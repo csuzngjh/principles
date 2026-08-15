@@ -1,0 +1,50 @@
+/**
+ * Locate the installed PD extension, the pd-cli entry, and the system Node
+ * command the companion uses to launch the console server.
+ *
+ * Pure functions only — fs existence checks happen at spawn time in the
+ * supervisor/main layer, so these helpers stay unit-testable.
+ */
+
+import * as path from 'path';
+
+/** Absolute path of the installed PD extension dir, or undefined if no home. */
+export function resolveExtensionDir(homeDir: string | undefined): string | undefined {
+  if (homeDir === undefined || homeDir.trim() === '') return undefined;
+  return path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple');
+}
+
+/** pd-cli entry inside the extension dir (mirrors installer's autoLaunchConsole). */
+export function resolvePdCliEntry(extDir: string): string {
+  return path.join(extDir, 'pd-cli', 'dist', 'index.js');
+}
+
+/** Plugin package.json inside the extension dir — the installed-version source. */
+export function resolvePluginPackageJson(extDir: string): string {
+  return path.join(extDir, 'package.json');
+}
+
+/**
+ * Node command used to run the console server: the literal `node` resolved
+ * via PATH by the OS. Deliberately NOT configurable by environment — an
+ * env-controlled executable would be an untrusted-program-selection risk.
+ * The server depends on better-sqlite3 built for the SYSTEM Node ABI, so
+ * Electron's bundled Node (ELECTRON_RUN_AS_NODE) must NOT be used.
+ */
+export function resolveSystemNodeCommand(): string {
+  return 'node';
+}
+
+/**
+ * Arguments for `pd console open` in companion mode:
+ * --json (machine-readable result), --no-browser (companion owns the window),
+ * --no-auth (parity with the installer's auto-launch path; the server refuses
+ * --no-auth on non-loopback hosts).
+ */
+export function buildConsoleOpenArgs(opts: { workspaceDir?: string } = {}): string[] {
+  const args = ['console', 'open', '--json', '--no-browser', '--no-auth'];
+  if (opts.workspaceDir !== undefined && opts.workspaceDir.length > 0) {
+    args.push('--workspace', opts.workspaceDir);
+  }
+  return args;
+}

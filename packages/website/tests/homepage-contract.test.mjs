@@ -131,3 +131,21 @@ test('published videos contain synchronized narration and six-scene captions', a
     }
   }
 })
+
+test('Download pages ship the companion entry with prerequisites and SmartScreen guidance', async () => {
+  const zh = await page(path.join('zh', 'download.html'))
+  assert.match(zh, /下载 PD Companion/)
+  // SSG renders the loading branch of DownloadCompanion — the component
+  // mount point must be present so the runtime fetch/button can hydrate.
+  assert.match(zh, /正在获取最新版本/)
+  assert.match(zh, /仍要运行/)
+  assert.match(zh, /Node.js ≥ 18/)
+  assert.match(zh, /npx create-principles-disciple/)
+  assert.match(zh, /不影响.*PD 本体/s)
+
+  const en = await page('download.html')
+  assert.match(en, /Download PD Companion/)
+  assert.match(en, /Fetching the latest release/)
+  assert.match(en, /Run anyway/)
+  assert.match(en, /Node.js ≥ 18/)
+})

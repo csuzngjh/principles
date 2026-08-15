@@ -12,6 +12,7 @@ import ThinkingLogCard from './components/ThinkingLogCard.vue'
 import ClosingSection from './components/ClosingSection.vue'
 import SiteFooter from './components/SiteFooter.vue'
 import InstallGuide from './components/InstallGuide.vue'
+import DownloadCompanion from './components/DownloadCompanion.vue'
 
 export default {
   extends: DefaultTheme,
@@ -33,5 +34,6 @@ export default {
     app.component('ThinkingLogCard', ThinkingLogCard)
     app.component('ClosingSection', ClosingSection)
     app.component('InstallGuide', InstallGuide)
+    app.component('DownloadCompanion', DownloadCompanion)
   }
 }

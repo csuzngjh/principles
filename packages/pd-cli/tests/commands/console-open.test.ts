@@ -496,14 +496,22 @@ describe('CLI command wiring (pd console open)', () => {
     workspaceRoot = path.resolve(__dirname, '../../../..');
     cliPath = path.join(workspaceRoot, 'packages', 'pd-cli', 'dist', 'index.js');
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-console-open-test-'));
-    // Fake a console install: create dir + dist/server.js with a minimal HTTP server
-    const consoleDir = path.join(os.homedir(), '.openclaw', 'extensions', 'principles-disciple', 'console');
-    fs.mkdirSync(path.join(consoleDir, 'dist'), { recursive: true });
-    // EP-06 regression guard: dist/web/index.html must exist (PR #1169 fix)
+    // Isolated fake HOME so the tests never read from — or rmSync-destroy — a
+    // real ~/.openclaw install on developer machines. runPd() points the CLI
+    // child at this home via __PD_CONSOLE_TEST_FAKE_HOME.
+    const fakeHome = path.join(tmp, 'home');
+    process.env.__PD_CONSOLE_TEST_FAKE_HOME = fakeHome;
+    // Fake a console install: dir + ESM package.json + dist/server.js with a
+    // minimal HTTP server. The package.json "type": "module" makes the fake
+    // server's module system deterministic regardless of whether a real
+    // extension-root package.json exists above the console dir.
+    const consoleDir = path.join(fakeHome, '.openclaw', 'extensions', 'principles-disciple', 'console');
     fs.mkdirSync(path.join(consoleDir, 'dist', 'web'), { recursive: true });
+    fs.writeFileSync(path.join(consoleDir, 'package.json'), JSON.stringify({ name: 'fake-pd-console', version: '0.0.0', type: 'module' }, null, 2));
+    // EP-06 regression guard: dist/web/index.html must exist (PR #1169 fix)
     fs.writeFileSync(path.join(consoleDir, 'dist', 'web', 'index.html'), '<!DOCTYPE html><html></html>');
     fs.writeFileSync(path.join(consoleDir, 'dist', 'server.js'), `
-      const http = require('http');
+      import http from 'node:http';
       const args = process.argv.slice(2);
       const portIdx = args.indexOf('--port');
       const port = portIdx >= 0 ? parseInt(args[portIdx + 1]) : 3100;
@@ -525,11 +533,8 @@ describe('CLI command wiring (pd console open)', () => {
   });
 
   afterEach(() => {
+    delete process.env.__PD_CONSOLE_TEST_FAKE_HOME;
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
-    try {
-      const consoleDir = path.join(os.homedir(), '.openclaw', 'extensions', 'principles-disciple', 'console');
-      fs.rmSync(consoleDir, { recursive: true, force: true });
-    } catch { /* ignore */ }
   });
 
   it('console open subcommand is registered (pd console open --help)', () => {
@@ -571,6 +576,58 @@ describe('CLI command wiring (pd console open)', () => {
     expect(parsed).toHaveProperty('reused');
     expect(parsed).toHaveProperty('browserOpened');
   }, 10_000);
+
+  it('pd console open --json fresh spawn includes a positive integer serverPid (PRI-526)', async () => {
+    // Async stream-parse + guaranteed teardown. execFileSync patterns are
+    // unreliable here on Windows: the CLI keeps running after printing JSON
+    // (fresh spawn) or may unexpectedly take another branch, and killing via
+    // timeout can leave the grandchild server holding pipe handles.
+    let run: CliJsonRun | undefined;
+    try {
+      run = await runPdUntilJson(
+        ['console', 'open', '--workspace', tmp, '--port', '49390', '--json', '--no-browser'],
+        workspaceRoot,
+      );
+      if (!isRecord(run.parsed)) throw new Error('CLI JSON output was not an object');
+      expect(run.parsed.status).toBe('started');
+      expect(run.parsed.reused).toBe(false);
+      const serverPid = run.parsed.serverPid;
+      expect(typeof serverPid === 'number' && Number.isInteger(serverPid) && serverPid > 0).toBe(true);
+    } finally {
+      await teardownCliTree(run);
+    }
+  }, 20_000);
+
+  it('pd console open --json reused path does NOT include serverPid (PRI-526)', async () => {
+    // Stand up a fake healthy console in-process, then point the CLI at its
+    // port: planConsoleLaunch probes /api/health → 200 → reused, no spawn.
+    const server = http.createServer((req, res) => {
+      if (req.url === '/api/health') {
+        res.statusCode = 200;
+        res.end(JSON.stringify({ success: true }));
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    let run: CliJsonRun | undefined;
+    try {
+      run = await runPdUntilJson(
+        ['console', 'open', '--workspace', tmp, '--port', String(addr.port), '--json', '--no-browser'],
+        workspaceRoot,
+      );
+      if (!isRecord(run.parsed)) throw new Error('CLI JSON output was not an object');
+      expect(run.parsed.status).toBe('reused');
+      expect(run.parsed.reused).toBe(true);
+      expect(run.parsed).not.toHaveProperty('serverPid');
+    } finally {
+      await teardownCliTree(run);
+      server.close();
+    }
+  }, 20_000);
 
   it('pd console open --port 99999 --json returns a structured failure (invalid port)', () => {
     const out = runPd(['console', 'open', '--workspace', tmp, '--port', '99999', '--json', '--no-browser'], workspaceRoot);
@@ -669,10 +726,21 @@ describe('CLI command wiring (pd console open)', () => {
 
     it('sets browserOpened: false when browser fails to open', async () => {
       const { handleConsoleOpen } = await import('../../src/commands/console.js');
-      
+
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // The in-process handler resolves the console dir via getConsoleDir(),
+      // which reads HOME/USERPROFILE directly. Point them at the isolated
+      // fake home — a clean CI runner has no real ~/.openclaw console, and
+      // relying on one (as this test implicitly did before) makes the result
+      // machine-dependent.
+      const fakeHome = process.env.__PD_CONSOLE_TEST_FAKE_HOME ?? '';
+      const savedHome = process.env.HOME;
+      const savedUserProfile = process.env.USERPROFILE;
+      process.env.HOME = fakeHome;
+      process.env.USERPROFILE = fakeHome;
 
       const mockChild = new EventEmitter() as any;
       mockChild.unref = vi.fn();
@@ -701,23 +769,29 @@ describe('CLI command wiring (pd console open)', () => {
         };
       };
 
-      await handleConsoleOpen({
-        workspace: tmp,
-        json: false,
-      });
+      try {
+        await handleConsoleOpen({
+          workspace: tmp,
+          json: false,
+        });
 
-      await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise(resolve => setTimeout(resolve, 150));
 
-      const loggedOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
-      expect(exitSpy).not.toHaveBeenCalled();
-      expect(spawnCalled).toBe(true);
-      
-      expect(loggedOutput).not.toContain('Browser opened');
-      expect(loggedOutput).toContain('Open http://127.0.0.1:3100 in your browser');
+        const loggedOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+        expect(exitSpy).not.toHaveBeenCalled();
+        expect(spawnCalled).toBe(true);
 
-      exitSpy.mockRestore();
-      logSpy.mockRestore();
-      errorSpy.mockRestore();
+        expect(loggedOutput).not.toContain('Browser opened');
+        expect(loggedOutput).toContain('Open http://127.0.0.1:3100 in your browser');
+      } finally {
+        if (savedHome === undefined) delete process.env.HOME;
+        else process.env.HOME = savedHome;
+        if (savedUserProfile === undefined) delete process.env.USERPROFILE;
+        else process.env.USERPROFILE = savedUserProfile;
+        exitSpy.mockRestore();
+        logSpy.mockRestore();
+        errorSpy.mockRestore();
+      }
     });
   });
 
@@ -755,6 +829,13 @@ describe('CLI command wiring (pd console open)', () => {
     it('[::1] is accepted and normalized to ::1 (not refused)', () => {
       // May spawn a long-lived server, use timeout.
       const out = runPd(['console', 'open', '--workspace', tmp, '--host', '[::1]', '--json', '--no-browser'], workspaceRoot, 8_000);
+      if (out.trim() === '') {
+        // The CLI was still in its 15s ready-poll when execFileSync timed out.
+        // Known environment limitation: on Windows hosts where IPv6 loopback
+        // connections are refused (EACCES), the health probe on ::1 never
+        // succeeds. CI (Linux) is unaffected.
+        throw new Error('CLI produced no JSON within 8s — ::1 health probe never succeeded (IPv6 loopback may be blocked on this machine)');
+      }
       const parsed = JSON.parse(out);
       // Should NOT be refused — [::1] is loopback
       expect(parsed.status).not.toBe('refused');
@@ -767,8 +848,8 @@ describe('CLI command wiring (pd console open)', () => {
     it('returns console_web_ui_missing when dist/web/index.html does not exist', () => {
       // beforeEach creates the fake console dir WITH dist/web/index.html.
       // Remove it to simulate a corrupted install (the PR #1169 regression).
-      const consoleDir = path.join(os.homedir(), '.openclaw', 'extensions', 'principles-disciple', 'console');
-      const webIndex = path.join(consoleDir, 'dist', 'web', 'index.html');
+      const fakeHome = process.env.__PD_CONSOLE_TEST_FAKE_HOME ?? '';
+      const webIndex = path.join(fakeHome, '.openclaw', 'extensions', 'principles-disciple', 'console', 'dist', 'web', 'index.html');
       fs.rmSync(webIndex, { force: true });
 
       const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-browser'], workspaceRoot, 5_000);
@@ -782,18 +863,10 @@ describe('CLI command wiring (pd console open)', () => {
 
 function runPd(args: string[], cwd: string, timeoutMs?: number): string {
   try {
-    const env: Record<string, string> = { ...process.env };
-    if (!args.includes('--workspace') && !args.includes('--help') && !args.includes('-h')) {
-      env.USERPROFILE = '/nonexistent';
-      env.HOME = '/nonexistent';
-      env.HOMEPATH = '/nonexistent';
-      env.HOMEDRIVE = '/nonexistent';
-      delete env.PD_WORKSPACE_DIR;
-    }
     return execFileSync('node', [getBuiltPdCliPath(), ...args], {
       encoding: 'utf8',
       cwd,
-      env,
+      env: buildChildEnv(),
       timeout: timeoutMs,
     });
   } catch (err: unknown) {
@@ -805,4 +878,109 @@ function runPd(args: string[], cwd: string, timeoutMs?: number): string {
     }
     throw err;
   }
+}
+
+/** Env for spawned CLI processes: isolated fake HOME, no workspace env leaks. */
+function buildChildEnv(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  const fakeHome = process.env.__PD_CONSOLE_TEST_FAKE_HOME;
+  if (fakeHome) {
+    env.USERPROFILE = fakeHome;
+    env.HOME = fakeHome;
+    delete env.HOMEPATH;
+    delete env.HOMEDRIVE;
+    delete env.PD_WORKSPACE_DIR;
+  }
+  return env;
+}
+
+/** Runtime type guard for unknown CLI JSON output (rc-1/rc-2). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+// ─── Async CLI runner with guaranteed teardown (PRI-526 tests) ───────────────
+
+interface CliJsonRun {
+  parsed: unknown;
+  child: childProcessModule.ChildProcess;
+}
+
+/**
+ * Spawn the CLI and resolve as soon as stdout contains one parseable JSON
+ * object. Fails fast (bounded timeout / early exit) with the collected
+ * stdout in the error message. The caller MUST call teardownCliTree(run)
+ * in a finally block — the CLI process may still be alive after the JSON
+ * is emitted (fresh-spawn mode keeps the console server attached).
+ */
+async function runPdUntilJson(args: string[], cwd: string, timeoutMs = 12_000): Promise<CliJsonRun> {
+  const child = childProcessModule.spawn('node', [getBuiltPdCliPath(), ...args], {
+    cwd,
+    env: buildChildEnv(),
+  });
+  let stdout = '';
+  child.stdout?.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
+
+  const parsed: unknown = await new Promise<unknown>((resolve, reject) => {
+    let done = false;
+    const fail = (msg: string): void => {
+      if (done) return;
+      done = true;
+      reject(new Error(`${msg}; stdout so far: ${stdout.slice(0, 400)}`));
+    };
+    const timer = setTimeout(() => fail('timed out waiting for CLI JSON'), timeoutMs);
+    const tryParse = (): boolean => {
+      const trimmed = stdout.trim();
+      if (!trimmed.startsWith('{')) return false;
+      try {
+        const value = JSON.parse(trimmed) as unknown;
+        done = true;
+        clearTimeout(timer);
+        resolve(value);
+        return true;
+      } catch {
+        return false; // partial pretty-printed JSON — wait for more chunks
+      }
+    };
+    if (tryParse()) return;
+    const onData = (): void => {
+      if (tryParse()) child.stdout?.off('data', onData);
+    };
+    child.stdout?.on('data', onData);
+    child.on('error', (err: Error) => fail(`CLI spawn error: ${err.message}`));
+    child.on('exit', (code: number | null) => fail(`CLI exited with code ${code} before emitting JSON`));
+  });
+
+  return { parsed, child };
+}
+
+/**
+ * Deterministic teardown of a runPdUntilJson run: kill the reported console
+ * server PID (grandchild) first so the CLI can exit on its own, then wait a
+ * bounded time, then force-kill the whole CLI tree. Safe to call multiple
+ * times and with undefined.
+ */
+async function teardownCliTree(run: CliJsonRun | undefined): Promise<void> {
+  if (!run) return;
+  const record = isRecord(run.parsed) ? run.parsed : undefined;
+  const serverPid = record !== undefined && typeof record.serverPid === 'number' ? record.serverPid : undefined;
+  if (serverPid !== undefined) {
+    try { process.kill(serverPid); } catch { /* already gone */ }
+  }
+  await new Promise<void>((resolve) => {
+    const t = setTimeout(() => { killTreeForce(run.child); resolve(); }, 4_000);
+    run.child.once('exit', () => { clearTimeout(t); resolve(); });
+  });
+  killTreeForce(run.child);
+}
+
+/**
+ * Last-resort kill of the CLI child process. The console server grandchild is
+ * reaped separately via its reported serverPid (see teardownCliTree), so a
+ * plain signal kill suffices — no shell/argv command wrapper needed.
+ */
+function killTreeForce(child: childProcessModule.ChildProcess): void {
+  try {
+    child.kill('SIGKILL');
+  } catch { /* already gone */ }
 }
