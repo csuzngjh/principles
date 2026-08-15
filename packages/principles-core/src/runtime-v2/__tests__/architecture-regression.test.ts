@@ -338,6 +338,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // PRI-530: Plugin I/O boundary — sync readonly state.db reads resolving principle
   // receipt attribution (title fallback chain / approval date / source summary).
   'principle-receipt-metadata.ts',
+  // PRI-531: Plugin I/O boundary — durable receipt ledger writes (state.db
+  // principle_applications inserts + 90-day retention sweep).
+  'principle-application-ledger.ts',
   'pain-lifecycle.ts',
   'session-tracker.ts',
   // PRI-459: now a thin re-export adapter over @principles/core/principle-tree-ledger.
@@ -449,7 +452,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // detection logic lives in @principles/core/runtime-v2/signal-collector/.
     // PRI-530: Added principle-receipt-metadata.ts (94 → 95) — plugin I/O boundary
     // for principle receipt attribution reads (readonly state.db joins).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(95);
+    // PRI-531: Added principle-application-ledger.ts (95 → 96) — receipt ledger writer.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
   });
 });
 

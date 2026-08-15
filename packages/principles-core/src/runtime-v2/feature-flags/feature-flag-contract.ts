@@ -212,6 +212,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Quiet + default off per ADR-0014 §2.5. Roll back = set enabled: false in
   // .pd/config.yaml (generic template returns).
   { id: 'principle_receipt_block_copy', category: 'quiet', enabled: false, since: '2026-08-15', description: 'Principle Receipt P0 — enriched RuleHost block copy with principle attribution (title/approval date/source summary, PRI-530). Default off; flag-off = generic block template unchanged.' },
+  // PRI-531: Principle Receipt ledger — durable application history. When off,
+  // no rows are written and console receipt surfaces show a degraded state with
+  // reason + nextAction. Quiet + default off per ADR-0014 §2.5.
+  { id: 'principle_receipt_ledger', category: 'quiet', enabled: false, since: '2026-08-15', description: 'Principle Receipt ledger — durable principle_applications history (effect/presence two-level semantics, PRI-531). Default off; flag-off = no ledger writes.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
