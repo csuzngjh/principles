@@ -209,7 +209,9 @@ export interface PluginHookBeforePromptBuildResult {
 
 export interface PluginHookBeforeToolCallEvent {
   toolName: string;
+  /** Host-provided tool call arguments (OpenClaw 2026.7.x sends `params`). */
   params?: Record<string, unknown>;
+  /** @deprecated Host sends `params`; kept for older adapter shims. */
   toolArgs?: Record<string, unknown>;
   agentId?: string;
   sessionId?: string;
@@ -217,7 +219,19 @@ export interface PluginHookBeforeToolCallEvent {
 }
 
 export interface PluginHookBeforeToolCallResult {
+  /**
+   * Host merge contract (OpenClaw 2026.7.x, hook-before-tool-call-result.ts):
+   * only `params`, `block`, `blockReason`, `requireApproval` are read from the
+   * hook result. New code must use these fields.
+   */
+  params?: Record<string, unknown>;
+  block?: boolean;
+  blockReason?: string;
+  /** Shape is host-defined (approval request details). */
+  requireApproval?: unknown;
+  /** @deprecated Use `params`. Host does not read `toolArgs`. */
   toolArgs?: Record<string, unknown>;
+  /** @deprecated Blocking is expressed via `block: true`. Host does not read `skipToolCall`. */
   skipToolCall?: boolean;
   [key: string]: unknown;
 }
@@ -272,15 +286,21 @@ export interface PluginHookSubagentEndedEvent {
 }
 
 export interface PluginHookLlmOutputEvent {
-  output: string;
+  /**
+   * @deprecated Host (OpenClaw 2026.7.x) does not send `output`. It fires once
+   * per model-loop attempt with `assistantTexts` + `lastAssistant`; read those.
+   */
+  output?: string;
   agentId?: string;
   sessionId?: string;
   runId?: string;
   provider?: string;
   model?: string;
   usage?: TokenUsage;
+  /** Host-provided full assistant texts for this model-loop attempt. */
   assistantTexts?: string[];
   trigger?: string;
+  /** Last complete assistant message object (host-defined shape). */
   lastAssistant?: unknown;
   [key: string]: unknown;
 }
@@ -337,6 +357,8 @@ export interface PluginHookBeforeMessageWriteEvent {
 
 export interface PluginHookBeforeMessageWriteResult {
   message?: { role?: string; content?: unknown };
+  /** Host contract: `block: true` prevents the transcript write entirely. */
+  block?: boolean;
   [key: string]: unknown;
 }
 
