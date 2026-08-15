@@ -31,6 +31,22 @@ function nullSeed() {
   return { version: null, url: null, sizeBytes: null, tag: null, fetchedAt: new Date().toISOString() };
 }
 
+/**
+ * Allowlist for the download URL before it is baked to disk (and later bound
+ * to the page's <a href>). The response is untrusted (rc-1) — a crafted
+ * payload must not smuggle a non-https / non-GitHub URL past validation
+ * (EP-08: enforce the scheme/host at the boundary, not in the component).
+ */
+function isSafeDownloadUrl(value) {
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' && parsed.hostname === 'github.com';
+  } catch {
+    return false;
+  }
+}
+
 function validateReleases(data) {
   if (!Array.isArray(data)) throw new Error('releases payload was not an array');
   for (const rel of data) {
@@ -44,7 +60,7 @@ function validateReleases(data) {
         asset !== null &&
         typeof asset.name === 'string' &&
         asset.name.endsWith('-setup.exe') &&
-        typeof asset.browser_download_url === 'string',
+        isSafeDownloadUrl(asset.browser_download_url),
     );
     if (exe) {
       return {

@@ -9,11 +9,24 @@ const props = defineProps({
 const REPO = 'csuzngjh/principles'
 const zh = props.lang === 'zh'
 
+// Allowlist before a URL is bound to the <a href> sink (EP-08). Applies to
+// both the build-time baked URL and the client-side refresh URL, so a crafted
+// payload can never inject a non-https / non-GitHub href (rc-1).
+function isSafeDownloadUrl(value) {
+  if (typeof value !== 'string') return false
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' && parsed.hostname === 'github.com'
+  } catch {
+    return false
+  }
+}
+
 // Baked at build time by scripts/fetch-companion-release.mjs (rc-1: validated
 // before use). The page never depends on the visitor's ability to reach
 // api.github.com — CN visitors otherwise always hit the fallback link.
 const version = ref(typeof baked.version === 'string' ? baked.version : '')
-const downloadUrl = ref(typeof baked.url === 'string' ? baked.url : '')
+const downloadUrl = ref(isSafeDownloadUrl(baked.url) ? baked.url : '')
 const sizeBytes = ref(typeof baked.sizeBytes === 'number' ? baked.sizeBytes : null)
 const refreshing = ref(false)
 
@@ -117,7 +130,7 @@ onMounted(async () => {
         (a) =>
           typeof a === 'object' && a !== null &&
           typeof a.name === 'string' && a.name.endsWith('-setup.exe') &&
-          typeof a.browser_download_url === 'string',
+          isSafeDownloadUrl(a.browser_download_url),
       )
       if (exe) {
         version.value = tag.replace('companion-v', '')
