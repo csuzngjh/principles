@@ -1,4 +1,5 @@
 .vitepress/dist
 .vitepress/cache
+.vitepress/theme/companion-release.json
 node_modules
 dist

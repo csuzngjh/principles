@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "docs:dev": "vitepress dev",
-    "docs:build": "vitepress build",
+    "prebake": "node scripts/fetch-companion-release.mjs",
+    "docs:dev": "npm run prebake && vitepress dev",
+    "docs:build": "npm run prebake && vitepress build",
     "docs:preview": "vitepress preview",
     "test:contract": "node --test tests/homepage-contract.test.mjs",
     "test": "npm run docs:build && npm run test:contract"
