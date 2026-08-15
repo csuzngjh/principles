@@ -20,7 +20,7 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { locatePluginData, locatePluginRoot, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
+const { ensurePluginData, locatePluginRoot, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:setup] status=failed reason=${reason}`);
@@ -83,10 +83,12 @@ function main() {
     return;
   }
 
-  // 2. Locate plugin + data dir, read pinned versions.
+  // 2. Locate plugin + data dir, read pinned versions. ensurePluginData OWNS
+  //    first-run creation of the data dir — Codex sets PLUGIN_DATA for hooks
+  //    but never creates the directory (verified on-device, 0.147.0).
   const root = locatePluginRoot(args.pluginRoot);
   if (!root.ok) { fail(root.reason, root.nextAction); return; }
-  const data = locatePluginData(args.pluginData);
+  const data = ensurePluginData(args.pluginData, root);
   if (!data.ok) { fail(data.reason, data.nextAction); return; }
 
   let pins;

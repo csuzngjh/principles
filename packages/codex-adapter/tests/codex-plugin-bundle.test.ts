@@ -365,6 +365,35 @@ describe('review-round regressions (PR #1316 review)', () => {
   }, 60_000);
 });
 
+describe('first-run $pd-setup (real user flow)', () => {
+  it('creates the plugin data dir Codex never creates, and npm-installs the pinned runtime', () => {
+    // Codex 0.147 SETS PLUGIN_DATA for hooks but does NOT create the dir —
+    // $pd-setup must own first-run creation (derive marketplace from the
+    // installed cache path) or every fresh install dead-ends.
+    const fakeHome = tempDir('pd-firstrun-home-');
+    const cachePlugin = path.join(fakeHome, '.codex', 'plugins', 'cache', 'principles', 'principles-disciple', '0.1.0');
+    fs.mkdirSync(cachePlugin, { recursive: true });
+    fs.cpSync(pluginDir, cachePlugin, { recursive: true });
+    const workspace = tempDir('pd-firstrun-ws-');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+
+    const result = spawnSync(process.execPath, [path.join(cachePlugin, 'scripts', 'pd-setup.cjs'), '--workspace', workspace, '--skip-init', '--json'], {
+      cwd: workspace,
+      encoding: 'utf8',
+      timeout: 240_000,
+      // Redirect the home dir cross-platform: os.homedir() reads HOME on POSIX and USERPROFILE/HOMEDRIVE+HOMEPATH on Windows.
+      env: { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome, HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2), HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'), PLUGIN_DATA: undefined },
+    });
+    expect(result.status, result.stderr.slice(0, 400)).toBe(0);
+    const report = JSON.parse(result.stdout) as { pluginData: string; runtime: Record<string, string>; runtimeInstalled: string };
+    // The data dir was derived + created under the fake home, not the real one.
+    expect(report.pluginData.startsWith(fakeHome)).toBe(true);
+    expect(fs.existsSync(path.join(report.pluginData, 'runtime', 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js'))).toBe(true);
+    expect(report.runtime.codexAdapter).toBe('0.1.0');
+    expect(report.runtime.hostRuntime).toBe('0.1.0');
+  }, 300_000);
+});
+
 describe('pd-disable.cjs kill switch', () => {
   it('flips host.codex.enabled in the nearest .pd/config.yaml and is idempotent', async () => {
     const workspace = tempDir('pd-disable-ws-');

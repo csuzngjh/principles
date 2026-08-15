@@ -6,10 +6,12 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const npmCli = process.env.npm_execpath;
-if (!npmCli) throw new Error('npm_execpath is required for the package contract test');
+// Invoke npm by literal command name (never an env-derived executable path).
+// Dynamic arguments are always positioned AFTER the `--` terminator at the
+// call sites, so tool-controlled values can never parse as npm options;
+// Windows needs a shell to resolve the npm launcher.
 const runNpm = (args: string[], options: Parameters<typeof execFileSync>[2]) =>
-  execFileSync(process.execPath, [npmCli, ...args], options);
+  execFileSync('npm', args, { ...options, ...(process.platform === 'win32' ? { shell: true } : {}) });
 let tempDir = '';
 
 describe('published @principles/codex-adapter bundle safety', () => {

@@ -80,6 +80,8 @@ function locatePluginRoot(explicit) {
 /**
  * Discover the plugin-private data dir. Preference order:
  *   --plugin-data arg > PLUGIN_DATA env > glob ~/.codex/plugins/data/principles-disciple-*
+ * Codex SETS the PLUGIN_DATA env var for hook commands but does NOT create
+ * the directory — callers that must write (pd-setup) use ensurePluginData.
  * Returns { ok: true, pluginData } or { ok: false, reason, nextAction }.
  */
 function locatePluginData(explicit) {
@@ -102,8 +104,34 @@ function locatePluginData(explicit) {
   return {
     ok: false,
     reason: 'plugin_data_not_found',
-    nextAction: 'Plugin data is created when Codex first runs the plugin hooks; trigger any hook (or pass --plugin-data <dir>) and re-run.',
+    nextAction: 'Run the $pd-setup skill — it creates the plugin data directory and installs the pinned runtime.',
   };
+}
+
+/**
+ * Like locatePluginData, but creates the canonical data dir when absent:
+ * the marketplace name is derived from the installed plugin cache path
+ * (~/.codex/plugins/cache/<marketplace>/principles-disciple/<version>).
+ * `pluginRoot` is a locatePluginRoot() result. This owns first-run creation —
+ * Codex never creates the directory itself (verified on-device, 0.147.0).
+ */
+function ensurePluginData(explicit, pluginRoot) {
+  if (explicit) return { ok: true, pluginData: explicit };
+  if (process.env.PLUGIN_DATA) {
+    try { fs.mkdirSync(process.env.PLUGIN_DATA, { recursive: true }); } catch { /* creation errors surface on install */ }
+    return { ok: true, pluginData: process.env.PLUGIN_DATA };
+  }
+  if (pluginRoot && pluginRoot.ok) {
+    const marketplace = path.basename(path.dirname(path.dirname(pluginRoot.pluginRoot)));
+    if (marketplace && marketplace !== path.parse(pluginRoot.pluginRoot).root) {
+      const canonical = path.join(codexDir(), 'plugins', 'data', `principles-disciple-${marketplace}`);
+      try {
+        fs.mkdirSync(canonical, { recursive: true });
+        return { ok: true, pluginData: canonical };
+      } catch { /* fall through to read-only discovery */ }
+    }
+  }
+  return locatePluginData(undefined);
 }
 
 /** Nearest ancestor (inclusive) of startDir containing .pd/config.yaml. */
@@ -155,6 +183,7 @@ function requireFlagValue(argv, index, flagName) {
 module.exports = {
   codexDir,
   compareVersionDirs,
+  ensurePluginData,
   locatePluginData,
   locatePluginRoot,
   locateWorkspace,
