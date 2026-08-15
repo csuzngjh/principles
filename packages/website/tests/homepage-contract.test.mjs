@@ -136,13 +136,20 @@ test('published videos contain synchronized narration and six-scene captions', a
 
 test('Download pages state what/which version/platform and guide first install', async () => {
   const zh = await page(path.join('zh', 'download.html'))
+  const en = await page('download.html')
+
+  // Page identity (frontmatter title) + the DownloadPage mount point.
   assert.match(zh, /下载 PD Companion/)
-  // SSG renders the loading branch of DownloadCompanion — the component
-  // mount point must be present so the runtime fetch/button can hydrate.
-  assert.match(zh, /正在获取最新版本/)
+  assert.match(en, /Download PD Companion/)
+  assert.match(zh, /companion-download-page/)
+  assert.match(en, /companion-download-page/)
+
   // Platform clarity: supported Windows badge + macOS expectation, both static
   assert.match(zh, /Windows 10 \/ 11（64 位）/)
   assert.match(zh, /macOS 即将推出/)
+  assert.match(en, /Windows 10 \/ 11 \(64-bit\)/)
+  assert.match(en, /macOS coming later/)
+
   // What you download and what it is
   assert.match(zh, /Windows 桌面版/)
   assert.match(zh, /首次安装四步/)
@@ -152,14 +159,27 @@ test('Download pages state what/which version/platform and guide first install',
   assert.match(zh, /npx create-principles-disciple/)
   assert.match(zh, /每个版本只提醒一次/)
   assert.match(zh, /不影响.*PD 本体/s)
-
-  const en = await page('download.html')
-  assert.match(en, /Download PD Companion/)
-  assert.match(en, /Fetching the latest release/)
-  assert.match(en, /Windows 10 \/ 11 \(64-bit\)/)
-  assert.match(en, /macOS coming later/)
   assert.match(en, /First install in four steps/)
   assert.match(en, /Run anyway/)
   assert.match(en, /Node\.js/)
   assert.match(en, /≥ 18/)
+
+  // Deterministic CTA branch: SSG bakes the release data at build time
+  // (scripts/fetch-companion-release.mjs) and renders either the real download
+  // button or the fallback link. Assert against the same baked JSON the build
+  // used so the test never depends on the GitHub network.
+  const baked = JSON.parse(
+    await readFile(path.join(websiteRoot, '.vitepress', 'theme', 'companion-release.json'), 'utf8'),
+  )
+  const hasUrl = typeof baked.url === 'string' && baked.url.length > 0
+  for (const html of [zh, en]) {
+    if (hasUrl) {
+      assert.match(html, /companion-download"/)
+      assert.match(html, /setup\.exe/)
+      assert.doesNotMatch(html, /companion-download-fallback/)
+    } else {
+      assert.match(html, /companion-download-fallback"/)
+      assert.doesNotMatch(html, /companion-download"/)
+    }
+  }
 })
