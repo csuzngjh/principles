@@ -1,0 +1,56 @@
+name: companion-release
+
+# PD Companion Windows installer release (PRI-526).
+# Manual trigger first (per plan risk note: first windows-latest runner in the
+# repo — validate manually before trusting the tag path), then tags.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'companion-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build PD Companion (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # No --ignore-scripts: electron's postinstall must fetch its binary.
+      # The GitHub-hosted runner has direct access to the electron releases.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build companion
+        run: npm run build --workspace=@principles/pd-companion
+
+      - name: Package NSIS installer
+        run: npm run dist --workspace=@principles/pd-companion
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pd-companion-windows
+          path: packages/pd-companion/release/pd-companion-*-setup.exe
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/companion-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: packages/pd-companion/release/pd-companion-*-setup.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

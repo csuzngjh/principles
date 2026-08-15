@@ -1,0 +1,26 @@
+# electron-builder config for PD Companion (PRI-526).
+# NSIS per-user installer (no admin required); artifact consumed by
+# companion-release.yml and linked from the website download page.
+appId: party.principles.disciple.companion
+productName: PD Companion
+directories:
+  output: release
+# The companion has NO runtime npm dependencies (electron + builder are
+# devDependencies), so the installer stays minimal: compiled main + lib + icon.
+files:
+  - dist/**/*
+  - assets/**/*
+  - package.json
+asarUnpack: []
+win:
+  icon: assets/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  artifactName: pd-companion-${version}-setup.${ext}
