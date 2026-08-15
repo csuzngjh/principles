@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Runtime-OpenClaw%20Adapter-FF6B35" alt="OpenClaw Adapter">
-  <img src="https://img.shields.io/badge/Next-Codex%20CLI-blue" alt="Codex CLI Planned">
+  <img src="https://img.shields.io/badge/Codex-CLI%20%2B%20Desktop-blue" alt="Codex CLI and Desktop supported">
   <img src="https://img.shields.io/github/v/release/csuzngjh/principles?style=flat-square&color=5865F2" alt="Release">
 </p>
 
@@ -27,7 +27,7 @@
 > It helps owners, operators, and maintainers turn repeated agent failures, risky actions, user corrections, and workflow mismatches
 > into structured pain signals, reviewed principles, decision logs, and owner-controlled guardrails.
 
-PD currently ships with an OpenClaw adapter as its first runtime integration. The architecture is designed around a runtime adapter layer so that PD can connect with different agent runtimes and task environments — OpenClaw today, Codex CLI next for agentic development — without being hard-coded to a single agent tool or task domain.
+PD currently ships with two runtime integrations: OpenClaw and Codex (CLI + Desktop, via an installable Codex plugin). The architecture is designed around a runtime adapter layer so that PD can connect with different agent runtimes and task environments without being hard-coded to a single agent tool or task domain.
 
 It is built for agents first.
 Agents are the daily users.
@@ -93,13 +93,22 @@ Not AI magic — your judgment respected and enforced. Not a one-off fix — dur
 
 ---
 
-## Runtime Adapters: OpenClaw Now, Codex Next
+## Runtime Adapters: OpenClaw and Codex
 
 PD is designed with a runtime adapter layer rather than being tied to a single agent runtime or task domain. The first validated domain is agentic development, where agent behavior is observable through tool calls, file edits, command execution, failures, user corrections, and review events. The adapter layer lets PD observe and govern different agent runtimes through a shared local feedback model: pain-signal capture, decision logs, principle review, and maintainer-approved guardrails.
 
 **OpenClaw adapter (implemented).** The first concrete runtime integration, validated through agentic development workflows. PD works as an OpenClaw plugin for capturing agent behavior — tool failures, risky edits, user corrections, blocked operations — and enforcing local development guardrails through prompt guidance, RuleHost enforcement, and defer/archive outcomes.
 
-**Codex CLI adapter (planned).** The next adapter target within the agentic development domain. The goal is to let Codex-style coding agents feed task trajectories, risky edits, repeated failures, and user corrections into PD, so maintainers can review behavior changes before they become durable rules. This would give Codex users the same local-first, maintainer-reviewed governance layer that OpenClaw users have today.
+**Codex adapter (implemented — plugin install).** Codex-style coding agents feed tool trajectories, risky edits, repeated failures, and user corrections into PD, giving Codex users the same local-first, maintainer-reviewed governance layer that OpenClaw users have. Owner-approved principles are injected into Codex session context, owner-approved rules can deny risky tool calls before they run, and failed tool calls are recorded as reviewable evidence — all through the same shared host runtime as OpenClaw.
+
+Install from this repository's marketplace (Codex CLI ≥ 0.147, Node ≥ 20):
+
+```bash
+codex plugin marketplace add csuzngjh/principles
+codex plugin add principles-disciple@principles
+```
+
+Then in a Codex session: run $pd-setup once per workspace, trust the hooks via /hooks, and review with $pd-review (the existing owner console). $pd-disable stops all Codex behavior instantly and reversibly; $pd-status reports health. Prerequisites and details: [ADR-0020](docs/adr/0020-codex-cli-host-adapter.md).
 
 ## What it does
 
@@ -238,7 +247,7 @@ Still evolving:
 - adaptive thresholds;
 - long-term learning reliability;
 - multi-workspace evolution patterns;
-- Codex CLI runtime adapter.
+- Codex runtime adapter (plugin hooks).
 
 Expect bugs.
 Review promoted behavior carefully.
@@ -249,7 +258,7 @@ Do not use it blindly on critical production workspaces.
 - [x] OpenClaw runtime adapter
 - [x] Local pain-signal capture and decision logging
 - [x] Replay-based review workflow for rule implementations
-- [ ] Codex CLI runtime adapter
+- [x] Codex runtime adapter (CLI + Desktop plugin)
 - [ ] Failure replay workflow for agent trajectories
 - [ ] Behavior-regression checks for new principles/rules
 - [ ] Codex / OpenAI-assisted PR review and release workflow experiments
