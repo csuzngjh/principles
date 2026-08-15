@@ -38,6 +38,7 @@ test('Chinese homepage ships the Owner-governed story and working paths', async 
   assert.match(html, /href="\/zh\/install"/)
   assert.match(html, /当前可用/)
   assert.match(html, /OpenClaw/)
+  assert.match(html, /Codex/)
   assert.match(html, /homepage-demo-zh\.mp4/)
   assert.match(html, /homepage-demo-poster-zh\.webp/)
   // Motto breathing space is present (rewritten, MVP-aligned placement)
@@ -55,6 +56,7 @@ test('English homepage preserves the same host-neutral contract', async () => {
   assert.match(html, /href="\/install"/)
   assert.match(html, /Available now/)
   assert.match(html, /OpenClaw/)
+  assert.match(html, /Codex/)
   assert.match(html, /homepage-demo-en\.mp4/)
   assert.match(html, /homepage-demo-poster-en\.webp/)
   assert.match(html, /not suffering, you/)
@@ -132,20 +134,32 @@ test('published videos contain synchronized narration and six-scene captions', a
   }
 })
 
-test('Download pages ship the companion entry with prerequisites and SmartScreen guidance', async () => {
+test('Download pages state what/which version/platform and guide first install', async () => {
   const zh = await page(path.join('zh', 'download.html'))
   assert.match(zh, /下载 PD Companion/)
   // SSG renders the loading branch of DownloadCompanion — the component
   // mount point must be present so the runtime fetch/button can hydrate.
   assert.match(zh, /正在获取最新版本/)
+  // Platform clarity: supported Windows badge + macOS expectation, both static
+  assert.match(zh, /Windows 10 \/ 11（64 位）/)
+  assert.match(zh, /macOS 即将推出/)
+  // What you download and what it is
+  assert.match(zh, /Windows 桌面版/)
+  assert.match(zh, /首次安装四步/)
   assert.match(zh, /仍要运行/)
-  assert.match(zh, /Node.js ≥ 18/)
+  assert.match(zh, /Node\.js/)
+  assert.match(zh, /≥ 18/)
   assert.match(zh, /npx create-principles-disciple/)
+  assert.match(zh, /每个版本只提醒一次/)
   assert.match(zh, /不影响.*PD 本体/s)
 
   const en = await page('download.html')
   assert.match(en, /Download PD Companion/)
   assert.match(en, /Fetching the latest release/)
+  assert.match(en, /Windows 10 \/ 11 \(64-bit\)/)
+  assert.match(en, /macOS coming later/)
+  assert.match(en, /First install in four steps/)
   assert.match(en, /Run anyway/)
-  assert.match(en, /Node.js ≥ 18/)
+  assert.match(en, /Node\.js/)
+  assert.match(en, /≥ 18/)
 })

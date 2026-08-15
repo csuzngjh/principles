@@ -5,31 +5,33 @@ title: Download PD Companion
 
 <DownloadCompanion lang="en" />
 
-## Prerequisites
+**PD Companion** is the Windows desktop app for Principles Disciple: one double-click gives you the full Console in its own window (no terminal, no browser tab), a tray icon, and system notifications when approvals need you.
 
-PD Companion is a desktop companion for an **existing** Principles Disciple install:
+## Requirements
 
-1. **Node.js ≥ 18** on PATH (`node -v`) — Companion runs the console server with your system Node.
-2. **PD installed** via `npx create-principles-disciple`. If the console is missing, Companion shows the exact fix instead of a blank window.
+| | |
+|---|---|
+| **OS** | Windows 10 / 11 (64-bit) |
+| **Node.js** | ≥ 18 on PATH (`node -v`) — Companion runs the console server with your system Node |
+| **PD** | Installed via `npx create-principles-disciple` (OpenClaw host) or the Codex plugin marketplace |
 
-## What it does
+Companion is an add-on to an existing PD install — if the console is missing, it shows the exact fix instead of a blank window.
 
-- One double-click: tray icon + the full Console in its own window (no terminal, no browser tab).
-- System notification when a new approval is pending — click to jump straight to the review page.
-- System notification when a new PD version is available (once per version).
-- Restart the console service from the tray; after you apply an update in the Console, Companion restarts the server within ~30 seconds.
+## First install in four steps
 
-## Windows SmartScreen notice
+1. **Download** the installer above (or from GitHub Releases).
+2. **Run it.** Windows may show a blue "Windows protected your PC" screen because the v1 installer is not code-signed: click **More info → Run anyway**.
+3. **Launch PD Companion** from the desktop shortcut. The tray icon appears and the Console window opens with your data.
+4. That's it. Auto-start on login is enabled by default and announced with a one-time balloon; turn it off any time from the tray menu.
 
-The v1 installer is **not code-signed**. On first launch Windows may show a blue "Windows protected your PC" screen:
+## What it notifies about
 
-1. Click **More info**.
-2. Click **Run anyway**.
+- **New pending approval** — click the notification to jump straight to the review page.
+- **New PD version available** — once per version, never nagging.
 
-This is expected for v1; we will sign installers once distribution scales.
+While you apply an update inside the Console, Companion restarts the console server automatically within ~30 seconds — no "Ctrl+C and rerun" needed.
 
 ## Control & uninstall
 
-- Auto-start on login is enabled by default (announced on first run) — toggle it in the tray menu at any time.
-- Closing the window keeps Companion in the tray; use **退出 / Exit** to quit (the console server is stopped with it, no orphan processes).
-- Uninstall from Windows Settings. Uninstalling Companion does **not** touch your PD install, `pd console open`, or workspace data.
+- Closing the window keeps Companion in the tray; **Exit** from the tray menu also stops the console server (no orphan processes).
+- Uninstall from Windows Settings — it does **not** touch your PD install, `pd console open`, or workspace data.
