@@ -3,15 +3,19 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// Invoke npm by literal command name (never an env-derived executable path).
-// Dynamic arguments are always positioned AFTER the `--` terminator at the
-// call sites, so tool-controlled values can never parse as npm options;
-// Windows needs a shell to resolve the npm launcher.
-const runNpm = (args: string[], options: Parameters<typeof execFileSync>[2]) =>
-  execFileSync('npm', args, { ...options, ...(process.platform === 'win32' ? { shell: true } : {}) });
+// npm runs through a shell-free helper (tests/helpers/run-npm.cjs): every
+// argument stays positional (`node <npm-cli.js> args...>`), pack filenames are
+// shape-validated before use, and dynamic positionals always sit AFTER the
+// `--` terminator at the call sites below.
+const nodeRequire = createRequire(import.meta.url);
+const { packTarballPath, runNpm } = nodeRequire('./helpers/run-npm.cjs') as {
+  packTarballPath: (packDir: string, filename: unknown) => string;
+  runNpm: (args: string[], options: Parameters<typeof execFileSync>[2]) => string;
+};
 let tempDir = '';
 
 describe('published @principles/codex-adapter bundle safety', () => {
@@ -30,15 +34,16 @@ describe('published @principles/codex-adapter bundle safety', () => {
 
     runNpm(['run', 'build'], { cwd: packageRoot, stdio: 'pipe' });
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pack-codex-adapter-'));
-    const packOutput = runNpm(['pack', '--ignore-scripts', '--pack-destination', tempDir, '--json'], {
-      cwd: packageRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    // `--` before the package spec: the dynamic directory can never parse as
+    // an npm option; the tarball lands in cwd (tempDir).
+    const packOutput = runNpm(['pack', '--json', '--', packageRoot], {
+      cwd: tempDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
     });
     const packed: unknown = JSON.parse(packOutput);
     if (!Array.isArray(packed) || !packed[0] || typeof packed[0] !== 'object' || !Object.hasOwn(packed[0], 'filename')) {
       throw new Error(`npm pack returned an unexpected result: ${packOutput.slice(0, 500)}`);
     }
-    const filename = (packed[0] as Record<string, unknown>).filename;
-    if (typeof filename !== 'string') throw new Error('npm pack filename is missing');
+    const adapterTarball = packTarballPath(tempDir, (packed[0] as Record<string, unknown>).filename);
 
     const consumerDir = path.join(tempDir, 'consumer');
     fs.mkdirSync(consumerDir);
@@ -55,19 +60,18 @@ describe('published @principles/codex-adapter bundle safety', () => {
     const hostRuntimeDir = path.resolve(packageRoot, '../host-runtime');
     const hostRuntimePackDir = path.join(tempDir, 'host-runtime-pack');
     fs.mkdirSync(hostRuntimePackDir);
-    const hrPackOutput = runNpm(['pack', '--ignore-scripts', '--pack-destination', hostRuntimePackDir, '--json'], {
-      cwd: hostRuntimeDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    const hrPackOutput = runNpm(['pack', '--json', '--', hostRuntimeDir], {
+      cwd: hostRuntimePackDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
     });
     const hrPacked: unknown = JSON.parse(hrPackOutput);
     if (!Array.isArray(hrPacked) || !hrPacked[0] || typeof hrPacked[0] !== 'object' || !Object.hasOwn(hrPacked[0], 'filename')) {
       throw new Error(`npm pack host-runtime returned an unexpected result: ${hrPackOutput.slice(0, 500)}`);
     }
-    const hrFilename = (hrPacked[0] as Record<string, unknown>).filename;
-    if (typeof hrFilename !== 'string') throw new Error('npm pack host-runtime filename is missing');
+    const hostRuntimeTarball = packTarballPath(hostRuntimePackDir, (hrPacked[0] as Record<string, unknown>).filename);
 
     runNpm(
-      ['install', path.join(tempDir, filename), path.join(hostRuntimePackDir, hrFilename), '--ignore-scripts', '--omit=optional', '--no-package-lock'],
-      { cwd: consumerDir, stdio: 'pipe', timeout: 120_000 },
+      ['install', '--ignore-scripts', '--omit=optional', '--no-package-lock', '--', adapterTarball, hostRuntimeTarball],
+      { cwd: consumerDir, stdio: 'pipe', timeout: 180_000 },
     );
 
     // The packed tarball must ship the built hook entry and codec modules.
