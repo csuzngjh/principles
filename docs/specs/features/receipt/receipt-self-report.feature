@@ -33,3 +33,8 @@ Feature: Principle Receipt — 软原则自述行 (PRI-532)
     Given principle_receipt_self_report 已启用
     When assistant 回复包含空 id 与超长 id 的伪标记行
     Then principle_applications 没有新增任何 self_reported 行
+
+  Scenario: flag 关闭——捕获跳过，标记行不产生任何履历
+    Given principle_receipt_self_report 未启用
+    When assistant 回复包含「📌 应用了你的原则「princ-A」：先读文档再动手」（会话 sess-off）
+    Then principle_applications 没有新增任何 self_reported 行

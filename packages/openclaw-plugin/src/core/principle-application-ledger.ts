@@ -172,16 +172,21 @@ export function recordInjectionPresence(
  */
 const SELF_REPORT_MARKER = /📌\s*应用了你的原则「([^」]{1,200})」[：:](.{0,200})/gu;
 
-/** 60s flag cache — capture runs on every llm_output turn, avoid a disk read each time. */
-let selfReportFlagCache: { expiresAt: number; enabled: boolean; workspaceDir: string } | undefined;
+/**
+ * 60s flag cache keyed by workspaceDir (ERR-092: per-input-derived module
+ * caches must be Map-keyed, not single-valued slots) — capture runs on every
+ * llm_output turn, avoid a disk read each time.
+ */
+const selfReportFlagCache = new Map<string, { expiresAt: number; enabled: boolean }>();
 
 function isSelfReportEnabled(workspaceDir: string, logger?: { warn?: (m: string) => void }): boolean {
   const now = Date.now();
-  if (selfReportFlagCache && selfReportFlagCache.expiresAt > now && selfReportFlagCache.workspaceDir === workspaceDir) {
-    return selfReportFlagCache.enabled;
+  const cached = selfReportFlagCache.get(workspaceDir);
+  if (cached && cached.expiresAt > now) {
+    return cached.enabled;
   }
   const enabled = loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_self_report', logger).enabled;
-  selfReportFlagCache = { expiresAt: now + 60_000, enabled, workspaceDir };
+  selfReportFlagCache.set(workspaceDir, { expiresAt: now + 60_000, enabled });
   return enabled;
 }
 
@@ -220,7 +225,7 @@ export function recordSelfReportFromText(
 
 /** Test hook: close cached connections and reset the retention sweep clock. */
 export function clearPrincipleApplicationLedgerCache(): void {
-  selfReportFlagCache = undefined;
+  selfReportFlagCache.clear();
   for (const conn of connections.values()) {
     try {
       conn.close();

@@ -4,7 +4,7 @@
  * the llm_output / before_message_write hooks call; ledger rows asserted via
  * readonly SqliteConnection against a real temp workspace + real config flags.
  */
-import { beforeEach, afterEach, expect, vi } from 'vitest';
+import { beforeEach, afterEach, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -97,6 +97,18 @@ registry.when(/assistant 回复包含「📌 应用了你的原则「princ-A」�
   expect(written).toBe(1);
 });
 
+registry.when(/assistant 回复包含「📌 应用了你的原则「princ-A」：先读文档再动手」（会话 sess-off）/, () => {
+  // Flag is off in this scenario — the helper must skip capture entirely
+  // (config on disk carries the flag state; the flag cache was reset in
+  // beforeEach so this scenario reads the fresh off state).
+  const written = recordSelfReportFromText(
+    workspaceDir,
+    '📌 应用了你的原则「princ-A」：先读文档再动手',
+    'sess-off',
+  );
+  expect(written).toBe(0);
+});
+
 registry.when(/同一会话的两次 assistant 回复包含相同原则的标记行/, () => {
   recordSelfReportFromText(workspaceDir, '📌 应用了你的原则「princ-A」：先看调用方', 'sess-dup');
   recordSelfReportFromText(workspaceDir, '📌 应用了你的原则「princ-A」：再次先看调用方', 'sess-dup');
@@ -150,6 +162,3 @@ defineFeature(
   fs.readFileSync(resolveFeaturePath('docs/specs/features/receipt/receipt-self-report.feature'), 'utf8'),
   registry,
 );
-
-// Silence unused-import lint for vi (used implicitly by future assertions).
-void vi;
