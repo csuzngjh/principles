@@ -14,6 +14,8 @@
  */
 import { SqliteConnection } from '@principles/core/runtime-v2';
 import Database from 'better-sqlite3';
+import * as nodePath from 'node:path';
+import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
 
 export type PrincipleApplicationLevel = 'effect' | 'presence';
 export type PrincipleApplicationKind =
@@ -158,8 +160,74 @@ export function recordInjectionPresence(
   return written;
 }
 
+/**
+ * PRI-532 (SPEC §5.2): capture agent self-report 📌 lines from assistant text.
+ * The directive template (flag on) instructs the agent to append
+ * `📌 应用了你的原则「<directive id>」：<one clause>` — this helper scans the
+ * final text, resolves the principleId from the marker (the directive id), and
+ * writes one self_reported effect row per unique principle×session (partial
+ * unique index). Never throws; failures warn via the optional logger (rc-9).
+ *
+ * Marker text is model output — treated as untrusted (rc-1): id and digest are
+ * length-bounded and never parsed as anything richer than strings.
+ */
+const SELF_REPORT_MARKER = /📌\s*应用了你的原则「([^」]{1,200})」[：:](.{0,200})/gu;
+
+/**
+ * 60s flag cache keyed by resolved workspaceDir (ERR-092: per-input-derived
+ * module caches must be Map-keyed with path normalization, not single-valued
+ * slots) — capture runs on every llm_output turn, avoid a disk read each time.
+ */
+const selfReportFlagCache = new Map<string, { expiresAt: number; enabled: boolean }>();
+
+function isSelfReportEnabled(workspaceDir: string, logger?: { warn?: (m: string) => void }): boolean {
+  const now = Date.now();
+  const cacheKey = nodePath.resolve(workspaceDir);
+  const cached = selfReportFlagCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.enabled;
+  }
+  const enabled = loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_self_report', logger).enabled;
+  selfReportFlagCache.set(cacheKey, { expiresAt: now + 60_000, enabled });
+  return enabled;
+}
+
+export function recordSelfReportFromText(
+  workspaceDir: string,
+  text: unknown,
+  sessionId: string | undefined,
+  logger?: { warn?: (message: string) => void; info?: (message: string) => void },
+): number {
+  if (typeof text !== 'string' || text.length === 0) return 0;
+  if (!isSelfReportEnabled(workspaceDir, logger)) return 0;
+
+  let written = 0;
+  for (const match of text.matchAll(SELF_REPORT_MARKER)) {
+    const principleId = (match[1] ?? '').trim();
+    if (principleId.length === 0) continue;
+    const digest = (match[2] ?? '').trim().slice(0, 200);
+    try {
+      const db = getConnection(workspaceDir).getDb();
+      sweepRetention(db);
+      const result = db.prepare(`
+        INSERT OR IGNORE INTO principle_applications
+          (principle_id, channel, level, kind, session_id, digest, created_at)
+        VALUES (?, 'prompt', 'effect', 'self_reported', ?, ?, ?)
+      `).run(principleId, sessionId ?? null, digest, new Date().toISOString());
+      const changes = typeof result === 'object' && result !== null
+        ? ((result as { changes?: number }).changes ?? 0)
+        : 0;
+      written += changes > 0 ? 1 : 0;
+    } catch (ledgerErr) {
+      logger?.warn?.(`[PD:ReceiptLedger] self_report row write failed for principle ${principleId}: ${String(ledgerErr)}`);
+    }
+  }
+  return written;
+}
+
 /** Test hook: close cached connections and reset the retention sweep clock. */
 export function clearPrincipleApplicationLedgerCache(): void {
+  selfReportFlagCache.clear();
   for (const conn of connections.values()) {
     try {
       conn.close();

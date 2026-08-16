@@ -632,7 +632,12 @@ export async function handleBeforePromptBuild(
   // These are owner-reviewed, validated behavior constraints — not background context.
   if (runtimeV2PrincipleIds.size > 0) {
     const directiveText = sharedActivePrinciplePrompt?.additionalContext
-      ?? renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, escapeXml);
+      ?? renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, {
+          escapeFn: escapeXml,
+          // PRI-532: self-report instruction on the fallback render path (the
+          // shared host-runtime path applies the same flag internally).
+          selfReportInstruction: loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_self_report', logger).enabled,
+        });
     prependSystemContext += directiveText;
   }
 
