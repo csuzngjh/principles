@@ -284,6 +284,92 @@ describe('handleUpdateRoute', () => {
       expect(body.data.newVersion).toBe('2.0.0');
     });
 
+    it('preserves an en skill-language manifest selection across diff updates (PR #1332 companion)', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      // "Extract" a fresh zh-default manifest (as shipped) from the tarball
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'openclaw.plugin.json'),
+              JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/zh/skills'] }, null, 2));
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Existing install materialized with --lang en (en templates present)
+      fs.writeFileSync(path.join(pluginDir, 'openclaw.plugin.json'),
+        JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/en/skills'] }, null, 2));
+      fs.mkdirSync(path.join(pluginDir, 'templates', 'langs', 'en', 'skills'), { recursive: true });
+
+      const req = createMockRequest('POST', { targetDir: pluginDir, mergeStrategy: 'smart', createBackup: false });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      const body = parseResponseBody<{ data: { success: boolean } }>(res);
+      expect(body.data.success).toBe(true);
+      const updated = JSON.parse(fs.readFileSync(path.join(pluginDir, 'openclaw.plugin.json'), 'utf-8')) as { skills: string[] };
+      expect(updated.skills).toEqual(['templates/langs/en/skills']);
+    });
+
+    it('collapses a legacy dual-root skill manifest to a single zh root on update', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'openclaw.plugin.json'),
+              JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/zh/skills'] }, null, 2));
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Pre-ERR-097 install declaring BOTH roots (23 collision warnings)
+      fs.writeFileSync(path.join(pluginDir, 'openclaw.plugin.json'),
+        JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/en/skills', 'templates/langs/zh/skills'] }, null, 2));
+
+      const req = createMockRequest('POST', { targetDir: pluginDir, mergeStrategy: 'smart', createBackup: false });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      const body = parseResponseBody<{ data: { success: boolean } }>(res);
+      expect(body.data.success).toBe(true);
+      const updated = JSON.parse(fs.readFileSync(path.join(pluginDir, 'openclaw.plugin.json'), 'utf-8')) as { skills: string[] };
+      expect(updated.skills).toEqual(['templates/langs/zh/skills']);
+    });
+
     it('should return 405 for non-POST method', async () => {
       const req = createMockRequest('GET');
       const res = createMockResponse();
@@ -1541,6 +1627,58 @@ describe('handleUpdateRoute', () => {
       const body = parseResponseBody<{ data: { success: boolean; message: string } }>(res);
       expect(body.data.success).toBe(true);
       expect(body.data.message).toContain('dependencies may have changed');
+    });
+
+    it('preserves an en skill-language manifest selection across full updates (PR #1332 companion)', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            // Shipped manifest is zh-default; bundle carries BOTH language template sets
+            fs.writeFileSync(path.join(dir, 'plugin', 'openclaw.plugin.json'),
+              JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/zh/skills'] }, null, 2));
+            for (const lang of ['zh', 'en']) {
+              const skillDir = path.join(dir, 'plugin', 'templates', 'langs', lang, 'skills', 'admin');
+              fs.mkdirSync(skillDir, { recursive: true });
+              fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `# ${lang}`);
+            }
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Existing install materialized with --lang en
+      fs.writeFileSync(path.join(pluginDir, 'openclaw.plugin.json'),
+        JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/en/skills'] }, null, 2));
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean } }>(res);
+      expect(body.data.success).toBe(true);
+      const updated = JSON.parse(fs.readFileSync(path.join(pluginDir, 'openclaw.plugin.json'), 'utf-8')) as { skills: string[] };
+      expect(updated.skills).toEqual(['templates/langs/en/skills']);
     });
 
     it('should return 405 for non-POST method', async () => {
