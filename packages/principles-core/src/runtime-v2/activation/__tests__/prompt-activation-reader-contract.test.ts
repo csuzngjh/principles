@@ -395,7 +395,7 @@ describe('prompt-activation-reader-contract', () => {
       ];
       const injectedIds = new Set(['P<001>']);
       const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const result = renderPrinciplesToDirectives(principles, injectedIds, escapeXml);
+      const result = renderPrinciplesToDirectives(principles, injectedIds, { escapeFn: escapeXml });
       expect(result).toContain('P&lt;001&gt;');
       expect(result).toContain('A&amp;B');
     });
