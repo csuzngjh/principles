@@ -14,8 +14,11 @@
  * product default language is zh.
  *
  * Contract: exactly ONE skills root is declared — the product-default
- * language (zh). The en templates stay in the package as translations; they
- * are simply not declared for publication.
+ * language (zh). The en templates stay in the package as translation assets
+ * for install-time language selection (`--lang en` rewrites the INSTALLED
+ * manifest's skills root to the en templates — see
+ * create-principles-disciple/src/skill-language.ts); they are simply not
+ * declared for publication here.
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync } from 'fs';
@@ -73,5 +76,18 @@ describe('manifest skills declaration', () => {
     }
     // Positive assertion: the zh root actually publishes the skill set
     expect(seen.size).toBeGreaterThanOrEqual(20);
+  });
+
+  it('ships BOTH language template roots so install-time selection can pick either', () => {
+    for (const lang of ['zh', 'en']) {
+      const root = resolve(packageRoot, 'templates', 'langs', lang, 'skills');
+      expect(existsSync(root), `template root missing: templates/langs/${lang}/skills`).toBe(true);
+      const publishable = readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && existsSync(join(root, e.name, 'SKILL.md')));
+      expect(
+        publishable.length,
+        `templates/langs/${lang}/skills must carry the full skill set for --lang ${lang} installs`,
+      ).toBeGreaterThanOrEqual(20);
+    }
   });
 });
