@@ -7,7 +7,7 @@ import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { evaluateCandidateAdmissions } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
-import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
 
 export type { PainProvenance };
@@ -45,6 +45,17 @@ export interface PainDetectedData {
 
 export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded';
 
+/**
+ * PRI-539: A candidate that was admitted and ledgered but could not be
+ * internalized (e.g. its mapped channel is MVP-disabled). Surfaced so the
+ * Owner can see which candidates were dropped and why instead of silently
+ * assuming every candidate was internalized (rc-9-no-silent-fallback / ERR-002).
+ */
+export interface NotInternalizableCandidate {
+  candidateId: string;
+  reason: string;
+}
+
 export interface PainSignalBridgeResult {
   status: PainSignalBridgeStatus;
   painId: string;
@@ -55,6 +66,8 @@ export interface PainSignalBridgeResult {
   candidateIds: string[];
   ledgerEntryIds: string[];
   admissionResults?: CandidateAdmissionResult[];
+  /** PRI-539: candidates admitted+ledgered but not internalizable (MVP-disabled channel). */
+  notInternalizable?: NotInternalizableCandidate[];
   errorCategory?: PDErrorCategory;
   message?: string;
 }
@@ -295,6 +308,7 @@ export class PainSignalBridge {
         }));
 
     const seedFailureCandidateIds: string[] = [];
+    const notInternalizable: NotInternalizableCandidate[] = [];
 
     if (this.autoIntakeEnabled) {
       for (let i = 0; i < candidates.length; i++) {
@@ -313,8 +327,12 @@ export class PainSignalBridge {
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
           if (route) {
+            // PRI-539: `ready` reflects only whether the route maps to a channel.
+            // Let computeBridgeDecision() itself decide MVP-disabled so the
+            // not_internalizable reason is accurate ("Channel ... MVP-disabled")
+            // instead of the misleading "not ready — missing required fields".
             const channel = ROUTE_CHANNEL_MAP[route];
-            const ready = !!channel && MVP_ENABLED_CHANNELS.has(channel);
+            const ready = !!channel;
             const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: painId });
             // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
             if (!('decision' in seed)) {
@@ -336,6 +354,16 @@ export class PainSignalBridge {
                   payload: { taskId: seed.taskId, channel: seed.channel },
                 });
               }
+            } else if (seed.decision === 'not_internalizable') {
+              // PRI-539: surface MVP-disabled candidates instead of silently
+              // marking them consumed (rc-9-no-silent-fallback / ERR-002).
+              notInternalizable.push({ candidateId: candidate.candidateId, reason: seed.reason });
+              this.eventEmitter?.emitTelemetry({
+                eventType: 'candidate_not_internalizable',
+                traceId: candidate.candidateId,
+                timestamp: new Date().toISOString(),
+                payload: { reason: seed.reason, channel: channel ?? null, route },
+              });
             }
           }
         } catch (seedErr) {
@@ -374,6 +402,7 @@ export class PainSignalBridge {
       autoIntakeEnabled: this.autoIntakeEnabled,
       admissionResults,
       seedFailureNote,
+      notInternalizable: notInternalizable.length > 0 ? notInternalizable : undefined,
     });
   }
 

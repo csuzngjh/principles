@@ -17,7 +17,7 @@
  * - ERR-002 / EP-03: every degraded/failed branch keeps its structured message
  * - ERR-004 / ERR-008 / EP-07: lineage fields are received, never re-derived
  */
-import type { PainSignalBridgeResult } from './pain-signal-bridge.js';
+import type { PainSignalBridgeResult, NotInternalizableCandidate } from './pain-signal-bridge.js';
 import type { CandidateAdmissionResult } from './admission-gate.js';
 
 /** Base fields shared by both fresh and existing paths. */
@@ -29,6 +29,8 @@ interface ShapeBridgeResultBase {
   runId?: string;
   artifactId?: string;
   autoIntakeEnabled: boolean;
+  /** PRI-539: candidates admitted+ledgered but not internalizable (MVP-disabled channel). */
+  notInternalizable?: NotInternalizableCandidate[];
 }
 
 /** Fresh diagnosis path — has admission results and seed failure notes. */
@@ -85,6 +87,10 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
 
   if (input.path === 'fresh') {
     const { admissionResults, seedFailureNote } = input;
+    const notInternalizable = input.notInternalizable ?? [];
+    const notInternalizableNote = notInternalizable.length > 0
+      ? `not_internalizable:${notInternalizable.map((n) => `${n.candidateId}=${n.reason}`).join(',')}`
+      : '';
     const admittedCount = admissionResults.filter((a) => a.admission.decision === 'admitted').length;
     const nonAdmittedCount = admissionResults.length - admittedCount;
 
@@ -99,6 +105,7 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
         candidateIds,
         ledgerEntryIds,
         admissionResults,
+        notInternalizable: input.notInternalizable,
         message: 'Candidate intake did not produce a ledger entry',
       };
     }
@@ -114,7 +121,8 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
         candidateIds,
         ledgerEntryIds,
         admissionResults,
-        message: `all_candidates_gated:${admissionResults.map((a) => `${a.candidateId}=${a.admission.decision}`).join(',')}${seedFailureNote ? `; ${seedFailureNote}` : ''}`,
+        notInternalizable: input.notInternalizable,
+        message: `all_candidates_gated:${admissionResults.map((a) => `${a.candidateId}=${a.admission.decision}`).join(',')}${seedFailureNote ? `; ${seedFailureNote}` : ''}${notInternalizableNote ? `; ${notInternalizableNote}` : ''}`,
       };
     }
 
@@ -129,13 +137,15 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
         candidateIds,
         ledgerEntryIds,
         admissionResults,
-        message: `partial_admission:${admittedCount}_admitted_${nonAdmittedCount}_gated${seedFailureNote ? `; ${seedFailureNote}` : ''}`,
+        notInternalizable: input.notInternalizable,
+        message: `partial_admission:${admittedCount}_admitted_${nonAdmittedCount}_gated${seedFailureNote ? `; ${seedFailureNote}` : ''}${notInternalizableNote ? `; ${notInternalizableNote}` : ''}`,
       };
     }
 
-    // Success (or degraded if seed failure occurred)
+    // Success (or degraded when seed failed or a candidate was not internalizable)
+    const combinedNote = [notInternalizableNote, seedFailureNote].filter(Boolean).join('; ');
     return {
-      status: seedFailureNote ? 'degraded' : 'succeeded',
+      status: combinedNote ? 'degraded' : 'succeeded',
       painId,
       taskId,
       runId,
@@ -143,7 +153,8 @@ export function shapeBridgeResult(input: ShapeBridgeResultInput): PainSignalBrid
       candidateIds,
       ledgerEntryIds,
       admissionResults,
-      message: seedFailureNote || undefined,
+      notInternalizable: input.notInternalizable,
+      message: combinedNote || undefined,
     };
   }
 
