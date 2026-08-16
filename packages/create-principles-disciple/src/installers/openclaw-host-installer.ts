@@ -170,22 +170,31 @@ export class OpenClawHostInstaller implements HostInstaller {
       }
       const plugins = { ...configObj.plugins };
 
-      if (!plugins.allow) plugins.allow = [];
-      if (!Array.isArray(plugins.allow)) {
-        return {
-          success: false,
-          hostId: this.hostId,
-          configPath,
-          configAction: 'skipped',
-          reason: 'openclaw.json plugins.allow is not an array.',
-          nextAction: 'Fix ~/.openclaw/openclaw.json plugins.allow manually, then re-run installer.',
-        };
+      // plugins.allow: append ONLY when the user already has an allow list —
+      // never create one. Once plugins.allow is non-empty, OpenClaw silently
+      // disables every discovered non-bundled plugin that is NOT on the list,
+      // so creating allow=["principles-disciple"] on a machine that already
+      // auto-loads other plugins (e.g. feishu / tavily) would disable those
+      // plugins. An absent allow list keeps the previous auto-load behavior
+      // (OpenClaw logs an informational notice instead).
+      const allowWasAbsent = plugins.allow === undefined || plugins.allow === null;
+      if (!allowWasAbsent) {
+        if (!Array.isArray(plugins.allow)) {
+          return {
+            success: false,
+            hostId: this.hostId,
+            configPath,
+            configAction: 'skipped',
+            reason: 'openclaw.json plugins.allow is not an array.',
+            nextAction: 'Fix ~/.openclaw/openclaw.json plugins.allow manually, then re-run installer.',
+          };
+        }
+        const allow = plugins.allow.filter((a): a is string => typeof a === 'string');
+        if (!allow.includes('principles-disciple')) {
+          allow.push('principles-disciple');
+        }
+        plugins.allow = allow;
       }
-      const allow = (plugins.allow as unknown[]).filter((a): a is string => typeof a === 'string');
-      if (!allow.includes('principles-disciple')) {
-        allow.push('principles-disciple');
-      }
-      plugins.allow = allow;
 
       if (!plugins.entries) plugins.entries = {};
       if (!isRecord(plugins.entries)) {
@@ -218,7 +227,9 @@ export class OpenClawHostInstaller implements HostInstaller {
         hostId: this.hostId,
         configPath,
         configAction: 'updated',
-        nextAction: `Verify: openclaw plugin list (should show principles-disciple as enabled)`,
+        nextAction: allowWasAbsent
+          ? 'Verify: openclaw plugin list. Note: plugins.allow was absent and was deliberately NOT created — a non-empty allow list silently disables every other discovered plugin not on it. To silence OpenClaw\u2019s allow-list notice, add ALL discovered plugin ids (see the gateway log) to plugins.allow yourself.'
+          : 'Verify: openclaw plugin list (should show principles-disciple as enabled)',
       };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);

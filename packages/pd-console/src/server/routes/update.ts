@@ -25,6 +25,11 @@ import {
   stopOpenClawGateway,
   restartOpenClawGateway,
 } from '../utils/gateway.js';
+import {
+  migrateLegacyExtensionBackups,
+  reservePdBackupDestination,
+  resolvePdBackupsRoot,
+} from '../utils/pd-backups.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -110,12 +115,29 @@ function isValidMergeStrategy(value: unknown): value is 'smart' | 'overwrite' | 
 function validatePathInWorkspace(target: string, workspaceDir: string): boolean {
   const resolved = path.resolve(target);
   const resolvedWorkspace = path.resolve(workspaceDir);
-  // Allow paths within workspace or within the OpenClaw extensions directory.
-  // The extensions dir is under the OpenClaw install home (~/.openclaw/extensions),
-  // which is NOT derived from the workspace dir (the two may be on different drives).
+  // Allow paths within workspace, within the OpenClaw extensions directory,
+  // or within the PD backups root. The extensions dir and backups root are
+  // under the OpenClaw install home (~/.openclaw), which is NOT derived from
+  // the workspace dir (the two may be on different drives).
   const extensionsDir = path.resolve(resolveExtensionsDir());
-  return resolved.startsWith(resolvedWorkspace + path.sep) || resolved === resolvedWorkspace
-    || resolved.startsWith(extensionsDir + path.sep) || resolved === extensionsDir;
+  const backupsRoot = path.resolve(resolvePdBackupsRoot());
+  const insideRoot = (root: string): boolean =>
+    resolved.startsWith(root + path.sep) || resolved === root;
+  return insideRoot(resolvedWorkspace) || insideRoot(extensionsDir) || insideRoot(backupsRoot);
+}
+
+/**
+ * Log the result of a legacy-backup migration (rc-9: failures are surfaced,
+ * never silent). Returns nothing; migration itself is best-effort.
+ */
+function logLegacyBackupMigration(source: string): void {
+  const legacy = migrateLegacyExtensionBackups();
+  if (legacy.movedFrom.length > 0) {
+    console.log(`[${source}] Migrated ${legacy.movedFrom.length} legacy PD backup dir(s) out of the extensions dir to ${resolvePdBackupsRoot()}`);
+  }
+  for (const failure of legacy.failed) {
+    console.warn(`[${source}] Could not migrate legacy PD backup "${failure.name}" out of the extensions dir: ${failure.reason}. Move it out manually to silence the OpenClaw "duplicate plugin id" warning.`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +437,11 @@ async function doApplyUpdate(
     // overwrites it (PR #1332 companion — see reapplySkillLanguage).
     const skillLanguage = detectInstalledSkillLanguage(targetDir);
 
+    // 0.5 Heal legacy installs: older versions left backups inside the
+    // extensions dir, where OpenClaw discovery picks them up as duplicate
+    // plugins. Move them out before creating a new backup alongside them.
+    logLegacyBackupMigration('pd-update');
+
     // 1. Fetch latest package info (with timeout + retry)
     const response = await fetchWithRetry(NPM_REGISTRY_LATEST, 'Registry check');
     const rawData: unknown = await response.json();
@@ -427,10 +454,13 @@ async function doApplyUpdate(
     if (!tarball) return { success: false, message: 'Missing tarball URL in registry response' };
 
     // 2. Create backup if requested (Fix 2: skip node_modules to avoid EPERM
-    //    from locked native modules and npm symlinks/junctions)
+    //    from locked native modules and npm symlinks/junctions).
+    //    The backup lives in <openclawHome>/pd-backups — OUTSIDE the
+    //    extensions dir, because OpenClaw plugin discovery scans every
+    //    extensions/ child and would report the backup as a duplicate
+    //    "principles-disciple" plugin on every gateway startup.
     if (createBackup) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      backupPath = path.join(path.dirname(targetDir), `.pd-backup-${timestamp}`);
+      backupPath = reservePdBackupDestination(path.basename(targetDir));
       copyDirRecursive(targetDir, backupPath, SKIP_DIRS);
     }
 
@@ -633,6 +663,10 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
   // overwrites it (PR #1332 companion — see reapplySkillLanguage).
   const skillLanguage = detectInstalledSkillLanguage(extDir);
   let tempDir: string | undefined;
+
+  // Heal legacy installs: move old backups out of the extensions dir so
+  // OpenClaw discovery stops reporting a duplicate plugin (see pd-backups.ts).
+  logLegacyBackupMigration('pd-update-full');
 
   try {
     // 2. Fetch installer package info from npm
@@ -881,7 +915,7 @@ export async function handleUpdateRoute(
         return;
       }
       if (!validatePathInWorkspace(backupDir, workspaceDir)) {
-        sendBadRequest(res, 'backupDir must be within workspace or extensions directory');
+        sendBadRequest(res, 'backupDir must be within the workspace, extensions directory, or PD backups directory');
         return;
       }
 
