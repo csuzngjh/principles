@@ -25,6 +25,11 @@ import {
   stopOpenClawGateway,
   restartOpenClawGateway,
 } from '../utils/gateway.js';
+import {
+  migrateLegacyExtensionBackups,
+  reservePdBackupDestination,
+  resolvePdBackupsRoot,
+} from '../utils/pd-backups.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -110,12 +115,29 @@ function isValidMergeStrategy(value: unknown): value is 'smart' | 'overwrite' | 
 function validatePathInWorkspace(target: string, workspaceDir: string): boolean {
   const resolved = path.resolve(target);
   const resolvedWorkspace = path.resolve(workspaceDir);
-  // Allow paths within workspace or within the OpenClaw extensions directory.
-  // The extensions dir is under the OpenClaw install home (~/.openclaw/extensions),
-  // which is NOT derived from the workspace dir (the two may be on different drives).
+  // Allow paths within workspace, within the OpenClaw extensions directory,
+  // or within the PD backups root. The extensions dir and backups root are
+  // under the OpenClaw install home (~/.openclaw), which is NOT derived from
+  // the workspace dir (the two may be on different drives).
   const extensionsDir = path.resolve(resolveExtensionsDir());
-  return resolved.startsWith(resolvedWorkspace + path.sep) || resolved === resolvedWorkspace
-    || resolved.startsWith(extensionsDir + path.sep) || resolved === extensionsDir;
+  const backupsRoot = path.resolve(resolvePdBackupsRoot());
+  const insideRoot = (root: string): boolean =>
+    resolved.startsWith(root + path.sep) || resolved === root;
+  return insideRoot(resolvedWorkspace) || insideRoot(extensionsDir) || insideRoot(backupsRoot);
+}
+
+/**
+ * Log the result of a legacy-backup migration (rc-9: failures are surfaced,
+ * never silent). Returns nothing; migration itself is best-effort.
+ */
+function logLegacyBackupMigration(source: string): void {
+  const legacy = migrateLegacyExtensionBackups();
+  if (legacy.movedFrom.length > 0) {
+    console.log(`[${source}] Migrated ${legacy.movedFrom.length} legacy PD backup dir(s) out of the extensions dir to ${resolvePdBackupsRoot()}`);
+  }
+  for (const failure of legacy.failed) {
+    console.warn(`[${source}] Could not migrate legacy PD backup "${failure.name}" out of the extensions dir: ${failure.reason}. Move it out manually to silence the OpenClaw "duplicate plugin id" warning.`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +181,80 @@ function copyFileTo(src: string, dest: string): void {
   const dir = path.dirname(dest);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.copyFileSync(src, dest);
+}
+
+// --- Plugin skill-language preservation (PR #1332 companion) -----------------
+// OpenClaw publishes plugin skills by directory name (first declaration
+// wins, same-name roots only warn — no locale mechanism), so a manifest must
+// declare exactly ONE language root. The shipped manifest declares zh
+// (product default); installs made with --lang en have their installed
+// manifest rewritten to the en root by the installer. Updates ship a fresh
+// zh-default manifest and would silently revert that choice — so capture the
+// installed language BEFORE any mutation and re-apply it after the new
+// manifest lands. Mirrors create-principles-disciple/src/skill-language.ts
+// (keep the two transforms in sync).
+const SKILL_LANGUAGE_ROOTS = {
+  zh: 'templates/langs/zh/skills',
+  en: 'templates/langs/en/skills',
+} as const;
+type SkillLanguage = keyof typeof SKILL_LANGUAGE_ROOTS;
+
+function isLanguageSkillRoot(entry: unknown): boolean {
+  if (typeof entry !== 'string') return false;
+  const normalized = entry.replaceAll('\\', '/');
+  return normalized === SKILL_LANGUAGE_ROOTS.zh || normalized === SKILL_LANGUAGE_ROOTS.en;
+}
+
+function detectInstalledSkillLanguage(extDir: string): SkillLanguage {
+  try {
+    const manifestPath = path.join(extDir, 'openclaw.plugin.json');
+    if (!fs.existsSync(manifestPath)) return 'zh';
+    const raw: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    if (!isRecord(raw) || !Array.isArray(raw.skills)) return 'zh';
+    const languages = new Set<SkillLanguage>();
+    for (const entry of raw.skills) {
+      if (typeof entry !== 'string') continue;
+      const normalized = entry.replaceAll('\\', '/');
+      if (normalized === SKILL_LANGUAGE_ROOTS.zh) languages.add('zh');
+      else if (normalized === SKILL_LANGUAGE_ROOTS.en) languages.add('en');
+    }
+    // Exactly one language root → that is the user's selection. Zero or both
+    // (pre-ERR-097 legacy install) → product default.
+    if (languages.size !== 1) return 'zh';
+    for (const language of languages) return language;
+    return 'zh';
+  } catch {
+    return 'zh';
+  }
+}
+
+function reapplySkillLanguage(extDir: string, language: SkillLanguage): void {
+  try {
+    const manifestPath = path.join(extDir, 'openclaw.plugin.json');
+    if (!fs.existsSync(manifestPath)) return;
+    // Defense in depth: only rewrite when the selected language's templates
+    // actually exist — otherwise the host would warn "plugin skill path not
+    // found" and publish nothing.
+    if (!fs.existsSync(path.join(extDir, SKILL_LANGUAGE_ROOTS[language]))) {
+      console.error(`[pd-console:update] skill language "${language}" templates missing — keeping shipped manifest skills`);
+      return;
+    }
+    const raw: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    if (!isRecord(raw) || !Array.isArray(raw.skills)) return;
+    const skills: unknown[] = raw.skills;
+    const kept = skills.filter((entry): entry is string =>
+      typeof entry === 'string' && !isLanguageSkillRoot(entry),
+    );
+    const next: string[] = [...kept, SKILL_LANGUAGE_ROOTS[language]];
+    const unchanged =
+      next.length === skills.length && next.every((entry, i) => entry === skills[i]);
+    if (unchanged) return;
+    raw.skills = next;
+    fs.writeFileSync(manifestPath, JSON.stringify(raw, null, 2) + '\n', 'utf-8');
+  } catch (error) {
+    // rc-9: degrade observably, never fail the whole update over skill language.
+    console.error(`[pd-console:update] failed to re-apply skill language "${language}": ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 interface LocalDiffResult {
@@ -337,6 +433,14 @@ async function doApplyUpdate(
   try {
     // 0. Save current version BEFORE any changes
     const fromVersion = readCurrentVersion(targetDir) ?? 'unknown';
+    // Capture the installed skill language before the tarball's manifest
+    // overwrites it (PR #1332 companion — see reapplySkillLanguage).
+    const skillLanguage = detectInstalledSkillLanguage(targetDir);
+
+    // 0.5 Heal legacy installs: older versions left backups inside the
+    // extensions dir, where OpenClaw discovery picks them up as duplicate
+    // plugins. Move them out before creating a new backup alongside them.
+    logLegacyBackupMigration('pd-update');
 
     // 1. Fetch latest package info (with timeout + retry)
     const response = await fetchWithRetry(NPM_REGISTRY_LATEST, 'Registry check');
@@ -350,10 +454,13 @@ async function doApplyUpdate(
     if (!tarball) return { success: false, message: 'Missing tarball URL in registry response' };
 
     // 2. Create backup if requested (Fix 2: skip node_modules to avoid EPERM
-    //    from locked native modules and npm symlinks/junctions)
+    //    from locked native modules and npm symlinks/junctions).
+    //    The backup lives in <openclawHome>/pd-backups — OUTSIDE the
+    //    extensions dir, because OpenClaw plugin discovery scans every
+    //    extensions/ child and would report the backup as a duplicate
+    //    "principles-disciple" plugin on every gateway startup.
     if (createBackup) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      backupPath = path.join(path.dirname(targetDir), `.pd-backup-${timestamp}`);
+      backupPath = reservePdBackupDestination(path.basename(targetDir));
       copyDirRecursive(targetDir, backupPath, SKIP_DIRS);
     }
 
@@ -401,6 +508,10 @@ async function doApplyUpdate(
       copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
       updatedFiles.push(file);
     }
+
+    // 4b. The incoming manifest declares the product-default skill language
+    // (zh); restore the language this install was materialized with.
+    reapplySkillLanguage(targetDir, skillLanguage);
 
     // Fix 3: deletions intentionally skipped — see comment above.
 
@@ -548,7 +659,14 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
 
   // Capture version before changes
   const fromVersion = readCurrentVersion(extDir) ?? 'unknown';
+  // Capture the installed skill language before the tarball's manifest
+  // overwrites it (PR #1332 companion — see reapplySkillLanguage).
+  const skillLanguage = detectInstalledSkillLanguage(extDir);
   let tempDir: string | undefined;
+
+  // Heal legacy installs: move old backups out of the extensions dir so
+  // OpenClaw discovery stops reporting a duplicate plugin (see pd-backups.ts).
+  logLegacyBackupMigration('pd-update-full');
 
   try {
     // 2. Fetch installer package info from npm
@@ -592,6 +710,9 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     const pluginSrc = path.join(tempDir, 'plugin');
     if (fs.existsSync(pluginSrc)) {
       copyDirRecursive(pluginSrc, extDir, SKIP_DIRS);
+      // The incoming manifest declares the product-default skill language
+      // (zh); restore the language this install was materialized with.
+      reapplySkillLanguage(extDir, skillLanguage);
     }
 
     //    b. console/ → extDir/console/ (overwrite dist/ files; do NOT rmSync —
@@ -794,7 +915,7 @@ export async function handleUpdateRoute(
         return;
       }
       if (!validatePathInWorkspace(backupDir, workspaceDir)) {
-        sendBadRequest(res, 'backupDir must be within workspace or extensions directory');
+        sendBadRequest(res, 'backupDir must be within the workspace, extensions directory, or PD backups directory');
         return;
       }
 

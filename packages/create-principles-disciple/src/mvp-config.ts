@@ -228,6 +228,17 @@ export function getPluginExtDir(): string {
   return path.join(getOpenClawDir(), 'extensions', 'principles-disciple');
 }
 
+/**
+ * PD 备份根目录（~/.openclaw/pd-backups）—— 必须位于 extensions/ 之外。
+ * OpenClaw 插件发现会扫描 extensions/ 下每个子目录；备份目录内含
+ * package.json(openclaw.extensions) + dist/bundle.js 时会被识别为第二个
+ * principles-disciple 插件，导致每次 gateway 启动都出现
+ * "duplicate plugin id detected" 告警。备份一律放这里，禁止放 extensions/ 内。
+ */
+export function getPdBackupsDir(): string {
+  return path.join(getOpenClawDir(), 'pd-backups');
+}
+
 export function getInstalledPdCliDir(): string {
   return path.join(getPluginExtDir(), 'pd-cli');
 }

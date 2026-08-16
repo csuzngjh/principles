@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync } from 'fs';
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as http from 'http';
@@ -18,6 +18,7 @@ import {
   readEnabledChannelsFromConfigYaml,
   getOpenClawDir,
   getPluginExtDir,
+  getPdBackupsDir,
   getInstalledPdCliDir,
   getInstalledBinDir,
   getInstalledConsoleDir,
@@ -28,6 +29,7 @@ import {
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
+import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -229,12 +231,63 @@ interface BackupResult {
   backupDir: string | null;
 }
 
-function backupExistingInstall(): BackupResult {
+/**
+ * Move legacy PD backup directories out of the extensions dir into the PD
+ * backups root. Older versions created backups as siblings of the plugin
+ * inside ~/.openclaw/extensions — OpenClaw plugin discovery scans every
+ * extensions/ child directory, so those backups get discovered as duplicate
+ * principles-disciple plugins ("duplicate plugin id detected" on every
+ * gateway startup). Best-effort: failures are logged, never fatal (rc-9).
+ *
+ * Exported for real-filesystem tests (tests/backup-location.test.ts).
+ */
+export function migrateLegacyPdBackups(): void {
+  const extensionsDir = path.join(getOpenClawDir(), 'extensions');
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(extensionsDir, { withFileTypes: true });
+  } catch {
+    return; // no extensions dir — nothing to migrate
+  }
+  const isLegacyName = (name: string): boolean =>
+    name.startsWith('.pd-backup-') || /^principles-disciple\.backup\.\d+$/.test(name);
+  const backupsDir = getPdBackupsDir();
+  let moved = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isLegacyName(entry.name)) continue;
+    let dest = path.join(backupsDir, entry.name);
+    let suffix = 1;
+    while (existsSync(dest)) {
+      dest = path.join(backupsDir, `${entry.name}-${suffix}`);
+      suffix += 1;
+    }
+    try {
+      mkdirSync(backupsDir, { recursive: true });
+      renameSync(path.join(extensionsDir, entry.name), dest);
+      moved += 1;
+    } catch (e) {
+      logger.warn(`Could not migrate legacy PD backup ${entry.name} out of extensions/: ${e instanceof Error ? e.message : String(e)}. Move it out manually to silence the OpenClaw "duplicate plugin id" warning.`);
+    }
+  }
+  if (moved > 0) {
+    logger.info(`Migrated ${moved} legacy PD backup dir(s) out of the extensions dir to ${backupsDir}`);
+  }
+}
+
+/**
+ * Exported for real-filesystem tests (tests/backup-location.test.ts).
+ */
+export function backupExistingInstall(): BackupResult {
   const extDir = getPluginExtDir();
   if (!existsSync(extDir)) return { type: 'no_existing', backupDir: null };
 
-  const backupDir = extDir + '.backup.' + Date.now();
+  // The backup must live OUTSIDE the extensions dir (see getPdBackupsDir):
+  // OpenClaw plugin discovery scans every extensions/ child directory and
+  // would discover the backup as a second principles-disciple plugin.
+  const backupsDir = getPdBackupsDir();
+  const backupDir = path.join(backupsDir, `principles-disciple.backup.${Date.now()}`);
   try {
+    mkdirSync(backupsDir, { recursive: true });
     renameSync(extDir, backupDir);
     logger.info(`Backed up existing install to ${backupDir}`);
     return { type: 'backed_up', backupDir };
@@ -368,12 +421,21 @@ export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
   }
 }
 
-async function installPluginToStaging(pluginDir: string): Promise<void> {
+export async function installPluginToStaging(pluginDir: string, language: SkillLanguage): Promise<void> {
   const extDir = getPluginExtDir();
   const builtPluginDir = path.join(pluginDir, 'plugin');
 
   await fse.ensureDir(extDir);
   await fse.copy(builtPluginDir, extDir, { overwrite: true });
+
+  // Skill-language selection: OpenClaw publishes skills by name with no
+  // locale mechanism, so the installed manifest must declare exactly one
+  // language root. The shipped manifest declares zh (product default);
+  // --lang en installs rewrite it to the en root here.
+  const selection = applySkillLanguageSelection(extDir, language);
+  if (!selection.applied) {
+    logger.warn(`Skill language "${language}" not applied (${selection.note ?? 'unknown'}) — published skills stay at the manifest default`);
+  }
 }
 
 // ADR-0020 §2.3: The OpenClaw config write logic previously lived here as
@@ -1324,6 +1386,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Backing up existing install...');
+    migrateLegacyPdBackups();
     const { backupDir: backupDirFromResult } = backupExistingInstall();
     backupDir = backupDirFromResult;
     stepIndex++;
@@ -1341,7 +1404,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
-    await installPluginToStaging(pluginDir);
+    await installPluginToStaging(pluginDir, options.language);
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for plugin...');

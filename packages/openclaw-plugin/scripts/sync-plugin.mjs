@@ -686,24 +686,33 @@ function syncFilteredManifest(lang) {
         process.exit(1);
     }
 
-    const filtered = manifest.skills.filter(sp => {
-        if (typeof sp !== 'string') return false;
-        return sp.includes(`/langs/${selectedLang}/`);
-    });
+    // PR #1332 companion: the source manifest declares exactly one root
+    // (zh, product default). REPLACE language roots with the selected one
+    // instead of only filtering, so `--lang en` works against a zh-default
+    // source manifest. Mirrors the production transform in
+    // create-principles-disciple/src/skill-language.ts.
+    const langRoots = {
+        zh: 'templates/langs/zh/skills',
+        en: 'templates/langs/en/skills',
+    };
+    const isLangRoot = (sp) =>
+        typeof sp === 'string' &&
+        (sp.replaceAll('\\', '/') === langRoots.zh || sp.replaceAll('\\', '/') === langRoots.en);
 
-    if (filtered.length === 0) {
-        console.error(`❌ No skills match language "${selectedLang}" in source manifest`);
+    if (!existsSync(join(SOURCE_DIR, langRoots[selectedLang]))) {
+        console.error(`❌ Skill templates missing for language "${selectedLang}": ${langRoots[selectedLang]}`);
         process.exit(1);
     }
 
-    manifest.skills = filtered;
+    const kept = manifest.skills.filter((sp) => !isLangRoot(sp));
+    manifest.skills = [...kept, langRoots[selectedLang]];
 
     // Use syncItem semantics: remove target, then write freshly
     if (existsSync(targetPath)) {
         rmSync(targetPath, { force: true });
     }
     writeFileSync(targetPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
-    console.log(`  ✅ skills filtered to lang: ${selectedLang} (${filtered.length} path(s))`);
+    console.log(`  ✅ skills filtered to lang: ${selectedLang} (${manifest.skills.length} path(s))`);
 }
 
 /**
