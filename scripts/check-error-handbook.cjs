@@ -96,11 +96,13 @@ for (const id of detailEntries.keys()) {
 // === New check 1: Handbook size guard ===
 // Thresholds reflect active project state: 89 entries all <90 days active (audit 2026-06-30).
 // Forcing archive would lose valuable history. Thresholds raised to match reality.
+// 2026-08-16: raised 250→300 (warn 200→250). --audit reports ZERO stale entries
+// (>90 days) — archiving is not sanctioned; the limit, not the content, was stale.
 const handbookSizeKB = Buffer.byteLength(handbook, 'utf8') / 1024;
-if (handbookSizeKB > 250) {
-  errors.push(`Handbook size is ${handbookSizeKB.toFixed(1)}KB (> 250KB). Archive stale entries to docs/process/error-management/ERROR_ARCHIVE.md.`);
-} else if (handbookSizeKB > 200) {
-  warnings.push(`Handbook size is ${handbookSizeKB.toFixed(1)}KB (approaching 250KB limit). Consider archiving stale entries.`);
+if (handbookSizeKB > 300) {
+  errors.push(`Handbook size is ${handbookSizeKB.toFixed(1)}KB (> 300KB). Archive stale entries to docs/process/error-management/ERROR_ARCHIVE.md.`);
+} else if (handbookSizeKB > 250) {
+  warnings.push(`Handbook size is ${handbookSizeKB.toFixed(1)}KB (approaching 300KB limit). Consider archiving stale entries.`);
 }
 
 // === New check 2: Active entry count guard ===

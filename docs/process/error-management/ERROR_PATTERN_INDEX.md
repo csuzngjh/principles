@@ -90,9 +90,17 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 - **Use when**: adding any user-facing string (visible text, `aria-label`, `title`, `placeholder`, `alt`) in a component that already uses an i18n translation function (`t()`, `useTranslation`, `i18next`).
 - **Failure mode**: new strings are hardcoded in the source language (usually English) while the rest of the component routes text through `t()`, causing screen readers, tooltips, and visible text to read in a different language than the active UI locale.
-- **Must check**: every new string attribute in an i18n-enabled component uses `t()` with a translation key; corresponding keys are added to all locale files (`en.json`, `zh-CN.json`, etc.); interpolation parameters (e.g., `{{count}}`) are passed through `t()` options.
+- **Must check**: every new string attribute in an i18n-enabled component uses `t()` with a translation key; corresponding keys are added to all locale files (`en.json`, `zh-CN.json`, etc.); interpolation parameters (e.g. `{{count}}`) are passed through `t()` options.
 - **Representative ERRs**: ERR-075.
 - **Automation target**: grep for `aria-label={`, `aria-label="`, `title="`, `placeholder="` in `.tsx` files that import `useTranslation`/`t()`; any match not using `t(...)` is a finding.
+
+### EP-12 Host Environment Contract
+
+- **Use when**: placing files under host-managed directories (`~/.openclaw/extensions`, `~/.openclaw/plugin-skills`, workspace `skills/`), writing host config keys (`openclaw.json` `plugins.*`, `skills.*`), or declaring manifest arrays OpenClaw consumes (`skills`, `commands`, hooks) — in pd-console, create-principles-disciple, or openclaw-plugin packaging.
+- **Failure mode**: PD treats its writes as inert data, but the host actively interprets them: backup dirs inside extensions/ are re-discovered as duplicate plugins; same-named skill roots across languages silently collapse to the first; a created `plugins.allow` silently disables every discovered plugin not on it.
+- **Must check**: cite the host rule that interprets the path/key (discovery scan + ignore-name conventions, publication-by-name uniqueness, allowlist hard gate that `entries.enabled` does NOT bypass) in the PR description; place PD-owned data outside discovery roots (`pd-backups`); shared host collections are append-only; manifest declares exactly one skills root with unique skill names.
+- **Representative ERRs**: ERR-097.
+- **Automation target**: manifest invariant test (single skills root, no cross-root name collisions); repo grep for writes creating directories under `extensions/` outside install/update flows.
 
 ## Maintenance Rules
 
