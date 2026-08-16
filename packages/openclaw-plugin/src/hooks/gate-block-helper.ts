@@ -17,6 +17,7 @@ import type { PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent } from './pain.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { loadPrincipleReceiptMetadata, type PrincipleReceiptMetadata } from '../core/principle-receipt-metadata.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
@@ -38,6 +39,10 @@ export interface BlockContext {
   sessionId?: string;
   /** Source module that triggered the block (for audit trail) */
   blockSource?: string;
+  /** RuleHost rule id — enables PRI-530 receipt copy attribution */
+  ruleId?: string;
+  /** Principle id from the rule result — enables PRI-530 receipt copy attribution */
+  principleId?: string;
 }
 
 /**
@@ -231,12 +236,68 @@ export function recordGateBlockAndReturn(
   }
 
   // 6. Return consistent block result with contextual operator guidance
-  const blockMessage = buildContextualBlockMessage({ filePath, reason });
+  // PRI-530: when principle_receipt_block_copy is enabled and this block came
+  // from RuleHost, enrich the copy with principle attribution (SPEC §5.1).
+  let blockMessage: string;
+  const receiptFlag = loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_block_copy', logger);
+  if (receiptFlag.enabled && blockCtx.blockSource === 'rule-host') {
+    const metadata = loadPrincipleReceiptMetadata(wctx.workspaceDir, blockCtx.ruleId, blockCtx.principleId);
+    if (metadata) {
+      blockMessage = buildReceiptBlockMessage({
+        filePath,
+        reason,
+        toolName,
+        metadata,
+      });
+    } else {
+      logWarn('[PD_GATE] Receipt metadata unresolved — generic block copy used (rc-9)');
+      blockMessage = buildContextualBlockMessage({ filePath, reason });
+    }
+  } else {
+    blockMessage = buildContextualBlockMessage({ filePath, reason });
+  }
 
   return {
     block: true,
     blockReason: blockMessage,
   };
+}
+
+/**
+ * PRI-530 (SPEC §5.1): owner-facing receipt copy for RuleHost blocks.
+ * Primary visible surface is the agent's narration (the template instructs
+ * it); the expanded tool card is the secondary surface. Fields degrade per
+ * the metadata reader's fallback chain — the source line only appears when
+ * the artifact actually carries painReasonSummary.
+ */
+function buildReceiptBlockMessage({
+  filePath,
+  reason,
+  toolName,
+  metadata,
+}: {
+  filePath: string;
+  reason: string;
+  toolName: string;
+  metadata: PrincipleReceiptMetadata;
+}): string {
+  const approvedLine = metadata.approvedAt
+    ? `你 ${metadata.approvedAt} 批准`
+    : '你批准';
+  const sourceLine = metadata.sourceSummary
+    ? ` · 来源：${metadata.sourceSummary}`
+    : '';
+  return `⛔ [PD 原则]「${metadata.title}」拦截了 ${toolName} ${filePath}
+   ${approvedLine}${sourceLine}
+   Reason: ${reason}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 如何解除拦截：
+
+此操作被 Rule Host 原则（来自 Principles Disciple）拦截。
+如果该操作确实安全且必要，请向 Owner（用户）解释原因，
+并请求 Owner 明确确认后再继续。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 }
 
 /**

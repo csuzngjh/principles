@@ -5,8 +5,9 @@
  * - applicationMode='live' + valid proposal: event.params mutated, telemetry emitted
  * - applicationMode='live' + invalid proposal: no mutation, validation_failed telemetry
  * - applicationMode='shadow': no mutation (existing behavior preserved)
- * - notifyAgent=true: warning injected in return value
- * - notifyAgent=false: no warning, returns void
+ * - PRI-529/D2: applied correction returns corrected params via the host
+ *   contract field `params` (host reads only params/block/blockReason/
+ *   requireApproval); in-place mutation is a secondary channel only
  * - Multiple correctedFields: all applied atomically when all valid
  * - Exception during application: fail-open, no partial mutation
  * - Strict field validation: ALL fields must exist in event.params AND proposedParams
@@ -149,11 +150,13 @@ describe('PRI-174: Gate auto_correct live mode', () => {
       { field: 'content', original: 'broken', applied: 'fixed content' },
     ]);
 
-    // Verify notifyAgent warning is in result
+    // Verify corrected params are returned via the host contract field (PRI-529/D2)
     expect(result).toBeDefined();
-    expect(result?._pdAutoCorrectWarning).toContain('[PD Auto-Correct]');
-    expect(result?._pdAutoCorrectWarning).toContain('content');
-    expect(result?.skipToolCall).toBe(false);
+    expect(result?.params).toMatchObject({
+      file_path: '/mock/workspace/src/foo.ts',
+      content: 'fixed content',
+    });
+    expect(result?.block).toBeUndefined();
   });
 
   it('applicationMode=live with invalid proposal: no params mutation, emits proposed with validationValid false', () => {
@@ -221,7 +224,7 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     expect(result).toBeUndefined();
   });
 
-  it('notifyAgent=true: warning injected in return value, does not block tool call', () => {
+  it('notifyAgent=true: corrected params returned via host contract, does not block tool call', () => {
     const proposal = makeValidProposal({ notifyAgent: true });
     _mockEvaluate = vi.fn().mockReturnValue({
       decision: 'auto_correct',
@@ -235,14 +238,11 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     const result = handleBeforeToolCall(event, makeCtx());
 
     expect(result).toBeDefined();
-    expect(result?._pdAutoCorrectWarning).toContain('[PD Auto-Correct]');
-    expect(result?._pdAutoCorrectWarning).toContain('Rule R_ac_live');
-    expect(result?._pdAutoCorrectWarning).toContain('fix typo');
-    expect(result?._pdAutoCorrectWarning).toContain('content');
-    expect(result?.skipToolCall).toBe(false);
+    expect(result?.params).toMatchObject({ content: 'fixed content' });
+    expect(result?.block).toBeUndefined();
   });
 
-  it('notifyAgent=false: no warning returned, tool call allowed', () => {
+  it('notifyAgent=false: corrected params still returned via host contract, tool call allowed', () => {
     const proposal = makeValidProposal({ notifyAgent: false });
     _mockEvaluate = vi.fn().mockReturnValue({
       decision: 'auto_correct',
@@ -255,11 +255,45 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     const event = makeWriteEvent();
     const result = handleBeforeToolCall(event, makeCtx());
 
-    // Verify no warning, tool call allowed
-    expect(result).toBeUndefined();
+    // PRI-529/D2: both notifyAgent modes return the corrected params —
+    // in-place mutation alone is not a reliable propagation channel.
+    expect(result?.params).toMatchObject({ content: 'fixed content' });
 
     // Verify correction was still applied
     expect(event.params.content).toBe('fixed content');
+  });
+
+  it('PRI-529/D2: host-contract simulation — host merge of the hook result yields corrected params', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { dry_run: true },
+      correctedFields: [
+        { field: 'dry_run', original: false, proposed: true, reason: 'enforce dry run' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'enforce dry run',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent({ dry_run: false });
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    // Simulate the host merge semantics (agent-tools.before-tool-call.ts):
+    // the host reads ONLY params/block/blockReason/requireApproval from the
+    // hook result. If the correction is not in `params`, the host never sees it.
+    const hookResult = (result ?? {}) as Record<string, unknown>;
+    const mergedParams = {
+      ...event.params,
+      ...(typeof hookResult.params === 'object' && hookResult.params !== null
+        ? hookResult.params as Record<string, unknown>
+        : {}),
+    };
+    expect(mergedParams.dry_run).toBe(true);
+    expect(hookResult.block).toBeUndefined();
+    expect(hookResult.blockReason).toBeUndefined();
   });
 
   it('Multiple correctedFields: all applied atomically when ALL fields valid', () => {
@@ -293,9 +327,8 @@ describe('PRI-174: Gate auto_correct live mode', () => {
       { field: 'new_string', original: 'broken2', applied: 'also fixed' },
     ]);
 
-    // Verify warning contains both corrections
-    expect(result?._pdAutoCorrectWarning).toContain('content');
-    expect(result?._pdAutoCorrectWarning).toContain('new_string');
+    // Verify both corrections are returned via the host contract field
+    expect(result?.params).toMatchObject({ content: 'fixed', new_string: 'also fixed' });
   });
 
   it('Field missing from event.params: fail-open, no mutation, no applied telemetry', () => {
