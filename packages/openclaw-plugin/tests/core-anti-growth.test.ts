@@ -111,6 +111,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-530: Principle receipt metadata reader — plugin I/O boundary
     // (readonly state.db joins resolving block copy attribution).
     'principle-receipt-metadata.ts',
+    // PRI-531: receipt ledger writer (state.db inserts + retention sweep).
+    'principle-application-ledger.ts',
   ] as const;
 
   // Category 6: Test files

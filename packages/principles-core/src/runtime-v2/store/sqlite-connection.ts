@@ -448,6 +448,28 @@ export class SqliteConnection {
         deactivated_at TEXT
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_activations_idempotency ON activations(idempotency_key);
+      -- PRI-531: Principle Receipt ledger (SPEC 5.3). Two levels: effect
+      -- (rule_blocked / auto_correct_applied / self_reported) vs presence
+      -- (prompt_injected, deduped per session x principle via partial unique
+      -- index; NULL session_id values are distinct in SQLite unique semantics).
+      -- 90-day rolling retention enforced by the plugin writer.
+      CREATE TABLE IF NOT EXISTS principle_applications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principle_id TEXT NOT NULL,
+        activation_id TEXT,
+        rule_id TEXT,
+        channel TEXT NOT NULL,
+        level TEXT NOT NULL CHECK (level IN ('effect','presence')),
+        kind TEXT NOT NULL CHECK (kind IN ('rule_blocked','auto_correct_applied','self_reported','prompt_injected')),
+        session_id TEXT,
+        tool_name TEXT,
+        file_path TEXT,
+        digest TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pa_presence_dedup
+        ON principle_applications(principle_id, session_id) WHERE kind = 'prompt_injected';
+      CREATE INDEX IF NOT EXISTS idx_pa_principle_time ON principle_applications(principle_id, created_at DESC);
     `);
 
     // Migration: add deactivated_at column if missing (existing databases)

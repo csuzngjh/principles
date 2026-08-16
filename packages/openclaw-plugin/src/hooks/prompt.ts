@@ -15,6 +15,7 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { recordInjectionPresence, alignActivationIds } from '../core/principle-application-ledger.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
@@ -554,6 +555,34 @@ export async function handleBeforePromptBuild(
       });
     } catch (logErr) {
       logger?.warn?.(`[PD:RuntimeV2] Failed to emit activation observability event: ${String(logErr)}`);
+    }
+
+    // PRI-531: receipt ledger presence rows — one per injected principle,
+    // deduped per session×principle (partial unique index). Flag-gated and
+    // failure-degrading; never affects the injection itself (rc-9).
+    try {
+      if (runtimeV2PrincipleIds.size > 0
+          && loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_ledger', logger).enabled) {
+        // Review fix (rc-6-adjacent pairing): activation ids must align with
+        // the INJECTED subset — the full dedupedV2 list mispairs when budget
+        // truncation drops principles. The shared-runtime path keeps its own
+        // parallel arrays.
+        const alignedActivationIds = sharedActivePrinciplePrompt
+          ? sharedActivePrinciplePrompt.activationIds
+          : alignActivationIds(dedupedV2, runtimeV2PrincipleIds);
+        const written = recordInjectionPresence(
+          workspaceDir,
+          [...runtimeV2PrincipleIds],
+          sessionId,
+          alignedActivationIds,
+          logger,
+        );
+        if (written === 0) {
+          logger?.info?.('[PD:RuntimeV2] Receipt ledger presence rows: all already recorded for this session');
+        }
+      }
+    } catch (ledgerErr) {
+      logger?.warn?.(`[PD:RuntimeV2] Receipt ledger presence write failed: ${String(ledgerErr)}`);
     }
   } catch (e) {
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
