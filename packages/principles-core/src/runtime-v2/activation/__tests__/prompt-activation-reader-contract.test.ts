@@ -378,6 +378,29 @@ describe('prompt-activation-reader-contract', () => {
       expect(result).toBe('');
     });
 
+    it('PRI-532: appends the self-report instruction footer when selfReportInstruction is true', () => {
+      const principles = [
+        { principleId: 'P-001', text: 'Always use typeof', artifactId: 'a1', activationId: 'act1' },
+      ];
+      const injectedIds = new Set(['P-001']);
+      const result = renderPrinciplesToDirectives(principles, injectedIds, { selfReportInstruction: true });
+      expect(result).toContain('Self-report (OWNER visibility)');
+      expect(result).toContain('📌 应用了你的原则「<directive id>」');
+      expect(result).toContain('At most one line per directive per session');
+    });
+
+    it('PRI-532: selfReportInstruction false/omitted keeps the template byte-identical', () => {
+      const principles = [
+        { principleId: 'P-001', text: 'Always use typeof', artifactId: 'a1', activationId: 'act1' },
+      ];
+      const injectedIds = new Set(['P-001']);
+      const withFalse = renderPrinciplesToDirectives(principles, injectedIds, { selfReportInstruction: false });
+      const omitted = renderPrinciplesToDirectives(principles, injectedIds);
+      expect(withFalse).toBe(omitted);
+      expect(omitted).not.toContain('Self-report (OWNER visibility)');
+      expect(omitted).not.toContain('📌');
+    });
+
     it('skips principles not in injectedIds', () => {
       const principles = [
         { principleId: 'P-001', text: 'Included', artifactId: 'a1', activationId: 'act1' },
