@@ -100,15 +100,32 @@ export function recordPrincipleApplication(
 }
 
 /**
+ * Align activation ids with the actually-injected principle subset (PRI-531
+ * review fix). Budget truncation can drop principles from the tail of the
+ * full list — pairing by raw index would attach the wrong activation_id to a
+ * presence row (rc-6-adjacent data pairing).
+ */
+export function alignActivationIds(
+  principles: ReadonlyArray<{ principleId: string; activationId?: string }>,
+  injectedIds: ReadonlySet<string>,
+): string[] {
+  return principles
+    .filter(p => injectedIds.has(p.principleId))
+    .map(p => p.activationId ?? '');
+}
+
+/**
  * Presence rows for a prompt injection event — one per principle, deduped per
  * session×principle by the partial unique index (restarts included).
  * Returns the number of NEW rows written (0 when all were already present).
+ * Failures are warned via the optional logger (rc-9) — never thrown.
  */
 export function recordInjectionPresence(
   workspaceDir: string,
   principleIds: readonly string[],
   sessionId: string | undefined,
   activationIds?: readonly string[],
+  logger?: { warn?: (message: string) => void; info?: (message: string) => void },
 ): number {
   let written = 0;
   for (let i = 0; i < principleIds.length; i++) {
@@ -117,13 +134,14 @@ export function recordInjectionPresence(
     try {
       const db = getConnection(workspaceDir).getDb();
       sweepRetention(db);
+      const activationId = activationIds?.[i];
       const result = db.prepare(`
         INSERT OR IGNORE INTO principle_applications
           (principle_id, activation_id, channel, level, kind, session_id, created_at)
         VALUES (?, ?, 'prompt', 'presence', 'prompt_injected', ?, ?)
       `).run(
         principleId,
-        typeof activationIds?.[i] === 'string' ? activationIds[i] : null,
+        typeof activationId === 'string' && activationId.length > 0 ? activationId : null,
         sessionId ?? null,
         new Date().toISOString(),
       );
@@ -131,10 +149,10 @@ export function recordInjectionPresence(
         ? ((result as { changes?: number }).changes ?? 0)
         : 0;
       written += changes > 0 ? 1 : 0;
-    } catch {
-      // Skip this principle's row; next injection retries (presence is
-      // idempotent). Overall degradation is observable via absence + console
-      // degraded state (rc-9 handled at caller level for the whole feature).
+    } catch (ledgerErr) {
+      // rc-9: a skipped row is observable via this warn; the next injection
+      // retries (presence writes are idempotent).
+      logger?.warn?.(`[PD:ReceiptLedger] Presence row write failed for principle ${principleId}: ${String(ledgerErr)}`);
     }
   }
   return written;

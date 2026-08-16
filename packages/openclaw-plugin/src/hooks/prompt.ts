@@ -15,7 +15,7 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
-import { recordInjectionPresence } from '../core/principle-application-ledger.js';
+import { recordInjectionPresence, alignActivationIds } from '../core/principle-application-ledger.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
@@ -563,11 +563,19 @@ export async function handleBeforePromptBuild(
     try {
       if (runtimeV2PrincipleIds.size > 0
           && loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_ledger', logger).enabled) {
+        // Review fix (rc-6-adjacent pairing): activation ids must align with
+        // the INJECTED subset — the full dedupedV2 list mispairs when budget
+        // truncation drops principles. The shared-runtime path keeps its own
+        // parallel arrays.
+        const alignedActivationIds = sharedActivePrinciplePrompt
+          ? sharedActivePrinciplePrompt.activationIds
+          : alignActivationIds(dedupedV2, runtimeV2PrincipleIds);
         const written = recordInjectionPresence(
           workspaceDir,
           [...runtimeV2PrincipleIds],
           sessionId,
-          sharedActivePrinciplePrompt?.activationIds ?? dedupedV2.map((p) => p.activationId),
+          alignedActivationIds,
+          logger,
         );
         if (written === 0) {
           logger?.info?.('[PD:RuntimeV2] Receipt ledger presence rows: all already recorded for this session');

@@ -327,7 +327,12 @@ export function handleBeforeToolCall(
                   sessionId: ctx.sessionId,
                   toolName: event.toolName,
                   filePath: relPath,
-                  digest: appliedFields.map(f => `${f.field}: ${JSON.stringify(f.original)} -> ${JSON.stringify(f.applied)}`).join(', '),
+                  // rc-8: corrected values (e.g. file content) can be huge —
+                  // bound the digest preview.
+                  digest: appliedFields
+                    .map(f => `${f.field}: ${JSON.stringify(f.original)} -> ${JSON.stringify(f.applied)}`)
+                    .join(', ')
+                    .slice(0, 200),
                 });
                 if (!written) {
                   logger?.warn?.('[PD_GATE] Receipt ledger write failed (auto_correct_applied) — history degraded, correction unaffected (rc-9)');
