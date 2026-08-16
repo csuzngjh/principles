@@ -147,11 +147,12 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     const event = makeWriteEvent(originalParams);
     const result = handleBeforeToolCall(event, makeCtx());
 
-    // PRI-174: Live mode now modifies params
+    // PRI-174: Live mode now modifies params; PRI-529/D2: corrected params
+    // returned via the host contract field
     expect(event.params.content).toBe('fixed content');
     expect(result).toBeDefined();
-    expect(result?._pdAutoCorrectWarning).toContain('[PD Auto-Correct]');
-    expect(result?.skipToolCall).toBe(false);
+    expect(result?.params).toMatchObject({ content: 'fixed content' });
+    expect(result?.block).toBeUndefined();
 
     // Verify applied telemetry was emitted
     expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).toHaveBeenCalledTimes(1);
@@ -273,10 +274,10 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
       pluginConfig: { autoCorrectLive: true },
     }));
 
-    // PRI-174: Live mode applies corrections
+    // PRI-174: Live mode applies corrections; PRI-529/D2: host contract field
     expect(event.params.content).toBe('fixed content');
     expect(result).toBeDefined();
-    expect(result?._pdAutoCorrectWarning).toContain('[PD Auto-Correct]');
+    expect(result?.params).toMatchObject({ content: 'fixed content' });
 
     // Verify applied telemetry was emitted
     expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).toHaveBeenCalledTimes(1);

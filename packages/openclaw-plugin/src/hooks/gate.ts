@@ -281,15 +281,14 @@ export function handleBeforeToolCall(
             logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_applied: ${String(evErr)}`);
           }
 
-          if (proposal.notifyAgent === true && appliedFields.length > 0) {
-            const messages = appliedFields.map(f =>
-              `[PD Auto-Correct] Rule ${proposal.ruleId}: ${proposal.correctedFields?.[0]?.reason || 'correction applied'}. Parameter '${f.field}' was adjusted from ${JSON.stringify(f.original)} to ${JSON.stringify(f.applied)}.`
-            );
-            return {
-              toolArgs: event.toolArgs,
-              skipToolCall: false,
-              _pdAutoCorrectWarning: messages.join('\n'),
-            };
+          if (appliedFields.length > 0) {
+            // PRI-529 (SPEC §6-D2): the host merges ONLY `params` from the hook
+            // result (hook-before-tool-call-result.ts). The previous return shape
+            // (`toolArgs`/`skipToolCall`/`_pdAutoCorrectWarning`) was ignored by
+            // the host and `_pdAutoCorrectWarning` had zero consumers. In-place
+            // mutation of event.params is kept as a secondary channel but the
+            // contract field is the propagation mechanism.
+            return { params: { ...event.params } };
           }
         } catch (applyError: unknown) {
           if (event.params) {
