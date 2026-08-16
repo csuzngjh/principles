@@ -470,6 +470,11 @@ export class SqliteConnection {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_pa_presence_dedup
         ON principle_applications(principle_id, session_id) WHERE kind = 'prompt_injected';
       CREATE INDEX IF NOT EXISTS idx_pa_principle_time ON principle_applications(principle_id, created_at DESC);
+      -- PRI-532: self-reported acknowledgements dedup per principle x session
+      -- (the injected instruction caps at one line per directive per session;
+      -- repeated model echoes must not inflate effect counts).
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pa_self_report_dedup
+        ON principle_applications(principle_id, session_id) WHERE kind = 'self_reported';
     `);
 
     // Migration: add deactivated_at column if missing (existing databases)

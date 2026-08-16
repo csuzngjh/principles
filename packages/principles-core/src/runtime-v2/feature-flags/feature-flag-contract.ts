@@ -216,6 +216,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // no rows are written and console receipt surfaces show a degraded state with
   // reason + nextAction. Quiet + default off per ADR-0014 §2.5.
   { id: 'principle_receipt_ledger', category: 'quiet', enabled: false, since: '2026-08-15', description: 'Principle Receipt ledger — durable principle_applications history (effect/presence two-level semantics, PRI-531). Default off; flag-off = no ledger writes.' },
+  // PRI-532: Principle Receipt P1-a — agent self-report line. When on, the
+  // directive block gains a footer instructing the agent to append one 📌 line
+  // when a directive actually changes its behavior, and llm_output /
+  // before_message_write capture writes self_reported ledger rows (deduped per
+  // principle×session). Governs P1-a's own ledger writes; principle_receipt_ledger
+  // governs the P1-b write points. Default off; flag-off = byte-identical template.
+  { id: 'principle_receipt_self_report', category: 'quiet', enabled: false, since: '2026-08-16', description: 'Principle Receipt P1-a — agent self-report 📌 line (injection instruction + capture, PRI-532). Default off; flag-off = directive template unchanged, no capture.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
