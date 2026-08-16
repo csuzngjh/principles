@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as tar from 'tar';
+import { getPdBackupsDir } from './mvp-config.js';
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org/create-principles-disciple';
 const NPM_LATEST_URL = `${NPM_REGISTRY_URL}/latest`;
@@ -258,11 +259,33 @@ async function backupDirectory(source: string, destination: string): Promise<voi
 }
 
 async function createBackup(targetDir: string): Promise<string> {
+  // Backups live OUTSIDE the extensions dir (see getPdBackupsDir): OpenClaw
+  // plugin discovery scans every extensions/ child directory and would
+  // discover the backup as a duplicate principles-disciple plugin.
+  const backupsRoot = getPdBackupsDir();
+  fs.mkdirSync(backupsRoot, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const parentDir = path.dirname(targetDir);
-  const backupDir = path.join(parentDir, `.pd-backup-${timestamp}`);
-  await backupDirectory(targetDir, backupDir);
-  return backupDir;
+  const targetName = path.basename(targetDir);
+  // Atomic reservation: plain (non-recursive) mkdirSync fails with EEXIST
+  // when the name is taken; retry with a bounded numeric suffix. Never poll
+  // existsSync in a loop — a stale/mocked always-true predicate makes it
+  // unbounded.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const suffix = attempt === 0 ? '' : `-${attempt}`;
+    const candidate = path.join(backupsRoot, `${targetName}-${timestamp}${suffix}`);
+    try {
+      fs.mkdirSync(candidate);
+      await backupDirectory(targetDir, candidate);
+      return candidate;
+    } catch (err) {
+      const code = err !== null && typeof err === 'object' && Object.hasOwn(err, 'code')
+        ? (err as { code?: unknown }).code
+        : undefined;
+      if (code === 'EEXIST') continue;
+      throw err;
+    }
+  }
+  throw new Error(`Could not reserve a unique backup directory under ${backupsRoot}`);
 }
 
 export interface ApplyUpdateOptions {

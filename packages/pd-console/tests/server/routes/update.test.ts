@@ -1074,6 +1074,124 @@ describe('handleUpdateRoute', () => {
       const extensionsDir = path.join(tmpDir, 'extensions');
       const backupDirs = fs.readdirSync(extensionsDir).filter(f => f.startsWith('.pd-backup-'));
       expect(backupDirs.length).toBe(0);
+      // The backup now lives under <home>/pd-backups — that location must be
+      // cleaned up on pre-change failure too.
+      const backupsRoot = path.join(tmpDir, 'pd-backups');
+      if (fs.existsSync(backupsRoot)) {
+        expect(fs.readdirSync(backupsRoot).length).toBe(0);
+      }
+    });
+  });
+
+  // ── Backup location outside the extensions scan root ────────────────
+
+  describe('Backup location outside the extensions scan root', () => {
+    function mockSuccessfulApply(): Promise<void> {
+      return Promise.resolve().then(async () => {
+        const { execSync: execSyncMock } = await import('child_process');
+
+        vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+          const urlStr = typeof url === 'string' ? url : url.toString();
+          if (urlStr.startsWith('https://registry.npmjs.org/')) {
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+            } as Response);
+          }
+          return Promise.resolve({
+            ok: true,
+            arrayBuffer: async () => new ArrayBuffer(0),
+          } as Response);
+        }) as unknown as typeof fetch);
+
+        vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+          if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+            const match = cmd.match(/-C\s+"([^"]+)"/);
+            if (match && match[1]) {
+              const dir = match[1];
+              fs.mkdirSync(dir, { recursive: true });
+              fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            }
+          }
+        }) as unknown as typeof execSyncMock);
+      });
+    }
+
+    it('creates the backup under <home>/pd-backups, not as an extensions/ sibling', async () => {
+      await mockSuccessfulApply();
+
+      const req = createMockRequest('POST', { mergeStrategy: 'overwrite', createBackup: true });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      const body = parseResponseBody<{ data: { success: boolean; backupPath?: string } }>(res);
+      expect(body.data.success).toBe(true);
+      expect(body.data.backupPath).toBeDefined();
+
+      const backupsRoot = path.join(tmpDir, 'pd-backups');
+      expect(body.data.backupPath!.startsWith(backupsRoot + path.sep)).toBe(true);
+      // Backup holds the PRE-update version
+      const backedUpPkg = JSON.parse(fs.readFileSync(path.join(body.data.backupPath!, 'package.json'), 'utf-8')) as { version: string };
+      expect(backedUpPkg.version).toBe('1.0.0');
+      // The extensions dir must contain ONLY the live plugin — a backup
+      // sibling would be re-discovered by OpenClaw as a duplicate plugin.
+      const extensionsEntries = fs.readdirSync(path.join(tmpDir, 'extensions'));
+      expect(extensionsEntries).toEqual(['principles-disciple']);
+    });
+
+    it('migrates a legacy .pd-backup-* sibling out of extensions/ during apply', async () => {
+      const legacyName = '.pd-backup-2026-08-13T14-12-57-972Z';
+      const legacyDir = path.join(tmpDir, 'extensions', legacyName);
+      fs.mkdirSync(legacyDir, { recursive: true });
+      fs.writeFileSync(path.join(legacyDir, 'marker.txt'), 'legacy');
+
+      await mockSuccessfulApply();
+
+      const req = createMockRequest('POST', { mergeStrategy: 'overwrite', createBackup: false });
+      const res = createMockResponse();
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+      const body = parseResponseBody<{ data: { success: boolean } }>(res);
+      expect(body.data.success).toBe(true);
+
+      // Legacy backup moved out of extensions/, content preserved
+      expect(fs.existsSync(legacyDir)).toBe(false);
+      const movedMarker = path.join(tmpDir, 'pd-backups', legacyName, 'marker.txt');
+      expect(fs.readFileSync(movedMarker, 'utf-8')).toBe('legacy');
+    });
+  });
+
+  // ── Rollback from the PD backups root ───────────────────────────────
+
+  describe('Rollback from the PD backups root', () => {
+    it('accepts and restores a backupDir under <home>/pd-backups', async () => {
+      const backupDir = path.join(tmpDir, 'pd-backups', 'principles-disciple-2026-08-13T00-00-00-000Z');
+      fs.mkdirSync(backupDir, { recursive: true });
+      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ name: 'principles-disciple', version: '0.9.0' }));
+
+      const req = createMockRequest('POST', { backupDir });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/rollback');
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ data: { success: boolean } }>(res);
+      expect(body.data.success).toBe(true);
+      // pluginDir package.json restored to the backup version
+      const restored = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf-8')) as { version: string };
+      expect(restored.version).toBe('0.9.0');
+    });
+
+    it('rejects a backupDir outside workspace/extensions/pd-backups', async () => {
+      const outside = path.resolve(tmpDir, '..', 'pd-elsewhere-backup');
+      const req = createMockRequest('POST', { backupDir: outside });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/rollback');
+
+      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
+      const body = parseResponseBody<{ message: string }>(res);
+      expect(body.message).toContain('backupDir');
     });
   });
 
