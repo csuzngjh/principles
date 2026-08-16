@@ -75,6 +75,8 @@ plans/
 conductor/
 .principles/
 .state/
+# Test-generated database files (trajectory.db, etc.)
+*.db
 # Prevent test-generated ledger files from being committed outside .state/
 principle_training_state.json
 memory/
