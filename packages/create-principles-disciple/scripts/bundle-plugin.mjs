@@ -70,6 +70,18 @@ for (const item of PLUGIN_REQUIRED) {
   }
 }
 
+// PR #1332 companion: the installer rewrites the installed manifest's skills
+// root per --lang, so BOTH language template sets must ship in the bundle —
+// a missing root silently breaks install-time language selection.
+const LANG_SKILL_DIRS = ['templates/langs/zh/skills', 'templates/langs/en/skills'];
+for (const dir of LANG_SKILL_DIRS) {
+  const src = join(PLUGIN_SRC, dir);
+  if (!existsSync(src)) {
+    console.error(`❌ Required skill language templates not found: ${src}`);
+    process.exit(1);
+  }
+}
+
 for (const item of PD_CLI_REQUIRED) {
   const src = join(PD_CLI_SRC, item);
   if (!existsSync(src)) {

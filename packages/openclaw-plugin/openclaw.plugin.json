@@ -9,7 +9,6 @@
     ]
   },
   "skills": [
-    "templates/langs/en/skills",
     "templates/langs/zh/skills"
   ],
   "configSchema": {

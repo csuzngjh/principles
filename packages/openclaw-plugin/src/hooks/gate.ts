@@ -19,7 +19,8 @@ import { getSession, hasRecentThinking } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime-v2';
-import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
+import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { recordPrincipleApplication } from '../core/principle-application-ledger.js';
 import { buildProductionRuleContext } from '../core/rule-context-assembler.js';
 import type { HostEventResult } from '@principles/core/host';
 
@@ -148,12 +149,40 @@ export function handleBeforeToolCall(
         logger?.warn?.(`[PD_GATE] Failed to record rule_enforced/rulehost_blocked: ${String(evErr)}`);
       }
 
+      // PRI-531: durable receipt ledger row for the block (flag-gated; the
+      // block decision itself never depends on this write — rc-9 on failure).
+      try {
+        if (loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_ledger').enabled) {
+          const ledgerPrincipleId = hostResult.principleId ?? hostResult.ruleId;
+          if (ledgerPrincipleId) {
+            const written = recordPrincipleApplication(wctx.workspaceDir, {
+              principleId: ledgerPrincipleId,
+              ruleId: hostResult.ruleId,
+              channel: 'code_tool_hook',
+              level: 'effect',
+              kind: 'rule_blocked',
+              sessionId: ctx.sessionId,
+              toolName: event.toolName,
+              filePath: relPath,
+              digest: hostResult.reason,
+            });
+            if (!written) {
+              logger?.warn?.('[PD_GATE] Receipt ledger write failed (rule_blocked) — history degraded, block unaffected (rc-9)');
+            }
+          }
+        }
+      } catch (ledgerErr) {
+        logger?.warn?.(`[PD_GATE] Receipt ledger write threw (rule_blocked): ${String(ledgerErr)}`);
+      }
+
       return recordGateBlockAndReturn(wctx, {
         filePath: relPath,
         reason: hostResult.reason,
         toolName: event.toolName,
         sessionId: ctx.sessionId,
         blockSource: 'rule-host',
+        ruleId: hostResult.ruleId,
+        principleId: hostResult.principleId,
       }, logger);
     }
 
@@ -281,15 +310,44 @@ export function handleBeforeToolCall(
             logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_applied: ${String(evErr)}`);
           }
 
-          if (proposal.notifyAgent === true && appliedFields.length > 0) {
-            const messages = appliedFields.map(f =>
-              `[PD Auto-Correct] Rule ${proposal.ruleId}: ${proposal.correctedFields?.[0]?.reason || 'correction applied'}. Parameter '${f.field}' was adjusted from ${JSON.stringify(f.original)} to ${JSON.stringify(f.applied)}.`
-            );
-            return {
-              toolArgs: event.toolArgs,
-              skipToolCall: false,
-              _pdAutoCorrectWarning: messages.join('\n'),
-            };
+          if (appliedFields.length > 0) {
+            // PRI-531: durable receipt ledger row — only after the correction
+            // verifiably applied (SPEC honesty rule: no applied row before D2).
+            try {
+              if (loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_ledger').enabled) {
+                const ledgerPrincipleId = proposal.principleId != null
+                  ? String(proposal.principleId)
+                  : String(proposal.ruleId ?? 'unknown');
+                const written = recordPrincipleApplication(wctx.workspaceDir, {
+                  principleId: ledgerPrincipleId,
+                  ruleId: String(proposal.ruleId ?? 'unknown'),
+                  channel: 'code_tool_hook',
+                  level: 'effect',
+                  kind: 'auto_correct_applied',
+                  sessionId: ctx.sessionId,
+                  toolName: event.toolName,
+                  filePath: relPath,
+                  // rc-8: corrected values (e.g. file content) can be huge —
+                  // bound the digest preview.
+                  digest: appliedFields
+                    .map(f => `${f.field}: ${JSON.stringify(f.original)} -> ${JSON.stringify(f.applied)}`)
+                    .join(', ')
+                    .slice(0, 200),
+                });
+                if (!written) {
+                  logger?.warn?.('[PD_GATE] Receipt ledger write failed (auto_correct_applied) — history degraded, correction unaffected (rc-9)');
+                }
+              }
+            } catch (ledgerErr) {
+              logger?.warn?.(`[PD_GATE] Receipt ledger write threw (auto_correct_applied): ${String(ledgerErr)}`);
+            }
+            // PRI-529 (SPEC §6-D2): the host merges ONLY `params` from the hook
+            // result (hook-before-tool-call-result.ts). The previous return shape
+            // (`toolArgs`/`skipToolCall`/`_pdAutoCorrectWarning`) was ignored by
+            // the host and `_pdAutoCorrectWarning` had zero consumers. In-place
+            // mutation of event.params is kept as a secondary channel but the
+            // contract field is the propagation mechanism.
+            return { params: { ...event.params } };
           }
         } catch (applyError: unknown) {
           if (event.params) {

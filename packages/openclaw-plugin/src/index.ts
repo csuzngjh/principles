@@ -270,7 +270,10 @@ const plugin = {
       api.logger.warn(`[PD:surface-guard] ${warning}`);
     }
 
-    const language = (api.pluginConfig?.language as string) || 'en';
+    // Language fallback must match openclaw.plugin.json configSchema default
+    // ("zh") — an 'en' fallback silently served English templates/prompts to
+    // every install that never set plugin config language (ERR-075 family).
+    const language = (api.pluginConfig?.language as string) || 'zh';
     const preparedLegacyPromptSelections = new WeakMap<PluginHookBeforePromptBuildEvent, LegacyPrinciplePromptSelection>();
     const sharedHostRuntime = createOpenClawHostRuntime({
       promptExcludePrincipleIds: (event, context) => {
