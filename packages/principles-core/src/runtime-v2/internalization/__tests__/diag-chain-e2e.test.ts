@@ -977,8 +977,14 @@ describe('Diag chain e2e', () => {
 
       const bridgeResult = await bridge.onPainDetected(painSignal);
 
-      // Verify successful e2e execution status
-      expect(bridgeResult.status).toBe('succeeded');
+      // Verify successful e2e execution status. The R6 fixture yields an
+      // `implementation` candidate (skill channel is MVP-disabled), so the
+      // bridge surfaces it as not_internalizable → degraded (PRI-539), while
+      // still succeeding on principle/rule intake.
+      expect(bridgeResult.status).toBe('degraded');
+      expect(bridgeResult.notInternalizable).toHaveLength(1);
+      expect(bridgeResult.notInternalizable?.[0]?.reason).toContain('MVP-disabled');
+      expect(bridgeResult.message).toContain('not_internalizable');
       expect(bridgeResult.painId).toBe(painSignal.painId);
       expect(bridgeResult.taskId).toBe(`diagnosis_${painSignal.painId}`);
 

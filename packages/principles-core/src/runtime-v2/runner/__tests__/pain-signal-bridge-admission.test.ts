@@ -490,12 +490,22 @@ describe('PainSignalBridge dreamer task seeding', () => {
       evidence: [{ sourceRef: 'impl-src', note: 'test evidence' }],
     });
 
-    expect(result.status).toBe('succeeded');
+    // PRI-539: non-MVP channel (implementation→skill) surfaces as degraded with
+    // notInternalizable populated, instead of silently returning succeeded.
+    expect(result.status).toBe('degraded');
+    expect(result.notInternalizable).toEqual([
+      { candidateId: 'c-impl', reason: expect.stringContaining('MVP-disabled') },
+    ]);
+    expect(result.message).toContain('not_internalizable');
     const dreamerCall = deps.createTaskCalls.find((c) => c?.taskKind === 'dreamer');
     expect(dreamerCall).toBeUndefined();
 
     const seededEvent = deps.telemetryEvents.find((e) => e.eventType === 'candidate_dreamer_task_seeded');
     expect(seededEvent).toBeUndefined();
+
+    const notInternalizableEvent = deps.telemetryEvents.find((e) => e.eventType === 'candidate_not_internalizable');
+    expect(notInternalizableEvent).toBeDefined();
+    expect((notInternalizableEvent as any).payload.reason).toContain('MVP-disabled');
   });
 
   it('seedIntakeTask failure degrades gracefully — candidate still consumed, result includes seed failure note', async () => {

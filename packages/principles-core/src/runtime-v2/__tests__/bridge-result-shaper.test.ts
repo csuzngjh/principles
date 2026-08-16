@@ -289,6 +289,62 @@ describe('shapeBridgeResult — fresh path', () => {
     expect(result.message).toBe('dreamer seed failed: LLM error');
   });
 
+  it('returns degraded with notInternalizable populated when a candidate is MVP-disabled', () => {
+    const admissionResults = [
+      makeAdmissionResult('cand-1', 'admitted'),
+    ];
+
+    const input: ShapeBridgeResultFreshInput = {
+      path: 'fresh',
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+      runId: RUN_ID,
+      artifactId: ARTIFACT_ID,
+      candidateIds: ['cand-1'],
+      ledgerEntryIds: ['ledger-1'],
+      admissionResults,
+      seedFailureNote: '',
+      notInternalizable: [
+        { candidateId: 'cand-1', reason: 'Channel "skill" for route "implementation-candidate" is MVP-disabled' },
+      ],
+      autoIntakeEnabled: true,
+    };
+
+    const result = shapeBridgeResult(input);
+
+    expect(result.status).toBe('degraded');
+    expect(result.notInternalizable).toEqual(input.notInternalizable);
+    expect(result.message).toBe('not_internalizable:cand-1=Channel "skill" for route "implementation-candidate" is MVP-disabled');
+  });
+
+  it('returns degraded with notInternalizable AND seed failure note combined', () => {
+    const admissionResults = [
+      makeAdmissionResult('cand-1', 'admitted'),
+    ];
+
+    const input: ShapeBridgeResultFreshInput = {
+      path: 'fresh',
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+      runId: RUN_ID,
+      artifactId: ARTIFACT_ID,
+      candidateIds: ['cand-1'],
+      ledgerEntryIds: ['ledger-1'],
+      admissionResults,
+      seedFailureNote: 'dreamer seed failed: LLM error',
+      notInternalizable: [
+        { candidateId: 'cand-2', reason: 'Channel "skill" is MVP-disabled' },
+      ],
+      autoIntakeEnabled: true,
+    };
+
+    const result = shapeBridgeResult(input);
+
+    expect(result.status).toBe('degraded');
+    expect(result.message).toContain('not_internalizable:cand-2=Channel "skill" is MVP-disabled');
+    expect(result.message).toContain('dreamer seed failed: LLM error');
+  });
+
   it('passes through lineage fields untouched (fresh path)', () => {
     const admissionResults = [makeAdmissionResult('cand-1', 'admitted')];
     const input: ShapeBridgeResultFreshInput = {
