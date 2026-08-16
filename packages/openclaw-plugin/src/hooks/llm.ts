@@ -12,6 +12,7 @@ import { atomicWriteFileSync } from '../utils/io.js';
 import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { recordSelfReportFromText } from '../core/principle-application-ledger.js';
 import { resolveSourceKind, type RawObservation } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import { evaluateTriggerController } from '@principles/core/runtime-v2';
@@ -200,6 +201,14 @@ export function handleLlmOutput(
     if (!event.assistantTexts || event.assistantTexts.length === 0) return;
 
     const text = event.assistantTexts.join('\n');
+    // PRI-532: capture agent self-report 📌 lines into the receipt ledger
+    // (flag-gated inside the helper; never throws; 60s flag cache).
+    try {
+        recordSelfReportFromText(workspaceDir ?? '', text, ctx.sessionId, (ctx as { logger?: { warn?: (m: string) => void } }).logger);
+    } catch {
+        // capture must never affect the trajectory/observability path (rc-9 is
+        // handled per-row inside the helper; this guard is for the scan itself)
+    }
     const signal = extractEmpathySignal(text);
     const enhancedFields = extractAssistantEnhancedFields(event.lastAssistant);
     const createdAt = new Date().toISOString();

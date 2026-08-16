@@ -44,6 +44,10 @@ export async function buildActivePrinciplePromptContext(input: {
     warnings.push('prompt_feature_disabled; nextAction=set features.prompt.enabled=true in .pd/config.yaml');
     return { additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings, budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false, excludedPrincipleIds, excludedCount: 0, allValidatedPrinciplesExcluded: false };
   }
+  // PRI-532: agent self-report instruction rides the directive template when
+  // the flag is on (flag-off keeps the template byte-identical).
+  const selfReportEnabled = computeFeatureFlagsFromConfig(config.effective)
+    .flags.principle_receipt_self_report?.enabled === true;
 
   let connection: SqliteConnection | undefined;
   const stateDbPath = path.join(input.workspaceDir, '.pd', 'state.db');
@@ -103,7 +107,7 @@ export async function buildActivePrinciplePromptContext(input: {
     const candidateContext = renderPrinciplesToDirectives(
       candidate,
       new Set(candidate.map((entry) => entry.principleId)),
-      escapeXml,
+      { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled },
     );
     if (candidateContext.length > RUNTIME_V2_PRINCIPLE_BUDGET) {
       truncated = true;

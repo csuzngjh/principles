@@ -171,7 +171,7 @@ describe('PRI-519: prompt-activation triple proof (sandbox, real persistence)', 
 
       // The directive is what actually gets prepended to the LLM system prompt
       // (this is the "behavior change" — the principle is now in the prompt).
-      const directive = renderPrinciplesToDirectives(result.principles, new Set([TEST_PRINCIPLE_ID]), (s) => s);
+      const directive = renderPrinciplesToDirectives(result.principles, new Set([TEST_PRINCIPLE_ID]), { escapeFn: (s) => s });
       directiveIncludesText.push(directive.includes(TEST_PRINCIPLE_TEXT));
     }
     expect(directiveIncludesText, 'all 3 builds must include the principle text in the directive').toEqual([true, true, true]);
