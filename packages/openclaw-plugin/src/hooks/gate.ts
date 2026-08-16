@@ -154,6 +154,8 @@ export function handleBeforeToolCall(
         toolName: event.toolName,
         sessionId: ctx.sessionId,
         blockSource: 'rule-host',
+        ruleId: hostResult.ruleId,
+        principleId: hostResult.principleId,
       }, logger);
     }
 

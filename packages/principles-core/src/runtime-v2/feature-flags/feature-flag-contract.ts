@@ -205,6 +205,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Roll back = set host.codex.enabled: false in .pd/config.yaml.
   { id: 'host.codex', category: 'core', enabled: true, since: '2026-08-11', description: 'ADR-0020: Codex CLI host adapter. Default ON (flipped 2026-08-12 after PRI-282 E2E). Flag-off = pd-hook.js outputs {} + exit 0 + SystemLogger records skip (rc-9). Disable via .pd/config.yaml: host.codex: { enabled: false }.' },
   { id: 'abstraction_layer_v1', category: 'quiet', enabled: false, since: '2026-08-13', description: 'PRI-523 shared host-runtime cutover for OpenClaw. Default OFF preserves the legacy route; enable only for controlled parity validation.' },
+  // PRI-530: Principle Receipt P0 — enriched RuleHost block copy. When off,
+  // the block message keeps the existing generic English template (byte
+  // identical); when on, blockReason carries principle attribution (title
+  // fallback chain, approval date, optional painReasonSummary source line).
+  // Quiet + default off per ADR-0014 §2.5. Roll back = set enabled: false in
+  // .pd/config.yaml (generic template returns).
+  { id: 'principle_receipt_block_copy', category: 'quiet', enabled: false, since: '2026-08-15', description: 'Principle Receipt P0 — enriched RuleHost block copy with principle attribution (title/approval date/source summary, PRI-530). Default off; flag-off = generic block template unchanged.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
