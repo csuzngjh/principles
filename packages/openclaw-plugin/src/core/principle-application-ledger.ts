@@ -14,6 +14,7 @@
  */
 import { SqliteConnection } from '@principles/core/runtime-v2';
 import Database from 'better-sqlite3';
+import * as nodePath from 'node:path';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
 
 export type PrincipleApplicationLevel = 'effect' | 'presence';
@@ -173,20 +174,21 @@ export function recordInjectionPresence(
 const SELF_REPORT_MARKER = /📌\s*应用了你的原则「([^」]{1,200})」[：:](.{0,200})/gu;
 
 /**
- * 60s flag cache keyed by workspaceDir (ERR-092: per-input-derived module
- * caches must be Map-keyed, not single-valued slots) — capture runs on every
- * llm_output turn, avoid a disk read each time.
+ * 60s flag cache keyed by resolved workspaceDir (ERR-092: per-input-derived
+ * module caches must be Map-keyed with path normalization, not single-valued
+ * slots) — capture runs on every llm_output turn, avoid a disk read each time.
  */
 const selfReportFlagCache = new Map<string, { expiresAt: number; enabled: boolean }>();
 
 function isSelfReportEnabled(workspaceDir: string, logger?: { warn?: (m: string) => void }): boolean {
   const now = Date.now();
-  const cached = selfReportFlagCache.get(workspaceDir);
+  const cacheKey = nodePath.resolve(workspaceDir);
+  const cached = selfReportFlagCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
     return cached.enabled;
   }
   const enabled = loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_self_report', logger).enabled;
-  selfReportFlagCache.set(workspaceDir, { expiresAt: now + 60_000, enabled });
+  selfReportFlagCache.set(cacheKey, { expiresAt: now + 60_000, enabled });
   return enabled;
 }
 
