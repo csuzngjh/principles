@@ -1398,7 +1398,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: EP-07 (Runtime State Source Alignment — output points to wrong state source, related but different: EP-07 is about reading stale state, this is about writing to wrong state). Also related to the "anti-pattern D" documented in `src/core/AGENTS.md` — `config-service.ts`, `dictionary-service.ts`, `detection-service.ts` all use the same broken `let lastStateDir` single-slot pattern and may need the same fix.
 - **Source**: PRI-504 / PR #1164 review
 - **Date**: 2026-07-03
-- **Recurrence**: None
+- **Recurrence**: Yes.
+  - 2026-08-16 PRI-532 (PR #1330 self-review): `isSelfReportEnabled` in `principle-application-ledger.ts` used a single-valued `let selfReportFlagCache` with a `workspaceDir === cached.workspaceDir` last-seen check — the exact anti-pattern this entry documents (written the same day the entry was re-read; pattern knowledge alone does not prevent the mistake). No correctness leak here (the key check prevented cross-workspace use) but multi-workspace processes would thrash to a disk read every turn. Fixed with `Map<string, T>` keyed by `path.resolve(workspaceDir)` per this entry's guidance; review also caught that the first fix forgot the path normalization step.
 
 ---
 
