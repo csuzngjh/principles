@@ -181,6 +181,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-091 | CI checkout lacks `lfs: true` when tests read LFS-tracked binary assets — assertion fails on 132-byte pointer files | PR #1159 |
 | ERR-092 | Module-level cache leaks across workspace instances when not keyed by workspaceDir | PRI-504 / PR #1164 review |
 | ERR-095 | Additive envelope/`contentJson` merge uses a key that collides with an existing output-schema field — silently overwrites the legitimate field | PR #1273 |
+| ERR-098 | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing dirs, never silence errors on critical cleanup | PRI-538 |
 
 ---
 
@@ -787,7 +788,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 97 |
+| Total lessons | 98 |
 | Last updated | 2026-08-16 |
 | Top category | Schema & Type |
 | Recurring errors | 49 |
@@ -1474,5 +1475,20 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: `packages/pd-console/tests/server/utils/pd-backups.test.ts` and `packages/create-principles-disciple/tests/backup-location.test.ts` (backups land outside extensions/, legacy migration moves `.pd-backup-*` / `*.backup.*` siblings out, rollback accepts the backups root); `packages/openclaw-plugin/tests/manifest-skills.test.ts` (exactly one skills root, declared dirs inside package root, no cross-root skill-name collisions); `packages/create-principles-disciple/tests/openclaw-host-installer.allow.test.ts` (allow never created when absent, appended id list preserves other ids, malformed allow fails loud).
 - **Related ERRs**: ERR-074 (early-return backup leak in the same update flow — sibling failure mode, different root cause: exit-tunnel leak vs artifact placement), ERR-040 / ERR-041 (published-artifact vs source-tree blind spot family), ERR-047 (config field semantics assumed instead of verified).
 - **Source**: startup-warning audit 2026-08-16 (owner-reported gateway startup log; fix branches fix/pd-backup-outside-extensions-scan, fix/plugin-manifest-single-skill-lang, fix/installer-allow-append-only)
+- **Date**: 2026-08-16
+- **Recurrence**: None
+
+---
+
+**[ERR-098]** | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing directories, and must not silence errors on critical cleanup steps
+
+- **What happened**: During PR review verification (PRs #1332-1335, 2026-08-16), the assistant created temporary git worktrees and junctioned their node_modules into the SHARED main repo (`D:\Code\principles`) to reuse dependencies. During cleanup, junction removal used `-ErrorAction SilentlyContinue` (removal failed silently due to file locks from still-running vitest/node processes), then `Remove-Item -Recurse -Force` was run on the worktree directories. PowerShell 7's Remove-Item FOLLOWS junction/reparse points during recursive deletion, so the shared repo's working tree (1,865 tracked files across packages/*/src) and all node_modules were deleted.
+- **Why it's wrong**: A destructive recursive delete was executed on a directory that contained reparse points pointing INTO a shared repository, and the failure of the preceding junction-removal step was hidden by silent error suppression. Shared-repo hygiene demands verification-baseline discipline; the assistant optimized for speed (junction reuse) instead of safety, then compounded it with a known PowerShell footgun and silent errors.
+- **Generalized failure mode**: When cleaning up temporary verification scaffolding (worktrees, junctions, symlinks) that references a shared repository, assistants must use repository-native removal (`git worktree remove`), must never run recursive filesystem deletes (`Remove-Item -Recurse`, `rm -rf`) on directories that may contain reparse points, must not silence errors on critical cleanup steps, and must snapshot a `git status` baseline before and verify it after cleanup — otherwise shared-repo working trees and dependencies get deleted in bulk.
+- **Correct approach**: (1) Clean up temp worktrees with `git worktree remove <path> --force` only (git never follows symlinks/junctions). (2) If junctions were created, remove them FIRST with junction-safe removal (`cmd /c rmdir <junction>` or `Remove-Item` WITHOUT `-Recurse`), and VERIFY each removal succeeded (check exit code / `Test-Path`) — never `-ErrorAction SilentlyContinue` on critical cleanup. (3) Never `Remove-Item -Recurse` / `rm -rf` on any directory containing or plausibly containing reparse points. (4) Record `git status` baseline before starting, assert it is unchanged after cleanup. (5) Prefer installing deps inside the worktree or running `vitest --root <worktree>` from the main repo over junctioning node_modules into a shared repo.
+- **How to prevent**: Before ANY deletion-capable command (`Remove-Item -Recurse`, `rm -r/-rf`, `git clean -fdx`): (a) scan the target for reparse points (`Get-ChildItem -Recurse | where Attributes -match ReparsePoint`, or `dir /AL /S`); (b) confirm the target does not link into a shared repo; (c) if junctions exist, use git-native or link-safe removal only; (d) never suppress errors on cleanup steps that precede a delete. Operator trigger: destructive command + junction/symlink-capable target → abort and use `git worktree remove`.
+- **Regression guard**: Runtime V2 rule candidate (triggerPattern `Remove-Item\s+-Recurse|rm\s+-r|rm\s+-rf`; action: scan for reparse points before delete, refuse or switch to `git worktree remove`, require explicit confirmation for high-risk deletes) + workspace TOOLS.md/AGENTS.md rule: "禁止对含 junction/symlink 的目录使用 Remove-Item -Recurse / rm -rf；临时 worktree 清理只用 git worktree remove；关键清理步骤不得静默吞错" + operational checklist: git-status baseline before/after cleanup.
+- **Related ERRs**: ERR-071 (cleanup hygiene family — async cleanup/finally leaks; different prevention rule: resource cleanup vs destructive-op safety), ERR-074 (update-flow backup leak cleanup family; different root cause), ERR-050 (wrong-target file operations family).
+- **Source**: PRI-538 (pr-review session 2026-08-16, PRs #1332-1335 verification cleanup)
 - **Date**: 2026-08-16
 - **Recurrence**: None

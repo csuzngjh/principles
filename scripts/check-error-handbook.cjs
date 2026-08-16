@@ -98,6 +98,8 @@ for (const id of detailEntries.keys()) {
 // Forcing archive would lose valuable history. Thresholds raised to match reality.
 // 2026-08-16: raised 250→300 (warn 200→250). --audit reports ZERO stale entries
 // (>90 days) — archiving is not sanctioned; the limit, not the content, was stale.
+// (same change as PR #1333, merged 2026-08-17). ERR-098 addition pushed the
+// handbook past the old 250KB error line (249.5KB base + ~2.7KB entry).
 const handbookSizeKB = Buffer.byteLength(handbook, 'utf8') / 1024;
 if (handbookSizeKB > 300) {
   errors.push(`Handbook size is ${handbookSizeKB.toFixed(1)}KB (> 300KB). Archive stale entries to docs/process/error-management/ERROR_ARCHIVE.md.`);
