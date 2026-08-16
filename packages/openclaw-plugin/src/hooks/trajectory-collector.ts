@@ -29,6 +29,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { sanitizeForEvidence } from './message-sanitize.js';
 import { checkConversationAccessConfig } from '../core/config-health.js';
+import { recordSelfReportFromText } from '../core/principle-application-ledger.js';
 
 /**
  * Async write queue — ensures ordered, non-blocking execution of SQLite writes.
@@ -127,6 +128,13 @@ export function handleBeforeMessageWrite(
   const createdAt = new Date().toISOString();
 
   if (msg.role === 'assistant') {
+    // PRI-532: llm_output is unauthorized on this install — this hook is the
+    // self-report capture fallback (same helper as the llm_output path).
+    try {
+      recordSelfReportFromText(workspaceDir, content, sessionId, logger);
+    } catch {
+      // capture must never block the sync before_message_write hook
+    }
     writeQueue.enqueue(async () => {
       try {
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir, logger });

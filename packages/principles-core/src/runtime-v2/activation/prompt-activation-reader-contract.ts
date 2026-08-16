@@ -130,12 +130,25 @@ export function trimToBudget(
   return { lines, injectedIds, truncated };
 }
 
+export interface RenderDirectivesOptions {
+  /** XML-escape function applied to principle ids and texts. */
+  escapeFn?: (s: string) => string;
+  /**
+   * PRI-532 (SPEC §5.2): append the agent self-report instruction footer.
+   * When a directive actually changes the agent's behavior this turn, the
+   * agent appends one 📌 line echoing the directive id — captured by the
+   * plugin's llm_output / before_message_write handlers.
+   */
+  selfReportInstruction?: boolean;
+}
+
 export function renderPrinciplesToDirectives(
   principles: { principleId: string; text: string; artifactId: string; activationId: string }[],
   injectedIds: Set<string>,
-  escapeFn: (s: string) => string = (s) => s,
+  options?: RenderDirectivesOptions,
 ): string {
   if (injectedIds.size === 0) return '';
+  const escapeFn = options?.escapeFn ?? ((s: string) => s);
 
   const directiveLines: string[] = [];
   directiveLines.push('');
@@ -151,6 +164,12 @@ export function renderPrinciplesToDirectives(
     directiveLines.push(`MANDATORY: ${escapeFn(p.text)}`);
     directiveLines.push('Apply this as an active behavior constraint. Do not treat this as background context.');
     directiveLines.push('</directive>');
+    directiveLines.push('');
+  }
+  if (options?.selfReportInstruction) {
+    directiveLines.push('Self-report (OWNER visibility): when a directive above actually changes what you do in this turn, append exactly ONE line at the end of your reply in this format:');
+    directiveLines.push('📌 应用了你的原则「<directive id>」：<用一句话说明你这次做法有何不同>');
+    directiveLines.push('Use the directive\'s exact id attribute. At most one line per directive per session. Omit the line entirely if no directive changed your behavior.');
     directiveLines.push('');
   }
   directiveLines.push('Note: These directives do not override safety, security, or core system policy.');

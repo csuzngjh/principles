@@ -29,6 +29,7 @@ import {
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
+import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -420,12 +421,21 @@ export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
   }
 }
 
-async function installPluginToStaging(pluginDir: string): Promise<void> {
+export async function installPluginToStaging(pluginDir: string, language: SkillLanguage): Promise<void> {
   const extDir = getPluginExtDir();
   const builtPluginDir = path.join(pluginDir, 'plugin');
 
   await fse.ensureDir(extDir);
   await fse.copy(builtPluginDir, extDir, { overwrite: true });
+
+  // Skill-language selection: OpenClaw publishes skills by name with no
+  // locale mechanism, so the installed manifest must declare exactly one
+  // language root. The shipped manifest declares zh (product default);
+  // --lang en installs rewrite it to the en root here.
+  const selection = applySkillLanguageSelection(extDir, language);
+  if (!selection.applied) {
+    logger.warn(`Skill language "${language}" not applied (${selection.note ?? 'unknown'}) — published skills stay at the manifest default`);
+  }
 }
 
 // ADR-0020 §2.3: The OpenClaw config write logic previously lived here as
@@ -1394,7 +1404,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
-    await installPluginToStaging(pluginDir);
+    await installPluginToStaging(pluginDir, options.language);
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for plugin...');

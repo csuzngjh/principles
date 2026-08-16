@@ -94,14 +94,25 @@ for (const [path, config] of Object.entries(expectedCounts)) {
   }
 }
 
-// 3. List skill files for visibility (agents migrated to skills in templates/)
-const skillsDir = join(rootDir, 'dist/templates/langs/zh/skills');
-if (existsSync(skillsDir)) {
-  const skillFiles = readdirSync(skillsDir)
-    .filter(f => f.endsWith('.md'));
-  
-  if (skillFiles.length > 0) {
-    console.log(`\n📦 Skills available: ${skillFiles.length} (in dist/templates/langs/zh/skills/)`);
+// 3. Verify skill template roots for BOTH languages ship in dist — the
+// installer rewrites the installed manifest per --lang (PR #1332 companion),
+// so a missing root breaks install-time language selection. A "publishable"
+// skill is an immediate child directory containing SKILL.md (what OpenClaw
+// links into ~/.openclaw/plugin-skills).
+for (const lang of ['zh', 'en']) {
+  const skillsDir = join(rootDir, 'dist/templates/langs', lang, 'skills');
+  if (!existsSync(skillsDir)) {
+    console.error(`❌ Missing skill templates: dist/templates/langs/${lang}/skills`);
+    hasError = true;
+    continue;
+  }
+  const publishable = readdirSync(skillsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && existsSync(join(skillsDir, e.name, 'SKILL.md')));
+  if (publishable.length < 20) {
+    console.error(`❌ dist/templates/langs/${lang}/skills has only ${publishable.length} publishable skills (expected at least 20)`);
+    hasError = true;
+  } else {
+    console.log(`✅ ${lang} skills: ${publishable.length} (dist/templates/langs/${lang}/skills/)`);
   }
 }
 

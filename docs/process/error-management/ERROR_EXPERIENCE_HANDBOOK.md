@@ -204,28 +204,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 **[ERR-002]** | Catch-and-degrade pattern silently swallows failure reasons
 
-- **2026-08-13 PRI-523 C1.3 recurrence (consolidated)**: SQLite construction/pragma/schema checks occurred outside the guarded failure boundary and enrichment ran before readiness. The first correction recognized table/index names but not required columns/types/index properties; the next checked that the canonical index was unique and partial but not that its predicate was the required `canonical_pain_id IS NOT NULL`, so a same-name index over `WHERE score > 50` still passed. The gate now validates unknown-first PRAGMA rows for every column used, reads bounded `sqlite_master.sql` and normalizes harmless whitespace/identifier quoting/case to require the exact canonical partial predicate, and prepares every exact production statement without mutation before enrichment. Corrupt/injected-open/stale-schema/wrong-predicate failures return a bounded structured warning + nextAction without rejection, partial write, bootstrap, or host side effects.
-
-- **What happened**: `buildFullTraceSafe()` catch block caught all exceptions and returned `null` with no observability — no logging, no error propagation, no ambiguity notes.
-- **Why it's wrong**: Downstream diagnostician receives `fullTrace: null` and cannot distinguish between "no painId provided" and "trace construction crashed". Degradation is correct design, but degradation ≠ silence. Silent degradation hides bugs and makes debugging impossible.
-- **Correct approach**: Catch blocks in degrade patterns must propagate the failure reason through at least one channel: `ambiguityNotes`, telemetry, or logging.
-- **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
-- **Source**: PRI-171
-- **Date**: 2026-05-19
-- **Recurrence**: Yes — silent catch/fallback emits success-shaped output with no reason/nextAction.
+- 2026-08-13 PRI-523 C1.3 (consolidated, full text in git history): SQLite schema checks escaped the guarded boundary + iterative corrections missed canonical partial-index predicate — gate now validates every column/predicate/statement before enrichment, failures return bounded warning + nextAction.
 - 2026-08-11 PR #1298 (CodeRabbit #3759264782, fixed in PR #1300): `OpenClawHostInstaller.writeInstallRecord` in `openclaw-host-installer.ts` catch block treated all non-ENOENT read errors (EACCES/EIO/malformed JSON) as fallthrough — the code continued to overwrite `~/.openclaw/plugins/installs.json` with a PD-only record, destroying other plugins' `installRecords`. The `if (code !== 'ENOENT') { // skip merge, will overwrite below }` comment explicitly documented the intent to overwrite, violating rc-9. CodeRabbit caught it in the final review pass before merge. Fixed in PR #1300 by returning early on non-ENOENT errors and non-record parse results, preserving the original file. Same structural sibling as the 2026-07-04 PR #1182 recurrence — catch-and-overwrite instead of catch-and-observable.
-- 2026-07-04 PR #1182: `HealthCheckModel.readCoreVersion()` in `pd-console` used `moduleRequire('@principles/core/package.json')` to read the core version for feedback reports, but `@principles/core`'s `exports` field didn't expose `./package.json` — Node.js threw `ERR_PACKAGE_PATH_NOT_EXPORTED` on every call. The catch block silently returned `'unknown'` with no logging, so every feedback report showed `coreVersion: 'unknown'` and operators had no way to discover WHY the version was missing. CodeRabbit review caught the rc-9 violation. Fixed by: (1) adding `./package.json` to `@principles/core`'s `exports` map so the require succeeds; (2) adding `process.stderr.write` logging in the catch block so future resolution failures are observable. This is the structural sibling of the 2026-07-03 PRI-442 recurrence — same "catch returns fallback with no observability" pattern, different trigger (missing exports entry vs. `ok: false` config).
-  - 2026-07-04 (feedback-pipeline-observability spec): 3 处 silent failure 复发并被修复
-    - `ActivationDispatcher.checkCanActivate` catch-and-refused 无 `originalError` — owner 无法知道 activation 为何被拒绝
-    - `EvolutionWorker.tryUpdateRetryCount`/`tryUpdatePrinciple` catch-and-swallow（注释明确写 "Errors are silently swallowed"）— worker-status.json 无 errors 记录
-    - `pain.ts emitPainDetectedEvent` catch-and-swallow — pain 信号完全丢失，无死信表，无日志
-    修复: 全部添加 reason + 日志 + 持久化（`dead_letter_pains` / `pending_agent_drafts` 表）
-  - 2026-07-03 PRI-442 (PR #1177): Bug #1 fix extracted `effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults` in `diagnose.ts` and `pain-retry.ts` but added NO observability for the `ok: false` fallback — operators got silent degradation to default feature flags with no warning, violating `rc-9-no-silent-fallback`. The TDD test only mocked `ok: true`, missing the `ok: false` branch. CodeRabbit caught both (rc-9 violation + test gap). Fixed by adding `console.warn` with `configPath` + `errors[]` summary + `nextAction`, plus an `ok: false` regression test. This is the structural sibling of the PRI-483/PR#1098 recurrence below — same `loadPdConfig` `ok: false` path, same missing warn log. Lesson: when fixing a silent-failure bug (Bug #1 was itself a silent-failure variant — rate-limit degradation silently dead), the fix must not introduce a NEW silent fallback on the failure branch; TDD tests must cover BOTH `ok: true` and `ok: false` branches whenever code branches on `ok`.
-  - 2026-07-01 PR #1146: onboarding localStorage writes/resets and website clipboard copy swallowed failures while UI reported or implied success. Storage APIs now return explicit success, callers surface localized errors, and copy exposes a visible failed state.
-  - 2026-06-29 PR#1122: behavior-examples parse/assemble failure silently degraded to text_principle_only; artificer-runner validateOutput left errorCategory undefined for modeErrors (permanent errors retried) — both fixed with fail-fast structured errors (rc-9-no-silent-fallback)
-  - 2026-06-28 PRI-483 (PR#1098): `_buildRuleContextIfEnabled` ignored `ok:false` from `loadPdConfigForPlugin` — added `!configResult.ok` guard + warn log (rc-9)
-  - 2026-06-19 PRI-408 (PR#972): approval-completion silent catch + `refused` paths missing nextAction; PRI-431 (PR#975) `ConfigResolutionError` catch dropped `nextAction`
-  - Earlier (PR#699-#966): catch→skip, malformed yaml→`[]`, false success on null, missing nextAction. Pattern: degrade lacks reason+nextAction. Fix: every catch/fallback emits structured reason + nextAction.
+  - Earlier recurrences (compressed 2026-08-16, see git history for full text):
+    - 2026-07-04 PR #1182: core version read failed via missing ./package.json export, catch silently returned 'unknown' (fixed: exports + stderr log)
+    - 2026-07-04 feedback-pipeline spec: 3 silent-catch recurrences (dispatcher/worker/pain emit) — all gained reason+logs+persistence
+    - 2026-07-03 PRI-442 PR #1177: config ok:false fallback unobserved — added warn + ok:false test
+    - 2026-07-01 PR #1146: onboarding localStorage/clipboard failures swallowed while UI implied success
+    - 2026-06-29 PR #1122: parse/assemble degradation to text_principle_only silently — fail-fast structured errors
+    - 2026-06-28 PRI-483 PR #1098: _buildRuleContextIfEnabled ignored ok:false — added guard + warn
+    - 2026-06-19 PRI-408/PR#972, PRI-431/PR#975: approval/catch paths missing reason+nextAction
+    - Earlier PR#699-#966: catch→skip / malformed yaml→[] / false success — every fallback now emits reason+nextAction
 
 ---
 
@@ -356,6 +345,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-192 / PR #638 (Codex review)
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — agent-output lineage fields can be fabricated/misattributed by the LLM.
+  - 2026-08-16 PRI-531 (PR #1328 review): prompt.ts presence-ledger call paired an injected-subset `principleIds` array with the FULL `dedupedV2.map(p => p.activationId)` list by raw index — budget truncation dropped principles so activation_ids misattributed to the wrong presence rows. Fixed with `alignActivationIds` (key-based subset alignment, 3 unit tests). Adjacent pre-existing instance in the `runtime_v2_prompt_activations_injected` observability event filed as PRI-537.
   - 2026-05-29 PRI-272: `taskId` in `DiagnosticianOutputV1Schema` was LLM-fabricatable — removed from schema, added `stripLineageFields` to free-form adapter
   - 2026-05-23 PRI-209 (PR #689): `result_ref` lineage checked at kind-level only — implemented true per-dependency `lineage_mismatch` detection via `SELECT task_id FROM artifacts`
   - 2026-05-23 PRI-225 (PR #693): malformed metadata reinterpreted as topology failure — used `bestEffortParentIds` while still emitting `metadata_malformed`
@@ -440,6 +430,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-200 / PR #665 (CodeRabbit review)
 - **Date**: 2026-05-21
 - **Recurrence**: Yes — same class as ERR-001/ERR-005 (type-specific branches bypass validation).
+  - 2026-08-16 PRI-531 (PR #1328 review): `auto_correct_applied` ledger digest embedded raw `original`/`applied` values via JSON.stringify with no bound — a correction on a large field (e.g. file content) would bloat the row unbounded. Fixed with `.slice(0, 200)` on the digest (rc-8).
   - 2026-06-18 PRI-428 (PR #966): `demo-rule-compiler.ts` used `JSON.stringify(result).slice(0, 100)` on `unknown` — raw stringify can throw on circular refs. Fixed with `safeStringifyPreview(result)` (BigInt-safe, circular-ref-safe, bounded).
 
 ---
@@ -796,7 +787,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 96 |
-| Last updated | 2026-08-15 |
+| Last updated | 2026-08-16 |
 | Top category | Schema & Type |
 | Recurring errors | 49 |
 
@@ -1407,7 +1398,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: EP-07 (Runtime State Source Alignment — output points to wrong state source, related but different: EP-07 is about reading stale state, this is about writing to wrong state). Also related to the "anti-pattern D" documented in `src/core/AGENTS.md` — `config-service.ts`, `dictionary-service.ts`, `detection-service.ts` all use the same broken `let lastStateDir` single-slot pattern and may need the same fix.
 - **Source**: PRI-504 / PR #1164 review
 - **Date**: 2026-07-03
-- **Recurrence**: None
+- **Recurrence**: Yes.
+  - 2026-08-16 PRI-532 (PR #1330 self-review): `isSelfReportEnabled` in `principle-application-ledger.ts` used a single-valued `let selfReportFlagCache` with a `workspaceDir === cached.workspaceDir` last-seen check — the exact anti-pattern this entry documents (written the same day the entry was re-read; pattern knowledge alone does not prevent the mistake). No correctness leak here (the key check prevented cross-workspace use) but multi-workspace processes would thrash to a disk read every turn. Fixed with `Map<string, T>` keyed by `path.resolve(workspaceDir)` per this entry's guidance; review also caught that the first fix forgot the path normalization step.
 
 ---
 
