@@ -112,7 +112,7 @@ function makeEnv(overrides?: Partial<RelayEnv>): RelayEnv {
 interface SubmitResult {
   result: Awaited<ReturnType<typeof handleFeedbackSubmit>>;
   kv: Map<string, string>;
-  linearCalls: { url: string; body: unknown }[];
+  linearCalls: { url: string; body: unknown; headers?: Record<string, string> }[];
 }
 
 async function submit(opts: {
@@ -126,7 +126,7 @@ async function submit(opts: {
   const env = opts.env ?? makeEnv();
   const linearCalls: { url: string; body: unknown }[] = [];
   const fetchFn = async (url: string, init: RequestInit): Promise<FakeResponse> => {
-    linearCalls.push({ url, body: JSON.parse(String(init.body)) });
+    linearCalls.push({ url, body: JSON.parse(String(init.body)), headers: init.headers as Record<string, string> });
     const responses = opts.linearResponses ?? [
       jsonResponse({ data: { issueCreate: { success: true, issue: { id: 'ISS-1', url: 'https://linear.app/acme/ISS-1' } } } }),
     ];
@@ -344,6 +344,12 @@ describe('handleFeedbackSubmit first-vs-duplicate branch', () => {
       teamId: 'TEAM',
       title: `[PD反馈][bug][failed_tasks] Peers never finish`,
     });
+
+    // Linear API rejects "Bearer <key>"; it expects the bare personal API key.
+    // Assert the real request header (production path), not a remembered schema (EP-02/EP-09).
+    const createHeaders = (linearCalls[0] as { headers?: Record<string, string> }).headers ?? {};
+    expect(createHeaders.Authorization).toBe('lin-key');
+    expect(createHeaders.Authorization).not.toContain('Bearer');
 
     // KV: fingerpint record + id mapping.
     const fpRecord = JSON.parse(kv.get(`fp:${r.fingerprint}`) as string);

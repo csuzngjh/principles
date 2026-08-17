@@ -274,11 +274,17 @@ async function callLinearGraphQL(args: {
 }): Promise<LinearCallOutcome> {
   let res: Response;
   try {
-    res = await args.fetchFn('https://api.linear.app/graphql', {
+    // Invoke with `this` bound to globalThis: storing `globalThis.fetch` in a
+    // variable and calling it as `fetchFn(...)` detaches its receiver and
+    // throws "Illegal invocation" on the Workers/Pages runtime. Using
+    // `.call(globalThis, ...)` restores the receiver and works for both the
+    // real fetch and injected test fakes (which ignore `this`).
+    res = await args.fetchFn.call(globalThis, 'https://api.linear.app/graphql', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${args.apiKey}`,
+        // Linear rejects "Bearer <key>"; it expects the bare API key.
+        Authorization: args.apiKey,
       },
       body: JSON.stringify({ query: args.request.query, variables: args.request.variables }),
     });
