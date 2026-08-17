@@ -170,6 +170,20 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     };
   }
 
+  /** Extract recorded mock calls from a vi.fn() reached through an unknown-typed object. */
+  function getMockCalls(holder: unknown, method: string): unknown[][] {
+    const record = holder as Record<string, { mock?: { calls?: unknown[][] } }>;
+    return record[method]?.mock?.calls ?? [];
+  }
+
+  /** Find telemetry payloads emitted for a given eventType. */
+  function telemetryPayloadsFor(deps: PhilosopherRunnerDeps, eventType: string): Record<string, unknown>[] {
+    return getMockCalls(deps.eventEmitter, 'emitTelemetry')
+      .map((call) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .filter((evt) => evt.eventType === eventType)
+      .map((evt) => evt.payload);
+  }
+
   it('malformed payload (non-object) does not write artifact or mark succeeded', async () => {
     await artifactStore.upsertArtifact(makeDreamerArtifact());
     const deps = createMockDeps({ artifactStore });
@@ -290,7 +304,7 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     expect(deps.stateManager.markTaskRetryWait).not.toHaveBeenCalled();
   });
 
-  it('taskId mismatch in output fails validation loud', async () => {
+  it('taskId wrong echo in output is reconciled from the authoritative task record (PRI-541)', async () => {
     await artifactStore.upsertArtifact(makeDreamerArtifact());
     const deps = createMockDeps({ artifactStore });
 
@@ -307,10 +321,19 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     });
 
     const result = await runner.run(PHILOSOPHER_TASK_ID);
-    expect(result.status).toBe('failed');
-    // output_invalid is transient; retry policy says shouldRetry=false → max_attempts_exceeded
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
-    expect(result.failureReason).toContain('taskId mismatch');
+    // Lineage is runner-owned (rc-6): a corrupted echo is corrected from the task
+    // record instead of dead-ending the candidate as output_invalid.
+    expect(result.status).toBe('succeeded');
+    expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalled();
+
+    const outputCalls = getMockCalls(deps.stateManager, 'updateRunOutput');
+    const persisted = JSON.parse(outputCalls[0]?.[1] as string) as Record<string, unknown>;
+    expect(persisted.taskId).toBe(PHILOSOPHER_TASK_ID);
+
+    // The correction is observable, not silent (rc-9).
+    const payloads = telemetryPayloadsFor(deps, 'philosopher_lineage_echo_corrected');
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.correctedFields).toEqual(['taskId']);
   });
 
   it('validation failure does not set phase to Completed', async () => {
@@ -366,7 +389,7 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     expect(runner.currentPhase).toBe(RunnerPhase.Completed);
   });
 
-  it('present-but-empty taskId fails validation (not silently corrected)', async () => {
+  it('present-but-empty taskId echo is reconciled with telemetry, never silently (PRI-541)', async () => {
     await artifactStore.upsertArtifact(makeDreamerArtifact());
     const deps = createMockDeps({ artifactStore });
 
@@ -383,11 +406,17 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     });
 
     const result = await runner.run(PHILOSOPHER_TASK_ID);
-    expect(result.status).toBe('failed');
-    // output_invalid is transient; retry policy says shouldRetry=false → max_attempts_exceeded
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
-    // postFetchTransform should NOT overwrite present-but-empty taskId
-    expect(result.failureReason).toContain('taskId mismatch');
+    // An empty echo is a corrupted echo of a runner-owned value: reconciled from
+    // the authoritative task record, with telemetry keeping it observable (rc-9).
+    expect(result.status).toBe('succeeded');
+
+    const outputCalls = getMockCalls(deps.stateManager, 'updateRunOutput');
+    const persisted = JSON.parse(outputCalls[0]?.[1] as string) as Record<string, unknown>;
+    expect(persisted.taskId).toBe(PHILOSOPHER_TASK_ID);
+
+    const payloads = telemetryPayloadsFor(deps, 'philosopher_lineage_echo_corrected');
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.correctedFields).toEqual(['taskId']);
   });
 
   it('risks with non-string elements fails validation (ERR-005 Rule 4)', async () => {
@@ -411,7 +440,7 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     expect(result.failureReason).toContain('risks must contain only strings');
   });
 
-  it('sourceDreamerArtifactId mismatch fails loud before artifact commit (ERR-004)', async () => {
+  it('sourceDreamerArtifactId wrong echo is reconciled before artifact commit (PRI-541, ERR-004)', async () => {
     await artifactStore.upsertArtifact(makeDreamerArtifact());
     const deps = createMockDeps({ artifactStore });
 
@@ -428,11 +457,18 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     });
 
     const result = await runner.run(PHILOSOPHER_TASK_ID);
-    expect(result.status).toBe('failed');
-    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    // The committed artifact carries the authoritative lineage (rc-6), not the
+    // LLM's corrupted echo — a wrong echo no longer dead-ends the candidate.
+    expect(result.status).toBe('succeeded');
+    expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalled();
 
     const artifacts = await artifactStore.listBySourceTaskId(PHILOSOPHER_TASK_ID);
-    expect(artifacts).toHaveLength(0);
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]?.contentJson).toContain('pi-art-dreamer-tb-001-run-001');
+
+    const payloads = telemetryPayloadsFor(deps, 'philosopher_lineage_echo_corrected');
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.correctedFields).toEqual(['sourceDreamerArtifactId']);
   });
 
   it('invalid errorCategory from custom validator fails loud and does not leak through', async () => {

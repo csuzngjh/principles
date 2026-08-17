@@ -914,7 +914,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
     expect(inh?.validationStatus).toBe('pending');
   });
 
-  it('mismatched sourceArtificerArtifactId does not write artifact or mark succeeded', async () => {
+  it('mismatched sourceArtificerArtifactId echo is reconciled before artifact commit (PRI-541)', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeArtificerArtifact());
     const deps = createMockDeps({ artifactStore: store });
@@ -935,15 +935,25 @@ describe('EvaluatorRunner (vertical slice)', () => {
     });
 
     const result = await runner.run(EVALUATOR_TASK_ID);
-    expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('output_invalid');
+    // Lineage is runner-owned (rc-6): the corrupted echo is corrected from the
+    // task record before validation/commit instead of dead-ending (PRI-541).
+    expect(result.status).toBe('succeeded');
 
     const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
-    expect(artifacts).toHaveLength(0);
-    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    expect(artifacts).toHaveLength(1);
+    expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalled();
+
+    const telemetryCalls = (deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> }).emitTelemetry.mock.calls;
+    const correctedEvent = telemetryCalls
+      .map((call) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .find((evt) => evt.eventType === 'evaluator_lineage_echo_corrected');
+    expect(correctedEvent).toBeDefined();
+    expect(correctedEvent?.payload.correctedFields).toEqual(
+      expect.arrayContaining(['sourceArtificerArtifactId', 'sourceTrace.artificerArtifactId']),
+    );
   });
 
-  it('sourceTrace.artificerArtifactId mismatch does not write artifact or mark succeeded', async () => {
+  it('sourceTrace.artificerArtifactId wrong echo is reconciled with telemetry (PRI-541)', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeArtificerArtifact());
     const deps = createMockDeps({ artifactStore: store });
@@ -963,12 +973,18 @@ describe('EvaluatorRunner (vertical slice)', () => {
     });
 
     const result = await runner.run(EVALUATOR_TASK_ID);
-    expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.status).toBe('succeeded');
 
     const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
-    expect(artifacts).toHaveLength(0);
-    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    expect(artifacts).toHaveLength(1);
+    expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalled();
+
+    const telemetryCalls = (deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> }).emitTelemetry.mock.calls;
+    const correctedEvent = telemetryCalls
+      .map((call) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .find((evt) => evt.eventType === 'evaluator_lineage_echo_corrected');
+    expect(correctedEvent).toBeDefined();
+    expect(correctedEvent?.payload.correctedFields).toEqual(['sourceTrace.artificerArtifactId']);
   });
 
   it('malformed output does not update validationStatus', async () => {

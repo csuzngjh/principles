@@ -32,7 +32,7 @@ import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../erro
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { ScribePromptBuilder } from './scribe-prompt-builder.js';
 import { SCRIBE_MANIFEST } from './context-manifests.js';
-import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -386,7 +386,24 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
    */
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: ScribeContext): void {
     super.postFetchTransform(taskId, untrustedOutput, _context);
-    injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
+    // Shared lineage echo gate (PRI-541): reconciles taskId,
+    // sourcePhilosopherArtifactId and sourceTrace.philosopherArtifactId
+    // against the authoritative context value before validation — a wrong
+    // echo previously dead-ended as output_invalid. Optional trace fields
+    // (dreamerArtifactId) have no authoritative value and are left alone.
+    const correctedFields = reconcileLineageEcho(untrustedOutput, {
+      topFields: [
+        { field: 'taskId', authoritativeValue: taskId },
+        { field: 'sourcePhilosopherArtifactId', authoritativeValue: _context.sourcePhilosopherArtifactId },
+      ],
+      trace: {
+        traceField: 'sourceTrace',
+        fields: [{ field: 'philosopherArtifactId', authoritativeValue: _context.sourcePhilosopherArtifactId }],
+      },
+    });
+    if (correctedFields.length > 0) {
+      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields });
+    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: ScribeOutputV1): void {

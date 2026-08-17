@@ -106,6 +106,12 @@ function makePhilosopherArtifact(): PIArtifactRecord {
 describe('ScribeRunner (migrated to BasePeerRunner)', () => {
   let artifactStore: PIArtifactStore = new MemoryPIArtifactStore();
 
+  /** Extract recorded mock calls from a vi.fn() reached through an unknown-typed object. */
+  function getMockCalls(holder: unknown, method: string): unknown[][] {
+    const record = holder as Record<string, { mock?: { calls?: unknown[][] } }>;
+    return record[method]?.mock?.calls ?? [];
+  }
+
   beforeEach(() => {
     artifactStore = new MemoryPIArtifactStore();
   });
@@ -390,19 +396,71 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 
-  // ── Existing behavior: sourcePhilosopherArtifactId mismatch ────────────────
+  // ── PRI-541: lineage echo reconciliation replaces the old fail-closed contract ─
+  //
+  // The OLD contract (mismatched sourcePhilosopherArtifactId echo →
+  // output_invalid → max_attempts_exceeded) dead-ended candidates in
+  // production: LLMs routinely truncate long artifact IDs when echoing them
+  // back, and the failure burned all retry attempts. The NEW contract:
+  // lineage is runner-owned metadata, postFetchTransform reconciles the echo
+  // with the authoritative context value BEFORE validation, and a
+  // scribe_lineage_echo_corrected telemetry event is emitted (rc-9).
 
-  it('mismatched sourcePhilosopherArtifactId does not write artifact or mark succeeded', async () => {
+  it('LLM-echoed truncated lineage is reconciled and succeeds with telemetry', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makePhilosopherArtifact());
     const deps = createMockDeps({ artifactStore: store });
 
-    const mismatchedOutput = makeScribeOutput();
-    (mismatchedOutput as unknown as Record<string, unknown>).sourcePhilosopherArtifactId = 'wrong-artifact-id';
-    (mismatchedOutput.sourceTrace as unknown as Record<string, unknown>).philosopherArtifactId = 'wrong-artifact-id';
+    // Simulate the production failure mode: truncated artifact ID echo.
+    const echoedOutput = makeScribeOutput();
+    (echoedOutput as unknown as Record<string, unknown>).sourcePhilosopherArtifactId = 'pi-art-philosopher-001';
+    (echoedOutput.sourceTrace as unknown as Record<string, unknown>).philosopherArtifactId = 'pi-art-philosopher-001';
 
     (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
-      payload: mismatchedOutput,
+      payload: echoedOutput,
+    });
+
+    const runner = new ScribeRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'scribe',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(SCRIBE_TASK_ID);
+    expect(result.status).toBe('succeeded');
+    expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalled();
+
+    // Persisted output carries the authoritative lineage, not the LLM echo.
+    const outputCalls = getMockCalls(deps.stateManager, 'updateRunOutput');
+    const persistedJson = outputCalls[0]?.[1] as string;
+    const persisted = JSON.parse(persistedJson) as Record<string, { philosopherArtifactId?: string }>;
+    expect(persisted.sourcePhilosopherArtifactId).toBe('pi-art-philosopher-001-run-001');
+    expect(persisted.sourceTrace?.philosopherArtifactId).toBe('pi-art-philosopher-001-run-001');
+
+    // Telemetry makes the correction observable (rc-9).
+    const telemetryCalls = getMockCalls(deps.eventEmitter, 'emitTelemetry');
+    const correctedEvent = telemetryCalls
+      .map((call) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .find((evt) => evt.eventType === 'scribe_lineage_echo_corrected');
+    expect(correctedEvent).toBeDefined();
+    expect(correctedEvent?.payload.correctedFields).toEqual(
+      expect.arrayContaining(['sourcePhilosopherArtifactId', 'sourceTrace.philosopherArtifactId']),
+    );
+  });
+
+  it('content-field validation failures are NOT reconciled and still fail', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makePhilosopherArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    // Lineage echoes are correct here, but the draft content is invalid —
+    // reconciliation must not mask genuine output_invalid content errors.
+    const badContentOutput = makeScribeOutput();
+    (badContentOutput.principleDraft as unknown as Record<string, unknown>).confidence = 1.5;
+
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: badContentOutput,
     });
 
     const runner = new ScribeRunner(deps, {
@@ -414,7 +472,6 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const result = await runner.run(SCRIBE_TASK_ID);
     expect(result.status).toBe('failed');
-    // output_invalid is retriable; after retry exhaustion → max_attempts_exceeded
     expect(result.errorCategory).toBe('max_attempts_exceeded');
 
     const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
@@ -422,53 +479,21 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 
-  // ── NEW: sourcePhilosopherArtifactId mismatch must not updateRunOutput ─────
+  // ── PRI-541: present-but-empty taskId is a wrong echo — corrected ──────────
+  //
+  // Under the OLD inject-only contract, taskId: '' was left untouched to
+  // fail loud in the validator. Under the PRI-541 reconciliation contract,
+  // an empty string is a corrupted echo of a runner-owned value (same class
+  // as a truncated artifact ID) and is overwritten with the authoritative
+  // taskId. The ERR-049 fail-loud semantics still hold for fields the gate
+  // does not own — the gate only rewrites fields it has authoritative
+  // values for.
 
-  it('sourcePhilosopherArtifactId mismatch does not updateRunOutput, write artifact, or mark succeeded', async () => {
+  it('present-but-empty taskId is reconciled to the authoritative taskId', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makePhilosopherArtifact());
     const deps = createMockDeps({ artifactStore: store });
 
-    // Output passes validator but fails lineage check in succeedTask
-    const mismatchedOutput = makeScribeOutput();
-    (mismatchedOutput as unknown as Record<string, unknown>).sourcePhilosopherArtifactId = 'wrong-artifact-id';
-    // Also fix sourceTrace to pass validator
-    (mismatchedOutput.sourceTrace as unknown as Record<string, unknown>).philosopherArtifactId = 'wrong-artifact-id';
-
-    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
-      payload: mismatchedOutput,
-    });
-
-    const runner = new ScribeRunner(deps, {
-      owner: 'test',
-      runtimeKind: 'scribe',
-      pollIntervalMs: 10,
-      timeoutMs: 1000,
-    });
-
-    const result = await runner.run(SCRIBE_TASK_ID);
-    // The mismatch is caught by the validator (DefaultScribeValidator checks it)
-    // output_invalid is retriable; after retry exhaustion → max_attempts_exceeded
-    expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
-
-    // No artifact written
-    const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
-    expect(artifacts).toHaveLength(0);
-
-    // No updateRunOutput or markTaskSucceeded
-    expect(deps.stateManager.updateRunOutput).not.toHaveBeenCalled();
-    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
-  });
-
-  // ── NEW: present-but-empty taskId not overwritten by postFetchTransform ────
-
-  it('present-but-empty taskId is not overwritten by postFetchTransform', async () => {
-    const store = new MemoryPIArtifactStore();
-    await store.upsertArtifact(makePhilosopherArtifact());
-    const deps = createMockDeps({ artifactStore: store });
-
-    // Output with taskId: '' (present but empty) — must NOT be overwritten
     const emptyTaskIdOutput = makeScribeOutput();
     (emptyTaskIdOutput as unknown as Record<string, unknown>).taskId = '';
 
@@ -484,14 +509,12 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     });
 
     const result = await runner.run(SCRIBE_TASK_ID);
-    // Validation should fail because taskId is empty (mismatch with SCRIBE_TASK_ID)
-    // output_invalid is retriable; after retry exhaustion → max_attempts_exceeded
-    expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    expect(result.status).toBe('succeeded');
 
-    // No artifact written
-    const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
-    expect(artifacts).toHaveLength(0);
+    const outputCalls = getMockCalls(deps.stateManager, 'updateRunOutput');
+    const persistedJson = outputCalls[0]?.[1] as string;
+    const persisted = JSON.parse(persistedJson) as { taskId?: string };
+    expect(persisted.taskId).toBe(SCRIBE_TASK_ID);
   });
 
   // ── NEW: missing taskId re-injected by postFetchTransform ──────────────────
@@ -731,19 +754,20 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     expect(callOrder).toEqual(['updateRunOutput', 'markTaskSucceeded']);
   });
 
-  // ── NEW: lineage mismatch in succeedTask throws and does not write artifact ─
+  // ── PRI-541: reconciliation runs even before a permissive validator ────────
+  //
+  // Previously this scenario (permissive validator + mismatched echo) tested
+  // the succeedTask lineage check as the last line of defense. With the
+  // shared lineage echo gate, postFetchTransform reconciles the echo BEFORE
+  // validation, so the succeedTask check no longer fires on this path (it
+  // remains in the code as defense in depth). The observable contract:
+  // the authoritative value is persisted, never the LLM echo.
 
-  it('succeedTask sourcePhilosopherArtifactId mismatch throws and does not write artifact', async () => {
+  it('lineage echo is reconciled even when the validator is permissive', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makePhilosopherArtifact());
     const deps = createMockDeps({ artifactStore: store });
 
-    // Create output that passes validator but has mismatched sourcePhilosopherArtifactId
-    // The validator only checks if expectedSourcePhilosopherArtifactId is provided and matches.
-    // But the DefaultScribeValidator checks sourcePhilosopherArtifactId against expected.
-    // We need to craft output where the validator passes but succeedTask catches the mismatch.
-    // Since the validator and succeedTask both check against context.sourcePhilosopherArtifactId,
-    // the validator will catch it first. Let's use a custom validator that passes everything.
     const permissiveValidator: ScribeValidator = {
       validate: async (): Promise<ScribeValidationResult> => {
         return { valid: true, errors: [] };
@@ -767,20 +791,14 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     });
 
     const result = await runner.run(SCRIBE_TASK_ID);
-    // succeedTask should throw on mismatch, caught by base class → retryOrFail
-    // output_invalid is retriable; after retry exhaustion → max_attempts_exceeded
-    expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    // The echo was reconciled pre-validation → the run succeeds and the
+    // persisted artifact carries the authoritative lineage.
+    expect(result.status).toBe('succeeded');
 
-    // No artifact written
-    const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
-    expect(artifacts).toHaveLength(0);
-
-    // No markTaskSucceeded
-    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
-
-    // No updateRunOutput (thrown before updateRunOutput)
-    expect(deps.stateManager.updateRunOutput).not.toHaveBeenCalled();
+    const outputCalls = getMockCalls(deps.stateManager, 'updateRunOutput');
+    const persistedJson = outputCalls[0]?.[1] as string;
+    const persisted = JSON.parse(persistedJson) as { sourcePhilosopherArtifactId?: string };
+    expect(persisted.sourcePhilosopherArtifactId).toBe('pi-art-philosopher-001-run-001');
   });
 
   // ── NEW: postFetchTransform operates on unknown, not typed output ──────────

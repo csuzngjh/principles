@@ -31,7 +31,7 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
-import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 import type {
@@ -371,7 +371,19 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
    */
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: PhilosopherContext): void {
     super.postFetchTransform(taskId, untrustedOutput, _context);
-    injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
+    // Shared lineage echo gate (PRI-541): a truncated/altered echo of the
+    // dreamer artifact ID previously failed succeedTask lineage validation
+    // as output_invalid (permanent, no retry) — now reconciled from the
+    // authoritative context value before validation, with telemetry (rc-9).
+    const correctedFields = reconcileLineageEcho(untrustedOutput, {
+      topFields: [
+        { field: 'taskId', authoritativeValue: taskId },
+        { field: 'sourceDreamerArtifactId', authoritativeValue: _context.sourceDreamerArtifactId },
+      ],
+    });
+    if (correctedFields.length > 0) {
+      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields });
+    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: PhilosopherOutputV1): void {
