@@ -1,7 +1,7 @@
 {
   "name": "principles-disciple",
   "version": "1.76.1",
-  "description": "Turn repeated Agent corrections into Owner-approved, observable, reversible behavior principles. Stop correcting the same AI behavior across sessions.",
+  "description": "Stop correcting the same AI behavior across sessions. Turn repeated Agent corrections into Owner-approved, observable, reversible behavior principles.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
