@@ -79,6 +79,44 @@ export function buildEmailText(report: FeedbackReport): string {
     lines.push('— Actual behavior —');
     lines.push(safe(report.userText.actualBehavior, MAX_EMAIL_FIELD));
   }
+  // ── 类型化新字段(Slice 1, PRI-543)──
+  if (report.type === 'confusing') {
+    if (report.userText.goal) {
+      lines.push('');
+      lines.push('— What I wanted to do —');
+      lines.push(safe(report.userText.goal, MAX_EMAIL_FIELD));
+    }
+    if (report.userText.stuckAt) {
+      lines.push('');
+      lines.push('— Where I got stuck —');
+      lines.push(safe(report.userText.stuckAt, MAX_EMAIL_FIELD));
+    }
+  } else if (report.type === 'feature_request') {
+    if (report.userText.job) {
+      lines.push('');
+      lines.push('— Goal —');
+      lines.push(safe(report.userText.job, MAX_EMAIL_FIELD));
+    }
+    if (report.userText.currentWorkaround) {
+      lines.push('');
+      lines.push('— Current workaround —');
+      lines.push(safe(report.userText.currentWorkaround, MAX_EMAIL_FIELD));
+    }
+  } else if (report.type === 'privacy_concern') {
+    if (report.userText.sawWhat) {
+      lines.push('');
+      lines.push('— What I saw —');
+      lines.push(safe(report.userText.sawWhat, MAX_EMAIL_FIELD));
+    }
+    if (report.userText.whereSeen) {
+      lines.push('');
+      lines.push('— Where I saw it —');
+      lines.push(safe(report.userText.whereSeen, MAX_EMAIL_FIELD));
+    }
+  }
+  if (report.userText.frequency) lines.push(`Frequency: ${report.userText.frequency}`);
+  if (report.userText.blockingLevel) lines.push(`Blocking level: ${report.userText.blockingLevel}`);
+  if (report.area) lines.push(`Area: ${report.area}`);
   lines.push('');
   lines.push('— Diagnostics (low-sensitivity) —');
   lines.push('versions:');

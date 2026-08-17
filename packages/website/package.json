@@ -8,7 +8,8 @@
     "docs:build": "npm run prebake && vitepress build",
     "docs:preview": "vitepress preview",
     "test:contract": "node --test tests/homepage-contract.test.mjs",
-    "test": "npm run docs:build && npm run test:contract"
+    "test:relay": "vitest run functions/_lib/__tests__/relay-core.test.ts",
+    "test": "npm run docs:build && npm run test:contract && npm run test:relay"
   },
   "devDependencies": {
     "sharp": "^0.34.5",

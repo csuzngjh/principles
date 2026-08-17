@@ -5,6 +5,10 @@
 export type {
   FeedbackType,
   UserSeverity,
+  FeedbackFrequency,
+  FeedbackBlockingLevel,
+  FeedbackStatus,
+  FeedbackSubmittedVia,
   FeedbackSource,
   FeedbackContext,
   AgentDraft,
@@ -24,11 +28,22 @@ export type {
 export {
   isFeedbackType,
   isUserSeverity,
+  isFeedbackFrequency,
+  isFeedbackBlockingLevel,
+  isFeedbackStatus,
+  isFeedbackSubmittedVia,
   isFeedbackSource,
   isRecord,
   isBoolean,
   normalizeFeedbackDraftInput,
 } from './feedback-types.js';
+
+export {
+  computeFeedbackFingerprint,
+  normalizeFeedbackTitle,
+  FEEDBACK_FINGERPRINT_DEFAULT_AREA,
+  FEEDBACK_FINGERPRINT_TITLE_LIMIT,
+} from './fingerprint.js';
 
 export {
   redactAbsolutePaths,

@@ -641,6 +641,30 @@ describe('buildFeedbackContextFromSearchParams', () => {
     });
   });
 
+  it('maps source=principle_page (PrincipleDetailPage entry) to console + sourceDetail', () => {
+    // Entity entry point from the principle detail page (slice 3, spec §7).
+    const sp = new URLSearchParams('?source=principle_page&principleId=pc-9');
+    const ctx = buildFeedbackContextFromSearchParams(sp);
+    expect(ctx).toEqual({
+      source: 'console',
+      sourceDetail: 'principle_page',
+      principleId: 'pc-9',
+    });
+  });
+
+  it('maps source=activation_page (ActivationPage entry) to console + sourceDetail', () => {
+    // Entity entry point from an activation card (slice 3, spec §7). Carries
+    // both activationId and the linked principleId for context pre-filling.
+    const sp = new URLSearchParams('?source=activation_page&activationId=act-9&principleId=pc-9');
+    const ctx = buildFeedbackContextFromSearchParams(sp);
+    expect(ctx).toEqual({
+      source: 'console',
+      sourceDetail: 'activation_page',
+      activationId: 'act-9',
+      principleId: 'pc-9',
+    });
+  });
+
   it('ignores empty string values', () => {
     const sp = new URLSearchParams('?painId=&principleId=pc-1');
     const ctx = buildFeedbackContextFromSearchParams(sp);

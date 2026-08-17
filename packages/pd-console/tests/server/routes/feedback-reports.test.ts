@@ -5,8 +5,16 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   handleFeedbackReportsRoute,
+  handleFeedbackChannelsRoute,
   disposeFeedbackReportModels,
 } from '../../../src/server/routes/feedback-reports.js';
+
+function makeJsonResponse(body?: unknown): Response {
+  return {
+    status: 202,
+    json: async () => body ?? {},
+  } as unknown as Response;
+}
 
 // ---------------------------------------------------------------------------
 // Test utilities (mirrors tests/server/routes/update.test.ts pattern)
@@ -324,6 +332,182 @@ describe('handleFeedbackReportsRoute', () => {
       expect(delRes.statusCode).toBe(200);
       const data = okEnvelope<{ deleted: boolean }>(delRes);
       expect(data.deleted).toBe(true);
+    });
+  });
+
+  describe('POST /api/feedback/reports/:id/submit', () => {
+    const ingestConfig = {
+      ingestUrl: 'https://example.com/api/feedback',
+      ingestToken: 'tok',
+      githubRepo: '',
+      githubProxy: '',
+    };
+
+    async function createDraft(type = 'bug', title = 'Submit me'): Promise<string> {
+      const req = createMockRequest('POST', { input: { type, title, description: 'describe' }, diagnostics: {} });
+      const res = createMockResponse();
+      await handleFeedbackReportsRoute(req, res, { workspaceDir, subPath: '' });
+      const data = okEnvelope<{ id: string }>(res);
+      return data.id;
+    }
+
+    it('submits the saved (server-side) draft via ingest and writes back status', async () => {
+      const id = await createDraft('bug', 'Peers never finish');
+      const fetchFn = vi.fn(async () =>
+        makeJsonResponse({ trackingId: 'fb-99', issueUrl: 'https://linear.app/i/1', duplicate: false }),
+      );
+      const req = createMockRequest('POST', { channel: 'ingest' });
+      const res = createMockResponse();
+      await handleFeedbackReportsRoute(req, res, {
+        workspaceDir,
+        subPath: `/${id}/submit`,
+        featureFlags: { feedback_channel: { enabled: true } },
+        channelConfig: ingestConfig,
+        submitDeps: { fetchFn },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ status: string; submittedVia: string; trackingId: string }>(res);
+      expect(data.status).toBe('submitted');
+      expect(data.submittedVia).toBe('ingest');
+      expect(data.trackingId).toBe('fb-99');
+
+      // Client-injected content is ignored: body only carried { channel }, so
+      // no report content ever reached the transport — only the disk draft.
+      const body = fetchFn.mock.calls[0]?.[1] as RequestInit | undefined;
+      const sent = JSON.parse(String(body?.body)) as { report: { title: string }; fingerprint: string };
+      expect(sent.report.title).toBe('Peers never finish');
+
+      // Receipt persisted to disk.
+      const raw = fs.readFileSync(path.join(workspaceDir, '.pd', 'feedback', 'drafts', `${id}.json`), 'utf8');
+      const onDisk = JSON.parse(raw) as { status: string; trackingId: string };
+      expect(onDisk.status).toBe('submitted');
+      expect(onDisk.trackingId).toBe('fb-99');
+    });
+
+    it('is idempotent — resubmitting an already-submitted draft returns alreadySubmitted', async () => {
+      const id = await createDraft('bug', 'Once only');
+      const fetchFn = vi.fn(async () =>
+        makeJsonResponse({ trackingId: 'fb-77', issueUrl: 'u', duplicate: false }),
+      );
+      const ctx = {
+        workspaceDir,
+        featureFlags: { feedback_channel: { enabled: true } },
+        channelConfig: ingestConfig,
+        submitDeps: { fetchFn },
+      };
+      // First submit succeeds.
+      await handleFeedbackReportsRoute(
+        createMockRequest('POST', { channel: 'ingest' }),
+        createMockResponse(),
+        { ...ctx, subPath: `/${id}/submit` },
+      );
+      // Second submit is a no-op.
+      const req2 = createMockRequest('POST', { channel: 'ingest' });
+      const res2 = createMockResponse();
+      await handleFeedbackReportsRoute(req2, res2, { ...ctx, subPath: `/${id}/submit` });
+
+      expect(res2.statusCode).toBe(200);
+      const data = okEnvelope<{ alreadySubmitted: boolean; trackingId: string }>(res2);
+      expect(data.alreadySubmitted).toBe(true);
+      expect(data.trackingId).toBe('fb-77');
+      expect(fetchFn).toHaveBeenCalledTimes(1); // no second POST to relay
+    });
+
+    it('returns 403 when the feature flag is disabled', async () => {
+      const id = await createDraft('bug', 'Flagged');
+      const req = createMockRequest('POST', { channel: 'ingest' });
+      const res = createMockResponse();
+      await handleFeedbackReportsRoute(req, res, {
+        workspaceDir,
+        subPath: `/${id}/submit`,
+        featureFlags: { feedback_channel: { enabled: false } },
+        channelConfig: ingestConfig,
+      });
+      expect(res.statusCode).toBe(403);
+      const body = parseResponseBody<{ success: false; error: string }>(res);
+      expect(body.error).toContain('feedback_channel');
+    });
+
+    it('returns 400 for an unknown channel value', async () => {
+      const id = await createDraft('bug', 'Bad channel');
+      const req = createMockRequest('POST', { channel: 'telepathy' });
+      const res = createMockResponse();
+      await handleFeedbackReportsRoute(req, res, {
+        workspaceDir,
+        subPath: `/${id}/submit`,
+        featureFlags: { feedback_channel: { enabled: true } },
+        channelConfig: ingestConfig,
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 404 for a nonexistent draft id', async () => {
+      const req = createMockRequest('POST', { channel: 'ingest' });
+      const res = createMockResponse();
+      await handleFeedbackReportsRoute(req, res, {
+        workspaceDir,
+        subPath: '/fb-does-not-exist/submit',
+        featureFlags: { feedback_channel: { enabled: true } },
+        channelConfig: ingestConfig,
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('keeps the draft as draft (+reason+nextAction) when the relay is unreachable', async () => {
+      const id = await createDraft('bug', 'unreachable');
+      const fetchFn = vi.fn(async () => {
+        throw new Error('ENOTFOUND example.com');
+      });
+      const req = createMockRequest('POST', { channel: 'ingest' });
+      const res = createMockResponse();
+      await handleFeedbackReportsRoute(req, res, {
+        workspaceDir,
+        subPath: `/${id}/submit`,
+        featureFlags: { feedback_channel: { enabled: true } },
+        channelConfig: ingestConfig,
+        submitDeps: { fetchFn },
+      });
+
+      expect(res.statusCode).toBe(502);
+      const body = parseResponseBody<{ success: false; error: string; message: string; nextAction: string }>(res);
+      expect(body.error).toContain('ingest_submit_failed');
+      expect(body.nextAction).toBeTruthy();
+
+      const raw = fs.readFileSync(path.join(workspaceDir, '.pd', 'feedback', 'drafts', `${id}.json`), 'utf8');
+      const onDisk = JSON.parse(raw) as { status?: string };
+      expect(onDisk.status).toBeUndefined(); // still draft
+    });
+  });
+
+  describe('GET /api/feedback/submit/channels', () => {
+    it('returns the four-ladder channel list without leaking the ingest token', async () => {
+      const req = createMockRequest('GET');
+      const res = createMockResponse();
+      const fetchFn = vi.fn(async () => new Response('{}', { status: 200 }));
+      await handleFeedbackChannelsRoute(req, res, {
+        workspaceDir,
+        channelConfig: {
+          ingestUrl: 'https://example.com/api/feedback',
+          ingestToken: 'should-not-leak',
+          githubRepo: '',
+          githubProxy: '',
+        },
+        maintainerEmail: 'maintainer@example.com',
+        channelDeps: { fetchFn },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ channels: { id: string }[] }>(res);
+      expect(data.channels.map((c) => c.id)).toEqual(['ingest', 'github', 'email', 'file']);
+      expect(JSON.stringify(data.channels)).not.toContain('should-not-leak');
+    });
+
+    it('returns 405 for non-GET methods', async () => {
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+      await handleFeedbackChannelsRoute(req, res, { workspaceDir });
+      expect(res.statusCode).toBe(405);
     });
   });
 });

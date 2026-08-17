@@ -177,6 +177,8 @@ const REQUIRED_SOURCE_FILES = [
   'feedback/privacy-preview.ts',
   'feedback/safe-stringify.ts',
   'feedback/create-report.ts',
+  // Slice 1 (PRI-543): deterministic fingerprint for feedback dedup/clustering.
+  'feedback/fingerprint.ts',
   'feedback/index.ts',
   // PRI-372 (T-G)
   'diagnostician/diag-rootcause-output.ts',
@@ -613,6 +615,8 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'stripFabricatedCorePrincipleIds',
     // PRI-470: IntentDecisionRecord durable SQLite store
     'SqliteIntentDecisionStore',
+    // Slice 1 (PRI-543): fingerprint for feedback dedup/clustering
+    'computeFeedbackFingerprint',
   ];
 
   for (const name of REQUIRED_EXPORTS) {

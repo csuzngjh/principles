@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { ShinyText } from "../../components/ui/shiny-text.js";
+import { Button } from "../../components/ui/button.js";
 import {
   fetchAllActivations,
   disableActivation,
@@ -56,6 +57,7 @@ function ActivationFactCard({
   disabling: boolean;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [showConfirm, setShowConfirm] = useState(false);
   const neverActivated = record.activatedAt === null;
   const channelLabel = getChannelLabel(record.channel, t);
@@ -69,7 +71,7 @@ function ActivationFactCard({
       data-testid={`activation-card-${record.activationId}`}
     >
       {/* Tags row */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap pr-24">
         {/* Status label */}
         <span
           className={`inline-flex items-center border rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
@@ -103,6 +105,26 @@ function ActivationFactCard({
           </span>
         )}
       </div>
+
+      {/* Feedback entry — pre-fills activationId + principleId into the draft */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="absolute top-[14px] right-[14px]"
+        data-testid={`activation-feedback-${record.activationId}`}
+        onClick={() => {
+          const params = new URLSearchParams({
+            source: "activation_page",
+            activationId: record.activationId,
+          });
+          if (record.principleId) {
+            params.set("principleId", record.principleId);
+          }
+          navigate(`/report-problem?${params.toString()}`);
+        }}
+      >
+        {t("pages.reportProblem.entryFeedback")}
+      </Button>
 
       {/* Principle info — action is the human-readable anchor; principleId
           is demoted to a secondary mono identifier (also available via hover) */}

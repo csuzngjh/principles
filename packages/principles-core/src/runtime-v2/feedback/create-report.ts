@@ -7,6 +7,7 @@
 
 import type {
   FeedbackReport,
+  FeedbackUserText,
   NormalizedDraft,
   ContextRef,
   DiagnosticSummary,
@@ -19,6 +20,8 @@ import {
   isRecord,
   isString,
   isUserSeverity,
+  isFeedbackFrequency,
+  isFeedbackBlockingLevel,
   normalizeFeedbackDraftInput,
 } from './feedback-types.js';
 import {
@@ -214,6 +217,27 @@ export function createFeedbackReport(
     redactionNotes.push('actualBehavior was redacted');
   }
 
+  // ── 类型化新字段(Slice 1, PRI-543):text 走同一脱敏管线,枚举字段原样保留 ──
+  // 键限定为 FeedbackUserText 中的 string 字段(goal/stuckAt/job/…),便于类型收窄;
+  // 枚举字段(frequency/blockingLevel)不在此列,它们在下方按枚举校验后原样拷贝。
+  type TypedTextFieldKey = 'goal' | 'stuckAt' | 'job' | 'currentWorkaround' | 'sawWhat' | 'whereSeen';
+  const typedTextFields: [key: TypedTextFieldKey, label: string][] = [
+    ['goal', 'goal'],
+    ['stuckAt', 'stuckAt'],
+    ['job', 'job'],
+    ['currentWorkaround', 'currentWorkaround'],
+    ['sawWhat', 'sawWhat'],
+    ['whereSeen', 'whereSeen'],
+  ];
+  const redactedTyped: Partial<FeedbackUserText> = {};
+  for (const [key, label] of typedTextFields) {
+    const raw = draft.userText[key];
+    if (typeof raw !== 'string' || raw.length === 0) continue;
+    const scrubbed = redactAbsolutePaths(redactTokenLikeValues(redactEnvLikeValues(raw)));
+    redactedTyped[key] = scrubbed;
+    if (scrubbed !== raw) redactionNotes.push(`${label} was redacted (paths/tokens/env values)`);
+  }
+
   // Task 13: If taskId is provided and a pending agent draft exists, merge it.
   // User-provided agentDraft (from input.agentDraft) takes priority — the
   // agent draft from the store is a fallback for when the user didn't write one.
@@ -291,6 +315,15 @@ export function createFeedbackReport(
   if (draft.userText.expectedBehavior !== undefined) userText.expectedBehavior = expectedBehavior;
   if (draft.userText.actualBehavior !== undefined) userText.actualBehavior = actualBehavior;
   if (isUserSeverity(draft.userText.userSeverity)) userText.userSeverity = draft.userText.userSeverity;
+  // ── 类型化新字段(Slice 1, PRI-543)──
+  if (draft.userText.goal !== undefined) userText.goal = redactedTyped.goal;
+  if (draft.userText.stuckAt !== undefined) userText.stuckAt = redactedTyped.stuckAt;
+  if (draft.userText.job !== undefined) userText.job = redactedTyped.job;
+  if (draft.userText.currentWorkaround !== undefined) userText.currentWorkaround = redactedTyped.currentWorkaround;
+  if (draft.userText.sawWhat !== undefined) userText.sawWhat = redactedTyped.sawWhat;
+  if (draft.userText.whereSeen !== undefined) userText.whereSeen = redactedTyped.whereSeen;
+  if (isFeedbackFrequency(draft.userText.frequency)) userText.frequency = draft.userText.frequency;
+  if (isFeedbackBlockingLevel(draft.userText.blockingLevel)) userText.blockingLevel = draft.userText.blockingLevel;
 
   const id = generateReportId();
   const createdAt = new Date().toISOString();
@@ -308,6 +341,7 @@ export function createFeedbackReport(
     privacy,
     outputs: { markdown: '', emailText: '', githubIssueUrl: '', mailtoUrl: '' },
   };
+  if (draft.area !== undefined) report.area = draft.area;
   // Surface the agent-attached evidence in the report so it propagates to
   // markdown, emailText, and any later consumer.
   // Redact sensitive values (paths/tokens/env) from agentDraft string fields.

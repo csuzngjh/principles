@@ -6,14 +6,26 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "../../components/ui/dialog.js";
+import {
   createFeedbackReport,
   listFeedbackReports,
   getFeedbackReport,
   deleteFeedbackReport,
   fetchConfigSummary,
+  fetchFeedbackChannels,
+  submitFeedbackReport,
+  markFeedbackReportSent,
   request,
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
+import type { FeedbackChannelStatusData } from "../../utils/validators.js";
 import {
   parseDraftRecord,
   parseDraftSummary,
@@ -21,37 +33,94 @@ import {
   getErrorMessage,
   buildFeedbackContextFromSearchParams,
   buildFeedbackDiagnostics,
+  deriveFeedbackArea,
 } from "../ReportProblemValidators.js";
-import type { FeedbackDraftSummary, DraftRecord, FeedbackType, UserSeverity } from "../ReportProblemValidators.js";
+import type {
+  FeedbackDraftSummary,
+  DraftRecord,
+  FeedbackType,
+  FeedbackFrequency,
+  FeedbackBlockingLevel,
+} from "../ReportProblemValidators.js";
 
 // ── Form state ────────────────────────────────────────────────────────────────
 
 interface FormState {
   type: FeedbackType;
-  severity: UserSeverity | undefined;
   title: string;
   description: string;
+  // bug 模板
   stepsToReproduce: string;
   expectedBehavior: string;
   actualBehavior: string;
+  // 类型化新增(Slice 3, spec §6):全部可选,按 type 条件渲染
+  frequency: FeedbackFrequency | undefined;
+  blockingLevel: FeedbackBlockingLevel | undefined;
+  goal: string;
+  stuckAt: string;
+  job: string;
+  currentWorkaround: string;
+  sawWhat: string;
+  whereSeen: string;
   submitting: boolean;
 }
 
 const INITIAL_FORM: FormState = {
   type: "bug",
-  severity: undefined,
   title: "",
   description: "",
   stepsToReproduce: "",
   expectedBehavior: "",
   actualBehavior: "",
+  frequency: undefined,
+  blockingLevel: undefined,
+  goal: "",
+  stuckAt: "",
+  job: "",
+  currentWorkaround: "",
+  sawWhat: "",
+  whereSeen: "",
   submitting: false,
 };
 
 const FEEDBACK_TYPES: FeedbackType[] = ["bug", "confusing", "privacy_concern", "feature_request", "other"];
-const SEVERITY_OPTIONS: UserSeverity[] = ["low", "medium", "high"];
 const VALID_FEEDBACK_TYPES = new Set<string>(FEEDBACK_TYPES);
-const VALID_SEVERITY_OPTIONS = new Set<string>(SEVERITY_OPTIONS);
+const FREQUENCY_OPTIONS: readonly FeedbackFrequency[] = ["always", "often", "sometimes", "once"];
+const BLOCKING_OPTIONS: readonly FeedbackBlockingLevel[] = ["blocked", "workaround", "minor"];
+const VALID_FREQUENCIES = new Set<string>(FREQUENCY_OPTIONS);
+const VALID_BLOCKING = new Set<string>(BLOCKING_OPTIONS);
+
+// 每类型对应的"补充细节"条件字段(spec §6)。标题与描述恒显;其余按 type 折叠。
+const PER_TYPE_DETAIL_FIELDS: Record<FeedbackType, Array<keyof FormState>> = {
+  bug: ["stepsToReproduce", "expectedBehavior", "actualBehavior", "frequency", "blockingLevel"],
+  confusing: ["goal", "stuckAt", "blockingLevel"],
+  feature_request: ["job", "currentWorkaround"],
+  privacy_concern: ["sawWhat", "whereSeen"],
+  other: [],
+};
+
+// 文本类字段的 i18n 标签键(select 类频率/阻塞度单独处理)。
+const DETAIL_FIELD_LABEL: Record<string, string> = {
+  stepsToReproduce: "pages.reportProblem.form.stepsLabel",
+  expectedBehavior: "pages.reportProblem.form.expectedLabel",
+  actualBehavior: "pages.reportProblem.form.actualLabel",
+  goal: "pages.reportProblem.form.goalLabel",
+  stuckAt: "pages.reportProblem.form.stuckAtLabel",
+  job: "pages.reportProblem.form.jobLabel",
+  currentWorkaround: "pages.reportProblem.form.currentWorkaroundLabel",
+  sawWhat: "pages.reportProblem.form.sawWhatLabel",
+  whereSeen: "pages.reportProblem.form.whereSeenLabel",
+};
+
+const CHANNEL_ORDER: Array<FeedbackChannelStatusData["id"]> = ["ingest", "github", "email", "file"];
+
+// 类型默认值按来源推断(spec §6):failed-tasks / error 入口 → bug,通用入口 → other。
+function defaultTypeFromParams(searchParams: URLSearchParams): FeedbackType {
+  const context = buildFeedbackContextFromSearchParams(searchParams);
+  const area = deriveFeedbackArea(context);
+  if (area === "failed_tasks" || area === "error") return "bug";
+  return "other";
+}
 
 // ── Runtime validator for drafts list envelope (H section / ERR-001/005/009) ─
 
@@ -185,6 +254,23 @@ function PrivacySection({ draft }: { draft: DraftRecord | null }) {
   );
 }
 
+function StatusBadge({ draft }: { draft: DraftRecord }) {
+  const { t } = useTranslation();
+  const submitted = draft.status === "submitted";
+  return (
+    <span
+      className={
+        submitted
+          ? "inline-flex items-center gap-1 px-2 py-[2px] rounded-[3px] text-[11px] font-medium border border-green-200 bg-green-50 text-green-700"
+          : "inline-flex items-center gap-1 px-2 py-[2px] rounded-[3px] text-[11px] font-medium border border-line bg-surface text-ink-3"
+      }
+    >
+      <span className={submitted ? "w-1.5 h-1.5 rounded-full bg-green-500" : "w-1.5 h-1.5 rounded-full bg-ink-3"} aria-hidden="true" />
+      {submitted ? t("pages.reportProblem.draft.sentBadge") : t("pages.reportProblem.draft.draftBadge")}
+    </span>
+  );
+}
+
 function DraftCard({ draft, onCopyMarkdown, onCopyEmail, onOpenGithub, onOpenEmail, onDelete }: {
   draft: DraftRecord;
   onCopyMarkdown: () => void;
@@ -198,10 +284,33 @@ function DraftCard({ draft, onCopyMarkdown, onCopyEmail, onOpenGithub, onOpenEma
 
   return (
     <article className="bg-panel border border-line rounded-[6px] p-4">
-      <div className="font-mono text-[11px] text-ink-3 mb-2">
-        {t("pages.reportProblem.draft.savedAt", { id: draft.id, at: draft.createdAt })}
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="font-mono text-[11px] text-ink-3">
+          {t("pages.reportProblem.draft.savedAt", { id: draft.id, at: draft.createdAt })}
+        </div>
+        <StatusBadge draft={draft} />
       </div>
-      <div className="font-semibold text-ink mb-3">{draft.title}</div>
+      <div className="font-semibold text-ink mb-1">{draft.title}</div>
+
+      {/* 回执 / 提交元数据(Slice 3, spec §11.3) */}
+      {(draft.status === "submitted" || draft.trackingId || draft.submittedVia) && (
+        <div className="text-ink-3 text-[12px] mb-2 space-y-0.5">
+          {draft.submittedVia && (
+            <div>via {draft.submittedVia}{draft.submittedAt ? ` · ${draft.submittedAt}` : ""}</div>
+          )}
+          {draft.trackingId && (
+            <div className="font-mono">{t("pages.reportProblem.channel.receiptTrackingId")}: {draft.trackingId}</div>
+          )}
+          {draft.externalUrl && (
+            <div>
+              <a href={draft.externalUrl} target="_blank" rel="noreferrer noopener" className="text-gov underline hover:text-gov-2">
+                {t("pages.reportProblem.channel.openIssue")}
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -285,8 +394,15 @@ function SavedDraftsSection({ drafts, onLoad, onDelete }: {
           {drafts.map((draft) => (
             <article key={draft.id} className="bg-panel border border-line rounded-[6px] px-4 py-3 flex items-center justify-between gap-4">
               <div className="min-w-0 flex-1">
-                <div className="font-mono text-[11px] text-ink-3 mb-1">
-                  {enumLabel('feedbackType', draft.type, t)} · {draft.createdAt}
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="font-mono text-[11px] text-ink-3">
+                    {enumLabel('feedbackType', draft.type, t)} · {draft.createdAt}
+                  </div>
+                  {draft.status === "submitted" && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-[2px] text-[10px] font-medium border border-green-200 bg-green-50 text-green-700">
+                      {t("pages.reportProblem.draft.sentBadge")}
+                    </span>
+                  )}
                 </div>
                 <div className="text-ink text-sm truncate">{draft.title}</div>
               </div>
@@ -314,6 +430,181 @@ function SavedDraftsSection({ drafts, onLoad, onDelete }: {
   );
 }
 
+// ── Channel ladder (Slice 3, spec §4/§11) ─────────────────────────────────────
+
+function ChannelSubmitArea({ draft, channels, onSubmitIngest, onSubmitGithub, onOpenEmail, onExportFile, onMarkSent }: {
+  draft: DraftRecord;
+  channels: FeedbackChannelStatusData[] | null;
+  onSubmitIngest: () => void;
+  onSubmitGithub: () => void;
+  onOpenEmail: () => void;
+  onExportFile: () => void;
+  onMarkSent: (via: "email" | "file") => void;
+}) {
+  const { t } = useTranslation();
+  const byId = useMemo(() => {
+    const m = new Map<FeedbackChannelStatusData["id"], FeedbackChannelStatusData>();
+    for (const c of channels ?? []) m.set(c.id, c);
+    return m;
+  }, [channels]);
+  const submitted = draft.status === "submitted";
+
+  const renderChannelButton = (id: FeedbackChannelStatusData["id"]) => {
+    const status = byId.get(id);
+    const available = status?.available ?? false;
+
+    // email: 客户端动作,但依赖 maintainer_email 已配置(占位地址不可投递,
+    // 探测不可用时禁用并内联显示原因 + nextAction,与 ingest/github 一致)。
+    if (id === "email") {
+      return (
+        <div key="email" className="space-y-1">
+          <button
+            type="button"
+            disabled={!available}
+            onClick={onOpenEmail}
+            className={
+              available
+                ? "w-full border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[8px] text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                : "w-full border border-line bg-surface text-ink-4 rounded-[3px] px-[14px] py-[8px] text-[13px] cursor-not-allowed"
+            }
+          >
+            {t("pages.reportProblem.channel.email")}
+          </button>
+          {!available && (status?.reason || status?.nextAction) && (
+            <p className="text-[11px] text-ink-3 leading-snug">
+              {t("pages.reportProblem.channel.disablingReason", { reason: status?.reason ?? "" })}
+              {status?.nextAction ? ` · ${status.nextAction}` : ""}
+            </p>
+          )}
+          {!submitted && (
+            <button
+              type="button"
+              onClick={() => onMarkSent("email")}
+              className="text-[11px] text-ink-3 hover:text-gov underline underline-offset-2 text-left"
+            >
+              {t("pages.reportProblem.draft.markAsSent")}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    if (id === "file") {
+      return (
+        <div key="file" className="space-y-1">
+          <button
+            type="button"
+            onClick={onExportFile}
+            className="w-full border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[8px] text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          >
+            {t("pages.reportProblem.channel.file")}
+          </button>
+          {!submitted && (
+            <button
+              type="button"
+              onClick={() => onMarkSent("file")}
+              className="text-[11px] text-ink-3 hover:text-gov underline underline-offset-2 text-left"
+            >
+              {t("pages.reportProblem.draft.markAsSent")}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    // ingest / github: 服务端通道,需探测可用性(rc-9: 禁用显示原因 + nextAction)。
+    const isIngest = id === "ingest";
+    const label = isIngest ? t("pages.reportProblem.channel.ingest") : t("pages.reportProblem.channel.github");
+    const onClick = isIngest ? onSubmitIngest : onSubmitGithub;
+    return (
+      <div key={id} className="space-y-1">
+        <button
+          type="button"
+          disabled={!available}
+          onClick={onClick}
+          className={
+            available
+              ? "w-full border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[8px] text-[13px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              : "w-full border border-line bg-surface text-ink-4 rounded-[3px] px-[14px] py-[8px] text-[13px] cursor-not-allowed"
+          }
+        >
+          {label}
+        </button>
+        {!available && (status?.reason || status?.nextAction) && (
+          <p className="text-[11px] text-ink-3 leading-snug">
+            {t("pages.reportProblem.channel.disablingReason", { reason: status?.reason ?? "" })}
+            {status?.nextAction ? ` · ${status.nextAction}` : ""}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <section className="mt-8" aria-labelledby="section-channel">
+      <SectionTitle id="section-channel">{t("pages.reportProblem.channel.title")}</SectionTitle>
+      <p className="text-ink-3 text-[13px] leading-relaxed mb-4">
+        {t("pages.reportProblem.channel.description")}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {CHANNEL_ORDER.map(renderChannelButton)}
+      </div>
+    </section>
+  );
+}
+
+function ConfirmSubmitDialog({ draft, channel, open, busy, onConfirm, onCancel }: {
+  draft: DraftRecord;
+  channel: "ingest" | "github";
+  open: boolean;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o && !busy) onCancel(); }}>
+      <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle>{t("pages.reportProblem.channel.confirmTitle")}</DialogTitle>
+          <DialogDescription>
+            {channel === "ingest"
+              ? t("pages.reportProblem.channel.confirmDescription")
+              : t("pages.reportProblem.channel.github")}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex-1 min-h-0 overflow-auto space-y-2">
+          <div className="font-mono text-[12px] text-ink-3">{draft.title}</div>
+          <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+            {t("pages.reportProblem.channel.confirmBodyLabel")}
+          </h3>
+          <pre className="whitespace-pre-wrap text-ink-2 text-[13px] leading-relaxed bg-surface border border-line rounded-[3px] p-3 max-h-[320px] overflow-auto">
+            {draft.outputs.markdown}
+          </pre>
+        </div>
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 disabled:opacity-50"
+          >
+            {t("pages.reportProblem.channel.confirmCancel")}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy ? t("pages.reportProblem.form.submitting") : t("pages.reportProblem.channel.confirmSubmit")}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main page component ──────────────────────────────────────────────────────
 
 type LoadingState = "loading" | "loaded" | "error";
@@ -321,26 +612,38 @@ type LoadingState = "loading" | "loaded" | "error";
 export function ReportProblemPage() {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
-  const [form, setForm] = useState<FormState>(INITIAL_FORM);
+  const [form, setForm] = useState<FormState>(() => ({
+    ...INITIAL_FORM,
+    type: defaultTypeFromParams(searchParams),
+  }));
   const [drafts, setDrafts] = useState<FeedbackDraftSummary[]>([]);
   const [currentDraft, setCurrentDraft] = useState<DraftRecord | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
-  // Task 6: read context identifiers (painId, principleId, approvalId,
-  // activationId, taskId, source, page) from URL query params so the feedback
-  // report can be associated with the originating entity.
+  // ── Channel ladder state (Slice 3) ──
+  const [channels, setChannels] = useState<FeedbackChannelStatusData[] | null>(null);
+  const [confirmCtx, setConfirmCtx] = useState<{ channel: "ingest" | "github" } | null>(null);
+  const [submittingChannel, setSubmittingChannel] = useState(false);
+
   const contextFromUrl = useMemo(
     () => buildFeedbackContextFromSearchParams(searchParams),
     [searchParams],
   );
 
-  // ── Load drafts on mount ─────────────────────────────────────────────────
+  const areaFromUrl = useMemo(() => deriveFeedbackArea(contextFromUrl), [contextFromUrl]);
+
+  // 类型切换时:有细节字段的类型自动展开"补充细节"。
+  useEffect(() => {
+    setShowDetails(PER_TYPE_DETAIL_FIELDS[form.type].length > 0);
+  }, [form.type]);
+
+  // ── Load drafts + channels on mount ─────────────────────────────────────
   const loadDrafts = useCallback(async () => {
     const result = await listFeedbackReports();
     if (!result.success) {
-      // ERR-002: graceful degradation with reason
       setLoadError(result.error ?? "Failed to load drafts");
       setLoadingState("loaded");
       return;
@@ -357,14 +660,48 @@ export function ReportProblemPage() {
     setLoadingState("loaded");
   }, []);
 
+  const loadChannels = useCallback(async () => {
+    const result = await fetchFeedbackChannels();
+    if (!result.success || !result.data) {
+      setChannels(null);
+      return;
+    }
+    setChannels(result.data.channels);
+  }, []);
+
   useEffect(() => {
     loadDrafts();
-  }, [loadDrafts]);
+    loadChannels();
+  }, [loadDrafts, loadChannels]);
 
   // ── Form handlers ────────────────────────────────────────────────────────
   const handleFieldChange = useCallback(<K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   }, []);
+
+  const buildInput = useCallback(() => {
+    const base = {
+      type: form.type as FeedbackType,
+      title: form.title.trim(),
+      description: form.description.trim(),
+      stepsToReproduce: form.stepsToReproduce.trim() || undefined,
+      expectedBehavior: form.expectedBehavior.trim() || undefined,
+      actualBehavior: form.actualBehavior.trim() || undefined,
+      // 类型化新字段(全部可选,按 type 条件提交)
+      goal: form.goal.trim() || undefined,
+      stuckAt: form.stuckAt.trim() || undefined,
+      job: form.job.trim() || undefined,
+      currentWorkaround: form.currentWorkaround.trim() || undefined,
+      sawWhat: form.sawWhat.trim() || undefined,
+      whereSeen: form.whereSeen.trim() || undefined,
+      frequency: form.frequency ?? undefined,
+      blockingLevel: form.blockingLevel ?? undefined,
+      ...(areaFromUrl ? { area: areaFromUrl } : {}),
+      ...(contextFromUrl?.taskId ? { taskId: contextFromUrl.taskId } : {}),
+      ...(contextFromUrl ? { context: contextFromUrl } : {}),
+    };
+    return base;
+  }, [form, areaFromUrl, contextFromUrl]);
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -377,26 +714,6 @@ export function ReportProblemPage() {
     setForm((prev) => ({ ...prev, submitting: true }));
 
     try {
-      const input = {
-        type: form.type,
-        title: form.title.trim(),
-        description: form.description.trim(),
-        stepsToReproduce: form.stepsToReproduce.trim() || undefined,
-        expectedBehavior: form.expectedBehavior.trim() || undefined,
-        actualBehavior: form.actualBehavior.trim() || undefined,
-        severity: form.severity,
-        // P0-1: 传递顶层 taskId 触发 agentDraft 合并（Task 13）
-        // contextFromUrl.taskId 来自 URL query（FailedTasksPage 跳转时传入）
-        // createFeedbackReport 检查 draft.taskId（顶层）决定是否从 pending_agent_drafts 表读取
-        ...(contextFromUrl?.taskId ? { taskId: contextFromUrl.taskId } : {}),
-        ...(contextFromUrl ? { context: contextFromUrl } : {}),
-      };
-
-      // ── Collect diagnostics concurrently (Task 5) ───────────────────────
-      // Fetch three APIs in parallel; Promise.allSettled ensures a single
-      // failure doesn't block the others. buildFeedbackDiagnostics then
-      // assembles a diagnostics object with unavailableReason for each failed
-      // field (rc-9-no-silent-fallback).
       const [configSettled, lifecycleSettled, healthSettled] = await Promise.allSettled([
         fetchConfigSummary(),
         request('/api/v1/lifecycle/state'),
@@ -408,7 +725,7 @@ export function ReportProblemPage() {
         healthSettled,
       );
 
-      const result = await createFeedbackReport(input, diagnostics);
+      const result = await createFeedbackReport(buildInput(), diagnostics);
 
       if (!result.success) {
         toast.error(getErrorMessage(result, t("pages.reportProblem.errors.createFailed")));
@@ -416,42 +733,34 @@ export function ReportProblemPage() {
         return;
       }
 
-      // Validate response with parseEnvelopeReport (ERR-001/005/009)
-      const parsed = parseEnvelopeReport(result.data);
-      if (parsed === null) {
-        // Try parseDraftRecord directly as fallback — no `as` cast (ERR-001/005)
-        let directParsed: DraftRecord | null = null;
-        if (isRecord(result.data) && Object.hasOwn(result.data, "report")) {
-          const reportValue = result.data["report"];
-          directParsed = parseDraftRecord(reportValue);
-        } else {
-          directParsed = parseDraftRecord(result.data);
-        }
-
-        if (directParsed === null) {
-          toast.error(t("pages.reportProblem.errors.createFailed"));
-          setForm((prev) => ({ ...prev, submitting: false }));
-          return;
-        }
-        setCurrentDraft(directParsed);
-      } else {
-        setCurrentDraft(parsed);
+      let parsed: DraftRecord | null = parseEnvelopeReport(result.data);
+      if (parsed === null && isRecord(result.data) && Object.hasOwn(result.data, "report")) {
+        parsed = parseDraftRecord(result.data["report"]);
       }
 
+      if (parsed === null) {
+        toast.error(t("pages.reportProblem.errors.createFailed"));
+        setForm((prev) => ({ ...prev, submitting: false }));
+        return;
+      }
+      setCurrentDraft(parsed);
       toast.success(t("pages.reportProblem.toast.draftCreated"));
 
-      // Reset form
-      setForm(INITIAL_FORM);
+      setForm((prev) => ({
+        ...INITIAL_FORM,
+        type: prev.type,
+        frequency: undefined,
+        blockingLevel: undefined,
+        submitting: false,
+      }));
       setShowPreview(false);
-
-      // Reload drafts list
       await loadDrafts();
     } catch {
       toast.error(t("pages.reportProblem.errors.createFailed"));
     } finally {
       setForm((prev) => ({ ...prev, submitting: false }));
     }
-  }, [form, t, loadDrafts, contextFromUrl]);
+  }, [form, t, loadDrafts, buildInput]);
 
   // ── Draft actions ────────────────────────────────────────────────────────
   const handleLoadDraft = useCallback(async (id: string) => {
@@ -468,18 +777,26 @@ export function ReportProblemPage() {
     setCurrentDraft(parsed);
     setForm({
       type: parsed.type,
-      severity: parsed.userText.userSeverity,
       title: parsed.title,
       description: parsed.userText.description,
       stepsToReproduce: parsed.userText.stepsToReproduce ?? "",
       expectedBehavior: parsed.userText.expectedBehavior ?? "",
       actualBehavior: parsed.userText.actualBehavior ?? "",
+      frequency: parsed.userText.frequency,
+      blockingLevel: parsed.userText.blockingLevel,
+      goal: parsed.userText.goal ?? "",
+      stuckAt: parsed.userText.stuckAt ?? "",
+      job: parsed.userText.job ?? "",
+      currentWorkaround: parsed.userText.currentWorkaround ?? "",
+      sawWhat: parsed.userText.sawWhat ?? "",
+      whereSeen: parsed.userText.whereSeen ?? "",
       submitting: false,
     });
   }, [t]);
 
   const handleCopyMarkdown = useCallback(async (draft: DraftRecord) => {
     try {
+      if (!draft.outputs.markdown) return;
       await navigator.clipboard.writeText(draft.outputs.markdown);
       toast.success(t("pages.reportProblem.toast.markdownCopied"));
     } catch {
@@ -489,6 +806,7 @@ export function ReportProblemPage() {
 
   const handleCopyEmail = useCallback(async (draft: DraftRecord) => {
     try {
+      if (!draft.outputs.emailText) return;
       await navigator.clipboard.writeText(draft.outputs.emailText);
       toast.success(t("pages.reportProblem.toast.emailCopied"));
     } catch {
@@ -507,6 +825,67 @@ export function ReportProblemPage() {
       window.open(draft.outputs.mailtoUrl, "_blank");
     }
   }, []);
+
+  const handleExportFile = useCallback((draft: DraftRecord) => {
+    const blob = new Blob([draft.outputs.markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `PD-feedback-${draft.id}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const refreshDraft = useCallback(async (id: string) => {
+    const result = await getFeedbackReport(id);
+    if (result.success) {
+      const parsed = parseEnvelopeReport(result.data);
+      if (parsed) setCurrentDraft(parsed);
+    }
+  }, []);
+
+  const handleSubmitChannel = useCallback(async (channel: "ingest" | "github") => {
+    const draft = currentDraft;
+    if (!draft) return;
+    setSubmittingChannel(true);
+    try {
+      const result = await submitFeedbackReport(draft.id, channel);
+      if (!result.success) {
+        toast.error(getErrorMessage(result, t("pages.reportProblem.toast.submitFailed")));
+        return;
+      }
+      await refreshDraft(draft.id);
+      await loadDrafts();
+      const data = result.data;
+      if (data?.writeBackFailed) {
+        toast.error(t("pages.reportProblem.channel.writeBackNote"));
+      } else if (data?.alreadySubmitted) {
+        toast.info(t("pages.reportProblem.channel.alreadySubmitted"));
+      } else {
+        toast.success(t("pages.reportProblem.toast.submitSucceeded", { trackingId: data?.trackingId ?? "" }));
+      }
+    } catch {
+      toast.error(t("pages.reportProblem.toast.submitFailed"));
+    } finally {
+      setSubmittingChannel(false);
+      setConfirmCtx(null);
+    }
+  }, [currentDraft, t, refreshDraft, loadDrafts]);
+
+  const handleMarkSent = useCallback(async (via: "email" | "file") => {
+    const draft = currentDraft;
+    if (!draft) return;
+    const result = await markFeedbackReportSent(draft.id, via);
+    if (!result.success) {
+      toast.error(getErrorMessage(result, t("pages.reportProblem.toast.submitFailed")));
+      return;
+    }
+    toast.success(t("pages.reportProblem.toast.markSentSucceeded"));
+    await refreshDraft(draft.id);
+    await loadDrafts();
+  }, [currentDraft, t, refreshDraft, loadDrafts]);
 
   const handleDeleteDraft = useCallback(async (id: string) => {
     const result = await deleteFeedbackReport(id);
@@ -550,6 +929,75 @@ export function ReportProblemPage() {
     );
   }
 
+  const detailFields = PER_TYPE_DETAIL_FIELDS[form.type];
+
+  const renderDetailField = (key: keyof FormState) => {
+    if (key === "frequency") {
+      const label = t("pages.reportProblem.form.frequencyLabel");
+      return (
+        <div key="frequency">
+          <label htmlFor="feedback-frequency" className="block text-ink-2 text-[13px] mb-1.5">{label}</label>
+          <select
+            id="feedback-frequency"
+            value={form.frequency ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "") handleFieldChange("frequency", undefined);
+              else if (VALID_FREQUENCIES.has(v)) handleFieldChange("frequency", v as FeedbackFrequency);
+            }}
+            className="border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov"
+          >
+            <option value="">{t("pages.reportProblem.form.frequencyNotSet")}</option>
+            {FREQUENCY_OPTIONS.map((f) => (
+              <option key={f} value={f}>
+                {t(`pages.reportProblem.form.frequency${f.charAt(0).toUpperCase() + f.slice(1)}` as `pages.reportProblem.form.frequency${string}`)}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+    if (key === "blockingLevel") {
+      const label = t("pages.reportProblem.form.blockingLevelLabel");
+      return (
+        <div key="blockingLevel">
+          <label htmlFor="feedback-blocking" className="block text-ink-2 text-[13px] mb-1.5">{label}</label>
+          <select
+            id="feedback-blocking"
+            value={form.blockingLevel ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "") handleFieldChange("blockingLevel", undefined);
+              else if (VALID_BLOCKING.has(v)) handleFieldChange("blockingLevel", v as FeedbackBlockingLevel);
+            }}
+            className="border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov"
+          >
+            <option value="">{t("pages.reportProblem.form.blockingLevelNotSet")}</option>
+            {BLOCKING_OPTIONS.map((b) => (
+              <option key={b} value={b}>
+                {t(`pages.reportProblem.form.blockingLevel${b.charAt(0).toUpperCase() + b.slice(1)}` as `pages.reportProblem.form.blockingLevel${string}`)}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+    const value = form[key];
+    const label = t(DETAIL_FIELD_LABEL[key] ?? "pages.reportProblem.form.descriptionLabel");
+    return (
+      <div key={key}>
+        <label htmlFor={`feedback-${key}`} className="block text-ink-2 text-[13px] mb-1.5">{label}</label>
+        <textarea
+          id={`feedback-${key}`}
+          value={typeof value === "string" ? value : ""}
+          onChange={(e) => handleFieldChange(key, e.target.value as FormState[typeof key])}
+          rows={key === "stepsToReproduce" ? 3 : 2}
+          className="w-full border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov resize-y"
+        />
+      </div>
+    );
+  };
+
   // ── Loaded state ─────────────────────────────────────────────────────────
   return (
     <PageShell>
@@ -586,7 +1034,7 @@ export function ReportProblemPage() {
               onChange={(e) => {
                 const val = e.target.value;
                 if (VALID_FEEDBACK_TYPES.has(val)) {
-                  handleFieldChange("type", val as FeedbackType);
+                  setForm((prev) => ({ ...prev, type: val as FeedbackType, frequency: undefined, blockingLevel: undefined }));
                 }
               }}
               className="border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov"
@@ -594,33 +1042,6 @@ export function ReportProblemPage() {
               {FEEDBACK_TYPES.map((ft) => (
                 <option key={ft} value={ft}>
                   {t(`pages.reportProblem.form.types.${ft}`)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Severity */}
-          <div>
-            <label htmlFor="feedback-severity" className="block text-ink-2 text-[13px] mb-1.5">
-              {t("pages.reportProblem.form.severity")}
-            </label>
-            <select
-              id="feedback-severity"
-              value={form.severity ?? ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === "") {
-                  handleFieldChange("severity", undefined);
-                } else if (VALID_SEVERITY_OPTIONS.has(val)) {
-                  handleFieldChange("severity", val as UserSeverity);
-                }
-              }}
-              className="border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov"
-            >
-              <option value="">{t("pages.reportProblem.form.severityNotSet")}</option>
-              {SEVERITY_OPTIONS.map((sev) => (
-                <option key={sev} value={sev}>
-                  {t(`pages.reportProblem.form.severity${sev.charAt(0).toUpperCase() + sev.slice(1)}` as `pages.reportProblem.form.severity${string}`)}
                 </option>
               ))}
             </select>
@@ -640,7 +1061,7 @@ export function ReportProblemPage() {
             />
           </div>
 
-          {/* Description */}
+          {/* Description (恒显必填) */}
           <div>
             <label htmlFor="feedback-description" className="block text-ink-2 text-[13px] mb-1.5">
               {t("pages.reportProblem.form.descriptionLabel")}
@@ -654,47 +1075,22 @@ export function ReportProblemPage() {
             />
           </div>
 
-          {/* Steps to reproduce */}
-          <div>
-            <label htmlFor="feedback-steps" className="block text-ink-2 text-[13px] mb-1.5">
-              {t("pages.reportProblem.form.stepsLabel")}
-            </label>
-            <textarea
-              id="feedback-steps"
-              value={form.stepsToReproduce}
-              onChange={(e) => handleFieldChange("stepsToReproduce", e.target.value)}
-              rows={3}
-              className="w-full border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov resize-y"
-            />
-          </div>
+          {/* 渐进披露:类型条件字段折叠在"补充细节"下(spec §6) */}
+          {detailFields.length > 0 && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowDetails((prev) => !prev)}
+                className="text-gov text-[13px] font-medium underline underline-offset-2 hover:text-gov-2 transition-colors"
+              >
+                {showDetails ? t("pages.reportProblem.form.detailsHide") : t("pages.reportProblem.form.detailsToggle")}
+              </button>
+            </div>
+          )}
 
-          {/* Expected behavior */}
-          <div>
-            <label htmlFor="feedback-expected" className="block text-ink-2 text-[13px] mb-1.5">
-              {t("pages.reportProblem.form.expectedLabel")}
-            </label>
-            <textarea
-              id="feedback-expected"
-              value={form.expectedBehavior}
-              onChange={(e) => handleFieldChange("expectedBehavior", e.target.value)}
-              rows={2}
-              className="w-full border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov resize-y"
-            />
-          </div>
-
-          {/* Actual behavior */}
-          <div>
-            <label htmlFor="feedback-actual" className="block text-ink-2 text-[13px] mb-1.5">
-              {t("pages.reportProblem.form.actualLabel")}
-            </label>
-            <textarea
-              id="feedback-actual"
-              value={form.actualBehavior}
-              onChange={(e) => handleFieldChange("actualBehavior", e.target.value)}
-              rows={2}
-              className="w-full border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov resize-y"
-            />
-          </div>
+          {showDetails && (
+            <div className="space-y-4 border-t border-line pt-4">{detailFields.map(renderDetailField)}</div>
+          )}
 
           {/* Submit */}
           <div className="flex items-center gap-3 pt-2">
@@ -735,7 +1131,20 @@ export function ReportProblemPage() {
       {/* Section 2: Privacy Boundary */}
       <PrivacySection draft={currentDraft} />
 
-      {/* Current draft card (after submission) */}
+      {/* Channel ladder — 仅在存在当前草稿时展示(spec §4/§11.2) */}
+      {currentDraft && (
+        <ChannelSubmitArea
+          draft={currentDraft}
+          channels={channels}
+          onSubmitIngest={() => setConfirmCtx({ channel: "ingest" })}
+          onSubmitGithub={() => setConfirmCtx({ channel: "github" })}
+          onOpenEmail={() => handleOpenEmail(currentDraft)}
+          onExportFile={() => handleExportFile(currentDraft)}
+          onMarkSent={handleMarkSent}
+        />
+      )}
+
+      {/* Current draft card */}
       {currentDraft && (
         <section className="mt-8" aria-labelledby="section-current-draft">
           <SectionTitle id="section-current-draft">{t("pages.reportProblem.draft.title")}</SectionTitle>
@@ -767,6 +1176,18 @@ export function ReportProblemPage() {
       <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">
         {t("pages.reportProblem.privacy.guarantee")}
       </footer>
+
+      {/* 确认面板(同意门,spec §11.1) */}
+      {currentDraft && confirmCtx && (
+        <ConfirmSubmitDialog
+          draft={currentDraft}
+          channel={confirmCtx.channel}
+          open
+          busy={submittingChannel}
+          onConfirm={() => handleSubmitChannel(confirmCtx.channel)}
+          onCancel={() => setConfirmCtx(null)}
+        />
+      )}
       </div>
     </PageShell>
   );
