@@ -32,6 +32,6 @@ export async function onRequestPost(context: {
 function jsonResponse(result: RelayResult): Response {
   return new Response(JSON.stringify(result.json), {
     status: result.status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...result.headers },
   });
 }

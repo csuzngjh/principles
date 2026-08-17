@@ -279,7 +279,7 @@ describe('handleFeedbackSubmit security posture', () => {
     expect(result.status).toBe(413);
   });
 
-  it('returns 429 after the hourly rate limit, with retry-after', async () => {
+  it('returns 429 after the hourly rate limit, with Retry-After header', async () => {
     const env = makeEnv();
     const ip = '9.9.9.9';
     const hourBucket = Math.floor(FIXED_NOW / (60 * 60 * 1000));
@@ -287,6 +287,8 @@ describe('handleFeedbackSubmit security posture', () => {
     const { body } = await freshBody();
     const { result } = await submit({ env, body, ip });
     expect(result.status).toBe(429);
+    // spec §9.2: 超限 429 + Retry-After (seconds until the hour bucket rolls).
+    expect(result.headers?.['Retry-After']).toMatch(/^\d+$/);
     if (!('reason' in (result.json as object))) throw new Error('expected json');
     expect((result.json as { nextAction?: string }).nextAction).toContain('retry');
   });
@@ -373,10 +375,16 @@ describe('handleFeedbackSubmit first-vs-duplicate branch', () => {
     expect(linearCalls).toHaveLength(1);
     const call = (linearCalls[0] as { body: unknown }).body as {
       query: string;
-      variables: { issueId: string };
+      variables: { issueId: string; body: string };
     };
     expect(call.query).toContain('commentCreate');
     expect(call.variables.issueId).toBe('ISS-1');
+    // spec §9.3: duplicate comment carries the new report summary —
+    // 时间 / 阻塞度 / 描述前 200 字 — plus the fingerprint footer.
+    expect(call.variables.body).toContain('时间: 2023-11-14T22:13:20.000Z');
+    expect(call.variables.body).toContain('阻塞度: 未填写');
+    expect(call.variables.body).toContain('描述摘要: Tasks stay in queued forever.');
+    expect(call.variables.body).toContain('反馈通道指纹');
 
     // KV count increments with current-iteration data.
     const fpRecord = JSON.parse(kv.get(`fp:${r.fingerprint}`) as string);

@@ -1164,11 +1164,13 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
  */
 function resolveGitUserEmail(workspaceDir: string): string | undefined {
   try {
-    const stdout = execSync(`git -C "${workspaceDir}" config user.email`, {
+    // CodeQL fix: execFileSync with an argv array — no shell interpolation of
+    // workspaceDir (previously execSync + shell:'cmd' was flagged for command
+    // injection when the path contains shell metacharacters).
+    const stdout = execFileSync('git', ['-C', workspaceDir, 'config', 'user.email'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5000,
-      shell: 'cmd',
     }).trim();
     return stdout.length > 0 ? stdout : undefined;
   } catch {

@@ -453,17 +453,29 @@ function ChannelSubmitArea({ draft, channels, onSubmitIngest, onSubmitGithub, on
     const status = byId.get(id);
     const available = status?.available ?? false;
 
-    // email / file: 依赖客户端动作(打开邮件 / 导出),恒可尝试。
+    // email: 客户端动作,但依赖 maintainer_email 已配置(占位地址不可投递,
+    // 探测不可用时禁用并内联显示原因 + nextAction,与 ingest/github 一致)。
     if (id === "email") {
       return (
         <div key="email" className="space-y-1">
           <button
             type="button"
+            disabled={!available}
             onClick={onOpenEmail}
-            className="w-full border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[8px] text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            className={
+              available
+                ? "w-full border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[8px] text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                : "w-full border border-line bg-surface text-ink-4 rounded-[3px] px-[14px] py-[8px] text-[13px] cursor-not-allowed"
+            }
           >
             {t("pages.reportProblem.channel.email")}
           </button>
+          {!available && (status?.reason || status?.nextAction) && (
+            <p className="text-[11px] text-ink-3 leading-snug">
+              {t("pages.reportProblem.channel.disablingReason", { reason: status?.reason ?? "" })}
+              {status?.nextAction ? ` · ${status.nextAction}` : ""}
+            </p>
+          )}
           {!submitted && (
             <button
               type="button"

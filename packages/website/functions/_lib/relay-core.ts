@@ -58,6 +58,8 @@ export interface RelayDeps {
 export interface RelayResult {
   status: number;
   json: unknown;
+  /** Extra response headers (e.g. 429 `Retry-After`, spec §9.2). */
+  headers?: Record<string, string>;
 }
 
 const MAX_BODY_BYTES = 256 * 1024; // spec §9.2 / Console route parity (256KB).
@@ -175,6 +177,32 @@ export function buildRelayIssueTitle(args: {
 /** Append the dedup-aggregation footer (count seen) to the issue body. */
 export function appendAggregationFooter(body: string, count: number): string {
   return `${body.trim()}\n\n---\n_收到 ${count} 条同类反馈。_`;
+}
+
+/**
+ * Duplicate-branch comment per spec §9.3: 新报告摘要(时间/阻塞度/描述前 200 字)
+ * + fingerprint footer. Gives the maintainer triage signal without re-reading
+ * the full report.
+ */
+export function buildDuplicateComment(args: {
+  count: number;
+  atIso: string;
+  blockingLevel?: string;
+  description: string;
+  fingerprint: string;
+}): string {
+  const normalized = args.description.replace(/\s+/g, ' ').trim();
+  const truncated = normalized.slice(0, 200);
+  const ellipsis = normalized.length > truncated.length ? '…' : '';
+  return [
+    `收到一条新的同类反馈(#${args.count})。`,
+    '',
+    `- 时间: ${args.atIso}`,
+    `- 阻塞度: ${args.blockingLevel ?? '未填写'}`,
+    `- 描述摘要: ${truncated}${ellipsis}`,
+    '',
+    `>— 来自反馈通道指纹 ${args.fingerprint.slice(0, 8)}…`,
+  ].join('\n');
 }
 
 export function parseTrackingId(random: () => number): string {
@@ -347,6 +375,7 @@ export async function handleFeedbackSubmit(deps: RelayDeps): Promise<RelayResult
     const retryAfter = Math.ceil((RATE_WINDOW_MS - (t % RATE_WINDOW_MS)) / 1000);
     return {
       status: 429,
+      headers: { 'Retry-After': String(retryAfter) },
       json: { error: 'rate_limited', reason: `too many requests (${rlCount}/${RATE_LIMIT})`, nextAction: `retry in ~${retryAfter}s` },
     };
   }
@@ -473,7 +502,13 @@ export async function handleFeedbackSubmit(deps: RelayDeps): Promise<RelayResult
   }
 
   // Duplicate branch: comment on existing issue + count increment.
-  const commentBody = `收到一条新的同类反馈(#${count})。\n\n>\u2014 来自反馈通道指纹 ${fingerprint.slice(0, 8)}…`;
+  const commentBody = buildDuplicateComment({
+    count,
+    atIso: nowIso,
+    blockingLevel,
+    description: body,
+    fingerprint,
+  });
   const commentReply = await createLinearIssue({
     env,
     request: buildLinearCommentCreate({
