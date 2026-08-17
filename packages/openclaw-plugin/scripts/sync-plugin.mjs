@@ -464,11 +464,15 @@ function verifyBundleContents() {
 
 /**
  * Write a build fingerprint.
+ *
+ * The fingerprint is PD-internal metadata and lives in
+ * dist/build-fingerprint.json — NOT inside openclaw.plugin.json. Unknown
+ * top-level manifest fields are rejected by ClawHub / OpenClaw manifest
+ * validation (manifest-unknown-fields warning).
  */
 function writeBuildFingerprint() {
     const bundleJs = join(SOURCE_DIR, 'dist', 'bundle.js');
-    const manifestSrc = join(SOURCE_DIR, 'openclaw.plugin.json');
-    const manifestDist = join(SOURCE_DIR, 'dist', 'openclaw.plugin.json');
+    const fingerprintPath = join(SOURCE_DIR, 'dist', 'build-fingerprint.json');
 
     let gitSha = 'unknown';
     try {
@@ -489,19 +493,8 @@ function writeBuildFingerprint() {
         console.warn('⚠️  Could not compute bundle MD5');
     }
 
-    let manifest;
-    try {
-        manifest = JSON.parse(readFileSync(manifestDist, 'utf-8'));
-    } catch {
-        try {
-            manifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
-        } catch {
-            console.warn('⚠️  Could not read openclaw.plugin.json');
-            return;
-        }
-    }
-
-    manifest.buildFingerprint = {
+    const fingerprint = {
+        pluginId: 'principles-disciple',
         gitSha,
         bundleMd5,
         builtAt: new Date().toISOString(),
@@ -509,7 +502,7 @@ function writeBuildFingerprint() {
 
     try {
         mkdirSync(join(SOURCE_DIR, 'dist'), { recursive: true });
-        writeFileAtomic(manifestDist, JSON.stringify(manifest, null, 2) + '\n');
+        writeFileAtomic(fingerprintPath, JSON.stringify(fingerprint, null, 2) + '\n');
         console.log(`✅ Build fingerprint: git=${gitSha} bundleMd5=${bundleMd5}`);
     } catch (err) {
         console.warn(`⚠️  Could not write fingerprint: ${err.message}`);
@@ -530,33 +523,41 @@ function writeFileAtomic(filePath, content) {
 
 /**
  * Verify installed fingerprint.
+ *
+ * Compares the PD-internal sidecars dist/build-fingerprint.json in source
+ * and install dirs. The sidecar travels with the dist/ sync item, so after
+ * a full sync both sides exist and must match; a mismatch means the
+ * installed copy is stale.
  */
 function verifyInstalledFingerprint() {
-    const sourceManifest = join(SOURCE_DIR, 'dist', 'openclaw.plugin.json');
-    const installedManifest = join(INSTALL_DIR, 'dist', 'openclaw.plugin.json');
+    const sourceFpPath = join(SOURCE_DIR, 'dist', 'build-fingerprint.json');
+    const installedFpPath = join(INSTALL_DIR, 'dist', 'build-fingerprint.json');
 
-    if (!existsSync(installedManifest)) {
-        console.error('\n❌ Installed manifest not found.');
+    if (!existsSync(installedFpPath)) {
+        console.error('\n❌ Installed fingerprint not found — dist sync incomplete.');
         process.exit(1);
     }
 
+    if (!existsSync(sourceFpPath)) {
+        console.warn('⚠️  Source build fingerprint missing — staleness check skipped.');
+        console.warn('   Run a full build (drop --skip-build) to regenerate dist/build-fingerprint.json.');
+        return;
+    }
+
     try {
-        const sm = JSON.parse(readFileSync(sourceManifest, 'utf-8'));
-        const im = JSON.parse(readFileSync(installedManifest, 'utf-8'));
-        const sourceFp = sm.buildFingerprint;
-        const installedFp = im.buildFingerprint;
+        const sourceFp = JSON.parse(readFileSync(sourceFpPath, 'utf-8'));
+        const installedFp = JSON.parse(readFileSync(installedFpPath, 'utf-8'));
 
-        if (sourceFp && installedFp) {
-            const gitMismatch = sourceFp.gitSha !== installedFp.gitSha;
-            const md5Mismatch = sourceFp.bundleMd5 !== installedFp.bundleMd5;
+        const gitMismatch = sourceFp.gitSha !== installedFp.gitSha;
+        const md5Mismatch = sourceFp.bundleMd5 !== installedFp.bundleMd5;
 
-            if (gitMismatch || md5Mismatch) {
-                console.error('\n❌ INSTALLED PLUGIN IS STALE — FINGERPRINT MISMATCH');
-                process.exit(1);
-            }
+        if (gitMismatch || md5Mismatch) {
+            console.error('\n❌ INSTALLED PLUGIN IS STALE — FINGERPRINT MISMATCH');
+            process.exit(1);
         }
-    } catch {
-        console.warn('⚠️  Fingerprint verification skipped');
+    } catch (err) {
+        console.warn(`⚠️  Fingerprint verification skipped: ${err.message}`);
+        return;
     }
 
     console.log('✅ Installed fingerprint verified');
