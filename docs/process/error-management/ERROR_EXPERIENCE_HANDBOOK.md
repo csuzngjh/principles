@@ -54,6 +54,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-046 | Rollback failure silently swallowed — install result may falsely claim old state restored | PRI-247 |
 | ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
+| ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
 
 ---
 
@@ -786,7 +787,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 96 |
+| Total lessons | 97 |
 | Last updated | 2026-08-16 |
 | Top category | Schema & Type |
 | Recurring errors | 49 |
@@ -1459,4 +1460,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-034 (canonical signal not consumed by caller — same "subset/proxy instead of the full signal" shape; different domain: runtime-config resolver vs CLI prompt-gating), ERR-063 / ERR-021 (CLI flag→handler wiring family — but those are parser-wiring gaps; ERR-096 is in-handler flag semantics, not parsing).
 - **Source**: fix/installer-gateway-lock (self-review before PR)
 - **Date**: 2026-08-12
+- **Recurrence**: None
+
+---
+
+**[ERR-097]** | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins
+
+- **What happened**: Three shipped behaviors violated OpenClaw host contracts because each was designed from PD's side only, treating the host environment as passive storage. (1) The pd-console updater and the installer stored update backups INSIDE `~/.openclaw/extensions/` (`.pd-backup-<ts>` and `<extDir>.backup.<ms>` siblings of the live plugin). OpenClaw plugin discovery scans every extensions/ child directory (its ignore list matches `.bak` / `.backup-` / `.disabled`, NOT `.pd-backup-`), so every backup was re-discovered as a second `principles-disciple` plugin — "duplicate plugin id detected" config warning on EVERY gateway start; 21 stale backup dirs had accumulated on the owner machine. (2) `openclaw.plugin.json` declared BOTH `templates/langs/en/skills` and `templates/langs/zh/skills`. OpenClaw publishes plugin skills by NAME (first declared root wins, no i18n mechanism), so all 23 same-named zh skills were silently dropped with 23 "plugin skill name collision" warnings per startup, and every published skill was English although PD's default language is zh. (3) `OpenClawHostInstaller.install()` created `plugins.allow: ["principles-disciple"]` when the key was absent. Once non-empty, OpenClaw's allowlist gate silently DISABLES every discovered non-bundled plugin not on it (entries.enabled=true does NOT bypass), so installing PD on a machine that auto-loads feishu/tavily would silently disable those plugins.
+- **Why it's wrong**: The host actively interprets everything in its directories and config keys: extensions/ children are plugin candidates, manifest arrays are publication instructions with name-uniqueness semantics, plugins.allow is a hard activation gate. Writing into these without reading the host's loader semantics means PD's own files and config writes become duplicate entities, suppressed content, or silently disabled host features. ERR-074 (same update flow) fixed backup LEAK paths but kept the backup LOCATION — the location itself was the remaining defect.
+- **Generalized failure mode**: When PD places artifacts inside a host-managed directory or writes/creates a host config key, the author must first verify the HOST's interpretation of that path/key (discovery scan rules and ignore conventions, publication-by-name uniqueness, activation/trust gates) from the host's loader code or docs, and place PD's data where the host's contract says it belongs — otherwise PD's own writes turn into duplicate plugins, silently dropped content, or silently disabled user plugins.
+- **Correct approach**: Backups go to `<openclawHome>/pd-backups` (outside every plugin discovery root), with a one-time migration moving legacy backups out of extensions/ at console server startup and before every update/install. The plugin manifest declares exactly ONE skill root (zh, the product default); en templates stay in the package as translations, undeclared. The installer only APPENDS to an existing plugins.allow and never creates one; when the key is absent the install result explains why (creating it would disable other discovered plugins).
+- **How to prevent**: PR-review trigger — any new file/directory created under `~/.openclaw/` (or any host-managed root), or any write to an `openclaw.json` key PD does not own: the PR description must name the host rule that interprets it (discovery scan, ignore list, publication-by-name, allowlist gate). If the author cannot cite the host rule, the write has not been checked. Shared host collections (allow lists) are append-only for PD.
+- **Regression guard**: `packages/pd-console/tests/server/utils/pd-backups.test.ts` and `packages/create-principles-disciple/tests/backup-location.test.ts` (backups land outside extensions/, legacy migration moves `.pd-backup-*` / `*.backup.*` siblings out, rollback accepts the backups root); `packages/openclaw-plugin/tests/manifest-skills.test.ts` (exactly one skills root, declared dirs inside package root, no cross-root skill-name collisions); `packages/create-principles-disciple/tests/openclaw-host-installer.allow.test.ts` (allow never created when absent, appended id list preserves other ids, malformed allow fails loud).
+- **Related ERRs**: ERR-074 (early-return backup leak in the same update flow — sibling failure mode, different root cause: exit-tunnel leak vs artifact placement), ERR-040 / ERR-041 (published-artifact vs source-tree blind spot family), ERR-047 (config field semantics assumed instead of verified).
+- **Source**: startup-warning audit 2026-08-16 (owner-reported gateway startup log; fix branches fix/pd-backup-outside-extensions-scan, fix/plugin-manifest-single-skill-lang, fix/installer-allow-append-only)
+- **Date**: 2026-08-16
 - **Recurrence**: None
