@@ -144,6 +144,78 @@ describe('RuleHostWriter', () => {
     expect(result.reason).toContain('gate_decision_not_accepted_shadow');
   });
 
+  // Regression for issue #1337: a legacy artifact (stored gate decision
+  // accepted_shadow under the pre-2026-06-20 contract) whose code violates
+  // the tightened RuleHostResult return shape must fail canActivate with the
+  // gate's field-level reasons attached — not the opaque bare decision
+  // suffix the owner previously saw (EP-03 / rc-9-no-silent-fallback).
+  it('surfaces field-level gate failure reasons on return-shape rejection (issue #1337)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    // Use the REAL sandbox wrapper + gate chain (static return-shape check →
+    // __return_shape__ validation_failed → rejected_validation_failed), not a
+    // mock, so the refusal reason is exercised along the production path
+    // (EP-02 / EP-09). evaluateCode is never reached: the static check
+    // short-circuits before VM execution.
+    const { evaluateInRefinerSandbox } = await import('../../../internalization/refiner-sandbox-wrapper.js');
+    const gateDeps: RefinerRuleHostGateDeps = {
+      evaluateInSandbox: (code, trace, opts) =>
+        // Stub satisfies ReplayEvaluateFn but is never reached: the static
+        // return-shape check short-circuits before VM execution.
+        evaluateInRefinerSandbox(code, trace, {
+          ...opts,
+          evaluateCode: () => ({ decision: 'allow', matched: false, reason: 'unreachable' }),
+        }),
+    };
+    const writer = new RuleHostWriter({ gateDeps });
+    // Mirrors the real legacy artifact pi-art-rule-rule-real-diagnosis-first-490a7eb9:
+    // returns missing decision/reason fields.
+    const legacyCode = [
+      'function evaluate(input, helpers) {',
+      '  if (!input.action) { return { matched: false }; }',
+      '  return { matched: true, decision: "allow" };',
+      '}',
+    ].join('\n');
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: legacyCode,
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('gate_decision_not_accepted_shadow:rejected_validation_failed');
+    expect(result.reason).toContain('return statement missing required field(s): decision, reason');
+    expect(result.reason).toContain('return statement missing required field(s): reason');
+  });
+
+  // Bounded enrichment: the same slice(0, 3) convention as extractGoldenTrace
+  // — a pathological artifact with many violations must not blow up the
+  // refusal reason unboundedly.
+  it('bounds gate failure reasons surfaced in the refusal (issue #1337)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const failedCases = Array.from({ length: 5 }, (_, i) => ({
+      caseId: `case-r${i + 1}`,
+      errorType: 'validation_failed' as const,
+      message: `marker-r${i + 1}`,
+    }));
+    const gateDeps: RefinerRuleHostGateDeps = {
+      evaluateInSandbox: vi.fn().mockReturnValue({
+        success: false,
+        failedCases,
+        executionTimeMs: 1,
+        forbiddenPatternViolations: [],
+      } satisfies RefinerSandboxResult),
+    };
+    const writer = new RuleHostWriter({ gateDeps });
+    const artifact = makeRuleArtifact();
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('gate_decision_not_accepted_shadow:rejected_validation_failed');
+    expect(result.reason).toContain('case-r3');
+    expect(result.reason).not.toContain('case-r4');
+  });
+
   // PRI-489: Owner approval creates a SHADOW activation first. The only
   // shadow -> live transition is `pd activation promote --activation-id ...
   // --confirm` (SqliteActivationStateStore.promoteActivation). Live blocking
