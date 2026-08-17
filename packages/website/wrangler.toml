@@ -4,14 +4,11 @@ pages_build_output_dir = ".vitepress/dist"
 
 # ---- Feedback relay bindings (spec §9.4) ----
 # KV: dedup fingerprint + rate-limit counters for the feedback relay.
-#   Create the namespace and paste its ID below:
-#     npx wrangler kv namespace create FEEDBACK_KV
-#   Then bind it via `wrangler pages deploy` (this file is the source of truth).
 [[kv_namespaces]]
 binding = "FEEDBACK_KV"
-id = "REPLACE_WITH_FEEDBACK_KV_NAMESPACE_ID"
+id = "4fee3748e8004992a94e5aaa7895c874"
 
 # Vars (non-secret). Secrets (INGEST_TOKEN, LIN_API_KEY) are NOT stored here —
 # set them via `wrangler pages secret put`.
 [vars]
-LIN_TEAM_ID = "REPLACE_WITH_LINEAR_TEAM_ID"
+LIN_TEAM_ID = "5e746d13-253f-43fa-a0e5-716b4da7edcd"
