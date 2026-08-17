@@ -14,7 +14,7 @@ import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.js';
-import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { reconcileLineageEcho } from './peer-runner-contracts.js';
 
 export type RolloutReviewerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 
@@ -204,8 +204,17 @@ export class RolloutReviewerRunner {
       this.phase = RunnerPhase.FetchingOutput;
       const output = await this.fetchAndParseOutput(runHandle.runId);
 
-      // Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
-      injectRunnerLineageIfAbsent(output, 'taskId', taskId);
+      // Lineage echo reconciliation (PRI-272 / ERR-004 / ERR-008 class):
+      // taskId and sourceEvaluatorArtifactId are runner-owned lineage
+      // metadata whose authoritative sources are the task record and the
+      // artifact store read in buildContext(). LLMs routinely truncate or
+      // alter long IDs when echoing them back, and a mismatch fails
+      // validation as output_invalid — a permanent error with no retry —
+      // dead-ending the candidate before it can reach the approval queue.
+      // Overwrite the echoed lineage with the authoritative values before
+      // validation; emit telemetry whenever an echo differed so the
+      // correction rate stays observable (rc-9-no-silent-fallback).
+      this.reconcileLineageEcho(taskId, output, sourceEvaluatorArtifactId);
 
       this.phase = RunnerPhase.Validating;
       const validationResult = await this.validator.validate(output, taskId, sourceEvaluatorArtifactId ?? undefined);
@@ -232,6 +241,45 @@ export class RolloutReviewerRunner {
       });
     } catch (error) {
       return await this.handlePostLeaseError(taskId, leasedTask, error);
+    }
+  }
+
+  /**
+   * Reconcile LLM-echoed lineage fields with the runner-owned authoritative
+   * values via the shared lineage echo gate (PRI-541, see
+   * peer-runner-contracts.ts). Thin wrapper: this runner does not extend
+   * BasePeerRunner, so it calls the shared helper directly and emits its own
+   * telemetry (no automatic runnerName prefix).
+   *
+   * The prompt asks the model to copy taskId / sourceEvaluatorArtifactId /
+   * sourceTrace.evaluatorArtifactId verbatim, but long artifact IDs are
+   * routinely truncated or altered on echo. Because a mismatch is classified
+   * output_invalid (a permanent error — no retry), a bad echo permanently
+   * blocks the candidate from reaching the approval queue. Lineage is
+   * runner-owned metadata (rc-6): the authoritative values come from the
+   * task record and the artifact store read in buildContext().
+   *
+   * Whenever an echo differed (or sourceTrace was missing), a
+   * rollout_reviewer_lineage_echo_corrected telemetry event is emitted so
+   * the correction rate stays observable (rc-9-no-silent-fallback).
+   */
+  private reconcileLineageEcho(taskId: string, output: RolloutReviewerOutputV1, authoritativeEvaluatorArtifactId: string): void {
+    const correctedFields = reconcileLineageEcho(output, {
+      topFields: [
+        { field: 'taskId', authoritativeValue: taskId },
+        { field: 'sourceEvaluatorArtifactId', authoritativeValue: authoritativeEvaluatorArtifactId },
+      ],
+      trace: {
+        traceField: 'sourceTrace',
+        fields: [{ field: 'evaluatorArtifactId', authoritativeValue: authoritativeEvaluatorArtifactId }],
+      },
+    });
+
+    if (correctedFields.length > 0) {
+      this.emitRolloutReviewerEvent('rollout_reviewer_lineage_echo_corrected', taskId, {
+        correctedFields,
+        authoritativeSourceEvaluatorArtifactId: authoritativeEvaluatorArtifactId,
+      });
     }
   }
 

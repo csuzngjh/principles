@@ -21,7 +21,7 @@ import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
 import { DREAMER_MANIFEST } from './context-manifests.js';
-import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { stripFabricatedCorePrincipleIds } from '../core-principles/index.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
@@ -363,7 +363,15 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
    */
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: DreamerContext): void {
     super.postFetchTransform(taskId, untrustedOutput, _context);
-    injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
+    // Shared lineage echo gate (PRI-541): dreamer is the chain head, so the
+    // only runner-owned lineage is taskId. Emits telemetry on correction so
+    // the LLM echo-corruption rate stays observable (rc-9).
+    const correctedFields = reconcileLineageEcho(untrustedOutput, {
+      topFields: [{ field: 'taskId', authoritativeValue: taskId }],
+    });
+    if (correctedFields.length > 0) {
+      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields });
+    }
     stripFabricatedCorePrincipleIds(untrustedOutput);
   }
 

@@ -267,7 +267,9 @@ describe('computeConsumerDecision — boundary conditions', () => {
   it('honors explicit runnerKinds override (full-chain scope)', () => {
     // The auto-consumer service passes FULL_CHAIN_CONSUMER_RUNNER_KINDS when
     // internalization_full_chain is ON; the decision echoes it back so the
-    // wake-loop advances dreamer→…→evaluator instead of dreamer-only.
+    // wake-loop advances dreamer→…→evaluator→rollout_reviewer instead of
+    // dreamer-only. rollout_reviewer is included so the approval queue is
+    // populated unattended (the human gate is the Console, not a CLI trigger).
     const fullChain = computeConsumerDecision({
       autoConsumerEnabled: true,
       readyTaskCount: 3,
@@ -275,7 +277,7 @@ describe('computeConsumerDecision — boundary conditions', () => {
     });
     expect(fullChain.shouldConsume).toBe(true);
     expect(fullChain.runnerKinds).toEqual(FULL_CHAIN_CONSUMER_RUNNER_KINDS);
-    expect(fullChain.runnerKinds).not.toContain('rollout_reviewer');
+    expect(fullChain.runnerKinds).toContain('rollout_reviewer');
 
     // No-ready-tasks path also echoes the override (used in SKIP telemetry).
     const noTasks = computeConsumerDecision({

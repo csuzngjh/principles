@@ -7,11 +7,13 @@ import {
   ScribeRunner,
   ArtificerRunner,
   EvaluatorRunner,
+  RolloutReviewerRunner,
   DefaultDreamerValidator,
   DefaultPhilosopherValidator,
   DefaultScribeValidator,
   DefaultArtificerValidator,
   DefaultEvaluatorValidator,
+  DefaultRolloutReviewerValidator,
   PiAiRuntimeAdapter,
   L2AgentLoopAdapter,
   buildL2PrincipleReaderFromLedger,
@@ -149,8 +151,10 @@ export async function runConsumerCycle(
     }
 
     // PRI-419 amendment: when internalization_full_chain is ON (default), the
-    // auto-consumer advances the full dreamer→…→evaluator chain so artifacts
-    // reach validation_status='validated'. flag-off reverts to dreamer-only.
+    // auto-consumer advances the full dreamer→…→evaluator→rollout_reviewer chain
+    // so artifacts reach validation_status='validated' and the approval queue is
+    // populated unattended. The human gate is the approval queue (Console), not
+    // the rollout_reviewer step. flag-off reverts to dreamer-only.
     const fullChainFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_full_chain');
     const consumerRunnerKinds = fullChainFlag.enabled
       ? FULL_CHAIN_CONSUMER_RUNNER_KINDS
@@ -178,9 +182,8 @@ export async function runConsumerCycle(
     );
 
     // Advance the configured runner kinds in priority order (dreamer first,
-    // then philosopher→…→evaluator under full-chain scope). Lease the first
-    // ready task whose dependencies are satisfied. rollout_reviewer is never
-    // in the auto-consume set — it stays a manual Owner gate.
+    // then philosopher→…→rollout_reviewer under full-chain scope). Lease the
+    // first ready task whose dependencies are satisfied.
     let wakeResult: Extract<WakeOnceResult, { decision: 'would_lease' }> | null = null;
     let lastSkipDecision = 'no_ready_tasks';
     let lastSkipReason: string | undefined;
@@ -266,10 +269,10 @@ export async function runConsumerCycle(
     const taskKind = wakeResult.taskKind;
     const runnerOptions = { owner: 'auto-consumer' as const, runtimeKind };
 
-    // Dispatch by leased task kind. rollout_reviewer and diagnostician stages
-    // are never auto-consumed (excluded from FULL_CHAIN_CONSUMER_RUNNER_KINDS),
-    // so they should not reach the default branch — fail loud if they do (EP-03).
-    let runner: DreamerRunner | PhilosopherRunner | ScribeRunner | ArtificerRunner | EvaluatorRunner;
+    // Dispatch by leased task kind. Only kinds listed in
+    // FULL_CHAIN_CONSUMER_RUNNER_KINDS can be leased here; anything else
+    // (e.g. diagnostician) hits the default branch — fail loud if it does (EP-03).
+    let runner: DreamerRunner | PhilosopherRunner | ScribeRunner | ArtificerRunner | EvaluatorRunner | RolloutReviewerRunner;
     switch (taskKind) {
       case 'dreamer':
         runner = new DreamerRunner(
@@ -303,6 +306,16 @@ export async function runConsumerCycle(
         // artifacts to reach validation_status='validated' on approved candidates.
         runner = new EvaluatorRunner(
           { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator() },
+          runnerOptions,
+        );
+        break;
+      case 'rollout_reviewer':
+        // Lineage echo reconciliation is built into the runner: LLM-truncated
+        // taskId / sourceEvaluatorArtifactId echoes are overwritten with the
+        // authoritative values before validation, so a bad echo no longer
+        // dead-ends the candidate before the approval queue.
+        runner = new RolloutReviewerRunner(
+          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultRolloutReviewerValidator() },
           runnerOptions,
         );
         break;

@@ -109,7 +109,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // (DEFAULT_CONSUMER_RUNNER_KINDS). The scope sets are independent: see
   // FULL_CHAIN_CONSUMER_RUNNER_KINDS vs DEFAULT_CONSUMER_RUNNER_KINDS in
   // internalization-consumer-decision.ts.
-  { id: 'internalization_full_chain', category: 'core', enabled: true, since: '2026-08-12', description: 'PRI-419 amendment: auto-consumer advances dreamer→…→evaluator (full chain) so artifacts reach validated. rollout_reviewer stays manual. Default ON; flag-off = dreamer-only.' },
+  { id: 'internalization_full_chain', category: 'core', enabled: true, since: '2026-08-12', description: 'PRI-419 amendment: auto-consumer advances dreamer→…→evaluator→rollout_reviewer (full chain) so artifacts reach validated and the approval queue is populated unattended. The human gate is the approval queue (Console), not the rollout_reviewer CLI trigger. Default ON; flag-off = dreamer-only.' },
   // PRI-408: Story A approval-completion orchestrator. Replaces the demo direct-writer
   // activation path with a formal ApprovalCompletionService that validates approval state,
   // enforces idempotency, and dispatches via ActivationDispatcher with rolloutDecision='approved'.

@@ -410,7 +410,7 @@ describe('DreamerRunner with DefaultDreamerValidator (PRI-87)', () => {
     expect(result.status).toBe('succeeded');
   });
 
-  it('malformed output with taskId mismatch is rejected, no artifact written', async () => {
+  it('taskId wrong echo is reconciled from the authoritative task record, artifact written (PRI-541)', async () => {
     const deps = createMockDepsWithStrictValidator();
     const malformedOutput: DreamerOutput = {
       valid: true,
@@ -439,12 +439,26 @@ describe('DreamerRunner with DefaultDreamerValidator (PRI-87)', () => {
     });
 
     const result = await runner.run('task-dreamer-001');
-    expect(result.status).toBe('failed');
+    // taskId is runner-owned lineage (rc-6): a wrong echo is corrected from the
+    // task record instead of dead-ending as output_invalid (PRI-541).
+    expect(result.status).toBe('succeeded');
 
     const artifacts = await artifactStore.listBySourceTaskId('task-dreamer-001');
-    expect(artifacts).toHaveLength(0);
+    expect(artifacts).toHaveLength(1);
 
-    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalled();
+
+    // Persisted output carries the authoritative taskId, not the LLM echo.
+    const outputCalls = (deps.stateManager as unknown as Record<string, { mock?: { calls?: unknown[][] } }>).updateRunOutput?.mock?.calls ?? [];
+    const persisted = JSON.parse(outputCalls[0]?.[1] as string) as Record<string, unknown>;
+    expect(persisted.taskId).toBe('task-dreamer-001');
+
+    const telemetryCalls = (deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> }).emitTelemetry.mock.calls;
+    const correctedEvent = telemetryCalls
+      .map((call) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .find((evt) => evt.eventType === 'dreamer_lineage_echo_corrected');
+    expect(correctedEvent).toBeDefined();
+    expect(correctedEvent?.payload.correctedFields).toEqual(['taskId']);
   });
 
   it('malformed output with invalid confidence is rejected, no artifact written', async () => {

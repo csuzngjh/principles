@@ -404,13 +404,12 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
     expect(DEFAULT_CONSUMER_RUNNER_KINDS).toEqual(['dreamer']);
   });
 
-  // ── FULL_CHAIN_CONSUMER_RUNNER_KINDS (flag-on scope) excludes rollout_reviewer ─
+  // ── FULL_CHAIN_CONSUMER_RUNNER_KINDS (flag-on scope) includes rollout_reviewer ─
 
-  it('FULL_CHAIN_CONSUMER_RUNNER_KINDS advances dreamer→…→evaluator and excludes rollout_reviewer', async () => {
+  it('FULL_CHAIN_CONSUMER_RUNNER_KINDS advances dreamer→…→evaluator→rollout_reviewer', async () => {
     const { FULL_CHAIN_CONSUMER_RUNNER_KINDS } = await import('../internalization-consumer-decision.js');
     expect(FULL_CHAIN_CONSUMER_RUNNER_KINDS).toEqual([
-      'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator',
+      'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer',
     ]);
-    expect(FULL_CHAIN_CONSUMER_RUNNER_KINDS).not.toContain('rollout_reviewer');
   });
 });

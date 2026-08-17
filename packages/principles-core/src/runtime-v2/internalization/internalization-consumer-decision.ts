@@ -11,11 +11,14 @@ export const DEFAULT_CONSUMER_RUNNER_KINDS: readonly RunnerKind[] = ['dreamer'] 
 
 /**
  * Auto-consume scope when the `internalization_full_chain` flag is ON.
- * Advances dreamer → philosopher → scribe → artificer → evaluator so artifacts
- * reach `validation_status='validated'` unattended.
+ * Advances dreamer → philosopher → scribe → artificer → evaluator →
+ * rollout_reviewer so artifacts reach `validation_status='validated'` and the
+ * rollout review completes unattended.
  *
- * `rollout_reviewer` is deliberately EXCLUDED: it stays a manual Owner trigger
- * (the last human gate before a principle enters the approval queue). Manual
+ * `rollout_reviewer` is an AI review step, NOT a human gate — the human gate
+ * is the approval queue (Owner approves/rejects in the Console). Requiring a
+ * manual CLI trigger before the Console gate dead-ended non-technical Owners
+ * (principle stuck at "数据暂不可用" with no actionable path). Manual
  * advancement via `pd runtime internalization run-once --runner rollout_reviewer`
  * is unaffected (run-once bypasses actionability).
  */
@@ -25,6 +28,7 @@ export const FULL_CHAIN_CONSUMER_RUNNER_KINDS: readonly RunnerKind[] = [
   'scribe',
   'artificer',
   'evaluator',
+  'rollout_reviewer',
 ] as const;
 
 export interface ConsumerDecision {

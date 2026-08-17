@@ -300,6 +300,91 @@ export function injectRunnerLineageIfAbsent(
   }
 }
 
+/** Top-level lineage field the runner owns, with its authoritative value. */
+export interface LineageEchoFieldRule {
+  field: string;
+  authoritativeValue: string;
+}
+
+/** Nested trace object reconciliation (e.g. sourceTrace.evaluatorArtifactId). */
+export interface LineageEchoTraceRule {
+  /** Object field name on the output, e.g. 'sourceTrace'. */
+  traceField: string;
+  fields: LineageEchoFieldRule[];
+}
+
+/**
+ * Shared lineage echo gate for peer runners (PRI-541 / ERR-004 / ERR-008).
+ *
+ * LLMs routinely truncate or alter long IDs when echoing runner-owned lineage
+ * back (taskId, source*ArtifactId, sourceTrace.*). A mismatch is classified
+ * `output_invalid` — a permanent error with no retry — dead-ending the
+ * candidate before it can reach the approval queue. Lineage is runner-owned
+ * metadata (rc-6): the task record and the artifact store read in
+ * buildContext() are the single source of truth, so a corrupted echo of a
+ * known value is corrected rather than trusted.
+ *
+ * Two distinct cases, handled by two distinct mechanisms:
+ *   1. ABSENT field → injectRunnerLineageIfAbsent semantics (ERR-049 / rc-3:
+ *      present-but-falsy values are left untouched to fail loud in the
+ *      validator).
+ *   2. PRESENT but wrong echo → overwrite with the authoritative value.
+ *
+ * Pure logic, zero I/O. Returns the list of corrected field names; the caller
+ * MUST emit telemetry when non-empty (rc-9-no-silent-fallback), typically as
+ * `<runner>_lineage_echo_corrected`.
+ *
+ * @param output  The parsed LLM output (untrusted — may be any shape).
+ * @param rules   Authoritative top-level fields and optional trace rule.
+ * @returns Names of fields that were injected or corrected.
+ */
+export function reconcileLineageEcho(
+  output: unknown,
+  rules: { topFields?: LineageEchoFieldRule[]; trace?: LineageEchoTraceRule },
+): string[] {
+  const correctedFields: string[] = [];
+  if (output === null || typeof output !== 'object' || Array.isArray(output)) {
+    return correctedFields;
+  }
+  const record = output as Record<string, unknown>;
+
+  for (const rule of rules.topFields ?? []) {
+    if (!Object.hasOwn(record, rule.field)) {
+      injectRunnerLineageIfAbsent(record, rule.field, rule.authoritativeValue);
+      continue;
+    }
+    if (record[rule.field] !== rule.authoritativeValue) {
+      record[rule.field] = rule.authoritativeValue;
+      correctedFields.push(rule.field);
+    }
+  }
+
+  if (rules.trace) {
+    const { traceField, fields } = rules.trace;
+    const trace = record[traceField];
+    if (trace !== null && typeof trace === 'object' && !Array.isArray(trace)) {
+      const traceRecord = trace as Record<string, unknown>;
+      for (const field of fields) {
+        if (traceRecord[field.field] !== field.authoritativeValue) {
+          traceRecord[field.field] = field.authoritativeValue;
+          correctedFields.push(`${traceField}.${field.field}`);
+        }
+      }
+    } else {
+      // Trace absent or malformed — inject the minimal required object so
+      // structural validation has the required lineage fields.
+      const injected: Record<string, string> = {};
+      for (const field of fields) {
+        injected[field.field] = field.authoritativeValue;
+      }
+      record[traceField] = injected;
+      correctedFields.push(traceField);
+    }
+  }
+
+  return correctedFields;
+}
+
 /**
  * Creates a minimal PITaskRecord for testing purposes.
  * Not for production use — real tasks should be created via RuntimeStateManager.

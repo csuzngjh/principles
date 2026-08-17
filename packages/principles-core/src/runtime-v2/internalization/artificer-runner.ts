@@ -40,7 +40,7 @@ import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../erro
 import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
 import { ARTIFICER_MANIFEST } from './context-manifests.js';
-import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -727,7 +727,22 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
    */
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: ArtificerContext): void {
     super.postFetchTransform(taskId, untrustedOutput, _context);
-    injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
+    // Shared lineage echo gate (PRI-541). sourceScribeArtifactId is nullable
+    // (rule-plan candidates with no scribe predecessor): when null there is
+    // no authoritative value to reconcile, so only taskId is enforced.
+    const topFields = [{ field: 'taskId', authoritativeValue: taskId }];
+    const traceFields = [] as { field: string; authoritativeValue: string }[];
+    if (_context.sourceScribeArtifactId !== null) {
+      topFields.push({ field: 'sourceScribeArtifactId', authoritativeValue: _context.sourceScribeArtifactId });
+      traceFields.push({ field: 'scribeArtifactId', authoritativeValue: _context.sourceScribeArtifactId });
+    }
+    const correctedFields = reconcileLineageEcho(untrustedOutput, {
+      topFields,
+      ...(traceFields.length > 0 ? { trace: { traceField: 'sourceTrace', fields: traceFields } } : {}),
+    });
+    if (correctedFields.length > 0) {
+      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields });
+    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: ArtificerRuleOutput): void {

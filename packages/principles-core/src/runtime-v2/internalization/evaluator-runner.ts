@@ -38,7 +38,7 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
 import { EvaluatorPromptBuilder } from './evaluator-prompt-builder.js';
-import { injectRunnerLineageIfAbsent, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
+import { reconcileLineageEcho, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -1004,7 +1004,24 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    */
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown, _context: EvaluatorContext): void {
     super.postFetchTransform(taskId, untrustedOutput, _context);
-    injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
+    // Shared lineage echo gate (PRI-541). sourceArtificerArtifactId is
+    // nullable (rule-plan candidates with no artificer predecessor): when
+    // null there is no authoritative value, so only taskId is enforced.
+    // This runs BEFORE checkLineageIntegrity, so a reconciled echo no longer
+    // triggers the lineage_integrity_violation telemetry.
+    const topFields = [{ field: 'taskId', authoritativeValue: taskId }];
+    const traceFields = [] as { field: string; authoritativeValue: string }[];
+    if (_context.sourceArtificerArtifactId !== null) {
+      topFields.push({ field: 'sourceArtificerArtifactId', authoritativeValue: _context.sourceArtificerArtifactId });
+      traceFields.push({ field: 'artificerArtifactId', authoritativeValue: _context.sourceArtificerArtifactId });
+    }
+    const correctedFields = reconcileLineageEcho(untrustedOutput, {
+      topFields,
+      ...(traceFields.length > 0 ? { trace: { traceField: 'sourceTrace', fields: traceFields } } : {}),
+    });
+    if (correctedFields.length > 0) {
+      this.emitEvent('lineage_echo_corrected', taskId, { correctedFields });
+    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: EvaluatorOutputV1): void {

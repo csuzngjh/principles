@@ -106,6 +106,11 @@ function makeEvaluatorArtifact(): PIArtifactRecord {
 }
 
 describe('RolloutReviewerRunner (vertical slice)', () => {
+  /** Extract recorded mock calls from a vi.fn() reached through an unknown-typed object. */
+  function getMockCalls(holder: unknown, method: string): unknown[][] {
+    const record = holder as Record<string, { mock?: { calls?: unknown[][] } }>;
+    return record[method]?.mock?.calls ?? [];
+  }
   function createMockDeps(overrides: Partial<RolloutReviewerRunnerDeps> = {}): RolloutReviewerRunnerDeps {
     const artifactStore = overrides.artifactStore ?? new MemoryPIArtifactStore();
     const rolloutReviewerTask = makeRolloutReviewerTask();
@@ -389,17 +394,33 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
     expect(result.errorCategory).toBe('output_invalid');
   });
 
-  it('mismatched sourceEvaluatorArtifactId does not write artifact or mark succeeded', async () => {
+  // ── Lineage echo reconciliation (PRI-272 / ERR-004 / ERR-008 class) ─────────
+  //
+  // The OLD contract (mismatched echo → output_invalid permanent failure)
+  // dead-ended candidates in production: LLMs routinely truncate long artifact
+  // IDs when echoing them back, and output_invalid has no retry, so the
+  // candidate never reached the approval queue ("数据暂不可用" in the Console).
+  //
+  // The NEW contract: lineage is runner-owned metadata. taskId and
+  // sourceEvaluatorArtifactId are overwritten with the authoritative values
+  // (task record + artifact store read in buildContext) BEFORE validation, and
+  // a rollout_reviewer_lineage_echo_corrected telemetry event is emitted so
+  // the correction rate stays observable (rc-9-no-silent-fallback).
+
+  it('LLM-echoed truncated lineage is reconciled to authoritative values and succeeds', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeEvaluatorArtifact());
     const deps = createMockDeps({ artifactStore: store });
 
-    const mismatchedOutput = makeRolloutReviewerOutput();
-    (mismatchedOutput as unknown as Record<string, unknown>).sourceEvaluatorArtifactId = 'wrong-artifact-id';
-    (mismatchedOutput.sourceTrace as unknown as Record<string, unknown>).evaluatorArtifactId = 'wrong-artifact-id';
+    // Simulate the production failure mode: the model echoed the artifact ID
+    // without the trailing segment and the wrong taskId.
+    const echoedOutput = makeRolloutReviewerOutput();
+    (echoedOutput as unknown as Record<string, unknown>).taskId = 'rollout-reviewer-0';
+    (echoedOutput as unknown as Record<string, unknown>).sourceEvaluatorArtifactId = 'pi-art-evaluator-001';
+    (echoedOutput.sourceTrace as unknown as Record<string, unknown>).evaluatorArtifactId = 'pi-art-evaluator-001';
 
     (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
-      payload: mismatchedOutput,
+      payload: echoedOutput,
     });
 
     const runner = new RolloutReviewerRunner(deps, {
@@ -410,24 +431,74 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
     });
 
     const result = await runner.run(ROLLOUT_REVIEWER_TASK_ID);
-    expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.status).toBe('succeeded');
+    expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalled();
 
-    const artifacts = await store.listBySourceTaskId(ROLLOUT_REVIEWER_TASK_ID);
-    expect(artifacts).toHaveLength(0);
-    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    // Persisted output carries the authoritative lineage, not the LLM echo.
+    const outputCalls = getMockCalls(deps.stateManager, 'updateRunOutput');
+    const persistedJson = outputCalls[0]?.[1] as string;
+    const persisted = JSON.parse(persistedJson) as Record<string, unknown>;
+    expect(persisted.taskId).toBe(ROLLOUT_REVIEWER_TASK_ID);
+    expect(persisted.sourceEvaluatorArtifactId).toBe('pi-art-evaluator-001-run-001');
+
+    // Telemetry makes the correction observable (rc-9).
+    const telemetryCalls = getMockCalls(deps.eventEmitter, 'emitTelemetry');
+    const correctedEvent = telemetryCalls
+      .map((call) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .find((evt) => evt.eventType === 'rollout_reviewer_lineage_echo_corrected');
+    expect(correctedEvent).toBeDefined();
+    expect(correctedEvent?.payload.correctedFields).toEqual(
+      expect.arrayContaining(['taskId', 'sourceEvaluatorArtifactId', 'sourceTrace.evaluatorArtifactId']),
+    );
   });
 
-  it('sourceTrace.evaluatorArtifactId mismatch does not write artifact or mark succeeded', async () => {
+  it('missing sourceTrace is injected with the authoritative evaluatorArtifactId', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeEvaluatorArtifact());
     const deps = createMockDeps({ artifactStore: store });
 
-    const mismatchedOutput = makeRolloutReviewerOutput();
-    (mismatchedOutput.sourceTrace as unknown as Record<string, unknown>).evaluatorArtifactId = 'wrong-trace-id';
+    const echoedOutput = makeRolloutReviewerOutput();
+    delete (echoedOutput as unknown as Record<string, unknown>).sourceTrace;
 
     (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
-      payload: mismatchedOutput,
+      payload: echoedOutput,
+    });
+
+    const runner = new RolloutReviewerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'rollout_reviewer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROLLOUT_REVIEWER_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    const outputCalls = getMockCalls(deps.stateManager, 'updateRunOutput');
+    const persistedJson = outputCalls[0]?.[1] as string;
+    const persisted = JSON.parse(persistedJson) as { sourceTrace?: { evaluatorArtifactId?: string } };
+    expect(persisted.sourceTrace?.evaluatorArtifactId).toBe('pi-art-evaluator-001-run-001');
+
+    const telemetryCalls = getMockCalls(deps.eventEmitter, 'emitTelemetry');
+    const correctedEvent = telemetryCalls
+      .map((call) => call[0] as { eventType: string; payload: Record<string, unknown> })
+      .find((evt) => evt.eventType === 'rollout_reviewer_lineage_echo_corrected');
+    expect(correctedEvent?.payload.correctedFields).toContain('sourceTrace');
+  });
+
+  it('content-field validation failures are NOT reconciled and still fail permanently', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeEvaluatorArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    // Lineage echoes are correct here, but the review content is invalid —
+    // reconciliation must not mask genuine output_invalid content errors.
+    const badContentOutput = makeRolloutReviewerOutput();
+    (badContentOutput.review as unknown as Record<string, unknown>).decision = 'invalid_decision';
+    (badContentOutput.review as unknown as Record<string, unknown>).confidence = 1.5;
+
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: badContentOutput,
     });
 
     const runner = new RolloutReviewerRunner(deps, {
