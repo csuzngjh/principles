@@ -782,6 +782,89 @@ export function getFeedbackMaintainerEmail(workspaceDir: string): string {
   return emailRaw;
 }
 
+// ── Feedback Channel Config (feedback-submit, PRI-543) ──────────────────────
+
+/**
+ * Channel-side parameters for the feedback submit ladder (§4 / §10 of
+ * docs/superpowers/specs/2026-08-17-feedback-last-mile-submit-design.md).
+ *
+ * All values are optional-from-config: an empty string means "key not set or
+ * not a string" → the corresponding channel reports unavailable. Presence of
+ * `ingest_url` enables the primary channel; presence of `github_repo` enables
+ * the gh CLI channel.
+ *
+ * Reads parse YAML as unknown (ERR-001/005: no `as` bypasses) and uses
+ * Object.hasOwn for untrusted key checks (ERR-013). Mirrors the
+ * `getFeedbackMaintainerEmail` pattern.
+ */
+export type FeedbackChannelConfig = {
+  ingestUrl: string;
+  ingestToken: string;
+  githubRepo: string;
+  githubProxy: string;
+};
+
+const EMPTY_FEEDBACK_CHANNEL: FeedbackChannelConfig = {
+  ingestUrl: '',
+  ingestToken: '',
+  githubRepo: '',
+  githubProxy: '',
+};
+
+/** Read a known string key from an already-validated record, or '' when absent/non-string. */
+function readConfigString(record: Record<string, unknown>, key: string): string {
+  if (!Object.hasOwn(record, key)) return '';
+  const v = record[key];
+  return typeof v === 'string' ? v : '';
+}
+
+/**
+ * Read `feedback.ingest_url` / `ingest_token` / `github_repo` / `github_proxy`
+ * from `.pd/config.yaml`. Missing/malformed config falls back to all-empty.
+ *
+ * NOTE: `ingest_token` is returned here but MUST NOT be serialised to any
+ * client-facing payload (channels endpoint omits it; only the server submit
+ * path uses it). It ships in the release and is an anti-abuse boundary, not a
+ * security boundary (spec §9.2).
+ */
+export function getFeedbackChannelConfig(workspaceDir: string): FeedbackChannelConfig {
+  const configPath = getPdConfigPath(workspaceDir);
+
+  if (!fs.existsSync(configPath)) {
+    return { ...EMPTY_FEEDBACK_CHANNEL };
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+  } catch {
+    return { ...EMPTY_FEEDBACK_CHANNEL };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+  } catch {
+    return { ...EMPTY_FEEDBACK_CHANNEL };
+  }
+
+  if (!isRecord(parsed)) {
+    return { ...EMPTY_FEEDBACK_CHANNEL };
+  }
+
+  const feedbackRaw = Object.hasOwn(parsed, 'feedback') ? parsed.feedback : undefined;
+  if (feedbackRaw === undefined || !isRecord(feedbackRaw)) {
+    return { ...EMPTY_FEEDBACK_CHANNEL };
+  }
+
+  return {
+    ingestUrl: readConfigString(feedbackRaw, 'ingest_url'),
+    ingestToken: readConfigString(feedbackRaw, 'ingest_token'),
+    githubRepo: readConfigString(feedbackRaw, 'github_repo'),
+    githubProxy: readConfigString(feedbackRaw, 'github_proxy'),
+  };
+}
+
 /**
  * Update principles.outputLanguage in config.yaml.
  * Safe partial write: preserves unknown sections, validates before write.

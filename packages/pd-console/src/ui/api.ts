@@ -14,6 +14,8 @@ import {
   validateFeedbackReport,
   validateFeedbackDraftsList,
   validateFeedbackDraftEnvelope,
+  validateFeedbackChannels,
+  validateFeedbackSubmitResult,
   validateDeleteEnvelope,
   validateWorkspaceEntry,
   validateWorkspaceList,
@@ -54,6 +56,8 @@ import type {
   FeedbackReportData,
   FeedbackDraftSummaryData,
   FeedbackDraftEnvelopeData,
+  FeedbackChannelsData,
+  FeedbackSubmitResultData,
   DeleteEnvelopeData,
   WorkspaceEntryData,
   RemovedEnvelopeData,
@@ -331,6 +335,37 @@ async function deleteFeedbackReport(id: string): Promise<ApiResponse<DeleteEnvel
   return request<DeleteEnvelopeData>('/api/feedback/reports/' + encodeURIComponent(id), {
     method: 'DELETE',
   }, validateDeleteEnvelope);
+}
+
+// ── Feedback submit ladder (Slice 3, spec §8) ─────────────────────────────────
+
+async function fetchFeedbackChannels(): Promise<ApiResponse<FeedbackChannelsData>> {
+  return request<FeedbackChannelsData>('/api/feedback/submit/channels', undefined, validateFeedbackChannels);
+}
+
+async function submitFeedbackReport(
+  id: string,
+  channel: 'ingest' | 'github',
+): Promise<ApiResponse<FeedbackSubmitResultData>> {
+  return request<FeedbackSubmitResultData>('/api/feedback/reports/' + encodeURIComponent(id) + '/submit', {
+    method: 'POST',
+    body: JSON.stringify({ channel }),
+  }, validateFeedbackSubmitResult);
+}
+
+/**
+ * Manually mark a draft as sent (mailto/export channels, spec §11.4). The
+ * console cannot server-confirm delivery for these channels, so this is an
+ * honest user-declared status write-back — never a fake acknowledgement.
+ */
+async function markFeedbackReportSent(
+  id: string,
+  via: 'email' | 'file',
+): Promise<ApiResponse<FeedbackSubmitResultData>> {
+  return request<FeedbackSubmitResultData>('/api/feedback/reports/' + encodeURIComponent(id) + '/mark-sent', {
+    method: 'POST',
+    body: JSON.stringify({ via }),
+  }, validateFeedbackSubmitResult);
 }
 
 // ── Config / Control Center API (PRI-303, PRI-309) ───────────────────────────
@@ -734,6 +769,10 @@ export {
   listFeedbackReports,
   getFeedbackReport,
   deleteFeedbackReport,
+  // Feedback submit ladder (Slice 3, spec §8)
+  fetchFeedbackChannels,
+  submitFeedbackReport,
+  markFeedbackReportSent,
   fetchConfigSummary,
   fetchConfigCatalog,
   updateAgentBinding,
@@ -780,6 +819,8 @@ export type {
   FeedbackReportData,
   FeedbackDraftSummaryData,
   FeedbackDraftEnvelopeData,
+  FeedbackChannelsData,
+  FeedbackSubmitResultData,
   DeleteEnvelopeData,
   WorkspaceEntryData,
   RemovedEnvelopeData,

@@ -1466,6 +1466,25 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     expect(typeof config.ui).toBe('object');
   });
 
+  it('PRI-543: writes the feedback channel segment matching the loader (spec §10 double-sync)', () => {
+    const config = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const feedback = config.feedback as Record<string, unknown>;
+    // The generated segment MUST mirror what pd-config-store.readFeedbackChannelConfig
+    // / getFeedbackMaintainerEmail expect under `feedback:`.
+    expect(feedback).toBeDefined();
+    for (const key of ['maintainer_email', 'ingest_url', 'ingest_token', 'github_repo', 'github_proxy']) {
+      expect(Object.hasOwn(feedback, key)).toBe(true);
+      expect(typeof feedback[key]).toBe('string');
+      expect(feedback[key]).toBe('');
+    }
+  });
+
+  it('PRI-543: pre-fills feedback.maintainer_email from the provided email (no placeholder leak)', () => {
+    const config = yaml.load(generateConfigYamlContent(undefined, 'owner@example.com')) as Record<string, unknown>;
+    const feedback = config.feedback as Record<string, unknown>;
+    expect(feedback.maintainer_email).toBe('owner@example.com');
+  });
+
   it('core features (prompt, code_tool_hook, defer_archive) are enabled', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;

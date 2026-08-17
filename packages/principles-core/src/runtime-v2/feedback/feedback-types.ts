@@ -14,6 +14,28 @@ export type FeedbackType =
 
 export type UserSeverity = 'low' | 'medium' | 'high';
 
+/**
+ * 出现频率(类型化反馈):用户对 bug 最诚实、最可分诊的回答。
+ * always=每次 / often=经常 / sometimes=偶尔 / once=仅一次。
+ */
+export type FeedbackFrequency = 'always' | 'often' | 'sometimes' | 'once';
+
+/**
+ * 阻塞度(类型化反馈):用户在 UI 层替代 severity 的诚实回答。
+ * blocked=卡住我了 / workaround=能绕过 / minor=不影响。
+ */
+export type FeedbackBlockingLevel = 'blocked' | 'workaround' | 'minor';
+
+/**
+ * 草稿/报告的分发状态。
+ * draft=仅本地保存 / submitted=已通过某个通道提交。
+ * 从未写过提交时的文件(旧草稿)缺省按 draft 处理。
+ */
+export type FeedbackStatus = 'draft' | 'submitted';
+
+/** 提交时使用的通道。 */
+export type FeedbackSubmittedVia = 'ingest' | 'github' | 'email' | 'file';
+
 export type FeedbackSource = 'console' | 'cli' | 'agent';
 
 export interface FeedbackContext {
@@ -46,6 +68,23 @@ export interface FeedbackUserText {
   expectedBehavior?: string;
   actualBehavior?: string;
   userSeverity?: UserSeverity;
+  // ── 类型化新字段(Slice 1, PRI-543):全部可选,按报告 type 条件进入渲染 ──
+  /** confusing:你当时想做什么 */
+  goal?: string;
+  /** confusing:卡在哪一步 */
+  stuckAt?: string;
+  /** feature_request:你想达成什么目标(job,而非功能名) */
+  job?: string;
+  /** feature_request:现在是怎么凑合的 */
+  currentWorkaround?: string;
+  /** privacy_concern:你看到了什么让你担心 */
+  sawWhat?: string;
+  /** privacy_concern:在哪里看到的 */
+  whereSeen?: string;
+  /** bug:出现频率 */
+  frequency?: FeedbackFrequency;
+  /** bug/confusing:阻塞度(UI 层取代 severity 的诚实回答) */
+  blockingLevel?: FeedbackBlockingLevel;
 }
 
 /**
@@ -62,6 +101,17 @@ export interface FeedbackDraftInput {
   expectedBehavior?: unknown;
   actualBehavior?: unknown;
   userSeverity?: unknown;
+  // ── 类型化新字段(Slice 1, PRI-543):镜像 FeedbackUserText,unknown 输入 ──
+  goal?: unknown;
+  stuckAt?: unknown;
+  job?: unknown;
+  currentWorkaround?: unknown;
+  sawWhat?: unknown;
+  whereSeen?: unknown;
+  frequency?: unknown;
+  blockingLevel?: unknown;
+  /** 来源页面 id(如 failed_tasks / pain / principles / activation / focus / intent) */
+  area?: unknown;
   context?: unknown;
   agentDraft?: unknown;
   /**
@@ -84,6 +134,8 @@ export interface NormalizedDraft {
   agentDraft?: AgentDraft;
   /** Task 13: top-level taskId (validated string), separate from context.taskId. */
   taskId?: string;
+  /** 来源页面 id(Slice 1, PRI-543) */
+  area?: string;
 }
 
 export interface RecentEvent {
@@ -135,6 +187,17 @@ export interface FeedbackReport {
     githubIssueUrl: string;
     mailtoUrl: string;
   };
+  // ── 来源与提交元数据(Slice 1, PRI-543):全部可选,旧草稿缺省兼容 ──
+  /** 来源页面 id(如 failed_tasks / pain / principles / activation / focus / intent) */
+  area?: string;
+  /** 分发状态;缺省按 draft 处理 */
+  status?: FeedbackStatus;
+  submittedAt?: string;
+  submittedVia?: FeedbackSubmittedVia;
+  /** relay 返回的回执编号(如 fb-xxxxxxxx) */
+  trackingId?: string;
+  /** 已建 issue 的 URL(Linear/GitHub) */
+  externalUrl?: string;
 }
 
 export type ValidationError = {
@@ -158,6 +221,10 @@ const FEEDBACK_TYPES: readonly FeedbackType[] = [
 ];
 
 const USER_SEVERITIES: readonly UserSeverity[] = ['low', 'medium', 'high'];
+const FEEDBACK_FREQUENCIES: readonly FeedbackFrequency[] = ['always', 'often', 'sometimes', 'once'];
+const FEEDBACK_BLOCKING_LEVELS: readonly FeedbackBlockingLevel[] = ['blocked', 'workaround', 'minor'];
+const FEEDBACK_STATUSES: readonly FeedbackStatus[] = ['draft', 'submitted'];
+const FEEDBACK_SUBMITTED_VIA: readonly FeedbackSubmittedVia[] = ['ingest', 'github', 'email', 'file'];
 const FEEDBACK_SOURCES: readonly FeedbackSource[] = ['console', 'cli', 'agent'];
 
 export function isFeedbackType(value: unknown): value is FeedbackType {
@@ -166,6 +233,22 @@ export function isFeedbackType(value: unknown): value is FeedbackType {
 
 export function isUserSeverity(value: unknown): value is UserSeverity {
   return typeof value === 'string' && (USER_SEVERITIES as readonly string[]).includes(value);
+}
+
+export function isFeedbackFrequency(value: unknown): value is FeedbackFrequency {
+  return typeof value === 'string' && (FEEDBACK_FREQUENCIES as readonly string[]).includes(value);
+}
+
+export function isFeedbackBlockingLevel(value: unknown): value is FeedbackBlockingLevel {
+  return typeof value === 'string' && (FEEDBACK_BLOCKING_LEVELS as readonly string[]).includes(value);
+}
+
+export function isFeedbackStatus(value: unknown): value is FeedbackStatus {
+  return typeof value === 'string' && (FEEDBACK_STATUSES as readonly string[]).includes(value);
+}
+
+export function isFeedbackSubmittedVia(value: unknown): value is FeedbackSubmittedVia {
+  return typeof value === 'string' && (FEEDBACK_SUBMITTED_VIA as readonly string[]).includes(value);
 }
 
 export function isFeedbackSource(value: unknown): value is FeedbackSource {
@@ -328,6 +411,31 @@ export function normalizeFeedbackDraftInput(value: unknown): NormalizeResult {
   validateOptionalString(value.expectedBehavior, 'expectedBehavior', errors);
   validateOptionalString(value.actualBehavior, 'actualBehavior', errors);
 
+  // ── 类型化新字段(Slice 1, PRI-543)──
+  validateOptionalString(value.goal, 'goal', errors);
+  validateOptionalString(value.stuckAt, 'stuckAt', errors);
+  validateOptionalString(value.job, 'job', errors);
+  validateOptionalString(value.currentWorkaround, 'currentWorkaround', errors);
+  validateOptionalString(value.sawWhat, 'sawWhat', errors);
+  validateOptionalString(value.whereSeen, 'whereSeen', errors);
+  validateOptionalString(value.area, 'area', errors);
+
+  // frequency / blockingLevel:枚举校验
+  if (value.frequency !== undefined && !isFeedbackFrequency(value.frequency)) {
+    errors.push({
+      field: 'frequency',
+      reason: 'frequency must be one of: always, often, sometimes, once (ERR-010)',
+      nextAction: 'provide a valid FeedbackFrequency value or omit it',
+    });
+  }
+  if (value.blockingLevel !== undefined && !isFeedbackBlockingLevel(value.blockingLevel)) {
+    errors.push({
+      field: 'blockingLevel',
+      reason: 'blockingLevel must be one of: blocked, workaround, minor (ERR-010)',
+      nextAction: 'provide a valid FeedbackBlockingLevel value or omit it',
+    });
+  }
+
   // Optional: userSeverity
   if (value.userSeverity !== undefined && !isUserSeverity(value.userSeverity)) {
     errors.push({
@@ -386,11 +494,21 @@ export function normalizeFeedbackDraftInput(value: unknown): NormalizeResult {
   if (isString(value.expectedBehavior)) userText.expectedBehavior = value.expectedBehavior;
   if (isString(value.actualBehavior)) userText.actualBehavior = value.actualBehavior;
   if (isUserSeverity(value.userSeverity)) userText.userSeverity = value.userSeverity;
+  // ── 类型化新字段(Slice 1, PRI-543)──
+  if (isString(value.goal)) userText.goal = value.goal;
+  if (isString(value.stuckAt)) userText.stuckAt = value.stuckAt;
+  if (isString(value.job)) userText.job = value.job;
+  if (isString(value.currentWorkaround)) userText.currentWorkaround = value.currentWorkaround;
+  if (isString(value.sawWhat)) userText.sawWhat = value.sawWhat;
+  if (isString(value.whereSeen)) userText.whereSeen = value.whereSeen;
+  if (isFeedbackFrequency(value.frequency)) userText.frequency = value.frequency;
+  if (isFeedbackBlockingLevel(value.blockingLevel)) userText.blockingLevel = value.blockingLevel;
 
   const normalized: NormalizedDraft = { type, title, userText };
   if (context) normalized.context = context;
   if (agentDraft) normalized.agentDraft = agentDraft;
   if (taskId !== undefined) normalized.taskId = taskId;
+  if (isString(value.area)) normalized.area = value.area;
 
   return { ok: true, value: normalized };
 }

@@ -96,6 +96,37 @@ export function renderReportMarkdown(report: FeedbackReport): string {
     parts.push('');
   }
 
+  // ── 类型化新字段(Slice 1, PRI-543):按 type 条件渲染,减少噪声 ──
+  const typedSection = (title: string, raw: string | undefined) => {
+    if (!raw) return;
+    const t = safe(raw, MAX_FIELD_IN_MD, { notes: report.privacy.redactionNotes, fieldLabel: title });
+    parts.push(`## ${title}`);
+    parts.push(t.text);
+    parts.push('');
+  };
+  if (report.type === 'confusing') {
+    typedSection('What I wanted to do', report.userText.goal);
+    typedSection('Where I got stuck', report.userText.stuckAt);
+  } else if (report.type === 'feature_request') {
+    typedSection('Goal', report.userText.job);
+    typedSection('Current workaround', report.userText.currentWorkaround);
+  } else if (report.type === 'privacy_concern') {
+    typedSection('What I saw', report.userText.sawWhat);
+    typedSection('Where I saw it', report.userText.whereSeen);
+  }
+  if (report.userText.frequency) {
+    parts.push(`- Frequency: \`${report.userText.frequency}\``);
+    parts.push('');
+  }
+  if (report.userText.blockingLevel) {
+    parts.push(`- Blocking level: \`${report.userText.blockingLevel}\``);
+    parts.push('');
+  }
+  if (report.area) {
+    parts.push(`- Area: \`${report.area}\``);
+    parts.push('');
+  }
+
   parts.push('## Diagnostic summary');
   parts.push('');
   parts.push('### Versions');

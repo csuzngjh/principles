@@ -11,6 +11,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { PageShell } from '../../components/layout/page-shell.js';
 import { PageLoading } from '../../components/layout/page-loading.js';
 import { Badge } from '../../components/ui/badge.js';
@@ -331,6 +332,7 @@ interface EvidenceChainCardProps {
 
 function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardProps) {
   const [copied, setCopied] = useState(false);
+  const navigate = useNavigate();
   const layer2Empty = isLayer2EffectivelyEmpty(record);
   const stateVariant = stateToVariant(record.state);
   const stateLabel = enumLabel('evidenceState', record.state, t);
@@ -357,9 +359,22 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
               </Badge>
             )}
           </div>
-          <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
-            {formatDate(record.observedAt)}
-          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid={`pain-feedback-${record.id}`}
+              onClick={() => {
+                const params = new URLSearchParams({ source: "pain_page", painId: record.id });
+                navigate(`/report-problem?${params.toString()}`);
+              }}
+            >
+              {t('pages.reportProblem.entryFeedback')}
+            </Button>
+            <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
+              {formatDate(record.observedAt)}
+            </span>
+          </div>
         </div>
       </CardHeader>
 

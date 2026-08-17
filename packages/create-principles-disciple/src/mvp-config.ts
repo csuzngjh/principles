@@ -281,8 +281,16 @@ export interface RuntimeProfileInput {
  * Fix-4 (P0-BUG-4): `runtimeProfile` optional parameter — when provided,
  * the `pd.default` profile is pre-filled with user-supplied values instead
  * of being left empty. Empty profile causes LLM features to fail silently.
+ *
+ * PRI-543 (slice 5): `maintainerEmail` optional parameter — when provided,
+ * it pre-fills `feedback.maintainer_email` so the email fallback channel uses
+ * a real address instead of the loader's placeholder. Added so the config
+ * template and pd-config-store stay in sync (spec §10 double-sync).
  */
-export function generateConfigYamlContent(runtimeProfile?: RuntimeProfileInput): string {
+export function generateConfigYamlContent(
+  runtimeProfile?: RuntimeProfileInput,
+  maintainerEmail?: string,
+): string {
   const config: Record<string, unknown> = {
     version: 1,
     features: {
@@ -342,6 +350,20 @@ export function generateConfigYamlContent(runtimeProfile?: RuntimeProfileInput):
     },
     ui: {
       diagnostics: { mode: 'simple' },
+    },
+    // PRI-543 feedback submit → config double-sync (spec §10). These channel
+    // params MUST mirror what pd-config-store.ts reads (feedback.maintainer_email
+    // + feedback.ingest_url / ingest_token / github_repo / github_proxy). The
+    // installer writes this segment so a fresh workspace always carries it;
+    // Owner pre-fills maintainer_email (git user.email, best-effort) — the loader
+    // falls back to the placeholder otherwise. ingest/github keys stay empty by
+    // default so the advanced channels report "unavailable" until configured.
+    feedback: {
+      maintainer_email: maintainerEmail ?? '',
+      ingest_url: '',
+      ingest_token: '',
+      github_repo: '',
+      github_proxy: '',
     },
   };
 

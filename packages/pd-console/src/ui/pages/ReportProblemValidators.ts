@@ -9,6 +9,11 @@
 
 export type FeedbackType = 'bug' | 'confusing' | 'privacy_concern' | 'feature_request' | 'other';
 export type UserSeverity = 'low' | 'medium' | 'high';
+// 类型化新字段(Slice 1/3)与提交元数据。枚举与 core feedback-types.ts 保持一致。
+export type FeedbackFrequency = 'always' | 'often' | 'sometimes' | 'once';
+export type FeedbackBlockingLevel = 'blocked' | 'workaround' | 'minor';
+export type FeedbackStatus = 'draft' | 'submitted';
+export type FeedbackSubmittedVia = 'ingest' | 'github' | 'email' | 'file';
 
 export type DraftRecord = {
   id: string;
@@ -21,6 +26,15 @@ export type DraftRecord = {
     expectedBehavior?: string;
     actualBehavior?: string;
     userSeverity?: UserSeverity;
+    // 类型化新字段(全部可选,按 type 条件渲染/解析,旧草稿缺省兼容)
+    goal?: string;
+    stuckAt?: string;
+    job?: string;
+    currentWorkaround?: string;
+    sawWhat?: string;
+    whereSeen?: string;
+    frequency?: FeedbackFrequency;
+    blockingLevel?: FeedbackBlockingLevel;
   };
   diagnosticSummary: {
     versions: Record<string, unknown>;
@@ -31,9 +45,72 @@ export type DraftRecord = {
   };
   privacy: { includedSections: string[]; excludedByDefault: string[]; redactionNotes: string[] };
   outputs: { markdown: string; emailText: string; githubIssueUrl: string; mailtoUrl: string };
+  // 来源与提交元数据(全部可选,旧草稿缺省兼容)
+  area?: string;
+  status?: FeedbackStatus;
+  submittedAt?: string;
+  submittedVia?: FeedbackSubmittedVia;
+  trackingId?: string;
+  externalUrl?: string;
 };
 
-export type FeedbackDraftSummary = { id: string; createdAt: string; type: string; title: string };
+export type FeedbackDraftSummary = {
+  id: string;
+  createdAt: string;
+  type: string;
+  title: string;
+  status?: string;
+};
+
+const FEEDBACK_FREQUENCIES: readonly FeedbackFrequency[] = ['always', 'often', 'sometimes', 'once'];
+const FEEDBACK_BLOCKING_LEVELS: readonly FeedbackBlockingLevel[] = ['blocked', 'workaround', 'minor'];
+const FEEDBACK_SUBMITTED_VIA: readonly FeedbackSubmittedVia[] = ['ingest', 'github', 'email', 'file'];
+
+function isFeedbackFrequency(value: unknown): value is FeedbackFrequency {
+  return typeof value === 'string' && (FEEDBACK_FREQUENCIES as readonly string[]).includes(value);
+}
+
+function isFeedbackBlockingLevel(value: unknown): value is FeedbackBlockingLevel {
+  return typeof value === 'string' && (FEEDBACK_BLOCKING_LEVELS as readonly string[]).includes(value);
+}
+
+function isFeedbackSubmittedVia(value: unknown): value is FeedbackSubmittedVia {
+  return typeof value === 'string' && (FEEDBACK_SUBMITTED_VIA as readonly string[]).includes(value);
+}
+
+/**
+ * 旧草稿 severity → blockingLevel 的展示映射(仅 UI 展示,不改文件,spec §5.2):
+ * high→blocked / medium→workaround / low→minor。
+ */
+export function mapSeverityToBlockingLevel(severity: UserSeverity | undefined): FeedbackBlockingLevel | undefined {
+  if (severity === 'high') return 'blocked';
+  if (severity === 'medium') return 'workaround';
+  if (severity === 'low') return 'minor';
+  return undefined;
+}
+
+/**
+ * 从 context(page / sourceDetail)归一化出反馈来源 area(spec §7)。
+ * area 值:failed_tasks / pain / principles / activation / focus / intent / error / general。
+ * 匹配失败缺省返回 'general'。
+ */
+export function deriveFeedbackArea(context: Record<string, string> | undefined): string | undefined {
+  if (!context) return undefined;
+  const haystack = `${context.page ?? ''} ${context.sourceDetail ?? ''}`.toLowerCase();
+  const tokens: [string, string][] = [
+    ['failed_tasks', 'failed_tasks'],
+    ['pain', 'pain'],
+    ['principle', 'principles'],
+    ['activation', 'activation'],
+    ['focus', 'focus'],
+    ['intent', 'intent'],
+    ['error', 'error'],
+  ];
+  for (const [token, area] of tokens) {
+    if (haystack.includes(token)) return area;
+  }
+  return undefined;
+}
 
 function isString(value: unknown): value is string {
   return typeof value === 'string';
@@ -106,6 +183,15 @@ export function parseDraftRecord(value: unknown): DraftRecord | null {
         userText.userSeverity === 'low' || userText.userSeverity === 'medium' || userText.userSeverity === 'high'
           ? userText.userSeverity
           : undefined,
+      // 类型化新字段(全部可选,旧草稿缺省兼容;枚举校验同 core)
+      goal: isString(userText.goal) ? userText.goal : undefined,
+      stuckAt: isString(userText.stuckAt) ? userText.stuckAt : undefined,
+      job: isString(userText.job) ? userText.job : undefined,
+      currentWorkaround: isString(userText.currentWorkaround) ? userText.currentWorkaround : undefined,
+      sawWhat: isString(userText.sawWhat) ? userText.sawWhat : undefined,
+      whereSeen: isString(userText.whereSeen) ? userText.whereSeen : undefined,
+      frequency: isFeedbackFrequency(userText.frequency) ? userText.frequency : undefined,
+      blockingLevel: isFeedbackBlockingLevel(userText.blockingLevel) ? userText.blockingLevel : undefined,
     },
     diagnosticSummary: {
       versions: asRecord(diagnostic.versions),
@@ -128,6 +214,13 @@ export function parseDraftRecord(value: unknown): DraftRecord | null {
       // "Open Email" button gracefully (rc-1: treat as unknown, no `as`).
       mailtoUrl: isString(outputs.mailtoUrl) ? outputs.mailtoUrl : '',
     },
+    // 来源与提交元数据(全部可选;status/trackingId/externalUrl 仅当枚举/字符串合法时保留)
+    area: isString(value.area) ? value.area : undefined,
+    status: value.status === 'draft' || value.status === 'submitted' ? value.status : undefined,
+    submittedAt: isString(value.submittedAt) ? value.submittedAt : undefined,
+    submittedVia: isFeedbackSubmittedVia(value.submittedVia) ? value.submittedVia : undefined,
+    trackingId: isString(value.trackingId) ? value.trackingId : undefined,
+    externalUrl: isString(value.externalUrl) ? value.externalUrl : undefined,
   };
 }
 
@@ -141,6 +234,7 @@ export function parseDraftSummary(value: unknown): FeedbackDraftSummary | null {
     createdAt: value.createdAt,
     type: value.type,
     title: value.title,
+    status: isString(value.status) ? value.status : undefined,
   };
 }
 
