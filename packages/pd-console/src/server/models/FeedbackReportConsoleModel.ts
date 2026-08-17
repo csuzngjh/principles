@@ -31,6 +31,8 @@ export type FeedbackReportDraftSummary = {
   createdAt: string;
   type: string;
   title: string;
+  /** 分发状态(缺省 draft);用于草稿列表区分 待发/已发(切片3) */
+  status?: string;
 };
 
 export type FeedbackReportListResult = {
@@ -173,6 +175,7 @@ export class FeedbackReportConsoleModel {
               createdAt: obj.createdAt as string,
               type: obj.type as string,
               title: obj.title as string,
+              status: typeof obj.status === 'string' ? obj.status : undefined,
             });
           }
         } catch (readErr) {
@@ -262,6 +265,48 @@ export class FeedbackReportConsoleModel {
         ok: false,
         error: `Failed to delete feedback report at ${filePath}: ${errMsg(e, err)}`,
         nextAction: 'verify the file is deletable and the workspace directory is writable',
+      };
+    }
+  }
+
+  /**
+   * Update a persisted draft by applying a partial patch, then atomic-write.
+   * Mirrors `create` (tmp + rename). Fails loud (not_found / read_error /
+   * invalid shape) without mutating on error.
+   */
+  async update(id: string, patch: Partial<FeedbackReport>): Promise<FeedbackReportGetResult> {
+    if (!reportIdValidator(id)) {
+      return {
+        ok: false,
+        error: `Invalid feedback report id: ${JSON.stringify(id)}`,
+        errorCode: 'INVALID_ID',
+        nextAction: 'pass a safe id matching /^[A-Za-z0-9._-]+$/ with length 1-256',
+      };
+    }
+    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+      return {
+        ok: false,
+        error: 'patch must be a plain object with optional FeedbackReport fields',
+        nextAction: 'pass a partial FeedbackReport object to update',
+      };
+    }
+    const loaded = await this.get(id);
+    if (!loaded.ok || !loaded.report) return loaded;
+    const merged: FeedbackReport = { ...loaded.report, ...patch, id };
+    const dir = this.ensureDraftsDir();
+    if (!dir.ok) return dir;
+    const filePath = path.join(this.draftsDir, `${id}.json`);
+    try {
+      const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+      const body = JSON.stringify(merged, null, 2);
+      await fs.promises.writeFile(tmpPath, body, { encoding: 'utf8', mode: 0o600 });
+      await fs.promises.rename(tmpPath, filePath);
+      return { ok: true, report: merged };
+    } catch (err) {
+      return {
+        ok: false,
+        error: `Failed to write feedback report update at ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+        nextAction: 'verify the workspace directory is writable and that disk space is available',
       };
     }
   }

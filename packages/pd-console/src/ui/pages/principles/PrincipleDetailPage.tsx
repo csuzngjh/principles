@@ -445,6 +445,18 @@ export function PrincipleDetailPage() {
           <span className="text-ink-4 text-[13px]">
             {t("principles.detail.modifyWordingNote")}
           </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            data-testid="principle-feedback"
+            onClick={() => {
+              const params = new URLSearchParams({ source: "principle_page", principleId: id ?? "" });
+              navigate(`/report-problem?${params.toString()}`);
+            }}
+          >
+            {t("reportProblem.entryFeedback")}
+          </Button>
         </div>
       </section>
 

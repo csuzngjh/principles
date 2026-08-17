@@ -3,11 +3,21 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { loadPdConfig, computeFlagsFromLoadResult, getFeedbackMaintainerEmail } from './config/pd-config-store.js';
+import {
+  loadPdConfig,
+  computeFlagsFromLoadResult,
+  getFeedbackMaintainerEmail,
+  getFeedbackChannelConfig,
+  type FeedbackChannelConfig,
+} from './config/pd-config-store.js';
 import { AuthConfig } from './config/AuthConfig.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
-import { handleFeedbackReportsRoute, disposeFeedbackReportModels } from './routes/feedback-reports.js';
+import {
+  handleFeedbackReportsRoute,
+  handleFeedbackChannelsRoute,
+  disposeFeedbackReportModels,
+} from './routes/feedback-reports.js';
 import { handleFailedTasksRoute, disposeFailedTasksModels } from './routes/failed-tasks.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
@@ -239,6 +249,7 @@ interface AppServices {
   workspaceService: WorkspaceService;
   feedbackFlags: Record<string, { enabled: boolean }>;
   maintainerEmail: string;
+  feedbackChannelConfig: FeedbackChannelConfig;
 }
 
 async function initServices(workspaceDir: string, authConfig: AuthConfig): Promise<AppServices> {
@@ -258,10 +269,15 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
     console.warn('[pd-console] PD config loading failed (using defaults for feedback channel):', configResult.errors.map(e => e.reason).join('; '));
   }
 
-  // Read feedback.maintainer_email from .pd/config.yaml (defaults to
-  // csuzngjh@hotmail.com when absent). Used to build mailto: URLs in feedback
-  // reports so the owner can open a pre-filled email directly.
+  // Read feedback.maintainer_email from .pd/config.yaml. Falls back to a
+  // placeholder (maintainer@example.com) when absent; UI/email channel honours
+  // that default at the channel-level (not here). Used to build mailto: URLs in
+  // feedback reports so the owner can open a pre-filled email directly.
   const maintainerEmail = getFeedbackMaintainerEmail(workspaceDir);
+
+  // Read the feedback submit-channel parameters (ingest_url / ingest_token /
+  // github_repo / github_proxy). Presence of a key enables its channel.
+  const feedbackChannelConfig = getFeedbackChannelConfig(workspaceDir);
 
   return {
     workspaceDir,
@@ -270,6 +286,7 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
     workspaceService,
     feedbackFlags,
     maintainerEmail,
+    feedbackChannelConfig,
   };
 }
 
@@ -329,10 +346,22 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
 
       // ── API routes ──────────────────────────────────────────────────
 
-      // GET/POST /api/feedback/reports, /api/feedback/reports/:id
+      // GET /api/feedback/submit/channels — submit-ladder probe
+      if (urlPath === '/api/feedback/submit/channels') {
+        asyncHandler(() => handleFeedbackChannelsRoute(req, res, {
+          workspaceDir: services.workspaceDir,
+          channelConfig: services.feedbackChannelConfig,
+          featureFlags: services.feedbackFlags,
+          maintainerEmail: services.maintainerEmail,
+        }))(req, res);
+        return;
+      }
+
+      // GET/POST /api/feedback/reports, /api/feedback/reports/:id,
+      // POST /api/feedback/reports/:id/submit
       if (urlPath === '/api/feedback/reports' || urlPath.startsWith('/api/feedback/reports/')) {
         const subPath = urlPath.slice('/api/feedback/reports'.length);
-        asyncHandler(() => handleFeedbackReportsRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags, maintainerEmail: services.maintainerEmail }))(req, res);
+        asyncHandler(() => handleFeedbackReportsRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags, maintainerEmail: services.maintainerEmail, channelConfig: services.feedbackChannelConfig }))(req, res);
         return;
       }
 

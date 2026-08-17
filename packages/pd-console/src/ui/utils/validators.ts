@@ -189,6 +189,81 @@ export function validateDeleteEnvelope(v: unknown): DeleteEnvelopeData | null {
   return { deleted: v.deleted };
 }
 
+// ── Feedback submit-ladder validators (Slice 3, spec §8) ──────────────────────
+
+export type FeedbackChannelId = 'ingest' | 'github' | 'email' | 'file';
+
+export interface FeedbackChannelStatusData {
+  id: FeedbackChannelId;
+  available: boolean;
+  reason?: string;
+  nextAction?: string;
+}
+
+export interface FeedbackChannelsData {
+  channels: FeedbackChannelStatusData[];
+}
+
+const CHANNEL_IDS: readonly string[] = ['ingest', 'github', 'email', 'file'];
+
+export function validateFeedbackChannels(v: unknown): FeedbackChannelsData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'channels') || !Array.isArray(v.channels)) return null;
+  const channels: FeedbackChannelStatusData[] = [];
+  for (const item of v.channels) {
+    if (!isObject(item)) continue;
+    if (!Object.hasOwn(item, 'id') || !isString(item.id) || !CHANNEL_IDS.includes(item.id)) continue;
+    if (!Object.hasOwn(item, 'available') || !isBoolean(item.available)) continue;
+    const status: FeedbackChannelStatusData = {
+      id: item.id as FeedbackChannelId,
+      available: item.available,
+    };
+    const reason = readNullableString(item, 'reason');
+    const nextAction = readNullableString(item, 'nextAction');
+    if (!reason.valid) return null;
+    if (!nextAction.valid) return null;
+    if (reason.value !== null) status.reason = reason.value;
+    if (nextAction.value !== null) status.nextAction = nextAction.value;
+    channels.push(status);
+  }
+  return { channels };
+}
+
+export interface FeedbackSubmitResultData {
+  ok: boolean;
+  alreadySubmitted: boolean;
+  status: string;
+  submittedVia?: string;
+  trackingId?: string;
+  externalUrl?: string;
+  writeBackFailed?: boolean;
+  nextAction?: string;
+}
+
+export function validateFeedbackSubmitResult(v: unknown): FeedbackSubmitResultData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'ok') || !isBoolean(v.ok)) return null;
+  if (!Object.hasOwn(v, 'alreadySubmitted') || !isBoolean(v.alreadySubmitted)) return null;
+  if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
+  const result: FeedbackSubmitResultData = {
+    ok: v.ok,
+    alreadySubmitted: v.alreadySubmitted,
+    status: v.status,
+  };
+  const submittedVia = readNullableString(v, 'submittedVia');
+  const trackingId = readNullableString(v, 'trackingId');
+  const externalUrl = readNullableString(v, 'externalUrl');
+  const nextAction = readNullableString(v, 'nextAction');
+  if (!submittedVia.valid || !trackingId.valid || !externalUrl.valid || !nextAction.valid) return null;
+  if (submittedVia.value !== null) result.submittedVia = submittedVia.value;
+  if (trackingId.value !== null) result.trackingId = trackingId.value;
+  if (externalUrl.value !== null) result.externalUrl = externalUrl.value;
+  if (nextAction.value !== null) result.nextAction = nextAction.value;
+  if (Object.hasOwn(v, 'writeBackFailed') && !isBoolean(v.writeBackFailed)) return null;
+  if (isBoolean(v.writeBackFailed)) result.writeBackFailed = v.writeBackFailed;
+  return result;
+}
+
 // ── Workspace validators ──────────────────────────────────────────────────────
 
 interface WorkspaceConfigData {

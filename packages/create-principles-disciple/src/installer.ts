@@ -1156,6 +1156,26 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   return count;
 }
 
+/**
+ * Best-effort resolve of the Owner's git `user.email`. Used to pre-fill the
+ * feedback `maintainer_email` so the email fallback channel sends to a real
+ * address instead of the loader's placeholder (spec §10 double-sync). Silent on
+ * failure → returns undefined (config leaves the field empty → placeholder).
+ */
+function resolveGitUserEmail(workspaceDir: string): string | undefined {
+  try {
+    const stdout = execSync(`git -C "${workspaceDir}" config user.email`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+      shell: 'cmd',
+    }).trim();
+    return stdout.length > 0 ? stdout : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function generateConfigYamlConfig(
   workspaceDir: string,
   runtimeProfile?: RuntimeProfileInput,
@@ -1163,6 +1183,8 @@ async function generateConfigYamlConfig(
   const configPath = getConfigYamlPath(workspaceDir);
   const configDir = path.dirname(configPath);
   await fse.ensureDir(configDir);
+  // PRI-543 (slice 5): pre-fill the feedback maintainer email from git user.email.
+  const maintainerEmail = resolveGitUserEmail(workspaceDir);
 
   // Fix-4 (P0-BUG-4): pass through the runtime profile so the generated
   // config.yaml's pd.default profile is pre-filled (avoids silent LLM
@@ -1176,7 +1198,7 @@ async function generateConfigYamlConfig(
   try {
     writeFileSync(
       configPath,
-      generateConfigYamlContent(runtimeProfile),
+      generateConfigYamlContent(runtimeProfile, maintainerEmail),
       { encoding: 'utf8', flag: 'wx' },
     );
     return configPath;

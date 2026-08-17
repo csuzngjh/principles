@@ -24,6 +24,13 @@ PD does not:
 
 The first version supports both human users and agents, but the primary path is manual user feedback. Agents may generate local drafts; they must not send feedback automatically.
 
+> **修订引用(2026-08-17)**:本条"止于本地草稿 + 复制/导出"的边界已被
+> [`2026-08-17-feedback-last-mile-submit-design.md`](./2026-08-17-feedback-last-mile-submit-design.md)
+> 扩展——PD 现在同样只持有**用户显式触发的、已脱敏草稿的服务端提交**(分层降级通道:
+> ingest relay / gh CLI / mailto / 导出文件),并**始终不静默上传**。所有"PD does not"
+> 约束(不静默上传、不代 GitHub token 提交、不直发邮件、不默认采集遥测、不落原文)继续成立。
+> 本文件下端点的草稿生成/脱敏/存储语义未变。
+
 ## User Flow
 
 1. A user opens `Feedback / Report Problem` from the Console global entrypoint, or clicks `Report this problem` from an error, update failure, degraded health state, or other contextual surface.
