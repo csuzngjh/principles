@@ -254,9 +254,20 @@ export class RuleHostWriter implements ChannelWriter {
     );
 
     if (gateResult.decision !== 'accepted_shadow') {
+      // rc-9-no-silent-fallback (EP-03, issue #1337): the gate has already
+      // computed actionable field-level failure reasons. Dropping them (the
+      // pre-#1337 behavior) left the owner an opaque
+      // `gate_decision_not_accepted_shadow:<decision>` with no way to
+      // self-serve. Surface the reasons, bounded to the first 3 — the same
+      // slice convention as extractGoldenTrace. Joining is branch-free: with
+      // zero reasons the result degrades to the exact legacy format.
+      const reasonParts = [
+        `gate_decision_not_accepted_shadow:${gateResult.decision}`,
+        ...gateResult.reasons.slice(0, 3),
+      ];
       return {
         ok: false,
-        reason: `gate_decision_not_accepted_shadow:${gateResult.decision}`,
+        reason: reasonParts.join(' — '),
         riskLevel: 'high',
       };
     }
