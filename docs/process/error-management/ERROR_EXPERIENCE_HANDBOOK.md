@@ -74,6 +74,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-088 | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path | PRI-486 |
 | ERR-094 | Range-bounds assertion uses `\|\|` instead of `&&` — tautology that always passes for any value when `low <= high` | PR #1218 |
 | ERR-096 | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal | fix/installer-gateway-lock |
+| ERR-099 | Defensive ternary alternate for a contract-impossible empty state shipped uncovered — codecov/patch gate fails; prefer a branch-free join that degrades to the legacy format | PR #1341 |
 
 ---
 
@@ -788,8 +789,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 98 |
-| Last updated | 2026-08-16 |
+| Total lessons | 99 |
+| Last updated | 2026-08-17 |
 | Top category | Schema & Type |
 | Recurring errors | 49 |
 
@@ -1491,4 +1492,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-071 (cleanup hygiene family — async cleanup/finally leaks; different prevention rule: resource cleanup vs destructive-op safety), ERR-074 (update-flow backup leak cleanup family; different root cause), ERR-050 (wrong-target file operations family).
 - **Source**: PRI-538 (pr-review session 2026-08-16, PRs #1332-1335 verification cleanup)
 - **Date**: 2026-08-16
+- **Recurrence**: None
+
+---
+
+**[ERR-099]** | Defensive ternary alternate for a contract-impossible empty state shipped uncovered — codecov/patch gate fails; prefer a branch-free join that degrades to the legacy format
+
+- **What happened**: In PR #1341 (issue #1337), the fix surfaced `gateResult.reasons` in the `RuleHostWriter.canActivate` refusal via a ternary with an empty-reasons alternate (`gateReasonDetail.length > 0 ? enriched : bare`). Every `evaluateRefinerRuleHostGate` rejection path initializes `reasons` with at least one string, so the bare alternate was unreachable through any production seam (the writer only injects `gateDeps`, not the gate result itself). The two new regression tests covered only the enriched branch, so codecov/patch reported 66.66% of diff hit (target 79.52%) and the check failed.
+- **Why it's wrong**: (a) A conditional alternate that no production path can reach is dead code that coverage gates still demand to be covered or removed. (b) Writing defensive handling for an impossible state instead of branch-free graceful degradation adds untestable surface and fails the CI gate on a PR that was otherwise green.
+- **Generalized failure mode**: When adding a conditional branch whose alternate handles a state the upstream contract guarantees cannot occur, assistants must either write the code branch-free (a single join/fold that degrades to the legacy format for the empty case) or cover the alternate with a test through a real seam — otherwise the coverage gate fails on the dead alternate and dead defensive code accumulates.
+- **Correct approach**: Prefer a construction with no branch: `const reasonParts = [prefix, ...gateResult.reasons.slice(0, 3)]; reason: reasonParts.join(' — ')` — an empty reasons array degrades to the exact legacy single-segment string with zero extra branches (PR #1341 commit 5d4fe743). If the two sides genuinely need different shapes, add a test per branch BEFORE pushing.
+- **How to prevent**: For every new conditional in a PR diff, ask: "Which production seam makes each side true?" If none exists for one side, remove the branch or restructure branch-free. Before handoff, run `npx vitest run --coverage --coverage.include='src/<changed-file>.ts'` locally and assert the new hunk has no uncovered statement/branch; also watch `codecov/patch` in `gh pr checks`.
+- **Regression guard**: PR #1341 commit 5d4fe743 (`rule-host-writer.ts` branch-free `reasonParts.join`) + codecov/patch as the standing CI gate that catches the pattern.
+- **Related ERRs**: ERR-089 (incomplete branch coverage when fixing — sibling-branch flavor of the same EP-02 group), ERR-025 (tests prove isolated helper behavior, not production path), ERR-088 (non-unique assertion signals — same EP-09 verify-the-right-thing group).
+- **Source**: PR #1341 (self-review, GitHub issue #1337)
+- **Date**: 2026-08-17
 - **Recurrence**: None
