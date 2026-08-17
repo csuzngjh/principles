@@ -1475,8 +1475,14 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     for (const key of ['maintainer_email', 'ingest_url', 'ingest_token', 'github_repo', 'github_proxy']) {
       expect(Object.hasOwn(feedback, key)).toBe(true);
       expect(typeof feedback[key]).toBe('string');
-      expect(feedback[key]).toBe('');
     }
+    // 产品级默认(PRI-543 语义修正):maintainer_email 是产品所有者邮箱;ingest 预置主通道,
+    // 让新装使用者开箱即可把反馈直送所有者 Linear。github 通道仍默认留空(按需配置)。
+    expect(feedback.maintainer_email).toBe('csuzngjh@hotmail.com');
+    expect(feedback.ingest_url).toBe('https://principles-website.pages.dev/api/feedback');
+    expect(feedback.ingest_token).not.toBe('');
+    expect(feedback.github_repo).toBe('');
+    expect(feedback.github_proxy).toBe('');
   });
 
   it('PRI-543: pre-fills feedback.maintainer_email from the provided email (no placeholder leak)', () => {
