@@ -10,6 +10,23 @@ export type MvpChannel = (typeof MVP_CHANNELS)[number];
 export const MVP_QUIET_FLAGS = ['gfi'] as const;
 export const MVP_GONE_FLAGS = ['nocturnal', 'idle_trigger'] as const;
 
+/**
+ * Product-level feedback defaults (PRI-543). The PD 控制台的"意见反馈"收集的是
+ * 使用者对 PD 产品的功能建议 / Bug,接收者是 PD 项目所有者,而非使用者自己。
+ * 因此 installer 生成的默认 config 预置:
+ * - `maintainer_email`:产品所有者的邮箱(兜底邮箱通道发到这里)。
+ * - `ingest_url` + `ingest_token`:主通道,让新装使用者开箱即可把反馈经 Cloudflare
+ *   relay 落到所有者的 Linear,无需使用者自行配置。
+ *
+ * `ingest_token` 是随发布版分发的固定"产品公共令牌",按 spec §9.2 属反滥用边界
+ * (非安全边界),靠 relay 端 IP 限流兜底。改动此值必须同步更新 Cloudflare Pages
+ * secret `INGEST_TOKEN` 为同一值,并更新 `packages/website` 端 relay 的校验常量;
+ * 同时保持与 `tests/mvp-config.test.ts` 的断言一致(spec §10 双点同步)。
+ */
+export const PRODUCT_FEEDBACK_MAINTAINER_EMAIL = 'csuzngjh@hotmail.com';
+export const PRODUCT_FEEDBACK_INGEST_URL = 'https://principles-website.pages.dev/api/feedback';
+export const PRODUCT_FEEDBACK_INGEST_TOKEN = 'pd_prod_pdxk4of3grc9vws2uz7te8iy'; // gitleaks:allow — 产品公共 ingest 令牌,spec §9.2 反滥用边界,非安全边界(随发布分发)
+
 export interface ComponentStatus {
   plugin: 'verified' | 'failed' | 'skipped';
   cli: 'verified' | 'verified_local_only' | 'failed' | 'skipped';
@@ -352,16 +369,16 @@ export function generateConfigYamlContent(
       diagnostics: { mode: 'simple' },
     },
     // PRI-543 feedback submit → config double-sync (spec §10). These channel
-    // params MUST mirror what pd-config-store.ts reads (feedback.maintainer_email
+    // params MUST mirror what pd-config-store reads (feedback.maintainer_email
     // + feedback.ingest_url / ingest_token / github_repo / github_proxy). The
-    // installer writes this segment so a fresh workspace always carries it;
-    // Owner pre-fills maintainer_email (git user.email, best-effort) — the loader
-    // falls back to the placeholder otherwise. ingest/github keys stay empty by
-    // default so the advanced channels report "unavailable" until configured.
+    // installer writes this segment so a fresh workspace always carries it.
+    // 产品反馈接收者是 PD 项目所有者:maintainer_email 默认=所有者邮箱;ingest_url
+    // / ingest_token 预置产品公共主通道(新装使用者开箱即可把反馈直送所有者 Linear,
+    // 无需使用者配置)。github 通道默认留空(需使用者按需配置 gh)。
     feedback: {
-      maintainer_email: maintainerEmail ?? '',
-      ingest_url: '',
-      ingest_token: '',
+      maintainer_email: maintainerEmail ?? PRODUCT_FEEDBACK_MAINTAINER_EMAIL,
+      ingest_url: PRODUCT_FEEDBACK_INGEST_URL,
+      ingest_token: PRODUCT_FEEDBACK_INGEST_TOKEN,
       github_repo: '',
       github_proxy: '',
     },
