@@ -187,6 +187,65 @@ describe('handleUpdateRoute', () => {
       expect(body.data.hasUpdate).toBe(false);
     });
 
+    it('should report hasUpdate against the installer deliverable and flag syncPending when the installer stalely bundles an older plugin (drift fix)', async () => {
+      // Plugin registry: 1.209.1 published. Installer: bundles only 1.209.0
+      // (its `pd.bundledPluginVersion` is what a full update can install).
+      // Even though the plugin registry is ahead, /check must NOT promise
+      // 1.209.1 (the full update cannot deliver it) and must surface the gap.
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/principles-disciple')) {
+          return Promise.resolve({ ok: true, json: async () => ({ version: '1.209.1' }) } as Response);
+        }
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              version: '1.111.0',
+              pd: { bundledPluginVersion: '1.209.0' },
+            }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: false, status: 404 } as Response);
+      }) as unknown as typeof fetch);
+
+      const req = createMockRequest('GET');
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/check');
+
+      const body = parseResponseBody<{ success: boolean; data: { hasUpdate: boolean; latestVersion: string; pluginLatestVersion: string; syncPending: boolean } }>(res);
+      expect(body.data.latestVersion).toBe('1.209.0');
+      expect(body.data.pluginLatestVersion).toBe('1.209.1');
+      expect(body.data.syncPending).toBe(true);
+      // Installed is 1.0.0 → installer deliverable 1.209.0 IS newer, so update
+      // is genuinely available (to a real, installable version).
+      expect(body.data.hasUpdate).toBe(true);
+    });
+
+    it('should fall back to plugin latest when the installer has no pd.bundledPluginVersion stamp (legacy installer)', async () => {
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/principles-disciple')) {
+          return Promise.resolve({ ok: true, json: async () => ({ version: '2.0.0' }) } as Response);
+        }
+        // Legacy installer: no `pd` stamp → bundledPluginVersion undefined.
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({ ok: true, json: async () => ({ version: '1.105.0' }) } as Response);
+        }
+        return Promise.resolve({ ok: false, status: 404 } as Response);
+      }) as unknown as typeof fetch);
+
+      const req = createMockRequest('GET');
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/check');
+
+      const body = parseResponseBody<{ success: boolean; data: { latestVersion: string; syncPending: boolean } }>(res);
+      expect(body.data.latestVersion).toBe('2.0.0');
+      expect(body.data.syncPending).toBe(false);
+    });
+
     it('should return 405 for non-GET method', async () => {
       const req = createMockRequest('POST');
       const res = createMockResponse();
