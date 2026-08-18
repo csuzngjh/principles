@@ -18,7 +18,7 @@ import type { TaskRecord, PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from './pitask-metadata.js';
 import type { PITaskMetadata } from './pitask-metadata.js';
 import { isPeerRunnerKind, isDiagnosticianStageKind, isRunnerKind } from './peer-runner-contracts.js';
 import {
@@ -628,22 +628,11 @@ export class InternalizationOrchestrator {
       return { ok: false, reason: `task_in_flight_${rawTask.status}` };
     }
 
-    const merged: PITaskMetadata = {
-      dependencyTaskIds: piTask.dependencyTaskIds,
-      channel: piTask.channel,
-      timeoutMs: piTask.timeoutMs,
-      inputArtifactRefs: piTask.inputArtifactRefs,
-      outputArtifactRefs: piTask.outputArtifactRefs,
-      parentTaskId: piTask.parentTaskId,
-      correlationId: piTask.correlationId,
-      rejectionCount: piTask.rejectionCount,
-      adversarialFeedback: piTask.adversarialFeedback,
-      repairPayload: piTask.repairPayload,
+    const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
       runnerDecision: undefined, // 新一轮 verdict 未定,清空旧判定 (INV-02 单一决策依据)
       revisionCount: (piTask.revisionCount ?? 0) + 1,
       revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
-      rolloutRevisionPayload: piTask.rolloutRevisionPayload,
-    };
+    });
 
     if (options?.replaceArtificerDependencyWith) {
       // 替换 artificer 依赖为指定任务(修订轮读取其 repairPayload/artifacts)。

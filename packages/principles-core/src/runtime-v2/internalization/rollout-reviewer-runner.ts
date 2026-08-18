@@ -11,7 +11,7 @@ import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, type PITaskMetadata } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
@@ -783,24 +783,11 @@ export class RolloutReviewerRunner {
       if (!raw) return;
       const piTask = hydratePITaskRecord(raw);
       if (!piTask) return;
-      const merged: PITaskMetadata = {
-        dependencyTaskIds: piTask.dependencyTaskIds,
-        channel: piTask.channel,
-        timeoutMs: piTask.timeoutMs,
-        inputArtifactRefs: piTask.inputArtifactRefs,
-        outputArtifactRefs: piTask.outputArtifactRefs,
-        parentTaskId: piTask.parentTaskId,
-        correlationId: piTask.correlationId,
-        rejectionCount: piTask.rejectionCount,
-        adversarialFeedback: piTask.adversarialFeedback,
-        repairPayload: piTask.repairPayload,
-        revisionCount: piTask.revisionCount,
-        revisionFeedback: piTask.revisionFeedback,
-        rolloutRevisionPayload: piTask.rolloutRevisionPayload,
+      const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
         runnerDecision: decision === 'approve_rollout' || decision === 'needs_revision' || decision === 'reject'
           ? decision
           : undefined,
-      };
+      });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
     } catch (err) {
       this.emitRolloutReviewerEvent('rollout_decision_record_failed', taskId, {
@@ -821,22 +808,9 @@ export class RolloutReviewerRunner {
       if (!raw) return;
       const piTask = hydratePITaskRecord(raw);
       if (!piTask) return;
-      const merged: PITaskMetadata = {
-        dependencyTaskIds: piTask.dependencyTaskIds,
-        channel: piTask.channel,
-        timeoutMs: piTask.timeoutMs,
-        inputArtifactRefs: piTask.inputArtifactRefs,
-        outputArtifactRefs: piTask.outputArtifactRefs,
-        parentTaskId: piTask.parentTaskId,
-        correlationId: piTask.correlationId,
-        rejectionCount: piTask.rejectionCount,
-        adversarialFeedback: piTask.adversarialFeedback,
-        repairPayload: piTask.repairPayload,
-        runnerDecision: piTask.runnerDecision,
-        revisionCount: piTask.revisionCount,
-        revisionFeedback: piTask.revisionFeedback,
+      const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
         rolloutRevisionPayload: payload,
-      };
+      });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
     } catch (err) {
       this.emitRolloutReviewerEvent('rollout_revision_record_failed', taskId, {

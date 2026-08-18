@@ -36,7 +36,7 @@ import type {
 import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, type RepairPayload, type PITaskMetadata } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type RepairPayload, type PITaskMetadata } from './pitask-metadata.js';
 import { EvaluatorPromptBuilder } from './evaluator-prompt-builder.js';
 import { reconcileLineageEcho, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -881,24 +881,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       if (!raw) return;
       const piTask = hydratePITaskRecord(raw);
       if (!piTask) return;
-      const merged: PITaskMetadata = {
-        dependencyTaskIds: piTask.dependencyTaskIds,
-        channel: piTask.channel,
-        timeoutMs: piTask.timeoutMs,
-        inputArtifactRefs: piTask.inputArtifactRefs,
-        outputArtifactRefs: piTask.outputArtifactRefs,
-        parentTaskId: piTask.parentTaskId,
-        correlationId: piTask.correlationId,
-        rejectionCount: piTask.rejectionCount,
-        adversarialFeedback: piTask.adversarialFeedback,
-        repairPayload: piTask.repairPayload,
-        revisionCount: piTask.revisionCount,
-        revisionFeedback: piTask.revisionFeedback,
-        rolloutRevisionPayload: piTask.rolloutRevisionPayload,
+      const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
         runnerDecision: decision === 'approved' || decision === 'needs_revision' || decision === 'rejected'
           ? decision
           : undefined,
-      };
+      });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
     } catch (err) {
       this.emitEvent('runner_decision_record_failed', taskId, {

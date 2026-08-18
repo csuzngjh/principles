@@ -116,12 +116,18 @@ describe('Signal Stage2 × real PiAiRuntimeAdapter (E2E, llama.cpp)', () => {
     ).rejects.toThrow();
   });
 
-  it('timeout: 超短预算 → startRun 抛 timeout, classification 不可得 (host 侧 catch 降级)', { timeout: 60_000 }, async () => {
-    const adapter = makeAdapter(LLAMACPP_BASE_URL, 1);
-    // adapter 的真实行为: 超时在 startRun 内以 PDRuntimeError[timeout] 抛出,
-    // host 的 classifier catch 后记录 SIGNAL_LLM_FAILED 并返回 null (降级)。
-    await expect(
-      runClassification(adapter, SEMANTIC_CORRECTION, 'signal-classification-output-v1', 1),
-    ).rejects.toThrow(/timed out|timeout/i);
-  });
+  it.skipIf(!llamaReachable)(
+    'timeout: 超短预算 → startRun 抛 timeout, classification 不可得 (host 侧 catch 降级)',
+    { timeout: 60_000 },
+    async () => {
+      const adapter = makeAdapter(LLAMACPP_BASE_URL, 1);
+      // adapter 的真实行为: 超时在 startRun 内以 PDRuntimeError[timeout] 抛出,
+      // host 的 classifier catch 后记录 SIGNAL_LLM_FAILED 并返回 null (降级)。
+      // CI 无 llama → skip: 该场景的"运行时不可用 → 抛错降级"分支已由上面的
+      // unavailable-runtime 测试覆盖(连接失败/api key 缺失路径确定性覆盖)。
+      await expect(
+        runClassification(adapter, SEMANTIC_CORRECTION, 'signal-classification-output-v1', 1),
+      ).rejects.toThrow(/timed out|timeout/i);
+    },
+  );
 });

@@ -166,6 +166,35 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
 /** Alias for serializePITaskMetadata — explicit name for adapter/consumer use. */
 export const createPITaskDiagnosticJson = serializePITaskMetadata;
 
+/**
+ * 从已 hydrate 的 PITaskRecord 重建可写 PITaskMetadata,浅覆盖指定字段。
+ *
+ * 单一重建点 (DRY): evaluator/rollout 的 verdict 记录、修订路由记录、
+ * orchestrator 的 revision reopen 共用同一字段搬运逻辑——此前 4 处手写
+ * 逐字段 spread,新增字段时容易漏抄 (Phase 3.5 consolidation)。
+ * 注意: overrides 中显式 undefined 会覆盖为 undefined (serialize 时省略键),
+ * 用于"清除旧 verdict"语义。
+ */
+export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITaskMetadata>): PITaskMetadata {
+  return {
+    dependencyTaskIds: base.dependencyTaskIds,
+    channel: base.channel,
+    timeoutMs: base.timeoutMs,
+    inputArtifactRefs: base.inputArtifactRefs,
+    outputArtifactRefs: base.outputArtifactRefs,
+    parentTaskId: base.parentTaskId,
+    correlationId: base.correlationId,
+    rejectionCount: base.rejectionCount,
+    adversarialFeedback: base.adversarialFeedback,
+    repairPayload: base.repairPayload,
+    runnerDecision: base.runnerDecision,
+    revisionCount: base.revisionCount,
+    revisionFeedback: base.revisionFeedback,
+    rolloutRevisionPayload: base.rolloutRevisionPayload,
+    ...overrides,
+  };
+}
+
 // ── ArtifactRef validation ─────────────────────────────────────────────────────
 
 /**

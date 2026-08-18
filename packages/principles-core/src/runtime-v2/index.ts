@@ -743,6 +743,7 @@ export {
   parsePITaskMetadata,
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
+  mergePITaskMetadata,
 } from './internalization/pitask-metadata.js';
 
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────

@@ -12,7 +12,7 @@
 
 import * as path from 'path';
 import { RuntimeStateManager } from '@principles/core/runtime-v2';
-import { hydratePITaskRecord, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 export interface InternalizationRetryOptions {
@@ -100,21 +100,7 @@ export async function handleRuntimeInternalizationRetry(opts: InternalizationRet
     // 清空 runnerDecision(新轮次 verdict 未定),保留 revision 轮次与 lineage
     const piTask = hydratePITaskRecord(task);
     if (piTask) {
-      const merged = {
-        dependencyTaskIds: piTask.dependencyTaskIds,
-        channel: piTask.channel,
-        timeoutMs: piTask.timeoutMs,
-        inputArtifactRefs: piTask.inputArtifactRefs,
-        outputArtifactRefs: piTask.outputArtifactRefs,
-        parentTaskId: piTask.parentTaskId,
-        correlationId: piTask.correlationId,
-        rejectionCount: piTask.rejectionCount,
-        adversarialFeedback: piTask.adversarialFeedback,
-        repairPayload: piTask.repairPayload,
-        revisionCount: piTask.revisionCount,
-        revisionFeedback: piTask.revisionFeedback,
-        rolloutRevisionPayload: piTask.rolloutRevisionPayload,
-      };
+      const merged = mergePITaskMetadata(piTask, { runnerDecision: undefined });
       await stateManager.updateTaskDiagnosticJson(opts.taskId, createPITaskDiagnosticJson(merged));
     }
     await stateManager.updateTask(opts.taskId, { status: 'pending', attemptCount: 0 });
