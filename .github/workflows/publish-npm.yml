@@ -475,6 +475,103 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Sync to ClawHub marketplace
+        # The ClawHub marketplace does NOT auto-sync from npm (no trusted
+        # publisher configured), so without this step the marketplace stays
+        # stale after every release. Runs after npm publish + release so a
+        # marketplace failure never blocks the primary npm channel.
+        #
+        # Timeout fallback (known issue: server-side inspection of this
+        # ~470-file package exceeds the CLI's 120s upload timeout, and the
+        # CLI's built-in 5x p-retry then races and hangs):
+        #   1. best-effort patch the freshly installed CLI's upload timeout
+        #      up to 600s (same patch we verified locally);
+        #   2. bound every attempt with an outer `timeout` guard +
+        #      --wait-timeout, and retry once;
+        #   3. success is judged by `clawhub package inspect` seeing the
+        #      version, not by the publish command's exit code alone;
+        #   4. if both attempts fail, degrade to a warning + manual
+        #      fallback instructions instead of failing the release.
+        if: matrix.pkg_dir == 'openclaw-plugin'
+        continue-on-error: true
+        timeout-minutes: 25
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        run: |
+          set -u
+
+          if [ -z "${CLAWHUB_TOKEN:-}" ]; then
+            echo "::warning::CLAWHUB_TOKEN secret is not set — skipping ClawHub marketplace sync. Add the secret (ClawHub API token) to enable it."
+            exit 0
+          fi
+
+          # CI auth: the CLI reads its token from a global config file,
+          # overridable via CLAWHUB_CONFIG_PATH.
+          CFG_DIR="$(mktemp -d)"
+          printf '{\n  "registry": "https://clawhub.ai",\n  "token": "%s"\n}\n' "$CLAWHUB_TOKEN" > "$CFG_DIR/config.json"
+          chmod 600 "$CFG_DIR/config.json"
+          export CLAWHUB_CONFIG_PATH="$CFG_DIR/config.json"
+
+          npm install -g clawhub@latest
+          clawhub --version
+
+          # Best-effort: raise the CLI's upload timeout (120s in published
+          # builds) to 600s. Non-fatal — the outer timeout guard below
+          # covers the case where the patch pattern does not match.
+          GLOBAL_HTTP_JS="$(npm root -g)/clawhub/dist/http.js"
+          if [ -f "$GLOBAL_HTTP_JS" ] && grep -q "UPLOAD_TIMEOUT_MS" "$GLOBAL_HTTP_JS"; then
+            sed -i -E 's/(UPLOAD_TIMEOUT_MS = )[0-9_]+/\1600_000/' "$GLOBAL_HTTP_JS" || true
+            grep -n "UPLOAD_TIMEOUT_MS =" "$GLOBAL_HTTP_JS" | head -1
+          fi
+
+          VERSION="$(node -p "require('./packages/openclaw-plugin/package.json').version")"
+          SRC="packages/openclaw-plugin"
+          echo "Publishing ClawHub marketplace version: $VERSION"
+
+          attempt() {
+            local N="$1"
+            echo "--- ClawHub publish attempt $N ---"
+            # Outer hard bound: upload (<=600s patched) + wait for scan.
+            timeout 480 clawhub package publish "$SRC" --version "$VERSION" --wait --wait-timeout 240 || true
+            # Judge success by the version being visible on the marketplace,
+            # not by the publish exit code (a --wait-timeout expiry can
+            # outlive a successful upload while the scan is still pending).
+            if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
+              echo "::notice::ClawHub marketplace shows v$VERSION (attempt $N)."
+              return 0
+            fi
+            echo "v$VERSION not visible on ClawHub yet (attempt $N)."
+            return 1
+          }
+
+          if attempt 1; then
+            echo "ClawHub marketplace sync succeeded."
+            exit 0
+          fi
+
+          echo "Attempt 1 failed — waiting 30s before retry..."
+          sleep 30
+          if attempt 2; then
+            echo "ClawHub marketplace sync succeeded on retry."
+            exit 0
+          fi
+
+          {
+            echo "## ⚠️ ClawHub marketplace sync failed"
+            echo ""
+            echo "npm \`${VERSION}\` published successfully; the ClawHub upload timed out twice."
+            echo "The package may still appear later (server-side scan can be slow)."
+            echo ""
+            echo "Manual fallback (on a machine with ClawHub CLI login):"
+            echo '```bash'
+            echo "cd packages/openclaw-plugin"
+            echo "clawhub package publish . --version ${VERSION} --wait"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::warning::ClawHub marketplace sync failed for v${VERSION} — npm publish succeeded. See step summary for the manual fallback command."
+          exit 1
+
       - name: Summary
         run: |
           echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
