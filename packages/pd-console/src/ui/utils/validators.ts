@@ -911,6 +911,10 @@ export interface UpdateStatusData {
   codexInstalled?: boolean;
   /** Release notes for the latest version (markdown, from GitHub Releases). */
   changelog?: string;
+  /** Newest plugin version published to npm (may exceed what the installer can deliver). */
+  pluginLatestVersion?: string;
+  /** True when a newer plugin is published but the installer has not been republished to bundle it. */
+  syncPending?: boolean;
 }
 
 export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
@@ -931,6 +935,12 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   }
   if (Object.hasOwn(v, 'changelog') && isString(v.changelog)) {
     result.changelog = v.changelog;
+  }
+  if (Object.hasOwn(v, 'pluginLatestVersion') && isString(v.pluginLatestVersion)) {
+    result.pluginLatestVersion = v.pluginLatestVersion;
+  }
+  if (Object.hasOwn(v, 'syncPending') && typeof v.syncPending === 'boolean') {
+    result.syncPending = v.syncPending;
   }
   return result;
 }
