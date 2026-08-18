@@ -25,6 +25,8 @@ let mockObservabilityWarnings: string[] = [];
 let lastPainDetectedData: PainDetectedData | null = null;
 let lastFactoryOpts: PainSignalRuntimeFactoryOptions | null = null;
 
+let submitPainSignalCalls = 0;
+
 vi.mock('../pain-signal-runtime-factory.js', () => ({
   createPainSignalBridge: vi.fn(async (opts: PainSignalRuntimeFactoryOptions) => {
     lastFactoryOpts = opts;
@@ -34,6 +36,13 @@ vi.mock('../pain-signal-runtime-factory.js', () => ({
         lastPainDetectedData = data;
         if (mockBridgeError) throw mockBridgeError;
         return { ...mockBridgeResult, taskId: data.taskId ?? mockBridgeResult.taskId };
+      }),
+      submitPainSignal: vi.fn(async (data: PainDetectedData) => {
+        submitPainSignalCalls += 1;
+        lastPainDetectedData = data;
+        if (mockBridgeError) throw mockBridgeError;
+        // async 模式只创建 pending 任务,不跑诊断 (evidence durable-first)
+        return { taskId: data.taskId ?? 'diag-async-1' };
       }),
     };
   }),
@@ -290,6 +299,47 @@ describe('PainToPrincipleService', () => {
 });
 
 // ── Parity: all 18 PDErrorCategory → FAILURE_CATEGORY_MAP ──────────────────
+
+describe('PainToPrincipleService async mode — evidence durable-first (P1, §十六)', () => {
+  it('asyncMode: evidence 作为 pending 任务持久化,submit 路径不触发 LLM 诊断,LLM 不可用不丢证据', async () => {
+    submitPainSignalCalls = 0;
+    observabilityCalled = false;
+    const service = new PainToPrincipleService(makeOpts({ asyncMode: true }));
+    const result = await service.recordPain({
+      painId: 'pain-async-1',
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'owner 明确提交的纠正证据',
+      score: 80,
+      sessionId: 'cli',
+      agentId: 'pd-cli',
+      provenance: 'owner_reported_no_host_trace',
+      evidence: [],
+      recordObservability: true,
+    });
+
+    // durable-first: 任务已创建 (submit), 状态 submitted (可重试), 未跑诊断
+    expect(result.status).toBe('submitted');
+    expect(submitPainSignalCalls).toBe(1);
+    expect(result.taskId).toBeTruthy();
+    expect(observabilityCalled).toBe(true);
+    // onPainDetected (同步诊断路径) 未被调用 — LLM 不在 submit 关键路径上
+    // (mock 的 onPainDetected 会设置 lastPainDetectedData, 但 submit 也设置;
+    //  区分手段: sync 路径返回 bridgeResult.status 而非 submitted)
+  });
+
+  it('asyncMode: bridge submit 抛错时 fail-loud 返回 failed (不伪装成功)', async () => {
+    mockBridgeError = new PDRuntimeError('runtime_unavailable', 'LLM unreachable');
+    const service = new PainToPrincipleService(makeOpts({ asyncMode: true }));
+    const result = await service.recordPain({
+      painId: 'pain-async-2', painType: 'user_frustration', source: 'manual',
+      reason: 'x', score: 80, sessionId: 'cli', agentId: 'pd-cli',
+      provenance: 'owner_reported_no_host_trace', evidence: [], recordObservability: false,
+    });
+    expect(result.status).toBe('failed');
+    mockBridgeError = null;
+  });
+});
 
 describe('PainToPrincipleService error classification parity', () => {
    
