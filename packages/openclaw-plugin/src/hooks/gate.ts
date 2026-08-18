@@ -123,6 +123,9 @@ export function handleBeforeToolCall(
         matched: hostResult?.matched ?? false,
         decision: hostResult?.decision ?? 'allow',
         ruleId: hostResult?.ruleId,
+        // P1 (ISSUE-023): live 事件补 activationId — 414 次 live-mode 评估
+        // 无法对账到规则的审计缺口
+        activationId: report.liveDecisionActivationId,
         activationMode: 'live',
       });
     } catch (evErr) {

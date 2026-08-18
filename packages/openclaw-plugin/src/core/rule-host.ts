@@ -84,6 +84,12 @@ export interface SkippedActivation {
 
 export interface RuleHostEvaluationReport {
   readonly liveDecision: RuleHostResult | undefined;
+  /**
+   * P1 (ISSUE-023): live 聚合决策的溯源 — 贡献该决策的 live activation id
+   * (经 ruleId 反查 implementationSources)。审计开放项: 414 次 live-mode
+   * 评估无法对账到具体规则,因为 live 事件不带 activationId。
+   */
+  readonly liveDecisionActivationId?: string;
   readonly shadowDecisions: readonly RuleHostObservedDecision[];
   /**
    * PRI-491 — Activations that were skipped at load time. Empty when all
@@ -213,7 +219,17 @@ export class RuleHost {
           );
         },
       });
-      return { liveDecision, shadowDecisions, skippedActivations: skipped };
+      // P1 (ISSUE-023): 经 ruleId 反查 live 决策的 activationId (可审计溯源)
+      let liveDecisionActivationId: string | undefined;
+      if (liveDecision?.ruleId) {
+        for (const source of this.implementationSources.values()) {
+          if (source.ruleId === liveDecision.ruleId) {
+            liveDecisionActivationId = source.activationId;
+            break;
+          }
+        }
+      }
+      return { liveDecision, liveDecisionActivationId, shadowDecisions, skippedActivations: skipped };
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)
       this.logger.warn?.(

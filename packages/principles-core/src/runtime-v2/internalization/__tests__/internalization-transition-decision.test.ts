@@ -130,9 +130,8 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
       listTasks: vi.fn().mockResolvedValue([]),
       getTask: vi.fn().mockResolvedValue(null),
       acquireLease: vi.fn(),
-      createTask: vi.fn().mockImplementation(async (input: { taskId: string }) => makeTask({
+      createTask: vi.fn().mockImplementation(async (input: { taskId: string; taskKind: string; status?: string; diagnosticJson?: string }) => makeTask({
         taskId: input.taskId, taskKind: input.taskKind, status: 'pending',
-        meta: input.diagnosticJson ? undefined : makeMeta(),
       })),
       updateTask: vi.fn().mockResolvedValue(undefined),
       updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined),
@@ -269,7 +268,7 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
       return null;
     });
     // 真实 store 的 UNIQUE 约束: 同 id 任务已存在 → createTask 抛错
-    mockStateManager.createTask.mockImplementation(async (input: { taskId: string }) => {
+    mockStateManager.createTask.mockImplementation(async (input: { taskId: string; taskKind: string }) => {
       if (input.taskId === 'rollout_reviewer-cand-6-prompt') {
         throw new Error('UNIQUE constraint failed: tasks.task_id');
       }
