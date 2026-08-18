@@ -102,7 +102,7 @@ export interface RolloutAutoDispatchOutcome {
   readonly reason?: string;
 }
 
-/** needs_revision 修订路由输入 (host 经 InternalizationOrchestrator.reopenTaskForRevision 实现) */
+/** needs_revision 修订路由输入 (host 层经 orchestrator 的 revision-reopen 能力实现,注入式) */
 export interface RolloutRevisionRoutingInput {
   readonly targetTaskId: string;
   readonly targetKind: 'scribe' | 'artificer';
@@ -710,17 +710,32 @@ export class RolloutReviewerRunner {
     const rawTask = await this.stateManager.getTask(taskId);
     if (!rawTask) return null;
     const piTask = hydratePITaskRecord(rawTask);
-    const evaluatorDeps = piTask?.dependencyTaskIds ?? [];
 
+    // 第一跳: rollout deps → evaluator; evaluator deps → artificer
     let artificerTaskId: string | null = null;
     let artificerDeps: string[] = [];
-    for (const depId of evaluatorDeps) {
+    const firstHop = piTask?.dependencyTaskIds ?? [];
+    for (const depId of firstHop) {
       const dep = await this.stateManager.getTask(depId);
-      if (!dep || dep.taskKind !== 'artificer') continue;
-      const depPi = hydratePITaskRecord(dep);
-      artificerTaskId = dep.taskId;
-      artificerDeps = depPi?.dependencyTaskIds ?? [];
-      break;
+      if (!dep) continue;
+      if (dep.taskKind === 'artificer') {
+        const depPi = hydratePITaskRecord(dep);
+        artificerTaskId = dep.taskId;
+        artificerDeps = depPi?.dependencyTaskIds ?? [];
+        break;
+      }
+      if (dep.taskKind === 'evaluator') {
+        const evalPi = hydratePITaskRecord(dep);
+        for (const evalDepId of evalPi?.dependencyTaskIds ?? []) {
+          const evalDep = await this.stateManager.getTask(evalDepId);
+          if (!evalDep || evalDep.taskKind !== 'artificer') continue;
+          const evalDepPi = hydratePITaskRecord(evalDep);
+          artificerTaskId = evalDep.taskId;
+          artificerDeps = evalDepPi?.dependencyTaskIds ?? [];
+          break;
+        }
+        if (artificerTaskId) break;
+      }
     }
     if (!artificerTaskId) return null;
 

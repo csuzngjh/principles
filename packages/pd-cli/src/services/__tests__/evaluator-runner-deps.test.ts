@@ -185,7 +185,7 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     expect(deps.isRepairLoopEnabled()).toBe(false);
   });
 
-  it('flag absent in config → isRepairLoopEnabled() returns false (defaults apply)', () => {
+  it('flag absent in config → isRepairLoopEnabled() returns true (P0-D: default-on since core-loop closure)', () => {
     const workspaceDir = createTempWorkspace(null);
     tmpWorkspaces.push(workspaceDir);
     const { stateManager } = createMockStateManager();
@@ -201,10 +201,11 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
 
     expect(typeof deps.isRepairLoopEnabled).toBe('function');
     if (typeof deps.isRepairLoopEnabled !== 'function') throw new Error('isRepairLoopEnabled missing');
-    expect(deps.isRepairLoopEnabled()).toBe(false);
+    // 契约变更 (2026-08-18, INV-02): registry 默认 ON;flag 缺省 = 默认生效
+    expect(deps.isRepairLoopEnabled()).toBe(true);
   });
 
-  it('malformed config → isRepairLoopEnabled() returns false (rc-9: fail safe, not throw)', () => {
+  it('malformed config → isRepairLoopEnabled() falls back to registry defaults (default-on), never throws', () => {
     // CodeQL: use mkdtempSync for atomic, unpredictable temp dir creation.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri-510-malformed-'));
     tmpWorkspaces.push(tmpDir);
@@ -223,10 +224,11 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
       workspaceDir: tmpDir,
     });
 
-    // Malformed config must NOT throw — return false so the legacy path runs.
+    // Malformed config must NOT throw — falls back to registry defaults
+    // (P0-D: evaluator_artificer_repair_loop default-on since core-loop closure).
     expect(typeof deps.isRepairLoopEnabled).toBe('function');
     if (typeof deps.isRepairLoopEnabled !== 'function') throw new Error('isRepairLoopEnabled missing');
-    expect(deps.isRepairLoopEnabled()).toBe(false);
+    expect(deps.isRepairLoopEnabled()).toBe(true);
   });
 
   it('seedArtificerRepairTask → creates artificer task with repairPayload in diagnosticJson (rc-1, rc-6)', async () => {

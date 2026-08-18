@@ -229,6 +229,8 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'internalization_core_grounding') continue;
       if (flag.id === 'internalization_auto_consumer') continue;
       if (flag.id === 'story_a_approval_completion') continue;
+      // P0-D (2026-08-18): repair loop promoted to default-on (INV-02 liveness)
+      if (flag.id === 'evaluator_artificer_repair_loop') continue;
       // PRI-454: painEvidenceAdmission + painEvidenceAdmissionDefault flipped to default-on
       if (flag.id === 'painEvidenceAdmission') continue;
       if (flag.id === 'pain_evidence_admission') continue;
@@ -504,12 +506,14 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
   });
 
   // ── PRI-509: Evaluator→Artificer repair loop ─────────────────────────────
-  it('PRI-509: evaluator_artificer_repair_loop is registered as quiet, default-off', () => {
+  it('PRI-509/P0-D: evaluator_artificer_repair_loop is quiet, default-ON since core-loop closure (INV-02)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'evaluator_artificer_repair_loop');
     expect(flag).toBeDefined();
     if (!flag) throw new Error('evaluator_artificer_repair_loop flag not found');
     expect(flag.category).toBe('quiet');
-    expect(flag.enabled).toBe(false);
+    // 契约变更 (2026-08-18): needs_revision 必须有自动 revision 出边 (INV-02);
+    // flag 保留为运行时 kill-switch (config enabled:false 回滚)
+    expect(flag.enabled).toBe(true);
     expect(flag.since).toBe('2026-07-04');
     expect(flag.description).toContain('PRI-509');
   });
