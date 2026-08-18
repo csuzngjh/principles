@@ -319,6 +319,17 @@ export function UpdatePage() {
             </div>
           )}
 
+          {/* Sync-pending notice: a newer plugin is published but the installer
+              has not been republished to bundle it. Show it honestly instead of
+              offering a version the full update cannot install. */}
+          {statusData?.syncPending && (
+            <div className="mt-4 p-3 rounded-[4px] border border-amber/30 bg-amber/5">
+              <p className="text-[12px] text-amber leading-relaxed">
+                {t("pages.update.syncPending", { pluginVersion: statusData.pluginLatestVersion ?? "" })}
+              </p>
+            </div>
+          )}
+
           {/* Codex host warning — Web UI update only covers the OpenClaw plugin */}
           {statusData?.codexInstalled && (
             <div className="mt-4 p-3 rounded-[4px] border border-amber/30 bg-amber/5">

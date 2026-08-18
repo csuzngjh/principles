@@ -335,6 +335,27 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   writeFileSync(bundledPluginPkgPath, JSON.stringify(pkg, null, 2) + '\n');
   console.log(`  ✅ plugin/package.json: ${oldVersion} → ${npmPluginVersion}`);
 
+  // Record the bundled plugin version on the INSTALLER's own package.json so
+  // the registry metadata (`create-principles-disciple/latest`) exposes which
+  // plugin version this installer can actually deliver. The console `/check`
+  // reads this field to compare against what the full update will install —
+  // without it, check (plugin registry latest) and apply-full (installer's
+  // build-time-frozen plugin) drift and produce the permanent false
+  // "update available". Unknown fields are preserved; only the
+  // `pd.bundledPluginVersion` stamp is added/updated.
+  const installerPkgPath = join(__dirname, '..', 'package.json');
+  try {
+    const installerRaw = readFileSync(installerPkgPath, 'utf-8');
+    const installerPkg = JSON.parse(installerRaw);
+    installerPkg.pd = installerPkg.pd && typeof installerPkg.pd === 'object' ? installerPkg.pd : {};
+    installerPkg.pd.bundledPluginVersion = npmPluginVersion;
+    writeFileSync(installerPkgPath, JSON.stringify(installerPkg, null, 2) + '\n');
+    console.log(`  ✅ create-principles-disciple/package.json pd.bundledPluginVersion → ${npmPluginVersion}`);
+  } catch (e) {
+    console.warn('  ⚠️  Could not stamp pd.bundledPluginVersion on installer package.json.');
+    console.warn(`      (${e instanceof Error ? e.message : String(e)})`);
+  }
+
   // Stamp plugin/openclaw.plugin.json (if it has a version field)
   // CodeQL: same TOCTOU false positive as above — build script, single-threaded.
   const bundledManifestPath = join(PLUGIN_DEST, 'openclaw.plugin.json');

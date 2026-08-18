@@ -39,6 +39,13 @@ import {
 // installer package (create-principles-disciple). These are independently
 // versioned — comparing them caused a permanent false "update available".
 const NPM_REGISTRY_LATEST = 'https://registry.npmjs.org/principles-disciple/latest';
+// Full update installs the bundled plugin from the INSTALLER package. The
+// installer captures the plugin version at build time (bundle-plugin.mjs
+// records it as `pd.bundledPluginVersion`). `/check` must compare the
+// installed version against what the installer can ACTUALLY deliver, not the
+// raw plugin registry latest, otherwise it promises a version the full update
+// can never install → permanent false "update available" and no-op updates.
+const NPM_REGISTRY_INSTALLER = 'https://registry.npmjs.org/create-principles-disciple/latest';
 const WORKSPACE_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md', 'CLAUDE.md'];
 
 // Directories to skip during backup and diff. node_modules contains native
@@ -322,45 +329,86 @@ function detectCodexInstall(): boolean {
   return fs.existsSync(codexHooks) || fs.existsSync(pdCodexDir);
 }
 
+/**
+ * Fetch a registry `/latest` document.
+ *
+ * Returns parsed fields with runtime guards (rc-1/rc-2): never trusts unknown
+ * JSON. `bundledPluginVersion` is read from `pd.bundledPluginVersion` and
+ * only returned when it is a valid semver string.
+ */
+async function fetchRegistryMetadata(url: string, label: string): Promise<{ version: string; bundledPluginVersion?: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`${label}: HTTP ${response.status}`);
+    const rawData: unknown = await response.json();
+    if (!isRecord(rawData)) throw new Error(`Invalid registry response (${label})`);
+    if (typeof rawData.version !== 'string') throw new Error(`Missing version (${label})`);
+    const out: { version: string; bundledPluginVersion?: string } = { version: rawData.version };
+    if (isRecord(rawData.pd) && typeof rawData.pd.bundledPluginVersion === 'string') {
+      const bundled = rawData.pd.bundledPluginVersion;
+      if (semver.valid(bundled) !== null) out.bundledPluginVersion = bundled;
+    }
+    return out;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function doCheckForUpdates(currentVersion: string) {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    let latestVersion = '';
-    try {
-      const response = await fetch(NPM_REGISTRY_LATEST, {
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const rawData: unknown = await response.json();
-      if (!isRecord(rawData)) throw new Error('Invalid registry response');
-      if (typeof rawData.version !== 'string') throw new Error('Invalid registry response: missing version');
-      latestVersion = rawData.version;
-    } finally {
-      clearTimeout(timeoutId);
+    // Fetch BOTH the plugin registry latest (for changelog + sync detection)
+    // and the installer's declared bundled plugin version (what a full update
+    // can actually deliver). rc-4: validate array/element shapes with guards.
+    const pluginResult = await fetchRegistryMetadata(NPM_REGISTRY_LATEST, 'Plugin registry check');
+    const pluginLatest = pluginResult.version;
+    const installerResult = await fetchRegistryMetadata(NPM_REGISTRY_INSTALLER, 'Installer registry check');
+    // The installer stamps the exact plugin version it bundles in
+    // `pd.bundledPluginVersion` (bundle-plugin.mjs). This is the version the
+    // full update ACTUALLY installs. Fall back to the plugin registry latest
+    // for old installers without the stamp.
+    const deliverableVersion = installerResult.bundledPluginVersion ?? pluginLatest;
+
+    // hasUpdate must compare against what we can actually install. If the
+    // installer is stale (its bundled plugin < plugin registry latest), we
+    // report the stale deliverable and surface the sync gap so the UI does
+    // not offer a version the update never installs.
+    const hasUpdate = semver.gt(deliverableVersion, currentVersion);
+    const syncPending =
+      Boolean(pluginLatest) &&
+      Boolean(deliverableVersion) &&
+      semver.gt(pluginLatest, deliverableVersion);
+
+    // Fetch release notes from GitHub (best-effort, non-blocking).
+    let changelog = '';
+    const notesVersion = syncPending ? pluginLatest : deliverableVersion;
+    if (notesVersion) {
+      try {
+        const ghResponse = await fetch(
+          `https://api.github.com/repos/csuzngjh/principles/releases/tags/v${notesVersion}`,
+          { signal: AbortSignal.timeout(5000), headers: { Accept: 'application/vnd.github.v3+json' } },
+        );
+        if (ghResponse.ok) {
+          const ghData: unknown = await ghResponse.json();
+          if (isRecord(ghData) && typeof ghData.body === 'string') {
+            changelog = ghData.body;
+          }
+        }
+      } catch { /* best-effort — changelog is optional */ }
     }
 
-    // Fetch release notes from GitHub for the latest version (best-effort,
-    // non-blocking — if it fails, the UI still shows version info without notes).
-    let changelog = '';
-    try {
-      const ghResponse = await fetch(
-        `https://api.github.com/repos/csuzngjh/principles/releases/tags/v${latestVersion}`,
-        { signal: AbortSignal.timeout(5000), headers: { Accept: 'application/vnd.github.v3+json' } },
-      );
-      if (ghResponse.ok) {
-        const ghData: unknown = await ghResponse.json();
-        if (isRecord(ghData) && typeof ghData.body === 'string') {
-          changelog = ghData.body;
-        }
-      }
-    } catch { /* best-effort — changelog is optional */ }
-
     return {
-      hasUpdate: semver.gt(latestVersion, currentVersion),
+      hasUpdate,
       currentVersion,
-      latestVersion,
+      latestVersion: deliverableVersion,
       changelog,
+      // Newer plugin is published but the installer has not been republished
+      // to bundle it. UI shows this as an honest "sync in progress" notice
+      // instead of offering an uninstallable version.
+      pluginLatestVersion: pluginLatest,
+      syncPending,
     };
   } catch (error) {
     return {
@@ -614,7 +662,6 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
 // pd-cli). We download it directly and copy the pre-built dist/ directories.
 // This is seconds-fast (no npm install) and requires no CLI/npx — the entire
 // operation happens inside the console HTTP handler.
-const NPM_REGISTRY_INSTALLER = 'https://registry.npmjs.org/create-principles-disciple/latest';
 
 /**
  * Compare two dependency maps for meaningful differences.
@@ -753,8 +800,40 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
 
-    // 7. Record history
+    // 7. Version-advance check (drift guard). The full update installs the
+    // plugin bundled inside the installer. If the installer is stale (its
+    // bundled plugin is NOT newer than what is installed), the "update" is a
+    // no-op that merely rewrites the same version — recording it as success
+    // produced the confusing `1.209.0 → 1.209.0` history and a permanent
+    // false "update available". Detect that and fail loud (rc-9) instead of
+    // reporting a false success.
     const newVersion = readCurrentVersion(extDir) ?? toVersion ?? 'unknown';
+    const progressed =
+      fromVersion !== 'unknown' &&
+      semver.valid(fromVersion) !== null &&
+      semver.valid(newVersion) !== null &&
+      semver.gt(newVersion, fromVersion);
+
+    if (!progressed) {
+      // Files were already rewritten to the same (or lower) version. Record a
+      // FAILED history entry so the operator sees why, and return a structured
+      // error with nextAction.
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: newVersion,
+        success: false,
+      });
+      return {
+        success: false,
+        message: 'Installed version did not advance — the update source is stale (it bundles the same or an older plugin).',
+        reason: 'installer_bundle_stale',
+        nextAction:
+          'The published installer mirrors an older plugin. Contact the maintainer to republish the installer, or try again later when a newer installer is available.',
+        requiresRestart: false,
+      };
+    }
+
+    // 8. Record history (only for genuine version advancement)
     appendUpdateHistory(workspaceDir, {
       fromVersion,
       toVersion: newVersion,
