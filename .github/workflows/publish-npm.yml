@@ -513,7 +513,7 @@ jobs:
           export CLAWHUB_CONFIG_PATH="$CFG_DIR/config.json"
 
           npm install -g clawhub@latest
-          clawhub --version
+          clawhub -V  # note: this CLI exposes -V/--cli-version, not --version
 
           # Best-effort: raise the CLI's upload timeout (120s in published
           # builds) to 600s. Non-fatal — the outer timeout guard below
