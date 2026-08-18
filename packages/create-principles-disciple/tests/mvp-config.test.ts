@@ -724,10 +724,19 @@ describe('Bundle script required vs optional artifacts (Fix A)', () => {
     expect(content).toContain("'dist/bundle.js'");
   });
 
-  it('plugin OPTIONAL items include scripts, docs', () => {
+  it('plugin OPTIONAL items include docs and exclude scripts (PRI-547)', () => {
+    // PRI-547 (ClawHub audit remediation): maintainer scripts must NOT be
+    // bundled into the installer-embedded plugin — they have zero
+    // installed-runtime readers and their shell/process execution was a top
+    // ClawHub static-analysis finding. Parse the PLUGIN_OPTIONAL array block
+    // itself so comments elsewhere in the file cannot satisfy the assertion.
     expect(content).toContain('PLUGIN_OPTIONAL');
-    expect(content).toContain("'scripts'");
-    expect(content).toContain("'docs'");
+    const optionalStart = content.indexOf('const PLUGIN_OPTIONAL = [');
+    expect(optionalStart).toBeGreaterThan(-1);
+    const optionalEnd = content.indexOf('];', optionalStart);
+    const optionalBlock = content.substring(optionalStart, optionalEnd);
+    expect(optionalBlock).toContain("'docs'");
+    expect(optionalBlock).not.toContain("'scripts'");
   });
 
   it('pd-cli required items include dist and package.json', () => {

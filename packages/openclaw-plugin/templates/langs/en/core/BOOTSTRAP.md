@@ -135,7 +135,7 @@ Also create `MEMORY.md` in the workspace root (core long-term memory):
 
 ## Strategy Initialization (Optional)
 
-If the user has clear project goals, run `/init-strategy` skill to:
+If the user has clear project goals, run the `/pd-init` command to:
 
 1. Define project vision and objectives
 2. Identify key milestones

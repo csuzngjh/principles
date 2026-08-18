@@ -1,6 +1,6 @@
 ---
 name: pd-planner
-description: Movie-script-style planning to break complex tasks into executable steps. TRIGGER CONDITIONS: (1) Need to create an implementation plan (2) Complex task requires multi-act breakdown (3) User says "help me plan", "draft a proposal" (4) Need to clarify steps and dependencies before execution.
+description: Movie-script-style planning inside Principles Disciple workflows: break an approved complex task into executable steps. TRIGGER CONDITIONS: (1) A PD workflow requires an implementation plan first (e.g. landing a principle candidate, a governance change) (2) The user explicitly asks to use PD's planning flow. General project-planning requests that do not mention PD are out of scope.
 disable-model-invocation: true
 ---
 

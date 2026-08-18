@@ -24,7 +24,6 @@
   "license": "MIT",
   "files": [
     "dist",
-    "scripts",
     "templates",
     "assets",
     "openclaw.plugin.json"

@@ -1,6 +1,6 @@
 ---
 name: pd-mentor
-description: Interactive command guidance and scenario-based recommendations to help users understand Principles Disciple features. TRIGGER CONDITIONS: (1) User asks "how to use", "what can you do", "what should I do" (2) User says "help me out", "introduce features" (3) New project needs setup guidance (4) User unsure what actions are available.
+description: Interactive command guidance and scenario-based recommendations for using Principles Disciple itself. TRIGGER CONDITIONS: (1) The user explicitly asks about Principles Disciple / PD usage, commands, configuration, or workflows (2) The user explicitly asks to use PD built-in capabilities for a governance goal. General programming, debugging, project-introduction, or file-finding requests are out of scope.
 disable-model-invocation: true
 ---
 
@@ -39,7 +39,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 ### Scenario 1: New Project Initialization
 
-**Trigger**: User says "I just created a new project" or similar
+**Trigger**: The user explicitly mentions onboarding a new project with Principles Disciple and asks for PD setup guidance
 
 **Recommended Flow**:
 1. `/pd-init` - Establish strategic vision
@@ -52,7 +52,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 ### Scenario 2: Bug Fix Needed
 
-**Trigger**: User says "there's a bug", "got an error", "something's wrong"
+**Trigger**: The user explicitly reports a problem with Principles Disciple / PD itself (a PD command failing, runtime status issues, security-stage questions)
 
 **Recommended Flow**:
 1. `/pd-status` - Check system status (GFI and Pain Dictionary)
@@ -64,7 +64,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 ### Scenario 3: Daily Maintenance & Review
 
-**Trigger**: User says "what did I do today", "check progress", "give me a report"
+**Trigger**: The user explicitly asks for a Principles Disciple progress or health review (mentioning PD, EP, GFI, or system status)
 
 **Recommended Flow**:
 1. `/pd-evolution-status` - View current trust score
@@ -76,7 +76,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 ### Scenario 4: Permission or Security Related
 
-**Trigger**: User says "not enough permissions", "blocked", "security level"
+**Trigger**: The user asks about Principles Disciple permissions, blocks, or security stages
 
 **Recommended Flow**:
 1. `/pd-evolution-status` - View trust score and security stage
@@ -88,7 +88,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 ### Scenario 6: Tool Upgrade Needs
 
-**Trigger**: User says "want to upgrade tools", "research new version", "tech stack update"
+**Trigger**: The user explicitly asks to use PD's environment scan or tool-research capabilities
 
 **Recommended Flow**:
 1. `/pd-bootstrap` - Scan current environment
@@ -158,30 +158,6 @@ Based on user's selected scenario, recommend corresponding command flow.
 Ask user if they want to execute a command:
 - "Execute `/pd-xxx` command now?"
 - "Need me to explain this command in detail?"
-
----
-
-## Advanced Usage
-
-### Combined Skills
-
-For complex scenarios, combine multiple skills:
-
-| Scenario | Combined Flow |
-|----------|---------------|
-| Major refactor | `/pd-evolution-status` → `deductive-audit` → execute |
-| System optimization | `/pd-status` → `root-cause` → optimize |
-| Project review | `/pd-evolution-status` → `/pd-status` → `reflection-log` |
-
-### Internal Skill Calls
-
-These skills are usually called automatically by the system, but advanced users can also trigger them manually:
-
-- `triage` - Issue triage
-- `root-cause` - Root cause analysis
-- `deductive-audit` - Deductive audit
-- `reflection` - Metacognitive reflection
-- `reflection-log` - Reflection logging
 
 ---
 

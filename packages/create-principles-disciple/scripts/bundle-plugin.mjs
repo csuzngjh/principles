@@ -28,8 +28,12 @@ const PLUGIN_REQUIRED = [
   'package.json',
 ];
 
+// PRI-547 (ClawHub audit remediation): the scripts entry was removed —
+// maintainer scripts (sync-plugin, bootstrap-rules, postinstall.cjs, ...)
+// have zero installed-runtime readers (census in the PR) and their
+// shell/process execution was a top ClawHub static-analysis finding.
+// Only docs stays optional.
 const PLUGIN_OPTIONAL = [
-  'scripts',
   'docs',
 ];
 

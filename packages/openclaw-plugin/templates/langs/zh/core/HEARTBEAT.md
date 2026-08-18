@@ -12,7 +12,7 @@
 - [ ] **`.state/evolution_queue.json`** — 是否有待处理的进化任务？
 - [ ] **`memory/logs/SYSTEM.log`** — 最近是否有未解决的高优先级问题？
 
-**行动**：如有信号，运行 `/reflection` 或 `/evolve-task`。
+**行动**：如有信号，用 `pd candidate list` 复查候选原则，或用 pd-console（`pd console open`）复查与处置。
 
 ---
 

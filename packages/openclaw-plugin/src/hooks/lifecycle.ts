@@ -36,7 +36,7 @@ export async function handleBeforeReset(
     const summary =
       `\n## [${new Date().toISOString()}] Session Reset Summary (Reason: ${event.reason ?? 'Manual'})\n` +
       `- Encountered ${painPoints.length} potential pain point(s) during this session.\n` +
-      `- Action: Consider running /reflection to solidify these into principles.\n`;
+      `- Action: These are informational notes only; Runtime V2 hooks capture pain evidence automatically. Review via pd-console (\`pd console open\`) if you want them turned into principle candidates.\n`;
     try {
       fs.appendFileSync(memoryPath, summary, 'utf8');
     } catch (_e) {
@@ -138,7 +138,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
     painPoints.slice(-5).forEach((p, idx) => {
       entry += `- [Signal ${idx + 1}] ${p.replace(/\n/g, ' ')}\n`;
     });
-    entry += `\n### Diagnosis (Pending)\n- Run /evolve-task to diagnose. Deep dive using memory_search if needed.\n`;
+    entry += `\n### Review\n- Signals above are informational notes. Fatal-intercept signals were already emitted into the Runtime V2 pain chain. Review and act on them via pd-console: \`pd console open --workspace "<workspace>"\`.\n`;
 
     try {
       const dir = path.dirname(dailyLogPath);

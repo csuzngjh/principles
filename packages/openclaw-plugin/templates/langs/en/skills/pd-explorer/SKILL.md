@@ -1,6 +1,6 @@
 ---
 name: pd-explorer
-description: Rapid evidence collection to locate files, logs, and reproduction steps related to an issue. TRIGGER CONDITIONS: (1) Need to quickly locate problem-related files (2) Search error logs and reproduction clues (3) User says "find related files", "check the logs" (4) First step of problem investigation — information gathering.
+description: Rapid evidence collection for Principles Disciple pain diagnosis: locate files, logs, and reproduction steps. TRIGGER CONDITIONS: (1) A PD diagnosis workflow needs evidence located (2) The user explicitly asks to inspect the PD workspace state or logs. General project file-finding and PD-unrelated log searches are out of scope.
 disable-model-invocation: true
 ---
 

@@ -12,7 +12,7 @@ On each heartbeat, run these core checks. **Don't just reply `HEARTBEAT_OK` ever
 - [ ] **`.state/evolution_queue.json`** — Any pending evolution tasks?
 - [ ] **`memory/logs/SYSTEM.log`** — Any unresolved high-priority issues?
 
-**Action**: If signals found, run `/reflection` or `/evolve-task`.
+**Action**: If signals found, review principle candidates via `pd candidate list`, or review and act on them in pd-console (`pd console open`).
 
 ---
 
