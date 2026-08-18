@@ -1856,6 +1856,8 @@ export {
   scanKeywords,
   buildLlmPrompt,
   parseLlmClassification,
+  resolveLlmClassificationPayload,
+  SignalClassificationOutputV1Schema,
   collectSync,
   mapLlmResultToOutput,
   buildEvidence,
@@ -1876,4 +1878,7 @@ export type {
   LlmClassificationResult,
   KeywordScanResult,
   ParseResult,
+  PayloadResolveResult,
+  ClassifierPayloadPath,
+  SignalClassificationOutputV1,
 } from './signal-collector/index.js';
