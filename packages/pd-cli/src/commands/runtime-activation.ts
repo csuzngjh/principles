@@ -45,29 +45,38 @@ interface ActivationDispatchOptions {
 }
 
 function mapRolloutDecision(reviewDecision: string | undefined): RolloutActivationDecision {
+  // P0-E (MVP_CORE_LOOP_CONTRACT INV-04): needs_revision 绝不映射 require_approval。
+  // 旧映射让"需修改"的评审结论伪装成正常审批进入 approval 队列(审计 ISSUE-027)。
+  // needs_revision 的出边是 revision loop(自动 reopen 修订目标),由
+  // rollout-reviewer-runner.handleRevisionRouting / auto-consumer 承担;
+  // CLI dispatch 对 needs_revision artifact 一律 refuse(structured reason + nextAction)。
   if (!reviewDecision) return 'require_approval';
   if (reviewDecision === 'approve_rollout') return 'auto_activate';
-  if (reviewDecision === 'needs_revision') return 'require_approval';
   if (reviewDecision === 'reject') return 'reject';
   return 'require_approval';
 }
 
-function extractRolloutDecisionFromArtifact(artifact: PIArtifactRecord): RolloutActivationDecision {
+/** 提取 artifact 上的原始 review decision(未映射),用于 needs_revision 拒绝分支 */
+function extractRawRolloutReviewDecision(artifact: PIArtifactRecord): string | null {
   try {
     const parsed = JSON.parse(artifact.contentJson) as Record<string, unknown>;
     if (parsed && typeof parsed === 'object') {
       const review = parsed.review as Record<string, unknown> | undefined;
       if (review && typeof review.decision === 'string') {
-        return mapRolloutDecision(review.decision);
+        return review.decision;
       }
       if (typeof parsed.rolloutDecision === 'string') {
-        return mapRolloutDecision(parsed.rolloutDecision);
+        return parsed.rolloutDecision;
       }
     }
   } catch {
-    return 'require_approval';
+    return null;
   }
-  return 'require_approval';
+  return null;
+}
+
+function extractRolloutDecisionFromArtifact(artifact: PIArtifactRecord): RolloutActivationDecision {
+  return mapRolloutDecision(extractRawRolloutReviewDecision(artifact) ?? undefined);
 }
 
 function toSnapshot(record: PIArtifactRecord): PIArtifactSnapshot {
@@ -158,6 +167,29 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
     }
 
     const artifactSnapshot = toSnapshot(artifactRecord);
+
+    // P0-E: needs_revision artifact 不允许手动 dispatch 入 approval (INV-04)。
+    // 出边是 revision loop: auto-consumer 会自动 reopen 修订目标;
+    // 手动场景给出结构化 next action (cli-6)。
+    const rawReviewDecision = extractRawRolloutReviewDecision(artifactRecord);
+    if (rawReviewDecision === 'needs_revision') {
+      const refused: ActivationDecision = {
+        decision: 'refused',
+        reason: 'rollout_needs_revision_not_dispatchable',
+        nextAction: 'Revision is handled by the automatic revision loop (rollout_reviewer reopens scribe/artificer). Inspect: pd runtime internalization list --json; advance manually: pd runtime internalization run-once --runner rollout_reviewer',
+        channel,
+        riskLevel: channel === 'code_tool_hook' ? 'high' : channel === 'skill' ? 'medium' : 'low',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(refused, null, 2));
+      } else {
+        console.log(formatTextOutput(refused));
+        console.log('  nextAction: ' + refused.nextAction);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
     const rolloutDecision = extractRolloutDecisionFromArtifact(artifactRecord);
 
     const artifactReadModel = {

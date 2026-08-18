@@ -226,14 +226,34 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       coreGrounding,
     });
 
+    // Rollout needs_revision 修订轮反馈 (P0-E): 任务元数据带 revisionFeedback 时
+    // 注入 prompt,让 scribe 针对性修订而非盲目重写。缺失 = 首轮,行为不变。
+    const revisionFeedback = await this.resolveRevisionFeedback(taskId);
+    const finalMessage = revisionFeedback
+      ? `${message}\n\n<revision_feedback>\n${revisionFeedback}\n</revision_feedback>`
+      : message;
+
     return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
-      inputPayload: message,
+      inputPayload: finalMessage,
       contextItems: [],
       outputSchemaRef: 'scribe-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
     });
+  }
+
+  /** 修订轮反馈 (P0-E): 读取任务元数据 revisionFeedback, 缺失返回 null */
+  private async resolveRevisionFeedback(taskId: string): Promise<string | null> {
+    try {
+      const task = await this.stateManager.getTask(taskId);
+      if (!task) return null;
+      const piTask = hydratePITaskRecord(task);
+      const feedback = piTask?.revisionFeedback;
+      return typeof feedback === 'string' && feedback.trim() !== '' ? feedback : null;
+    } catch {
+      return null; // 反馈读取失败不阻断首轮语义 (rc-9: 修订路由已有事件记录)
+    }
   }
 
   async validateOutput(output: unknown, taskId: string, context: ScribeContext): Promise<PeerRunnerValidationResult> {

@@ -80,8 +80,8 @@ export interface PITaskMetadata {
   /**
    * Prior adversarial replay failures to inject into a Round-2+ Artificer
    * prompt (RuleHost MVP, PRI-428). Set by runAdversarialLoop when a prior
-   * Evaluator round returned needs_revision. Treated as opaque text by the
-   * metadata layer; the ArtificerRunner forwards it to the prompt builder.
+   * Evaluator round returned needs_revision. Treated as opaque text by
+   * the metadata layer; the ArtificerRunner forwards it to the prompt builder.
    */
   adversarialFeedback?: string;
   /**
@@ -91,6 +91,49 @@ export interface PITaskMetadata {
    * can address each required change. Undefined on Round-1 artificer tasks.
    */
   repairPayload?: RepairPayload;
+  /**
+   * Runner 判定(evaluator / rollout_reviewer 的 LLM 决策),由 runner 在
+   * succeedTask 收尾时写入。commitNextTaskProposal 依据它做单一迁移决策
+   * (MVP_CORE_LOOP_CONTRACT INV-02: needs_revision 不得同时 seed 正常后继)。
+   */
+  runnerDecision?: RunnerDecision;
+  /**
+   * 该任务被 revision reopen 的次数(每次 reopen +1)。revision 有界性的
+   * 一部分: 配合 rolloutRevisionPayload.revisionIteration / repairIteration
+   * 构成 lineage 级 revision budget。
+   */
+  revisionCount?: number;
+  /**
+   * Rollout reviewer needs_revision 时注入到被 reopen 修订目标的反馈
+   * (scribe / artificer 的 prompt 侧注入,由各 runner buildContext 消费)。
+   */
+  revisionFeedback?: string;
+  /**
+   * Rollout reviewer needs_revision 的修订路由载荷: 记录修订目标 stage、
+   * 迭代号与来源,保证 revision budget 可判定 (MVP_CORE_LOOP_CONTRACT INV-07)。
+   */
+  rolloutRevisionPayload?: RolloutRevisionPayload;
+}
+
+/** evaluator / rollout_reviewer 的合法 runner 决策值 */
+export type RunnerDecision =
+  | 'approved'
+  | 'needs_revision'
+  | 'rejected'
+  | 'approve_rollout'
+  | 'reject';
+
+const RUNNER_DECISIONS: ReadonlySet<string> = new Set([
+  'approved', 'needs_revision', 'rejected', 'approve_rollout', 'reject',
+]);
+
+/** rollout needs_revision 的修订路由载荷 */
+export interface RolloutRevisionPayload {
+  readonly requiredChanges: readonly string[];
+  readonly revisionIteration: number;
+  readonly sourceRolloutTaskId: string;
+  readonly sourceArtifactId: string;
+  readonly targetTaskKind: 'scribe' | 'artificer';
 }
 
 // ── Serialization ──────────────────────────────────────────────────────────────
@@ -112,6 +155,10 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       rejectionCount: metadata.rejectionCount,
       adversarialFeedback: metadata.adversarialFeedback,
       repairPayload: metadata.repairPayload,
+      runnerDecision: metadata.runnerDecision,
+      revisionCount: metadata.revisionCount,
+      revisionFeedback: metadata.revisionFeedback,
+      rolloutRevisionPayload: metadata.rolloutRevisionPayload,
     },
   });
 }
@@ -258,6 +305,45 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ repairPayload } = m);
   }
 
+  // runnerDecision (transition control, INV-02): optional literal union.
+  if (Object.hasOwn(m, 'runnerDecision') && m.runnerDecision !== undefined) {
+    if (typeof m.runnerDecision !== 'string' || !RUNNER_DECISIONS.has(m.runnerDecision)) return null;
+  }
+
+  // revisionCount: optional non-negative integer.
+  if (Object.hasOwn(m, 'revisionCount') && m.revisionCount !== undefined) {
+    if (typeof m.revisionCount !== 'number' || !Number.isInteger(m.revisionCount) || m.revisionCount < 0) return null;
+  }
+
+  // revisionFeedback: optional non-empty string.
+  if (Object.hasOwn(m, 'revisionFeedback') && m.revisionFeedback !== undefined) {
+    if (typeof m.revisionFeedback !== 'string' || m.revisionFeedback.trim() === '') return null;
+  }
+
+  // rolloutRevisionPayload: optional, full validation (rc-1/rc-4).
+  let rolloutRevisionPayload: RolloutRevisionPayload | undefined;
+  if (Object.hasOwn(m, 'rolloutRevisionPayload') && m.rolloutRevisionPayload !== undefined) {
+    const p = m.rolloutRevisionPayload;
+    if (typeof p !== 'object' || p === null || Array.isArray(p)) return null;
+    const r = p as Record<string, unknown>;
+    if (!Array.isArray(r.requiredChanges) || r.requiredChanges.length === 0) return null;
+    for (const c of r.requiredChanges) {
+      if (typeof c !== 'string' || c.trim() === '') return null;
+    }
+    if (typeof r.revisionIteration !== 'number' || !Number.isInteger(r.revisionIteration)
+      || r.revisionIteration < 1 || r.revisionIteration > 2) return null;
+    if (typeof r.sourceRolloutTaskId !== 'string' || r.sourceRolloutTaskId.trim() === '') return null;
+    if (typeof r.sourceArtifactId !== 'string' || r.sourceArtifactId.trim() === '') return null;
+    if (r.targetTaskKind !== 'scribe' && r.targetTaskKind !== 'artificer') return null;
+    rolloutRevisionPayload = {
+      requiredChanges: r.requiredChanges as string[],
+      revisionIteration: r.revisionIteration,
+      sourceRolloutTaskId: r.sourceRolloutTaskId,
+      sourceArtifactId: r.sourceArtifactId,
+      targetTaskKind: r.targetTaskKind,
+    };
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -269,6 +355,12 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     rejectionCount,
     adversarialFeedback: typeof m.adversarialFeedback === 'string' ? m.adversarialFeedback : undefined,
     repairPayload,
+    runnerDecision: typeof m.runnerDecision === 'string' && RUNNER_DECISIONS.has(m.runnerDecision)
+      ? m.runnerDecision as RunnerDecision
+      : undefined,
+    revisionCount: typeof m.revisionCount === 'number' ? m.revisionCount : undefined,
+    revisionFeedback: typeof m.revisionFeedback === 'string' ? m.revisionFeedback : undefined,
+    rolloutRevisionPayload,
   };
 }
 
@@ -317,5 +409,9 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     rejectionCount: meta.rejectionCount ?? 0,
     adversarialFeedback: meta.adversarialFeedback,
     repairPayload: meta.repairPayload,
+    runnerDecision: meta.runnerDecision,
+    revisionCount: meta.revisionCount,
+    revisionFeedback: meta.revisionFeedback,
+    rolloutRevisionPayload: meta.rolloutRevisionPayload,
   } as unknown as PITaskRecord;
 }

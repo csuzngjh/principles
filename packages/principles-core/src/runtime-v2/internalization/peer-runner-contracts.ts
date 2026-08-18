@@ -142,6 +142,14 @@ export interface PITaskRecord extends TaskRecord {
   adversarialFeedback?: string;
   /** Evaluator repair payload (PRI-509); present only on artificer repair tasks. */
   repairPayload?: RepairPayload;
+  /** Runner decision (evaluator/rollout_reviewer LLM verdict) — transition control (INV-02). */
+  runnerDecision?: import('./pitask-metadata.js').RunnerDecision;
+  /** Times this task has been reopened for revision (bounded revision budget). */
+  revisionCount?: number;
+  /** Feedback injected when this task is reopened by rollout needs_revision routing. */
+  revisionFeedback?: string;
+  /** Rollout needs_revision routing payload; present on rollout_reviewer tasks that routed a revision. */
+  rolloutRevisionPayload?: import('./pitask-metadata.js').RolloutRevisionPayload;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

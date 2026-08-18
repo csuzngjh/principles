@@ -31,6 +31,7 @@ import {
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { createEvaluatorRepairDeps, createRolloutGovernanceDeps } from './auto-consumer-governance-wiring.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { computeHash as contentHashFn } from '../utils/hashing.js';
 
@@ -299,13 +300,15 @@ export async function runConsumerCycle(
         );
         break;
       case 'evaluator':
-        // Base construction — the PRI-509 repair loop is intentionally NOT
-        // wired here; it stays opt-in via the separate evaluator_artificer_repair_loop
-        // flag (quiet, default off). When omitted, evaluator follows the legacy
-        // needs_revision path (no repair task seeded), which is sufficient for
-        // artifacts to reach validation_status='validated' on approved candidates.
+        // P0-D 生产接线: PRI-509 repair loop 正式进入 auto-consumer (bounded,
+        // flag evaluator_artificer_repair_loop 保留运行时关闭能力)。needs_revision
+        // → seed artificer repair; commit 门控保证不再并行 seed rollout_reviewer。
         runner = new EvaluatorRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator() },
+          {
+            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
+            artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
+            ...createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
+          },
           runnerOptions,
         );
         break;
@@ -314,8 +317,16 @@ export async function runConsumerCycle(
         // taskId / sourceEvaluatorArtifactId echoes are overwritten with the
         // authoritative values before validation, so a bad echo no longer
         // dead-ends the candidate before the approval queue.
+        //
+        // P0-E/F 治理接线: approve_rollout → 自动 ActivationDispatcher (低风险
+        // auto_activate / 高风险 approvals.pending); needs_revision → reopen
+        // scribe/artificer 修订 (绝不进入 approval 队列, INV-04)。
         runner = new RolloutReviewerRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultRolloutReviewerValidator() },
+          {
+            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
+            artifactStore: stateManager.piArtifactStore, validator: new DefaultRolloutReviewerValidator(),
+            ...createRolloutGovernanceDeps(workspaceDir, orchestrator, logger),
+          },
           runnerOptions,
         );
         break;

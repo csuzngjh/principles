@@ -36,7 +36,7 @@ import type {
 import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, type RepairPayload, type PITaskMetadata } from './pitask-metadata.js';
 import { EvaluatorPromptBuilder } from './evaluator-prompt-builder.js';
 import { reconcileLineageEcho, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -768,6 +768,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         // valid verdict; the *task status* reflects that human review is
         // required, not that the runner failed.
         const resultRef = `${this.config.resultRefPrefix}://${runId}`;
+        await this.recordRunnerDecision(taskId, 'needs_revision');
         try {
           await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
         } catch (stateErr) {
@@ -812,6 +813,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
       throw stateErr;
     }
+
+    // 单一迁移决策输入 (P0-D, INV-02): 把 verdict 写进任务元数据,
+    // commitNextTaskProposal 据此仲裁 — needs_revision 不 seed 正常后继。
+    await this.recordRunnerDecision(taskId, output.evaluation.decision);
 
     this.emitEvent('task_succeeded', taskId, {
       attemptCount: task.attemptCount,
@@ -863,6 +868,45 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return 0;
     }
     return 0;
+  }
+
+  /**
+   * 把 runner verdict 持久化进任务 diagnosticJson(commit 门控的输入)。
+   * 失败不静默 (rc-9): emitEvent 后吞掉 — verdict 已在 events/runs 中可观测,
+   * 且 commit 门对缺失 verdict 走 legacy 推进,不会因记录失败而卡链。
+   */
+  private async recordRunnerDecision(taskId: string, decision: string): Promise<void> {
+    try {
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) return;
+      const piTask = hydratePITaskRecord(raw);
+      if (!piTask) return;
+      const merged: PITaskMetadata = {
+        dependencyTaskIds: piTask.dependencyTaskIds,
+        channel: piTask.channel,
+        timeoutMs: piTask.timeoutMs,
+        inputArtifactRefs: piTask.inputArtifactRefs,
+        outputArtifactRefs: piTask.outputArtifactRefs,
+        parentTaskId: piTask.parentTaskId,
+        correlationId: piTask.correlationId,
+        rejectionCount: piTask.rejectionCount,
+        adversarialFeedback: piTask.adversarialFeedback,
+        repairPayload: piTask.repairPayload,
+        revisionCount: piTask.revisionCount,
+        revisionFeedback: piTask.revisionFeedback,
+        rolloutRevisionPayload: piTask.rolloutRevisionPayload,
+        runnerDecision: decision === 'approved' || decision === 'needs_revision' || decision === 'rejected'
+          ? decision
+          : undefined,
+      };
+      await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+    } catch (err) {
+      this.emitEvent('runner_decision_record_failed', taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        decision,
+        nextAction: 'check_task_store_consistency',
+      });
+    }
   }
 
   /**

@@ -717,9 +717,25 @@ export {
   validateInternalizationGraph,
 } from './internalization/internalization-state-machine.js';
 
+// ── Internalization Transition Decision (P0-D, INV-02/INV-07) ────────────────
+
+export type {
+  InternalizationTransitionDecisionKind,
+  TransitionDecision,
+  TransitionDecisionInput,
+} from './internalization/internalization-transition-decision.js';
+export {
+  decideInternalizationTransition,
+  transitionInputFromTask,
+} from './internalization/internalization-transition-decision.js';
+
 // ── PITask Persistence & Hydration (PRI-65) ──────────────────────────────────
 
-export type { PITaskMetadata } from './internalization/pitask-metadata.js';
+export type {
+  PITaskMetadata,
+  RunnerDecision,
+  RolloutRevisionPayload,
+} from './internalization/pitask-metadata.js';
 
 export {
   PI_METADATA_KEY,
@@ -957,6 +973,9 @@ export type {
   RolloutReviewerRunnerOptions,
   ResolvedRolloutReviewerRunnerOptions,
   RolloutReviewerRunnerDeps,
+  RolloutAutoDispatchInput,
+  RolloutAutoDispatchOutcome,
+  RolloutRevisionRoutingInput,
 } from './internalization/rollout-reviewer-runner.js';
 
 export {

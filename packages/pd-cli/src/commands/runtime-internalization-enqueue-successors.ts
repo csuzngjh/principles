@@ -99,6 +99,38 @@ function mapCommitDecisionToAction(
         reason: 'task_not_found: task disappeared between scan and commit',
         nextAction: 'Re-scan or investigate concurrent deletion',
       };
+    case 'blocked_by_revision':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `blocked_by_revision: ${commitResult.reason} (runnerDecision=${commitResult.runnerDecision}); revision loop owns the out-edge`,
+        nextAction: 'Inspect the seeded repair/revision task: pd runtime internalization list --json',
+      };
+    case 'blocked_by_rejection':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `blocked_by_rejection: ${commitResult.reason} (runnerDecision=${commitResult.runnerDecision}); no successor, no approval`,
+        nextAction: 'Terminal reject — inspect the reviewer output or re-run the stage if the verdict was spurious',
+      };
+    case 'revision_reopened':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'successor_created',
+        successorKind: 'evaluator',
+        successorTaskId: commitResult.reopenedTaskId,
+      };
+    case 'successor_reopened':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'successor_created',
+        successorKind: commitResult.successorKind,
+        successorTaskId: commitResult.reopenedTaskId,
+      };
   }
 }
 
