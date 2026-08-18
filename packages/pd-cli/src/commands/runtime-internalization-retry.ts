@@ -31,6 +31,16 @@ export interface InternalizationRetryOutput {
   nextAction?: string;
 }
 
+function emit(out: InternalizationRetryOutput, json?: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(out, null, 2));
+    return;
+  }
+  console.log(`Retry: ${out.status}${out.previousStatus ? ` (was ${out.previousStatus})` : ''}`);
+  if (out.reason) console.log(`  reason: ${out.reason}`);
+  if (out.nextAction) console.log(`  nextAction: ${out.nextAction}`);
+}
+
 export async function handleRuntimeInternalizationRetry(opts: InternalizationRetryOptions): Promise<void> {
   if (!opts.taskId) {
     const out: InternalizationRetryOutput = {
@@ -131,12 +141,3 @@ export async function handleRuntimeInternalizationRetry(opts: InternalizationRet
   }
 }
 
-function emit(out: InternalizationRetryOutput, json?: boolean): void {
-  if (json) {
-    console.log(JSON.stringify(out, null, 2));
-    return;
-  }
-  console.log(`Retry: ${out.status}${out.previousStatus ? ` (was ${out.previousStatus})` : ''}`);
-  if (out.reason) console.log(`  reason: ${out.reason}`);
-  if (out.nextAction) console.log(`  nextAction: ${out.nextAction}`);
-}

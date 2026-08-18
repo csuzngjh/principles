@@ -557,7 +557,7 @@ export class RolloutReviewerRunner {
     });
 
     // ── P0-E/F: verdict 出边 (INV-04) ──
-    const decision = ctx.output.review.decision;
+    const { decision } = ctx.output.review;
     if (decision === 'approve_rollout') {
       await this.handleAutoDispatch(ctx, artifactId);
     } else if (decision === 'needs_revision') {
@@ -653,7 +653,7 @@ export class RolloutReviewerRunner {
       return;
     }
 
-    const feedback = this.formatRevisionFeedback(ctx.output);
+    const feedback = RolloutReviewerRunner.formatRevisionFeedback(ctx.output);
     try {
       const outcome = await this.reopenRevisionTarget({
         targetTaskId: target.taskId,
@@ -750,7 +750,7 @@ export class RolloutReviewerRunner {
     return null;
   }
 
-  private formatRevisionFeedback(output: RolloutReviewerOutputV1): string {
+  private static formatRevisionFeedback(output: RolloutReviewerOutputV1): string {
     const lines = ['Rollout review 判定 needs_revision,请修订后重新走验证链:'];
     for (const change of output.review.requiredChanges) {
       lines.push(`- 必须修改: ${change}`);
