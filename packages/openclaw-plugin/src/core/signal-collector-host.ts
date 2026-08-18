@@ -96,6 +96,8 @@ interface PendingSignal {
   sessionId: string;
   text: string;
   traceId: string;
+  /** Stage1 扫描时的词库快照(异步路径复用同一份,避免检测期间词库漂移) */
+  storeSnapshot: UnifiedKeywordStore;
 }
 
 /**
@@ -110,6 +112,12 @@ export type SignalLlmClassifier = (text: string, promptTemplate: string) =>
 
 export interface SignalCollectorHostOptions {
   keywordStore?: UnifiedKeywordStore;
+  /**
+   * Live store provider (P0-B Learn→Detect 闭环): 每次检测调用,mtime 变化时
+   * 重载 learned correction cues。设置后优先于 keywordStore 静态快照——
+   * optimizer 学到的词无需重启 OpenClaw 即进入下一次检测。
+   */
+  keywordStoreProvider?: () => UnifiedKeywordStore;
   config?: SignalCollectorConfig;
   /** Stage2 LLM 分类器。null/undefined → 降级纯关键词。 */
   llmClassifier?: SignalLlmClassifier | null;
@@ -117,7 +125,7 @@ export interface SignalCollectorHostOptions {
 
 export class SignalCollectorHost {
   private readonly wctx: WorkspaceContext;
-  private readonly store: UnifiedKeywordStore;
+  private readonly storeProvider: () => UnifiedKeywordStore;
   private readonly config: SignalCollectorConfig;
   private readonly llmClassifier: SignalLlmClassifier | null;
 
@@ -126,7 +134,8 @@ export class SignalCollectorHost {
 
   constructor(wctx: WorkspaceContext, options: SignalCollectorHostOptions = {}) {
     this.wctx = wctx;
-    this.store = options.keywordStore ?? buildDefaultKeywordStore();
+    this.storeProvider = options.keywordStoreProvider
+      ?? (options.keywordStore ? () => options.keywordStore as UnifiedKeywordStore : () => buildDefaultKeywordStore());
     this.config = options.config ?? DEFAULT_SIGNAL_CONFIG;
     this.llmClassifier = options.llmClassifier ?? null;
   }
@@ -156,8 +165,10 @@ export class SignalCollectorHost {
     }
 
     // 2. Stage1 关键词快扫 (同步,零成本)。detectedAt 由 plugin 层注入(core 不取时间,CodeRabbit #11)
+    //    词库经 provider 按次解析(P0-B: learned cues 无需重启即生效)。
     const detectedAt = new Date().toISOString();
-    const output = collectSync(userMessage, sessionId, this.store, this.config, detectedAt);
+    const store = this.storeProvider();
+    const output = collectSync(userMessage, sessionId, store, this.config, detectedAt);
 
     // 3. 写 user_turns (复用 recordUserTurn)
     //    correctionDetected 含义扩展:isSignal && strength=STRONG (spec §5.2)
@@ -189,6 +200,7 @@ export class SignalCollectorHost {
         sessionId,
         text: userMessage,
         traceId: createTraceId(),
+        storeSnapshot: store,
       };
       // fire-and-forget,失败不影响用户消息处理 (spec §4.2)
       void this.detectAsyncAndRoute(pending);
@@ -231,7 +243,7 @@ export class SignalCollectorHost {
       // 不触发 trackFriction,仅 recordUserTurn,已在 detectSync 中完成)。
       if (pending.output.matchedPrecision === 'ambiguous' && pending.output.matchedTerms.length > 0) {
         const hasEmpathyMatch = pending.output.matchedTerms.some(
-          (term) => this.store.terms[term]?.category === 'empathy',
+          (term) => pending.storeSnapshot.terms[term]?.category === 'empathy',
         );
         if (hasEmpathyMatch) {
           SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_DEGRADED_WEAK',
