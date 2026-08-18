@@ -886,6 +886,7 @@
       "version": "版本",
       "failed": "失败",
       "checkError": "检查出错",
+      "syncPending": "最新版 {{pluginVersion}} 已发布，安装器同步中（当前可更新至上方列出的版本）。请稍后再试。",
       "loadError": "无法加载更新数据。你可以尝试刷新页面。",
       "checkFailed": "更新检查失败，请稍后重试。",
       "applyUpdate": "立即更新",
