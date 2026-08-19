@@ -554,7 +554,7 @@ export class RolloutReviewerRunner {
       if (!candidate) {
         await this.markNeedsHumanReview(ctx.taskId, 'rollout_activation_candidate_unresolved');
         this.phase = RunnerPhase.Completed;
-        return this.buildSucceededResult(ctx, artifactId, resultRef);
+        return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
       }
       dispatchArtifactId = candidate;
       const completed = await this.dispatchOrRouteFailure(ctx, candidate);
@@ -562,7 +562,7 @@ export class RolloutReviewerRunner {
         // dispatchOrRouteFailure 已把任务转入 needs_human_review;
         // runner 本身执行成功 (verdict 有效),返回 succeeded 描述本次运行
         this.phase = RunnerPhase.Completed;
-        return this.buildSucceededResult(ctx, artifactId, resultRef);
+        return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
       }
     } else if (decision === 'needs_revision') {
       await this.handleRevisionRouting(ctx);
@@ -589,10 +589,10 @@ export class RolloutReviewerRunner {
     });
 
     this.phase = RunnerPhase.Completed;
-    return this.buildSucceededResult(ctx, artifactId, resultRef);
+    return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
   }
 
-  private buildSucceededResult(
+  private static buildSucceededResult(
     ctx: SucceedContext,
     artifactId: string,
     resultRef: string,
@@ -630,7 +630,7 @@ export class RolloutReviewerRunner {
     const channel = ctx.channel ?? 'prompt';
     const wantKind = channel === 'code_tool_hook' ? 'rule' : 'principle';
 
-    const chainIds = await this.collectLineageSourceTaskIds(ctx.taskId, [ctx.taskId], 0, 5);
+    const chainIds = await this.collectLineageSourceTaskIds(ctx.taskId, [ctx.taskId], 0);
     const matches: string[] = [];
     for (const taskId of chainIds) {
       // P0-1 加固: prompt/defer 渠道排除决策型 runner 名下的 artifacts —
@@ -642,12 +642,8 @@ export class RolloutReviewerRunner {
           continue;
         }
       }
-      let artifacts: PIArtifactRecord[] = [];
-      try {
-        artifacts = await this.artifactStore.listBySourceTaskId(taskId);
-      } catch {
-        continue;
-      }
+      const artifacts = await this.artifactStore.listBySourceTaskId(taskId).catch(() => null);
+      if (!artifacts) continue;
       for (const a of artifacts) {
         if (a.artifactKind === wantKind && a.validationStatus === 'validated') {
           matches.push(a.artifactId);
@@ -677,20 +673,21 @@ export class RolloutReviewerRunner {
   }
 
   /** 收集 lineage 上所有 source task id (BFS 沿 dependencyTaskIds, 有界深度)。 */
+  private static readonly LINEAGE_MAX_DEPTH = 5;
+
   private async collectLineageSourceTaskIds(
     rootTaskId: string,
     acc: string[],
     depth: number,
-    maxDepth: number,
   ): Promise<string[]> {
-    if (depth > maxDepth) return acc;
+    if (depth > RolloutReviewerRunner.LINEAGE_MAX_DEPTH) return acc;
     const task = await this.stateManager.getTask(rootTaskId);
     if (!task) return acc;
     const piTask = hydratePITaskRecord(task);
     for (const depId of piTask?.dependencyTaskIds ?? []) {
       if (acc.includes(depId)) continue;
       acc.push(depId);
-      await this.collectLineageSourceTaskIds(depId, acc, depth + 1, maxDepth);
+      await this.collectLineageSourceTaskIds(depId, acc, depth + 1);
     }
     return acc;
   }

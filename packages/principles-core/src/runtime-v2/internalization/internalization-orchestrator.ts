@@ -613,7 +613,7 @@ export class InternalizationOrchestrator {
    */
   private async resolveLegacyRunnerVerdict(taskId: string, taskKind: string): Promise<string | undefined> {
     if (taskKind !== 'evaluator' && taskKind !== 'rollout_reviewer') return undefined;
-    let runs: { outputPayload?: string }[] = [];
+    let runs: { outputPayload?: string }[];
     try {
       runs = await this.stateManager.getRunsByTask(taskId);
     } catch {
