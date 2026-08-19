@@ -26,11 +26,9 @@ export {
   getFallbackName,
   getFallbackDescription,
 } from '@principles/core/runtime-v2';
-export { deriveThinkingScenarios } from '@principles/core/runtime-v2';
 export type {
   ThinkingModelDefinition,
   ThinkingModelMatch,
-  ThinkingScenarioContext,
 } from '@principles/core/runtime-v2';
 
 // ---------------------------------------------------------------------------

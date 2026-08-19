@@ -19,12 +19,18 @@ describe('PathResolver', () => {
     it('should have all required path keys', async () => {
         const { PathResolver } = await import('../../src/core/path-resolver.js');
         const resolver = new PathResolver({ workspaceDir: '/test/workspace' });
-        
-        const requiredKeys = ['PROFILE', 'AGENT_SCORECARD', 'PAIN_FLAG', 'EVOLUTION_QUEUE', 'THINKING_OS', 'THINKING_OS_USAGE', 'THINKING_OS_CANDIDATES'];
-        
+
+        const requiredKeys = ['PROFILE', 'AGENT_SCORECARD', 'PAIN_FLAG', 'EVOLUTION_QUEUE', 'THINKING_OS', 'THINKING_OS_CANDIDATES'];
+
         for (const key of requiredKeys) {
             expect(() => resolver.resolve(key)).not.toThrow();
         }
+    });
+
+    it('no longer resolves the retired THINKING_OS_USAGE key (2026-08-19 retirement)', async () => {
+        const { PathResolver } = await import('../../src/core/path-resolver.js');
+        const resolver = new PathResolver({ workspaceDir: '/test/workspace' });
+        expect(() => resolver.resolve('THINKING_OS_USAGE')).toThrow();
     });
 });
 

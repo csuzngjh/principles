@@ -52,7 +52,6 @@ export const PD_FILES = {
     SYSTEM_CAPABILITIES: posixJoin(PD_DIRS.STATE, 'SYSTEM_CAPABILITIES.json'),
     PAIN_SETTINGS: posixJoin(PD_DIRS.STATE, 'pain_settings.json'),
     PAIN_CANDIDATES: posixJoin(PD_DIRS.STATE, 'pain_candidates.json'),
-    THINKING_OS_USAGE: posixJoin(PD_DIRS.STATE, 'thinking_os_usage.json'),
     TRAJECTORY_DB: posixJoin(PD_DIRS.STATE, 'trajectory.db'),
     TRAJECTORY_BLOBS_DIR: posixJoin(PD_DIRS.STATE, 'blobs'),
     EXPORTS_DIR: posixJoin(PD_DIRS.STATE, 'exports'),

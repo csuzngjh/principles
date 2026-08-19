@@ -314,7 +314,6 @@ export class PathResolver {
             'SYSTEM_CAPABILITIES': workspacePath.join(state, 'SYSTEM_CAPABILITIES.json'),
             'PAIN_SETTINGS': workspacePath.join(state, 'pain_settings.json'),
             'PAIN_CANDIDATES': workspacePath.join(state, 'pain_candidates.json'),
-            'THINKING_OS_USAGE': workspacePath.join(state, 'thinking_os_usage.json'),
             'DICTIONARY': workspacePath.join(state, 'pain_dictionary.json'),
             'STATE_DIR': state,
             'EXTENSION_ROOT': extensionRoot,

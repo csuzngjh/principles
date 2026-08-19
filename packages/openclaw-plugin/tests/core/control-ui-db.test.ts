@@ -15,20 +15,43 @@ describe('ControlUiDatabase', () => {
     }
   });
 
-  it('creates thinking_model_events schema and derived views', () => {
+  it('does not create the retired thinking_model_events schema on new workspaces (2026-08-19 retirement)', () => {
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-control-ui-'));
     const trajectory = new TrajectoryDatabase({ workspaceDir });
-    const assistantTurnId = trajectory.recordAssistantTurn({
+    trajectory.recordAssistantTurn({
       sessionId: 's1',
       runId: 'run-1',
       provider: 'test',
       model: 'model',
-      rawText: 'Let me check the actual logs first.',
-      sanitizedText: 'Let me check the actual logs first.',
+      rawText: 'text',
+      sanitizedText: 'text',
       usageJson: {},
       empathySignalJson: { detected: false },
       createdAt: '2026-03-19T09:00:00.000Z',
     });
+
+    const db = new ControlUiDatabase({ workspaceDir });
+    const tables = db.all<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'thinking_model_events'",
+    );
+    const views = db.all<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'view' AND name LIKE 'v_thinking_model%'",
+    );
+    expect(tables).toEqual([]);
+    expect(views).toEqual([]);
+
+    // The writer and scenario-context reader are gone from the public surface.
+    const proto = ControlUiDatabase.prototype as unknown as Record<string, unknown>;
+    expect(proto.recordThinkingModelEvent).toBeUndefined();
+    expect(proto.getRecentThinkingContext).toBeUndefined();
+
+    db.dispose();
+    trajectory.dispose();
+  });
+
+  it('still exposes the generic analytics read surface (all/get/run)', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-control-ui-'));
+    const trajectory = new TrajectoryDatabase({ workspaceDir });
     trajectory.recordToolCall({
       sessionId: 's1',
       toolName: 'read_file',
@@ -37,37 +60,11 @@ describe('ControlUiDatabase', () => {
     });
 
     const db = new ControlUiDatabase({ workspaceDir });
-    db.recordThinkingModelEvent({
-      sessionId: 's1',
-      runId: 'run-1',
-      assistantTurnId,
-      modelId: 'T-03',
-      matchedPattern: 'check|verify|confirm',
-      scenarioJson: ['verification', 'after-recovery'],
-      toolContextJson: [{ toolName: 'read_file', outcome: 'success' }],
-      painContextJson: [],
-      principleContextJson: [],
-      triggerExcerpt: 'Let me check the actual logs first.',
-      createdAt: '2026-03-19T09:00:00.000Z',
-    });
-
-    const usage = db.get<{ hits: number; distinct_turns: number }>(
-      'SELECT hits, distinct_turns FROM v_thinking_model_usage WHERE model_id = ?',
-      'T-03',
+    const rows = db.all<{ tool_name: string }>(
+      'SELECT tool_name FROM tool_calls WHERE session_id = ?',
+      's1',
     );
-    const scenarios = db.all<{ scenario: string; hits: number }>(
-      'SELECT scenario, hits FROM v_thinking_model_scenarios WHERE model_id = ? ORDER BY scenario ASC',
-      'T-03',
-    );
-
-    expect(usage).toEqual(expect.objectContaining({
-      hits: 1,
-      distinct_turns: 1,
-    }));
-    expect(scenarios).toEqual(expect.arrayContaining([
-      expect.objectContaining({ scenario: 'after-recovery', hits: 1 }),
-      expect.objectContaining({ scenario: 'verification', hits: 1 }),
-    ]));
+    expect(rows.map((r) => r.tool_name)).toEqual(['read_file']);
 
     db.dispose();
     trajectory.dispose();

@@ -2,15 +2,13 @@
 export {
   BUILTIN_PATTERNS,
   BUILTIN_PATTERN_MAP,
+  getBuiltinBaselineScenarios,
   getFallbackName,
   getFallbackDescription,
-  getBuiltinBaselineScenarios,
-  deriveThinkingScenarios,
 } from './thinking-models-policy.js';
 
 export type {
   ThinkingModelDefinition,
   ThinkingModelMatch,
-  ThinkingScenarioContext,
   BuiltinPatternEntry,
 } from './thinking-models-policy.js';

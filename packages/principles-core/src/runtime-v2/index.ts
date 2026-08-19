@@ -1830,16 +1830,14 @@ export { estimateLineChanges } from './risk/index.js';
 export {
   BUILTIN_PATTERNS,
   BUILTIN_PATTERN_MAP,
+  getBuiltinBaselineScenarios,
   getFallbackName,
   getFallbackDescription,
-  getBuiltinBaselineScenarios,
-  deriveThinkingScenarios,
 } from './thinking-models/index.js';
 
 export type {
   ThinkingModelDefinition,
   ThinkingModelMatch,
-  ThinkingScenarioContext,
   BuiltinPatternEntry,
 } from './thinking-models/index.js';
 

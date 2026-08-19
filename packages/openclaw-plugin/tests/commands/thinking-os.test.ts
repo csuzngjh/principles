@@ -13,38 +13,12 @@ describe('Thinking OS Command', () => {
         vi.clearAllMocks();
     });
 
-    it('should return default help text if no subcommand is provided', () => {
+    it('should return default help text listing only propose (2026-08-19 retirement)', () => {
         const result = handleThinkingOs({ config: { workspaceDir }, args: '' } as any);
         expect(result.text).toContain('Governance Console');
-        expect(result.text).toContain('/thinking-os status');
-    });
-
-    it('should format usage report on status', () => {
-        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
-        const thinkingOsPath = path.join(workspaceDir, '.principles', 'THINKING_OS.md');
-
-        vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            const pStr = p.toString();
-            return pStr === usageLogPath || pStr === thinkingOsPath;
-        });
-        vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            const pStr = p.toString();
-            if (pStr === usageLogPath) {
-                return JSON.stringify({
-                    '_total_turns': 100,
-                    'T-01': 10,
-                    'T-06': 3
-                });
-            }
-            if (pStr === thinkingOsPath) {
-                return '### T-01: Map Before Territory (地图先于领土)\n### T-06: Occam\'s Razor (奥卡姆剃刀)';
-            }
-            return '';
-        });
-
-        const result = handleThinkingOs({ config: { workspaceDir }, args: 'status' } as any);
-        expect(result.text).toContain('Total turns tracked: **100**');
-        expect(result.text).toContain('T-01 | Map Before Territory (地图先于领土) | 10 | ✅ 10.0%');
+        expect(result.text).toContain('/pd-thinking propose');
+        expect(result.text).not.toContain('status');
+        expect(result.text).not.toContain('audit');
     });
 
     it('should handle propose subcommand', () => {
@@ -57,77 +31,22 @@ describe('Thinking OS Command', () => {
 
     it('should return validation error if propose is empty', () => {
         const result = handleThinkingOs({ config: { workspaceDir }, args: 'propose   ' } as any);
-        expect(result.text).toContain('Usage: `/thinking-os propose');
+        expect(result.text).toContain('Usage: `/pd-thinking propose');
         expect(fs.appendFileSync).not.toHaveBeenCalled();
     });
 
-    it('should run audit and warn about overused models', () => {
-        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
-        const thinkingOsPath = path.join(workspaceDir, '.principles', 'THINKING_OS.md');
-
-        vi.mocked(fs.existsSync).mockImplementation(() => true);
-
-        vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            const pStr = p.toString();
-            if (pStr === usageLogPath) {
-                return JSON.stringify({
-                    '_total_turns': 10,
-                    'T-01': 8 // 80% usage
-                });
-            }
-            if (pStr === thinkingOsPath) {
-                return '### T-01: Map\n### T-02: Constraints';
-            }
-            return '';
-        });
-
-        const result = handleThinkingOs({ config: { workspaceDir }, args: 'audit' } as any);
-        expect(result.text).toContain('Active models**: 2');
-        expect(result.text).toContain('possibly too broad a pattern');
-    });
-
-    // rc-1: JSON.parse output that is not a JSON object must fail loud (status path)
-    it('should return error when usage log is a JSON array (not an object) on status', () => {
-        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
-        const thinkingOsPath = path.join(workspaceDir, '.principles', 'THINKING_OS.md');
-
-        vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            const pStr = p.toString();
-            return pStr === usageLogPath || pStr === thinkingOsPath;
-        });
-        vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            const pStr = p.toString();
-            if (pStr === usageLogPath) {
-                return '[1, 2, 3]'; // valid JSON but not an object — isRecord returns false
-            }
-            if (pStr === thinkingOsPath) {
-                return '### T-01: Map';
-            }
-            return '';
-        });
-
+    // 2026-08-19 retirement: status/audit depended on THINKING_OS_USAGE.json,
+    // whose writer was removed. The subcommands must refuse explicitly —
+    // never silently render empty usage data.
+    it('status returns an explicit retirement notice', () => {
         const result = handleThinkingOs({ config: { workspaceDir }, args: 'status' } as any);
-        expect(result.text).toContain('usage log is not a valid JSON object');
+        expect(result.text).toContain('retired');
+        expect(result.text).toContain('/pd-thinking propose');
     });
 
-    // rc-1: JSON.parse output that is not a JSON object must fail loud (audit path)
-    it('should return error when usage log is a JSON primitive string (not an object) on audit', () => {
-        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
-        const thinkingOsPath = path.join(workspaceDir, '.principles', 'THINKING_OS.md');
-
-        vi.mocked(fs.existsSync).mockImplementation(() => true);
-        vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            const pStr = p.toString();
-            if (pStr === usageLogPath) {
-                return '"just a string"'; // valid JSON but not an object — isRecord returns false
-            }
-            if (pStr === thinkingOsPath) {
-                return '### T-01: Map';
-            }
-            return '';
-        });
-
+    it('audit returns an explicit retirement notice', () => {
         const result = handleThinkingOs({ config: { workspaceDir }, args: 'audit' } as any);
-        expect(result.text).toContain('usage log is not a valid JSON object');
+        expect(result.text).toContain('retired');
+        expect(result.text).toContain('/pd-thinking propose');
     });
 });

@@ -5,7 +5,6 @@
  *   - BUILTIN_PATTERNS: carefully tuned regexes that match AI output text
  *   - BUILTIN_PATTERN_MAP: id → entry lookup
  *   - getFallbackName / getFallbackDescription: delegate to Core Principle Registry
- *   - deriveThinkingScenarios: pure scenario derivation from context
  *
  * I/O (reading THINKING_OS.md from a workspace) stays in the plugin.
  *
@@ -33,29 +32,6 @@ export interface ThinkingModelDefinition {
 export interface ThinkingModelMatch {
   modelId: string;
   matchedPattern: string;
-}
-
-export interface ThinkingScenarioContext {
-  recentToolCalls?: {
-    toolName: string;
-    outcome: 'success' | 'failure' | 'blocked';
-    errorType?: string | null;
-  }[];
-  recentPainEvents?: {
-    source: string;
-    score: number;
-  }[];
-  recentGateBlocks?: {
-    toolName: string;
-    reason: string;
-  }[];
-  recentUserCorrections?: {
-    correctionCue?: string | null;
-  }[];
-  recentPrincipleEvents?: {
-    eventType: string;
-    principleId?: string | null;
-  }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +186,14 @@ export const BUILTIN_PATTERN_MAP: ReadonlyMap<string, BuiltinPatternEntry> = new
   BUILTIN_PATTERNS.map((p) => [p.id, p]),
 );
 
+/**
+ * Look up baselineScenarios for a model id from the builtin pattern map.
+ * Returns an empty array if the id is unknown.
+ */
+export function getBuiltinBaselineScenarios(modelId: string): string[] {
+  return BUILTIN_PATTERN_MAP.get(modelId)?.baselineScenarios ?? [];
+}
+
 // ---------------------------------------------------------------------------
 // Fallback name/description lookup — delegates to Core Principle Registry
 // ---------------------------------------------------------------------------
@@ -224,72 +208,4 @@ export function getFallbackDescription(id: string): string {
   return entry?.statement ?? '';
 }
 
-/**
- * Look up baselineScenarios for a model id from the builtin pattern map.
- * Returns an empty array if the id is unknown.
- */
-export function getBuiltinBaselineScenarios(modelId: string): string[] {
-  return BUILTIN_PATTERN_MAP.get(modelId)?.baselineScenarios ?? [];
-}
 
-// ---------------------------------------------------------------------------
-// Scenario derivation — pure logic, no I/O
-// ---------------------------------------------------------------------------
-
-/**
- * Derive thinking scenarios for a model id given a context.
- *
- * baselineScenarios come from BUILTIN_PATTERN_MAP (the source of truth —
- * even when the plugin loads THINKING_OS.md, baselineScenarios are sourced
- * from the builtin map, never from the parsed directives).
- */
-export function deriveThinkingScenarios(
-  modelId: string,
-  context: ThinkingScenarioContext,
-): string[] {
-  const scenarios = new Set<string>(getBuiltinBaselineScenarios(modelId));
-
-  if ((context.recentToolCalls ?? []).some((call) => call.outcome === 'failure')) {
-    scenarios.add('after-tool-failure');
-  }
-  // after-recovery: success that follows a failure (not just any success)
-  const calls = context.recentToolCalls ?? [];
-  const hasFailure = calls.some((call) => call.outcome === 'failure');
-  const hasSuccess = calls.some((call) => call.outcome === 'success');
-  if (hasFailure && hasSuccess) {
-    scenarios.add('after-recovery');
-  }
-  if ((context.recentToolCalls ?? []).some((call) => call.outcome === 'blocked')) {
-    scenarios.add('blocked-execution');
-  }
-  if ((context.recentToolCalls ?? []).some((call) => Boolean(call.errorType))) {
-    scenarios.add('incident-response');
-  }
-  if ((context.recentPainEvents ?? []).length > 0) {
-    scenarios.add('user-friction');
-  }
-  if ((context.recentGateBlocks ?? []).length > 0) {
-    scenarios.add('gate-block');
-  }
-  if ((context.recentUserCorrections ?? []).length > 0) {
-    scenarios.add('user-correction');
-  }
-  if ((context.recentPrincipleEvents ?? []).length > 0) {
-    scenarios.add('principle-feedback');
-  }
-
-  if (modelId === 'T-03') {
-    scenarios.add('root-cause-analysis');
-  }
-  if (modelId === 'T-04' || modelId === 'T-05') {
-    scenarios.add('risk-review');
-  }
-  if (modelId === 'T-08') {
-    scenarios.add('reflection-loop');
-  }
-  if (modelId === 'T-09') {
-    scenarios.add('task-planning');
-  }
-
-  return Array.from(scenarios);
-}
