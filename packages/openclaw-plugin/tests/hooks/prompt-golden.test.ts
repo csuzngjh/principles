@@ -267,7 +267,7 @@ describe('Golden fixture: prompt output', () => {
     }
 
     // Verify key structural elements even without fixture file
-    expect(result.prependSystemContext).toContain('## 【AGENT IDENTITY】');
+    expect(result.prependSystemContext).toContain('## 【PD GOVERNANCE CONTEXT】');
     expect(result.appendSystemContext ?? '').not.toContain('<project_context>');
     expect(result.appendSystemContext ?? '').not.toContain('<core_principles>');
 
@@ -308,7 +308,7 @@ describe('Golden fixture: prompt output', () => {
     }
 
     // Verify structural elements
-    expect(result.prependSystemContext).toContain('## 【AGENT IDENTITY】');
+    expect(result.prependSystemContext).toContain('## 【PD GOVERNANCE CONTEXT】');
     expect(result.appendSystemContext).toContain('<evolution_principles>');
     expect(result.appendSystemContext).toContain('Active principles:');
     expect(result.appendSystemContext).toContain('[P-001]');
@@ -530,7 +530,7 @@ describe('Golden fixture: prompt output', () => {
     expect(epPos).toBeLessThan(cpPos);
   });
 
-  it('6. Idempotency: AGENT IDENTITY not duplicated on repeated calls', async () => {
+  it('6. Idempotency: PD GOVERNANCE CONTEXT not duplicated on repeated calls', async () => {
     const { handleBeforePromptBuild, resetPromptStateForTest } = await import('../../src/hooks/prompt.js');
 
     // Use the default mock (no principles) — just verify no accumulation
@@ -546,9 +546,9 @@ describe('Golden fixture: prompt output', () => {
       makeCtx({ trigger: 'heartbeat' }),
     );
 
-    // AGENT IDENTITY should appear exactly once in each call
-    const identity1 = (result1?.prependSystemContext ?? '').match(/## 【AGENT IDENTITY】/g);
-    const identity2 = (result2?.prependSystemContext ?? '').match(/## 【AGENT IDENTITY】/g);
+    // PD GOVERNANCE CONTEXT should appear exactly once in each call
+    const identity1 = (result1?.prependSystemContext ?? '').match(/## 【PD GOVERNANCE CONTEXT】/g);
+    const identity2 = (result2?.prependSystemContext ?? '').match(/## 【PD GOVERNANCE CONTEXT】/g);
     expect(identity1?.length ?? 0).toBe(1);
     expect(identity2?.length ?? 0).toBe(1);
 

@@ -44,7 +44,7 @@ behavior evidence -> diagnosis -> principle proposal -> owner review
 
 ## PD data locations
 
-- `.principles/` — principle store, ledger, thinking models.
+- `.principles/` — principle store (PRINCIPLES.md, profiles, thinking models).
 - `.state/` — PD runtime state (e.g. pain flags as legacy compatibility).
 
 Do not write project business logic into the agent workspace; keep it in the

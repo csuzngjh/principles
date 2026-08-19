@@ -90,7 +90,6 @@ describe('loadGoldenTraceCases containment', () => {
   });
 
   it('rejects parent traversal in golden trace path', () => {
-    const trace = writeTrace(wsDir, 'golden.json');
     const traversal = path.join(wsDir, '..', '..', 'etc', 'passwd');
     const result = loadGoldenTraceCases(traversal, wsDir);
     expect(result.error).toBeDefined();

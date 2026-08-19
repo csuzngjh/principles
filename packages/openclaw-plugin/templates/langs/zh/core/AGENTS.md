@@ -42,7 +42,7 @@ Principles Disciple（PD）是 **Owner 治理的行为内化层**：把重复出
 
 ## PD 数据位置
 
-- `.principles/` — 原则存储、ledger、思维模型。
+- `.principles/` — 原则存储（PRINCIPLES.md、profile、思维模型）。
 - `.state/` — PD 运行时状态（如 pain flag，仅 legacy 兼容）。
 
 不要将项目业务逻辑写入 Agent 工作区；业务代码放在项目根目录（`$CWD`）。

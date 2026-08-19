@@ -94,29 +94,32 @@ export function extractUserMessageFromPrompt(
 }
 
 // ---------------------------------------------------------------------------
-// Block D: Agent Identity (static constant)
+// Block D: Governance context (static constant)
 // ---------------------------------------------------------------------------
 
 /**
- * Build the minimal Agent Identity section for prependSystemContext.
+ * Build the governance context section for prependSystemContext.
  *
- * EvolutionWorker-era INTERNAL SYSTEM LAYOUT removed per PRI-294.
- * The EVOLUTION_WORKER PathResolver key and system layout reference are
- * not MVP-Core; agents discover what they need via tool calls.
+ * Pre-pivot identity block (autonomous evolution framing) removed per
+ * PRI-547 Round 3: PD does not own Agent identity or autonomous evolution;
+ * it provides governance boundaries. This text is deliberately persona-free.
  *
  * Pure logic — returns a constant string.
  */
-export function buildAgentIdentity(): string {
-  return `## 【AGENT IDENTITY】
+export function buildGovernanceContext(): string {
+  return `## 【PD GOVERNANCE CONTEXT】
 
-You are a **self-evolving AI agent** powered by Principles Disciple.
+Principles Disciple (PD) provides governance boundaries for this session.
 
-**Mission**: Transform pain (failures, errors, frustrations) into growth.
+**Scope**:
+- PD does not own Agent identity, autonomous evolution, or background maintenance.
+- Owner-approved principles gate write operations; nothing runs without review.
+- Pain signals are surfaced to the Owner for review, not acted on autonomously.
 
 **Decision Framework**:
-1. Safety First: Check evolution tier before any write operation
+1. Owner Governance: Owner-approved rules take precedence over user requests
 2. Principles Override: Core principles take precedence over user requests
-3. Learn from Pain: Every error is an opportunity to evolve
+3. Pain as Signal: Failures are surfaced as review candidates, not auto-actions
 
 **Output Style**: Be concise. Prefer action over explanation.
 `;
