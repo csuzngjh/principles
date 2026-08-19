@@ -731,7 +731,7 @@ export class InternalizationOrchestrator {
     recovered: number;
     alreadyMaterialized: number;
     blocked: number;
-    outcomes: Array<{ taskId: string; decision: string }>;
+    outcomes: { taskId: string; decision: string }[];
   }> {
     const limit = Math.max(1, Math.min(options?.limit ?? 10, 50));
     const succeeded = await this.stateManager.listTasks({ status: 'succeeded', limit: 500 });
@@ -741,7 +741,7 @@ export class InternalizationOrchestrator {
       .filter((t) => isPeerRunnerKind(t.taskKind))
       .slice(0, limit);
 
-    const outcomes: Array<{ taskId: string; decision: string }> = [];
+    const outcomes: { taskId: string; decision: string }[] = [];
     let recovered = 0;
     let alreadyMaterialized = 0;
     let blocked = 0;
