@@ -9,7 +9,7 @@
  * - Apply mode with legacy targets
  * - V1 artifact identification
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import os from 'os';

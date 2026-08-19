@@ -7,6 +7,23 @@
  * prefix — a string `startsWith` on a possibly-relative root is wrong on
  * two counts: (1) a relative root never prefixes an absolute target, and
  * (2) `/work/foo` is a prefix of `/work/foobar` without being a boundary.
+ *
+ * ── Symlink policy ────────────────────────────────────────────────────────
+ * The guarantee provided here is LEXICAL containment: `path.resolve` +
+ * `path.relative`, without resolving symlinks. We deliberately do NOT
+ * `realpath` the target before containment because:
+ *   1. PD's IO roots are operator-supplied workspace directories; symlinks
+ *      inside the workspace are created by the owner and treated as trusted
+ *      content.
+ *   2. On Windows, junction points (worktree junctions, `node_modules`
+ *      junctions) resolve to a *different physical location* via `realpath`;
+ *      realpath-based containment would reject legitimate local workflows
+ *      (e.g. a worktree whose `node_modules` is junctioned to the main
+ *      checkout).
+ * If a future caller must constrain the physical read target (e.g. reading a
+ * file whose path could be a symlink to an untrusted location), that caller
+ * must realpath the target FIRST and then run containment on the resolved
+ * path — do not weaken this module's contract.
  */
 
 import * as path from 'node:path';

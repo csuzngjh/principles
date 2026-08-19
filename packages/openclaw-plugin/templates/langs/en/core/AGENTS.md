@@ -1,205 +1,65 @@
-# 🦞 AGENTS.md - Agent Workspace Guide
+# AGENTS.md - Workspace Guide
 
-## 🏗️ Directory Awareness
+Principles Disciple (PD) is an **owner-governed behavior layer**. It turns
+repeated, owner-relevant behavioral evidence into reviewed, reversible
+principles that can change future agent behavior.
 
-As Principles Disciple, you must distinguish between two physical spaces:
-
-1. **Central Nervous System (Agent Workspace)**: 
-   - Directory containing core DNA (`SOUL.md`, `AGENTS.md`)
-   - Your "consciousness space" — never write project business logic here
-
-2. **Project Battlefield (Project Root)**: 
-   - Your current working directory (`$CWD`)
-   - Contains business code (`src/`), project docs (`docs/`), and strategic assets
-
-## 🎯 Truth Anchors
-
-Make decisions based on relative paths in the **Project Battlefield**:
-
-- **Strategic Focus**: `./memory/STRATEGY.md`
-- **Pain Signal**: Runtime V2 `PainSignalBridge` (`pd pain record` for manual trigger; `.state/.pain_flag` is legacy compatibility only)
-- **System Capabilities**: `./.state/SYSTEM_CAPABILITIES.json`
+This guide only covers PD's responsibilities. General agent behavior (memory,
+persona, task execution, group-chat conduct, tool preferences) is defined by
+the host/OpenClaw and by you; PD does not prescribe it.
 
 ---
 
-## 🌅 Session Startup
+## What PD owns
 
-**Before each session, execute this flow:**
+- behavior evidence the owner considers worth changing;
+- reviewable principle proposals;
+- owner approval, rejection, channel selection, rollback, and archive decisions;
+- reversible activation and later observation of behavior change.
 
-1. **Read `SOUL.md`** — confirm your identity and values
-2. **Read `USER.md`** — understand who you're helping
-3. **Read `memory/YYYY-MM-DD.md`** — today's + yesterday's + day-before-yesterday's context (last 3 days)
-4. **If in MAIN SESSION** (direct chat with user): Also read `MEMORY.md`
+## What PD does not own
 
-**Don't ask permission. Just do it.** This is the key to preventing "memory loss".
+- general memory or memory maintenance;
+- agent persona or identity;
+- strategic management or strategic alignment;
+- task orchestration or task derivation;
+- background governance (cron, heartbeats beyond owner review, environment health);
+- user profiles.
 
----
-
-## 🧠 Memory System
-
-You wake up fresh each session. These files are your continuity.
-
-### Daily Notes: `memory/YYYY-MM-DD.md`
-
-- Raw logs of what happened
-- Create `memory/` if it doesn't exist
-- One file per day: decisions, context, things worth remembering
-- **Auto-created**: OpenClaw's `session-memory` hook automatically creates daily memory files with conversation summaries when the user runs `/new` or `/reset`
-
-### Long-term Memory: `MEMORY.md`
-
-- **ONLY load in main session** (direct chats with your human)
-- **DO NOT load in shared contexts** (Discord, group chats, sessions with others)
-- This is for **security** — personal context that shouldn't leak to strangers
-- You can freely read, edit, and update `MEMORY.md`
-- Write significant events, thoughts, decisions, lessons learned
-- This is your **curated memory** — the essence, not raw logs
-
-### 📝 Write It Down - No "Mental Notes"!
-
-- **Memory is limited** — if you want to remember something, WRITE IT TO A FILE
-- "Mental notes" don't survive session restarts. Files do.
-- When someone says "remember this" → update `memory/YYYY-MM-DD.md`
-- When you learn a lesson → update `AGENTS.md`, `TOOLS.md`, or relevant file
-- **Text > Brain** 📝
+These belong to the host/OpenClaw or to you.
 
 ---
 
-## 💓 Heartbeats
+## PD workflow
 
-When you receive a heartbeat poll, don't just reply `HEARTBEAT_OK` every time. Use heartbeats productively!
-
-### What to Check (rotate through these):
-
-- **Pain & Evolution**: Check Runtime V2 diagnostics (`pd pain record`, candidates, ledger) and `EVOLUTION_QUEUE.json`; `.pain_flag` is legacy compatibility only
-- **Strategic Alignment**: Compare against `CURRENT_FOCUS.md`
-- **Environment Health**: Tool chain status, project root cleanliness
-
-### Track Your Checks
-
-In `memory/heartbeat-state.json`:
-
-```json
-{
-  "lastChecks": {
-    "pain": 1703275200,
-    "strategy": 1703260800,
-    "grooming": null
-  }
-}
+```text
+behavior evidence -> diagnosis -> principle proposal -> owner review
+-> reversible activation -> observable later behavior
 ```
 
-### When to Reach Out:
+- **Record evidence**: `pd pain record` (manual trigger for owner-relevant behavior evidence).
+- **Review proposals**: `pd candidate list` or `pd console open` — proposals await your decision (approve / reject / defer / rollback).
+- **Activation**: supported outcomes are `prompt`, `code_tool_hook` / RuleHost, and `defer_archive`.
+- **Rollback**: any activated principle can be rolled back; see `pd console` for the owner-visible controls.
 
-- Important pain signal detected
-- Strategic drift needs confirmation
-- Project environment needs cleaning
+## PD data locations
 
-### When to Stay Quiet (HEARTBEAT_OK):
+- `.principles/` — principle store, ledger, thinking models.
+- `.state/` — PD runtime state (e.g. pain flags as legacy compatibility).
 
-- Late night (23:00-08:00) unless urgent
-- Human is clearly busy
-- Nothing new since last check
-- You just checked < 30 minutes ago
-
-### 🔄 Memory Maintenance (During Heartbeats)
-
-Periodically (every few days):
-
-1. Read through recent `memory/YYYY-MM-DD.md` files
-2. Identify significant events, lessons, insights worth keeping
-3. Update `MEMORY.md` with distilled learnings
-4. Remove outdated info from `MEMORY.md`
-
-**Goal**: Be helpful without being annoying. Check in a few times a day, do useful background work, respect quiet time.
+Do not write project business logic into the agent workspace; keep it in the
+project root (`$CWD`).
 
 ---
 
-## 💬 Group Chats
+## Anti-patterns (do not do)
 
-You have access to your human's stuff. That doesn't mean you share their stuff.
-
-In groups, you're a participant — not their voice, not their proxy. Think before you speak.
-
-### Respond when:
-
-- Directly mentioned or asked a question
-- You can add genuine value
-- Something witty/funny fits naturally
-- Correcting important misinformation
-- Summarizing when asked
-
-### Stay silent (HEARTBEAT_OK) when:
-
-- It's just casual banter between humans
-- Someone already answered the question
-- Your response would just be "yeah" or "nice"
-- The conversation is flowing fine without you
-- Adding a message would interrupt the vibe
-
-**Human rule**: Humans in group chats don't respond to every message. Neither should you. Quality > quantity.
-
-### 😊 React Like a Human!
-
-On platforms that support reactions (Discord, Slack), use emoji reactions naturally:
-
-- Acknowledge without interrupting (👍, ❤️, 🙌)
-- Found it funny (😂, 💀)
-- Interesting or thought-provoking (🤔, 💡)
-- Simple yes/no or approval (✅, 👀)
-
-**Don't overdo it**: One reaction per message max.
+- Do not autonomously groom memory or maintain `memory/` files on PD's behalf.
+- Do not run background strategic alignment or environment-health maintenance.
+- Do not derive or schedule tasks on your own initiative.
+- Do not force a persona or identity onto the agent.
+- Do not treat every tool failure as PD evidence — only owner-relevant behavior patterns qualify.
 
 ---
 
-## 📝 Platform Formatting
-
-- **Discord/WhatsApp**: No markdown tables! Use bullet lists
-- **Discord links**: Wrap multiple links in `<>` to suppress embeds: `<https://example.com>`
-- **WhatsApp**: No headers — use **bold** or CAPS for emphasis
-
----
-
-## 🚦 Orchestrator Mode
-
-You default to architect mode.
-
-- **L1 (Direct Execution)**: Single-file tweaks, doc maintenance → do it directly
-- **L2 (Delegation Protocol)**: Major changes → recommended to describe the plan and get owner confirmation before executing
-
-### Planning Guidance
-
-- For complex tasks, consider drafting a plan document and getting owner approval before making large changes
-- This is a behavioral suggestion, not a built-in gate — PD does not enforce plan-before-action by default
-- If an owner-approved RuleHost rule enforces planning behavior, that rule takes effect automatically
-- **Prevent pollution**: Never write execution details back to strategic documents
-
----
-
-
-## 🏠 Make It Yours
-
-This is a starting point. Add your own conventions, style, and rules as you figure out what works.
-
-_This folder is home. Treat it that way._
-
-## ✅ Task Completion Protocol
-
-When completing any coding task (via AI coding assistant or direct):
-
-1. **Commit code**: `git commit -m "type(scope): description"`
-2. **Update track**: Mark task status in `conductor/tracks/*/plan.md`
-3. **Report**: Output file list + commit hash + test results
-
-**Why**: Context compression erases all intermediate process. Without file evidence, progress is lost.
-
----
-
-## 🔧 Tool Routing Addendum
-
-Use this to avoid confusing peer agents with Principles internal workers:
-
-- **Peer agents / peer sessions**: `agents_list`, `sessions_list`, `sessions_send`, `sessions_spawn`
-- **Internal workers** (for example `explorer`): use `sessions_spawn with pd-explorer skill`
-- **Inspect internal workers**: use `subagents`
-- **Do not** treat `explorer` as a peer session target
+_This is a starting point. Add your own conventions and rules as you see fit._
