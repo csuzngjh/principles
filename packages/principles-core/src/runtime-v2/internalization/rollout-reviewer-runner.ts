@@ -558,7 +558,7 @@ export class RolloutReviewerRunner {
       // P0-A: verdict + completion intent (effect=needs_human_review) 已
       // durable;执行终态效果后标 applied — crash 窗口内 resume 会重写
       // needs_human_review,绝不重问 LLM。
-      await this.markNeedsHumanReview(ctx.taskId, `rollout_revision_budget_exhausted_applied_${recorded.appliedCount}`);
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_budget_exhausted_applied_${recorded.appliedCount}`);
       await this.markCompletionIntentAppliedOrThrow(ctx.taskId);
       this.phase = RunnerPhase.Completed;
       return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
@@ -712,7 +712,7 @@ export class RolloutReviewerRunner {
         reason: 'dispatch_activation_dep_not_injected',
         nextAction: 'wire_activation_dispatcher_in_auto_consumer_or_run_once',
       });
-      await this.markNeedsHumanReview(ctx.taskId, 'rollout_dispatch_not_wired');
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_dispatch_not_wired');
       return false;
     }
     // throw 在此冒泡: transient (db locked / network) → retry_wait,由消费循环重试
@@ -739,7 +739,7 @@ export class RolloutReviewerRunner {
       },
     );
     if (!completed) {
-      await this.markNeedsHumanReview(ctx.taskId, `rollout_dispatch_${outcome.decision}`);
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_dispatch_${outcome.decision}`);
       return false;
     }
     return true;
@@ -761,7 +761,7 @@ export class RolloutReviewerRunner {
   private async handleRevisionRouting(ctx: SucceedContext, iteration: number): Promise<boolean> {
     const target = await this.resolveRevisionTarget(ctx.taskId, ctx.channel ?? 'prompt');
     if (!target) {
-      await this.markNeedsHumanReview(ctx.taskId, 'rollout_revision_target_unresolved');
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_target_unresolved');
       return false;
     }
     if (!this.reopenRevisionTarget) {
@@ -769,7 +769,7 @@ export class RolloutReviewerRunner {
         reason: 'reopen_revision_target_dep_not_injected',
         nextAction: 'wire_revision_routing_in_auto_consumer_or_run_once',
       });
-      await this.markNeedsHumanReview(ctx.taskId, 'rollout_revision_routing_not_wired');
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_routing_not_wired');
       return false;
     }
 
@@ -806,7 +806,7 @@ export class RolloutReviewerRunner {
           sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
         });
         if (!outcome.ok) {
-          await this.markNeedsHumanReview(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`);
+          await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`);
           return false;
         }
       }
@@ -896,18 +896,34 @@ export class RolloutReviewerRunner {
     return lines.join('\n');
   }
 
-  private async markNeedsHumanReview(taskId: string, reason: string): Promise<void> {
+  /**
+   * P0 (INV-2): needs_human_review 是 completion effect 的 materialize 操作 —
+   * fail-closed。写失败/读回不一致必须 throw (→ retry_wait → 入口门 resume
+   * 同一 effect,不问 LLM),禁止 catch+swallow 后让 caller 把 intent 标
+   * applied (intent applied ⇔ 其 durable effect 已 materialize)。
+   */
+  private async markNeedsHumanReviewOrThrow(taskId: string, reason: string): Promise<void> {
     this.emitRolloutReviewerEvent('rollout_reviewer_task_needs_human_review', taskId, {
       reason,
       nextAction: 'owner_inspect_retry_or_archive',
     });
     try {
       await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+      // read-back invariant (INV-2): 只有 effect durable 才允许 caller 标 applied
+      const current = await this.stateManager.getTask(taskId);
+      if (!current || current.status !== 'needs_human_review') {
+        throw new PDRuntimeError(
+          'storage_unavailable',
+          `needs_human_review effect not durable for task ${taskId} (read-back status: ${current?.status ?? 'task_missing'})`,
+        );
+      }
     } catch (err) {
       this.emitRolloutReviewerEvent('rollout_mark_human_review_failed', taskId, {
         errorMessage: err instanceof Error ? err.message : String(err),
-        nextAction: 'manual_intervention_required',
+        reason,
+        nextAction: 'task_will_retry_then_resume_completion_intent_without_llm',
       });
+      throw err;
     }
   }
 
@@ -996,7 +1012,7 @@ export class RolloutReviewerRunner {
     if (ctx.output.review.decision === 'approve_rollout') {
       const candidate = await this.resolveActivationCandidate(ctx);
       if (!candidate) {
-        await this.markNeedsHumanReview(ctx.taskId, 'rollout_activation_candidate_unresolved');
+        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_activation_candidate_unresolved');
         return { kind: 'human_review' };
       }
       const completed = await this.dispatchOrRouteFailure(ctx, candidate);
@@ -1005,7 +1021,7 @@ export class RolloutReviewerRunner {
     if (ctx.output.review.decision === 'needs_revision') {
       if (iteration === undefined) {
         // intent 缺 iteration 却走到 needs_revision 效果 — authority 记录损坏
-        await this.markNeedsHumanReview(ctx.taskId, 'rollout_revision_iteration_missing');
+        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_iteration_missing');
         return { kind: 'human_review' };
       }
       const completed = await this.handleRevisionRouting(ctx, iteration);
@@ -1046,7 +1062,17 @@ export class RolloutReviewerRunner {
   ): Promise<RolloutReviewerRunnerResult | null> {
     const piTask = hydratePITaskRecord(leasedTask);
     const intent = piTask?.completionIntent;
-    if (!piTask || !intent || intent.status !== 'pending') return null;
+    if (!piTask || !intent || intent.status !== 'pending') {
+      // P0 (INV-1/INV-5): applied 但任务未 terminal (标 applied 后、
+      // markTaskSucceeded 写失败/crash 的窗口) — effects 已 materialize,
+      // 不重问 LLM,直接补 terminal,消除 "applied+非终态" 的 LLM 重开窗口。
+      if (piTask && intent && intent.status === 'applied'
+        && intent.revisionEpoch === (piTask.revisionCount ?? 0)
+        && leasedTask.status !== 'needs_human_review') {
+        return await this.finalizeAppliedIntentTerminal(taskId, intent.sourceRunId, leasedTask);
+      }
+      return null;
+    }
     if (intent.revisionEpoch !== (piTask.revisionCount ?? 0)) {
       this.emitRolloutReviewerEvent('rollout_completion_intent_stale_epoch', taskId, {
         intentEpoch: intent.revisionEpoch,
@@ -1067,7 +1093,7 @@ export class RolloutReviewerRunner {
       const budgetOutput = await this.recoverIntentOutput(taskId, intent.sourceRunId);
       const stored = await this.readRolloutRevisionPayload(taskId);
       const appliedCount = stored && stored.status !== 'pending' ? stored.revisionIteration : 2;
-      await this.markNeedsHumanReview(taskId, `rollout_revision_budget_exhausted_applied_${appliedCount}`);
+      await this.markNeedsHumanReviewOrThrow(taskId, `rollout_revision_budget_exhausted_applied_${appliedCount}`);
       await this.markCompletionIntentAppliedOrThrow(taskId);
       this.phase = RunnerPhase.Completed;
       return RolloutReviewerRunner.buildResumeResult({
@@ -1119,6 +1145,42 @@ export class RolloutReviewerRunner {
     });
     this.phase = RunnerPhase.Completed;
     return RolloutReviewerRunner.buildResumeResult({ taskId, runId: intent.sourceRunId, artifactId, resultRef, output, attemptCount: leasedTask.attemptCount });
+  }
+
+  /**
+   * P0 (INV-1/INV-5): applied intent 的补 terminal — effects 已 materialize
+   * (applied ⇒ INV-2 保证),仅 markTaskSucceeded 缺失。不调用 LLM。
+   */
+  private async finalizeAppliedIntentTerminal(
+    taskId: string,
+    sourceRunId: string,
+    leasedTask: TaskRecord,
+  ): Promise<RolloutReviewerRunnerResult> {
+    this.emitRolloutReviewerEvent('rollout_completion_intent_finalize_terminal', taskId, {
+      sourceRunId,
+      taskStatus: leasedTask.status,
+    });
+    const output = await this.recoverIntentOutput(taskId, sourceRunId);
+    const resultRef = `rollout-reviewer://${sourceRunId}`;
+    try {
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+    } catch (stateErr) {
+      this.emitRolloutReviewerEvent('rollout_reviewer_mark_succeeded_failed', taskId, {
+        taskId,
+        runId: sourceRunId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
+    this.phase = RunnerPhase.Completed;
+    return RolloutReviewerRunner.buildResumeResult({
+      taskId,
+      runId: sourceRunId,
+      artifactId: `pi-art-${taskId}-${sourceRunId}`,
+      resultRef,
+      output,
+      attemptCount: leasedTask.attemptCount,
+    });
   }
 
   /**

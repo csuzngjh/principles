@@ -480,9 +480,9 @@ describe('P0-B verdict drift — rule assembly 纳入 completion effect', () => 
       .map((a) => ({ artifactId: a.artifactId, validationStatus: a.validationStatus }));
   }
 
-  function makeV2Evaluator(spy: { llmCalls: number }, seedRepair?: () => Promise<string>): EvaluatorRunner {
+  function makeV2Evaluator(spy: { llmCalls: number }, payload: unknown, seedRepair?: () => Promise<string>): EvaluatorRunner {
     return new EvaluatorRunner({
-      stateManager, runtimeAdapter: driftAdapter(evaluatorOutput('needs_revision'), spy),
+      stateManager, runtimeAdapter: driftAdapter(payload, spy),
       eventEmitter: storeEmitter, artifactStore: new SqlitePIArtifactStore(new SqliteConnection(workspaceDir)),
       validator: new DefaultEvaluatorValidator(),
       isRepairLoopEnabled: () => true,
@@ -510,7 +510,7 @@ describe('P0-B verdict drift — rule assembly 纳入 completion effect', () => 
 
     const spy = { llmCalls: 0 };
     const seedCalls: number[] = [];
-    const result = await makeV2Evaluator(spy, async () => { seedCalls.push(1); throw new Error('T7: repair must not be seeded'); }).run(EVAL_ID);
+    const result = await makeV2Evaluator(spy, evaluatorV2Output(), async () => { seedCalls.push(1); throw new Error('T7: repair must not be seeded'); }).run(EVAL_ID);
     expect(result.status).toBe('succeeded');
 
     expect(spy.llmCalls).toBe(0);                          // LLM 未被调用
@@ -533,7 +533,7 @@ describe('P0-B verdict drift — rule assembly 纳入 completion effect', () => 
     expect((await listRules()).length).toBe(0);
 
     const spy = { llmCalls: 0 };
-    const result = await makeV2Evaluator(spy).run(EVAL_ID);
+    const result = await makeV2Evaluator(spy, evaluatorV2Output()).run(EVAL_ID);
     expect(result.status).toBe('succeeded');
 
     expect(spy.llmCalls).toBe(0);                          // 不调用 LLM
@@ -548,12 +548,28 @@ describe('P0-B verdict drift — rule assembly 纳入 completion effect', () => 
     expect(pi?.completionIntent?.status).toBe('applied');
   });
 
-  it('T8-reverse intent 持久化前 crash: 不得留下 validated rule', async () => {
+  it('T8-reverse (approved V2 真实 fixture) intent 持久化前 crash: 无任何治理副作用落库', async () => {
     await seedLineage();
     await seedArtificerV2Artifact();
     await stateManager.updateTask(EVAL_ID, { status: 'pending', attemptCount: 0 });
+    // seedLineage 为 rollout 链预置了 runnerDecision='approved' — 清空以证明
+    // "失败写不留痕" (assert 的 undefined 只能来自本次 abandoned attempt)
+    const preRaw = await stateManager.getTask(EVAL_ID);
+    if (!preRaw) throw new Error('T8-reverse: evaluator missing');
+    const prePi = hydratePITaskRecord(preRaw);
+    if (!prePi) throw new Error('T8-reverse: evaluator not hydratable');
+    await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(
+      mergePITaskMetadata(prePi, { runnerDecision: undefined, completionIntent: undefined }),
+    ));
+    // bearer 起始 pending: 若 approved effects 在 intent 前执行过,会被翻 validated
+    const conn0 = new SqliteConnection(workspaceDir);
+    const store0 = new SqlitePIArtifactStore(conn0);
+    await store0.updateValidationStatus(SCRIBE_ART, 'pending');
+    conn0.close();
 
-    // 注入: completion intent 的 metadata 写失败 (crash-before-intent 等价)
+    // 注入: completion intent 的 metadata 写失败 (crash-before-intent 等价)。
+    // fixture 是真实的 approved V2 + adversarial passed (PART B 修复: 此前
+    // 误用 needs_revision V1,从未证明 approved V2 ordering)。
     const inner = stateManager as unknown as Record<string, unknown>;
     const orig = inner.updateTaskDiagnosticJson as (taskId: string, json: string) => Promise<void>;
     inner.updateTaskDiagnosticJson = async (taskId: string, json: string): Promise<void> => {
@@ -564,11 +580,80 @@ describe('P0-B verdict drift — rule assembly 纳入 completion effect', () => 
     };
 
     const spy = { llmCalls: 0 };
-    const result = await makeV2Evaluator(spy).run(EVAL_ID);
+    const seedCalls: number[] = [];
+    const result = await makeV2Evaluator(spy, evaluatorV2Output(), async () => {
+      seedCalls.push(1);
+      throw new Error('T8-reverse: repair must not be seeded');
+    }).run(EVAL_ID);
 
+    // evaluator 不得 succeeded
     expect(result.status).not.toBe('succeeded');
-    // rule assembly 是 completion effect — intent 未落库则绝无 validated rule
-    const rules = await listRules();
-    expect(rules.filter((r) => r.validationStatus === 'validated')).toEqual([]);
+    const pi = await readMeta(EVAL_ID);
+    // 原子写失败 ⇒ decision + intent 均未落库,无 durable completion
+    expect(pi?.completionIntent).toBeUndefined();
+    expect(pi?.runnerDecision).toBeUndefined();
+    // validated rule 数量 = 0 (rule assembly 在 intent 后,intent 未落则绝不执行)
+    expect((await listRules()).filter((r) => r.validationStatus === 'validated')).toEqual([]);
+    // scribe bearer 不得因本次 abandoned completion 获得治理状态变化
+    const conn = new SqliteConnection(workspaceDir);
+    const store = new SqlitePIArtifactStore(conn);
+    const bearer = await store.getArtifactById(SCRIBE_ART);
+    conn.close();
+    expect(bearer?.validationStatus).toBe('pending');
+    // repair task = 0
+    expect(seedCalls).toEqual([]);
+  });
+
+  it('T6b needs_human_review materialization 失败: intent 不 applied,恢复后 resume 同一 effect (零 LLM)', async () => {
+    await seedLineage();
+    await craftRolloutCrashState('needs_revision', {
+      effect: 'needs_human_review',
+      rolloutRevisionPayload: {
+        requiredChanges: ['前两轮'], revisionIteration: 2, sourceRolloutTaskId: ROLLOUT_ID,
+        sourceArtifactId: SCRIBE_ART, targetTaskKind: 'scribe', status: 'applied',
+      },
+    });
+
+    // 注入: updateTask(status=needs_human_review) 一次性失败
+    const inner = stateManager as unknown as Record<string, unknown>;
+    const origUpdate = inner.updateTask as (taskId: string, patch: Record<string, unknown>) => Promise<unknown>;
+    let failuresLeft = 1;
+    inner.updateTask = async (taskId: string, patch: Record<string, unknown>): Promise<unknown> => {
+      if (taskId === ROLLOUT_ID && (patch as { status?: string }).status === 'needs_human_review' && failuresLeft > 0) {
+        failuresLeft -= 1;
+        throw new Error('injected needs_human_review write failure');
+      }
+      return origUpdate.call(stateManager, taskId, patch);
+    };
+
+    const spy = { llmCalls: 0 };
+    const runner1 = makeRolloutRunner(driftAdapter(rolloutOutput('approve_rollout'), spy), {
+      dispatch: async () => { throw new Error('T6b: dispatch must not be called'); },
+      reopen: async () => { throw new Error('T6b: reopen must not be called'); },
+    });
+
+    // 第一次 resume: materialize 失败 → 不正常完成
+    const r1 = await runner1.run(ROLLOUT_ID);
+    expect(r1.status).not.toBe('succeeded');
+    // intent 仍 pending (INV-2: effect 未 durable 不得 applied)
+    const pi1 = await readMeta(ROLLOUT_ID);
+    expect(pi1?.completionIntent?.status).toBe('pending');
+    expect((await stateManager.getTask(ROLLOUT_ID))?.status).not.toBe('needs_human_review');
+    expect(spy.llmCalls).toBe(0);
+
+    // 第二次 run: DB 恢复 → resume 同一 effect,LLM 总数仍 0
+    const runner2 = makeRolloutRunner(driftAdapter(rolloutOutput('approve_rollout'), spy), {
+      dispatch: async () => { throw new Error('T6b: dispatch must not be called'); },
+      reopen: async () => { throw new Error('T6b: reopen must not be called'); },
+    });
+    const r2 = await runner2.run(ROLLOUT_ID);
+    expect(r2.status).toBe('succeeded');
+    expect(spy.llmCalls).toBe(0);
+    expect((await stateManager.getTask(ROLLOUT_ID))?.status).toBe('needs_human_review');
+    const pi2 = await readMeta(ROLLOUT_ID);
+    expect(pi2?.runnerDecision).toBe('needs_revision');
+    expect(pi2?.completionIntent?.status).toBe('applied');
+    // revision budget 保持不变
+    expect(pi2?.rolloutRevisionPayload?.revisionIteration).toBe(2);
   });
 });

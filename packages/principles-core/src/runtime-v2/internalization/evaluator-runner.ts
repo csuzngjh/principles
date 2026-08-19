@@ -799,7 +799,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
             'validated',
           );
           if (!updated) {
-            // updateValidationStatus returned false — fail loud with structured telemetry (ERR-018)
+            // updateValidationStatus returned false — deterministic store
+            // inconsistency (bearer 不在 store);结构化降级 (telemetry +
+            // rollout 侧 resolveActivationCandidate 兜底 needs_human_review)。
             this.emitEvent('source_validation_update_not_found', taskId, {
               runId,
               sourceArtifactId: principleArtifactId,
@@ -812,7 +814,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
             runId,
             sourceArtifactId: principleArtifactId,
             errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
+            nextAction: 'task_will_retry; repeated validated write is idempotent',
           });
+          // P0 (INV-2): bearer validated 是 approved 的 required effect —
+          // 存储写失败必须重试 (resume 幂等重放),不得吞掉后标 intent applied。
+          throw updateErr;
         }
       }
 
@@ -853,17 +859,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         // Fail loud (rc-9, EP-03, ERR-002): mark the task needs_human_review
         // so it does NOT stay in 'leased' state (which would cause the lease
         // to expire and the evaluator to re-run the same verdict infinitely).
+        // P0 (INV-2): needs_human_review 是本 completion 的 materialize 操作 —
+        // fail-closed: 写失败 throw → retry_wait → 入口门 resume 同一效果,
+        // 不问 LLM;禁止吞错后继续 (intent applied ⇔ effect 已 durable)。
         const resultRef = `${this.config.resultRefPrefix}://${runId}`;
-        try {
-          await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
-        } catch (stateErr) {
-          // Surface the state-update failure observably (rc-9 — never silent).
-          this.emitEvent('repair_loop_mark_review_failed', taskId, {
-            runId,
-            errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-            nextAction: 'manual_intervention_required',
-          });
-        }
+        await this.markNeedsHumanReviewOrThrow(taskId, runId, 'repair_loop_max_iterations_or_seed_failure');
         this.emitEvent('task_needs_human_review', taskId, {
           attemptCount: task.attemptCount,
           resultRef,
@@ -933,6 +933,34 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   // ── P0 (verdict drift): completion intent — record / applied / resume ──
 
   /**
+   * P0 (INV-2): needs_human_review 是 completion effect 的 materialize 操作 —
+   * fail-closed + read-back。写失败 throw → retry_wait → 入口门 resume 同一
+   * effect,不问 LLM;禁止吞错后让 caller 标 intent applied
+   * (intent applied ⇔ 其 durable effect 已 materialize)。
+   */
+  private async markNeedsHumanReviewOrThrow(taskId: string, runId: string, reason: string): Promise<void> {
+    try {
+      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+      // read-back invariant (INV-2): 只有 effect durable 才允许 caller 标 applied
+      const current = await this.stateManager.getTask(taskId);
+      if (!current || current.status !== 'needs_human_review') {
+        throw new PDRuntimeError(
+          'storage_unavailable',
+          `needs_human_review effect not durable for task ${taskId} (read-back status: ${current?.status ?? 'task_missing'})`,
+        );
+      }
+    } catch (err) {
+      this.emitEvent('repair_loop_mark_review_failed', taskId, {
+        runId,
+        reason,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'task_will_retry_then_resume_completion_intent_without_llm',
+      });
+      throw err;
+    }
+  }
+
+  /**
    * verdict + completion intent 原子落库 (单次 metadata 写)。intent 的存在
    * 证明 output 已 durable (updateRunOutput 在 succeedTask 最前)。
    * 同 epoch crash/retry 重跑经 maybeResumePendingIntent resume,不重问 LLM。
@@ -999,7 +1027,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   ): Promise<PeerRunnerResult<EvaluatorOutputV1> | null> {
     const piTask = hydratePITaskRecord(leasedTask);
     const intent = piTask?.completionIntent;
-    if (!piTask || !intent || intent.status !== 'pending') return null;
+    if (!piTask || !intent || intent.status !== 'pending') {
+      // P0 (INV-1/INV-5): applied 但任务未 terminal (标 applied 后、
+      // markTaskSucceeded 写失败/crash 的窗口) — effects 已 materialize,
+      // 不重问 LLM,直接补 terminal。
+      if (piTask && intent && intent.status === 'applied'
+        && intent.revisionEpoch === (piTask.revisionCount ?? 0)
+        && leasedTask.status !== 'needs_human_review') {
+        return await this.finalizeAppliedIntentTerminal({ taskId, decision: intent.decision, sourceRunId: intent.sourceRunId, leasedTask });
+      }
+      return null;
+    }
     if (intent.revisionEpoch !== (piTask.revisionCount ?? 0)) {
       this.emitEvent('completion_intent_stale_epoch', taskId, {
         intentEpoch: intent.revisionEpoch,
@@ -1069,6 +1107,53 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       artifactId,
       resultRef,
       contextHash,
+      output,
+      attemptCount: leasedTask.attemptCount,
+    };
+  }
+
+  /**
+   * P0 (INV-1/INV-5): applied intent 的补 terminal — effects 已 materialize
+   * (applied ⇒ INV-2 保证),仅 markTaskSucceeded 缺失。不调用 LLM。
+   */
+  private async finalizeAppliedIntentTerminal(args: {
+    taskId: string;
+    decision: RunnerDecision;
+    sourceRunId: string;
+    leasedTask: TaskRecord;
+  }): Promise<PeerRunnerResult<EvaluatorOutputV1>> {
+    const { taskId, decision, sourceRunId, leasedTask } = args;
+    this.emitEvent('completion_intent_finalize_terminal', taskId, {
+      sourceRunId,
+      taskStatus: leasedTask.status,
+    });
+    const output = await this.recoverIntentOutput(taskId, sourceRunId, decision);
+    const resultRef = `${this.config.resultRefPrefix}://${sourceRunId}`;
+    try {
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+    } catch (stateErr) {
+      this.emitEvent('mark_succeeded_failed', taskId, {
+        taskId,
+        runId: sourceRunId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
+    this.emitEvent('task_succeeded', taskId, {
+      attemptCount: leasedTask.attemptCount,
+      resultRef,
+      evaluationDecision: output.evaluation.decision,
+      evaluationScore: output.evaluation.score,
+      ruleArtifactId: null,
+      finalizedFromAppliedIntent: true,
+    });
+    return {
+      status: 'succeeded',
+      taskId,
+      runId: sourceRunId,
+      artifactId: `pi-art-${taskId}-${sourceRunId}`,
+      resultRef,
+      contextHash: `resume-${sourceRunId}`,
       output,
       attemptCount: leasedTask.attemptCount,
     };

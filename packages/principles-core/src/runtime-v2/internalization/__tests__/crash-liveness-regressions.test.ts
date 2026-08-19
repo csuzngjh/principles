@@ -94,11 +94,14 @@ function wrapRoutingWriteFailure(failures: { count: number }): typeof stateManag
 }
 
 async function resetRolloutForRerun(): Promise<void> {
+  // 生产语义的"新一轮" = reopenTaskForRevision: 清 runnerDecision +
+  // completionIntent (epoch 前进)。fixture 必须镜像同一清理,否则残留的
+  // applied completionIntent 会触发补 terminal 分支而非新一轮评估。
   const t = await stateManager.getTask(ROLLOUT_ID);
   const pi = hydratePITaskRecord(t as TaskRecord);
   if (pi) {
     await stateManager.updateTaskDiagnosticJson(ROLLOUT_ID, createPITaskDiagnosticJson(
-      mergePITaskMetadata(pi, { runnerDecision: undefined }),
+      mergePITaskMetadata(pi, { runnerDecision: undefined, completionIntent: undefined }),
     ));
   }
   await stateManager.updateTask(ROLLOUT_ID, { status: 'pending', attemptCount: 0 });
@@ -172,7 +175,10 @@ describe('C — rollout revision budget persistence fail-closed (record-first)',
     expect((await readRolloutRouting()).iteration).toBeUndefined(); // budget 未落
 
     // ── 2) 恢复 + 重放 (模拟重启后的 revision flow) ──
-    await resetRolloutForRerun();
+    // run1 的 payload 写失败已把任务置 retry_wait (intent 已 pending durable)
+    // — 直接重跑即触发入口门 resume (无 LLM 重问),无需手工 reset。
+    const r1Task = await stateManager.getTask(ROLLOUT_ID);
+    if (r1Task?.status !== 'retry_wait') throw new Error(`C: expected retry_wait after failure, got ${r1Task?.status}`);
     const r2 = await makeRunner(stateManager).run(ROLLOUT_ID);
     expect(r2.status).toBe('succeeded');
     expect((await stateManager.getTask(SCRIBE_ID))?.status).toBe('pending'); // reopen 恰发生一次
@@ -275,15 +281,18 @@ describe('B — revision intent materialization state machine', () => {
     expect(await scribeRc()).toBe(1);
     const rcAfterRound1 = await scribeRc();
 
-    // 构造 B2 crash 态: 模拟"reopen 已发生但 rollout 未标 succeeded 前崩溃"
-    // = 回滚 rollout 到 pending + intent 回 pending (保留 target 的 causeId=r1)
-    const raw = await stateManager.getTask(ROLLOUT_ID);
-    if (!raw) throw new Error('B2: rollout task missing');
-    const pi = hydratePITaskRecord(raw);
-    if (!pi) throw new Error('B2: rollout task not hydratable');
+    // 构造 B2 crash 态 (现代协议): "reopen 已 materialize 但 rollout 未标
+    // succeeded 前崩溃" = completionIntent 回 pending (保留 target 的
+    // causeId=r1);payload 回 pending 模拟 markRevisionIntentApplied 前窗口。
+    const runs = await stateManager.getRunsByTask(ROLLOUT_ID);
+    const sourceRunId = runs[runs.length - 1]?.runId;
+    if (!sourceRunId) throw new Error('B2: no durable run for intent sourceRunId');
+    const pi = hydratePITaskRecord(await stateManager.getTask(ROLLOUT_ID) as TaskRecord);
+    if (!pi) throw new Error('B2: rollout not hydratable');
     const payload = pi.rolloutRevisionPayload;
     if (!payload) throw new Error('B2: revision intent payload missing');
     await stateManager.updateTaskDiagnosticJson(ROLLOUT_ID, createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
+      completionIntent: { decision: 'needs_revision', sourceRunId, revisionEpoch: pi.revisionCount ?? 0, status: 'pending', revisionIteration: 1 },
       rolloutRevisionPayload: { ...payload, status: 'pending' as const },
     })));
     await stateManager.updateTask(ROLLOUT_ID, { status: 'pending', attemptCount: 0 });

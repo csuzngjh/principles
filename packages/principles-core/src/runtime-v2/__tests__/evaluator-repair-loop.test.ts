@@ -269,12 +269,19 @@ function createMockDeps(overrides: {
       updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined), // P0-3: runner verdict 前置写入
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
-    updateTask: vi.fn().mockImplementation(async (taskId: string, patch: Record<string, unknown>) => ({
-      ...evaluatorTask,
-      taskId,
-      ...patch,
-      updatedAt: new Date().toISOString(),
-    })),
+    updateTask: vi.fn().mockImplementation(async (taskId: string, patch: Record<string, unknown>) => {
+      // 忠实 store 语义: updateTask 成功 ⇒ 后续 getTask 读回新状态
+      // (markNeedsHumanReviewOrThrow 的 read-back invariant 依赖)
+      if (taskId === EVALUATOR_TASK_ID && typeof patch.status === 'string') {
+        (evaluatorTask as Record<string, unknown>).status = patch.status;
+      }
+      return {
+        ...evaluatorTask,
+        taskId,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+    }),
     createTask: vi.fn().mockImplementation(async (record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>) => ({
       ...record,
       createdAt: new Date().toISOString(),

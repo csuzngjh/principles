@@ -164,7 +164,14 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
         if (id === SCRIBE_TASK_ID) return Promise.resolve(makeScribeTask());
         return Promise.resolve(null);
       }),
-      updateTask: vi.fn().mockResolvedValue(undefined),
+      updateTask: vi.fn().mockImplementation(async (id: string, patch: { status?: string }) => {
+        // 忠实 store 语义: updateTask 成功 ⇒ 后续 getTask 读回新状态
+        // (markNeedsHumanReviewOrThrow 的 read-back invariant 依赖)
+        if (id === ROLLOUT_REVIEWER_TASK_ID && typeof patch.status === 'string') {
+          (rolloutReviewerTask as Record<string, unknown>).status = patch.status;
+        }
+        return undefined;
+      }),
       updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined),
       getRunsByTask: vi.fn().mockResolvedValue([{
         runId: 'run-rollout-reviewer-001',
@@ -827,7 +834,14 @@ describe('RolloutReviewerRunner integration: test-double captures sourceEvaluato
         if (id === SCRIBE_TASK_ID) return Promise.resolve(makeScribeTask());
         return Promise.resolve(null);
       }),
-      updateTask: vi.fn().mockResolvedValue(undefined),
+      updateTask: vi.fn().mockImplementation(async (id: string, patch: { status?: string }) => {
+        // 忠实 store 语义: updateTask 成功 ⇒ 后续 getTask 读回新状态
+        // (markNeedsHumanReviewOrThrow 的 read-back invariant 依赖)
+        if (id === ROLLOUT_REVIEWER_TASK_ID && typeof patch.status === 'string') {
+          (rolloutReviewerTask as Record<string, unknown>).status = patch.status;
+        }
+        return undefined;
+      }),
       updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined),
       getRunsByTask: vi.fn().mockResolvedValue([{
         runId: 'run-integration-001',

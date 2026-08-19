@@ -99,7 +99,17 @@ async function makeDeps(output: RolloutReviewerOutputV1, overrides: Partial<Roll
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
-    updateTask: vi.fn().mockResolvedValue(undefined),
+    updateTask: vi.fn().mockImplementation(async (id: string, patch: { status?: string }) => {
+      // 忠实 store 语义 (ERR-025/PART A read-back): updateTask 成功 ⇒ 状态
+      // 可被后续 getTask 读回 — markNeedsHumanReviewOrThrow 的 read-back
+      // invariant 依赖这一点,bare vi.fn() 会让 needs_human_review 分支
+      // 全部误报 storage_unavailable。
+      const t = tasks.get(id);
+      if (t && typeof patch.status === 'string') {
+        (t as Record<string, unknown>).status = patch.status;
+      }
+      return undefined;
+    }),
     updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined),
     getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
   } as unknown as Record<string, unknown>;
@@ -187,12 +197,19 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
 
   it('needs_revision 路由目标缺失 (dep 链断) → needs_human_review (target_unresolved)', async () => {
     const { deps, stateManager } = await makeDeps(makeOutput('needs_revision'));
-    // 断链: evaluator 的 dep 指向不存在的 artificer
+    // 断链: evaluator 的 dep 指向不存在的 artificer;getTask 单独 override,
+    // 状态用本地变量回写 (PART A read-back 依赖 getTask 能读到 updateTask 的效果)
+    let rolloutStatus: TaskRecord['status'] = 'pending';
     (deps.stateManager.getTask as unknown as { mockImplementation: (fn: (id: string) => Promise<TaskRecord | null>) => void })
       .mockImplementation(async (id: string) => id === EVAL_ID
         ? { ...makeTask({ taskId: EVAL_ID, taskKind: 'evaluator', deps: ['missing-artificer'] }) }
-        : id === ROLLOUT_ID ? { ...makeTask({ taskId: ROLLOUT_ID, taskKind: 'rollout_reviewer', deps: [EVAL_ID], status: 'pending' }) }
+        : id === ROLLOUT_ID ? { ...makeTask({ taskId: ROLLOUT_ID, taskKind: 'rollout_reviewer', deps: [EVAL_ID] }), status: rolloutStatus }
         : null);
+    (stateManager.updateTask as { mockImplementation: (fn: (id: string, patch: { status?: TaskRecord['status'] }) => Promise<undefined>) => void })
+      .mockImplementation(async (id: string, patch: { status?: TaskRecord['status'] }) => {
+        if (id === ROLLOUT_ID && typeof patch.status === 'string') rolloutStatus = patch.status;
+        return undefined;
+      });
     const result = await makeRunner({ ...deps, reopenRevisionTarget: vi.fn() }).run(ROLLOUT_ID);
     expect(result.status).toBe('succeeded');
     expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
