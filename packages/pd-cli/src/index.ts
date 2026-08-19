@@ -44,6 +44,7 @@ import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
 import { handleRuntimeInternalizationContextTrace } from './commands/runtime-internalization-context-trace.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
+import { registerRuntimeCompatibilityScanCommand } from './commands/runtime-compatibility-scan.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
 import {
@@ -339,6 +340,8 @@ runtimeCmd
       json: opts.json === true,
     });
   });
+
+registerRuntimeCompatibilityScanCommand(runtimeCmd);
 
 const synthCmd = runtimeCmd
   .command('synthetic', { hidden: true })

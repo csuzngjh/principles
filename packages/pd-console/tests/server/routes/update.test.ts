@@ -1867,4 +1867,86 @@ describe('handleUpdateRoute', () => {
       expect(res.writeHead).toHaveBeenCalledWith(405, expect.any(Object));
     });
   });
+
+  // ── Legacy rule contract preflight (P1-3, 2026-08-19) ────────────────
+  //
+  // An active owner-approved rule that reads a removed RuleHost contract
+  // symbol (session.recentThinking) must block /apply and /apply-full
+  // BEFORE any network fetch, backup, or file mutation — the running
+  // installation stays exactly as it was and the error names the rule.
+  describe('legacy rule contract preflight', () => {
+    const LEGACY_CODE = `function evaluate(input, helpers) {
+  if (input.session && input.session.recentThinking === true) {
+    return { decision: 'block', matched: true };
+  }
+  return { decision: 'allow', matched: false };
+}`;
+
+    async function seedLegacyActiveRule(): Promise<void> {
+      const { SqliteConnection, SqliteActivationStateStore } = await import('@principles/core/runtime-v2');
+      const conn = new SqliteConnection(workspaceDir);
+      try {
+        const now = new Date().toISOString();
+        conn.getDb().prepare(`
+          INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+          VALUES ('art-legacy-console', 'rule', 'task-legacy', 'P_LEGACY', 'rule-real-diagnosis-first', '[]', 'validated', ?, ?, ?)
+        `).run(JSON.stringify({ ruleId: 'rule-real-diagnosis-first', implementationCode: LEGACY_CODE }), now, now);
+        await new SqliteActivationStateStore(conn).recordActivation({
+          activationId: 'act-legacy-console',
+          idempotencyKey: 'art-legacy-console::code_tool_hook',
+          artifactId: 'art-legacy-console',
+          channel: 'code_tool_hook',
+          action: 'code_tool_hook_live_activate',
+          targetRef: 'impl://rule-real-diagnosis-first',
+          activatedAt: now,
+          deactivatedAt: null,
+        });
+      } finally {
+        conn.close();
+      }
+    }
+
+    it('POST /apply refuses before fetch/mutation and names the blocking rule', async () => {
+      await seedLegacyActiveRule();
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockClear();
+
+      const req = createMockRequest('POST', {
+        targetDir: pluginDir,
+        mergeStrategy: 'smart',
+        createBackup: false,
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; reason?: string; nextAction?: string } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('legacy_rule_contract_dependency');
+      expect(body.data.nextAction).toContain('Migrate or deactivate');
+      // Refusal must precede any network access (nothing fetched, nothing changed).
+      expect(fetchMock).not.toHaveBeenCalled();
+      const version = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf-8')) as { version: string };
+      expect(version.version).toBe('1.0.0');
+    });
+
+    it('POST /apply-full refuses likewise with requiresRestart false', async () => {
+      await seedLegacyActiveRule();
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockClear();
+
+      const req = createMockRequest('POST');
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string; requiresRestart?: boolean } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('legacy_rule_contract_dependency');
+      expect(body.data.requiresRestart).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
 });

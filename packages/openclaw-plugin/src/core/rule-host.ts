@@ -28,6 +28,7 @@ import { createRuleHostHelpers } from '@principles/core/runtime-v2';
 import { mergeDecisions } from '@principles/core/runtime-v2';
 import { validateRuleHostResult } from '@principles/core/runtime-v2';
 import { SqliteConnection } from '@principles/core/runtime-v2';
+import { scanLegacyRuleContractDependencies } from '@principles/core/runtime-v2';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import { EventLogService } from './event-log.js';
 import type {
@@ -534,6 +535,39 @@ export class RuleHost {
             });
             this._recordSkipped(activationId, artifactId, typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId), activationMode, reason, nextAction);
             continue;
+          }
+
+          // Retired-contract backstop (2026-08-19): persisted RuleCode may
+          // still reference RuleHost contract symbols this runtime removed
+          // (session.recentThinking, workspace.planStatus/hasPlanFile,
+          // getPlanStatus()/hasPlanFile() helpers). Executing such a rule
+          // would silently change owner-approved semantics (undefined reads);
+          // refuse to load it and surface exactly which symbol blocks it.
+          {
+            const legacyFindings = scanLegacyRuleContractDependencies([{
+              activationId,
+              artifactId,
+              ruleId: typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId),
+              principleId: sourcePrincipleId ?? undefined,
+              implementationCode,
+            }]);
+            if (legacyFindings.length > 0) {
+              const symbols = legacyFindings.map(f => f.symbol).join(', ');
+              const reason = `legacy_rule_contract_dependency: ${symbols}`;
+              const nextAction = 'Migrate the RuleCode off the retired contract symbols, or deactivate this activation (pd activation deactivate) and re-approve a migrated rule';
+              this.logger.warn?.(
+                `[RuleHost] Activation ${activationId}: ${reason}, skipping (never executed). nextAction=${nextAction}`
+              );
+              skipped.push({
+                activationId,
+                ruleId: typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId),
+                mode: activationMode,
+                reason,
+                nextAction,
+              });
+              this._recordSkipped(activationId, artifactId, typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId), activationMode, reason, nextAction);
+              continue;
+            }
           }
 
           const ruleId = typeof contentObj['ruleId'] === 'string'

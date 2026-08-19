@@ -44,13 +44,14 @@
     },
     {
       "name": "read-model",
-      "description": "Read-only composite models that query state.db and the file ledger to produce operator-facing snapshots (operator health, pain chain, pruning, schema conformance, internalization chain integrity). No writes — pure read paths exposed for CLI and console reuse.",
+      "description": "Read-only composite models that query state.db and the file ledger to produce operator-facing snapshots (operator health, pain chain, pruning, schema conformance, internalization chain integrity, activation compatibility). No writes — pure read paths exposed for CLI and console reuse.",
       "files": [
         "runtime-v2/operator-health-read-model.ts",
         "runtime-v2/pain-chain-read-model.ts",
         "runtime-v2/pruning-read-model.ts",
         "runtime-v2/schema-conformance-read-model.ts",
-        "runtime-v2/internalization-chain-integrity-read-model.ts"
+        "runtime-v2/internalization-chain-integrity-read-model.ts",
+        "runtime-v2/activation-compatibility-read-model.ts"
       ]
     },
     {

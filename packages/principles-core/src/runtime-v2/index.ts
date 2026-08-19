@@ -478,6 +478,10 @@ export type {
 } from './internalization/rule-host-contracts.js';
 export type { RuleHostHelpers } from './internalization/rule-host-helpers.js';
 export { createRuleHostHelpers } from './internalization/rule-host-helpers.js';
+// Legacy RuleHost contract dependency scanner (2026-08-19) — shared
+// detection for runtime load backstops and upgrade preflights.
+export type { LegacyRuleContractSymbol, LegacyRuleContractRuleSource, LegacyRuleContractFinding } from './internalization/legacy-rule-contract-scanner.js';
+export { scanLegacyRuleContractDependencies, formatLegacyRuleContractRemediation } from './internalization/legacy-rule-contract-scanner.js';
 // Correction proposal (PRI-114)
 export type { CorrectionProposal, CorrectionProposalValidationResult, PathValidationResult } from './internalization/correction-proposal.js';
 export { validateProposedParams, validateCorrectionProposal, isPathWithinWorkspace, validateProposedPathBounds } from './internalization/correction-proposal.js';
@@ -1199,6 +1203,10 @@ export type { GfiReadModelInput, GfiWorkspaceSnapshot, GfiWorkspaceHealthAssessm
 
 export { SchemaConformanceReadModel } from './schema-conformance-read-model.js';
 export type { SchemaConformanceResult, SchemaConformanceTableResult, SchemaConformanceReadModelOptions } from './schema-conformance-read-model.js';
+// Activation compatibility read model (2026-08-19) — upgrade preflight /
+// operator scan over active code_tool_hook RuleCode.
+export { ActivationCompatibilityReadModel } from './activation-compatibility-read-model.js';
+export type { ActivationCompatibilityScanResult } from './activation-compatibility-read-model.js';
 
 // ── Internalization Chain Integrity Read Model (PRI-97) ─────────────────────
 
@@ -1825,21 +1833,11 @@ export type {
 export type { FileModification } from './risk/index.js';
 export { estimateLineChanges } from './risk/index.js';
 
-// Thinking models (Stage 3) — pure detection patterns + scenario derivation
-// migrated from plugin. I/O (reading THINKING_OS.md) stays in the plugin.
-export {
-  BUILTIN_PATTERNS,
-  BUILTIN_PATTERN_MAP,
-  getBuiltinBaselineScenarios,
-  getFallbackName,
-  getFallbackDescription,
-} from './thinking-models/index.js';
-
-export type {
-  ThinkingModelDefinition,
-  ThinkingModelMatch,
-  BuiltinPatternEntry,
-} from './thinking-models/index.js';
+// Thinking models policy (BUILTIN_PATTERNS detection regexes) was retired
+// 2026-08-19 with the Thinking Activity telemetry writer — its only remaining
+// consumers were tests and dead re-exports. The Core Principle Registry
+// (T-01..T-10) in core-principles/ and the THINKING_OS.md guidance templates
+// are current product and remain.
 
 export type {
   TrajectoryTurnReader,

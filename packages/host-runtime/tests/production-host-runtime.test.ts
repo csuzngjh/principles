@@ -477,3 +477,41 @@ describe('shared production RuleHost gate kernel', () => {
     });
   });
 });
+
+describe('retired-contract backstop (persisted legacy RuleCode)', () => {
+  // 2026-08-19: an upgraded workspace may hold an ACTIVE rule whose RuleCode
+  // reads a removed RuleHost contract symbol (session.recentThinking). The
+  // host-runtime gate must never execute it (undefined reads would silently
+  // change owner-approved behavior) and must name the blocking symbols.
+  const LEGACY_CONTRACT_CODE = `
+function evaluate(input) {
+  if (input.session && input.session.recentThinking === true) {
+    return { decision: 'block', matched: true, reason: 'LEGACY_RECENT_THINKING_MUST_NOT_RUN' };
+  }
+  return { decision: 'allow', matched: false };
+}
+`;
+
+  it('never executes an active rule reading the retired recentThinking contract', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, LEGACY_CONTRACT_CODE, undefined, '-legacy-contract');
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow',
+      warnings: [expect.stringContaining('legacy_rule_contract_dependency: recentThinking')],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
+  it('blocks the retired-contract rule observably while a healthy sibling still denies', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, LEGACY_CONTRACT_CODE, undefined, '-legacy-contract');
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE, undefined, '-healthy-contract');
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'deny', reason: SHARED_GATE_REASON,
+      warnings: [expect.stringMatching(/legacy_rule_contract_dependency.*nextAction=/)],
+      metadata: { evaluatedLiveRules: 1 },
+    });
+  });
+});

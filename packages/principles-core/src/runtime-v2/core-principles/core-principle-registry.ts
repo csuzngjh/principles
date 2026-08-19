@@ -2,8 +2,8 @@
  * Core Principle Registry — T-01..T-10
  *
  * Canonical source of truth for the 10 built-in core principles.
- * Anchored to `thinking-models.ts` ids + fallback names.
- * Drift test in openclaw-plugin validates registry matches runtime.
+ * The shipped THINKING_OS.md templates carry the same T-NN ids; the drift
+ * test in openclaw-plugin validates template ↔ registry alignment.
  *
  * Bilingual: each principle has EN (name/statement) and
  * ZH (nameZh/statementZh) fields.
@@ -17,9 +17,9 @@ import { Type } from '@sinclair/typebox';
 // ── Core principle entry ──────────────────────────────────────────────────
 
 export interface CorePrinciple {
-  /** Canonical id — matches thinking-models.ts BUILTIN_PATTERNS id (e.g. 'T-01') */
+  /** Canonical id — also the directive id in THINKING_OS.md templates (e.g. 'T-01') */
   id: string;
-  /** Human-readable name (EN) — matches thinking-models.ts getFallbackName() */
+  /** Human-readable name (EN) */
   name: string;
   /** Human-readable name (ZH) — bilingual counterpart */
   nameZh: string;

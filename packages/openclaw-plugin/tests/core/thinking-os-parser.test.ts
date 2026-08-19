@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseThinkingOsMd,
-  generateDetectionPatterns,
   type ThinkingOsDirective,
 } from '../../src/core/thinking-os-parser.js';
 
@@ -242,73 +241,5 @@ Footer text.
     expect(parseThinkingOsMd('')).toEqual([]);
     expect(parseThinkingOsMd(null as unknown as string)).toEqual([]);
     expect(parseThinkingOsMd(undefined as unknown as string)).toEqual([]);
-  });
-});
-
-describe('generateDetectionPatterns', () => {
-  it('returns empty array for empty string', () => {
-    expect(generateDetectionPatterns('')).toEqual([]);
-  });
-
-  it('extracts Chinese phrases from trigger text', () => {
-    const patterns = generateDetectionPatterns('当用户感到困惑时应该停下来');
-    expect(patterns.map(p => p.source)).toEqual(['当用户感到困惑时', '应该停下来']);
-    for (const p of patterns) {
-      expect(p).toBeInstanceOf(RegExp);
-      expect(p.flags).toContain('i');
-    }
-  });
-
-  it('extracts English words from trigger text', () => {
-    const patterns = generateDetectionPatterns('When user is confused stop and clarify');
-    expect(patterns.length).toBeGreaterThan(0);
-    const patternSources = patterns.map(p => p.source);
-    expect(patternSources.some(s => /user/.test(s))).toBe(true);
-    expect(patternSources.some(s => /confused/.test(s))).toBe(true);
-  });
-
-  it('generates case-insensitive regex patterns', () => {
-    const patterns = generateDetectionPatterns('Confused User');
-    expect(patterns.length).toBeGreaterThan(0);
-    for (const p of patterns) {
-      expect(p.flags).toContain('i');
-    }
-  });
-
-  it('matches expected text with generated patterns', () => {
-    const patterns = generateDetectionPatterns('user is confused');
-    const hasMatch = patterns.some(p => p.test('The user seems confused about this issue'));
-    expect(hasMatch).toBe(true);
-  });
-
-  it('handles mixed Chinese and English text', () => {
-    const patterns = generateDetectionPatterns('用户 confused 应该停下来');
-    expect(patterns.length).toBeGreaterThan(1);
-    const hasChinese = patterns.some(p => /[\u4e00-\u9fa5]/.test(p.source));
-    const hasEnglish = patterns.some(p => /[a-zA-Z]/.test(p.source));
-    expect(hasChinese).toBe(true);
-    expect(hasEnglish).toBe(true);
-  });
-
-  it('treats regex punctuation as phrase separators', () => {
-    const patterns = generateDetectionPatterns('error occurred with file.test.ts');
-    expect(patterns.map(p => p.source)).toEqual(['error occurred with file', 'test']);
-  });
-
-  it('filters out very short English phrases (< 3 chars)', () => {
-    const patterns = generateDetectionPatterns('a b c hi go');
-    const patternSources = patterns.map(p => p.source);
-    const shortPatterns = patternSources.filter(s => s.replace(/\\/g, '').length < 3);
-    expect(shortPatterns.length).toBe(0);
-  });
-
-  it('handles text with only short words', () => {
-    const patterns = generateDetectionPatterns('a b c d');
-    expect(patterns).toEqual([]);
-  });
-
-  it('handles text with numbers and symbols', () => {
-    const patterns = generateDetectionPatterns('test123 error code 404 not found');
-    expect(patterns.length).toBeGreaterThan(0);
   });
 });

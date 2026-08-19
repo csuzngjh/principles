@@ -310,8 +310,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'training-program.ts',
   'replay-engine.ts',
   'merge-gate-audit.ts',
-  'control-ui-db.ts',
-  'thinking-models.ts',
   'pd-task-reconciler.ts',
   'correction-cue-learner.ts',
   'principle-compiler/compiler.ts',
@@ -455,7 +453,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-530: Added principle-receipt-metadata.ts (94 → 95) — plugin I/O boundary
     // for principle receipt attribution reads (readonly state.db joins).
     // PRI-531: Added principle-application-ledger.ts (95 → 96) — receipt ledger writer.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
+    // 2026-08-19 retirement: Removed control-ui-db.ts and thinking-models.ts
+    // (96 → 94) — zero production consumers after the Thinking Activity
+    // writer retirement (census in the PR description).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
   });
 });
 

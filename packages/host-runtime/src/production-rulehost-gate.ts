@@ -4,6 +4,7 @@ import {
   buildRuleHostAction,
   estimateLineChanges,
   mergeDecisions,
+  scanLegacyRuleContractDependencies,
   SqliteConnection,
   UNAVAILABLE_RULE_CONTEXT,
   validateRuleContextV2,
@@ -260,6 +261,23 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             }
             const ruleId = typeof content.ruleId === 'string' ? content.ruleId : typeof row.source_rule_id === 'string' ? row.source_rule_id : artifactId;
             const principleId = typeof content.principleId === 'string' ? content.principleId : typeof row.source_principle_id === 'string' ? row.source_principle_id : ruleId;
+            // Retired-contract backstop (2026-08-19): persisted RuleCode that
+            // references removed RuleHost contract symbols must never execute
+            // against the new contract — reads silently resolve to undefined
+            // and change owner-approved behavior. Skip with a structured
+            // warning naming the exact blocking symbols.
+            const legacyFindings = scanLegacyRuleContractDependencies([{
+              activationId,
+              artifactId,
+              ruleId,
+              principleId,
+              implementationCode: content.implementationCode,
+            }]);
+            if (legacyFindings.length > 0) {
+              const symbols = legacyFindings.map((finding) => finding.symbol).join(', ');
+              addWarning(warnings, `legacy_rule_contract_dependency: ${symbols} (activation=${activationId})`, 'migrate the RuleCode off the retired contract symbols or deactivate the activation, then re-approve a migrated rule');
+              continue;
+            }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
             candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode });
           } catch (error: unknown) {

@@ -94,8 +94,10 @@ afterAll(() => {
 
 describe('Real packaged install smoke test', () => {
   it('tarball contains core/ directory', () => {
-    const tarOutput = execSync(`tar -tf "${tarballPath}"`, {
-      shell: true,
+    // cwd + relative tarball name: an absolute C:\… path makes GNU tar treat
+    // "C:" as a remote host on Windows.
+    const tarOutput = execFileSync('tar', ['-tf', path.basename(tarballPath)], {
+      cwd: path.dirname(tarballPath),
       stdio: 'pipe',
       timeout: 30_000,
     }).toString();
@@ -178,6 +180,132 @@ describe('Real packaged install smoke test', () => {
       expect(verification.storyA).toBe('passed');
     }
   }, 240_000);
+
+  it('installer demo verification does not pollute the user workspace', () => {
+    // P0-1 anti-regression: the installer's Story A verification must run in
+    // a throwaway temp workspace (pd-cli's own), never against the install
+    // target. After a successful install, the user's workspace must contain
+    // zero demo-provenance rows (demo principle/rule/task ids, origin=demo).
+    const markers = [
+      'demo-principle-',
+      'demo-rule-',
+      'task-demo-',
+      'art-demo-',
+      '"origin":"demo"',
+      'Demo: block writes to system directories',
+    ];
+    const scanRoots = [
+      path.join(tempWorkspaceDir, '.pd'),
+      path.join(tempWorkspaceDir, '.state'),
+      path.join(tempWorkspaceDir, '.principles'),
+    ].map((p) => path.resolve(p));
+    const hits: string[] = [];
+    const walk = (rootDir: string): void => {
+      if (!fs.existsSync(rootDir)) return;
+      for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+        // Boundary check: only descend into paths that stay inside rootDir.
+        const full = path.resolve(rootDir, entry.name);
+        if (full !== rootDir && !full.startsWith(rootDir + path.sep)) continue;
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        let content: string;
+        try {
+          content = fs.readFileSync(full).toString('latin1');
+        } catch {
+          continue;
+        }
+        for (const marker of markers) {
+          if (content.includes(marker)) {
+            hits.push(`${full} contains "${marker}"`);
+          }
+        }
+      }
+    };
+    for (const root of scanRoots) walk(root);
+    expect(hits, `demo artifacts leaked into the install workspace:\n${hits.join('\n')}`).toEqual([]);
+  }, 30_000);
+
+  it('bundled plugin PROFILE templates carry no retired PLAN-gate keys', () => {
+    // Distribution-layer guard: the bundle step copies the plugin tree at
+    // pack time, so a stale working tree could re-ship retired templates
+    // even after the source was cleaned. Inspect the actual tarball.
+    const retiredKeys = [
+      'require_plan_for_risk_paths',
+      'require_audit_before_write',
+      'require_reviewer_after_write',
+      'progressive_gate',
+      'plan_approvals',
+      'thinking_checkpoint',
+    ];
+    const extractRoot = path.resolve(fs.mkdtempSync(path.join(TMPDIR, 'pd-smoke-profile-')));
+    try {
+      for (const name of ['PROFILE.json', 'PROFILE.schema.json']) {
+        const rel = `package/plugin/templates/workspace/.principles/${name}`;
+        // cwd + relative tarball name: an absolute C:\… path makes GNU tar
+        // treat "C:" as a remote host on Windows.
+        execFileSync('tar', ['-xzf', path.basename(tarballPath), '-C', extractRoot, rel], {
+          stdio: 'pipe',
+          cwd: path.dirname(tarballPath),
+        });
+        const extracted = path.resolve(extractRoot, rel);
+        expect(extracted.startsWith(extractRoot + path.sep)).toBe(true);
+        const content = fs.readFileSync(extracted, 'utf8');
+        for (const key of retiredKeys) {
+          expect(content.includes(key), `tarball ${name} must not contain retired key "${key}"`).toBe(false);
+        }
+        expect(() => JSON.parse(content), `tarball ${name} must be valid JSON`).not.toThrow();
+      }
+    } finally {
+      cleanupDir(extractRoot);
+    }
+  }, 60_000);
+
+  it('tarball ships exactly the approved 8 skills and no legacy skill payload', () => {
+    // P1-4: the installer package must not carry its own (historical,
+    // unread) skill tree, and the bundled plugin must ship exactly the
+    // maintainer-approved MVP skill set in both languages.
+    const APPROVED_SKILLS = [
+      'pd-auditor',
+      'pd-cli-operator',
+      'pd-explorer',
+      'pd-implementer',
+      'pd-mentor',
+      'pd-pain-signal',
+      'pd-planner',
+      'pd-runtime-v2',
+    ];
+    const LEGACY_SKILLS = [
+      'admin', 'bootstrap-tools', 'deductive-audit', 'evolution-framework-update',
+      'evolve-system', 'evolve-task', 'feedback', 'init-strategy', 'inject-rule',
+      'manage-okr', 'pain', 'profile', 'reflection', 'reflection-log', 'report',
+      'root-cause', 'triage', 'watch-evolution', 'pd-reporter', 'pd-reviewer',
+    ];
+    const listing = execFileSync('tar', ['-tf', path.basename(tarballPath)], {
+      stdio: 'pipe',
+      maxBuffer: 32 * 1024 * 1024,
+      cwd: path.dirname(tarballPath),
+    }).toString();
+
+    // The installer's own template skill tree has no runtime reader — the
+    // whole tree must be gone from the distribution.
+    expect(listing.includes('package/templates/langs/zh/skills/'), 'installer-level templates/langs skills must not ship').toBe(false);
+    expect(listing.includes('package/templates/langs/en/skills/'), 'installer-level templates/langs skills must not ship').toBe(false);
+
+    // The bundled plugin ships the approved set, per language.
+    for (const lang of ['zh', 'en']) {
+      const skillDirs = new Set<string>();
+      for (const line of listing.split('\n')) {
+        const m = line.match(/^package\/plugin\/templates\/langs\/([^/]+)\/skills\/([^/]+)\//);
+        if (m && m[1] === lang) skillDirs.add(m[2]);
+      }
+      expect([...skillDirs].sort(), `bundled plugin ${lang} skills`).toEqual([...APPROVED_SKILLS].sort());
+    }
+    for (const legacy of LEGACY_SKILLS) {
+      expect(listing.includes(`/skills/${legacy}/`), `legacy skill "${legacy}" must not ship`).toBe(false);
+    }
+  }, 60_000);
 
   it('pd console starts and /api/health returns 200 on loopback', async () => {
     const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);

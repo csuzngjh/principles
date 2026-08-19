@@ -139,33 +139,3 @@ export function loadThinkingOsFromWorkspace(
 
   return [];
 }
-
-/**
- * Extract meaningful detection keywords from a trigger string.
- * Returns an array of regex patterns.
- */
-export function generateDetectionPatterns(trigger: string): RegExp[] {
-  if (!trigger) return [];
-
-  const patterns: string[] = [];
-
-  // Extract Chinese phrases: 3-8 character sequences that are meaningful
-  const chinesePattern = /[\u4e00-\u9fff]{3,8}/g;
-  const chineseMatches = trigger.match(chinesePattern) ?? [];
-  for (const phrase of chineseMatches) {
-    patterns.push(phrase);
-  }
-
-  // Extract English words/phrases: sequences of letters
-  const englishPattern = /[a-zA-Z]{3,20}(?:\s+[a-zA-Z]{3,20}){0,3}/g;
-  const englishMatches = trigger.match(englishPattern) ?? [];
-  for (const phrase of englishMatches) {
-    const cleaned = phrase.trim();
-    if (cleaned.length >= 3) {
-      patterns.push(cleaned);
-    }
-  }
-
-  // Convert to case-insensitive regexes
-  return patterns.map(p => new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
-}

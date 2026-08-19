@@ -189,6 +189,7 @@ interface InstallStep {
 
 const INSTALL_STEPS: InstallStep[] = [
   { name: 'Checking built plugin', weight: 3 },
+  { name: 'Checking workspace rule compatibility', weight: 1 },
   { name: 'Backing up existing install', weight: 3 },
   { name: 'Installing bundled @principles/core', weight: 8 },
   { name: 'Installing bundled @principles/host-runtime', weight: 3 },
@@ -379,6 +380,133 @@ function buildGatewayRefusalResult(
     nextAction: detail.nextAction,
     reason: detail.reason,
     ...(detail.error !== undefined ? { error: detail.error } : {}),
+  };
+}
+
+/**
+ * Legacy rule contract preflight (2026-08-19).
+ *
+ * Before replacing the current installation, run the NEW pd-cli's
+ * `runtime compatibility-scan` against the target workspace: if any ACTIVE
+ * owner-approved RuleCode still references a RuleHost contract symbol this
+ * version removed (recentThinking, planStatus, hasPlanFile, ...), upgrading
+ * would silently change that rule's behavior. Refusing here keeps the old
+ * installation untouched (cli-5) and tells the owner exactly which rules
+ * block the upgrade.
+ */
+export interface LegacyRulePreflightOutcome {
+  ok: boolean;
+  /** rc-9: structured reason + remediation whenever ok=false. */
+  reason?: string;
+  remediation?: string;
+}
+
+/** Injected runner so tests can exercise refusal without a built pd-cli. */
+export type LegacyRulePreflightRunner = (
+  pdCliEntry: string,
+  workspaceDir: string,
+) => Promise<LegacyRulePreflightOutcome>;
+
+function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflightOutcome {
+  if (typeof stdout !== 'string' || stdout.trim().length === 0) {
+    return { ok: false, reason: 'compatibility_scan_unreadable: empty stdout' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { ok: false, reason: 'compatibility_scan_unreadable: stdout is not JSON' };
+  }
+  if (!isRecord(parsed)) {
+    return { ok: false, reason: 'compatibility_scan_unreadable: stdout is not an object' };
+  }
+  const ok = parsed.ok === true;
+  const status = typeof parsed.status === 'string' ? parsed.status : 'unknown';
+  const remediation = typeof parsed.remediation === 'string' ? parsed.remediation : undefined;
+  if (ok) return { ok: true };
+  return {
+    ok: false,
+    reason: `legacy_rule_contract_dependency: ${status}`,
+    ...(remediation !== undefined ? { remediation } : {}),
+  };
+}
+
+async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir: string): Promise<LegacyRulePreflightOutcome> {
+  // The entry path is boundary-checked before it is used as a subprocess
+  // target, and the subprocess is invoked with an argv array (no shell).
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile);
+  try {
+    const result = await execFileAsync(
+      process.execPath,
+      [pdCliEntry, 'runtime', 'compatibility-scan', '--json', '--workspace', workspaceDir],
+      { timeout: 60_000 },
+    );
+    return parseCompatibilityScanStdout(result.stdout);
+  } catch (err) {
+    // The scan command exits 1 WITH valid JSON when dependencies exist.
+    const {stdout} = (err as { stdout?: string });
+    const fromStdout = typeof stdout === 'string' && stdout.trim().length > 0
+      ? parseCompatibilityScanStdout(stdout)
+      : null;
+    if (fromStdout && !fromStdout.ok && fromStdout.reason?.startsWith('legacy_rule_contract_dependency')) {
+      return fromStdout;
+    }
+    return {
+      ok: false,
+      reason: `compatibility_scan_failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+export async function runLegacyRuleContractPreflight(
+  pluginDir: string,
+  workspaceDir: string,
+  runScan: LegacyRulePreflightRunner = defaultLegacyRulePreflightRunner,
+): Promise<LegacyRulePreflightOutcome> {
+  const pdCliRoot = path.resolve(pluginDir, 'pd-cli');
+  const pdCliEntry = path.resolve(pdCliRoot, 'dist', 'index.js');
+  if (pdCliEntry !== pdCliRoot && !pdCliEntry.startsWith(pdCliRoot + path.sep)) {
+    return { ok: false, reason: `pd-cli entry escapes package dir: ${pdCliEntry}` };
+  }
+  if (!existsSync(pdCliEntry) || !statSync(pdCliEntry).isFile()) {
+    // Fresh-workspace installs without a bundled pd-cli entry cannot have
+    // legacy rules scanned by the new runtime; the runtime backstop in
+    // RuleHost still protects execution. Surface rather than block (rc-9).
+    return { ok: true, reason: 'preflight_skipped: bundled pd-cli entry not found (fresh package layout)' };
+  }
+  try {
+    return await runScan(pdCliEntry, path.resolve(workspaceDir));
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `compatibility_scan_failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Structured refusal for the legacy-contract preflight: nothing has been
+ * mutated yet (the old installation is untouched) and the message names the
+ * affected rules via the scan's remediation text.
+ */
+function buildCompatibilityRefusalResult(
+  options: InstallOptions,
+  outcome: LegacyRulePreflightOutcome,
+): InstallResult {
+  const nextAction = outcome.remediation ?? 'Migrate or deactivate the listed rules, then re-run the installer.';
+  return {
+    success: false,
+    workspaceDir: options.workspaceDir,
+    configYamlPath: getConfigYamlPath(options.workspaceDir),
+    templatesCount: 0,
+    components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+    verification: { features: 'skipped', storyA: 'skipped' },
+    enabledChannels: options.channels,
+    nextAction,
+    reason: outcome.reason ?? 'legacy_rule_contract_dependency',
+    ...(outcome.remediation !== undefined ? { error: outcome.remediation } : {}),
   };
 }
 
@@ -1384,6 +1512,20 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     verification.manifestActivation = 'verified';
     stepIndex++;
 
+    // Legacy rule contract preflight — run BEFORE the backup/rename step so
+    // a refusal leaves the existing installation completely untouched. Only
+    // meaningful when the target workspace already has PD state; fresh
+    // workspaces scan clean (no state.db → nothing persisted to conflict).
+    if (existsSync(path.join(path.resolve(options.workspaceDir), '.pd', 'state.db'))) {
+      if (spinner) updateProgress(spinner, stepIndex, 'Checking workspace rule compatibility...');
+      const compat = await runLegacyRuleContractPreflight(pluginDir, options.workspaceDir);
+      if (!compat.ok) {
+        if (!quiet) logger.error(compat.reason ?? 'legacy_rule_contract_dependency');
+        return buildCompatibilityRefusalResult(options, compat);
+      }
+    }
+    stepIndex++;
+
     if (spinner) updateProgress(spinner, stepIndex, 'Backing up existing install...');
     migrateLegacyPdBackups();
     const { backupDir: backupDirFromResult } = backupExistingInstall();
@@ -1501,9 +1643,26 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
     if (spinner) updateProgress(spinner, stepIndex, 'Verifying demo...');
     try {
-      const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
-      execFileSync(process.execPath, [installedPdCliEntry, 'demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
-        stdio: 'pipe',
+      // Demo isolation (2026-08-19): the install target already holds
+      // initialized PD state at this point (.pd/state.db, .principles/
+      // PROFILE.json), so the CLI's demo guard refuses to write demo data
+      // into it. Run WITHOUT --workspace — pd-cli provisions and cleans up
+      // its own throwaway temp workspace, exercising the same installed
+      // pd-cli + core chain without polluting the user's workspace.
+      // The entry path is boundary-checked before it is used as a
+      // subprocess target (canonical-path containment + existence).
+      const pdCliRoot = path.resolve(getInstalledPdCliDir());
+      const pdCliEntry = path.resolve(pdCliRoot, 'dist', 'index.js');
+      if (pdCliEntry !== pdCliRoot && !pdCliEntry.startsWith(pdCliRoot + path.sep)) {
+        throw new Error(`pd-cli entry escapes install dir: ${pdCliEntry}`);
+      }
+      if (!existsSync(pdCliEntry) || !statSync(pdCliEntry).isFile()) {
+        throw new Error(`pd-cli entry missing: ${pdCliEntry}`);
+      }
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      await execFileAsync(process.execPath, [pdCliEntry, 'demo', 'story-a', '--json'], {
         timeout: STORY_A_VERIFICATION_TIMEOUT_MS,
       });
       verification.storyA = 'passed';
