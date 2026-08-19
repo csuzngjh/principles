@@ -71,7 +71,7 @@ export function handleBootstrapTools(ctx: PluginCommandContext): PluginCommandRe
         `Capabilities saved to \`.state/SYSTEM_CAPABILITIES.json\`.`,
     };
   } catch (err) {
-    return { text: `❌ bootstrap-tools failed: ${err instanceof Error ? err.message : String(err)}` };
+    return { text: `❌ pd-bootstrap failed: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 

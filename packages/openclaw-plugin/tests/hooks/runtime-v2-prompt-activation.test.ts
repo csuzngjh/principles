@@ -833,7 +833,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     expect(appendCtx).not.toContain(directiveMarker);
   });
 
-  it('directives appear after AGENT IDENTITY in prependSystemContext', async () => {
+  it('directives appear after PD GOVERNANCE CONTEXT in prependSystemContext', async () => {
     const artifactId = 'art-v2-directive-205';
     const principleId = 'princ-v2-directive-205';
 
@@ -844,7 +844,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const ctx = result?.prependSystemContext ?? '';
-    const identityIdx = ctx.indexOf('AGENT IDENTITY');
+    const identityIdx = ctx.indexOf('PD GOVERNANCE CONTEXT');
     const directiveIdx = ctx.indexOf('OWNER-APPROVED BEHAVIOR DIRECTIVES');
     expect(identityIdx).toBeGreaterThanOrEqual(0);
     expect(directiveIdx).toBeGreaterThan(identityIdx);

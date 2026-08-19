@@ -99,6 +99,21 @@ for (const [path, config] of Object.entries(expectedCounts)) {
 // so a missing root breaks install-time language selection. A "publishable"
 // skill is an immediate child directory containing SKILL.md (what OpenClaw
 // links into ~/.openclaw/plugin-skills).
+//
+// PRI-547 (ClawHub audit remediation): the shipped set is EXACTLY the 8
+// MVP pd-* skills — neither fewer (broken build) nor more (legacy skills
+// re-entering the published artifact).
+const EXPECTED_SKILLS = [
+  'pd-auditor',
+  'pd-cli-operator',
+  'pd-explorer',
+  'pd-implementer',
+  'pd-mentor',
+  'pd-pain-signal',
+  'pd-planner',
+  'pd-runtime-v2',
+];
+
 for (const lang of ['zh', 'en']) {
   const skillsDir = join(rootDir, 'dist/templates/langs', lang, 'skills');
   if (!existsSync(skillsDir)) {
@@ -107,12 +122,22 @@ for (const lang of ['zh', 'en']) {
     continue;
   }
   const publishable = readdirSync(skillsDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && existsSync(join(skillsDir, e.name, 'SKILL.md')));
-  if (publishable.length < 20) {
-    console.error(`❌ dist/templates/langs/${lang}/skills has only ${publishable.length} publishable skills (expected at least 20)`);
+    .filter((e) => e.isDirectory() && existsSync(join(skillsDir, e.name, 'SKILL.md')))
+    .map((e) => e.name)
+    .sort();
+  const expected = [...EXPECTED_SKILLS].sort();
+  const missing = expected.filter((name) => !publishable.includes(name));
+  const unexpected = publishable.filter((name) => !expected.includes(name));
+  if (missing.length > 0 || unexpected.length > 0) {
+    if (missing.length > 0) {
+      console.error(`❌ dist/templates/langs/${lang}/skills is missing expected skills: ${missing.join(', ')}`);
+    }
+    if (unexpected.length > 0) {
+      console.error(`❌ dist/templates/langs/${lang}/skills contains non-approved skills: ${unexpected.join(', ')}`);
+    }
     hasError = true;
   } else {
-    console.log(`✅ ${lang} skills: ${publishable.length} (dist/templates/langs/${lang}/skills/)`);
+    console.log(`✅ ${lang} skills: exactly the ${publishable.length} approved pd-* skills (dist/templates/langs/${lang}/skills/)`);
   }
 }
 

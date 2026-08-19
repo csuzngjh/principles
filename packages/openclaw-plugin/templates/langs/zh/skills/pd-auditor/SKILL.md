@@ -1,6 +1,6 @@
 ---
 name: pd-auditor
-description: 演绎审计，使用公理验证、系统审计、否定论证方法验证系统一致性。TRIGGER CONDITIONS: (1) 需要审计系统或流程的一致性 (2) 验证核心假设是否自洽 (3) 检查组件交互是否正确 (4) 需要识别设计缺陷或逻辑矛盾。
+description: 对 Principles Disciple 治理范围内的目标系统做演绎审计：公理验证、系统审计、否定论证。TRIGGER CONDITIONS: (1) PD 流程要求对目标系统做一致性审计 (2) 用户明确要求使用 PD 的审计方法验证系统或流程。与 PD 无关的一般代码审查、测试、调试请求不属于本技能。
 disable-model-invocation: true
 ---
 

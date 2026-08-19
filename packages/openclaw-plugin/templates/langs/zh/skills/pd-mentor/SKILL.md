@@ -1,6 +1,6 @@
 ---
 name: pd-mentor
-description: 交互式命令引导和场景化推荐，帮助用户理解和使用 Principles Disciple 功能。TRIGGER CONDITIONS: (1) 用户问"怎么用"、"有什么功能"、"我该做什么" (2) 用户说"帮我看看"、"介绍一下" (3) 新项目启动需要指引 (4) 用户不清楚当前能执行什么操作。
+description: 交互式命令引导和场景化推荐，帮助用户理解和使用 Principles Disciple 本身。TRIGGER CONDITIONS: (1) 用户明确询问 Principles Disciple / PD 的用法、命令、配置或工作流 (2) 用户明确要求使用 PD 内置能力完成当前治理目标。一般编程、调试、项目介绍、文件查找请求不属于本技能。
 disable-model-invocation: true
 ---
 
@@ -39,7 +39,7 @@ disable-model-invocation: true
 
 ### 场景 1: 新项目初始化
 
-**触发条件**: 用户说"我刚创建了一个新项目"或类似表述
+**触发条件**: 用户明确提到要为新建项目启用 Principles Disciple，并要求 PD 初始化指引
 
 **推荐流程**:
 1. `/pd-init` - 建立战略愿景和 OKR 框架
@@ -52,7 +52,7 @@ disable-model-invocation: true
 
 ### 场景 2: 遇到 Bug 需要修复
 
-**触发条件**: 用户说"有个bug"、"报错了"、"出问题了"等
+**触发条件**: 用户明确报告 Principles Disciple / PD 本身的问题（PD 命令失败、runtime 状态异常、安全等级疑问）
 
 **推荐流程**:
 1. `/pd-status` - 检查系统状态（GFI 和痛苦词典）
@@ -64,7 +64,7 @@ disable-model-invocation: true
 
 ### 场景 3: 日常维护与回顾
 
-**触发条件**: 用户说"今天干了什么"、"看看进度"、"汇报一下"
+**触发条件**: 用户明确要求 Principles Disciple 的进度或健康回顾（提及 PD、EP、GFI、系统状态）
 
 **推荐流程**:
 1. `/pd-evolution-status` - 查看当前信任积分
@@ -76,7 +76,7 @@ disable-model-invocation: true
 
 ### 场景 4: 权限或安全相关
 
-**触发条件**: 用户说"权限不够"、"被拦截了"、"安全等级"
+**触发条件**: 用户询问 Principles Disciple 的权限、拦截或安全等级
 
 **推荐流程**:
 1. `/pd-evolution-status` - 查看信任积分和安全等级
@@ -88,7 +88,7 @@ disable-model-invocation: true
 
 ### 场景 6: 工具升级需求
 
-**触发条件**: 用户说"想升级工具"、"研究新版本"、"技术栈更新"
+**触发条件**: 用户明确要求使用 PD 的环境扫描或工具研究能力
 
 **推荐流程**:
 1. `/pd-bootstrap` - 扫描当前环境
@@ -158,30 +158,6 @@ disable-model-invocation: true
 询问用户是否需要执行某个命令：
 - "是否现在执行 `/pd-xxx` 命令？"
 - "需要我详细解释这个命令的作用吗？"
-
----
-
-## 高级用法
-
-### 组合技能
-
-对于复杂场景，可以组合使用多个技能：
-
-| 场景 | 组合流程 |
-|------|----------|
-| 大型重构 | `/pd-evolution-status` → `deductive-audit` → 执行 |
-| 系统优化 | `/pd-status` → `root-cause` → 优化实施 |
-| 项目复盘 | `/pd-evolution-status` → `/pd-status` → `reflection-log` |
-
-### 内部技能调用
-
-以下技能通常由系统自动调用，但高级用户也可以手动触发：
-
-- `triage` - 问题分诊
-- `root-cause` - 根因分析
-- `deductive-audit` - 演绎审计
-- `reflection` - 元认知反思
-- `reflection-log` - 反思落盘
 
 ---
 

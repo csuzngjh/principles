@@ -219,9 +219,9 @@ describe('PRI-291 Prompt Diet: default prompt excludes non-MVP sections', { time
 // ─── Tests: MVP Diet — sections that MUST still appear ─────────────────────
 
 describe('PRI-291 Prompt Diet: MVP sections preserved', () => {
-  it('AGENT IDENTITY is still injected in prependSystemContext', async () => {
+  it('PD GOVERNANCE CONTEXT is still injected in prependSystemContext', async () => {
     const { prepend } = await getPromptOutput();
-    expect(prepend).toContain('AGENT IDENTITY');
+    expect(prepend).toContain('PD GOVERNANCE CONTEXT');
   });
 
   it('active principles can still be injected when present', async () => {

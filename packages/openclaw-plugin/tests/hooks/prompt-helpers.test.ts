@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractUserMessageFromPrompt,
-  buildAgentIdentity,
+  buildGovernanceContext,
   buildEmpathySilenceConstraint,
   assembleHeartbeatChecklist,
   formatCorePrinciples,
@@ -97,26 +97,26 @@ describe('extractUserMessageFromPrompt', () => {
   });
 });
 
-// ─── buildAgentIdentity ─────────────────────────────────────────────────────
+// ─── buildGovernanceContext ─────────────────────────────────────────────────────
 
-describe('buildAgentIdentity', () => {
-  it('returns non-empty string with AGENT IDENTITY header', () => {
-    const result = buildAgentIdentity();
-    expect(result).toContain('## 【AGENT IDENTITY】');
-    expect(result).toContain('self-evolving AI agent');
+describe('buildGovernanceContext', () => {
+  it('returns non-empty string with PD GOVERNANCE CONTEXT header', () => {
+    const result = buildGovernanceContext();
+    expect(result).toContain('## 【PD GOVERNANCE CONTEXT】');
+    expect(result).toContain('governance boundaries');
     expect(result).toContain('Principles Disciple');
     expect(result.length).toBeGreaterThan(100);
   });
 
   it('includes Decision Framework', () => {
-    const result = buildAgentIdentity();
+    const result = buildGovernanceContext();
     expect(result).toContain('Decision Framework');
-    expect(result).toContain('Safety First');
-    expect(result).toContain('Principles Override');
+    expect(result).toContain('Owner Governance');
+    expect(result).toContain('Conflict Handling');
   });
 
   it('is deterministic (same output every call)', () => {
-    expect(buildAgentIdentity()).toBe(buildAgentIdentity());
+    expect(buildGovernanceContext()).toBe(buildGovernanceContext());
   });
 });
 

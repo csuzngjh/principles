@@ -1,59 +1,27 @@
-# 🔄 BOOT.md - 启动指令
+# BOOT.md - 启动指令
 
-启动时应执行的简短明确指令。如果任务需要发送消息，使用 message 工具，然后回复 `NO_REPLY`。
+启动时应执行的简短明确指令。
+
+宿主（OpenClaw）已经会加载它所需的工作区指南文件（AGENTS.md、SOUL.md、USER.md、
+IDENTITY.md、TOOLS.md、HEARTBEAT.md、memory）。PD 不需要重新读取它们，也不拥有
+通用记忆或身份。
 
 ---
 
 ## 启动检查清单
 
-1. **环境感知** (优先级最高): 探索并记录你所在的运行环境
-   - 检查当前工作目录: `pwd` 或查看 `process.cwd()`
-   - 识别操作系统: Windows/Linux/macOS
-   - 检查 Git 状态: 是否在 Git 仓库中
-   - 列出可用工具: 查看 `/tools` 或 `/skills`
-   - **将信息写入** `memory/environment-snapshot.md`
-
-2. **确认工作空间**: 检查当前工作目录是否正确
-3. **读取身份文件**: `SOUL.md`, `USER.md`, `IDENTITY.md`
-4. **检查记忆状态**: 读取今日和昨日的 `memory/YYYY-MM-DD.md`
-5. **检查 Runtime V2 痛苦诊断**: 使用 `pd candidate list` / ledger state；`.state/.pain_flag` 仅为 legacy compatibility
+1. **确认工作空间**：检查当前工作目录是否正确。
+2. **PD 审阅队列**：运行 `pd candidate list`，检查是否有等待 Owner 审阅的原则提案。
+   - 如有待审提案，**一次性**给出精简摘要 + 审阅决策选项（approve / reject / defer / rollback）。
+   - 否则静默继续。
 
 ---
 
-## 环境感知模板
+## 边界
 
-创建 `memory/environment-snapshot.md`:
-
-```markdown
-# 环境快照
-
-> 最后更新: [日期时间]
-
-## 系统信息
-
-- **操作系统**: [Windows/Linux/macOS]
-- **工作目录**: [完整路径]
-- **Git 仓库**: [是/否] - [分支名]
-- **Shell**: [bash/zsh/powershell等]
-
-## 可用工具
-
-- [列出的主要工具]
-- [技能列表]
-
-## 目录结构
-
-```
-[简要列出关键目录]
-```
-
-## 环境变量
-
-[重要的环境变量，如 PATH 等]
-
----
-_此文件应在每次启动时更新_
-```
+- **不要**在启动时写入环境快照或运行时状态文件——环境发现是宿主/OpenClaw 自身能力，
+  PD 不拥有通用记忆或环境持久化。
+- **不要**在 PD 启动流程中读取或管理 `memory/` 文件——那是宿主/OpenClaw 的职责。
 
 ---
 

@@ -172,4 +172,25 @@ describe('resolveWorkspaceDir', () => {
     mockDiscover.mockReturnValue(null);
     expect(() => resolveWorkspaceDir()).toThrow('workspace.default');
   });
+
+  // 12. CWE-22 boundary guard: parent traversal is rejected
+  it('rejects parent-traversal workspace paths', () => {
+    mockDiscover.mockReturnValue(null);
+    expect(() => resolveWorkspaceDir('../evil')).toThrow('parent traversal');
+    expect(() => resolveWorkspaceDir('a/../../b')).toThrow('parent traversal');
+  });
+
+  // 13. CWE-22 boundary guard: filesystem root is rejected
+  it('rejects filesystem-root workspace paths', () => {
+    mockDiscover.mockReturnValue(null);
+    expect(() => resolveWorkspaceDir('/')).toThrow('filesystem root');
+  });
+
+  // 14. Platform-agnostic: a Windows-style path is accepted everywhere.
+  // On POSIX runners "Z:\\work" is not absolute; the boundary guard must
+  // NOT treat that as invalid (regression for CI failure on Linux).
+  it('accepts Windows-style workspace paths (platform-agnostic)', () => {
+    mockDiscover.mockReturnValue(null);
+    expect(resolveWorkspaceDir('Z:\\pd-nonexistent-workspace-12345')).toBe('Z:\\pd-nonexistent-workspace-12345');
+  });
 });
