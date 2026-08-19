@@ -846,8 +846,12 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const ctx = result?.prependSystemContext ?? '';
+    // main (PRI-547) renamed AGENT IDENTITY → PD GOVERNANCE CONTEXT; this
+    // branch (P0-G) renamed OWNER-APPROVED → ACTIVE BEHAVIOR DIRECTIVES with
+    // authority= annotation. The merged runtime emits BOTH new names — the
+    // assertion must match the surviving pair, not main's pre-P0-G wording.
     const identityIdx = ctx.indexOf('PD GOVERNANCE CONTEXT');
-    const directiveIdx = ctx.indexOf('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+    const directiveIdx = ctx.indexOf('ACTIVE BEHAVIOR DIRECTIVES');
     expect(identityIdx).toBeGreaterThanOrEqual(0);
     expect(directiveIdx).toBeGreaterThan(identityIdx);
   });
