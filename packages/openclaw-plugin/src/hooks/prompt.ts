@@ -24,7 +24,7 @@ import {
   isMinimalTrigger,
 } from '@principles/core/prompt-builder';
 import {
-  buildAgentIdentity,
+  buildGovernanceContext,
   buildEmpathySilenceConstraint,
   extractUserMessageFromPrompt,
   assembleHeartbeatChecklist,
@@ -288,7 +288,7 @@ export async function handleBeforePromptBuild(
   // EvolutionWorker-era INTERNAL SYSTEM LAYOUT removed per PRI-294.
   // The EVOLUTION_WORKER PathResolver key and system layout reference are
   // not MVP-Core; agents discover what they need via tool calls.
-  prependSystemContext = buildAgentIdentity();
+  prependSystemContext = buildGovernanceContext();
 
   // ──── 2. Empathy Observer Spawn (async sidecar)
   const empathySilenceConstraint = buildEmpathySilenceConstraint();

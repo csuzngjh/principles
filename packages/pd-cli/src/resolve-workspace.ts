@@ -15,20 +15,54 @@
 
 import * as path from 'path';
 import { discoverWorkspaceDefault } from './services/pd-config-loader.js';
+import { assertSafeDirectoryRoot } from './utils/path-security.js';
 
 /** Environment variable name for workspace directory. */
 export const WORKSPACE_ENV = 'PD_WORKSPACE_DIR';
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
-/** Normalize path to forward slashes for cross-platform comparison. */
+/**
+ * Normalize a path to forward slashes for cross-platform string comparison.
+ *
+ * Comparison-only helper: it never resolves against the filesystem and never
+ * feeds a filesystem operation, so it intentionally uses `path.normalize`
+ * (pure string normalization) instead of `path.resolve`. Callers compare two
+ * paths for equality after normalization; the workspace root itself is
+ * validated by `assertWorkspaceDirInside` before any IO uses it.
+ */
 function normalizePath(p: string): string {
-  return path.resolve(p).replace(/\\/g, '/');
+  return path.normalize(p).replace(/\\/g, '/');
 }
 
 /** Emit workspace warnings to stderr. */
 function emitWarning(msg: string): void {
   process.stderr.write(`[PD:workspace] WARNING: ${msg}\n`);
+}
+
+/**
+ * Validate an operator-supplied workspace root before it is used as an IO
+ * root. Delegates to the shared canonical-root validator (empty, parent
+ * traversal, filesystem root). Returns nothing; callers keep the original
+ * value so downstream resolution semantics are unchanged.
+ */
+function assertWorkspaceDirInside(p: string, source: string): void {
+  assertSafeDirectoryRoot(p, source);
+}
+
+/** Emit a warning when an explicit override differs from config default. */
+function emitWarningIfDiffers(
+  override: string,
+  configDefault: string | undefined,
+  discovered: { configPath?: string } | null,
+): void {
+  if (configDefault && normalizePath(override) !== normalizePath(configDefault)) {
+    emitWarning(
+      `"${override}" differs from config default "${configDefault}" ` +
+        `(source: ${discovered?.configPath}). Using explicit override. ` +
+        `Consider updating workspace.default in config.`,
+    );
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -46,34 +80,24 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
 
   // Step 2: Check --workspace flag (highest priority)
   if (workspaceDir) {
-    if (configDefault && normalizePath(workspaceDir) !== normalizePath(configDefault)) {
-      emitWarning(
-        `--workspace "${workspaceDir}" differs from config default "${configDefault}" ` +
-        `(source: ${discovered.configPath}). Using explicit flag. ` +
-        `Consider updating workspace.default in config.`,
-      );
-    }
+    assertWorkspaceDirInside(workspaceDir, '--workspace');
+    emitWarningIfDiffers(workspaceDir, configDefault, discovered);
     return workspaceDir;
   }
 
   // Step 3: Check PD_WORKSPACE_DIR env var
   const envWorkspace = process.env.PD_WORKSPACE_DIR?.trim();
   if (envWorkspace) {
-    if (configDefault && normalizePath(envWorkspace) !== normalizePath(configDefault)) {
-      emitWarning(
-        `PD_WORKSPACE_DIR "${envWorkspace}" differs from config default "${configDefault}" ` +
-        `(source: ${discovered.configPath}). Using env var. ` +
-        `Consider aligning or updating workspace.default.`,
-      );
-    }
+    assertWorkspaceDirInside(envWorkspace, WORKSPACE_ENV);
+    emitWarningIfDiffers(envWorkspace, configDefault, discovered);
     return envWorkspace;
   }
 
   // Step 4: Use discovered config default
   if (configDefault) {
+    assertWorkspaceDirInside(configDefault, 'workspace.default');
     return configDefault;
   }
-
   // Step 5: No resolution possible — throw (preserves current behavior)
   throw new Error(
     'No workspace directory configured. Set --workspace <path>, ' +

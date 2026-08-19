@@ -179,8 +179,9 @@ source audit of the published artifact (PRI-547).
 
 Behavior evidence, principles, decision records, and trajectories are stored
 in the user-controlled local workspace (flat files plus SQLite databases
-under the workspace's PD state directories). Nothing leaves the machine
-unless an LLM runtime profile is configured (see below).
+under the workspace's PD state directories). The core plugin does not send
+product telemetry; network access occurs only when an Owner-configured LLM
+runtime provider is used (see below).
 
 ### Agent authority
 
@@ -211,20 +212,25 @@ when you invoke it.
 
 ### Network access and LLM providers
 
-The plugin source itself makes no direct network requests. Optional LLM
-calls happen only when you configure a runtime profile: the bundled
-provider SDKs read their standard credential environment variables
-(AWS/Azure/GCP/OpenAI-style, depending on the chosen provider) and call that
-provider from your machine. Diagnostics, principle refinement, and internal
-agents run through this user-configured provider. Some antivirus engines
-flag the bundled provider SDKs' environment-variable handling; that is
-disclosed here rather than obfuscated.
+The core plugin performs no network I/O except through Owner-configured
+provider SDKs. Optional LLM calls happen only when you configure a runtime
+profile: the bundled provider SDKs read their standard credential
+environment variables (AWS/Azure/GCP/OpenAI-style, depending on the chosen
+provider) and call that provider from your machine. Diagnostics, principle
+refinement, and internal agents run through this user-configured provider.
+Some antivirus engines flag the bundled provider SDKs'
+environment-variable handling; that is disclosed here rather than
+obfuscated.
 
 ### Telemetry
 
-The core OpenClaw plugin does not send product-usage telemetry. Local event
-logs and runtime summaries stay on disk, sensitive fields are redacted
-before persistence, and `/pd-export` redacts by default.
+The core OpenClaw plugin does not send product-usage telemetry. PD redacts
+supported sensitive patterns before persistence — including known Windows
+and Unix paths, email addresses, and common token formats — and `/pd-export`
+redacts by default. This is not a general-purpose PII scrubber: automatic
+redaction does not yet cover phone numbers, credit cards, IP addresses, or
+other unknown PII. Remaining limitations are tracked in the project's
+[security baseline](https://github.com/csuzngjh/principles/blob/main/docs/architecture/SECURITY_BASELINE.md).
 
 ### Separately shipped components
 

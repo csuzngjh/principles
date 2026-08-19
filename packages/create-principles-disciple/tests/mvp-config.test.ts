@@ -68,6 +68,22 @@ describe('Bundle source path contract', () => {
     const content = fs.readFileSync(scriptPath, 'utf-8');
     expect(content).toContain("join(ROOT_DIR, 'packages', 'pd-cli')");
   });
+
+  it('bundle-plugin.mjs stamps pd.bundledPluginVersion into the installer package.json (PRI-547)', () => {
+    // PRI-547: pd.bundledPluginVersion is formal release metadata stamped by
+    // bundle-plugin.mjs at bundle time. Contract test: the stamping logic must
+    // exist, and the committed value must be a valid semver.
+    const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+    const script = fs.readFileSync(scriptPath, 'utf-8');
+    expect(script).toContain('pd.bundledPluginVersion');
+    expect(script).toContain('installerPkg.pd.bundledPluginVersion = npmPluginVersion');
+
+    const installerPkgPath = path.resolve(__dirname, '..', 'package.json');
+    const installerPkg = JSON.parse(fs.readFileSync(installerPkgPath, 'utf-8'));
+    const stamped = installerPkg.pd?.bundledPluginVersion;
+    expect(typeof stamped).toBe('string');
+    expect(stamped).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
+  });
 });
 
 describe('Windows .cmd verification contract', () => {

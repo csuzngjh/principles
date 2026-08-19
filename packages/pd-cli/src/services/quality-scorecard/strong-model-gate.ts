@@ -60,6 +60,40 @@ Flags: ${localEval.flags.length > 0 ? localEval.flags.join(', ') : 'none'}
 Do NOT output anything other than this JSON object.`;
 }
 
+/**
+ * CWE-918 (SSRF) mitigation for operator-supplied LLM API base URLs.
+ *
+ * Threat model: OPENAI_BASE_URL is explicitly configured by the Owner /
+ * operator in the environment or Runtime Profile — it is trusted operator
+ * configuration, NOT untrusted remote input. Local and private-network
+ * OpenAI-compatible endpoints (llama.cpp, LM Studio, local gateways,
+ * intranet model servers) are legitimate PD runtime targets and must keep
+ * working.
+ *
+ * What stays blocked:
+ * - non-http(s) schemes (file:, javascript:, data:, ...)
+ * - malformed / unparseable URLs
+ * - credentials embedded in the URL (secrets leak into logs/errors)
+ *
+ * Callers must not allow the host to be rewritten from untrusted input
+ * after this validation; the endpoint is derived from this URL only.
+ */
+export function assertSafeLlmBaseUrl(rawBaseUrl: string): URL {
+  let url: URL;
+  try {
+    url = new URL(rawBaseUrl);
+  } catch {
+    throw new Error(`Invalid OPENAI_BASE_URL: "${rawBaseUrl}" is not a valid URL`);
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(`Invalid OPENAI_BASE_URL: protocol must be http or https, got "${url.protocol}"`);
+  }
+  if (url.username || url.password) {
+    throw new Error(`Invalid OPENAI_BASE_URL: credentials must not be embedded in the URL`);
+  }
+  return url;
+}
+
 export async function adjudicate(
   episode: PainEpisode,
   localEval: LocalEvaluation,
@@ -67,7 +101,11 @@ export async function adjudicate(
 ): Promise<StrongModelAdjudication> {
   const { modelId: strongModelId, log } = config;
   const prompt = buildAdjudicationPrompt(episode, localEval);
-  const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+  // CWE-918 (SSRF): validate the operator-supplied base URL before any
+  // network request — http(s) only, no embedded credentials. Local and
+  // private OpenAI-compatible endpoints remain valid (trusted operator
+  // configuration; llama.cpp / LM Studio / local gateways are supported).
+  const baseUrl = assertSafeLlmBaseUrl(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1');
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -82,7 +120,11 @@ export async function adjudicate(
   }
 
   try {
-    const resp = await fetch(`${baseUrl}/chat/completions`, {
+    // Build the endpoint on the validated URL: append the chat completions
+    // path to the base URL's (possibly empty) path component.
+    const endpoint = new URL(baseUrl);
+    endpoint.pathname = endpoint.pathname.replace(/\/+$/, '') + '/chat/completions';
+    const resp = await fetch(endpoint.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

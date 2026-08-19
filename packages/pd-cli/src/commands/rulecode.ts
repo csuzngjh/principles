@@ -31,6 +31,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import type { Command } from 'commander';
+import { isPathInside } from '../utils/path-security.js';
 import {
   RULECODE_SPEC_TEXT,
   checkForbiddenPatterns,
@@ -113,11 +114,33 @@ function isGoldenTraceCaseInput(value: unknown): value is GoldenTraceCaseInput {
 /**
  * Load and validate golden trace cases from a JSON file.
  * Returns either the validated cases or a structured error.
+ * Exported for boundary regression tests (internal test surface).
  */
-function loadGoldenTraceCases(filePath: string): { cases?: GoldenTraceCaseInput[]; error?: { reason: string; nextAction: string } } {
+export function loadGoldenTraceCases(
+  filePath: string,
+  workspaceDir?: string,
+): { cases?: GoldenTraceCaseInput[]; error?: { reason: string; nextAction: string } } {
   let raw: string;
   try {
+    if (!filePath || filePath.trim().length === 0) {
+      throw new Error('golden trace path is empty');
+    }
     const resolved = path.resolve(filePath);
+    // CWE-22 boundary: canonical containment against the workspace root
+    // (rejects sibling-prefix and traversal escapes; relative workspaces
+    // canonicalize consistently). Filesystem-root targets are rejected by
+    // containment when a workspace root is supplied.
+    const normalized = path.normalize(resolved);
+    if (normalized.split(/[\\/]/).includes('..')) {
+      throw new Error('golden trace path contains parent traversal');
+    }
+    if (workspaceDir) {
+      if (!isPathInside(workspaceDir, resolved)) {
+        throw new Error('golden trace path must be inside the workspace directory');
+      }
+    } else if (normalized === path.parse(normalized).root) {
+      throw new Error('golden trace path resolves to filesystem root');
+    }
     raw = fs.readFileSync(resolved, 'utf8');
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -286,7 +309,7 @@ export async function handleRulecodeReplay(opts: ReplayOptions): Promise<void> {
     return;
   }
 
-  const traceResult = loadGoldenTraceCases(opts.goldenTrace);
+  const traceResult = loadGoldenTraceCases(opts.goldenTrace, opts.workspace);
   if (traceResult.error || traceResult.cases === undefined) {
     const { error } = traceResult;
     const output: RulecodeReplayOutput = {
