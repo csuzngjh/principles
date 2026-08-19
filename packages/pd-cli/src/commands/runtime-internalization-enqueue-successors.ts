@@ -131,6 +131,14 @@ function mapCommitDecisionToAction(
         successorKind: commitResult.successorKind,
         successorTaskId: commitResult.reopenedTaskId,
       };
+    case 'revision_reopen_noop':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `revision_reopen_noop: ${commitResult.reason}; transition already materialized (same revision cause)`,
+        nextAction: 'No action — idempotent replay',
+      };
     case 'blocked_missing_verdict':
       return {
         taskId: commitResult.taskId,

@@ -565,7 +565,12 @@ export class RolloutReviewerRunner {
         return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
       }
     } else if (decision === 'needs_revision') {
-      await this.handleRevisionRouting(ctx);
+      const routingCompleted = await this.handleRevisionRouting(ctx);
+      if (!routingCompleted) {
+        // 任务已转入 needs_human_review — 不得再 markTaskSucceeded 覆盖
+        this.phase = RunnerPhase.Completed;
+        return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
+      }
     }
     // 'reject' → terminal: 无 dispatch、无 approval、无后继 (INV-04)
 
@@ -748,19 +753,24 @@ export class RolloutReviewerRunner {
    * Budget: rolloutRevisionPayload.revisionIteration, 上限 2; 耗尽或路由失败 →
    * needs_human_review (Owner 注意队列)。
    */
-  private async handleRevisionRouting(ctx: SucceedContext): Promise<void> {
+  /**
+   * 返回 true = revision transition 完成 (target 已 reopen);false = 任务已
+   * 转入 needs_human_review。caller 据此跳过 markTaskSucceeded — 否则会把
+   * needs_human_review 覆盖回 succeeded。
+   */
+  private async handleRevisionRouting(ctx: SucceedContext): Promise<boolean> {
     const priorIteration = await this.resolvePriorRevisionIteration(ctx.taskId);
     const iteration = priorIteration + 1;
 
     if (iteration > 2) {
       await this.markNeedsHumanReview(ctx.taskId, `rollout_revision_budget_exhausted_iteration_${priorIteration}`);
-      return;
+      return false;
     }
 
     const target = await this.resolveRevisionTarget(ctx.taskId, ctx.channel ?? 'prompt');
     if (!target) {
       await this.markNeedsHumanReview(ctx.taskId, 'rollout_revision_target_unresolved');
-      return;
+      return false;
     }
     if (!this.reopenRevisionTarget) {
       this.emitRolloutReviewerEvent('rollout_revision_not_wired', ctx.taskId, {
@@ -768,10 +778,22 @@ export class RolloutReviewerRunner {
         nextAction: 'wire_revision_routing_in_auto_consumer_or_run_once',
       });
       await this.markNeedsHumanReview(ctx.taskId, 'rollout_revision_routing_not_wired');
-      return;
+      return false;
     }
 
     const feedback = RolloutReviewerRunner.formatRevisionFeedback(ctx.output);
+    // ── C (外部复核): budget/cause 先持久化,再 reopen ──
+    // record 位于 try 之外: 持久化失败 = transient 存储错误 → 直接冒泡到
+    // run() 的 retryOrFail (retry_wait 自动重放; record 幂等覆盖写);
+    // reopen 的失败才走 catch → needs_human_review。
+    // 禁止 "reopen 成功 + budget metadata 丢失 + rollout 正常完成"。
+    await this.recordRolloutRevisionRoutingOrThrow(ctx.taskId, {
+      requiredChanges: [...ctx.output.review.requiredChanges],
+      revisionIteration: iteration,
+      sourceRolloutTaskId: ctx.taskId,
+      sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+      targetTaskKind: target.kind,
+    });
     try {
       const outcome = await this.reopenRevisionTarget({
         targetTaskId: target.taskId,
@@ -783,25 +805,20 @@ export class RolloutReviewerRunner {
       });
       if (!outcome.ok) {
         await this.markNeedsHumanReview(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`);
-        return;
+        return false;
       }
-      await this.recordRolloutRevisionRouting(ctx.taskId, {
-        requiredChanges: [...ctx.output.review.requiredChanges],
-        revisionIteration: iteration,
-        sourceRolloutTaskId: ctx.taskId,
-        sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
-        targetTaskKind: target.kind,
-      });
       this.emitRolloutReviewerEvent('rollout_revision_routed', ctx.taskId, {
         targetTaskId: outcome.reopenedTaskId ?? target.taskId,
         targetKind: target.kind,
         revisionIteration: iteration,
       });
+      return true;
     } catch (err) {
       this.emitRolloutReviewerEvent('rollout_revision_route_failed', ctx.taskId, {
         errorMessage: err instanceof Error ? err.message : String(err),
       });
       await this.markNeedsHumanReview(ctx.taskId, 'rollout_revision_route_threw');
+      return false;
     }
   }
 
@@ -934,10 +951,22 @@ export class RolloutReviewerRunner {
       });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
     } catch (err) {
+      // C (外部复核): routing intent 持久化失败必须 fail loud (caller 已把
+      // record 前置于 reopen — 此 throw 阻止无 budget 记录的 reopen 发生)
       this.emitRolloutReviewerEvent('rollout_revision_record_failed', taskId, {
         errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'task_will_retry; record is idempotent overwrite',
       });
+      throw err;
     }
+  }
+
+  /** C: 显式 fail-loud 包装 — routing intent 是 transition 的组成部分。 */
+  private async recordRolloutRevisionRoutingOrThrow(
+    taskId: string,
+    payload: { requiredChanges: string[]; revisionIteration: number; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer' },
+  ): Promise<void> {
+    await this.recordRolloutRevisionRouting(taskId, payload);
   }
 
   private async handleRuntimeFailure(

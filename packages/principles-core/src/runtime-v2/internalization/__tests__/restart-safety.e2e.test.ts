@@ -26,10 +26,11 @@ interface StageSummary {
   activations: Array<{ activation_id: string; action: string }>;
   commit?: string;
   runStatus?: string;
+  reconcile?: { scanned: number; recovered: number; alreadyMaterialized: number; blocked: number };
 }
 
 /** stage 白名单: 只接受枚举值(注入防御) */
-const ALLOWED_STAGES = new Set(['seed', 'repair-complete', 'evaluator-approved', 'rollout-approve']);
+const ALLOWED_STAGES = new Set(['seed', 'repair-complete', 'evaluator-approved', 'rollout-approve', 'eval-approved-nocommit', 'rollout-succeed', 'reconcile']);
 
 function runStage(workspaceDir: string, stage: string): Promise<StageSummary> {
   if (!ALLOWED_STAGES.has(stage)) {
@@ -93,6 +94,81 @@ describe('Journey 11 — Restart Safety (独立 Worker 逐阶段推进)', () => 
       // 幂等重放 dispatch: rollout 已 succeeded(lease 拒绝)→ activation 不重复
       const s4b = await runStage(workspaceDir, 'rollout-approve');
       expect(s4b.activations.length).toBe(1);
+    } finally {
+      try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* temp */ }
+    }
+  });
+
+  it('A: crash-after-succeeded → 新 consumer 周期自动恢复 successor,恰好一次,重放无重复', { timeout: 180_000 }, async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-restart-a-'));
+    try {
+      // 进程 1: 常规链至 evaluator needs_revision + repair seeded
+      const s1 = await runStage(workspaceDir, 'seed');
+      expect(s1.tasks['evaluator-j11-prompt']).toBe('succeeded');
+      // 进程 2: repair 完成 + commit (evaluator reopen) — 常规路径
+      const s2 = await runStage(workspaceDir, 'repair-complete');
+      expect(s2.commit).toBe('revision_reopened');
+      // 进程 3: evaluator 修订轮 approved 已持久化, 但 commit 前 crash
+      const s3 = await runStage(workspaceDir, 'eval-approved-nocommit');
+      expect(s3.tasks['evaluator-j11-prompt']).toBe('succeeded');
+      // crash 后果: rollout successor 缺失 (没有任何任务创建它)
+      expect(Object.keys(s3.tasks).filter((id) => id.includes('rollout'))).toEqual([]);
+
+      // 进程 4 (重启后的 auto-consumer): 只跑 reconciliation
+      const s4 = await runStage(workspaceDir, 'reconcile');
+      console.log('A-DEBUG s4:', JSON.stringify(s4.reconcile));
+      expect(s4.reconcile?.recovered).toBe(1);
+      expect(s4.tasks['rollout_reviewer-j11-prompt']).toBe('pending'); // 自动恢复
+
+      // 重放无重复: 再跑两次 reconciliation — successor_exists,无新增任务/重复出边
+      const s5 = await runStage(workspaceDir, 'reconcile');
+      const s6 = await runStage(workspaceDir, 'reconcile');
+      expect(s5.reconcile?.recovered).toBe(0);
+      expect(s6.reconcile?.recovered).toBe(0);
+      const rollouts = Object.keys(s6.tasks).filter((id) => id.startsWith('rollout_reviewer-'));
+      expect(rollouts.length).toBe(1);
+      expect(s6.tasks['rollout_reviewer-j11-prompt']).toBe('pending');
+    } finally {
+      try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* temp */ }
+    }
+  });
+
+  it('B: 同一 upstream revision wave 连续 reconcile 3 次 — successor revisionCount 只 +1', { timeout: 180_000 }, async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-restart-b-'));
+    try {
+      // 建立 cascade 前置: evaluator 修订轮 approved + 正常 commit (rollout 创建)
+      await runStage(workspaceDir, 'seed');
+      await runStage(workspaceDir, 'repair-complete');  // evaluator reopen rc=1
+      await runStage(workspaceDir, 'evaluator-approved'); // commit → rollout created
+      await runStage(workspaceDir, 'rollout-succeed');    // 下游 succeeded (cascade 可触发)
+      // 第二次 revision wave: evaluator 再次 approved 后 crash (无 commit)
+      await runStage(workspaceDir, 'eval-approved-nocommit');
+      // 第一次 reconcile: cascade reopen rollout rc 0→1
+      const r1 = await runStage(workspaceDir, 'reconcile');
+      expect(r1.reconcile?.recovered).toBeGreaterThanOrEqual(1);
+
+      // 用独立连接读取 successor 的 revisionCount (worker 摘要不含元数据)
+      const { SqliteConnection } = await import('@principles/core/runtime-v2');
+      const readRevisionCount = (): number => {
+        const conn = new SqliteConnection(workspaceDir);
+        try {
+          const row = conn.getDb().prepare(
+            "SELECT diagnostic_json FROM tasks WHERE task_id = 'rollout_reviewer-j11-prompt'",
+          ).get() as { diagnostic_json?: string } | undefined;
+          if (!row?.diagnostic_json) return -1;
+          const parsed = JSON.parse(row.diagnostic_json) as { pi_metadata?: { revisionCount?: number } };
+          return parsed.pi_metadata?.revisionCount ?? 0;
+        } finally {
+          try { conn.close(); } catch { /* best-effort */ }
+        }
+      };
+      const rc1 = readRevisionCount();
+
+      // 连续两次 reconciliation 重放 — 因果幂等: revisionCount 不变
+      await runStage(workspaceDir, 'reconcile');
+      await runStage(workspaceDir, 'reconcile');
+      expect(readRevisionCount()).toBe(rc1);
+      expect(rc1).toBe(1); // 整个 wave 只发生过一次 reopen
     } finally {
       try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* temp */ }
     }

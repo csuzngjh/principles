@@ -151,6 +151,8 @@ export type CommitNextTaskResult =
   | { decision: 'revision_reopened'; sourceTaskId: string; reopenedTaskId: string; reason: string }
   /** revision 波及下游: 已存在的 succeeded 后继被 reopen 重跑 (级联修订) */
   | { decision: 'successor_reopened'; sourceTaskId: string; reopenedTaskId: string; successorKind: RunnerKind }
+  /** A/B: 同 causeId 重放的 no-op reopen — 已 materialized,不计数为恢复 */
+  | { decision: 'revision_reopen_noop'; sourceTaskId: string; reopenedTaskId: string; reason: string }
   /** P0-3: 决策型任务缺少 durable + legacy verdict — fail-closed, 不 seed 任何后继 */
   | { decision: 'blocked_missing_verdict'; taskId: string; reason: string };
 
@@ -452,15 +454,40 @@ export class InternalizationOrchestrator {
       };
     }
     if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
+      const causeId = `repair-${taskId}`;
+      // A/B: cause 已 materialize 的判定前移 — 目标(任意状态)的 revisionCauseId
+      // 与本 repair 的 causeId 相同,说明这轮 reopen 已发生过: 目标可能仍在
+      // pending(等待重跑),也可能已经跑完(succeeded 且带新 verdict)。两种
+      // 情况重放都不得再次 reopen(后者会丢弃已完成的修订轮 verdict)。
+      const srcRaw = await this.stateManager.getTask(piTask.repairPayload.sourceEvaluatorTaskId);
+      const srcPi = srcRaw ? hydratePITaskRecord(srcRaw) : null;
+      if (srcPi && srcPi.revisionCauseId === causeId) {
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+          reason: 'revision_cause_already_materialized',
+        };
+      }
       const reopened = await this.reopenTaskForRevision(piTask.repairPayload.sourceEvaluatorTaskId, {
         replaceArtificerDependencyWith: taskId,
         reason: 'artificer_repair_complete',
-        revisionCauseId: `repair-${taskId}`,
+        revisionCauseId: causeId,
       });
       if (!reopened.ok) {
         // reopen 失败 (evaluator 缺失/状态不可 reopen) — 不 seed 正常后继,
         // 结构化返回让 host 层观测 (rc-9)。
         return { decision: 'no_successor', sourceTaskId: taskId, reason: `evaluator_reopen_failed:${reopened.reason}` };
+      }
+      // A (crash window): 同 causeId 重放 = 真 no-op — 单独 decision 使
+      // reconciliation 不把它计为"恢复" (already materialized)。
+      if (reopened.reason === 'idempotent_replay_same_revision') {
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+          reason: reopened.reason,
+        };
       }
       return {
         decision: 'revision_reopened',
@@ -529,10 +556,33 @@ export class InternalizationOrchestrator {
       ? await this.stateManager.getTask(successorTaskId)
       : null;
     if (existingById && (existingById.status === 'succeeded' || existingById.status === 'needs_human_review')) {
+      const cascadeCauseId = `cascade-${taskId}-rc${piTask.revisionCount ?? 0}-${successorTaskId}`;
+      // B: 对称的 cause 前置 — 该 wave 的 cascade reopen 已 materialize
+      // (successor 可能 pending 或已重跑完成),重放不得再 reopen。
+      const succPi = hydratePITaskRecord(existingById);
+      if (succPi && succPi.revisionCauseId === cascadeCauseId) {
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: successorTaskId,
+          reason: 'revision_cause_already_materialized',
+        };
+      }
       const reopened = await this.reopenTaskForRevision(successorTaskId, {
         reason: 'upstream_revision_cascade',
+        // B (外部复核): causal idempotency — 同一 upstream revision wave 的
+        // reconciliation/commit 重放不得再次 reopen 或递增 revisionCount。
+        revisionCauseId: cascadeCauseId,
       });
       if (reopened.ok) {
+        if (reopened.reason === 'idempotent_replay_same_revision') {
+          return {
+            decision: 'revision_reopen_noop',
+            sourceTaskId: taskId,
+            reopenedTaskId: successorTaskId,
+            reason: reopened.reason,
+          };
+        }
         return {
           decision: 'successor_reopened',
           sourceTaskId: taskId,
@@ -644,6 +694,78 @@ export class InternalizationOrchestrator {
       }
     }
     return undefined;
+  }
+
+  // ── A: succeeded-transition reconciliation (crash window 修复) ─────────────
+
+  /**
+   * Bounded reconciliation for the crash window between markTaskSucceeded
+   * (durable, inside the runner) and commitNextTaskProposal (in-process,
+   * called by the consumer AFTER run() returns). If the process dies between
+   * them, the task stays succeeded forever and its outgoing transition
+   * (successor seed / repair-source reopen / cascade reopen) is lost —
+   * wakeOnce only scans pending/retry_wait.
+   *
+   * Strategy (bounded, not a blind sweep):
+   *   - scan only the N most recently updated succeeded tasks (default 10);
+   *   - only peer-runner kinds whose commit semantics are outgoing
+   *     transitions (rollout_reviewer included: its commit is a harmless
+   *     no-op verified by the verdict gate);
+   *   - arbitration ALWAYS goes through commitNextTaskProposal — the single
+   *     state-machine authority — whose paths are idempotent:
+   *       successor_exists / blocked_by_revision / blocked_by_rejection /
+   *       revision_reopened (same revisionCauseId → no-op) /
+   *       blocked_missing_verdict (fail-closed, surfaced not retried
+   *       aggressively — logged once per sweep).
+   *   - verdict semantics remain authoritative: needs_revision/rejected
+   *     never seed successors through this path.
+   *
+   * Restart-safe: calling this every consumer cycle is safe; duplicates
+   * collapse into the idempotent commit results above.
+   */
+  async reconcileSucceededTransitions(options?: {
+    limit?: number;
+    logger?: { info?: (msg: string) => void };
+  }): Promise<{
+    scanned: number;
+    recovered: number;
+    alreadyMaterialized: number;
+    blocked: number;
+    outcomes: Array<{ taskId: string; decision: string }>;
+  }> {
+    const limit = Math.max(1, Math.min(options?.limit ?? 10, 50));
+    const succeeded = await this.stateManager.listTasks({ status: 'succeeded', limit: 500 });
+    // most recent first; bounded to `limit` AFTER kind filtering
+    const recent = [...succeeded]
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+      .filter((t) => isPeerRunnerKind(t.taskKind))
+      .slice(0, limit);
+
+    const outcomes: Array<{ taskId: string; decision: string }> = [];
+    let recovered = 0;
+    let alreadyMaterialized = 0;
+    let blocked = 0;
+    for (const task of recent) {
+      try {
+        const result = await this.commitNextTaskProposal(task.taskId);
+        outcomes.push({ taskId: task.taskId, decision: result.decision });
+        if (result.decision === 'successor_created' || result.decision === 'revision_reopened' || result.decision === 'successor_reopened') {
+          recovered += 1;
+          options?.logger?.info?.(`[PD:Reconcile] recovered missing transition for ${task.taskId} (${result.decision})`);
+        } else if (result.decision === 'successor_exists' || result.decision === 'revision_reopen_noop') {
+          alreadyMaterialized += 1;
+        } else {
+          // blocked_by_revision / blocked_by_rejection / blocked_missing_verdict /
+          // no_successor — legitimate terminal/no-op verdicts, counted not acted on
+          blocked += 1;
+        }
+      } catch (err) {
+        // per-task failure must not abort the sweep (rc-9: surfaced via outcome)
+        outcomes.push({ taskId: task.taskId, decision: `reconcile_error:${err instanceof Error ? err.message : String(err)}` });
+        blocked += 1;
+      }
+    }
+    return { scanned: recent.length, recovered, alreadyMaterialized, blocked, outcomes };
   }
 
   // ── Revision reopen (P0-D, MVP_CORE_LOOP_CONTRACT INV-02/INV-07/INV-08) ─────

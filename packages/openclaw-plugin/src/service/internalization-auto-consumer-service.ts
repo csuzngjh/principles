@@ -201,6 +201,30 @@ export async function runConsumerCycle(
     }
 
     if (!wakeResult) {
+      // A (crash window): 无 ready 任务时执行 bounded succeeded-transition
+      // reconciliation — 恢复 markSucceeded 与 commit 之间 crash 丢失的出边
+      // (successor seed / repair-source reopen / cascade reopen)。
+      // 仲裁唯一入口仍是 commitNextTaskProposal,幂等且 verdict-fail-closed。
+      try {
+        const recon = await orchestrator.reconcileSucceededTransitions({
+          limit: 10,
+          logger: { info: (msg) => logger.info(msg) },
+        });
+        if (recon.recovered > 0) {
+          SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RECONCILED', JSON.stringify({
+            scanned: recon.scanned,
+            recovered: recon.recovered,
+            alreadyMaterialized: recon.alreadyMaterialized,
+            blocked: recon.blocked,
+            outcomes: recon.outcomes.filter((o) => o.decision.startsWith('successor_created') || o.decision.includes('reopened')),
+          }));
+          logger.info(`[PD:AutoConsumer] Reconciled ${recon.recovered} missing transition(s) after crash window.`);
+        }
+      } catch (reconErr) {
+        // reconciliation 失败不阻塞周期 (下轮再试);显式留痕 (rc-9)
+        SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RECONCILE_FAILED', String(reconErr));
+        logger.warn(`[PD:AutoConsumer] Succeeded-transition reconciliation failed: ${String(reconErr)}`);
+      }
       const skipPayload: Record<string, unknown> = { decision: lastSkipDecision };
       if (lastSkipReason) {
         skipPayload.reason = lastSkipReason;

@@ -8,7 +8,7 @@
  * 显式 verdict 是唯一 legacy 判据。
  * P1-1: artificer prompt 真实携带 rollout revisionFeedback。
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -100,7 +100,8 @@ describe('P0-4 — repair/reopen 真幂等 (fault injection)', () => {
     // ── fault injection: 模拟 evaluator 修订轮完成过程中 crash ──
     // (不推进 evaluator; consumer 下一周期重放同一 repair commit)
     const r2 = await orchestrator.commitNextTaskProposal(REPAIR_ID);
-    expect(r2.decision).toBe('revision_reopened'); // 幂等成功
+    // crash-liveness 轮: 同 cause 重放 = 真 no-op (不再是 revision_reopened)
+    expect(r2.decision).toBe('revision_reopen_noop');
 
     // 关键断言: revisionCount 不递增 (同 causeId 重放 = no-op 语义)
     evalTask = await stateManager.getTask(EVAL_ID);

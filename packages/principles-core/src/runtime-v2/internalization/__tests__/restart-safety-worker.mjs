@@ -212,6 +212,37 @@ async function main() {
     return await summarize({ stage, runStatus: result.status });
   }
 
+  if (stage === 'eval-approved-nocommit') {
+    // A (crash window): evaluator 修订轮 approved, markSucceeded 已持久化,
+    // 但进程在 consumer 调用 commit 之前死亡 — 不执行任何 commit。
+    const current = await stateManager.getTask(EVAL_ID);
+    if (current?.status !== 'succeeded') {
+      await stateManager.acquireLease({ taskId: EVAL_ID, owner: 'p', runtimeKind: 'test-double' });
+      await stateManager.markTaskSucceeded(EVAL_ID);
+    }
+    const t = await stateManager.getTask(EVAL_ID);
+    const pi = hydratePITaskRecord(t);
+    await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(pi, { runnerDecision: 'approved' })));
+    return await summarize({ stage });
+  }
+
+  if (stage === 'rollout-succeed') {
+    // B: 使 cascade 有 succeeded 下游 — lease+succeed rollout (不跑 runner)
+    const existing = await stateManager.getTask(ROLLOUT_ID);
+    if (existing && existing.status !== 'succeeded') {
+      await stateManager.acquireLease({ taskId: ROLLOUT_ID, owner: 'p', runtimeKind: 'test-double' });
+      await stateManager.markTaskSucceeded(ROLLOUT_ID);
+    }
+    return await summarize({ stage });
+  }
+
+  if (stage === 'reconcile') {
+    // A: 模拟重启后的 auto-consumer idle 周期 — 只调 bounded reconciliation,
+    // 不执行任何手动 CLI / 直接 commit。
+    const recon = await orchestrator.reconcileSucceededTransitions({ limit: 10 });
+    return await summarize({ stage, reconcile: { scanned: recon.scanned, recovered: recon.recovered, alreadyMaterialized: recon.alreadyMaterialized, blocked: recon.blocked, outcomes: recon.outcomes } });
+  }
+
   throw new Error(`unknown stage: ${stage}`);
 }
 
