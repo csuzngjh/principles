@@ -112,7 +112,7 @@ describe('buildGovernanceContext', () => {
     const result = buildGovernanceContext();
     expect(result).toContain('Decision Framework');
     expect(result).toContain('Owner Governance');
-    expect(result).toContain('Principles Override');
+    expect(result).toContain('Conflict Handling');
   });
 
   it('is deterministic (same output every call)', () => {
