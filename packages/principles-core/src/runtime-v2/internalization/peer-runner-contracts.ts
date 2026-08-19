@@ -15,7 +15,7 @@
  */
 
 import type { TaskRecord } from '../task-status.js';
-import type { RepairPayload, RunnerDecision, RolloutRevisionPayload } from './pitask-metadata.js';
+import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent } from './pitask-metadata.js';
 
 // ── Internalization Channel Types ─────────────────────────────────────────────
 
@@ -152,6 +152,12 @@ export interface PITaskRecord extends TaskRecord {
   revisionCauseId?: string;
   /** Rollout needs_revision routing payload; present on rollout_reviewer tasks that routed a revision. */
   rolloutRevisionPayload?: RolloutRevisionPayload;
+  /**
+   * P0 (verdict drift): durable completion intent of one LLM verdict. Pending
+   * intent in the same revision epoch is the recovery authority — re-runs
+   * resume it instead of re-invoking the LLM. See pitask-metadata.ts.
+   */
+  completionIntent?: RunnerCompletionIntent;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ import { RolloutReviewerRunner } from '../internalization/rollout-reviewer-runne
 import type { RolloutReviewerRunnerDeps } from '../internalization/rollout-reviewer-runner.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
+import type { PDRuntimeAdapter, RunHandle } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RolloutReviewerOutputV1 } from '../internalization/rollout-reviewer-output.js';
 import { DefaultRolloutReviewerValidator } from '../internalization/rollout-reviewer-output.js';
@@ -22,7 +22,10 @@ const EVAL_ID = 'evaluator-err';
 const SCRIBE_ID = 'scribe-err';
 const ARTIFER_ID = 'artificer-err';
 
-function makeTask(taskId: string, taskKind: string, deps: string[], status = 'succeeded'): TaskRecord {
+function makeTask(spec: { taskId: string; taskKind: string; deps?: string[]; status?: string }): TaskRecord {
+  const { taskId, taskKind } = spec;
+  const deps = spec.deps ?? [];
+  const status = spec.status ?? 'succeeded';
   return {
     taskId, taskKind, status: status as TaskRecord['status'],
     attemptCount: 0, maxAttempts: 3,
@@ -32,6 +35,15 @@ function makeTask(taskId: string, taskKind: string, deps: string[], status = 'su
       inputArtifactRefs: [], outputArtifactRefs: [],
     }),
   };
+}
+
+type EmittedEvent = { eventType: string; payload: Record<string, unknown> };
+
+function getEmitted(deps: RolloutReviewerRunnerDeps): EmittedEvent[] {
+  const emitter = deps.eventEmitter as unknown as { emitTelemetry: { mock: { calls: EmittedEvent[][] } } };
+  return emitter.emitTelemetry.mock.calls
+    .map((c) => c[0])
+    .filter((e): e is EmittedEvent => e !== undefined);
 }
 
 function makeOutput(decision: 'needs_revision' | 'approve_rollout', requiredChanges: string[] = []): RolloutReviewerOutputV1 {
@@ -51,7 +63,7 @@ function makeOutput(decision: 'needs_revision' | 'approve_rollout', requiredChan
 async function makeDeps(output: RolloutReviewerOutputV1, overrides: Partial<RolloutReviewerRunnerDeps> & {
   rolloutStatus?: string; rolloutMeta?: Record<string, unknown>;
 } = {}): Promise<{ deps: RolloutReviewerRunnerDeps; stateManager: Record<string, unknown> }> {
-  const rolloutTask = { ...makeTask(ROLLOUT_ID, 'rollout_reviewer', [EVAL_ID], overrides.rolloutStatus ?? 'pending') };
+  const rolloutTask = { ...makeTask({ taskId: ROLLOUT_ID, taskKind: 'rollout_reviewer', deps: [EVAL_ID], status: overrides.rolloutStatus ?? 'pending' }) };
   if (overrides.rolloutMeta) {
     rolloutTask.diagnosticJson = createPITaskDiagnosticJson({
       dependencyTaskIds: [EVAL_ID], channel: 'prompt', timeoutMs: 300_000,
@@ -61,9 +73,9 @@ async function makeDeps(output: RolloutReviewerOutputV1, overrides: Partial<Roll
   }
   const tasks = new Map<string, TaskRecord>([
     [ROLLOUT_ID, rolloutTask],
-    [EVAL_ID, makeTask(EVAL_ID, 'evaluator', [ARTIFER_ID])],
-    [ARTIFER_ID, makeTask(ARTIFER_ID, 'artificer', [SCRIBE_ID])],
-    [SCRIBE_ID, makeTask(SCRIBE_ID, 'scribe', [])],
+    [EVAL_ID, makeTask({ taskId: EVAL_ID, taskKind: 'evaluator', deps: [ARTIFER_ID] })],
+    [ARTIFER_ID, makeTask({ taskId: ARTIFER_ID, taskKind: 'artificer', deps: [SCRIBE_ID] })],
+    [SCRIBE_ID, makeTask({ taskId: SCRIBE_ID, taskKind: 'scribe' })],
   ]);
   const artifactStoreEarly = new MemoryPIArtifactStore();
   // P0-1: 合法 activation 候选 = scribe 的 validated principle artifact
@@ -95,7 +107,7 @@ async function makeDeps(output: RolloutReviewerOutputV1, overrides: Partial<Roll
   const runHandle: RunHandle = { runId: 'run-err', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
   const runtimeAdapter = {
     startRun: vi.fn().mockResolvedValue(runHandle),
-    pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-err' } as RunStatus),
+    pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-err' }),
     fetchOutput: vi.fn().mockResolvedValue({ runId: 'run-err', payload: output }),
     cancelRun: vi.fn().mockResolvedValue(undefined),
   } as unknown as PDRuntimeAdapter;
@@ -178,8 +190,8 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
     // 断链: evaluator 的 dep 指向不存在的 artificer
     (deps.stateManager.getTask as unknown as { mockImplementation: (fn: (id: string) => Promise<TaskRecord | null>) => void })
       .mockImplementation(async (id: string) => id === EVAL_ID
-        ? { ...makeTask(EVAL_ID, 'evaluator', ['missing-artificer']) }
-        : id === ROLLOUT_ID ? { ...makeTask(ROLLOUT_ID, 'rollout_reviewer', [EVAL_ID], 'pending') }
+        ? { ...makeTask({ taskId: EVAL_ID, taskKind: 'evaluator', deps: ['missing-artificer'] }) }
+        : id === ROLLOUT_ID ? { ...makeTask({ taskId: ROLLOUT_ID, taskKind: 'rollout_reviewer', deps: [EVAL_ID], status: 'pending' }) }
         : null);
     const result = await makeRunner({ ...deps, reopenRevisionTarget: vi.fn() }).run(ROLLOUT_ID);
     expect(result.status).toBe('succeeded');
@@ -204,32 +216,29 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
     expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
   });
 
-  it('needs_revision + reopen throw → route_failed 事件 + needs_human_review', async () => {
+  it('needs_revision + reopen throw → route_failed 事件 + transient 上抛 retry (P0: resume 而非 human_review)', async () => {
     const { deps, stateManager } = await makeDeps(makeOutput('needs_revision', ['x']), {
       reopenRevisionTarget: vi.fn().mockRejectedValue(new Error('sqlite busy')),
     });
     const result = await makeRunner(deps).run(ROLLOUT_ID);
-    expect(result.status).toBe('succeeded');
+    // P0 verdict drift 语义变更: reopen 抛错 = transient (db locked) → 冒泡
+    // retryOrFail (mock shouldRetry=false → failed;生产为 retry_wait → 下一轮
+    // 入口门 resume 同一 completion intent,无 LLM 重问)。确定性拒绝
+    // (ok=false) 才走 needs_human_review (见上一用例)。
+    expect(result.status).not.toBe('succeeded');
     expect(getEmitted(deps).some((e) => e.eventType === 'rollout_revision_route_failed')).toBe(true);
-    expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
+    expect(stateManager.updateTask).not.toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 
-  it('recordRunnerDecision store 失败 → fail loud (retry),任务绝不无 verdict 地 succeeded (P0-3)', async () => {
+  it('completion intent 落库失败 → fail loud (retry),任务绝不无 verdict 地 succeeded (P0-3)', async () => {
     const { deps, stateManager } = await makeDeps(makeOutput('approve_rollout'));
     (deps.stateManager.updateTaskDiagnosticJson as unknown as { mockImplementation: (fn: () => Promise<never>) => void })
       .mockImplementation(() => Promise.reject(new Error('disk full')));
     const result = await makeRunner(deps).run(ROLLOUT_ID);
     expect(result.status).not.toBe('succeeded');
     expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
-    expect(getEmitted(deps).some((e) => e.eventType === 'rollout_decision_record_failed')).toBe(true);
+    expect(getEmitted(deps).some((e) => e.eventType === 'rollout_completion_record_failed')).toBe(true);
   });
 });
 
-type EmittedEvent = { eventType: string; payload: Record<string, unknown> };
-
-function getEmitted(deps: RolloutReviewerRunnerDeps): EmittedEvent[] {
-  const emitter = deps.eventEmitter as unknown as { emitTelemetry: { mock: { calls: Array<Array<EmittedEvent | undefined>> } } };
-  return emitter.emitTelemetry.mock.calls
-    .map((c) => c[0])
-    .filter((e): e is EmittedEvent => e !== undefined);
-}

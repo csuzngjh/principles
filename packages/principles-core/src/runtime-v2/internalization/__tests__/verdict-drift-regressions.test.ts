@@ -1,0 +1,397 @@
+/**
+ * P0 (verdict drift) — durable completion intent 是 recovery authority。
+ *
+ * 外部复核反例 (第 5 轮): runner 在 side effect 已部分发生、task 未 terminal
+ * 时 crash,retry/restart 重跑会重新调用 LLM;非确定性下新 verdict 覆盖旧
+ * runnerDecision,与已发生副作用形成治理矛盾:
+ *   T1 rollout revision drift — pending r1 不得被新 approve 漂移;
+ *   T2 activation drift — 已 activated 后不得漂移为 reject;
+ *   T3 evaluator repair drift — 已 seed repair 后不得漂移为 approved;
+ *   T4 evaluator validation drift — 已 validate bearer 后不得漂移为 needs_revision;
+ *   T5 new epoch — 真正 revision reopen 后允许不同 verdict (禁止过度封锁)。
+ *
+ * 每个 drift 测试的 adapter 均带调用计数: 断言 resume 路径根本未调用 LLM。
+ */
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
+import { InternalizationOrchestrator } from '../internalization-orchestrator.js';
+import { RolloutReviewerRunner } from '../rollout-reviewer-runner.js';
+import { EvaluatorRunner } from '../evaluator-runner.js';
+import { DefaultRolloutReviewerValidator } from '../rollout-reviewer-output.js';
+import { DefaultEvaluatorValidator } from '../evaluator-output.js';
+import type { RolloutReviewerOutputV1 } from '../rollout-reviewer-output.js';
+import type { PDRuntimeAdapter } from '../../runtime-protocol.js';
+import { SqliteConnection } from '../../store/sqlite-connection.js';
+import { SqlitePIArtifactStore } from '../../store/artifact/sqlite-pi-artifact-store.js';
+import { storeEmitter } from '../../store/event-emitter.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from '../pitask-metadata.js';
+import type { RolloutRevisionPayload } from '../pitask-metadata.js';
+
+let workspaceDir: string;
+let stateManager: RuntimeStateManager;
+let orchestrator: InternalizationOrchestrator;
+
+const SCRIBE_ID = 'scribe-d1-prompt';
+const ARTIFICER_ID = 'artificer-d1-prompt';
+const EVAL_ID = 'evaluator-d1-prompt';
+const ROLLOUT_ID = 'rollout_reviewer-d1-prompt';
+const SCRIBE_ART = 'pi-art-scribe-d1';
+const ARTIFICER_ART = 'pi-art-artificer-d1';
+
+beforeEach(async () => {
+  workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-drift-'));
+  stateManager = new RuntimeStateManager({ workspaceDir });
+  await stateManager.initialize();
+  orchestrator = new InternalizationOrchestrator(
+    { stateManager }, { owner: 'drift', runtimeKind: 'test-double', dryRun: true },
+  );
+});
+
+afterEach(async () => {
+  await stateManager.close();
+  try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* temp */ }
+});
+
+function meta(o: Record<string, unknown> = {}): string {
+  return createPITaskDiagnosticJson({
+    dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+    inputArtifactRefs: [], outputArtifactRefs: [], ...o,
+  });
+}
+
+async function mkTask(id: string, kind: string, deps: string[]): Promise<void> {
+  await stateManager.createTask({ taskId: id, taskKind: kind, status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta({ correlationId: 'd1', dependencyTaskIds: deps }) });
+}
+
+async function succeed(id: string): Promise<void> {
+  await stateManager.acquireLease({ taskId: id, owner: 'drift', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(id);
+}
+
+/** scribe(validated bearer) → artificer → evaluator(succeeded+approved) → rollout(pending) + 依赖 artifacts */
+async function seedLineage(): Promise<SqlitePIArtifactStore> {
+  await mkTask(SCRIBE_ID, 'scribe', []);
+  await succeed(SCRIBE_ID);
+  await mkTask(ARTIFICER_ID, 'artificer', [SCRIBE_ID]);
+  await succeed(ARTIFICER_ID);
+  await mkTask(EVAL_ID, 'evaluator', [ARTIFICER_ID]);
+  await succeed(EVAL_ID);
+  const evalRaw = await stateManager.getTask(EVAL_ID);
+  if (!evalRaw) throw new Error('seed: evaluator missing');
+  const evalPi = hydratePITaskRecord(evalRaw);
+  if (!evalPi) throw new Error('seed: evaluator not hydratable');
+  await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(evalPi, { runnerDecision: 'approved' })));
+  await mkTask(ROLLOUT_ID, 'rollout_reviewer', [EVAL_ID]);
+
+  const conn = new SqliteConnection(workspaceDir);
+  const store = new SqlitePIArtifactStore(conn);
+  await store.upsertArtifact({
+    artifactId: 'pi-art-eval-d1', artifactKind: 'principle', sourceTaskId: EVAL_ID,
+    lineageArtifactIds: [], validationStatus: 'pending',
+    contentJson: JSON.stringify({ evaluation: { decision: 'approved', score: 0.9, strengths: [], concerns: [], requiredChanges: [] } }),
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+  await store.upsertArtifact({
+    artifactId: SCRIBE_ART, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
+    lineageArtifactIds: [], validationStatus: 'validated',
+    contentJson: JSON.stringify({ principleId: 'd1-p', text: '原则', principleDraft: { title: 'd1-p', statement: '原则' } }),
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+  conn.close();
+  return store;
+}
+
+function rolloutOutput(decision: 'needs_revision' | 'approve_rollout' | 'reject'): RolloutReviewerOutputV1 {
+  return {
+    taskId: ROLLOUT_ID, sourceEvaluatorArtifactId: 'pi-art-eval-d1',
+    review: { decision, summary: 'd1', confidence: 0.9, requiredChanges: decision === 'needs_revision' ? ['必须改 X'] : [], rolloutRisks: [], safetyChecks: [] },
+    sourceTrace: { evaluatorArtifactId: 'pi-art-eval-d1' }, risks: [], generatedAt: new Date().toISOString(),
+  };
+}
+
+function evaluatorOutput(decision: 'approved' | 'needs_revision'): unknown {
+  return {
+    taskId: EVAL_ID, sourceArtificerArtifactId: ARTIFICER_ART,
+    evaluation: { decision, summary: 'd1', score: 0.9, strengths: [], concerns: [], requiredChanges: decision === 'needs_revision' ? ['必须改 X'] : [] },
+    sourceTrace: { artificerArtifactId: ARTIFICER_ART, scribeArtifactId: SCRIBE_ART },
+    risks: [], generatedAt: new Date().toISOString(),
+  };
+}
+
+/** 带 LLM 调用计数的 scripted adapter — drift 场景的"第二次"回答 */
+function driftAdapter(payload: unknown, spy: { llmCalls: number }): PDRuntimeAdapter {
+  return {
+    startRun: async () => { spy.llmCalls += 1; return { runId: 'run-drift-2', runtimeKind: 'test-double', startedAt: new Date().toISOString() }; },
+    pollRun: async () => ({ status: 'succeeded', runId: 'run-drift-2' }),
+    fetchOutput: async () => ({ runId: 'run-drift-2', payload }),
+    cancelRun: async () => undefined,
+  } as unknown as PDRuntimeAdapter;
+}
+
+/**
+ * 手工构造真实 crash 态 (与生产原子写等价):
+ * run 行携带原 output → metadata 落 runnerDecision + pending completionIntent
+ * → 任务回到 pending (模拟 lease 过期回收)。
+ */
+async function craftRolloutCrashState(decision: 'needs_revision' | 'approve_rollout', options?: {
+  revisionIteration?: number;
+  rolloutRevisionPayload?: RolloutRevisionPayload;
+}): Promise<string> {
+  await stateManager.acquireLease({ taskId: ROLLOUT_ID, owner: 'drift', runtimeKind: 'test-double' });
+  const runs = await stateManager.getRunsByTask(ROLLOUT_ID);
+  const runId = runs[runs.length - 1]?.runId;
+  if (!runId) throw new Error('craft: no run row after lease');
+  await stateManager.updateRunOutput(runId, JSON.stringify(rolloutOutput(decision)));
+  const raw = await stateManager.getTask(ROLLOUT_ID);
+  if (!raw) throw new Error('craft: rollout missing');
+  const pi = hydratePITaskRecord(raw);
+  if (!pi) throw new Error('craft: rollout not hydratable');
+  await stateManager.updateTaskDiagnosticJson(ROLLOUT_ID, createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
+    runnerDecision: decision,
+    completionIntent: {
+      decision, sourceRunId: runId, revisionEpoch: pi.revisionCount ?? 0, status: 'pending',
+      ...(options?.revisionIteration !== undefined ? { revisionIteration: options.revisionIteration } : {}),
+    },
+    ...(options?.rolloutRevisionPayload ? { rolloutRevisionPayload: options.rolloutRevisionPayload } : {}),
+  })));
+  await stateManager.updateTask(ROLLOUT_ID, { status: 'pending', attemptCount: 0 });
+  return runId;
+}
+
+async function craftEvaluatorCrashState(decision: 'approved' | 'needs_revision'): Promise<string> {
+  // seedLineage 后 evaluator 是 succeeded;crash 叙事里它当时 leased — 先回 pending
+  await stateManager.updateTask(EVAL_ID, { status: 'pending', attemptCount: 0 });
+  await stateManager.acquireLease({ taskId: EVAL_ID, owner: 'drift', runtimeKind: 'test-double' });
+  const runs = await stateManager.getRunsByTask(EVAL_ID);
+  const runId = runs[runs.length - 1]?.runId;
+  if (!runId) throw new Error('craft: no run row after lease');
+  await stateManager.updateRunOutput(runId, JSON.stringify(evaluatorOutput(decision)));
+  const raw = await stateManager.getTask(EVAL_ID);
+  if (!raw) throw new Error('craft: evaluator missing');
+  const pi = hydratePITaskRecord(raw);
+  if (!pi) throw new Error('craft: evaluator not hydratable');
+  await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
+    runnerDecision: decision,
+    completionIntent: { decision, sourceRunId: runId, revisionEpoch: pi.revisionCount ?? 0, status: 'pending' },
+  })));
+  await stateManager.updateTask(EVAL_ID, { status: 'pending', attemptCount: 0 });
+  return runId;
+}
+
+function makeRolloutRunner(adapter: PDRuntimeAdapter, deps: {
+  dispatch?: (input: { artifactId: string }) => Promise<{ decision: string; reason?: string; activationId?: string }>;
+  reopen?: (input: { targetTaskId: string; revisionIteration: number }) => Promise<{ ok: boolean; reason: string }>;
+}): RolloutReviewerRunner {
+  return new RolloutReviewerRunner({
+    stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
+    artifactStore: new SqlitePIArtifactStore(new SqliteConnection(workspaceDir)),
+    validator: new DefaultRolloutReviewerValidator(),
+    ...(deps.dispatch ? { dispatchActivation: deps.dispatch } : {}),
+    ...(deps.reopen ? { reopenRevisionTarget: deps.reopen } : {}),
+  }, { owner: 'drift', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
+}
+
+async function readMeta(id: string): Promise<ReturnType<typeof hydratePITaskRecord>> {
+  const raw = await stateManager.getTask(id);
+  return raw ? hydratePITaskRecord(raw) : null;
+}
+
+describe('P0 verdict drift — completion intent 是 recovery authority', () => {
+  it('T1 rollout revision drift: pending r1 之后 LLM 返回 approve 也不得成为 authority', async () => {
+    await seedLineage();
+    await craftRolloutCrashState('needs_revision', { revisionIteration: 1 });
+
+    const spy = { llmCalls: 0 };
+    const dispatchCalls: string[] = [];
+    const runner = makeRolloutRunner(driftAdapter(rolloutOutput('approve_rollout'), spy), {
+      dispatch: async (input) => { dispatchCalls.push(input.artifactId); return { decision: 'activated' }; },
+      reopen: async (input) => {
+        const r = await orchestrator.reopenTaskForRevision(input.targetTaskId, {
+          revisionCauseId: `rollout-${ROLLOUT_ID}-r${input.revisionIteration}`,
+          revisionFeedback: 'feedback',
+        });
+        return r.ok ? { ok: true, reason: r.reason } : { ok: false, reason: r.reason };
+      },
+    });
+
+    const result = await runner.run(ROLLOUT_ID);
+    expect(result.status).toBe('succeeded');
+
+    // LLM 根本未被调用 — 第二个 adapter 不是 authority
+    expect(spy.llmCalls).toBe(0);
+    // r1 被继续 materialize: scribe 被 reopen 一次
+    expect((await stateManager.getTask(SCRIBE_ID))?.status).toBe('pending');
+    const scribePi = await readMeta(SCRIBE_ID);
+    expect(scribePi?.revisionCauseId).toBe(`rollout-${ROLLOUT_ID}-r1`);
+    // activation = 0
+    expect(dispatchCalls).toEqual([]);
+    // 终态与 intent 一致
+    expect((await stateManager.getTask(ROLLOUT_ID))?.status).toBe('succeeded');
+    const rolloutPi = await readMeta(ROLLOUT_ID);
+    expect(rolloutPi?.runnerDecision).toBe('needs_revision');
+    expect(rolloutPi?.rolloutRevisionPayload?.status).toBe('applied');
+    expect(rolloutPi?.rolloutRevisionPayload?.revisionIteration).toBe(1);
+    expect(rolloutPi?.completionIntent?.status).toBe('applied');
+  });
+
+  it('T2 activation drift: activated 后 crash,LLM 返回 reject 也不得漂移 (无 reject+active)', async () => {
+    await seedLineage();
+    await craftRolloutCrashState('approve_rollout');
+
+    const spy = { llmCalls: 0 };
+    const dispatchCalls: number[] = [];
+    const runner = makeRolloutRunner(driftAdapter(rolloutOutput('reject'), spy), {
+      // run-1 已 activated 的 durable 效果 → 重放 dispatch = already_activated
+      dispatch: async () => { dispatchCalls.push(1); return { decision: 'already_activated', reason: 'idempotent_redispatch' }; },
+      reopen: async () => { throw new Error('T2: reopen must not be called'); },
+    });
+
+    const result = await runner.run(ROLLOUT_ID);
+    expect(result.status).toBe('succeeded');
+
+    expect(spy.llmCalls).toBe(0);                       // LLM 未被调用
+    expect(dispatchCalls.length).toBe(1);               // activation 恰好一条 (幂等重放)
+    expect((await stateManager.getTask(ROLLOUT_ID))?.status).toBe('succeeded');
+    const pi = await readMeta(ROLLOUT_ID);
+    expect(pi?.runnerDecision).toBe('approve_rollout'); // final verdict 与 activation 一致
+    expect(pi?.completionIntent?.status).toBe('applied');
+  });
+
+  it('T3 evaluator repair drift: repair 已 seed 后 LLM 返回 approved 也不得绕过 repair', async () => {
+    await seedLineage();
+    const conn = new SqliteConnection(workspaceDir);
+    const artifactStore = new SqlitePIArtifactStore(conn);
+    // artificer 依赖产物 (repair seed lineage 用)
+    await artifactStore.upsertArtifact({
+      artifactId: ARTIFICER_ART, artifactKind: 'principle', sourceTaskId: ARTIFICER_ID,
+      lineageArtifactIds: [], validationStatus: 'validated',
+      contentJson: JSON.stringify({ plan: 'p' }),
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    conn.close();
+    await craftEvaluatorCrashState('needs_revision');
+
+    // run-1 的 durable 副作用: 确定性 ID 的 repair 任务已 seed (crash 前发生)
+    const repairTaskId = `artificer-repair-${EVAL_ID}-r1`;
+    await stateManager.createTask({
+      taskId: repairTaskId, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: meta({
+        correlationId: 'd1', dependencyTaskIds: [SCRIBE_ID],
+        repairPayload: {
+          requiredChanges: ['必须改 X'], concerns: [], previousScore: 0.9,
+          repairIteration: 1, sourceArtificerArtifactId: ARTIFICER_ART, sourceEvaluatorTaskId: EVAL_ID,
+        },
+      }),
+    });
+
+    const spy = { llmCalls: 0 };
+    const seedCalls: number[] = [];
+    const evaluator = new EvaluatorRunner({
+      stateManager, runtimeAdapter: driftAdapter(evaluatorOutput('approved'), spy),
+      eventEmitter: storeEmitter, artifactStore: new SqlitePIArtifactStore(new SqliteConnection(workspaceDir)),
+      validator: new DefaultEvaluatorValidator(),
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async (params) => {
+        seedCalls.push(1);
+        // 生产接线语义: 确定性 ID 已存在 → 复用
+        const existing = await stateManager.getTask(repairTaskId);
+        if (existing) return repairTaskId;
+        await stateManager.createTask({
+          taskId: repairTaskId, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+          diagnosticJson: meta({ correlationId: 'd1', dependencyTaskIds: [SCRIBE_ID], repairPayload: params.repairPayload }),
+        });
+        return repairTaskId;
+      },
+    }, { owner: 'drift', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
+
+    const result = await evaluator.run(EVAL_ID);
+    expect(result.status).toBe('succeeded');
+
+    expect(spy.llmCalls).toBe(0);                        // LLM 未被调用
+    expect((await stateManager.getTask(EVAL_ID))?.status).toBe('succeeded');
+    const pi = await readMeta(EVAL_ID);
+    expect(pi?.runnerDecision).toBe('needs_revision');   // 原 intent 被恢复
+    expect(pi?.completionIntent?.status).toBe('applied');
+    // repair 恰好一个 (确定性 ID 复用)
+    expect(await stateManager.getTask(repairTaskId)).not.toBeNull();
+    expect(seedCalls.length).toBe(1);
+    // approved 不得正常推进: commit 门 fail-closed (无 rollout 后继)
+    const commit = await orchestrator.commitNextTaskProposal(EVAL_ID);
+    expect(commit.decision).toBe('blocked_by_revision');
+  });
+
+  it('T4 evaluator validation drift: bearer 已 validated 后 LLM 返回 needs_revision 也不得漂移', async () => {
+    await seedLineage();
+    await craftEvaluatorCrashState('approved');
+
+    const spy = { llmCalls: 0 };
+    const seedCalls: number[] = [];
+    const evaluator = new EvaluatorRunner({
+      stateManager, runtimeAdapter: driftAdapter(evaluatorOutput('needs_revision'), spy),
+      eventEmitter: storeEmitter, artifactStore: new SqlitePIArtifactStore(new SqliteConnection(workspaceDir)),
+      validator: new DefaultEvaluatorValidator(),
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async () => { seedCalls.push(1); throw new Error('T4: seed must not be called'); },
+    }, { owner: 'drift', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
+
+    const result = await evaluator.run(EVAL_ID);
+    expect(result.status).toBe('succeeded');
+
+    expect(spy.llmCalls).toBe(0);
+    expect((await stateManager.getTask(EVAL_ID))?.status).toBe('succeeded');
+    const pi = await readMeta(EVAL_ID);
+    expect(pi?.runnerDecision).toBe('approved');         // 原 intent 恢复
+    expect(pi?.completionIntent?.status).toBe('applied');
+    // 无 "validated + needs_revision" 矛盾: bearer 维持 validated,无 repair
+    expect(seedCalls).toEqual([]);
+    const conn = new SqliteConnection(workspaceDir);
+    const store = new SqlitePIArtifactStore(conn);
+    const bearer = await store.getArtifactById(SCRIBE_ART);
+    conn.close();
+    expect(bearer?.validationStatus).toBe('validated');
+    // approved 正常推进 (lineage 已预建 rollout 任务 → successor_exists 同为 ADVANCE)
+    const commit = await orchestrator.commitNextTaskProposal(EVAL_ID);
+    expect(commit.decision).not.toBe('blocked_by_revision');
+    expect(['successor_created', 'successor_exists']).toContain(commit.decision);
+  });
+
+  it('T5 new epoch: 真正 revision reopen 后允许不同 verdict (LLM 被调用)', async () => {
+    await seedLineage();
+    // 构造 r1 已 applied 且 rollout 被 reopen (revisionCount=1,intent/decision 已清空)
+    const raw = await stateManager.getTask(ROLLOUT_ID);
+    if (!raw) throw new Error('T5: rollout missing');
+    const pi = hydratePITaskRecord(raw);
+    if (!pi) throw new Error('T5: rollout not hydratable');
+    const payload: RolloutRevisionPayload = {
+      requiredChanges: ['x'], revisionIteration: 1, sourceRolloutTaskId: ROLLOUT_ID,
+      sourceArtifactId: SCRIBE_ART, targetTaskKind: 'scribe', status: 'applied',
+    };
+    await stateManager.updateTaskDiagnosticJson(ROLLOUT_ID, createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
+      runnerDecision: undefined,
+      completionIntent: undefined,
+      revisionCount: 1,
+      rolloutRevisionPayload: payload,
+    })));
+
+    const spy = { llmCalls: 0 };
+    const dispatchCalls: number[] = [];
+    const runner = makeRolloutRunner(driftAdapter(rolloutOutput('approve_rollout'), spy), {
+      dispatch: async () => { dispatchCalls.push(1); return { decision: 'activated', activationId: 'act-t5' }; },
+      reopen: async () => { throw new Error('T5: reopen must not be called'); },
+    });
+
+    const result = await runner.run(ROLLOUT_ID);
+    expect(result.status).toBe('succeeded');
+
+    // 新 epoch 允许新 verdict: LLM 被调用,与上一轮 needs_revision 不同
+    expect(spy.llmCalls).toBe(1);
+    expect(dispatchCalls.length).toBe(1);
+    const finalPi = await readMeta(ROLLOUT_ID);
+    expect(finalPi?.runnerDecision).toBe('approve_rollout');
+    expect(finalPi?.completionIntent?.status).toBe('applied');
+    expect(finalPi?.completionIntent?.revisionEpoch).toBe(1);
+  });
+});

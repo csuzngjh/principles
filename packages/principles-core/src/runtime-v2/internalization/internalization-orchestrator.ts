@@ -855,6 +855,10 @@ export class InternalizationOrchestrator {
 
     const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
       runnerDecision: undefined, // 新一轮 verdict 未定,清空旧判定 (INV-02 单一决策依据)
+      // P0 verdict drift: revision reopen = 新 execution epoch — 旧 completion
+      // intent 失去 authority,必须随旧 verdict 一并清空;否则重跑时入口门
+      // 会 resume 旧 intent,新 epoch 的重新评估被永远跳过。
+      completionIntent: undefined,
       revisionCount: (piTask.revisionCount ?? 0) + 1,
       revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
       revisionCauseId: options?.revisionCauseId,

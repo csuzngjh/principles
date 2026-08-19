@@ -119,6 +119,21 @@ export interface PITaskMetadata {
    * 迭代号与来源,保证 revision budget 可判定 (MVP_CORE_LOOP_CONTRACT INV-07)。
    */
   rolloutRevisionPayload?: RolloutRevisionPayload;
+  /**
+   * P0 (verdict drift): 一次 LLM verdict 的 durable completion intent。
+   *
+   * 与 runnerDecision 在同一次 metadata 写入中落库 (原子): intent 存在且
+   * status='pending' ⇒ 该 verdict 的治理 transition 尚未完成。同一
+   * execution epoch 内 crash/retry/restart 重跑时,run() 入口必须 RESUME
+   * 该 intent (跳过 LLM,幂等重放 effects),禁止让新的 LLM 输出覆盖它
+   * —— LLM 非确定性下,重问可能产生 approve/reject 漂移,与已发生的
+   * side effect (activation / repair seed / validation) 形成治理矛盾。
+   *
+   * epoch 语义: revisionEpoch = 落库时的 revisionCount。真正的 revision
+   * reopen 会递增 revisionCount 并清空本字段 (新 epoch 允许新 verdict);
+   * epoch 不匹配的残留 intent 视为 stale,不得 resume。
+   */
+  completionIntent?: RunnerCompletionIntent;
 }
 
 /** evaluator / rollout_reviewer 的合法 runner 决策值 */
@@ -132,6 +147,24 @@ export type RunnerDecision =
 const RUNNER_DECISIONS: ReadonlySet<string> = new Set([
   'approved', 'needs_revision', 'rejected', 'approve_rollout', 'reject',
 ]);
+
+/**
+ * 一次 verdict completion 的 durable intent (P0 verdict drift 修复)。
+ * effectPayload 语义按 decision 分派:
+ *   - needs_revision (rollout): revisionIteration = 本次 completion 的修订轮号
+ *     (record 时由已 APPLIED 的 rolloutRevisionPayload 计出并锁定,resume
+ *     据此继续同一轮,消除"applied 载荷属于上一轮还是本轮"的歧义);
+ *   - 其余 decision: 无 effect 载荷。
+ */
+export interface RunnerCompletionIntent {
+  readonly decision: RunnerDecision;
+  /** 产出该 verdict 的 run — resume 时从其 outputPayload 恢复已验证输出 */
+  readonly sourceRunId: string;
+  /** 落库时任务的 revisionCount — 同 epoch 才允许 resume */
+  readonly revisionEpoch: number;
+  readonly status: 'pending' | 'applied';
+  readonly revisionIteration?: number;
+}
 
 /** rollout needs_revision 的修订路由载荷 */
 export interface RolloutRevisionPayload {
@@ -175,6 +208,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       revisionFeedback: metadata.revisionFeedback,
       revisionCauseId: metadata.revisionCauseId,
       rolloutRevisionPayload: metadata.rolloutRevisionPayload,
+      completionIntent: metadata.completionIntent,
     },
   });
 }
@@ -208,6 +242,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     revisionFeedback: base.revisionFeedback,
     revisionCauseId: base.revisionCauseId,
     rolloutRevisionPayload: base.rolloutRevisionPayload,
+    completionIntent: base.completionIntent,
     ...overrides,
   };
 }
@@ -398,6 +433,33 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     };
   }
 
+  // completionIntent: optional, full validation (rc-1/rc-4). Malformed intent
+  // invalidates the whole metadata (fail-closed) — a corrupted authority
+  // record must never silently degrade into "no intent, re-ask the LLM".
+  let completionIntent: RunnerCompletionIntent | undefined;
+  if (Object.hasOwn(m, 'completionIntent') && m.completionIntent !== undefined) {
+    const p = m.completionIntent;
+    if (typeof p !== 'object' || p === null || Array.isArray(p)) return null;
+    const r = p as Record<string, unknown>;
+    if (typeof r.decision !== 'string' || !RUNNER_DECISIONS.has(r.decision)) return null;
+    if (typeof r.sourceRunId !== 'string' || r.sourceRunId.trim() === '') return null;
+    if (typeof r.revisionEpoch !== 'number' || !Number.isInteger(r.revisionEpoch) || r.revisionEpoch < 0) return null;
+    if (r.status !== 'pending' && r.status !== 'applied') return null;
+    let revisionIteration: number | undefined;
+    if (r.revisionIteration !== undefined) {
+      if (typeof r.revisionIteration !== 'number' || !Number.isInteger(r.revisionIteration)
+        || r.revisionIteration < 1 || r.revisionIteration > 2) return null;
+      ({ revisionIteration } = r);
+    }
+    completionIntent = {
+      decision: r.decision as RunnerDecision,
+      sourceRunId: r.sourceRunId,
+      revisionEpoch: r.revisionEpoch,
+      status: r.status,
+      revisionIteration,
+    };
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -416,6 +478,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     revisionFeedback: typeof m.revisionFeedback === 'string' ? m.revisionFeedback : undefined,
     revisionCauseId: typeof m.revisionCauseId === 'string' ? m.revisionCauseId : undefined,
     rolloutRevisionPayload,
+    completionIntent,
   };
 }
 
@@ -469,5 +532,6 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     revisionFeedback: meta.revisionFeedback,
     revisionCauseId: meta.revisionCauseId,
     rolloutRevisionPayload: meta.rolloutRevisionPayload,
+    completionIntent: meta.completionIntent,
   } as unknown as PITaskRecord;
 }
