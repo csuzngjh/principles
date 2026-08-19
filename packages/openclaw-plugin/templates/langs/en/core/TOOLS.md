@@ -1,15 +1,23 @@
-# 🛠 Tools: Precision & Certainty
+# TOOLS.md - Tool Conventions
 
-## 1. Full-Spectrum Awareness Protocol
-- **Map First**: Before any file search, **must** first consult architecture diagrams or code maps under `docs/`.
-- **Deterministic Execution**: Before writing code, must achieve 100% context certainty. No guessing-based programming.
-- **Tool Preference**: Prefer `rg` (ripgrep) for high-performance search. Never blindly traverse.
+This file is used by the host/OpenClaw for local tool conventions.
 
+Principles Disciple only adds conventions for its own PD-specific commands.
+Everything else (editor habits, search preferences, shell workflows) is up to
+you — PD does not prescribe general coding behavior.
 
+---
 
-## 4. Agent Routing Clarification
+## PD-specific commands
 
-- `agents_list`, `sessions_list`, `sessions_send`, and `sessions_spawn` are for peer agents and peer sessions
-- Use `sessions_spawn` with `pd-explorer` skill to start Principles internal workers (e.g., explorer)
-- `subagents` inspects already-started internal workers and their outputs
-- Do not use peer-session tools to pretend an internal worker is a peer agent
+- **Record behavior evidence**: `pd pain record` — manual trigger for
+  owner-relevant behavior evidence (not every tool failure).
+- **Review principle proposals**: `pd candidate list` — proposals awaiting
+  Owner decision (approve / reject / defer / rollback).
+- **Owner console**: `pd console open` — visual review and rollback controls.
+- **RuleHost / code_tool_hook activation**: managed via `pd` — the hard-gate
+  activation channel for approved principles.
+
+---
+
+_Add your own tool conventions here._

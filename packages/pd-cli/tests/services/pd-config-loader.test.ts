@@ -38,7 +38,14 @@ function rmTmpDir(dir: string): void {
 }
 
 function writeConfig(workspaceDir: string, content: string): void {
-  const configDir = path.join(workspaceDir, PD_CONFIG_DIR);
+  // CWE-22 boundary guard for test helpers: every config path is derived
+  // from an mkdtemp dir under os.tmpdir(); verify that invariant before IO.
+  const tmpRoot = path.resolve(os.tmpdir());
+  const wsRoot = path.resolve(workspaceDir);
+  if (!wsRoot.startsWith(tmpRoot + path.sep)) {
+    throw new Error(`Test helper refuses non-tmpdir workspace: ${workspaceDir}`);
+  }
+  const configDir = path.join(wsRoot, PD_CONFIG_DIR);
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, PD_CONFIG_FILENAME), content, 'utf8');
 }

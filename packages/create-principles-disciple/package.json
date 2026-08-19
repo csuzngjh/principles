@@ -61,5 +61,8 @@
     "type": "git",
     "url": "https://github.com/csuzngjh/principles.git",
     "directory": "packages/create-principles-disciple"
+  },
+  "pd": {
+    "bundledPluginVersion": "1.209.4"
   }
 }

@@ -1,6 +1,6 @@
 ---
 name: pd-planner
-description: 电影剧本式计划制定，将复杂任务分解为可执行的步骤。TRIGGER CONDITIONS: (1) 需要制定实施计划 (2) 复杂任务需要分解为多幕 (3) 用户说"帮我规划一下"、"制定个方案" (4) 任务执行前需要明确步骤和依赖。
+description: 在 Principles Disciple 工作流中，用电影剧本式方法将已批准的复杂任务分解为可执行步骤。TRIGGER CONDITIONS: (1) PD 流程要求先产出实施计划（如原则候选落地、治理改动） (2) 用户明确要求使用 PD 的规划流程分解任务。未提及 PD 的一般项目规划请求不属于本技能。
 disable-model-invocation: true
 ---
 

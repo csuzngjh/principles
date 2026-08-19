@@ -1,6 +1,6 @@
 ---
 name: pd-implementer
-description: 按计划执行代码修改，逐步实施代码变更。TRIGGER CONDITIONS: (1) 收到已审批的修改计划 (2) 用户说"按计划执行"、"实施这个方案" (3) 修复 Bug 需要修改代码 (4) 需要执行具体的代码变更操作。
+description: 在 Principles Disciple 工作流中，按已审批的计划执行代码修改。TRIGGER CONDITIONS: (1) 收到 PD 流程中已审批的修改计划 (2) 用户明确要求按 PD 规划结果实施。一般 Bug 修复、未提及 PD 的常规代码修改请求不属于本技能。
 disable-model-invocation: true
 ---
 

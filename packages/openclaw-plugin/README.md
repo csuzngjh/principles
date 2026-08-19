@@ -168,6 +168,79 @@ The plugin accepts the following configuration options:
 For the full architecture, runtime adapters (OpenClaw, Codex), and product
 boundary, see the project documentation linked below.
 
+## Security & data boundaries
+
+Principles Disciple is a local-first behavior-governance layer. This section
+describes what this npm package (`principles-disciple`, the OpenClaw plugin)
+actually does, so you can evaluate it before installing. It reflects a
+source audit of the published artifact (PRI-547).
+
+### Local data
+
+Behavior evidence, principles, decision records, and trajectories are stored
+in the user-controlled local workspace (flat files plus SQLite databases
+under the workspace's PD state directories). The core plugin does not send
+product telemetry; network access occurs only when an Owner-configured LLM
+runtime provider is used (see below).
+
+### Agent authority
+
+PD influences future agent behavior through owner-approved context injection
+and tool-hook enforcement. Principle activation is subject to owner review;
+anything activated can be rolled back (`/pd-rollback`,
+`/pd-principle-rollback`).
+
+### Conversation and hook access
+
+The plugin registers OpenClaw hooks (prompt, tool calls, LLM output,
+session lifecycle). Conversation access is granted through the host's
+`hooks.allowConversationAccess` config key. The `npx` installer and the
+plugin's first-load auto-fix set this key to `true` so the hooks work out of
+the box (PRI-343); you can turn it off with
+`openclaw config set plugins.entries.principles-disciple.hooks.allowConversationAccess false`
+— the plugin degrades to non-conversation surfaces (with a fallback
+trajectory collector) instead of failing.
+
+### Process and filesystem access
+
+The plugin reads and writes PD workspace state (memory files, `.state/`,
+`.principles/`, SQLite databases) and observes tool-call activity through
+OpenClaw hooks — these capabilities are its stated behavior-governance
+function. The `/pd-bootstrap` command runs `<tool> --version` probes (rg,
+fd, shellcheck, …) to scan your local development environment; it only runs
+when you invoke it.
+
+### Network access and LLM providers
+
+The core plugin performs no network I/O except through Owner-configured
+provider SDKs. Optional LLM calls happen only when you configure a runtime
+profile: the bundled provider SDKs read their standard credential
+environment variables (AWS/Azure/GCP/OpenAI-style, depending on the chosen
+provider) and call that provider from your machine. Diagnostics, principle
+refinement, and internal agents run through this user-configured provider.
+Some antivirus engines flag the bundled provider SDKs'
+environment-variable handling; that is disclosed here rather than
+obfuscated.
+
+### Telemetry
+
+The core OpenClaw plugin does not send product-usage telemetry. PD redacts
+supported sensitive patterns before persistence — including known Windows
+and Unix paths, email addresses, and common token formats — and `/pd-export`
+redacts by default. This is not a general-purpose PII scrubber: automatic
+redaction does not yet cover phone numbers, credit cards, IP addresses, or
+other unknown PII. Remaining limitations are tracked in the project's
+[security baseline](https://github.com/csuzngjh/principles/blob/main/docs/architecture/SECURITY_BASELINE.md).
+
+### Separately shipped components
+
+Other PD components ship as their own packages and have their own
+boundaries: the `create-principles-disciple` installer downloads from the
+npm registry and installs files under `~/.openclaw/`; `pd-console` is a
+local web console that performs npm registry update checks and
+user-initiated feedback submission when you use those features. They are not
+part of this plugin tarball.
+
 ## Part of the principles monorepo
 
 See the root [README.md](https://github.com/csuzngjh/principles#readme) for

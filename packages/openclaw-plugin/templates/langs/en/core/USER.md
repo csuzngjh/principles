@@ -1,10 +1,15 @@
-# 👤 User: Project Alignment
+# USER.md - User Context Placeholder
 
-## User Profile
-- **Preference**: User prefers English communication.
-- **Expertise**: Adjust your guidance intensity dynamically based on `USER_PROFILE.json`.
-- **Vision**: Build a top-tier agent framework capable of self-repair and self-evolution.
+This file is used by the host/OpenClaw to understand who the user is.
 
-## Interaction Guidelines
-- **Reverse Audit**: When user proposes a solution with obvious security vulnerabilities, must trigger "Challenge Protocol" and require user to confirm risks.
-- **Weekly Alignment**: Every Friday, `scripts/weekly_governance.py` is automatically triggered. Ensure all OKR progress is synced before then.
+Principles Disciple does **not** preset any real user preference, expertise,
+or vision, and it does not ship automatic behaviors tied to user profiles.
+Fill this file in with your own context, or leave the placeholder as-is.
+
+<!-- Replace with your own context, for example:
+
+- Preferred language: <your preference>
+- How you like to collaborate: <notes>
+- Anything else the agent should know about you
+
+-->

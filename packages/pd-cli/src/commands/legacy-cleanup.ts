@@ -27,6 +27,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { Database } from 'better-sqlite3';
 import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { assertSafeDirectoryRoot, isPathInside } from '../utils/path-security.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -257,9 +258,21 @@ function glob(pattern: string): string[] {
   return results;
 }
 
+/**
+ * Validate a workspace root before cleanup scans derive paths from it.
+ * Returns the canonical root so all derived targets are absolute and
+ * containment checks are canonical-vs-canonical (relative workspaces work).
+ */
+function assertCleanupWorkspaceRoot(workspacePath: string): string {
+  return assertSafeDirectoryRoot(workspacePath, 'workspace path');
+}
+
 function findLegacyTargets(workspacePath: string): CleanupTarget[] {
   const targets: CleanupTarget[] = [];
-  const stateDir = path.join(workspacePath, '.state');
+  // CWE-22: resolve the workspace root once and verify it is a valid,
+  // non-root directory so every derived path stays inside the boundary.
+  const workspaceRoot = assertCleanupWorkspaceRoot(workspacePath);
+  const stateDir = path.join(workspaceRoot, '.state');
   const archiveTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const archiveDir = path.join(stateDir, 'legacy-archive', archiveTimestamp);
 
@@ -288,7 +301,11 @@ function findLegacyTargets(workspacePath: string): CleanupTarget[] {
   if (fs.existsSync(sessionsDir)) {
     for (const file of fs.readdirSync(sessionsDir)) {
       if (!file.endsWith('.json')) continue;
-      const filePath = path.join(sessionsDir, file);
+      const filePath = path.resolve(sessionsDir, file);
+      // CWE-22: verify the canonical path stays inside the canonical
+      // sessions dir before any filesystem access (readdir results are
+      // trusted, but defense-in-depth).
+      if (!isPathInside(sessionsDir, filePath)) continue;
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
         const session = JSON.parse(content);

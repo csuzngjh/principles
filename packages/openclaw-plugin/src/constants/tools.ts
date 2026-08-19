@@ -39,7 +39,6 @@ export const CONSTRUCTIVE_TOOL_NAMES = [
   // Include all BASH aliases for consistent constructive classification
   ...BASH_TOOL_NAMES,
   ...AGENT_TOOL_NAMES,
-  'evolve-task', 'init-strategy',
 ] as const;
 
 export const EXPLORATORY_TOOL_NAMES = [

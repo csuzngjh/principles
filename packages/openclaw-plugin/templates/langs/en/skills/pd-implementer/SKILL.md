@@ -1,6 +1,6 @@
 ---
 name: pd-implementer
-description: Execute code modifications according to a plan, implementing changes step by step. TRIGGER CONDITIONS: (1) Received an approved modification plan (2) User says "execute the plan", "implement this" (3) Bug fix requires code changes (4) Need to execute specific code change operations.
+description: Execute code modifications according to an approved plan inside Principles Disciple workflows. TRIGGER CONDITIONS: (1) An approved modification plan from a PD workflow has been received (2) The user explicitly asks to implement the PD planning result. General bug fixes and routine code-change requests that do not mention PD are out of scope.
 disable-model-invocation: true
 ---
 

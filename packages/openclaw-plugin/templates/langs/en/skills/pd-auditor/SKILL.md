@@ -1,6 +1,6 @@
 ---
 name: pd-auditor
-description: Deductive audit using axiom verification, system audit, and via negativa methods. TRIGGER CONDITIONS: (1) Need to audit system or process consistency (2) Verify core assumptions are self-consistent (3) Check component interactions are correct (4) Need to identify design flaws or logical contradictions.
+description: Deductive audit of target systems within Principles Disciple governance scope: axiom verification, system audit, and via negativa. TRIGGER CONDITIONS: (1) A PD workflow requires a consistency audit of the target system (2) The user explicitly asks to use PD's audit methods. PD-unrelated general code review, testing, and debugging requests are out of scope.
 disable-model-invocation: true
 ---
 

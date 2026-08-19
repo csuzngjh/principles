@@ -19,6 +19,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { assertSafeDirectoryRoot, isPathInside } from '../utils/path-security.js';
 
 interface EvidenceOptions {
   workspace?: string;
@@ -40,11 +41,14 @@ interface TriggerDecisionEntry {
 }
 
 /**
- * Get the memory/logs directory for a workspace.
+ * Get the memory/logs directory for a workspace (canonical root).
  * SystemLogger writes to <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
+ * The workspace root is canonicalized once here so downstream containment
+ * checks compare canonical paths (relative --workspace inputs work).
  */
 function getLogDir(workspaceDir: string): string {
-  return path.join(workspaceDir, 'memory', 'logs');
+  const root = assertSafeDirectoryRoot(workspaceDir, 'workspace path');
+  return path.join(root, 'memory', 'logs');
 }
 
 /**
@@ -108,7 +112,11 @@ function readRecentDecisions(logDir: string, limit: number): TriggerDecisionEntr
   for (const logFile of logFiles) {
     if (allEntries.length >= limit) break;
 
-    const filePath = path.join(logDir, logFile);
+    // CWE-22: verify the canonical log path stays inside the canonical
+    // logDir before reading (canonical-vs-canonical containment, so relative
+    // workspace roots work).
+    const filePath = path.resolve(logDir, logFile);
+    if (!isPathInside(logDir, filePath)) continue;
     try {
       const content = fs.readFileSync(filePath, 'utf8');
       const entries = parseTriggerDecisions(content);

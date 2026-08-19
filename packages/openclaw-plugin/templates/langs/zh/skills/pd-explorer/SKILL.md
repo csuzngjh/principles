@@ -1,6 +1,6 @@
 ---
 name: pd-explorer
-description: 快速证据收集，定位和收集问题相关的文件、日志、复现步骤。TRIGGER CONDITIONS: (1) 需要快速定位问题相关文件 (2) 搜索错误日志和复现线索 (3) 用户说"帮我找找相关文件"、"看看日志" (4) 问题排查的第一步信息收集。
+description: 为 Principles Disciple 痛苦诊断/排查快速收集证据：定位文件、日志、复现步骤。TRIGGER CONDITIONS: (1) PD 诊断流程需要定位证据 (2) 用户明确要求检查 PD 工作区状态或日志。一般项目的文件查找、与 PD 无关的日志搜索不属于本技能。
 disable-model-invocation: true
 ---
 

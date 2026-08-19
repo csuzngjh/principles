@@ -1,60 +1,32 @@
-# 🔄 BOOT.md - Startup Instructions
+# BOOT.md - Startup Instructions
 
-Short, explicit instructions for what OpenClaw should do on startup. If the task needs to send a message, use the message tool and then reply `NO_REPLY`.
+Short, explicit instructions for what the agent should do on startup.
+
+The host (OpenClaw) already loads the workspace guidance files it needs
+(AGENTS.md, SOUL.md, USER.md, IDENTITY.md, TOOLS.md, HEARTBEAT.md, memory).
+PD does not need to re-read them and does not own general memory or identity.
 
 ---
 
 ## Startup Checklist
 
-1. **Environment Awareness** (HIGHEST PRIORITY): Explore and record your runtime environment
-   - Check current working directory: `pwd` or `process.cwd()`
-   - Identify operating system: Windows/Linux/macOS
-   - Check Git status: Are you in a Git repository?
-   - List available tools: Check `/tools` or `/skills`
-   - **Write findings to** `memory/environment-snapshot.md`
-
-2. **Confirm workspace**: Check current working directory is correct
-3. **Read identity files**: `SOUL.md`, `USER.md`, `IDENTITY.md`
-4. **Check memory state**: Read today's and yesterday's `memory/YYYY-MM-DD.md`
-5. **Check Runtime V2 pain diagnostics**: use `pd candidate list` / ledger state; `.state/.pain_flag` is legacy compatibility only
+1. **Confirm workspace**: check the current working directory is correct.
+2. **PD review queue**: run `pd candidate list` and check whether any
+   principle proposals are awaiting Owner review.
+   - If there are pending proposals, surface them **once** with a concise
+     summary and the review decision options (approve / reject / defer / rollback).
+   - Otherwise proceed silently.
 
 ---
 
-## Environment Snapshot Template
+## Boundary
 
-Create `memory/environment-snapshot.md`:
-
-```markdown
-# Environment Snapshot
-
-> Last updated: [date/time]
-
-## System Information
-
-- **Operating System**: [Windows/Linux/macOS]
-- **Working Directory**: [full path]
-- **Git Repository**: [yes/no] - [branch name]
-- **Shell**: [bash/zsh/powershell/etc]
-
-## Available Tools
-
-- [list of main tools]
-- [skills list]
-
-## Directory Structure
-
-```
-[key directories overview]
-```
-
-## Environment Variables
-
-[important env vars like PATH etc]
-
----
-_This file should be updated on every startup_
-```
+- Do **not** write environment snapshots or runtime state files on startup —
+  environment discovery is a host/OpenClaw capability, and PD does not own
+  general memory or environment persistence.
+- Do **not** read or manage `memory/` files as part of PD startup — that is
+  host/OpenClaw responsibility.
 
 ---
 
-_This file can be customized by user to add specific startup tasks._
+_This file can be customized by the user to add specific startup tasks._

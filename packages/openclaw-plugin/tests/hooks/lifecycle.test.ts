@@ -37,6 +37,21 @@ describe('Lifecycle Hooks', () => {
       expect(callArgs[1]).toContain('1 potential pain point(s)');
     });
 
+    it('PRI-547: reset summary must not reference the retired /reflection skill', async () => {
+      const mockEvent = {
+        messages: [
+          { role: 'assistant', content: 'error: something went wrong' }
+        ],
+        reason: 'Manual reset'
+      };
+
+      await handleBeforeReset(mockEvent, { workspaceDir });
+
+      const callArgs = vi.mocked(fs.appendFileSync).mock.calls[0];
+      expect(callArgs[1]).not.toContain('/reflection');
+      expect(callArgs[1]).toContain('pd console open');
+    });
+
     it('should not write if no pain points are found', async () => {
       const mockEvent = {
         messages: [{ role: 'assistant', content: 'all good' }]
@@ -102,6 +117,31 @@ describe('Lifecycle Hooks', () => {
       expect(memoryWrite).toBeDefined();
       expect(memoryWrite![1]).toContain('[FATAL INTERCEPT]');
       expect(memoryWrite![1]).toContain('I will modify the file directly');
+    });
+
+    it('PRI-547: pre-compaction pain entry must not reference the retired /evolve-task skill', async () => {
+      const loggerMock = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+      const jsonlContent = [
+        JSON.stringify({
+          role: 'assistant',
+          content: 'I will modify the file directly',
+          openclawAbort: { aborted: true, origin: 'rpc', runId: 'test-run-124' }
+        })
+      ].join('\n') + '\n';
+
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => p === tempSessionFile || String(p).includes('memory'));
+      vi.spyOn(fs, 'createReadStream').mockImplementation((...args: any[]) => {
+        return Readable.from([jsonlContent]) as any;
+      });
+
+      await extractPainFromSessionFile(tempSessionFile, { workspaceDir, logger: loggerMock });
+
+      const calls = vi.mocked(fs.appendFileSync).mock.calls;
+      const dailyLogWrite = calls.find((call: any) => String(call[0]).endsWith('.md') && !String(call[0]).includes('confusion_samples'));
+      expect(dailyLogWrite).toBeDefined();
+      expect(dailyLogWrite![1]).not.toContain('/evolve-task');
+      expect(dailyLogWrite![1]).toContain('pd console open');
     });
 
     it('should extract COGNITIVE OVERLOAD from oversized placeholder', async () => {
