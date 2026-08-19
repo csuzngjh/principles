@@ -613,15 +613,16 @@ export class InternalizationOrchestrator {
    */
   private async resolveLegacyRunnerVerdict(taskId: string, taskKind: string): Promise<string | undefined> {
     if (taskKind !== 'evaluator' && taskKind !== 'rollout_reviewer') return undefined;
-    let runs: { outputPayload?: unknown }[] = [];
+    let runs: { outputPayload?: string }[] = [];
     try {
-      runs = await this.stateManager.getRunsByTask(taskId) as { outputPayload?: unknown }[];
+      runs = await this.stateManager.getRunsByTask(taskId);
     } catch {
       return undefined;
     }
     for (const run of [...runs].reverse()) {
-      // RunRecord 字段为 camelCase outputPayload (store 层映射)
-      const raw = (run as unknown as Record<string, unknown>).outputPayload;
+      // RunRecord.outputPayload 已是类型化 string|undefined (store 层映射);
+      // JSON.parse 结果仍按 rc-1 逐字段守卫 (下方 evaluation/review 检查)
+      const raw = run.outputPayload;
       if (typeof raw !== 'string' || raw.length === 0) continue;
       let parsed: unknown;
       try {
