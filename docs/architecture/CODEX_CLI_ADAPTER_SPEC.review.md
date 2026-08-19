@@ -2,6 +2,8 @@
 
 > 核实日期：2026-08-11 | 核实人：WorkBuddy
 > 核实依据：`D:\Code\codex`（HEAD = `2cc9dbb984`，2026-08-11）、`D:\Code\principles` 及本 worktree、OpenAI 官方文档 <https://developers.openai.com/codex/hooks>
+>
+> ⚠️ **HISTORICAL（2026-08-19）**：本报告核实的 SPEC 描述的 confirm-first / PLAN.md 硬编码门禁已于 2026-06-01（PRI-286, PR #764）从 PD 移除；当前唯一权威门禁是 RuleHost 动态规则（Owner 审批的 code_tool_hook 激活）。文中 confirm-first 相关内容仅为历史记录。
 
 ## 总体结论
 

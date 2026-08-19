@@ -106,16 +106,11 @@ Edit your workspace's `docs/PROFILE.json`:
 
 ```json
 {
-  "progressive_gate": {
-    "enabled": true,
-    "plan_approvals": {
-      "enabled": true,
-      "allowed_patterns": ["docs/**", "skills/**"],
-      "allowed_operations": ["write", "edit"]
-    }
-  }
+  "risk_paths": ["SOUL.md", "USER.md", "AGENTS.md", "docs/plans/**"]
 }
 ```
+
+`risk_paths` feeds risk classification used by evidence triage and pain scoring. Blocking behavior itself comes only from the RuleHost rules you approved.
 
 ## Slash Commands
 

@@ -219,36 +219,10 @@ The plugin requires the following npm packages:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `micromatch` | ^4.0.8 | Glob pattern matching for PLAN whitelist |
+| `micromatch` | ^4.0.8 | Glob pattern matching for risk-path rules |
 | `@sinclair/typebox` | ^0.34.48 | Type definitions and validation |
 
 These are **not** included in the plugin bundle to keep the distribution size small. They must be installed separately in the plugin directory.
-
----
-
-## 🚀 Quick Start
-
-After installation, enable the PLAN whitelist feature:
-
-1. Edit your workspace's `docs/PROFILE.json`:
-
-```json
-{
-  "progressive_gate": {
-    "enabled": true,
-    "plan_approvals": {
-      "enabled": true,
-      "max_lines_override": -1,
-      "allowed_patterns": ["docs/**", "skills/**"],
-      "allowed_operations": ["write", "edit"]
-    }
-  }
-}
-```
-
-2. Restart your agent session
-
-Now even Stage 1 agents can edit files when a READY plan exists!
 
 ---
 

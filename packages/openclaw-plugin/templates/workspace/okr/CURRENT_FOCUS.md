@@ -42,7 +42,6 @@
 
 | 资源 | 路径 |
 |------|------|
-| 详细计划 | `memory/tasks/{任务目录}/PLAN.md` |
 | 历史版本 | `memory/okr/.history/` |
 | 任务列表 | `memory/okr/WEEK_TASKS.json` |
 

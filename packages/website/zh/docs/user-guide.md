@@ -107,16 +107,11 @@ RuleHost 会对每个变更工具调用进行已激活规则的评估：
 
 ```json
 {
-  "progressive_gate": {
-    "enabled": true,
-    "plan_approvals": {
-      "enabled": true,
-      "allowed_patterns": ["docs/**", "skills/**"],
-      "allowed_operations": ["write", "edit"]
-    }
-  }
+  "risk_paths": ["SOUL.md", "USER.md", "AGENTS.md", "docs/plans/**"]
 }
 ```
+
+`risk_paths` 用于证据分诊和痛觉评分中的风险分类。拦截行为本身只来自你审批过的 RuleHost 规则。
 
 ## 斜杠命令
 
