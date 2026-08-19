@@ -60,6 +60,47 @@ Flags: ${localEval.flags.length > 0 ? localEval.flags.join(', ') : 'none'}
 Do NOT output anything other than this JSON object.`;
 }
 
+/**
+ * CWE-918 (SSRF) mitigation for operator-supplied LLM API base URLs.
+ *
+ * OPENAI_BASE_URL is environment-controlled, so before any network request
+ * we require: (1) a parseable https URL, (2) a hostname that is not
+ * localhost, loopback, link-local, or in a private/reserved IP range.
+ * This prevents a misconfigured or malicious value from targeting internal
+ * network services (metadata endpoints, internal APIs, etc.).
+ */
+function assertSafeLlmBaseUrl(rawBaseUrl: string): URL {
+  let url: URL;
+  try {
+    url = new URL(rawBaseUrl);
+  } catch {
+    throw new Error(`Invalid OPENAI_BASE_URL: "${rawBaseUrl}" is not a valid URL`);
+  }
+  if (url.protocol !== 'https:') {
+    throw new Error(`Invalid OPENAI_BASE_URL: protocol must be https, got "${url.protocol}"`);
+  }
+  const host = url.hostname.toLowerCase();
+  const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  if (isIpv4) {
+    const parts = host.split('.').map(Number);
+    const [p0 = -1, p1 = -1] = parts;
+    const isPrivate =
+      p0 === 10 ||
+      p0 === 127 ||
+      (p0 === 192 && p1 === 168) ||
+      (p0 === 172 && p1 >= 16 && p1 <= 31) ||
+      (p0 === 169 && p1 === 254) ||
+      p0 === 0 ||
+      (p0 === 100 && p1 >= 64 && p1 <= 127);
+    if (isPrivate) {
+      throw new Error(`Invalid OPENAI_BASE_URL: "${rawBaseUrl}" resolves to a private/reserved IP`);
+    }
+  } else if (host === 'localhost' || host.endsWith('.localhost')) {
+    throw new Error(`Invalid OPENAI_BASE_URL: "${rawBaseUrl}" targets localhost`);
+  }
+  return url;
+}
+
 export async function adjudicate(
   episode: PainEpisode,
   localEval: LocalEvaluation,
@@ -67,7 +108,9 @@ export async function adjudicate(
 ): Promise<StrongModelAdjudication> {
   const { modelId: strongModelId, log } = config;
   const prompt = buildAdjudicationPrompt(episode, localEval);
-  const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+  // CWE-918 (SSRF): validate the operator-supplied base URL before any
+  // network request — https only, and no private/reserved/localhost targets.
+  const baseUrl = assertSafeLlmBaseUrl(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1');
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -82,7 +125,11 @@ export async function adjudicate(
   }
 
   try {
-    const resp = await fetch(`${baseUrl}/chat/completions`, {
+    // Build the endpoint on the validated URL: append the chat completions
+    // path to the base URL's (possibly empty) path component.
+    const endpoint = new URL(baseUrl);
+    endpoint.pathname = endpoint.pathname.replace(/\/+$/, '') + '/chat/completions';
+    const resp = await fetch(endpoint.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 // Resolve __dirname in ESM
@@ -40,11 +40,16 @@ ui:
 
     // Resolve CLI binary path relative to this file to be workspace-independent
     const cliBin = path.resolve(__dirname, '../../dist/index.js');
-    const cmd = `node "${cliBin}" pain record --reason "Regression test frustration" --json --workspace "${tmpDir}"`;
-    
+    // Parameterized exec (no shell): tmpDir and reason are passed as separate
+    // argv entries, so shell metacharacters in them cannot be interpreted as
+    // commands (CWE-78 mitigation).
     let stdoutStr: string;
     try {
-      stdoutStr = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'] });
+      stdoutStr = execFileSync(
+        process.execPath,
+        [cliBin, 'pain', 'record', '--reason', 'Regression test frustration', '--json', '--workspace', tmpDir],
+        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true },
+      );
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

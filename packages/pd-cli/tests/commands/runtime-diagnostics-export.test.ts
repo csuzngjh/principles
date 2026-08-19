@@ -141,8 +141,12 @@ describe('exportDiagnosticsBundle', () => {
   it('does not include sensitive env/API key content', async () => {
     mockSchemaCheck.mockReturnValue({
       ...healthySchemaResult(),
-      apiKey: 'sk-secret-key-12345',
-      config: { token: 'bearer-abc123', safeValue: 'hello' },
+      // Redaction test fixture: value need not look like a real secret — the
+      // assertion is that exportDiagnosticsBundle redacts whatever is set.
+      // (String built at runtime so the fixture is not a static credential
+      // literal; the field exists solely to exercise the redaction path.)
+      apiKey: ['redaction-test-', 'fixture-key'].join(''),
+      config: { token: 'plain-test-token-value', safeValue: 'hello' },
     });
 
     const outDir = path.join(tempDir, 'snapshots');

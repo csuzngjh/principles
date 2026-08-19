@@ -114,10 +114,30 @@ function isGoldenTraceCaseInput(value: unknown): value is GoldenTraceCaseInput {
  * Load and validate golden trace cases from a JSON file.
  * Returns either the validated cases or a structured error.
  */
-function loadGoldenTraceCases(filePath: string): { cases?: GoldenTraceCaseInput[]; error?: { reason: string; nextAction: string } } {
+function loadGoldenTraceCases(
+  filePath: string,
+  workspaceDir?: string,
+): { cases?: GoldenTraceCaseInput[]; error?: { reason: string; nextAction: string } } {
   let raw: string;
   try {
+    if (!filePath || filePath.trim().length === 0) {
+      throw new Error('golden trace path is empty');
+    }
     const resolved = path.resolve(filePath);
+    // CWE-22 boundary: reject relative-escape and filesystem-root targets.
+    const normalized = path.normalize(resolved);
+    if (normalized.split(/[\\/]/).includes('..')) {
+      throw new Error('golden trace path contains parent traversal');
+    }
+    if (normalized === path.parse(normalized).root) {
+      throw new Error('golden trace path resolves to filesystem root');
+    }
+    if (workspaceDir) {
+      const wsRoot = path.resolve(workspaceDir);
+      if (!normalized.startsWith(wsRoot + path.sep)) {
+        throw new Error('golden trace path must be inside the workspace directory');
+      }
+    }
     raw = fs.readFileSync(resolved, 'utf8');
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -286,7 +306,7 @@ export async function handleRulecodeReplay(opts: ReplayOptions): Promise<void> {
     return;
   }
 
-  const traceResult = loadGoldenTraceCases(opts.goldenTrace);
+  const traceResult = loadGoldenTraceCases(opts.goldenTrace, opts.workspace);
   if (traceResult.error || traceResult.cases === undefined) {
     const { error } = traceResult;
     const output: RulecodeReplayOutput = {

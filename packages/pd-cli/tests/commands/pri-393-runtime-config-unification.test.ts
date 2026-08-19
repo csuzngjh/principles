@@ -100,7 +100,11 @@ describe('PRI-393: runtime config unification', () => {
       ];
 
       for (const file of commandFiles) {
-        const fullPath = path.resolve(file);
+        // CWE-22: resolve against the repo root (this test file lives at
+        // packages/pd-cli/tests/commands/) and refuse paths that escape it.
+        const repoRoot = path.resolve(__dirname, '../../..');
+        const fullPath = path.resolve(repoRoot, file);
+        if (!fullPath.startsWith(repoRoot + path.sep)) continue;
         if (!fs.existsSync(fullPath)) continue;
         const source = fs.readFileSync(fullPath, 'utf8');
 

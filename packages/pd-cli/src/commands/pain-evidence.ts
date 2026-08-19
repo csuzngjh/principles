@@ -44,7 +44,19 @@ interface TriggerDecisionEntry {
  * SystemLogger writes to <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
  */
 function getLogDir(workspaceDir: string): string {
-  return path.join(workspaceDir, 'memory', 'logs');
+  // CWE-22 boundary: normalize (pure string, no fs access) and reject
+  // empty/relative/parent-traversal paths before deriving the log dir.
+  if (!workspaceDir || workspaceDir.trim().length === 0) {
+    throw new Error('Invalid workspace path: path is empty');
+  }
+  const normalized = path.normalize(workspaceDir);
+  if (!path.isAbsolute(normalized)) {
+    throw new Error(`Invalid workspace path: "${workspaceDir}" is not an absolute path`);
+  }
+  if (normalized.split(/[\\/]/).includes('..')) {
+    throw new Error(`Invalid workspace path: "${workspaceDir}" contains parent traversal`);
+  }
+  return path.join(normalized, 'memory', 'logs');
 }
 
 /**
@@ -108,7 +120,9 @@ function readRecentDecisions(logDir: string, limit: number): TriggerDecisionEntr
   for (const logFile of logFiles) {
     if (allEntries.length >= limit) break;
 
-    const filePath = path.join(logDir, logFile);
+    // CWE-22: verify the joined path stays inside logDir before reading.
+    const filePath = path.resolve(logDir, logFile);
+    if (!filePath.startsWith(logDir + path.sep)) continue;
     try {
       const content = fs.readFileSync(filePath, 'utf8');
       const entries = parseTriggerDecisions(content);

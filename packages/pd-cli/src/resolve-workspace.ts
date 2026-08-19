@@ -21,14 +21,48 @@ export const WORKSPACE_ENV = 'PD_WORKSPACE_DIR';
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 
-/** Normalize path to forward slashes for cross-platform comparison. */
+/**
+ * Normalize a path to forward slashes for cross-platform string comparison.
+ *
+ * Comparison-only helper: it never resolves against the filesystem and never
+ * feeds a filesystem operation, so it intentionally uses `path.normalize`
+ * (pure string normalization) instead of `path.resolve`. Callers compare two
+ * paths for equality after normalization; the workspace root itself is
+ * validated by `assertWorkspaceDirInside` before any IO uses it.
+ */
 function normalizePath(p: string): string {
-  return path.resolve(p).replace(/\\/g, '/');
+  return path.normalize(p).replace(/\\/g, '/');
 }
 
 /** Emit workspace warnings to stderr. */
 function emitWarning(msg: string): void {
   process.stderr.write(`[PD:workspace] WARNING: ${msg}\n`);
+}
+
+/**
+ * Validate an operator-supplied workspace root before it is used as an IO
+ * root. Uses `path.normalize` (pure string normalization, no filesystem
+ * access) to collapse `..` segments, then rejects empty values, relative
+ * paths, residual parent-traversal segments, and filesystem-root results so
+ * later `path.join(workspaceRoot, ...)` calls stay inside the workspace
+ * directory boundary instead of silently escaping to the drive root.
+ */
+function assertWorkspaceDirInside(p: string, source: string): void {
+  if (!p || p.trim().length === 0) {
+    throw new Error(`Invalid ${source}: path is empty`);
+  }
+  const normalized = path.normalize(p);
+  if (!path.isAbsolute(normalized)) {
+    throw new Error(`Invalid ${source}: "${p}" is not an absolute path`);
+  }
+  // After normalize, a surviving `..` segment means the input escaped a
+  // parent boundary (e.g. "..\\..\\evil") — reject rather than trust it.
+  if (normalized.split(/[\\/]/).includes('..')) {
+    throw new Error(`Invalid ${source}: "${p}" contains parent traversal`);
+  }
+  if (normalized === path.parse(normalized).root) {
+    throw new Error(`Invalid ${source}: "${p}" resolves to filesystem root`);
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -46,6 +80,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
 
   // Step 2: Check --workspace flag (highest priority)
   if (workspaceDir) {
+    assertWorkspaceDirInside(workspaceDir, '--workspace');
     if (configDefault && normalizePath(workspaceDir) !== normalizePath(configDefault)) {
       emitWarning(
         `--workspace "${workspaceDir}" differs from config default "${configDefault}" ` +
@@ -59,6 +94,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
   // Step 3: Check PD_WORKSPACE_DIR env var
   const envWorkspace = process.env.PD_WORKSPACE_DIR?.trim();
   if (envWorkspace) {
+    assertWorkspaceDirInside(envWorkspace, WORKSPACE_ENV);
     if (configDefault && normalizePath(envWorkspace) !== normalizePath(configDefault)) {
       emitWarning(
         `PD_WORKSPACE_DIR "${envWorkspace}" differs from config default "${configDefault}" ` +
@@ -71,6 +107,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
 
   // Step 4: Use discovered config default
   if (configDefault) {
+    assertWorkspaceDirInside(configDefault, 'workspace.default');
     return configDefault;
   }
 

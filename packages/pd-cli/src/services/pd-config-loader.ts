@@ -317,6 +317,31 @@ function loadOpenClawPluginConfig(): { workspace?: string } | null {
 }
 
 /**
+ * Validate a candidate config directory before it is joined into a config
+ * path for filesystem reads. Candidate dirs are operator-supplied
+ * (PD_WORKSPACE_DIR / plugin config / home default), so we normalize with
+ * `path.normalize` (pure string, no filesystem access), then reject empty,
+ * relative, parent-traversal, or root paths. This keeps the subsequent
+ * `path.join(dir, PD_CONFIG_DIR, ...)` inside the intended directory
+ * boundary (CWE-22 mitigation).
+ */
+function assertConfigDirBoundary(dir: string, source: string): void {
+  if (!dir || dir.trim().length === 0) {
+    throw new Error(`Invalid config search dir (${source}): path is empty`);
+  }
+  const normalized = path.normalize(dir);
+  if (!path.isAbsolute(normalized)) {
+    throw new Error(`Invalid config search dir (${source}): "${dir}" is not an absolute path`);
+  }
+  if (normalized.split(/[\\/]/).includes('..')) {
+    throw new Error(`Invalid config search dir (${source}): "${dir}" contains parent traversal`);
+  }
+  if (normalized === path.parse(normalized).root) {
+    throw new Error(`Invalid config search dir (${source}): "${dir}" resolves to filesystem root`);
+  }
+}
+
+/**
  * Search known locations for a .pd/config.yaml that contains a workspace.default field.
  * This runs BEFORE workspace resolution and does NOT require knowing the workspace dir.
  *
@@ -346,7 +371,14 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
 
   // Search each candidate for .pd/config.yaml with workspace.default
   for (const { dir, source } of candidates) {
-    const configPath = path.join(dir, PD_CONFIG_DIR, PD_CONFIG_FILENAME);
+    assertConfigDirBoundary(dir, source);
+    // CWE-22: resolve the candidate root once, then verify the joined config
+    // path stays inside that root before any filesystem access.
+    const candidateRoot = path.resolve(dir);
+    const configPath = path.resolve(candidateRoot, PD_CONFIG_DIR, PD_CONFIG_FILENAME);
+    if (configPath !== candidateRoot && !configPath.startsWith(candidateRoot + path.sep)) {
+      throw new Error(`Invalid config search dir (${source}): "${dir}" escapes its boundary`);
+    }
     if (fs.existsSync(configPath)) {
       const workspaceDefault = extractWorkspaceDefault(configPath);
       if (workspaceDefault) {

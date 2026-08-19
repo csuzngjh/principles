@@ -219,19 +219,61 @@ export async function findAvailablePort(
 // ─── Browser opener (best-effort, no throw) ──────────────────────────────────
 
 /**
+ * Validate a browser URL before it is handed to a system opener.
+ * Only http/https targets are allowed — other schemes (file:, javascript:,
+ * custom protocols) could be abused. This is the primary defense for the
+ * win32 opener path, which no longer routes through a shell.
+ */
+function assertSafeBrowserUrl(rawUrl: string): string {
+  if (!rawUrl || rawUrl.trim().length === 0) {
+    throw new Error('browser URL is empty');
+  }
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`invalid browser URL: "${rawUrl}"`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`invalid browser URL: protocol must be http(s), got "${url.protocol}"`);
+  }
+  return url.toString();
+}
+
+/**
  * Open the system browser. Best-effort — failures are reported but do not
  * crash the launcher.
+ *
+ * Security: the URL is validated (http/https only) and every opener is
+ * invoked with a parameterized `spawn` (no shell). In particular the win32
+ * path uses `explorer.exe` with an argument array instead of the previous
+ * `cmd.exe /c start "" <url>` form, which ran the URL through the cmd shell
+ * and allowed shell metacharacters in the URL to be interpreted as commands
+ * (command injection).
  */
-export async function openBrowser(url: string): Promise<{ opened: boolean; reason?: string; nextAction?: string }> {
+export async function openBrowser(rawUrl: string): Promise<{ opened: boolean; reason?: string; nextAction?: string }> {
   const { spawn } = await import('child_process');
   const { platform } = process;
+
+  let url: string;
+  try {
+    url = assertSafeBrowserUrl(rawUrl);
+  } catch (err) {
+    return {
+      opened: false,
+      reason: err instanceof Error ? err.message : String(err),
+      nextAction: 'Use an http:// or https:// URL.',
+    };
+  }
 
   let cmd: string;
   let args: string[];
 
   if (platform === 'win32') {
-    cmd = process.env.ComSpec || 'cmd.exe';
-    args = ['/c', 'start', '""', url];
+    // Parameterized spawn (no shell): explorer.exe receives the validated
+    // URL as a plain argument and opens it in the default browser.
+    cmd = 'explorer.exe';
+    args = [url];
   } else if (platform === 'darwin') {
     cmd = 'open';
     args = [url];

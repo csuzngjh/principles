@@ -257,9 +257,35 @@ function glob(pattern: string): string[] {
   return results;
 }
 
+/**
+ * Validate a workspace root before cleanup scans derive paths from it.
+ * Uses `path.normalize` (pure string normalization, no filesystem access)
+ * to collapse `..` segments, then rejects empty, relative, parent-traversal,
+ * and filesystem-root paths (CWE-22 boundary guard).
+ */
+function assertCleanupWorkspaceRoot(workspacePath: string): string {
+  if (!workspacePath || workspacePath.trim().length === 0) {
+    throw new Error('Invalid workspace path: path is empty');
+  }
+  const normalized = path.normalize(workspacePath);
+  if (!path.isAbsolute(normalized)) {
+    throw new Error(`Invalid workspace path: "${workspacePath}" is not an absolute path`);
+  }
+  if (normalized.split(/[\\/]/).includes('..')) {
+    throw new Error(`Invalid workspace path: "${workspacePath}" contains parent traversal`);
+  }
+  if (normalized === path.parse(normalized).root) {
+    throw new Error(`Invalid workspace path: "${workspacePath}" resolves to filesystem root`);
+  }
+  return normalized;
+}
+
 function findLegacyTargets(workspacePath: string): CleanupTarget[] {
   const targets: CleanupTarget[] = [];
-  const stateDir = path.join(workspacePath, '.state');
+  // CWE-22: resolve the workspace root once and verify it is a valid,
+  // non-root directory so every derived path stays inside the boundary.
+  const workspaceRoot = assertCleanupWorkspaceRoot(workspacePath);
+  const stateDir = path.join(workspaceRoot, '.state');
   const archiveTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const archiveDir = path.join(stateDir, 'legacy-archive', archiveTimestamp);
 
@@ -288,7 +314,10 @@ function findLegacyTargets(workspacePath: string): CleanupTarget[] {
   if (fs.existsSync(sessionsDir)) {
     for (const file of fs.readdirSync(sessionsDir)) {
       if (!file.endsWith('.json')) continue;
-      const filePath = path.join(sessionsDir, file);
+      const filePath = path.resolve(sessionsDir, file);
+      // CWE-22: verify the joined path stays inside the sessions dir before
+      // any filesystem access (readdir results are trusted, but defense-in-depth).
+      if (!filePath.startsWith(sessionsDir + path.sep)) continue;
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
         const session = JSON.parse(content);
