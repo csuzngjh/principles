@@ -31,6 +31,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import type { Command } from 'commander';
+import { isPathInside } from '../utils/path-security.js';
 import {
   RULECODE_SPEC_TEXT,
   checkForbiddenPatterns,
@@ -113,8 +114,9 @@ function isGoldenTraceCaseInput(value: unknown): value is GoldenTraceCaseInput {
 /**
  * Load and validate golden trace cases from a JSON file.
  * Returns either the validated cases or a structured error.
+ * Exported for boundary regression tests (internal test surface).
  */
-function loadGoldenTraceCases(
+export function loadGoldenTraceCases(
   filePath: string,
   workspaceDir?: string,
 ): { cases?: GoldenTraceCaseInput[]; error?: { reason: string; nextAction: string } } {
@@ -124,19 +126,20 @@ function loadGoldenTraceCases(
       throw new Error('golden trace path is empty');
     }
     const resolved = path.resolve(filePath);
-    // CWE-22 boundary: reject relative-escape and filesystem-root targets.
+    // CWE-22 boundary: canonical containment against the workspace root
+    // (rejects sibling-prefix and traversal escapes; relative workspaces
+    // canonicalize consistently). Filesystem-root targets are rejected by
+    // containment when a workspace root is supplied.
     const normalized = path.normalize(resolved);
     if (normalized.split(/[\\/]/).includes('..')) {
       throw new Error('golden trace path contains parent traversal');
     }
-    if (normalized === path.parse(normalized).root) {
-      throw new Error('golden trace path resolves to filesystem root');
-    }
     if (workspaceDir) {
-      const wsRoot = path.resolve(workspaceDir);
-      if (!normalized.startsWith(wsRoot + path.sep)) {
+      if (!isPathInside(workspaceDir, resolved)) {
         throw new Error('golden trace path must be inside the workspace directory');
       }
+    } else if (normalized === path.parse(normalized).root) {
+      throw new Error('golden trace path resolves to filesystem root');
     }
     raw = fs.readFileSync(resolved, 'utf8');
   } catch (err) {

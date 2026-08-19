@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'js-yaml';
+import { canonicalPath, isPathInside } from '../utils/path-security.js';
 import {
   validatePdConfig,
   computeEffectivePdConfig,
@@ -375,9 +376,9 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
     assertConfigDirBoundary(dir, source);
     // CWE-22: resolve the candidate root once, then verify the joined config
     // path stays inside that root before any filesystem access.
-    const candidateRoot = path.resolve(dir);
+    const candidateRoot = canonicalPath(dir);
     const configPath = path.resolve(candidateRoot, PD_CONFIG_DIR, PD_CONFIG_FILENAME);
-    if (configPath !== candidateRoot && !configPath.startsWith(candidateRoot + path.sep)) {
+    if (!isPathInside(candidateRoot, configPath)) {
       throw new Error(`Invalid config search dir (${source}): "${dir}" escapes its boundary`);
     }
     if (fs.existsSync(configPath)) {

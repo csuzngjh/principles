@@ -63,40 +63,33 @@ Do NOT output anything other than this JSON object.`;
 /**
  * CWE-918 (SSRF) mitigation for operator-supplied LLM API base URLs.
  *
- * OPENAI_BASE_URL is environment-controlled, so before any network request
- * we require: (1) a parseable https URL, (2) a hostname that is not
- * localhost, loopback, link-local, or in a private/reserved IP range.
- * This prevents a misconfigured or malicious value from targeting internal
- * network services (metadata endpoints, internal APIs, etc.).
+ * Threat model: OPENAI_BASE_URL is explicitly configured by the Owner /
+ * operator in the environment or Runtime Profile — it is trusted operator
+ * configuration, NOT untrusted remote input. Local and private-network
+ * OpenAI-compatible endpoints (llama.cpp, LM Studio, local gateways,
+ * intranet model servers) are legitimate PD runtime targets and must keep
+ * working.
+ *
+ * What stays blocked:
+ * - non-http(s) schemes (file:, javascript:, data:, ...)
+ * - malformed / unparseable URLs
+ * - credentials embedded in the URL (secrets leak into logs/errors)
+ *
+ * Callers must not allow the host to be rewritten from untrusted input
+ * after this validation; the endpoint is derived from this URL only.
  */
-function assertSafeLlmBaseUrl(rawBaseUrl: string): URL {
+export function assertSafeLlmBaseUrl(rawBaseUrl: string): URL {
   let url: URL;
   try {
     url = new URL(rawBaseUrl);
   } catch {
     throw new Error(`Invalid OPENAI_BASE_URL: "${rawBaseUrl}" is not a valid URL`);
   }
-  if (url.protocol !== 'https:') {
-    throw new Error(`Invalid OPENAI_BASE_URL: protocol must be https, got "${url.protocol}"`);
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(`Invalid OPENAI_BASE_URL: protocol must be http or https, got "${url.protocol}"`);
   }
-  const host = url.hostname.toLowerCase();
-  const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
-  if (isIpv4) {
-    const parts = host.split('.').map(Number);
-    const [p0 = -1, p1 = -1] = parts;
-    const isPrivate =
-      p0 === 10 ||
-      p0 === 127 ||
-      (p0 === 192 && p1 === 168) ||
-      (p0 === 172 && p1 >= 16 && p1 <= 31) ||
-      (p0 === 169 && p1 === 254) ||
-      p0 === 0 ||
-      (p0 === 100 && p1 >= 64 && p1 <= 127);
-    if (isPrivate) {
-      throw new Error(`Invalid OPENAI_BASE_URL: "${rawBaseUrl}" resolves to a private/reserved IP`);
-    }
-  } else if (host === 'localhost' || host.endsWith('.localhost')) {
-    throw new Error(`Invalid OPENAI_BASE_URL: "${rawBaseUrl}" targets localhost`);
+  if (url.username || url.password) {
+    throw new Error(`Invalid OPENAI_BASE_URL: credentials must not be embedded in the URL`);
   }
   return url;
 }
@@ -109,7 +102,9 @@ export async function adjudicate(
   const { modelId: strongModelId, log } = config;
   const prompt = buildAdjudicationPrompt(episode, localEval);
   // CWE-918 (SSRF): validate the operator-supplied base URL before any
-  // network request — https only, and no private/reserved/localhost targets.
+  // network request — http(s) only, no embedded credentials. Local and
+  // private OpenAI-compatible endpoints remain valid (trusted operator
+  // configuration; llama.cpp / LM Studio / local gateways are supported).
   const baseUrl = assertSafeLlmBaseUrl(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1');
   const apiKey = process.env.OPENAI_API_KEY;
 

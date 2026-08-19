@@ -19,6 +19,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { assertSafeDirectoryRoot, isPathInside } from '../utils/path-security.js';
 
 interface EvidenceOptions {
   workspace?: string;
@@ -40,21 +41,14 @@ interface TriggerDecisionEntry {
 }
 
 /**
- * Get the memory/logs directory for a workspace.
+ * Get the memory/logs directory for a workspace (canonical root).
  * SystemLogger writes to <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
+ * The workspace root is canonicalized once here so downstream containment
+ * checks compare canonical paths (relative --workspace inputs work).
  */
 function getLogDir(workspaceDir: string): string {
-  // CWE-22 boundary: normalize (pure string, no fs access) and reject
-  // empty/parent-traversal paths before deriving the log dir. No
-  // `path.isAbsolute` check — absolute-ness is platform-dependent.
-  if (!workspaceDir || workspaceDir.trim().length === 0) {
-    throw new Error('Invalid workspace path: path is empty');
-  }
-  const normalized = path.normalize(workspaceDir);
-  if (normalized.split(/[\\/]/).includes('..')) {
-    throw new Error(`Invalid workspace path: "${workspaceDir}" contains parent traversal`);
-  }
-  return path.join(normalized, 'memory', 'logs');
+  const root = assertSafeDirectoryRoot(workspaceDir, 'workspace path');
+  return path.join(root, 'memory', 'logs');
 }
 
 /**
@@ -118,9 +112,11 @@ function readRecentDecisions(logDir: string, limit: number): TriggerDecisionEntr
   for (const logFile of logFiles) {
     if (allEntries.length >= limit) break;
 
-    // CWE-22: verify the joined path stays inside logDir before reading.
+    // CWE-22: verify the canonical log path stays inside the canonical
+    // logDir before reading (canonical-vs-canonical containment, so relative
+    // workspace roots work).
     const filePath = path.resolve(logDir, logFile);
-    if (!filePath.startsWith(logDir + path.sep)) continue;
+    if (!isPathInside(logDir, filePath)) continue;
     try {
       const content = fs.readFileSync(filePath, 'utf8');
       const entries = parseTriggerDecisions(content);

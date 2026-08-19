@@ -15,6 +15,7 @@
 
 import * as path from 'path';
 import { discoverWorkspaceDefault } from './services/pd-config-loader.js';
+import { assertSafeDirectoryRoot } from './utils/path-security.js';
 
 /** Environment variable name for workspace directory. */
 export const WORKSPACE_ENV = 'PD_WORKSPACE_DIR';
@@ -41,30 +42,26 @@ function emitWarning(msg: string): void {
 
 /**
  * Validate an operator-supplied workspace root before it is used as an IO
- * root. Uses `path.normalize` (pure string normalization, no filesystem
- * access) to collapse `..` segments, then rejects empty values, residual
- * parent-traversal segments, and filesystem-root results so later
- * `path.join(workspaceRoot, ...)` calls stay inside the workspace directory
- * boundary instead of silently escaping to the drive root.
- *
- * Platform note: no `path.isAbsolute` check here — absolute-ness is
- * platform-dependent (a Windows-style path like "Z:\\work" is not absolute
- * on POSIX runners), and relative paths resolve inside cwd so they carry no
- * traversal risk. The boundary guards that matter are: empty, parent
- * traversal, and filesystem root.
+ * root. Delegates to the shared canonical-root validator (empty, parent
+ * traversal, filesystem root). Returns nothing; callers keep the original
+ * value so downstream resolution semantics are unchanged.
  */
 function assertWorkspaceDirInside(p: string, source: string): void {
-  if (!p || p.trim().length === 0) {
-    throw new Error(`Invalid ${source}: path is empty`);
-  }
-  const normalized = path.normalize(p);
-  // After normalize, a surviving `..` segment means the input escaped a
-  // parent boundary (e.g. "..\\..\\evil") — reject rather than trust it.
-  if (normalized.split(/[\\/]/).includes('..')) {
-    throw new Error(`Invalid ${source}: "${p}" contains parent traversal`);
-  }
-  if (normalized === path.parse(normalized).root) {
-    throw new Error(`Invalid ${source}: "${p}" resolves to filesystem root`);
+  assertSafeDirectoryRoot(p, source);
+}
+
+/** Emit a warning when an explicit override differs from config default. */
+function emitWarningIfDiffers(
+  override: string,
+  configDefault: string | undefined,
+  discovered: { configPath?: string } | null,
+): void {
+  if (configDefault && normalizePath(override) !== normalizePath(configDefault)) {
+    emitWarning(
+      `"${override}" differs from config default "${configDefault}" ` +
+        `(source: ${discovered?.configPath}). Using explicit override. ` +
+        `Consider updating workspace.default in config.`,
+    );
   }
 }
 
@@ -84,13 +81,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
   // Step 2: Check --workspace flag (highest priority)
   if (workspaceDir) {
     assertWorkspaceDirInside(workspaceDir, '--workspace');
-    if (configDefault && normalizePath(workspaceDir) !== normalizePath(configDefault)) {
-      emitWarning(
-        `--workspace "${workspaceDir}" differs from config default "${configDefault}" ` +
-        `(source: ${discovered.configPath}). Using explicit flag. ` +
-        `Consider updating workspace.default in config.`,
-      );
-    }
+    emitWarningIfDiffers(workspaceDir, configDefault, discovered);
     return workspaceDir;
   }
 
@@ -98,13 +89,7 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
   const envWorkspace = process.env.PD_WORKSPACE_DIR?.trim();
   if (envWorkspace) {
     assertWorkspaceDirInside(envWorkspace, WORKSPACE_ENV);
-    if (configDefault && normalizePath(envWorkspace) !== normalizePath(configDefault)) {
-      emitWarning(
-        `PD_WORKSPACE_DIR "${envWorkspace}" differs from config default "${configDefault}" ` +
-        `(source: ${discovered.configPath}). Using env var. ` +
-        `Consider aligning or updating workspace.default.`,
-      );
-    }
+    emitWarningIfDiffers(envWorkspace, configDefault, discovered);
     return envWorkspace;
   }
 
@@ -113,7 +98,6 @@ export function resolveWorkspaceDir(workspaceDir?: string): string {
     assertWorkspaceDirInside(configDefault, 'workspace.default');
     return configDefault;
   }
-
   // Step 5: No resolution possible — throw (preserves current behavior)
   throw new Error(
     'No workspace directory configured. Set --workspace <path>, ' +

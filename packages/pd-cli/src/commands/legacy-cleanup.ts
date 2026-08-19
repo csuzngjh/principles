@@ -27,6 +27,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { Database } from 'better-sqlite3';
 import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { assertSafeDirectoryRoot, isPathInside } from '../utils/path-security.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -259,24 +260,11 @@ function glob(pattern: string): string[] {
 
 /**
  * Validate a workspace root before cleanup scans derive paths from it.
- * Uses `path.normalize` (pure string normalization, no filesystem access)
- * to collapse `..` segments, then rejects empty, parent-traversal, and
- * filesystem-root paths (CWE-22 boundary guard). No `path.isAbsolute`
- * check: absolute-ness is platform-dependent (a Windows-style path is not
- * absolute on POSIX runners) and relative paths resolve inside cwd.
+ * Returns the canonical root so all derived targets are absolute and
+ * containment checks are canonical-vs-canonical (relative workspaces work).
  */
 function assertCleanupWorkspaceRoot(workspacePath: string): string {
-  if (!workspacePath || workspacePath.trim().length === 0) {
-    throw new Error('Invalid workspace path: path is empty');
-  }
-  const normalized = path.normalize(workspacePath);
-  if (normalized.split(/[\\/]/).includes('..')) {
-    throw new Error(`Invalid workspace path: "${workspacePath}" contains parent traversal`);
-  }
-  if (normalized === path.parse(normalized).root) {
-    throw new Error(`Invalid workspace path: "${workspacePath}" resolves to filesystem root`);
-  }
-  return normalized;
+  return assertSafeDirectoryRoot(workspacePath, 'workspace path');
 }
 
 function findLegacyTargets(workspacePath: string): CleanupTarget[] {
@@ -314,9 +302,10 @@ function findLegacyTargets(workspacePath: string): CleanupTarget[] {
     for (const file of fs.readdirSync(sessionsDir)) {
       if (!file.endsWith('.json')) continue;
       const filePath = path.resolve(sessionsDir, file);
-      // CWE-22: verify the joined path stays inside the sessions dir before
-      // any filesystem access (readdir results are trusted, but defense-in-depth).
-      if (!filePath.startsWith(sessionsDir + path.sep)) continue;
+      // CWE-22: verify the canonical path stays inside the canonical
+      // sessions dir before any filesystem access (readdir results are
+      // trusted, but defense-in-depth).
+      if (!isPathInside(sessionsDir, filePath)) continue;
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
         const session = JSON.parse(content);

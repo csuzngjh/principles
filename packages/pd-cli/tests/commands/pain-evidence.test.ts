@@ -271,6 +271,43 @@ describe('real SYSTEM log fixture', () => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('FIXTURE-06: relative --workspace reads SYSTEM logs (regression)', async () => {
+    // Regression: a relative workspace root must not break containment.
+    // getLogDir canonicalizes via assertSafeDirectoryRoot and the log-file
+    // check uses isPathInside (canonical-vs-canonical), so a relative root
+    // must resolve and contain its own log dir.
+    const { handlePainEvidence } = await import('../../src/commands/pain-evidence.js');
+
+    // Create a workspace under cwd so a true relative path is possible.
+    const relTmp = fs.mkdtempSync(path.join(process.cwd(), '.tmp-rel-ws-'));
+    try {
+      const relLogDir = path.join(relTmp, 'memory', 'logs');
+      fs.mkdirSync(relLogDir, { recursive: true });
+      fs.writeFileSync(path.join(relLogDir, 'SYSTEM_2026-06-08.log'), FULL_LOG_CONTENT, 'utf8');
+      const relWorkspace = path.relative(process.cwd(), relTmp);
+      expect(path.isAbsolute(relWorkspace)).toBe(false);
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+      await handlePainEvidence({ workspace: relWorkspace, limit: 10, json: true });
+
+      const jsonCall = logSpy.mock.calls.find((call) => {
+        try { JSON.parse(call[0] as string); return true; } catch { return false; }
+      });
+      expect(jsonCall).toBeDefined();
+      const output = JSON.parse(jsonCall![0] as string);
+      expect(output.count).toBe(3);
+      expect(output.searchedPath).toContain(path.join('memory', 'logs', 'SYSTEM_*.log'));
+      expect(output.decisions[0].outcome).toBe('manual_owner_admitted');
+
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+    } finally {
+      fs.rmSync(relTmp, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── Commander Registration Tests ───────────────────────────────────────────
