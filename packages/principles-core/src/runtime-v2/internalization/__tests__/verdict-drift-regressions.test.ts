@@ -139,6 +139,7 @@ function driftAdapter(payload: unknown, spy: { llmCalls: number }): PDRuntimeAda
 async function craftRolloutCrashState(decision: 'needs_revision' | 'approve_rollout', options?: {
   revisionIteration?: number;
   rolloutRevisionPayload?: RolloutRevisionPayload;
+  effect?: 'needs_human_review';
 }): Promise<string> {
   await stateManager.acquireLease({ taskId: ROLLOUT_ID, owner: 'drift', runtimeKind: 'test-double' });
   const runs = await stateManager.getRunsByTask(ROLLOUT_ID);
@@ -154,6 +155,7 @@ async function craftRolloutCrashState(decision: 'needs_revision' | 'approve_roll
     completionIntent: {
       decision, sourceRunId: runId, revisionEpoch: pi.revisionCount ?? 0, status: 'pending',
       ...(options?.revisionIteration !== undefined ? { revisionIteration: options.revisionIteration } : {}),
+      ...(options?.effect ? { effect: options.effect } : {}),
     },
     ...(options?.rolloutRevisionPayload ? { rolloutRevisionPayload: options.rolloutRevisionPayload } : {}),
   })));
@@ -161,14 +163,14 @@ async function craftRolloutCrashState(decision: 'needs_revision' | 'approve_roll
   return runId;
 }
 
-async function craftEvaluatorCrashState(decision: 'approved' | 'needs_revision'): Promise<string> {
+async function craftEvaluatorCrashState(decision: 'approved' | 'needs_revision', outputOverride?: unknown): Promise<string> {
   // seedLineage 后 evaluator 是 succeeded;crash 叙事里它当时 leased — 先回 pending
   await stateManager.updateTask(EVAL_ID, { status: 'pending', attemptCount: 0 });
   await stateManager.acquireLease({ taskId: EVAL_ID, owner: 'drift', runtimeKind: 'test-double' });
   const runs = await stateManager.getRunsByTask(EVAL_ID);
   const runId = runs[runs.length - 1]?.runId;
   if (!runId) throw new Error('craft: no run row after lease');
-  await stateManager.updateRunOutput(runId, JSON.stringify(evaluatorOutput(decision)));
+  await stateManager.updateRunOutput(runId, JSON.stringify(outputOverride ?? evaluatorOutput(decision)));
   const raw = await stateManager.getTask(EVAL_ID);
   if (!raw) throw new Error('craft: evaluator missing');
   const pi = hydratePITaskRecord(raw);
@@ -393,5 +395,180 @@ describe('P0 verdict drift — completion intent 是 recovery authority', () => 
     expect(finalPi?.runnerDecision).toBe('approve_rollout');
     expect(finalPi?.completionIntent?.status).toBe('applied');
     expect(finalPi?.completionIntent?.revisionEpoch).toBe(1);
+  });
+
+  it('T6 budget exhausted resume: crash before needs_human_review 写入,LLM 返回 approve 也不得漂移', async () => {
+    await seedLineage();
+    // 前置: r1/r2 已 materialized (applied iteration=2) — 新 verdict 需 budget
+    await craftRolloutCrashState('needs_revision', {
+      effect: 'needs_human_review',
+      rolloutRevisionPayload: {
+        requiredChanges: ['前两轮'], revisionIteration: 2, sourceRolloutTaskId: ROLLOUT_ID,
+        sourceArtifactId: SCRIBE_ART, targetTaskKind: 'scribe', status: 'applied',
+      },
+    });
+
+    const spy = { llmCalls: 0 };
+    const runner = makeRolloutRunner(driftAdapter(rolloutOutput('approve_rollout'), spy), {
+      dispatch: async () => { throw new Error('T6: dispatch must not be called'); },
+      reopen: async () => { throw new Error('T6: reopen must not be called'); },
+    });
+
+    const result = await runner.run(ROLLOUT_ID);
+    expect(result.status).toBe('succeeded');
+
+    // 同 epoch retry: resume needs_human_review 效果,LLM/activation/路由全禁
+    expect(spy.llmCalls).toBe(0);
+    expect((await stateManager.getTask(ROLLOUT_ID))?.status).toBe('needs_human_review');
+    const pi = await readMeta(ROLLOUT_ID);
+    expect(pi?.runnerDecision).toBe('needs_revision');
+    // budget 仍为 2 (未产生新修订轮)
+    expect(pi?.rolloutRevisionPayload?.revisionIteration).toBe(2);
+    expect(pi?.rolloutRevisionPayload?.status).toBe('applied');
+    expect(pi?.completionIntent?.status).toBe('applied');
+    expect(pi?.completionIntent?.effect).toBe('needs_human_review');
+  });
+});
+
+describe('P0-B verdict drift — rule assembly 纳入 completion effect', () => {
+  /** V2 (code-bearing) + adversarial passed 的 evaluator output */
+  function evaluatorV2Output(): unknown {
+    return {
+      taskId: EVAL_ID, sourceArtificerArtifactId: ARTIFICER_ART,
+      evaluation: { decision: 'approved', summary: 'v2', score: 0.9, strengths: [], concerns: [], requiredChanges: [] },
+      sourceTrace: { artificerArtifactId: ARTIFICER_ART, scribeArtifactId: SCRIBE_ART },
+      risks: [], generatedAt: new Date().toISOString(),
+      codeReview: {
+        intentConsistency: { aligned: true, explanation: 'ok' },
+        scopePrecision: { verdict: 'precise', explanation: 'ok' },
+        traceCoverage: { sufficient: true, gaps: [], explanation: 'ok' },
+      },
+      adversarialCases: [{ caseId: 'adv-1', attackType: 'boundary', toolName: 'write_file', params: { path: '/x' }, expectedDecision: 'block', rationale: 'r' }],
+      adversarialResult: { passed: true, failedCases: [] },
+    };
+  }
+
+  /** artificer 的 V2 产物 (implementationCode + ≥1 正例 + ≥1 负例 golden trace) */
+  async function seedArtificerV2Artifact(): Promise<void> {
+    const conn = new SqliteConnection(workspaceDir);
+    const store = new SqlitePIArtifactStore(conn);
+    await store.upsertArtifact({
+      artifactId: ARTIFICER_ART, artifactKind: 'principle', sourceTaskId: ARTIFICER_ID,
+      lineageArtifactIds: [], validationStatus: 'validated',
+      contentJson: JSON.stringify({
+        taskId: ARTIFICER_ID, sourceScribeArtifactId: SCRIBE_ART,
+        implementationCode: 'function evaluate(input) { return { decision: "allow", matched: true, reason: "ok" }; }',
+        goldenTraceCases: [
+          { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/safe.txt' }, expectedDecision: 'allow' },
+          { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        ],
+        affectedTools: ['write_file'],
+        sourceTrace: { scribeArtifactId: SCRIBE_ART },
+        risks: [], generatedAt: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    conn.close();
+  }
+
+  async function listRules(): Promise<{ artifactId: string; validationStatus: string }[]> {
+    const conn = new SqliteConnection(workspaceDir);
+    const store = new SqlitePIArtifactStore(conn);
+    const all = await store.listBySourceTaskId(EVAL_ID);
+    conn.close();
+    return all.filter((a) => a.artifactKind === 'rule')
+      .map((a) => ({ artifactId: a.artifactId, validationStatus: a.validationStatus }));
+  }
+
+  function makeV2Evaluator(spy: { llmCalls: number }, seedRepair?: () => Promise<string>): EvaluatorRunner {
+    return new EvaluatorRunner({
+      stateManager, runtimeAdapter: driftAdapter(evaluatorOutput('needs_revision'), spy),
+      eventEmitter: storeEmitter, artifactStore: new SqlitePIArtifactStore(new SqliteConnection(workspaceDir)),
+      validator: new DefaultEvaluatorValidator(),
+      isRepairLoopEnabled: () => true,
+      ...(seedRepair ? { seedArtificerRepairTask: seedRepair } : {}),
+    }, { owner: 'drift', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
+  }
+
+  it('T7 assembly 完成后 crash before terminal: LLM 返回 needs_revision 也不得漂移,rule 恰一个', async () => {
+    await seedLineage();
+    await seedArtificerV2Artifact();
+    const runId = await craftEvaluatorCrashState('approved', evaluatorV2Output());
+
+    // run-1 的 durable 副作用: rule 已 assembled + validated,crash before terminal
+    const expectedRuleId = `pi-rule-${EVAL_ID}-${runId}`;
+    const conn = new SqliteConnection(workspaceDir);
+    const store = new SqlitePIArtifactStore(conn);
+    await store.upsertArtifact({
+      artifactId: expectedRuleId, artifactKind: 'rule', sourceTaskId: EVAL_ID,
+      sourcePrincipleId: 'd1-p', sourceRuleId: `rule-${EVAL_ID}`,
+      lineageArtifactIds: [], validationStatus: 'validated',
+      contentJson: JSON.stringify({ implementationCode: 'x', goldenTrace: { cases: [] }, goldenTraceCases: [], affectedTools: [], ruleHostGateDecision: 'accepted_shadow' }),
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    conn.close();
+
+    const spy = { llmCalls: 0 };
+    const seedCalls: number[] = [];
+    const result = await makeV2Evaluator(spy, async () => { seedCalls.push(1); throw new Error('T7: repair must not be seeded'); }).run(EVAL_ID);
+    expect(result.status).toBe('succeeded');
+
+    expect(spy.llmCalls).toBe(0);                          // LLM 未被调用
+    const pi = await readMeta(EVAL_ID);
+    expect(pi?.runnerDecision).toBe('approved');           // final verdict 不漂移
+    expect(pi?.completionIntent?.status).toBe('applied');
+    expect(seedCalls).toEqual([]);                         // 无 repair
+    // validated rule 恰好一个,id 与 fresh run 相同 (deterministic)
+    const rules = await listRules();
+    expect(rules.length).toBe(1);
+    expect(rules[0]?.artifactId).toBe(expectedRuleId);
+    expect(rules[0]?.validationStatus).toBe('validated');
+  });
+
+  it('T8 intent 持久化后、rule validated 前 crash: resume 自动恢复 assembly', async () => {
+    await seedLineage();
+    await seedArtificerV2Artifact();
+    const runId = await craftEvaluatorCrashState('approved', evaluatorV2Output());
+    // crash between intent and rule assembly — 无 rule 产物
+    expect((await listRules()).length).toBe(0);
+
+    const spy = { llmCalls: 0 };
+    const result = await makeV2Evaluator(spy).run(EVAL_ID);
+    expect(result.status).toBe('succeeded');
+
+    expect(spy.llmCalls).toBe(0);                          // 不调用 LLM
+    // rule assembly 自动恢复: 最终 validated,evaluator succeeded
+    const rules = await listRules();
+    expect(rules.length).toBe(1);
+    expect(rules[0]?.artifactId).toBe(`pi-rule-${EVAL_ID}-${runId}`);
+    expect(rules[0]?.validationStatus).toBe('validated');
+    expect((await stateManager.getTask(EVAL_ID))?.status).toBe('succeeded');
+    const pi = await readMeta(EVAL_ID);
+    expect(pi?.runnerDecision).toBe('approved');
+    expect(pi?.completionIntent?.status).toBe('applied');
+  });
+
+  it('T8-reverse intent 持久化前 crash: 不得留下 validated rule', async () => {
+    await seedLineage();
+    await seedArtificerV2Artifact();
+    await stateManager.updateTask(EVAL_ID, { status: 'pending', attemptCount: 0 });
+
+    // 注入: completion intent 的 metadata 写失败 (crash-before-intent 等价)
+    const inner = stateManager as unknown as Record<string, unknown>;
+    const orig = inner.updateTaskDiagnosticJson as (taskId: string, json: string) => Promise<void>;
+    inner.updateTaskDiagnosticJson = async (taskId: string, json: string): Promise<void> => {
+      if (taskId === EVAL_ID && json.includes('"completionIntent"')) {
+        throw new Error('injected completion intent write failure');
+      }
+      return orig.call(stateManager, taskId, json);
+    };
+
+    const spy = { llmCalls: 0 };
+    const result = await makeV2Evaluator(spy).run(EVAL_ID);
+
+    expect(result.status).not.toBe('succeeded');
+    // rule assembly 是 completion effect — intent 未落库则绝无 validated rule
+    const rules = await listRules();
+    expect(rules.filter((r) => r.validationStatus === 'validated')).toEqual([]);
   });
 });

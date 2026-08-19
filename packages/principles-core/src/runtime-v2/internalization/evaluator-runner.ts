@@ -81,6 +81,17 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * P0-B (verdict drift 完整性): rule assembly 的稳定输入。fresh 路径来自
+ * buildContext 的内存结果;resume 路径从 durable lineage 重建 (store 按
+ * output.sourceArtificerArtifactId 取 contentJson) — 瞬时内存 context 不得
+ * 作为 recovery authority。
+ */
+interface RuleAssemblyInput {
+  readonly artificerArtifact: string | null;
+  readonly sourceArtificerArtifactId: string | null;
+}
+
+/**
  * Extract scribeArtifactId from an artificer artifact's contentJson (PRD Decision 12).
  * The contentJson is untrusted — parsed defensively with type guards, never as-cast
  * (Runtime Contract Rule 1/2/5). Returns null when the field is absent or malformed;
@@ -690,40 +701,26 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
 
-    // ── PRI-427: rule artifact assembly ──
-    // When the evaluator output is V2 AND the adversarial replay passed, write
-    // a second artifact with artifactKind='rule' carrying the executable code
-    // + golden trace + gate decision, then mark it 'validated' so the downstream
-    // RuleHostWriter.canActivate path accepts it.
-    //
-    // PRD Decision 5 contract:
-    //   - rule artifact goldenTrace = Artificer's FULL trace (buildGoldenTraceFromArtificer),
-    //     NOT the adversarial replay trace. The adversarial trace was only used
-    //     to TEST the code in PRI-426; enforcement uses the production trace.
-    //   - ruleHostGateDecision must be 'accepted_shadow' for RuleHostWriter to
-    //     accept (rule-host-writer.ts extractRuleHostGateDecision).
-    //   - Assembly failure is non-fatal: principle artifact is already written,
-    //     prompt-channel fallback remains available (PRD Decision 5 degradation).
-    let ruleArtifactId: string | null = null;
-    if (isEvaluatorOutputV2(finalOutput) && finalOutput.adversarialResult?.passed === true) {
-      ruleArtifactId = await this.assembleRuleArtifact(finalOutput, taskId, runId, context, lineageArtifactIds);
-    }
-
     // ── P0 (verdict drift): verdict + completion intent 原子落库 ──
-    // 必须先于一切治理 side effect (validate bearer / seed repair):side
-    // effect 已发生而 intent 未落 = crash 后重跑会重新问 LLM,新 verdict
-    // 与已发生副作用形成治理矛盾 (repair drift / validation drift)。
-    // 同 epoch crash/retry 重跑经 maybeResumePendingIntent resume,不重问。
+    // 必须先于一切治理 side effect (validate bearer / seed repair / rule
+    // assembly):side effect 已发生而 intent 未落 = crash 后重跑会重新问
+    // LLM,新 verdict 与已发生副作用形成治理矛盾 (repair drift /
+    // validation drift / validated-rule drift)。同 epoch crash/retry 重跑经
+    // maybeResumePendingIntent resume,不重问。
     await this.recordCompletionOrThrow(taskId, runId, finalOutput.evaluation.decision);
 
+    const ruleAssemblyInput = {
+      artificerArtifact: context.artificerArtifact ?? null,
+      sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? null,
+    };
     const sourceArtificerArtifactId = context.sourceArtificerArtifactId
       ?? finalOutput.sourceArtificerArtifactId
       ?? null;
     const effectResult = await this.applyEvaluatorDecisionEffects({
-      taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId,
+      taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId, ruleAssemblyInput,
     });
-    if (effectResult) {
-      return effectResult;
+    if (effectResult.kind === 'human_review') {
+      return effectResult.result;
     }
 
     // ── P0 invariant 5: intent APPLIED 后才允许 terminal ──
@@ -747,7 +744,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       resultRef,
       evaluationDecision: finalOutput.evaluation.decision,
       evaluationScore: finalOutput.evaluation.score,
-      ruleArtifactId,
+      ruleArtifactId: effectResult.ruleArtifactId,
     });
 
     return {
@@ -780,7 +777,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     artifactId: string;
     contextHash: string;
     sourceArtificerArtifactId: string | null;
-  }): Promise<PeerRunnerResult<EvaluatorOutputV1> | null> {
+    ruleAssemblyInput: RuleAssemblyInput;
+  }): Promise<
+    | { kind: 'human_review'; result: PeerRunnerResult<EvaluatorOutputV1> }
+    | { kind: 'completed'; ruleArtifactId: string | null }
+  > {
     const { taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId } = args;
     const {decision} = finalOutput.evaluation;
 
@@ -814,7 +815,30 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           });
         }
       }
-      return null;
+
+      // ── P0-B (verdict drift 完整性): rule assembly 是治理 side effect ──
+      // validated rule 会被 RuleHostWriter.canActivate 消费,必须在 durable
+      // completion intent 之后执行 (原顺序: assembly 在 intent 前 → crash 后
+      // 新 verdict 可与已 validated rule 冲突)。fresh 与 resume 共用本路径;
+      // resume 的 assembly 输入由 durable lineage 重建 (store 按
+      // sourceArtificerArtifactId 取 contentJson),deterministic
+      // pi-rule-<taskId>-<runId> 保证重放不重复。
+      if (isEvaluatorOutputV2(finalOutput) && finalOutput.adversarialResult?.passed === true) {
+        let lineageIds: readonly string[] = [];
+        try {
+          lineageIds = (await this.resolveLineageArtifactIds(taskId)).ids;
+        } catch (lineageErr) {
+          this.emitEvent('lineage_resolve_failed', taskId, {
+            runId,
+            errorMessage: lineageErr instanceof Error ? lineageErr.message : String(lineageErr),
+          });
+        }
+        const ruleArtifactId = await this.assembleRuleArtifact(
+          finalOutput, taskId, runId, args.ruleAssemblyInput, lineageIds,
+        );
+        return { kind: 'completed', ruleArtifactId };
+      }
+      return { kind: 'completed', ruleArtifactId: null };
     }
 
     // ── PRI-509: Evaluator→Artificer Repair Loop ──
@@ -849,21 +873,24 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           reason: 'repair_loop_max_iterations_or_seed_failure',
         });
         return {
-          status: 'succeeded',
-          taskId,
-          runId,
-          artifactId,
-          resultRef,
-          contextHash,
-          output: finalOutput,
-          attemptCount: task.attemptCount,
+          kind: 'human_review',
+          result: {
+            status: 'succeeded',
+            taskId,
+            runId,
+            artifactId,
+            resultRef,
+            contextHash,
+            output: finalOutput,
+            attemptCount: task.attemptCount,
+          },
         };
       }
-      // repairOutcome.kind === 'repair_seeded' → fall through (null)
+      // repairOutcome.kind === 'repair_seeded' → fall through (completed)
     }
     // rejected / needs_revision (repair loop off): 无治理效果 — commit 门的
     // transition decision 依据 durable runnerDecision fail-closed。
-    return null;
+    return { kind: 'completed', ruleArtifactId: null };
   }
 
   /**
@@ -989,6 +1016,19 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const output = await this.recoverIntentOutput(taskId, intent.sourceRunId, intent.decision);
     const artifactId = `pi-art-${taskId}-${intent.sourceRunId}`;
     const contextHash = `resume-${intent.sourceRunId}`;
+    // P0-B: rule assembly 输入由 durable lineage 重建 (fresh 路径来自内存
+    // context;resume 不得依赖瞬时内存) — store 按 output 的
+    // sourceArtificerArtifactId 取 artificer contentJson。
+    const assemblySourceId = output.sourceArtificerArtifactId ?? null;
+    let artificerContent: string | null = null;
+    if (assemblySourceId) {
+      try {
+        const rec = await this.artifactStore.getArtifactById(assemblySourceId);
+        artificerContent = rec?.contentJson ?? null;
+      } catch {
+        artificerContent = null; // assembly 将结构化降级 (rule_assembly_failed)
+      }
+    }
     const effectResult = await this.applyEvaluatorDecisionEffects({
       taskId,
       runId: intent.sourceRunId,
@@ -996,10 +1036,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       task: leasedTask,
       artifactId,
       contextHash,
-      sourceArtificerArtifactId: output.sourceArtificerArtifactId ?? null,
+      sourceArtificerArtifactId: assemblySourceId,
+      ruleAssemblyInput: { artificerArtifact: artificerContent, sourceArtificerArtifactId: assemblySourceId },
     });
-    if (effectResult) {
-      return effectResult;
+    if (effectResult.kind === 'human_review') {
+      return effectResult.result;
     }
     await this.markCompletionIntentAppliedOrThrow(taskId);
     const resultRef = `${this.config.resultRefPrefix}://${intent.sourceRunId}`;
@@ -1018,7 +1059,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       resultRef,
       evaluationDecision: output.evaluation.decision,
       evaluationScore: output.evaluation.score,
-      ruleArtifactId: null,
+      ruleArtifactId: effectResult.ruleArtifactId,
       resumedFromCompletionIntent: true,
     });
     return {
@@ -1652,10 +1693,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     output: EvaluatorOutputV2,
     taskId: string,
     runId: string,
-    context: EvaluatorContext,
+    assemblyInput: RuleAssemblyInput,
     lineageArtifactIds: readonly string[],
   ): Promise<string | null> {
-    if (!context.artificerArtifact) {
+    if (!assemblyInput.artificerArtifact) {
       this.emitEvent('rule_assembly_failed', taskId, {
         runId,
         reason: 'no_artificer_artifact_in_context',
@@ -1664,7 +1705,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return null;
     }
 
-    const artificerParsed = this.parseArtificerArtifact(context.artificerArtifact);
+    const artificerParsed = this.parseArtificerArtifact(assemblyInput.artificerArtifact);
     if (!artificerParsed) {
       this.emitEvent('rule_assembly_failed', taskId, {
         runId,
@@ -1703,7 +1744,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // + ≥1 negative case.
     const traceBuild = buildGoldenTraceFromArtificer({
       cases: goldenTraceCases,
-      sourceArtifactId: context.sourceArtificerArtifactId ?? undefined,
+      sourceArtifactId: assemblyInput.sourceArtificerArtifactId ?? undefined,
     });
     if (!traceBuild.ok) {
       this.emitEvent('rule_assembly_failed', taskId, {
@@ -1728,7 +1769,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // adversarialResult.passed === true is the precondition for this method;
       // the gate decision is therefore accepted_shadow.
       ruleHostGateDecision: 'accepted_shadow',
-      sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
+      sourceArtificerArtifactId: assemblyInput.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
       adversarialResult: output.adversarialResult,
       ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
       // PRI-490: preserve evidenceRefs from Artificer artifact into rule artifact.

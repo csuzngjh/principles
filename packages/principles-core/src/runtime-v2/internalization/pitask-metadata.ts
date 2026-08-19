@@ -164,6 +164,14 @@ export interface RunnerCompletionIntent {
   readonly revisionEpoch: number;
   readonly status: 'pending' | 'applied';
   readonly revisionIteration?: number;
+  /**
+   * P0-A (completion-intent 完整性): 该 completion 的效果类型。
+   * - 'governance_transition' (缺省): 正常治理 transition (dispatch /
+   *   revision routing / repair seed / validation),由 runner 的 effects 执行;
+   * - 'needs_human_review': 终态人工裁决效果 (rollout budget exhausted 等)
+   *   — crash resume 必须继续该效果 (重写 needs_human_review),禁止重问 LLM。
+   */
+  readonly effect?: 'governance_transition' | 'needs_human_review';
 }
 
 /** rollout needs_revision 的修订路由载荷 */
@@ -451,12 +459,17 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
         || r.revisionIteration < 1 || r.revisionIteration > 2) return null;
       ({ revisionIteration } = r);
     }
+    // P0-A: 可选效果类型,缺失 = governance_transition
+    let effect: 'governance_transition' | 'needs_human_review' | undefined;
+    if (r.effect !== undefined && r.effect !== 'governance_transition' && r.effect !== 'needs_human_review') return null;
+    if (r.effect === 'needs_human_review') ({ effect } = r);
     completionIntent = {
       decision: r.decision as RunnerDecision,
       sourceRunId: r.sourceRunId,
       revisionEpoch: r.revisionEpoch,
       status: r.status,
       revisionIteration,
+      ...(effect !== undefined ? { effect } : {}),
     };
   }
 
