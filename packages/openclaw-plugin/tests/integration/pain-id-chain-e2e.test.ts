@@ -207,8 +207,6 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
       },
       workspace: {
         isRiskPath: false,
-        planStatus: 'NONE',
-        hasPlanFile: false,
       },
       session: {
         sessionId: 'session-eval-001',
@@ -240,8 +238,6 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
       },
       workspace: {
         isRiskPath: false,
-        planStatus: 'NONE',
-        hasPlanFile: false,
       },
       session: {
         sessionId: 'session-eval-002',

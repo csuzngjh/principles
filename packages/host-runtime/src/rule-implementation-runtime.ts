@@ -39,8 +39,6 @@ try {
         ' getToolName: () => __pdCallInput.action.toolName,' +
         ' getEstimatedLineChanges: () => __pdCallInput.derived.estimatedLineChanges,' +
         ' getBashRisk: () => __pdCallInput.derived.bashRisk,' +
-        ' hasPlanFile: () => __pdCallInput.workspace.hasPlanFile,' +
-        ' getPlanStatus: () => __pdCallInput.workspace.planStatus,' +
         ' getEpTier: () => __pdCallInput.evolution.epTier' +
         '});', { filename: rule.filename + '.bootstrap' }
       ).runInContext(context, { timeout: 1000 });

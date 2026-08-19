@@ -155,11 +155,13 @@ export type ProfileEvolutionMode = (typeof PROFILE_EVOLUTION_MODES)[number];
 export const PROFILE_TEST_LEVELS = ['smoke', 'unit', 'full'] as const;
 export type ProfileTestLevel = (typeof PROFILE_TEST_LEVELS)[number];
 
-export interface ProfileGateConfig {
-  require_plan_for_risk_paths: boolean;
-  require_audit_before_write: boolean;
-  require_reviewer_after_write: boolean;
-}
+// PRI-286 retirement cleanup (2026-08-19): ProfileGateConfig,
+// ProfilePlanApprovalsConfig, ProfileProgressiveGateConfig, and
+// ProfileThinkingCheckpointConfig were removed. The built-in PLAN/
+// confirm-first gate and the thinking-checkpoint gate no longer exist in
+// the runtime; these keys are accepted as no-op legacy input with a
+// deprecation warning (see pd-validate-profile.ts) and are NOT part of
+// the canonical profile contract anymore.
 
 export interface ProfileTestsConfig {
   on_change: ProfileTestLevel;
@@ -188,30 +190,12 @@ export interface ProfileLifecycleConfig {
   heartbeat_stale_hours: number;
 }
 
-export interface ProfilePlanApprovalsConfig {
-  enabled: boolean;
-  max_lines_override: number;
-  allowed_patterns: string[];
-  allowed_operations: string[];
-}
-
-export interface ProfileProgressiveGateConfig {
-  enabled: boolean;
-  plan_approvals: ProfilePlanApprovalsConfig;
-}
-
 export interface ProfileEditVerificationConfig {
   enabled: boolean;
   max_file_size_bytes: number;
   fuzzy_match_enabled: boolean;
   fuzzy_match_threshold: number;
   skip_large_file_action: 'warn' | 'block';
-}
-
-export interface ProfileThinkingCheckpointConfig {
-  enabled: boolean;
-  window_ms: number;
-  high_risk_tools: string[];
 }
 
 export interface ProfileCustomGuard {
@@ -224,13 +208,10 @@ export interface ProfileConfig {
   audit_level: ProfileAuditLevel;
   risk_paths: string[];
   evolution_mode: ProfileEvolutionMode;
-  gate: ProfileGateConfig;
   tests: ProfileTestsConfig;
   pain: ProfilePainConfig;
   lifecycle: ProfileLifecycleConfig;
-  progressive_gate: ProfileProgressiveGateConfig;
   edit_verification: ProfileEditVerificationConfig;
-  thinking_checkpoint: ProfileThinkingCheckpointConfig;
   custom_guards: ProfileCustomGuard[];
 }
 

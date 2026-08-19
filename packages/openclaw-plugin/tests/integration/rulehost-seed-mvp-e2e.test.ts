@@ -384,7 +384,7 @@ function buildRuleHostInput(toolName: string, filePath: string, context?: RuleCo
       normalizedPath: filePath,
       paramsSummary: { file_path: filePath },
     },
-    workspace: { isRiskPath: false, planStatus: 'NONE' as const, hasPlanFile: false },
+    workspace: { isRiskPath: false },
     session: { sessionId: 'pri492-e2e-session', currentGfi: 0, recentThinking: false },
     evolution: { epTier: 1 },
     derived: { estimatedLineChanges: 10, bashRisk: 'safe' as const },

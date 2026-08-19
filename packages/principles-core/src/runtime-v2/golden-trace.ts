@@ -196,8 +196,6 @@ export function createSyntheticRuleHostInput(
     action,
     workspace: {
       isRiskPath: false,
-      planStatus: 'UNKNOWN',
-      hasPlanFile: false,
       ...overrides.workspace,
     },
     session: {

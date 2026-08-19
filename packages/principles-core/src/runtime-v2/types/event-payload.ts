@@ -11,7 +11,6 @@ import type {
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,
-  PlanApprovalEventData,
   EvolutionTaskEventData,
   EmpathyRollbackEventData,
   EventCategory,
@@ -25,7 +24,6 @@ export type EventLogEntry =
   | { ts: string; date: string; type: 'hook_execution'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: HookExecutionEventData }
   | { ts: string; date: string; type: 'gate_block'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: GateBlockEventData }
   | { ts: string; date: string; type: 'gate_bypass'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: GateBypassEventData }
-  | { ts: string; date: string; type: 'plan_approval'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: PlanApprovalEventData }
   | { ts: string; date: string; type: 'evolution_task'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: EvolutionTaskEventData }
   | { ts: string; date: string; type: 'empathy_rollback'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: EmpathyRollbackEventData }
   | { ts: string; date: string; type: 'error'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: Record<string, unknown> }
@@ -55,10 +53,6 @@ export function isGateBlockEventEntry(entry: EventLogEntry): entry is Extract<Ev
 
 export function isGateBypassEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'gate_bypass' }> {
   return entry.type === 'gate_bypass';
-}
-
-export function isPlanApprovalEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'plan_approval' }> {
-  return entry.type === 'plan_approval';
 }
 
 export function isEvolutionTaskEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'evolution_task' }> {
@@ -120,15 +114,6 @@ export const DiscriminatedEventLogEntrySchema = Type.Union([
     ts: Type.String(),
     date: Type.String(),
     type: Type.Literal('gate_bypass'),
-    category: EventCategorySchema,
-    sessionId: Type.Optional(Type.String()),
-    workspaceDir: Type.Optional(Type.String()),
-    data: Type.Record(Type.String(), Type.Any()),
-  }),
-  Type.Object({
-    ts: Type.String(),
-    date: Type.String(),
-    type: Type.Literal('plan_approval'),
     category: EventCategorySchema,
     sessionId: Type.Optional(Type.String()),
     workspaceDir: Type.Optional(Type.String()),

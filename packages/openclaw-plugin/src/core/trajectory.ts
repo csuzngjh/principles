@@ -238,7 +238,6 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
       tool_name TEXT NOT NULL,
       file_path TEXT,
       reason TEXT NOT NULL,
-      plan_status TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS trust_changes (
@@ -709,15 +708,16 @@ export class TrajectoryDatabase {
 
   recordGateBlock(input: TrajectoryGateBlockInput): void {
     this.withWrite(() => {
+      // PRI-286 cleanup: the retired plan-state column is never written. Old
+      // databases keep their (nullable) column; no destructive migration.
       this.db.prepare(`
-        INSERT INTO gate_blocks (session_id, tool_name, file_path, reason, plan_status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO gate_blocks (session_id, tool_name, file_path, reason, created_at)
+        VALUES (?, ?, ?, ?, ?)
       `).run(
         input.sessionId ?? null,
         input.toolName,
         input.filePath ?? null,
         input.reason,
-        input.planStatus ?? null,
         input.createdAt ?? nowIso(),
       );
     });
@@ -1413,35 +1413,6 @@ export class TrajectoryDatabase {
   }
 
   /**
-   * List gate blocks for a session.
-   * Returns minimal fields for nocturnal use — no raw text.
-   */
-  listGateBlocksForSession(sessionId: string): {
-    id: number;
-    toolName: string;
-    filePath: string | null;
-    reason: string;
-    planStatus: string | null;
-    createdAt: string;
-  }[] {
-    const rows = this.db.prepare(`
-      SELECT id, tool_name, file_path, reason, plan_status, created_at
-      FROM gate_blocks
-      WHERE session_id = ?
-      ORDER BY id ASC
-    `).all(sessionId) as Record<string, unknown>[];
-
-    return rows.map((row) => ({
-      id: Number(row.id),
-      toolName: String(row.tool_name),
-      filePath: row.file_path ? String(row.file_path) : null,
-      reason: String(row.reason),
-      planStatus: row.plan_status ? String(row.plan_status) : null,
-      createdAt: String(row.created_at),
-    }));
-  }
-
-  /**
    * List correction samples for a specific session.
    * Returns minimal fields for nocturnal use — correction cue only.
    * #268: Wire correction_samples into nocturnal pipeline.
@@ -1786,7 +1757,6 @@ export class TrajectoryDatabase {
             toolName: String(event.data?.toolName ?? 'unknown'),
             filePath: typeof event.data?.filePath === 'string' ? event.data.filePath : null,
             reason: String(event.data?.reason ?? 'legacy'),
-            planStatus: typeof event.data?.planStatus === 'string' ? event.data.planStatus : null,
             createdAt: event.ts,
           });
         }

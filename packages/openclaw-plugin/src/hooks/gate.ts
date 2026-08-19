@@ -70,12 +70,6 @@ export function handleBeforeToolCall(
       action,
       workspace: {
         isRiskPath: false, // Rule Host determines risk dynamically
-        // DEPRECATED (PRI-286): planStatus/hasPlanFile are legacy compatibility fields.
-        // Live PD no longer reads or manages PLAN.md state. These fields must not be
-        // used for new MVP behavior. Future "plan-first" enforcement must come from
-        // owner-approved RuleHost/code_tool_hook activation, not built-in state.
-        planStatus: 'NONE' as const,
-        hasPlanFile: false,
       },
       session: {
         sessionId: ctx.sessionId,

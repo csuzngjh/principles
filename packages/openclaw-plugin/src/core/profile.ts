@@ -6,11 +6,6 @@ export const PROFILE_DEFAULTS = {
   audit_level: "medium",
   risk_paths: [] as string[],
   evolution_mode: "realtime",
-  gate: {
-    require_plan_for_risk_paths: true,
-    require_audit_before_write: true,
-    require_reviewer_after_write: true,
-  },
   tests: {
     on_change: "smoke",
     on_risk_change: "unit",
@@ -33,15 +28,6 @@ export const PROFILE_DEFAULTS = {
     enabled: true,
     heartbeat_stale_hours: 72,
   },
-  progressive_gate: {
-    enabled: true,
-    plan_approvals: {
-      enabled: false,
-      max_lines_override: -1,
-      allowed_patterns: [] as string[],
-      allowed_operations: [] as string[],
-    },
-  },
   edit_verification: {
     enabled: true,
     max_file_size_bytes: 10 * 1024 * 1024, // 10MB
@@ -49,13 +35,13 @@ export const PROFILE_DEFAULTS = {
     fuzzy_match_threshold: 0.8,
     skip_large_file_action: "warn" as "warn" | "block", // "warn" or "block"
   },
-  thinking_checkpoint: {
-    enabled: false,  // Default OFF to avoid blocking new users
-    window_ms: 5 * 60 * 1000, // 5 minute window
-  high_risk_tools: ['run_shell_command', 'delete_file', 'move_file'],
-  },
   custom_guards: [] as { pattern: string; message: string; severity: string }[],
 };
+
+// PRI-286 retirement cleanup (2026-08-19): gate / progressive_gate /
+// thinking_checkpoint are retired PROFILE keys. normalizeProfile no longer
+// normalizes them; presence of any of them surfaces a warning (rc-9) so
+// owners learn the key has no runtime effect.
 
  
 // Reason: normalizeProfile handles arbitrary JSON profile shapes where static typing cannot capture runtime field existence
@@ -93,59 +79,15 @@ export function normalizeProfile(rawProfile: any): any {
       warnings.push("risk_paths must be an array of strings");
     }
 
-    // Gate settings
-    if (rawProfile.gate && typeof rawProfile.gate === 'object') {
-      const g = rawProfile.gate;
-      normalized.gate.require_plan_for_risk_paths = g.require_plan_for_risk_paths ?? g.requirePlanForRiskPaths ?? defaults.gate.require_plan_for_risk_paths;
-      normalized.gate.require_audit_before_write = g.require_audit_before_write ?? g.requireAuditBeforeWrite ?? defaults.gate.require_audit_before_write;
-      normalized.gate.require_reviewer_after_write = g.require_reviewer_after_write ?? g.requireReviewerAfterWrite ?? defaults.gate.require_reviewer_after_write;
+    // Retired gate-family keys (PRI-286 cleanup): warn instead of normalize.
+    if (rawProfile.gate !== undefined || rawProfile.progressiveGate !== undefined) {
+      warnings.push("PROFILE key 'gate'/'progressive_gate' is retired (PRI-286, built-in PLAN gate removed); it has no effect and can be deleted.");
     }
-
-    // Progressive Gate
-    if (rawProfile.progressive_gate && typeof rawProfile.progressive_gate === 'object') {
-      const pg = rawProfile.progressive_gate;
-      normalized.progressive_gate.enabled = pg.enabled ?? pg.enabled ?? defaults.progressive_gate.enabled;
-
-      // Plan approvals configuration
-      if (pg.plan_approvals && typeof pg.plan_approvals === 'object') {
-        const pa = pg.plan_approvals;
-        normalized.progressive_gate.plan_approvals.enabled = pa.enabled ?? pa.planApprovals ?? defaults.progressive_gate.plan_approvals.enabled;
-
-        const maxLines = pa.max_lines_override ?? pa.maxLinesOverride;
-        if (typeof maxLines === 'number' && maxLines >= -1) {
-          normalized.progressive_gate.plan_approvals.max_lines_override = maxLines;
-        }
-
-        if (Array.isArray(pa.allowed_patterns)) {
-          normalized.progressive_gate.plan_approvals.allowed_patterns = pa.allowed_patterns.filter((p: any) => typeof p === 'string');
-        }
-
-        if (Array.isArray(pa.allowed_operations)) {
-          normalized.progressive_gate.plan_approvals.allowed_operations = pa.allowed_operations.filter((o: any) => typeof o === 'string');
-        }
-      }
-    } else if (rawProfile.progressiveGate && typeof rawProfile.progressiveGate === 'object') {
-      const pg = rawProfile.progressiveGate;
-      normalized.progressive_gate.enabled = pg.enabled ?? defaults.progressive_gate.enabled;
-
-      // Plan approvals configuration (camelCase)
-      if (pg.planApprovals && typeof pg.planApprovals === 'object') {
-        const pa = pg.planApprovals;
-        normalized.progressive_gate.plan_approvals.enabled = pa.enabled ?? defaults.progressive_gate.plan_approvals.enabled;
-
-        const maxLines = pa.maxLinesOverride;
-        if (typeof maxLines === 'number' && maxLines >= -1) {
-          normalized.progressive_gate.plan_approvals.max_lines_override = maxLines;
-        }
-
-        if (Array.isArray(pa.allowedPatterns)) {
-          normalized.progressive_gate.plan_approvals.allowed_patterns = pa.allowedPatterns.filter((p: any) => typeof p === 'string');
-        }
-
-        if (Array.isArray(pa.allowedOperations)) {
-          normalized.progressive_gate.plan_approvals.allowed_operations = pa.allowedOperations.filter((o: any) => typeof o === 'string');
-        }
-      }
+    if (rawProfile.progressive_gate !== undefined) {
+      warnings.push("PROFILE key 'progressive_gate' is retired (PRI-286); it has no effect and can be deleted.");
+    }
+    if (rawProfile.thinking_checkpoint !== undefined || rawProfile.thinkingCheckpoint !== undefined) {
+      warnings.push("PROFILE key 'thinking_checkpoint' is retired; it has no effect and can be deleted.");
     }
 
     // Edit verification settings (P-03)
@@ -192,18 +134,8 @@ export function normalizeProfile(rawProfile: any): any {
       }
     }
 
-    // Thinking OS Checkpoint settings (P-10)
-    const tcRaw = rawProfile.thinking_checkpoint ?? rawProfile.thinkingCheckpoint;
-    if (tcRaw && typeof tcRaw === 'object') {
-      normalized.thinking_checkpoint.enabled = tcRaw.enabled ?? defaults.thinking_checkpoint.enabled;
-      const windowMs = tcRaw.window_ms ?? tcRaw.windowMs;
-      if (typeof windowMs === 'number' && windowMs > 0) {
-        normalized.thinking_checkpoint.window_ms = windowMs;
-      }
-      if (Array.isArray(tcRaw.high_risk_tools ?? tcRaw.highRiskTools)) {
-        normalized.thinking_checkpoint.high_risk_tools = (tcRaw.high_risk_tools ?? tcRaw.highRiskTools).filter((t: any) => typeof t === 'string');
-      }
-    }
+    // Thinking OS Checkpoint settings retired with the checkpoint gate —
+    // presence warned above; not normalized.
 
     if (Array.isArray(rawProfile.custom_guards)) {
       normalized.custom_guards = rawProfile.custom_guards.map((item: any) => {

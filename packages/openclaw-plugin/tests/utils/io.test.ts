@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizePath, normalizeRiskPath, isRisky, parseKvLines, serializeKvLines, planStatus } from '../../src/utils/io';
+import { normalizePath, normalizeRiskPath, isRisky, parseKvLines, serializeKvLines } from '../../src/utils/io';
 
 describe('IO Utilities', () => {
   describe('Path Normalization', () => {

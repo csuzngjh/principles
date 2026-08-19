@@ -169,7 +169,6 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       tool_name TEXT NOT NULL,
       file_path TEXT,
       reason TEXT NOT NULL,
-      plan_status TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS trust_changes (

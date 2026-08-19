@@ -121,7 +121,6 @@ export type {
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,
-  PlanApprovalEventData,
   EvolutionTaskEventData,
   EmpathyRollbackEventData,
   HeartbeatDiagnosisEventData,
@@ -157,7 +156,6 @@ export {
   HookExecutionEventDataSchema,
   GateBlockEventDataSchema,
   GateBypassEventDataSchema,
-  PlanApprovalEventDataSchema,
   EvolutionTaskEventDataSchema,
   EmpathyRollbackEventDataSchema,
   HeartbeatDiagnosisEventDataSchema,
@@ -197,7 +195,6 @@ export {
   isHookExecutionEventEntry,
   isGateBlockEventEntry,
   isGateBypassEventEntry,
-  isPlanApprovalEventEntry,
   isEvolutionTaskEventEntry,
   isEmpathyRollbackEventEntry,
 } from './event-payload.js';

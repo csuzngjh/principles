@@ -271,7 +271,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
 
       const hostInput: RuleHostInput = {
         action,
-        workspace: { isRiskPath: false, planStatus: 'NONE', hasPlanFile: false },
+        workspace: { isRiskPath: false },
         session: { sessionId: event.context.sessionId, currentGfi: enrichment.currentGfi, recentThinking: enrichment.recentThinking },
         evolution: { epTier: enrichment.epTier },
         derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }), bashRisk: enrichment.bashRisk },

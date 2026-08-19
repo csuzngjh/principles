@@ -12,7 +12,6 @@ export type EventType =
   | 'hook_execution'
   | 'gate_block'
   | 'gate_bypass'
-  | 'plan_approval'
   | 'evolution_task'
   | 'empathy_rollback'
   | 'error'
@@ -42,7 +41,6 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('hook_execution'),
   Type.Literal('gate_block'),
   Type.Literal('gate_bypass'),
-  Type.Literal('plan_approval'),
   Type.Literal('evolution_task'),
   Type.Literal('empathy_rollback'),
   Type.Literal('error'),
@@ -249,7 +247,6 @@ export interface GateBlockEventData {
   toolName: string;
   filePath: string;
   reason: string;
-  planStatus?: string;
   /** Source module that triggered the block (for audit trail) */
   blockSource?: string;
 }
@@ -258,7 +255,6 @@ export const GateBlockEventDataSchema = Type.Object({
   toolName: Type.String(),
   filePath: Type.String(),
   reason: Type.String(),
-  planStatus: Type.Optional(Type.String()),
   blockSource: Type.Optional(Type.String()),
 });
 export type GateBlockEventDataStatic = Static<typeof GateBlockEventDataSchema>;
@@ -276,20 +272,11 @@ export const GateBypassEventDataSchema = Type.Object({
 });
 export type GateBypassEventDataStatic = Static<typeof GateBypassEventDataSchema>;
 
-export interface PlanApprovalEventData {
-  toolName: string;
-  filePath: string;
-  pattern: string;
-  planStatus: string;
-}
-
-export const PlanApprovalEventDataSchema = Type.Object({
-  toolName: Type.String(),
-  filePath: Type.String(),
-  pattern: Type.String(),
-  planStatus: Type.String(),
-});
-export type PlanApprovalEventDataStatic = Static<typeof PlanApprovalEventDataSchema>;
+// PRI-286 retirement cleanup (2026-08-19): the plan_approval event type and
+// PlanApprovalEventData were removed — zero production writers remained after
+// the confirm-first gate deletion. Historical JSONL entries are tolerated as
+// extra data by tolerant readers; nothing parses old logs against this union
+// strictly.
 
 export interface EvolutionTaskEventData {
   taskId: string;

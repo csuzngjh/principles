@@ -13,7 +13,7 @@ import type { RuleHostInput, RuleHostResult, LoadedImplementation } from '../int
 function makeInput(): RuleHostInput {
   return {
     action: { toolName: 'write', normalizedPath: '/foo.ts', paramsSummary: {} },
-    workspace: { isRiskPath: false, planStatus: 'NONE', hasPlanFile: false },
+    workspace: { isRiskPath: false },
     session: { sessionId: 's1', currentGfi: 0, recentThinking: false },
     evolution: { epTier: 0 },
     derived: { estimatedLineChanges: 1, bashRisk: 'unknown' },
@@ -245,7 +245,7 @@ describe('mergeDecisions — auto_correct (PRI-114)', () => {
   function makeInput114(): RuleHostInput {
     return {
       action: { toolName: 'write', normalizedPath: '/foo.ts', paramsSummary: {} },
-      workspace: { isRiskPath: false, planStatus: 'NONE', hasPlanFile: false },
+      workspace: { isRiskPath: false },
       session: { sessionId: 's1', currentGfi: 0, recentThinking: false },
       evolution: { epTier: 0 },
       derived: { estimatedLineChanges: 1, bashRisk: 'unknown' },

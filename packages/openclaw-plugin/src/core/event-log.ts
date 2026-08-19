@@ -14,7 +14,6 @@ import type {
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,
-  PlanApprovalEventData,
   EvolutionTaskEventData,
   EmpathyRollbackEventData,
   DiagnosisTaskEventData,
@@ -139,10 +138,6 @@ export class EventLog {
     this.record('gate_bypass', 'bypassed', sessionId, data);
   }
 
-  recordPlanApproval(sessionId: string | undefined, data: PlanApprovalEventData): void {
-    this.record('plan_approval', 'approved', sessionId, data);
-  }
-  
   recordEvolutionTask(data: EvolutionTaskEventData): void {
     this.record('evolution_task', 'enqueued', undefined, data);
   }

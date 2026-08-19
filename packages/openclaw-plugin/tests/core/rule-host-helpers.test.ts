@@ -5,6 +5,7 @@
  *   - Returns correct values from the frozen input snapshot
  *   - Is a frozen object that cannot be mutated
  *   - All helpers are pure functions with no side effects
+ *   - Does NOT expose retired plan-state helpers (PRI-286 anti-regression)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -20,8 +21,6 @@ function makeInput(overrides?: Partial<RuleHostInput>): RuleHostInput {
     },
     workspace: {
       isRiskPath: false,
-      planStatus: 'NONE',
-      hasPlanFile: false,
     },
     session: {
       sessionId: 'session-123',
@@ -54,7 +53,7 @@ describe('createRuleHostHelpers', () => {
 
   it('should return correct isRiskPath from input snapshot', () => {
     const helpers = createRuleHostHelpers(makeInput({
-      workspace: { isRiskPath: true, planStatus: 'READY', hasPlanFile: true },
+      workspace: { isRiskPath: true },
     }));
     expect(helpers.isRiskPath()).toBe(true);
   });
@@ -83,20 +82,6 @@ describe('createRuleHostHelpers', () => {
     expect(helpers.getBashRisk()).toBe('safe');
   });
 
-  it('should return correct hasPlanFile from input snapshot', () => {
-    const helpers = createRuleHostHelpers(makeInput({
-      workspace: { isRiskPath: false, planStatus: 'READY', hasPlanFile: true },
-    }));
-    expect(helpers.hasPlanFile()).toBe(true);
-  });
-
-  it('should return correct planStatus from input snapshot', () => {
-    const helpers = createRuleHostHelpers(makeInput({
-      workspace: { isRiskPath: false, planStatus: 'DRAFT', hasPlanFile: true },
-    }));
-    expect(helpers.getPlanStatus()).toBe('DRAFT');
-  });
-
   it('should return correct epTier from input snapshot', () => {
     const helpers = createRuleHostHelpers(makeInput({
       evolution: { epTier: 4 },
@@ -113,8 +98,12 @@ describe('createRuleHostHelpers', () => {
     expect(helpers.getToolName()).toBe(helpers.getToolName());
     expect(helpers.getEstimatedLineChanges()).toBe(helpers.getEstimatedLineChanges());
     expect(helpers.getBashRisk()).toBe(helpers.getBashRisk());
-    expect(helpers.hasPlanFile()).toBe(helpers.hasPlanFile());
-    expect(helpers.getPlanStatus()).toBe(helpers.getPlanStatus());
     expect(helpers.getEpTier()).toBe(helpers.getEpTier());
+  });
+
+  it('does not expose retired plan-state helpers (PRI-286 anti-regression)', () => {
+    const helpers = createRuleHostHelpers(makeInput()) as unknown as Record<string, unknown>;
+    expect(Object.hasOwn(helpers, 'hasPlanFile')).toBe(false);
+    expect(Object.hasOwn(helpers, 'getPlanStatus')).toBe(false);
   });
 });

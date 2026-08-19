@@ -225,8 +225,6 @@ function validateCase(
       getToolName: () => input.action.toolName,
       getEstimatedLineChanges: () => input.derived.estimatedLineChanges,
       getBashRisk: () => input.derived.bashRisk,
-      hasPlanFile: () => input.workspace.hasPlanFile,
-      getPlanStatus: () => input.workspace.planStatus,
       getEpTier: () => input.evolution.epTier,
     };
     try {

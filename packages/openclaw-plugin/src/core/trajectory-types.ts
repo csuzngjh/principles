@@ -82,7 +82,6 @@ export interface TrajectoryGateBlockInput {
   toolName: string;
   filePath?: string | null;
   reason: string;
-  planStatus?: string | null;
   createdAt?: string;
 }
 

@@ -50,7 +50,7 @@ describe('internalization contracts (PRI-42)', () => {
       const { createRuleHostHelpers } = await import('../internalization/rule-host-helpers.js');
       const input = {
         action: { toolName: 'write', normalizedPath: 'src/test.ts', paramsSummary: {} },
-        workspace: { isRiskPath: true, planStatus: 'DRAFT' as const, hasPlanFile: true },
+        workspace: { isRiskPath: true },
         session: { sessionId: 'test', currentGfi: 3, recentThinking: false },
         evolution: { epTier: 2 },
         derived: { estimatedLineChanges: 10, bashRisk: 'normal' as const },
@@ -63,8 +63,6 @@ describe('internalization contracts (PRI-42)', () => {
       expect(helpers.getToolName()).toBe('write');
       expect(helpers.getEstimatedLineChanges()).toBe(10);
       expect(helpers.getBashRisk()).toBe('normal');
-      expect(helpers.hasPlanFile()).toBe(true);
-      expect(helpers.getPlanStatus()).toBe('DRAFT');
       expect(helpers.getEpTier()).toBe(2);
     });
 
@@ -72,7 +70,7 @@ describe('internalization contracts (PRI-42)', () => {
       const { createRuleHostHelpers } = await import('../internalization/rule-host-helpers.js');
       const input = {
         action: { toolName: 'bash', normalizedPath: null, paramsSummary: {} },
-        workspace: { isRiskPath: false, planStatus: 'NONE' as const, hasPlanFile: false },
+        workspace: { isRiskPath: false },
         session: { currentGfi: 0, recentThinking: false },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' as const },
