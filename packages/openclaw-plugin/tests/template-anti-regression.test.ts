@@ -98,11 +98,13 @@ const NEGATION_RE =
 function collectCoreFiles(): { dir: string; file: string; content: string }[] {
   const out: { dir: string; file: string; content: string }[] = [];
   for (const dir of CORE_DIRS) {
-    for (const name of fs.readdirSync(dir)) {
-      const full = path.join(dir, name);
-      if (fs.statSync(full).isFile()) {
-        out.push({ dir, file: name, content: fs.readFileSync(full, 'utf8') });
-      }
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const full = path.join(dir, entry.name);
+      // Read directly: the templates are static fixtures and a missing file
+      // must fail loudly rather than being masked by a stat/exists pre-check.
+      const content = fs.readFileSync(full, 'utf8');
+      out.push({ dir, file: entry.name, content });
     }
   }
   return out;
