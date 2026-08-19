@@ -1258,3 +1258,37 @@ describe('RuleHostWriter dispatcher integration', () => {
     expect(record).toBeNull();
   });
 });
+
+describe('legacy-signature RuleCode anti-regression (2026-08-19 validator hardening)', () => {
+  it('rejects an old-signature evaluate(toolName, params) rule at the activation boundary via the REAL gate deps', async () => {
+    const { RuleHostWriter } = await import('../rule-host-writer.js');
+    const { createProductionGateDeps } = await import('../../production-gate-deps.js');
+    // Old demo-pipeline signature: treats arg0 as a toolName string and arg1
+    // as a params record. Called with the canonical (input, helpers) contract
+    // it throws (params.path is undefined -> TypeError), which the replay
+    // gate must classify as rejected_runtime_error — never activatable.
+    const legacySignatureCode = [
+      'function evaluate(toolName, params) {',
+      '  if (params.path.indexOf("/etc") === 0) {',
+      '    return { decision: "block", matched: true, reason: "legacy demo rule" };',
+      '  }',
+      '  return { decision: "allow", matched: false, reason: "legacy demo rule" };',
+      '}',
+      'var meta = { name: "legacy-demo", version: "1", ruleId: "R_LEGACY", coversCondition: "all" };',
+    ].join('\n');
+
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: legacySignatureCode,
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['write_file'],
+      }),
+    });
+
+    const writer = new RuleHostWriter({ gateDeps: createProductionGateDeps() });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('gate_decision_not_accepted_shadow:rejected_runtime_error');
+  });
+});

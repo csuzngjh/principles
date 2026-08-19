@@ -454,11 +454,13 @@ demoCmd
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')
   .option('--channels <channels>', 'Comma-separated channel list (prompt,code_tool_hook,defer_archive)')
+  .option('--allow-demo-write-to-existing-workspace', 'Developer override: permit writing demo artifacts into a workspace that already contains PD state (demo isolation guard)')
   .action(async (opts) => {
     await handleDemoStoryA({
       workspace: opts.workspace,
       json: opts.json,
       channels: opts.channels,
+      allowDemoWriteToExistingWorkspace: opts.allowDemoWriteToExistingWorkspace === true,
     });
   });
 

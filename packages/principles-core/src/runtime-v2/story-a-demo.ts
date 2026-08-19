@@ -83,6 +83,7 @@ export function makePrincipleArtifactRecord(runId: string): PIArtifactRecord {
     validationStatus: 'validated',
     contentJson: JSON.stringify({
       principleId,
+      origin: 'demo',
       text: 'Demo principle: prevent writing to system-critical directories',
       painReasonSummary: 'Agent repeatedly wrote to /etc/passwd — owner-corrected behavior pattern',
       evidenceType: 'repeated_owner_correction',
@@ -129,6 +130,7 @@ export function makeRuleArtifactRecord(runId: string, principleRecord: PIArtifac
     contentJson: JSON.stringify({
       principleId: principleRecord.sourcePrincipleId,
       ruleId,
+      origin: 'demo',
       implementationCode: 'function evaluate(input, helpers) { var p = String(input.action.normalizedPath ?? input.action.paramsSummary.path ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "Demo: system path blocked" }; return { decision: "allow", matched: false, reason: "Demo: path is safe" }; }',
       goldenTrace,
       ruleHostGateDecision: 'accepted_shadow',

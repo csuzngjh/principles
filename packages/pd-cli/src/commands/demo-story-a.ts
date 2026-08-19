@@ -8,6 +8,20 @@ interface DemoStoryAOptions {
   workspace?: string;
   json?: boolean;
   channels?: string;
+  /** Developer override for the demo-isolation guard (default false). */
+  allowDemoWriteToExistingWorkspace?: boolean;
+}
+
+/**
+ * Demo isolation guard (2026-08-19): a demo run writes task/artifact/approval/
+ * activation rows into its target workspace. Refuse by default when the target
+ * already contains real PD state so demo data can never masquerade as
+ * owner-generated history. Detection = any marker of initialized PD state.
+ */
+function workspaceHasPdState(workspaceDir: string): boolean {
+  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'))
+    || fs.existsSync(path.join(workspaceDir, '.pd', 'config.yaml'))
+    || fs.existsSync(path.join(workspaceDir, '.principles', 'PROFILE.json'));
 }
 
 function formatStage(stage: { name: string; status: string; reason?: string; evidenceRef?: string }): string {
@@ -108,6 +122,36 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
     : fs.mkdtempSync(path.join(os.tmpdir(), 'pd-story-a-'));
+
+  // Demo isolation (cli-5: failure must not mutate): refuse BEFORE creating
+  // the RuntimeStateManager or writing anything when the target workspace
+  // already carries PD state and the developer override was not passed.
+  if (opts.workspace && !opts.allowDemoWriteToExistingWorkspace && workspaceHasPdState(workspaceDir)) {
+    const errorResult = {
+      status: 'refused' as const,
+      generatedAt: new Date().toISOString(),
+      narrative: 'Refused: demo would write into an existing PD workspace.',
+      storyDescription: 'Demo isolation guard',
+      stages: [],
+      channelOutcomes: [],
+      isRuntimeV2Exclusive: true,
+      refusal: {
+        reason: 'demo_write_to_existing_workspace',
+        message: 'This command would write demo artifacts into an existing PD workspace.',
+        nextAction: 'Use a temporary workspace (omit --workspace), or pass --allow-demo-write-to-existing-workspace to explicitly opt in (developer only).',
+        targetWorkspace: workspaceDir,
+      },
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(errorResult, null, 2));
+    } else {
+      console.error('Refused: this command would write demo artifacts into an existing PD workspace.');
+      console.error(`Target: ${workspaceDir}`);
+      console.error('Use a temporary workspace (omit --workspace), or pass --allow-demo-write-to-existing-workspace to explicitly opt in (developer only).');
+    }
+    process.exitCode = 1;
+    return;
+  }
 
   const parsed = parseChannelList(opts.channels);
 
