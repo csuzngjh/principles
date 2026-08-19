@@ -4,7 +4,6 @@ import {
   buildRuleHostAction,
   estimateLineChanges,
   mergeDecisions,
-  scanLegacyRuleContractDependencies,
   SqliteConnection,
   UNAVAILABLE_RULE_CONTEXT,
   validateRuleContextV2,
@@ -15,6 +14,7 @@ import {
   type RuleHostMeta,
   type RuleHostResult,
 } from '@principles/core/runtime-v2';
+import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 import {
   createNodeRuleImplementationRuntime,
@@ -265,17 +265,12 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             // references removed RuleHost contract symbols must never execute
             // against the new contract — reads silently resolve to undefined
             // and change owner-approved behavior. Skip with a structured
-            // warning naming the exact blocking symbols.
-            const legacyFindings = scanLegacyRuleContractDependencies([{
-              activationId,
-              artifactId,
-              ruleId,
-              principleId,
-              implementationCode: content.implementationCode,
-            }]);
-            if (legacyFindings.length > 0) {
-              const symbols = legacyFindings.map((finding) => finding.symbol).join(', ');
-              addWarning(warnings, `legacy_rule_contract_dependency: ${symbols} (activation=${activationId})`, 'migrate the RuleCode off the retired contract symbols or deactivate the activation, then re-approve a migrated rule');
+            // warning naming the exact blocking symbols. The scan is a local
+            // copy (see legacy-rule-contract-symbols.ts) so the published
+            // bundle keeps working against the currently published core.
+            const retiredSymbols = scanRetiredContractSymbols(content.implementationCode);
+            if (retiredSymbols.length > 0) {
+              addWarning(warnings, `legacy_rule_contract_dependency: ${retiredSymbols.join(', ')} (activation=${activationId})`, 'migrate the RuleCode off the retired contract symbols or deactivate the activation, then re-approve a migrated rule');
               continue;
             }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
