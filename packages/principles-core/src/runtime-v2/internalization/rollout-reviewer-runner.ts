@@ -7,7 +7,7 @@ import type {
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RolloutReviewerOutputV1, RolloutReviewerValidator } from './rollout-reviewer-output.js';
-import type { PIArtifactStore, PIArtifactRecord } from './pi-artifact.js';
+import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
