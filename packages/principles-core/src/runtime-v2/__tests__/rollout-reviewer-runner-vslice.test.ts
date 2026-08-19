@@ -14,6 +14,8 @@ import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter
 
 const EVALUATOR_TASK_ID = 'evaluator-001';
 const ROLLOUT_REVIEWER_TASK_ID = 'rollout-reviewer-001';
+const SCRIBE_TASK_ID = 'scribe-001';
+const SCRIBE_VALIDATED_ARTIFACT_ID = 'pi-art-scribe-001-validated';
 
 function makeEvaluatorTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -26,7 +28,7 @@ function makeEvaluatorTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     diagnosticJson: createPITaskDiagnosticJson({
-      dependencyTaskIds: [],
+      dependencyTaskIds: [SCRIBE_TASK_ID],
       channel: 'prompt',
       timeoutMs: 300_000,
       inputArtifactRefs: [],
@@ -53,6 +55,44 @@ function makeRolloutReviewerTask(overrides: Partial<TaskRecord> = {}): TaskRecor
       outputArtifactRefs: [],
     }),
     ...overrides,
+  };
+}
+
+function makeScribeTask(): TaskRecord {
+  return {
+    taskId: SCRIBE_TASK_ID,
+    taskKind: 'scribe',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 3,
+    resultRef: 'scribe://run-001',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    diagnosticJson: createPITaskDiagnosticJson({
+      dependencyTaskIds: [],
+      channel: 'prompt',
+      timeoutMs: 300_000,
+      inputArtifactRefs: [],
+      outputArtifactRefs: [{ artifactType: 'principle', ref: SCRIBE_VALIDATED_ARTIFACT_ID }],
+    }),
+  };
+}
+
+function makeScribeValidatedArtifact(): PIArtifactRecord {
+  return {
+    artifactId: SCRIBE_VALIDATED_ARTIFACT_ID,
+    artifactKind: 'principle',
+    sourceTaskId: SCRIBE_TASK_ID,
+    lineageArtifactIds: [],
+    // P0-1: 真实激活目标 = scribe 的 validated principle artifact
+    // (evaluator approved 时翻 validated 的 bearer)
+    validationStatus: 'validated',
+    contentJson: JSON.stringify({
+      principleId: 'principle-vslice',
+      text: '遇到歧义先确认意图',
+    }),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -121,8 +161,11 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ROLLOUT_REVIEWER_TASK_ID) return Promise.resolve(rolloutReviewerTask);
         if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTask);
+        if (id === SCRIBE_TASK_ID) return Promise.resolve(makeScribeTask());
         return Promise.resolve(null);
       }),
+      updateTask: vi.fn().mockResolvedValue(undefined),
+      updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined),
       getRunsByTask: vi.fn().mockResolvedValue([{
         runId: 'run-rollout-reviewer-001',
         taskId: ROLLOUT_REVIEWER_TASK_ID,
@@ -158,12 +201,17 @@ describe('RolloutReviewerRunner (vertical slice)', () => {
 
     const validator = new DefaultRolloutReviewerValidator();
 
+      void artifactStore.upsertArtifact(makeScribeValidatedArtifact());
+
     return {
       stateManager,
       runtimeAdapter,
       eventEmitter,
       validator,
       artifactStore,
+      // P0-2: approve_rollout 的 dispatch 是 governance transition 的一部分;
+      // 提供 stub 使 happy-path 用例走 activated → markSucceeded
+      dispatchActivation: async () => ({ decision: 'activated', activationId: 'act-vslicetest' }),
       ...overrides,
     };
   }
@@ -776,8 +824,11 @@ describe('RolloutReviewerRunner integration: test-double captures sourceEvaluato
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ROLLOUT_REVIEWER_TASK_ID) return Promise.resolve(rolloutReviewerTask);
         if (id === EVALUATOR_TASK_ID) return Promise.resolve(makeEvaluatorTask());
+        if (id === SCRIBE_TASK_ID) return Promise.resolve(makeScribeTask());
         return Promise.resolve(null);
       }),
+      updateTask: vi.fn().mockResolvedValue(undefined),
+      updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined),
       getRunsByTask: vi.fn().mockResolvedValue([{
         runId: 'run-integration-001',
         taskId: ROLLOUT_REVIEWER_TASK_ID,
@@ -805,6 +856,7 @@ describe('RolloutReviewerRunner integration: test-double captures sourceEvaluato
       eventEmitter,
       validator: new DefaultRolloutReviewerValidator(),
       artifactStore,
+      dispatchActivation: async () => ({ decision: 'activated', activationId: 'act-integration-001' }),
     };
 
     const runner = new RolloutReviewerRunner(deps, {

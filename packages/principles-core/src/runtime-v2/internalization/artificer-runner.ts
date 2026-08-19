@@ -66,6 +66,13 @@ interface ArtificerContext {
    */
   readonly adversarialFeedback: string | null;
   /**
+   * P1-1: Rollout-reviewer revision feedback. Non-null when this task was
+   * reopened by rollout needs_revision routing (code_tool_hook channel).
+   * Raw validated text from PITaskMetadata.revisionFeedback; appended to the
+   * prompt so the artificer addresses each requiredChange.
+   */
+  readonly revisionFeedback?: string | null;
+  /**
    * Dreamer candidate 5-dim context (PRI-508). Undefined when:
    * - scribe artifact lacks sourceTrace.dreamerArtifactId (pre-PRI-508 flows)
    * - dreamer artifact cannot be resolved (best-effort, non-blocking)
@@ -466,9 +473,16 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       ? formatRepairFeedback(piTask.repairPayload)
       : null;
 
+    // P1-1 (外部复核): rollout needs_revision 路由到 artificer (code 渠道) 时,
+    // revisionFeedback 携带 reviewer requiredChanges — 与 repairPayload 同等
+    // 注入 prompt,避免"路由到 artificer 但反馈丢失"。rc-7: 从当前任务元数据读取。
+    const revisionFeedback = typeof piTask?.revisionFeedback === 'string' && piTask.revisionFeedback.trim() !== ''
+      ? piTask.revisionFeedback
+      : null;
+
     if (deps.length === 0) {
       this.emitEvent('no_dependencies', taskId, {});
-      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback };
+      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, revisionFeedback };
     }
 
     for (const depId of deps) {
@@ -510,6 +524,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           sourceScribeArtifactId: firstArtifact.artifactId,
           adversarialFeedback,
           repairFeedback,
+          revisionFeedback,
           ...(dreamerContext !== undefined ? { dreamerContext } : {}),
         };
       }
@@ -560,11 +575,20 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // (prompt builder treats undefined as backward-compatible no-op).
       repairFeedback: context.repairFeedback ?? undefined,
     });
+    // P1-1: rollout revision feedback 注入 (与 scribe 同模式; repairFeedback
+    // 走 prompt builder 字段,revisionFeedback 是路由文本,直接附加)
+    const finalMessage = context.revisionFeedback
+      ? `${message}
+
+<rollout_revision_feedback>
+${context.revisionFeedback}
+</rollout_revision_feedback>`
+      : message;
 
     return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
-      inputPayload: message,
+      inputPayload: finalMessage,
       contextItems: [],
       outputSchemaRef: 'artificer-rule-output-v2',
       timeoutMs: this.resolvedOptions.timeoutMs,

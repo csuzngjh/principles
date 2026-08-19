@@ -131,6 +131,14 @@ function mapCommitDecisionToAction(
         successorKind: commitResult.successorKind,
         successorTaskId: commitResult.reopenedTaskId,
       };
+    case 'blocked_missing_verdict':
+      return {
+        taskId: commitResult.taskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `blocked_missing_verdict: ${commitResult.reason}; durable runnerDecision and legacy runs verdict both absent (fail-closed)`,
+        nextAction: 'Re-run the stage runner (writes durable verdict) or reconcile via the pending-artifacts report',
+      };
   }
 }
 

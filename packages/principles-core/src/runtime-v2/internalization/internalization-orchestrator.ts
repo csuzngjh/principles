@@ -150,7 +150,9 @@ export type CommitNextTaskResult =
   /** artificer repair 任务完成 → 来源 evaluator 被 reopen 重跑修订轮 */
   | { decision: 'revision_reopened'; sourceTaskId: string; reopenedTaskId: string; reason: string }
   /** revision 波及下游: 已存在的 succeeded 后继被 reopen 重跑 (级联修订) */
-  | { decision: 'successor_reopened'; sourceTaskId: string; reopenedTaskId: string; successorKind: RunnerKind };
+  | { decision: 'successor_reopened'; sourceTaskId: string; reopenedTaskId: string; successorKind: RunnerKind }
+  /** P0-3: 决策型任务缺少 durable + legacy verdict — fail-closed, 不 seed 任何后继 */
+  | { decision: 'blocked_missing_verdict'; taskId: string; reason: string };
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
@@ -416,15 +418,22 @@ export class InternalizationOrchestrator {
       return { decision: 'invalid_task_metadata', taskId, reason: 'Failed to hydrate PITaskRecord from diagnosticJson' };
     }
 
-    // ── 单一迁移决策 (P0-D, INV-02) ──
+    // ── 单一迁移决策 (P0-D/P0-3, INV-02) ──
     // runner 的 verdict 与状态迁移在此仲裁: needs_revision/rejected 不 seed
     // 正常后继; artificer repair 完成 reopen 来源 evaluator。
-    const transition = decideInternalizationTransition(transitionInputFromTask(piTask));
+    // P0-3: durable runnerDecision 缺失时,用 runs.output_payload 的**显式可解析**
+    // verdict 作 legacy 判据; 两者皆无 → BLOCKED_MISSING_VERDICT (fail-closed,
+    // 禁止 missing=ADVANCE 复活审计的错误旁路)。
+    const legacyVerdict = await this.resolveLegacyRunnerVerdict(taskId, rawTask.taskKind);
+    const transition = decideInternalizationTransition(transitionInputFromTask(piTask, legacyVerdict));
     if (transition.kind === 'HUMAN_REVIEW_REQUIRED') {
       return { decision: 'source_not_succeeded', taskId, status: piTask.status };
     }
     if (transition.kind === 'NOT_ADVANCEABLE') {
       return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+    if (transition.kind === 'BLOCKED_MISSING_VERDICT') {
+      return { decision: 'blocked_missing_verdict', taskId, reason: transition.reason };
     }
     if (transition.kind === 'REVISION_REQUIRED') {
       return {
@@ -446,6 +455,7 @@ export class InternalizationOrchestrator {
       const reopened = await this.reopenTaskForRevision(piTask.repairPayload.sourceEvaluatorTaskId, {
         replaceArtificerDependencyWith: taskId,
         reason: 'artificer_repair_complete',
+        revisionCauseId: `repair-${taskId}`,
       });
       if (!reopened.ok) {
         // reopen 失败 (evaluator 缺失/状态不可 reopen) — 不 seed 正常后继,
@@ -594,6 +604,47 @@ export class InternalizationOrchestrator {
     };
   }
 
+  /**
+   * P0-3 legacy 判据: 从该任务最近 succeeded run 的 output_payload **显式解析**
+   * verdict (evaluation.decision / review.decision / rolloutDecision)。
+   * 这是修复前唯一持久 verdict 载体 — 对历史数据是真实证据而非猜测;
+   * 新数据由 runner 的 durable runnerDecision 承载。解析失败/缺失 → undefined。
+   * rc-1/rc-2: output_payload 按不可信 JSON 处理,逐字段类型守卫。
+   */
+  private async resolveLegacyRunnerVerdict(taskId: string, taskKind: string): Promise<string | undefined> {
+    if (taskKind !== 'evaluator' && taskKind !== 'rollout_reviewer') return undefined;
+    let runs: { outputPayload?: unknown }[] = [];
+    try {
+      runs = await this.stateManager.getRunsByTask(taskId) as { outputPayload?: unknown }[];
+    } catch {
+      return undefined;
+    }
+    for (const run of [...runs].reverse()) {
+      // RunRecord 字段为 camelCase outputPayload (store 层映射)
+      const raw = (run as unknown as Record<string, unknown>).outputPayload;
+      if (typeof raw !== 'string' || raw.length === 0) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (typeof parsed !== 'object' || parsed === null) continue;
+      const obj = parsed as Record<string, unknown>;
+      const verdictHolders: unknown[] = [obj.evaluation, obj.review];
+      for (const holder of verdictHolders) {
+        if (typeof holder === 'object' && holder !== null) {
+          const d = (holder as Record<string, unknown>).decision;
+          if (typeof d === 'string' && d.length > 0) return d;
+        }
+      }
+      if (typeof obj.rolloutDecision === 'string' && obj.rolloutDecision.length > 0) {
+        return obj.rolloutDecision;
+      }
+    }
+    return undefined;
+  }
+
   // ── Revision reopen (P0-D, MVP_CORE_LOOP_CONTRACT INV-02/INV-07/INV-08) ─────
 
   /**
@@ -612,6 +663,13 @@ export class InternalizationOrchestrator {
       revisionFeedback?: string;
       replaceArtificerDependencyWith?: string;
       reason?: string;
+      /**
+       * P0-4 revision identity: 同一逻辑修订动作的稳定标识。相同 causeKey 对
+       * 已 reopen 目标重放 = 真正 no-op (不递增 revisionCount,不重写反馈);
+       * 不同 causeKey = 新修订轮 (正常递增)。未提供时退化为旧行为 (每次 +1,
+       * 仅建议内部测试使用;生产调用方必须传)。
+       */
+      revisionCauseId?: string;
     },
   ): Promise<{ ok: boolean; reason: string }> {
     const rawTask = await this.stateManager.getTask(taskId);
@@ -623,7 +681,12 @@ export class InternalizationOrchestrator {
       return { ok: false, reason: 'invalid_task_metadata' };
     }
     if (rawTask.status === 'pending' || rawTask.status === 'retry_wait') {
-      // 已在待跑状态 — 视为幂等成功(更新依赖/反馈仍执行,保证 revision 输入最新)
+      // P0-4 幂等: 同一 causeKey 重放 → 真 no-op (revisionCount 不再递增,
+      // 防止 consumer 重复周期烧穿 revision budget)
+      if (options?.revisionCauseId && piTask.revisionCauseId === options.revisionCauseId) {
+        return { ok: true, reason: 'idempotent_replay_same_revision' };
+      }
+      // 不同 causeKey / 无 causeKey — 更新依赖/反馈后继续 (保证 revision 输入最新)
     } else if (rawTask.status !== 'succeeded' && rawTask.status !== 'needs_human_review') {
       return { ok: false, reason: `task_in_flight_${rawTask.status}` };
     }
@@ -632,6 +695,7 @@ export class InternalizationOrchestrator {
       runnerDecision: undefined, // 新一轮 verdict 未定,清空旧判定 (INV-02 单一决策依据)
       revisionCount: (piTask.revisionCount ?? 0) + 1,
       revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
+      revisionCauseId: options?.revisionCauseId,
     });
 
     if (options?.replaceArtificerDependencyWith) {

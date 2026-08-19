@@ -37,7 +37,6 @@ import type { RuntimeStateManager } from '@principles/core/runtime-v2';
 import type { InternalizationOrchestrator } from '@principles/core/runtime-v2';
 import type { PluginLogger } from '../openclaw-sdk.js';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
-import { randomUUID } from 'node:crypto';
 
 /** rollout → ActivationDispatcher 的生产接线 (per dispatch 打开短连接, 与 Console 模式一致) */
 export async function dispatchRolloutActivation(
@@ -144,7 +143,14 @@ export function createEvaluatorRepairDeps(
       return isFeatureEnabled(flags, 'evaluator_artificer_repair_loop');
     },
     seedArtificerRepairTask: async (params) => {
-      const repairTaskId = `artificer-repair-${randomUUID()}`;
+      // P0-4: 确定性 revision identity — evaluatorTaskId + iteration 唯一定位
+      // 一个逻辑 repair 任务; 重放 (consumer 重复周期 / crash 恢复) reuse 而非再建。
+      const repairTaskId = `artificer-repair-${params.repairPayload.sourceEvaluatorTaskId}-r${params.repairPayload.repairIteration}`;
+      const existing = await stateManager.getTask(repairTaskId);
+      if (existing) {
+        logger?.info?.(`[PD:AutoConsumer] repair task ${repairTaskId} already exists; reusing (idempotent seed)`);
+        return repairTaskId;
+      }
       await stateManager.createTask({
         taskId: repairTaskId,
         taskKind: 'artificer',
@@ -181,6 +187,7 @@ export function createRolloutGovernanceDeps(
       const result = await orchestrator.reopenTaskForRevision(input.targetTaskId, {
         revisionFeedback: input.revisionFeedback,
         reason: `rollout_revision_iteration_${input.revisionIteration}`,
+        revisionCauseId: `rollout-${input.sourceRolloutTaskId}-r${input.revisionIteration}`,
       });
       return result.ok
         ? { ok: true, reason: result.reason, reopenedTaskId: input.targetTaskId }

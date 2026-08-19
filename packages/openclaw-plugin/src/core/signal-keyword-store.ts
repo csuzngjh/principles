@@ -27,7 +27,8 @@ import type { WorkspaceContext } from './workspace-context.js';
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
 
-/** learned 词进入高精度 deterministic path 的权重阈值 */
+/** learned 词进入高精度 deterministic path 的权重阈值(仅适用于 seed/owner_promoted;
+ * llm_learned 恒 ambiguous — 见 projectLearnedStore 内注释) */
 export const HIGH_PRECISION_LEARNED_WEIGHT = 0.7;
 
 /** 高精度纠正短语 overlay(已验证的确定性 STRONG 路径,不属于 learner seed 集) */
@@ -64,6 +65,22 @@ function mapLearnedSource(source: string): UnifiedKeywordStore['terms'][string][
 }
 
 /**
+ * P1-2 (外部复核) 精度策略:
+ * - llm_learned 恒 'ambiguous' — optimizer 的 weight 是 LLM 自评,无独立
+ *   ground-truth;高权重常见词(如"大问题")直接确定性 STRONG→pain 的误报面
+ *   不可控(live 历史曾把 "try again" 误报)。learned 词参与 Stage1 扫描
+ *   (cue 记录)+ Stage2 LLM 确认(LLM 可用时由 verdict 决定 STRONG),
+ *   即 learn→detect 闭环完整;仅"绕过 LLM 的确定性触发"不对 learned 开放。
+ * - owner_promoted(用户显式加入)与 seed 维持权重阈值(≥0.7 → high)。
+ * 若未来有可靠 TP 证据源,可在证据充分后把 llm_learned 晋升 high —
+ * 届时再放开,并附 FP regression。
+ */
+function precisionFor(source: string, weight: number): 'high' | 'ambiguous' {
+  if (source === 'llm') return 'ambiguous';
+  return weight >= HIGH_PRECISION_LEARNED_WEIGHT ? 'high' : 'ambiguous';
+}
+
+/**
  * 把 learner store JSON(unknown)投影为 correction terms。
  * 返回 null 表示文件内容不可用(missing/invalid),调用方走 seed-only。
  */
@@ -83,7 +100,7 @@ function projectLearnedStore(raw: unknown): { terms: UnifiedKeywordStore['terms'
       term,
       category: 'correction',
       weight,
-      precision: weight >= HIGH_PRECISION_LEARNED_WEIGHT ? 'high' : 'ambiguous',
+      precision: precisionFor(kw.source, weight),
       source: mapLearnedSource(kw.source),
     };
     if (kw.source === 'llm') learnedCount += 1;

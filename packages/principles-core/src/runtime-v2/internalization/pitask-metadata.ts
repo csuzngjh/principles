@@ -109,6 +109,12 @@ export interface PITaskMetadata {
    */
   revisionFeedback?: string;
   /**
+   * P0-4 revision identity: 触发本次 reopen 的稳定 cause 标识
+   * (如 `repair-<repairTaskId>` / `rollout-<rolloutTaskId>-r<iteration>`)。
+   * reopenTaskForRevision 对相同 causeId 的重放是真正 no-op。
+   */
+  revisionCauseId?: string;
+  /**
    * Rollout reviewer needs_revision 的修订路由载荷: 记录修订目标 stage、
    * 迭代号与来源,保证 revision budget 可判定 (MVP_CORE_LOOP_CONTRACT INV-07)。
    */
@@ -158,6 +164,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       runnerDecision: metadata.runnerDecision,
       revisionCount: metadata.revisionCount,
       revisionFeedback: metadata.revisionFeedback,
+      revisionCauseId: metadata.revisionCauseId,
       rolloutRevisionPayload: metadata.rolloutRevisionPayload,
     },
   });
@@ -190,6 +197,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     runnerDecision: base.runnerDecision,
     revisionCount: base.revisionCount,
     revisionFeedback: base.revisionFeedback,
+    revisionCauseId: base.revisionCauseId,
     rolloutRevisionPayload: base.rolloutRevisionPayload,
     ...overrides,
   };
@@ -344,9 +352,12 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     if (typeof m.revisionCount !== 'number' || !Number.isInteger(m.revisionCount) || m.revisionCount < 0) return null;
   }
 
-  // revisionFeedback: optional non-empty string.
+  // revisionFeedback / revisionCauseId: optional non-empty strings.
   if (Object.hasOwn(m, 'revisionFeedback') && m.revisionFeedback !== undefined) {
     if (typeof m.revisionFeedback !== 'string' || m.revisionFeedback.trim() === '') return null;
+  }
+  if (Object.hasOwn(m, 'revisionCauseId') && m.revisionCauseId !== undefined) {
+    if (typeof m.revisionCauseId !== 'string' || m.revisionCauseId.trim() === '') return null;
   }
 
   // rolloutRevisionPayload: optional, full validation (rc-1/rc-4).
@@ -389,6 +400,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
       : undefined,
     revisionCount: typeof m.revisionCount === 'number' ? m.revisionCount : undefined,
     revisionFeedback: typeof m.revisionFeedback === 'string' ? m.revisionFeedback : undefined,
+    revisionCauseId: typeof m.revisionCauseId === 'string' ? m.revisionCauseId : undefined,
     rolloutRevisionPayload,
   };
 }
@@ -441,6 +453,7 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     runnerDecision: meta.runnerDecision,
     revisionCount: meta.revisionCount,
     revisionFeedback: meta.revisionFeedback,
+    revisionCauseId: meta.revisionCauseId,
     rolloutRevisionPayload: meta.rolloutRevisionPayload,
   } as unknown as PITaskRecord;
 }

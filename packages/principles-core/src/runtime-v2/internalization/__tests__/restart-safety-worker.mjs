@@ -133,15 +133,22 @@ async function main() {
         diagnosticJson: meta({ dependencyTaskIds: [EVAL_ID], correlationId: 'j11' }),
       });
     }
-    // artifact 先落 SQLite(幂等),runner 的 artifactStore 也指向 SQLite——
-    // 重启后的 rollout runner 从持久层读 lineage,而非内存 store
+    // artifacts 先落 SQLite(幂等),真实形状 (P0-1):
+    //   - evaluator 名下 principle = 评审输出,恒 pending
+    //   - scribe 名下 principle = bearer,validated (evaluator approved 翻过)
     const seedConn = new SqliteConnection(workspaceDir);
     try {
       const seedStore = new SqlitePIArtifactStore(seedConn);
       await seedStore.upsertArtifact({
         artifactId: EVAL_ARTIFACT, artifactKind: 'principle', sourceTaskId: EVAL_ID,
+        lineageArtifactIds: [], validationStatus: 'pending',
+        contentJson: JSON.stringify({ taskId: EVAL_ID, evaluation: { decision: 'approved', score: 0.9, strengths: [], concerns: [], requiredChanges: [] } }),
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      });
+      await seedStore.upsertArtifact({
+        artifactId: 'pi-art-scribe-j11', artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
         lineageArtifactIds: [], validationStatus: 'validated',
-        contentJson: JSON.stringify({ principleId: 'j11-principle', text: '重启安全测试', evaluation: { decision: 'approved', score: 0.9, requiredChanges: [], concerns: [] } }),
+        contentJson: JSON.stringify({ principleId: 'j11-principle', text: '重启安全测试', principleDraft: { title: 'j11-principle', statement: '重启安全测试' } }),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       });
     } finally {

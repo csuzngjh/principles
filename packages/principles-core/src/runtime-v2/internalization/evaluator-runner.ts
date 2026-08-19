@@ -768,7 +768,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         // valid verdict; the *task status* reflects that human review is
         // required, not that the runner failed.
         const resultRef = `${this.config.resultRefPrefix}://${runId}`;
-        await this.recordRunnerDecision(taskId, 'needs_revision');
+        // P0-3: 同样前置且 fail loud — record 抛错 → run() 的 retryOrFail,
+        // 重试轮重新落 verdict 再进 needs_human_review。
+        await this.recordRunnerDecisionOrThrow(taskId, 'needs_revision');
         try {
           await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
         } catch (stateErr) {
@@ -801,8 +803,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // repairOutcome.kind === 'repair_seeded' → fall through to markTaskSucceeded.
     }
 
-    // Mark task succeeded
+    // 单一迁移决策输入 (P0-D/P0-3, INV-02): verdict durability 是 succeeded
+    // 的前置条件 — 写失败必须 fail loud (retry_wait),否则 commit 门读到
+    // missing decision,链路语义不可判定。先于 markTaskSucceeded。
     const resultRef = `${this.config.resultRefPrefix}://${runId}`;
+    await this.recordRunnerDecisionOrThrow(taskId, output.evaluation.decision);
+
     try {
       await this.stateManager.markTaskSucceeded(taskId, resultRef);
     } catch (stateErr) {
@@ -813,10 +819,6 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
       throw stateErr;
     }
-
-    // 单一迁移决策输入 (P0-D, INV-02): 把 verdict 写进任务元数据,
-    // commitNextTaskProposal 据此仲裁 — needs_revision 不 seed 正常后继。
-    await this.recordRunnerDecision(taskId, output.evaluation.decision);
 
     this.emitEvent('task_succeeded', taskId, {
       attemptCount: task.attemptCount,
@@ -888,12 +890,20 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
     } catch (err) {
+      // P0-3 (外部复核): 吞掉写失败 = succeeded 任务无 durable verdict,
+      // commit 门退化为不可判定 — fail loud,由重试机制重写 (verdict 仍在 runs)。
       this.emitEvent('runner_decision_record_failed', taskId, {
         errorMessage: err instanceof Error ? err.message : String(err),
         decision,
-        nextAction: 'check_task_store_consistency',
+        nextAction: 'task_will_retry; check_task_store_consistency',
       });
+      throw err;
     }
+  }
+
+  /** P0-3: verdict 持久化前置包装 — 语义显式化,失败必然抛出。 */
+  private async recordRunnerDecisionOrThrow(taskId: string, decision: string): Promise<void> {
+    await this.recordRunnerDecision(taskId, decision);
   }
 
   /**

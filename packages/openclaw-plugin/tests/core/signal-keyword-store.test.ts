@@ -73,7 +73,7 @@ describe('createLiveSignalKeywordStore (learned store projection)', () => {
     _resetCorrectionCueCache();
   });
 
-  it('learned term 投影为 correction term,权重映射 precision 层级', () => {
+  it('learned term 投影为 correction term (P1-2: llm_learned 恒 ambiguous,与权重无关)', () => {
     saveCorrectionKeywordStore(stateDir, makeStore([
       { term: '重大失误', weight: 0.8, source: 'llm', addedAt: new Date().toISOString() },
       { term: '不太对', weight: 0.35, source: 'llm', addedAt: new Date().toISOString() },
@@ -82,12 +82,22 @@ describe('createLiveSignalKeywordStore (learned store projection)', () => {
     const live = createLiveSignalKeywordStore(wctx as never);
     const store = live.resolve();
 
+    // LLM 自评权重不构成确定性触发依据 — 高/低权重 learned 词一律 ambiguous
+    // (参与 Stage1 扫描 + Stage2 LLM 确认; deterministic STRONG 仅
+    //  seed overlay 与 owner_promoted 可及)
     expect(store.terms['重大失误']).toMatchObject({
-      category: 'correction', precision: 'high', source: 'llm_learned', weight: 0.8,
+      category: 'correction', precision: 'ambiguous', source: 'llm_learned', weight: 0.8,
     });
     expect(store.terms['不太对']).toMatchObject({
       category: 'correction', precision: 'ambiguous', source: 'llm_learned', weight: 0.35,
     });
+    // owner_promoted(用户显式加入)高权重 → 可确定性触发
+    saveCorrectionKeywordStore(stateDir, makeStore([
+      { term: '别自作聪明', weight: 0.85, source: 'user', addedAt: new Date().toISOString() },
+    ]));
+    _resetCorrectionCueCache();
+    const store2 = createLiveSignalKeywordStore(wctx as never).resolve();
+    expect(store2.terms['别自作聪明']).toMatchObject({ precision: 'high', source: 'owner_promoted' });
   });
 
   it('高精度 overlay 与 empathy seed 恒保留(learner store 不含它们)', () => {
@@ -169,25 +179,71 @@ describe('Learn→Detect live refresh (无需重启)', () => {
     );
   });
 
-  it('LLM 关闭后 learned 高权重词仍可 deterministic 触发 STRONG', async () => {
+  it('P1-2 FP regression: LLM 关闭时高权重 learned 常见词不触发 STRONG(防误报泛滥)', async () => {
+    // 场景: optimizer 给常见词 "大问题" 赋高权重 0.85 — 若按权重放行
+    // deterministic STRONG,普通消息 "这里有个大问题需要讨论" 每次都会
+    // 产生 pain 误报 (live 历史曾把 "try again" 误报)。P1-2 后: learned
+    // 词仅记 cue,不触发 STRONG;STRONG 需 Stage2 LLM 确认或 owner promotion。
     saveCorrectionKeywordStore(stateDir, makeStore([
-      { term: '完全弄反了', weight: 0.85, source: 'llm', addedAt: new Date().toISOString() },
+      { term: '大问题', weight: 0.85, source: 'llm', addedAt: new Date().toISOString() },
     ]));
     const wctx = makeMockWctx(stateDir);
     const live = createLiveSignalKeywordStore(wctx as never);
     const host = new SignalCollectorHost(wctx as never, {
       keywordStoreProvider: () => live.resolve(),
       config: noLlmConfig,
-      llmClassifier: null,  // LLM 不可用
+      llmClassifier: null,  // LLM 不可用 — 确定性面单独接受检验
+    });
+
+    host.detectSync('这里有个大问题需要讨论', 'sess-fp1', 'user');
+    await flushAsync();
+
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ correctionDetected: false, correctionCue: '大问题' }),
+    );
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+
+  it('P1-2: LLM 可用时高权重 learned 词经 Stage2 确认触发 STRONG (learn→detect 闭环)', async () => {
+    saveCorrectionKeywordStore(stateDir, makeStore([
+      { term: '完全弄反了', weight: 0.85, source: 'llm', addedAt: new Date().toISOString() },
+    ]));
+    const wctx = makeMockWctx(stateDir);
+    const live = createLiveSignalKeywordStore(wctx as never);
+    const classifier = async () => ({
+      is_feedback: true, type: 'correction' as const, confidence: 0.92, reason: '明确纠正',
+    });
+    const host = new SignalCollectorHost(wctx as never, {
+      keywordStoreProvider: () => live.resolve(),
+      config: noLlmConfig,
+      llmClassifier: classifier,
     });
 
     host.detectSync('你完全弄反了,停下来', 'sess-j3b', 'user');
     await flushAsync();
 
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1); // LLM 确认后 STRONG
+  });
+
+  it('P1-2 对照: owner_promoted 高权重词 LLM 关闭时仍确定性 STRONG', async () => {
+    saveCorrectionKeywordStore(stateDir, makeStore([
+      { term: '完全弄反了', weight: 0.85, source: 'user', addedAt: new Date().toISOString() },
+    ]));
+    const wctx = makeMockWctx(stateDir);
+    const live = createLiveSignalKeywordStore(wctx as never);
+    const host = new SignalCollectorHost(wctx as never, {
+      keywordStoreProvider: () => live.resolve(),
+      config: noLlmConfig,
+      llmClassifier: null,
+    });
+
+    host.detectSync('你完全弄反了,停下来', 'sess-j3c', 'user');
+    await flushAsync();
+
     expect(wctx.trajectory.recordUserTurn).toHaveBeenLastCalledWith(
       expect.objectContaining({ correctionDetected: true, correctionCue: '完全弄反了' }),
     );
-    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);  // deterministic STRONG
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
   });
 
   it('LLM 关闭: 低权重 learned 词只记 cue 不触发 STRONG(防 FP 泛滥)', async () => {

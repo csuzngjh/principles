@@ -72,10 +72,26 @@ describe('decideInternalizationTransition (pure)', () => {
     }
   });
 
-  it('历史数据无 runnerDecision → legacy ADVANCE (不因缺记录卡链)', () => {
+  it('P0-3: 无 durable verdict 且无 legacy verdict → BLOCKED_MISSING_VERDICT (fail-closed)', () => {
     expect(decideInternalizationTransition({
       taskKind: 'evaluator', taskStatus: 'succeeded', isRepairTask: false, revisionCount: 0,
-    })).toMatchObject({ kind: 'ADVANCE', reason: expect.stringContaining('legacy') });
+    })).toMatchObject({ kind: 'BLOCKED_MISSING_VERDICT' });
+    expect(decideInternalizationTransition({
+      taskKind: 'rollout_reviewer', taskStatus: 'succeeded', isRepairTask: false, revisionCount: 0,
+    })).toMatchObject({ kind: 'BLOCKED_MISSING_VERDICT' });
+  });
+
+  it('P0-3: 显式 legacy verdict (runs.output_payload) 是唯一回退判据', () => {
+    expect(decideInternalizationTransition({
+      taskKind: 'evaluator', taskStatus: 'succeeded', legacyRunnerDecision: 'needs_revision', isRepairTask: false, revisionCount: 0,
+    })).toMatchObject({ kind: 'REVISION_REQUIRED' });
+    expect(decideInternalizationTransition({
+      taskKind: 'evaluator', taskStatus: 'succeeded', legacyRunnerDecision: 'approved', isRepairTask: false, revisionCount: 0,
+    })).toMatchObject({ kind: 'ADVANCE' });
+    // 非法 legacy 值不作为判据 → 阻断
+    expect(decideInternalizationTransition({
+      taskKind: 'evaluator', taskStatus: 'succeeded', legacyRunnerDecision: 'yolo', isRepairTask: false, revisionCount: 0,
+    })).toMatchObject({ kind: 'BLOCKED_MISSING_VERDICT' });
   });
 });
 

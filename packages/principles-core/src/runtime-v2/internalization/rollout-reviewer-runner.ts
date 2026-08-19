@@ -7,7 +7,7 @@ import type {
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RolloutReviewerOutputV1, RolloutReviewerValidator } from './rollout-reviewer-output.js';
-import type { PIArtifactStore } from './pi-artifact.js';
+import type { PIArtifactStore, PIArtifactRecord } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
@@ -535,6 +535,40 @@ export class RolloutReviewerRunner {
     }
 
     const resultRef = `rollout-reviewer://${ctx.runId}`;
+
+    // ── P0-3 (外部复核): verdict durability 是终态的前置条件 ──
+    // decision 写失败必须 fail (retry_wait 重试),不得吞掉后把任务标 succeeded
+    // ——否则 commit 门读到 missing decision,链路语义不可判定。
+    await this.recordRunnerDecisionOrThrow(ctx.taskId, ctx.output.review.decision);
+
+    // ── P0-2 (外部复核): dispatch 是 governance transition 的组成部分 ──
+    // 在 markTaskSucceeded 之前执行:
+    //   - transient 失败 (throw) → 冒泡到 run() 的 retryOrFail → retry_wait 自动重试
+    //     (dispatcher 幂等 key 保证重放安全; crash-after-dispatch 重跑 → already_activated)
+    //   - refused / invalid / candidate 不可解析 → needs_human_review (不得伪装 succeeded)
+    //   - 只有 activated / already_activated / queued_for_approval 视为 transition 完成
+    const { decision } = ctx.output.review;
+    let dispatchArtifactId: string | null = null;
+    if (decision === 'approve_rollout') {
+      const candidate = await this.resolveActivationCandidate(ctx);
+      if (!candidate) {
+        await this.markNeedsHumanReview(ctx.taskId, 'rollout_activation_candidate_unresolved');
+        this.phase = RunnerPhase.Completed;
+        return this.buildSucceededResult(ctx, artifactId, resultRef);
+      }
+      dispatchArtifactId = candidate;
+      const completed = await this.dispatchOrRouteFailure(ctx, candidate);
+      if (!completed) {
+        // dispatchOrRouteFailure 已把任务转入 needs_human_review;
+        // runner 本身执行成功 (verdict 有效),返回 succeeded 描述本次运行
+        this.phase = RunnerPhase.Completed;
+        return this.buildSucceededResult(ctx, artifactId, resultRef);
+      }
+    } else if (decision === 'needs_revision') {
+      await this.handleRevisionRouting(ctx);
+    }
+    // 'reject' → terminal: 无 dispatch、无 approval、无后继 (INV-04)
+
     try {
       await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
     } catch (stateErr) {
@@ -546,26 +580,23 @@ export class RolloutReviewerRunner {
       throw stateErr;
     }
 
-    // 单一迁移决策输入 (P0-D/E/F, INV-02/04): verdict 写进任务元数据
-    await this.recordRunnerDecision(ctx.taskId, ctx.output.review.decision);
-
     this.emitRolloutReviewerEvent('rollout_reviewer_task_succeeded', ctx.taskId, {
       attemptCount: ctx.task.attemptCount,
       resultRef,
       reviewDecision: ctx.output.review.decision,
       reviewConfidence: ctx.output.review.confidence,
+      ...(dispatchArtifactId ? { dispatchedArtifactId: dispatchArtifactId } : {}),
     });
 
-    // ── P0-E/F: verdict 出边 (INV-04) ──
-    const { decision } = ctx.output.review;
-    if (decision === 'approve_rollout') {
-      await this.handleAutoDispatch(ctx, artifactId);
-    } else if (decision === 'needs_revision') {
-      await this.handleRevisionRouting(ctx);
-    }
-    // 'reject' → terminal: 无 dispatch、无 approval、无后继 (INV-04)
-
     this.phase = RunnerPhase.Completed;
+    return this.buildSucceededResult(ctx, artifactId, resultRef);
+  }
+
+  private buildSucceededResult(
+    ctx: SucceedContext,
+    artifactId: string,
+    resultRef: string,
+  ): RolloutReviewerRunnerResult {
     return {
       status: 'succeeded',
       taskId: ctx.taskId,
@@ -579,49 +610,139 @@ export class RolloutReviewerRunner {
   }
 
   /**
-   * P0-F: approve_rollout → 自动 activation dispatch (INV-06)。
-   * dispatch 目标是被评审且已 validated 的 evaluator artifact (prompt 注入/
-   * RuleHost 激活都要求 validated)。幂等性由 ActivationDispatcher 的
-   * `${artifactId}::${channel}` idempotency key 保证 (INV-08)。
-   * 未注入 dep → 显式 degraded 事件 (rc-9)。
+   * P0-1 (外部复核): 解析 activation 候选 artifact — 与 review source 分离。
+   *
+   * 事实基线 (evaluator-runner 产物形状):
+   *   - evaluator 任务名下存在 kind='principle' 但 **pending** 的 evaluation
+   *     输出 artifact (pi-art-<evalTask>-<run>),其 contentJson 是 EvaluatorOutputV1,
+   *     不含可激活的 principleId/text —— 不是合法 activation 目标。
+   *   - prompt/defer_archive 渠道的合法目标 = **scribe** 的 validated principle
+   *     artifact (evaluator approved 时被 updateValidationStatus 翻 validated)。
+   *   - code_tool_hook 渠道的合法目标 = evaluator assemble 的 validated **rule**
+   *     artifact (pi-rule-<evalTask>-<run>, V2 对抗通过)。
+   *
+   * 解析策略: 沿 dep 链 (rollout→evaluator→artificer→scribe) 收集各 source task
+   * 的 artifacts,按 channel 期望的 kind+validated 过滤;恰好一个候选才接受;
+   * 零候选或多个候选 (历史脏数据) 一律 unresolved → needs_human_review,
+   * 禁止 firstArtifact/created_at 猜测。
    */
-  private async handleAutoDispatch(ctx: SucceedContext, rolloutArtifactId: string): Promise<void> {
+  private async resolveActivationCandidate(ctx: SucceedContext): Promise<string | null> {
+    const channel = ctx.channel ?? 'prompt';
+    const wantKind = channel === 'code_tool_hook' ? 'rule' : 'principle';
+
+    const chainIds = await this.collectLineageSourceTaskIds(ctx.taskId, [ctx.taskId], 0, 5);
+    const matches: string[] = [];
+    for (const taskId of chainIds) {
+      // P0-1 加固: prompt/defer 渠道排除决策型 runner 名下的 artifacts —
+      // evaluator 名下的 principle 是评审输出(即使历史脏数据把它翻成
+      // validated 也不是可激活的原则文本;合法 bearer 属于 scribe)。
+      if (wantKind === 'principle') {
+        const ownerTask = await this.stateManager.getTask(taskId);
+        if (ownerTask?.taskKind === 'evaluator' || ownerTask?.taskKind === 'rollout_reviewer') {
+          continue;
+        }
+      }
+      let artifacts: PIArtifactRecord[] = [];
+      try {
+        artifacts = await this.artifactStore.listBySourceTaskId(taskId);
+      } catch {
+        continue;
+      }
+      for (const a of artifacts) {
+        if (a.artifactKind === wantKind && a.validationStatus === 'validated') {
+          matches.push(a.artifactId);
+        }
+      }
+    }
+
+    if (matches.length === 1) {
+      const [candidateId] = matches;
+      this.emitRolloutReviewerEvent('rollout_activation_candidate_resolved', ctx.taskId, {
+        artifactId: candidateId ?? '',
+        channel,
+        kind: wantKind,
+        searchedTaskIds: chainIds,
+      });
+      return candidateId ?? null;
+    }
+    this.emitRolloutReviewerEvent('rollout_activation_candidate_unresolved', ctx.taskId, {
+      channel,
+      kind: wantKind,
+      matchCount: matches.length,
+      matchedArtifactIds: matches,
+      reason: matches.length === 0 ? 'no_validated_candidate_in_lineage' : 'ambiguous_validated_candidates',
+      nextAction: 'inspect lineage artifacts; dispatch manually via pd activation dispatch after fixing',
+    });
+    return null;
+  }
+
+  /** 收集 lineage 上所有 source task id (BFS 沿 dependencyTaskIds, 有界深度)。 */
+  private async collectLineageSourceTaskIds(
+    rootTaskId: string,
+    acc: string[],
+    depth: number,
+    maxDepth: number,
+  ): Promise<string[]> {
+    if (depth > maxDepth) return acc;
+    const task = await this.stateManager.getTask(rootTaskId);
+    if (!task) return acc;
+    const piTask = hydratePITaskRecord(task);
+    for (const depId of piTask?.dependencyTaskIds ?? []) {
+      if (acc.includes(depId)) continue;
+      acc.push(depId);
+      await this.collectLineageSourceTaskIds(depId, acc, depth + 1, maxDepth);
+    }
+    return acc;
+  }
+
+  /**
+   * P0-2 (外部复核): dispatch + 结果分类。
+   * 返回 true = governance transition 完成 (activated / already_activated /
+   * queued_for_approval);false = 已转入 needs_human_review。
+   * transient 异常直接冒泡 (caller → retryOrFail → retry_wait 自动重试)。
+   */
+  private async dispatchOrRouteFailure(ctx: SucceedContext, candidateArtifactId: string): Promise<boolean> {
     if (!this.dispatchActivation) {
       this.emitRolloutReviewerEvent('rollout_dispatch_not_wired', ctx.taskId, {
         reason: 'dispatch_activation_dep_not_injected',
         nextAction: 'wire_activation_dispatcher_in_auto_consumer_or_run_once',
-        rolloutArtifactId,
       });
-      return;
+      await this.markNeedsHumanReview(ctx.taskId, 'rollout_dispatch_not_wired');
+      return false;
     }
-    if (!ctx.sourceEvaluatorArtifactId) {
-      this.emitRolloutReviewerEvent('rollout_dispatch_target_unresolved', ctx.taskId, {
-        reason: 'source_evaluator_artifact_id_missing',
-        nextAction: 'manual_dispatch_via_cli_after_lineage_check',
-      });
-      return;
-    }
-    try {
-      const outcome = await this.dispatchActivation({
-        artifactId: ctx.sourceEvaluatorArtifactId,
-        channel: ctx.channel ?? 'prompt',
-        confidence: ctx.output.review.confidence,
-        rolloutTaskId: ctx.taskId,
-      });
-      this.emitRolloutReviewerEvent('rollout_activation_dispatched', ctx.taskId, {
-        artifactId: ctx.sourceEvaluatorArtifactId,
+    // throw 在此冒泡: transient (db locked / network) → retry_wait,由消费循环重试
+    const outcome = await this.dispatchActivation({
+      artifactId: candidateArtifactId,
+      channel: ctx.channel ?? 'prompt',
+      confidence: ctx.output.review.confidence,
+      rolloutTaskId: ctx.taskId,
+    });
+
+    const completed = outcome.decision === 'activated'
+      || outcome.decision === 'already_activated'
+      || outcome.decision === 'queued_for_approval';
+    this.emitRolloutReviewerEvent(
+      completed ? 'rollout_activation_dispatched' : 'rollout_activation_dispatch_refused',
+      ctx.taskId,
+      {
+        artifactId: candidateArtifactId,
         channel: ctx.channel ?? 'prompt',
         decision: outcome.decision,
         activationId: outcome.activationId ?? null,
         reason: outcome.reason ?? null,
-      });
-    } catch (err) {
-      this.emitRolloutReviewerEvent('rollout_activation_dispatch_failed', ctx.taskId, {
-        artifactId: ctx.sourceEvaluatorArtifactId,
-        errorMessage: err instanceof Error ? err.message : String(err),
-        nextAction: 'recovery_sweep_or_manual_dispatch',
-      });
+        nextAction: completed ? null : 'owner_inspect_artifact_then_manual_dispatch_or_archive',
+      },
+    );
+    if (!completed) {
+      await this.markNeedsHumanReview(ctx.taskId, `rollout_dispatch_${outcome.decision}`);
+      return false;
     }
+    return true;
+  }
+
+  /** P0-3: verdict 持久化失败 → fail loud (retry),绝不静默继续。 */
+  private async recordRunnerDecisionOrThrow(taskId: string, decision: string): Promise<void> {
+    await this.recordRunnerDecision(taskId, decision);
   }
 
   /**
@@ -790,11 +911,14 @@ export class RolloutReviewerRunner {
       });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
     } catch (err) {
+      // P0-3 (外部复核): verdict durability 是 succeeded 的前置 — 写失败必须
+      // fail loud (retry_wait),吞掉会让 commit 门读到 missing decision。
       this.emitRolloutReviewerEvent('rollout_decision_record_failed', taskId, {
         errorMessage: err instanceof Error ? err.message : String(err),
         decision,
-        nextAction: 'check_task_store_consistency',
+        nextAction: 'task_will_retry; check_task_store_consistency',
       });
+      throw err;
     }
   }
 

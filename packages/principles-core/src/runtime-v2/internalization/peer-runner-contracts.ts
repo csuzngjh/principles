@@ -148,6 +148,8 @@ export interface PITaskRecord extends TaskRecord {
   revisionCount?: number;
   /** Feedback injected when this task is reopened by rollout needs_revision routing. */
   revisionFeedback?: string;
+  /** P0-4 stable revision identity — same-cause reopen replays are no-ops. */
+  revisionCauseId?: string;
   /** Rollout needs_revision routing payload; present on rollout_reviewer tasks that routed a revision. */
   rolloutRevisionPayload?: RolloutRevisionPayload;
 }

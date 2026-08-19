@@ -100,6 +100,8 @@ function createMockStateManager(): {
 } {
   const createdTasks: TaskRecord[] = [];
   const stateManager = {
+    getTask: vi.fn(async (taskId: string) =>
+      createdTasks.find((t) => t.taskId === taskId) ?? null),
     createTask: vi.fn(async (record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>) => {
       const now = new Date().toISOString();
       const task: TaskRecord = { ...record, createdAt: now, updatedAt: now };
@@ -288,7 +290,7 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     expect(meta.inputArtifactRefs).toEqual(params.inheritedInputArtifactRefs);
   });
 
-  it('seedArtificerRepairTask → each call returns a UNIQUE task ID (rc-7: no stale state)', async () => {
+  it('seedArtificerRepairTask → deterministic id + replay reuse (P0-4); 不同 iteration 不同 id (rc-7)', async () => {
     const workspaceDir = createTempWorkspace(true);
     tmpWorkspaces.push(workspaceDir);
     const { stateManager } = createMockStateManager();
@@ -305,9 +307,17 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
 
     if (typeof deps.seedArtificerRepairTask !== 'function') throw new Error('seedArtificerRepairTask missing');
     const id1 = await deps.seedArtificerRepairTask(params);
+    // P0-4: 同一 evaluator+iteration 的重放 (consumer 重复周期 / crash 恢复)
+    // reuse 同一确定性 id,不重复创建
+    expect(id1).toBe(`artificer-repair-${params.repairPayload.sourceEvaluatorTaskId}-r${params.repairPayload.repairIteration}`);
     const id2 = await deps.seedArtificerRepairTask(params);
-
-    expect(id1).not.toBe(id2);
+    expect(id2).toBe(id1);
+    // 不同 iteration (下一逻辑修复轮) → 不同 id
+    const id3 = await deps.seedArtificerRepairTask({
+      ...params,
+      repairPayload: { ...params.repairPayload, repairIteration: params.repairPayload.repairIteration + 1 },
+    });
+    expect(id3).not.toBe(id1);
   });
 
   it('deps spread contains all required base PeerRunnerDeps fields (EP-02: real path gets full deps)', () => {

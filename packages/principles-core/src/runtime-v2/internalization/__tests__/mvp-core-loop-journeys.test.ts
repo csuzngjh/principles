@@ -16,6 +16,8 @@ import * as os from 'os';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import { InternalizationOrchestrator } from '../internalization-orchestrator.js';
 import { RolloutReviewerRunner } from '../rollout-reviewer-runner.js';
+import { EvaluatorRunner } from '../evaluator-runner.js';
+import { DefaultEvaluatorValidator } from '../evaluator-output.js';
 import { DefaultRolloutReviewerValidator } from '../rollout-reviewer-output.js';
 import type { RolloutReviewerOutputV1 } from '../rollout-reviewer-output.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson } from '../pitask-metadata.js';
@@ -351,12 +353,103 @@ describe('Journey 7 — rollout needs_revision → scribe reopen,不进 approval
   });
 });
 
-describe('Journey 8 — approve_rollout → 自动 dispatch (低风险 system_policy)', () => {
-  it('approve_rollout: activation 行自动产生,无需 pd runtime activation dispatch', async () => {
-    const artifactStore = await seedRolloutLineage(true);
-    const runner = new RolloutReviewerRunner({
+describe('Journey 8 — 真实 EvaluatorRunner → RolloutReviewerRunner → ActivationDispatcher (P0-1)', () => {
+  const SCRIBE_TASK_ID = 'scribe-j8-real-prompt';
+  const ARTIFICER_TASK_ID = 'artificer-j8-real-prompt';
+  const EVAL_TASK_ID = 'evaluator-j8-real-prompt';
+  const ROLLOUT_TASK_ID = 'rollout_reviewer-j8-real-prompt';
+  const SCRIBE_ARTIFACT = 'pi-art-scribe-j8-real';
+  const ARTIFICER_ARTIFACT = 'pi-art-artificer-j8-real';
+
+  async function seedRealLineage(): Promise<void> {
+    // scribe(succeeded) + principle artifact(pending, 真实 bearer 形状)
+    await createTask(SCRIBE_TASK_ID, 'scribe', meta({ correlationId: 'j8real' }));
+    await succeedWithDecision(SCRIBE_TASK_ID);
+    const conn = new SqliteConnection(workspaceDir);
+    try {
+      const store = new SqlitePIArtifactStore(conn);
+      await store.upsertArtifact({
+        artifactId: SCRIBE_ARTIFACT, artifactKind: 'principle', sourceTaskId: SCRIBE_TASK_ID,
+        lineageArtifactIds: [], validationStatus: 'pending',
+        contentJson: JSON.stringify({
+          principleId: 'principle-j8-real', text: '遇到歧义先确认 Owner 意图',
+          principleDraft: { title: 'principle-j8-real', statement: '遇到歧义先确认 Owner 意图' },
+        }),
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      });
+      await store.upsertArtifact({
+        artifactId: ARTIFICER_ARTIFACT, artifactKind: 'patch', sourceTaskId: ARTIFICER_TASK_ID,
+        lineageArtifactIds: [SCRIBE_ARTIFACT], validationStatus: 'pending',
+        contentJson: JSON.stringify({ taskId: ARTIFICER_TASK_ID, changes: [] }),
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      });
+    } finally {
+      try { conn.close(); } catch { /* best-effort */ }
+    }
+    // artificer(succeeded) / evaluator(pending)
+    await createTask(ARTIFICER_TASK_ID, 'artificer', meta({
+      dependencyTaskIds: [SCRIBE_TASK_ID], correlationId: 'j8real',
+      outputArtifactRefs: [{ artifactType: 'patch', ref: ARTIFICER_ARTIFACT }],
+    }));
+    await succeedWithDecision(ARTIFICER_TASK_ID);
+    await createTask(EVAL_TASK_ID, 'evaluator', meta({
+      dependencyTaskIds: [ARTIFICER_TASK_ID], correlationId: 'j8real',
+    }));
+  }
+
+  function evaluatorAdapter(): PDRuntimeAdapter {
+    return {
+      startRun: async () => ({ runId: 'run-eval-j8', runtimeKind: 'test-double', startedAt: new Date().toISOString() }),
+      pollRun: async () => ({ status: 'succeeded', runId: 'run-eval-j8' }),
+      fetchOutput: async () => ({
+        runId: 'run-eval-j8',
+        payload: {
+          taskId: EVAL_TASK_ID,
+          sourceArtificerArtifactId: ARTIFICER_ARTIFACT,
+          evaluation: { decision: 'approved', summary: 'ok', score: 0.9, strengths: [], concerns: [], requiredChanges: [] },
+          sourceTrace: { artificerArtifactId: ARTIFICER_ARTIFACT, scribeArtifactId: SCRIBE_ARTIFACT },
+          risks: [], generatedAt: new Date().toISOString(),
+        },
+      }),
+      cancelRun: async () => undefined,
+    } as unknown as PDRuntimeAdapter;
+  }
+
+  it('approved 链: dispatch 目标 = scribe 的 validated principle artifact,绝非 evaluator 评审输出', async () => {
+    await seedRealLineage();
+    const artifactStore = new SqlitePIArtifactStore(new SqliteConnection(workspaceDir));
+
+    // ── 真实 EvaluatorRunner (scripted LLM verdict: approved) ──
+    const evaluator = new EvaluatorRunner({
+      stateManager, runtimeAdapter: evaluatorAdapter(), eventEmitter: storeEmitter,
+      artifactStore, validator: new DefaultEvaluatorValidator(),
+    }, { owner: 'j8', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
+    const evalResult = await evaluator.run(EVAL_TASK_ID);
+    expect(evalResult.status).toBe('succeeded');
+
+    // evaluator 产物事实 (P0-1 基线): 名下 principle artifact = 评审输出,恒 pending;
+    // scribe bearer 被翻 validated
+    const evalOwned = await artifactStore.listBySourceTaskId(EVAL_TASK_ID);
+    expect(evalOwned.length).toBe(1);
+    expect(evalOwned[0]?.validationStatus).toBe('pending');
+    const scribeArt = await artifactStore.getArtifactById(SCRIBE_ARTIFACT);
+    expect(scribeArt?.validationStatus).toBe('validated');
+
+    // commit → seed rollout (durable runnerDecision=approved)
+    const commit = await orchestrator.commitNextTaskProposal(EVAL_TASK_ID);
+    expect(commit.decision).toBe('successor_created');
+
+    // ── 真实 RolloutReviewerRunner + 真实 dispatcher deps ──
+    await createTask(ROLLOUT_TASK_ID, 'rollout_reviewer', meta({
+      dependencyTaskIds: [EVAL_TASK_ID], correlationId: 'j8real',
+    }));
+    const rolloutOutput = makeRolloutOutput('approve_rollout');
+    const rollout = new RolloutReviewerRunner({
       stateManager,
-      runtimeAdapter: scriptedAdapter(makeRolloutOutput('approve_rollout')),
+      runtimeAdapter: scriptedAdapter({
+        ...rolloutOutput, taskId: ROLLOUT_TASK_ID,
+        sourceTrace: { evaluatorArtifactId: evalOwned[0]?.artifactId ?? '' },
+      }),
       eventEmitter: storeEmitter,
       validator: new DefaultRolloutReviewerValidator(),
       artifactStore,
@@ -364,23 +457,63 @@ describe('Journey 8 — approve_rollout → 自动 dispatch (低风险 system_po
     }, { owner: 'j8', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
 
     expect(countActivations()).toBe(0);
-    const result = await runner.run(ROLLOUT_ID);
+    const result = await rollout.run(ROLLOUT_TASK_ID);
     expect(result.status).toBe('succeeded');
 
-    // 低风险 prompt 渠道 → system policy 自动激活
+    // P0-1 核心断言: activation 落在 scribe bearer 上,不是 evaluator 输出
     const activations = listActivations();
     expect(activations.length).toBe(1);
-    expect(activations[0]?.artifact_id).toBe(EVAL_ARTIFACT);
+    expect(activations[0]?.artifact_id).toBe(SCRIBE_ARTIFACT);
+    expect(activations[0]?.artifact_id).not.toBe(evalOwned[0]?.artifactId);
     expect(activations[0]?.action).toBe('prompt_activate');
-    expect(activations[0]?.deactivated_at).toBeNull();
-    // 无 approval 需要 Owner 处理 (低风险自动路径)
     expect(countApprovals()).toBe(0);
 
-    // 幂等 (INV-08): 重跑不产生第二条 activation
-    await stateManager.updateTask(ROLLOUT_ID, { status: 'pending', attemptCount: 0 });
-    const rerun = await runner.run(ROLLOUT_ID);
+    // 幂等重放: reopen rollout 重跑 → already_activated,不重复
+    await stateManager.updateTask(ROLLOUT_TASK_ID, { status: 'pending', attemptCount: 0 });
+    const rerun = await rollout.run(ROLLOUT_TASK_ID);
     expect(rerun.status).toBe('succeeded');
     expect(listActivations().length).toBe(1);
+  });
+
+  it('P0-2: 无 validated 候选 (未跑 evaluator) → 任务 needs_human_review,零 activation', async () => {
+    await seedRealLineage();
+    // 不跑 evaluator,但存在其评审输出 artifact (pending, 真实形状) —
+    // scribe bearer 仍 pending → 无 validated 候选
+    const evalConn = new SqliteConnection(workspaceDir);
+    try {
+      const store = new SqlitePIArtifactStore(evalConn);
+      await store.upsertArtifact({
+        artifactId: 'pi-art-eval-j8b-review-output', artifactKind: 'principle', sourceTaskId: EVAL_TASK_ID,
+        lineageArtifactIds: [ARTIFICER_ARTIFACT], validationStatus: 'pending',
+        contentJson: JSON.stringify({ taskId: EVAL_TASK_ID, evaluation: { decision: 'approved', score: 0.9, strengths: [], concerns: [], requiredChanges: [] } }),
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      });
+    } finally {
+      try { evalConn.close(); } catch { /* best-effort */ }
+    }
+    await succeedWithDecision(EVAL_TASK_ID, 'approved');
+    const commit = await orchestrator.commitNextTaskProposal(EVAL_TASK_ID);
+    expect(commit.decision).toBe('successor_created');
+    await createTask(ROLLOUT_TASK_ID, 'rollout_reviewer', meta({
+      dependencyTaskIds: [EVAL_TASK_ID], correlationId: 'j8real',
+    }));
+
+    const artifactStore = new SqlitePIArtifactStore(new SqliteConnection(workspaceDir));
+    const rollout = new RolloutReviewerRunner({
+      stateManager,
+      runtimeAdapter: scriptedAdapter({ ...makeRolloutOutput('approve_rollout'), taskId: ROLLOUT_TASK_ID }),
+      eventEmitter: storeEmitter,
+      validator: new DefaultRolloutReviewerValidator(),
+      artifactStore,
+      ...makeDispatcherDeps(),
+    }, { owner: 'j8b', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
+
+    const result = await rollout.run(ROLLOUT_TASK_ID);
+    expect(result.status).toBe('succeeded'); // runner 本轮执行成功 (verdict 有效)
+    // governance transition 未完成 → needs_human_review,不伪装成功
+    const task = await stateManager.getTask(ROLLOUT_TASK_ID);
+    expect(task?.status).toBe('needs_human_review');
+    expect(countActivations()).toBe(0);
   });
 });
 

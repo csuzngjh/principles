@@ -266,6 +266,7 @@ function createMockDeps(overrides: {
     }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined), // P0-3: runner verdict 前置写入
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
     updateTask: vi.fn().mockImplementation(async (taskId: string, patch: Record<string, unknown>) => ({

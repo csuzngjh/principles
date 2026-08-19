@@ -48,9 +48,9 @@ function makeOutput(decision: 'needs_revision' | 'approve_rollout', requiredChan
   };
 }
 
-function makeDeps(output: RolloutReviewerOutputV1, overrides: Partial<RolloutReviewerRunnerDeps> & {
+async function makeDeps(output: RolloutReviewerOutputV1, overrides: Partial<RolloutReviewerRunnerDeps> & {
   rolloutStatus?: string; rolloutMeta?: Record<string, unknown>;
-} = {}): { deps: RolloutReviewerRunnerDeps; stateManager: Record<string, unknown> } {
+} = {}): Promise<{ deps: RolloutReviewerRunnerDeps; stateManager: Record<string, unknown> }> {
   const rolloutTask = { ...makeTask(ROLLOUT_ID, 'rollout_reviewer', [EVAL_ID], overrides.rolloutStatus ?? 'pending') };
   if (overrides.rolloutMeta) {
     rolloutTask.diagnosticJson = createPITaskDiagnosticJson({
@@ -65,6 +65,18 @@ function makeDeps(output: RolloutReviewerOutputV1, overrides: Partial<RolloutRev
     [ARTIFER_ID, makeTask(ARTIFER_ID, 'artificer', [SCRIBE_ID])],
     [SCRIBE_ID, makeTask(SCRIBE_ID, 'scribe', [])],
   ]);
+  const artifactStoreEarly = new MemoryPIArtifactStore();
+  // P0-1: 合法 activation 候选 = scribe 的 validated principle artifact
+  await artifactStoreEarly.upsertArtifact({
+    artifactId: 'pi-art-scribe-validated',
+    artifactKind: 'principle',
+    sourceTaskId: SCRIBE_ID,
+    lineageArtifactIds: [],
+    validationStatus: 'validated',
+    contentJson: JSON.stringify({ principleId: 'err-path-p', text: 'x' }),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
 
   const stateManager = {
     acquireLease: vi.fn().mockResolvedValue(rolloutTask),
@@ -88,13 +100,14 @@ function makeDeps(output: RolloutReviewerOutputV1, overrides: Partial<RolloutRev
     cancelRun: vi.fn().mockResolvedValue(undefined),
   } as unknown as PDRuntimeAdapter;
 
-  const artifactStore = new MemoryPIArtifactStore();
-  void artifactStore.upsertArtifact({
+  const artifactStore = artifactStoreEarly;
+  await artifactStore.upsertArtifact({
     artifactId: 'pi-art-eval-err',
     artifactKind: 'principle',
     sourceTaskId: EVAL_ID,
     lineageArtifactIds: [],
-    validationStatus: 'validated',
+    // 真实形状: evaluator 名下 principle = 评审输出,恒 pending (P0-1)
+    validationStatus: 'pending',
     contentJson: JSON.stringify({
       principleId: 'err-principle',
       text: '错误路径测试原则',
@@ -120,27 +133,31 @@ function makeRunner(deps: RolloutReviewerRunnerDeps): RolloutReviewerRunner {
 }
 
 describe('RolloutReviewerRunner verdict out-edge error paths', () => {
-  it('approve_rollout + dispatch dep 未注入 → rollout_dispatch_not_wired 事件, 不 throw', async () => {
-    const { deps, stateManager } = makeDeps(makeOutput('approve_rollout'));
+  it('approve_rollout + dispatch dep 未注入 → not_wired 事件 + needs_human_review (P0-2: 不伪装成功)', async () => {
+    const { deps, stateManager } = await makeDeps(makeOutput('approve_rollout'));
     const runner = makeRunner(deps);
     const result = await runner.run(ROLLOUT_ID);
+    // runner 本轮执行成功 (verdict 有效),但 governance transition 未完成
     expect(result.status).toBe('succeeded');
     const emitted = getEmitted(deps);
     expect(emitted.some((e) => e.eventType === 'rollout_dispatch_not_wired')).toBe(true);
-    expect(stateManager.updateTask).not.toHaveBeenCalledWith(ROLLOUT_ID, expect.objectContaining({ status: 'needs_human_review' }));
+    expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 
-  it('approve_rollout + dispatch throw → rollout_activation_dispatch_failed 事件, 任务仍 succeeded (降级不卡链)', async () => {
-    const { deps } = makeDeps(makeOutput('approve_rollout'), {
+  it('approve_rollout + dispatch transient throw (db locked) → 不 markSucceeded,走重试路径 (P0-2)', async () => {
+    const { deps, stateManager } = await makeDeps(makeOutput('approve_rollout'), {
       dispatchActivation: vi.fn().mockRejectedValue(new Error('db locked')),
     });
     const result = await makeRunner(deps).run(ROLLOUT_ID);
-    expect(result.status).toBe('succeeded');
-    expect(getEmitted(deps).some((e) => e.eventType === 'rollout_activation_dispatch_failed')).toBe(true);
+    // transient → 异常冒泡到 retryOrFail (mock 策略 shouldRetry=false → failed;
+    // 生产策略为 retry_wait 自动重试,dispatcher 幂等保证重放安全)
+    expect(result.status).not.toBe('succeeded');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 
   it('needs_revision budget 耗尽 (已记录 iteration=2) → needs_human_review, 不再 reopen', async () => {
-    const { deps, stateManager } = makeDeps(makeOutput('needs_revision', ['改措辞']), {
+    const { deps, stateManager } = await makeDeps(makeOutput('needs_revision', ['改措辞']), {
       rolloutMeta: {
         rolloutRevisionPayload: {
           requiredChanges: ['前一轮'], revisionIteration: 2,
@@ -157,7 +174,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
   });
 
   it('needs_revision 路由目标缺失 (dep 链断) → needs_human_review (target_unresolved)', async () => {
-    const { deps, stateManager } = makeDeps(makeOutput('needs_revision'));
+    const { deps, stateManager } = await makeDeps(makeOutput('needs_revision'));
     // 断链: evaluator 的 dep 指向不存在的 artificer
     (deps.stateManager.getTask as unknown as { mockImplementation: (fn: (id: string) => Promise<TaskRecord | null>) => void })
       .mockImplementation(async (id: string) => id === EVAL_ID
@@ -170,7 +187,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
   });
 
   it('needs_revision + reopen dep 未注入 → not_wired 事件 + needs_human_review', async () => {
-    const { deps, stateManager } = makeDeps(makeOutput('needs_revision', ['x']));
+    const { deps, stateManager } = await makeDeps(makeOutput('needs_revision', ['x']));
     const result = await makeRunner(deps).run(ROLLOUT_ID);
     expect(result.status).toBe('succeeded');
     const emitted = getEmitted(deps);
@@ -179,7 +196,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
   });
 
   it('needs_revision + reopen 返回 ok=false → needs_human_review (reopen_failed reason)', async () => {
-    const { deps, stateManager } = makeDeps(makeOutput('needs_revision', ['x']), {
+    const { deps, stateManager } = await makeDeps(makeOutput('needs_revision', ['x']), {
       reopenRevisionTarget: vi.fn().mockResolvedValue({ ok: false, reason: 'task_in_flight_leased' }),
     });
     const result = await makeRunner(deps).run(ROLLOUT_ID);
@@ -188,7 +205,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
   });
 
   it('needs_revision + reopen throw → route_failed 事件 + needs_human_review', async () => {
-    const { deps, stateManager } = makeDeps(makeOutput('needs_revision', ['x']), {
+    const { deps, stateManager } = await makeDeps(makeOutput('needs_revision', ['x']), {
       reopenRevisionTarget: vi.fn().mockRejectedValue(new Error('sqlite busy')),
     });
     const result = await makeRunner(deps).run(ROLLOUT_ID);
@@ -197,12 +214,13 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
     expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
   });
 
-  it('recordRunnerDecision store 失败 → decision_record_failed 事件, 不 throw (verdict 已在 events/runs 可观测)', async () => {
-    const { deps } = makeDeps(makeOutput('approve_rollout'));
+  it('recordRunnerDecision store 失败 → fail loud (retry),任务绝不无 verdict 地 succeeded (P0-3)', async () => {
+    const { deps, stateManager } = await makeDeps(makeOutput('approve_rollout'));
     (deps.stateManager.updateTaskDiagnosticJson as unknown as { mockImplementation: (fn: () => Promise<never>) => void })
       .mockImplementation(() => Promise.reject(new Error('disk full')));
     const result = await makeRunner(deps).run(ROLLOUT_ID);
-    expect(result.status).toBe('succeeded');
+    expect(result.status).not.toBe('succeeded');
+    expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
     expect(getEmitted(deps).some((e) => e.eventType === 'rollout_decision_record_failed')).toBe(true);
   });
 });
