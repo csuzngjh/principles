@@ -211,7 +211,6 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
       session: {
         sessionId: 'session-eval-001',
         currentGfi: 50,
-        recentThinking: false,
       },
       evolution: {
         epTier: 0,
@@ -242,7 +241,6 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
       session: {
         sessionId: 'session-eval-002',
         currentGfi: 50,
-        recentThinking: false,
       },
       evolution: {
         epTier: 0,

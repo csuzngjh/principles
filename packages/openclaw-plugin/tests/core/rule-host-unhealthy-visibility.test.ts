@@ -102,7 +102,7 @@ function makeInput(): RuleHostInput {
       paramsSummary: { path: '/etc/passwd' },
     },
     workspace: { isRiskPath: false },
-    session: { sessionId: 'test-session-unhealthy', currentGfi: 0, recentThinking: false },
+    session: { sessionId: 'test-session-unhealthy', currentGfi: 0 },
     evolution: { epTier: 1 },
     derived: { estimatedLineChanges: 1, bashRisk: 'safe' as const },
   };

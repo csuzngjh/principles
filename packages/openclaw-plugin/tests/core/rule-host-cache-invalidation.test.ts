@@ -192,7 +192,7 @@ function makeHostInput(): RuleHostInput {
       paramsSummary: { file_path: '/etc/passwd', content: 'x' },
     },
     workspace: { isRiskPath: false },
-    session: { sessionId: 'cache-inval-session', currentGfi: 0, recentThinking: false },
+    session: { sessionId: 'cache-inval-session', currentGfi: 0 },
     evolution: { epTier: 3 },
     derived: { estimatedLineChanges: 1, bashRisk: 'unknown' },
     context: undefined,

@@ -391,14 +391,14 @@ describe('shared production RuleHost gate kernel', () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, `
       function evaluate(input) {
-        if (input.session.currentGfi === 523 && input.session.recentThinking === true && input.evolution.epTier === 7) {
+        if (input.session.currentGfi === 523 && input.evolution.epTier === 7) {
           return { decision: 'block', matched: true, reason: 'HOST_ENRICHMENT_PARITY_523' };
         }
         return { decision: 'allow', matched: false, reason: 'host enrichment absent' };
       }
     `);
     const runtime = createProductionHostRuntime({
-      ruleInputEnrichmentProvider: () => ({ currentGfi: 523, recentThinking: true, epTier: 7, bashRisk: 'normal' }),
+      ruleInputEnrichmentProvider: () => ({ currentGfi: 523, epTier: 7, bashRisk: 'normal' }),
       afterToolCall: async (event) => ({ decision: 'observe', source: event.source }),
     });
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/safe/project.txt'))).resolves.toMatchObject({

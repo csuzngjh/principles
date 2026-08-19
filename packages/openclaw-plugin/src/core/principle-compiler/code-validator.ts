@@ -21,7 +21,7 @@ const MOCK_INPUT = {
     paramsSummary: { command: 'echo test' },
   },
   workspace: { isRiskPath: false },
-  session: { sessionId: 'test', currentGfi: 0, recentThinking: false },
+  session: { sessionId: 'test', currentGfi: 0 },
   evolution: { epTier: 0 },
   derived: { estimatedLineChanges: 0, bashRisk: 'safe' },
 };

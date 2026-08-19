@@ -200,7 +200,6 @@ export function createSyntheticRuleHostInput(
     },
     session: {
       currentGfi: 0,
-      recentThinking: false,
       ...overrides.session,
     },
     evolution: {

@@ -127,7 +127,6 @@ function makeInput(normalizedPath: string): RuleHostInput {
     session: {
       sessionId: 'test-session',
       currentGfi: 0,
-      recentThinking: false,
     },
     evolution: {
       epTier: 1,

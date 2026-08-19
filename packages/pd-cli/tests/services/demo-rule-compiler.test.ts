@@ -109,7 +109,7 @@ function makeRuleHostInput(estimatedLineChanges = 0): RuleHostInput {
       paramsSummary: {},
     },
     workspace: { isRiskPath: false },
-    session: { currentGfi: 0, recentThinking: true },
+    session: { currentGfi: 0 },
     evolution: { epTier: 0 },
     derived: { estimatedLineChanges, bashRisk: 'safe' },
   };

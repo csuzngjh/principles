@@ -15,7 +15,7 @@ import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
-import { getSession, hasRecentThinking } from '../core/session-tracker.js';
+import { getSession } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime-v2';
@@ -74,7 +74,6 @@ export function handleBeforeToolCall(
       session: {
         sessionId: ctx.sessionId,
         currentGfi: _getCurrentGfi(ctx.sessionId),
-        recentThinking: _hasRecentThinking(ctx.sessionId),
       },
       evolution: {
         epTier: _getEpTier(wctx.workspaceDir),
@@ -413,15 +412,6 @@ function _getCurrentGfi(sessionId?: string): number {
   }
 }
 
-function _hasRecentThinking(sessionId?: string): boolean {
-  if (!sessionId) return false;
-  try {
-    return hasRecentThinking(sessionId);
-  } catch {
-    return false;
-  }
-}
-
 function _getEpTier(workspaceDir: string): number {
   try {
     const engine = getEvolutionEngine(workspaceDir);
@@ -452,7 +442,6 @@ export function buildOpenClawRuleInputEnrichment(
 ) {
   return {
     currentGfi: _getCurrentGfi(sessionId),
-    recentThinking: _hasRecentThinking(sessionId),
     epTier: _getEpTier(workspaceDir),
     bashRisk: _getBashRisk(event),
   };

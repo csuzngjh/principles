@@ -92,7 +92,7 @@ function makeInput(normalizedPath: string, epTier?: unknown): RuleHostInput {
       paramsSummary: { path: normalizedPath },
     },
     workspace: { isRiskPath: false },
-    session: { sessionId: 'test-session-adversarial', currentGfi: 0, recentThinking: false },
+    session: { sessionId: 'test-session-adversarial', currentGfi: 0 },
     evolution: { epTier: epTier as number },
     derived: { estimatedLineChanges: 1, bashRisk: 'safe' as const },
   };

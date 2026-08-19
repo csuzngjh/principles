@@ -51,7 +51,7 @@ describe('internalization contracts (PRI-42)', () => {
       const input = {
         action: { toolName: 'write', normalizedPath: 'src/test.ts', paramsSummary: {} },
         workspace: { isRiskPath: true },
-        session: { sessionId: 'test', currentGfi: 3, recentThinking: false },
+        session: { sessionId: 'test', currentGfi: 3 },
         evolution: { epTier: 2 },
         derived: { estimatedLineChanges: 10, bashRisk: 'normal' as const },
       };
@@ -71,7 +71,7 @@ describe('internalization contracts (PRI-42)', () => {
       const input = {
         action: { toolName: 'bash', normalizedPath: null, paramsSummary: {} },
         workspace: { isRiskPath: false },
-        session: { currentGfi: 0, recentThinking: false },
+        session: { currentGfi: 0 },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' as const },
       };

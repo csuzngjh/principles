@@ -78,8 +78,6 @@ export interface SessionState {
     dailyPainSignals: number;
     dailyGfiPeak: number;
     
-    // Thinking OS checkpoint - tracks last deep thinking timestamp
-    lastThinkingTimestamp: number;
 
     // Evolution loop feedback attribution
     injectedProbationIds?: string[];
@@ -248,7 +246,6 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey
             dailyToolFailures: 0,
             dailyPainSignals: 0,
             dailyGfiPeak: 0,
-            lastThinkingTimestamp: 0,
             injectedProbationIds: [],
         };
         sessions.set(sessionId, state);
@@ -404,30 +401,12 @@ export function resetFriction(
     return state;
 }
 
-/**
- * Records that deep thinking (Thinking OS) was performed in this session.
- * Used by the Thinking OS checkpoint to allow high-risk operations.
- */
-export function recordThinkingCheckpoint(sessionId: string, workspaceDir?: string): SessionState {
-    const state = getOrCreateSession(sessionId, workspaceDir);
-    state.lastThinkingTimestamp = Date.now();
-    touchActivity(state, 'control');
-    SystemLogger.log(state.workspaceDir, 'THINKING_CHECKPOINT', `Deep thinking recorded at ${new Date(state.lastThinkingTimestamp).toISOString()}`);
-    schedulePersistence(state);
-    return state;
-}
-
-/**
- * Checks if deep thinking was performed recently (within the given window).
- * @param sessionId - The session to check
- * @param windowMs - How recent the thinking must be (default: 5 minutes)
- * @returns true if thinking was recorded within the window
- */
-export function hasRecentThinking(sessionId: string, windowMs: number = 5 * 60 * 1000): boolean {
-    const state = sessions.get(sessionId);
-    if (!state || !state.lastThinkingTimestamp) return false;
-    return (Date.now() - state.lastThinkingTimestamp) < windowMs;
-}
+// Thinking checkpoint retirement (2026-08-19, Wave 4): recordThinkingCheckpoint /
+// hasRecentThinking / SessionState.lastThinkingTimestamp were removed. The only
+// consumer (RuleHostInput.session.recentThinking and rule-real-diagnosis-first
+// v1's regex-proxy fallback) was migrated to RuleContextV2 history evidence.
+// Old persisted session JSON files may still carry a lastThinkingTimestamp
+// field; the loader tolerates extra fields, so no destructive migration.
 
 export function trackBlock(sessionId: string): SessionState {
     const state = getOrCreateSession(sessionId);

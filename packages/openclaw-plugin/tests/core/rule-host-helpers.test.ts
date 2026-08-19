@@ -25,7 +25,6 @@ function makeInput(overrides?: Partial<RuleHostInput>): RuleHostInput {
     session: {
       sessionId: 'session-123',
       currentGfi: 10,
-      recentThinking: false,
     },
     evolution: {
       epTier: 2,
