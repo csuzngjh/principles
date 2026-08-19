@@ -42,19 +42,22 @@ function emitWarning(msg: string): void {
 /**
  * Validate an operator-supplied workspace root before it is used as an IO
  * root. Uses `path.normalize` (pure string normalization, no filesystem
- * access) to collapse `..` segments, then rejects empty values, relative
- * paths, residual parent-traversal segments, and filesystem-root results so
- * later `path.join(workspaceRoot, ...)` calls stay inside the workspace
- * directory boundary instead of silently escaping to the drive root.
+ * access) to collapse `..` segments, then rejects empty values, residual
+ * parent-traversal segments, and filesystem-root results so later
+ * `path.join(workspaceRoot, ...)` calls stay inside the workspace directory
+ * boundary instead of silently escaping to the drive root.
+ *
+ * Platform note: no `path.isAbsolute` check here — absolute-ness is
+ * platform-dependent (a Windows-style path like "Z:\\work" is not absolute
+ * on POSIX runners), and relative paths resolve inside cwd so they carry no
+ * traversal risk. The boundary guards that matter are: empty, parent
+ * traversal, and filesystem root.
  */
 function assertWorkspaceDirInside(p: string, source: string): void {
   if (!p || p.trim().length === 0) {
     throw new Error(`Invalid ${source}: path is empty`);
   }
   const normalized = path.normalize(p);
-  if (!path.isAbsolute(normalized)) {
-    throw new Error(`Invalid ${source}: "${p}" is not an absolute path`);
-  }
   // After normalize, a surviving `..` segment means the input escaped a
   // parent boundary (e.g. "..\\..\\evil") — reject rather than trust it.
   if (normalized.split(/[\\/]/).includes('..')) {

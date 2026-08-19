@@ -45,14 +45,12 @@ interface TriggerDecisionEntry {
  */
 function getLogDir(workspaceDir: string): string {
   // CWE-22 boundary: normalize (pure string, no fs access) and reject
-  // empty/relative/parent-traversal paths before deriving the log dir.
+  // empty/parent-traversal paths before deriving the log dir. No
+  // `path.isAbsolute` check — absolute-ness is platform-dependent.
   if (!workspaceDir || workspaceDir.trim().length === 0) {
     throw new Error('Invalid workspace path: path is empty');
   }
   const normalized = path.normalize(workspaceDir);
-  if (!path.isAbsolute(normalized)) {
-    throw new Error(`Invalid workspace path: "${workspaceDir}" is not an absolute path`);
-  }
   if (normalized.split(/[\\/]/).includes('..')) {
     throw new Error(`Invalid workspace path: "${workspaceDir}" contains parent traversal`);
   }

@@ -321,18 +321,19 @@ function loadOpenClawPluginConfig(): { workspace?: string } | null {
  * path for filesystem reads. Candidate dirs are operator-supplied
  * (PD_WORKSPACE_DIR / plugin config / home default), so we normalize with
  * `path.normalize` (pure string, no filesystem access), then reject empty,
- * relative, parent-traversal, or root paths. This keeps the subsequent
+ * parent-traversal, or root paths. This keeps the subsequent
  * `path.join(dir, PD_CONFIG_DIR, ...)` inside the intended directory
  * boundary (CWE-22 mitigation).
+ *
+ * Platform note: no `path.isAbsolute` check — absolute-ness is
+ * platform-dependent (a Windows-style path is not absolute on POSIX
+ * runners) and relative dirs resolve inside cwd without traversal risk.
  */
 function assertConfigDirBoundary(dir: string, source: string): void {
   if (!dir || dir.trim().length === 0) {
     throw new Error(`Invalid config search dir (${source}): path is empty`);
   }
   const normalized = path.normalize(dir);
-  if (!path.isAbsolute(normalized)) {
-    throw new Error(`Invalid config search dir (${source}): "${dir}" is not an absolute path`);
-  }
   if (normalized.split(/[\\/]/).includes('..')) {
     throw new Error(`Invalid config search dir (${source}): "${dir}" contains parent traversal`);
   }

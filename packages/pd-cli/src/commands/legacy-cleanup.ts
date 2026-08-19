@@ -260,17 +260,16 @@ function glob(pattern: string): string[] {
 /**
  * Validate a workspace root before cleanup scans derive paths from it.
  * Uses `path.normalize` (pure string normalization, no filesystem access)
- * to collapse `..` segments, then rejects empty, relative, parent-traversal,
- * and filesystem-root paths (CWE-22 boundary guard).
+ * to collapse `..` segments, then rejects empty, parent-traversal, and
+ * filesystem-root paths (CWE-22 boundary guard). No `path.isAbsolute`
+ * check: absolute-ness is platform-dependent (a Windows-style path is not
+ * absolute on POSIX runners) and relative paths resolve inside cwd.
  */
 function assertCleanupWorkspaceRoot(workspacePath: string): string {
   if (!workspacePath || workspacePath.trim().length === 0) {
     throw new Error('Invalid workspace path: path is empty');
   }
   const normalized = path.normalize(workspacePath);
-  if (!path.isAbsolute(normalized)) {
-    throw new Error(`Invalid workspace path: "${workspacePath}" is not an absolute path`);
-  }
   if (normalized.split(/[\\/]/).includes('..')) {
     throw new Error(`Invalid workspace path: "${workspacePath}" contains parent traversal`);
   }
