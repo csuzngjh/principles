@@ -140,6 +140,15 @@ export interface RolloutRevisionPayload {
   readonly sourceRolloutTaskId: string;
   readonly sourceArtifactId: string;
   readonly targetTaskKind: 'scribe' | 'artificer';
+  /**
+   * B (最终复核) intent 状态机:
+   * - 'pending': intent 已持久化,transition 尚未 materialize — crash/retry/
+   *   restart 必须继续执行同一 iteration N,禁止自动 N+1;
+   * - 'applied': reopen 已 materialize — 只有新的 needs_revision verdict 才
+   *   能 N→N+1;budget 按 APPLIED 计数,不按 intent 写入次数计。
+   * - undefined: 旧形状 (本状态机引入前) — 兼容视为 'applied'。
+   */
+  readonly status?: 'pending' | 'applied';
 }
 
 // ── Serialization ──────────────────────────────────────────────────────────────
@@ -375,12 +384,17 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     if (typeof r.sourceRolloutTaskId !== 'string' || r.sourceRolloutTaskId.trim() === '') return null;
     if (typeof r.sourceArtifactId !== 'string' || r.sourceArtifactId.trim() === '') return null;
     if (r.targetTaskKind !== 'scribe' && r.targetTaskKind !== 'artificer') return null;
+    // B: 可选 intent 状态,缺失视为旧形状 (=applied)
+    let intentStatus: 'pending' | 'applied' | undefined;
+    if (r.status !== undefined && r.status !== 'pending' && r.status !== 'applied') return null;
+    if (r.status === 'pending' || r.status === 'applied') intentStatus = r.status;
     rolloutRevisionPayload = {
       requiredChanges: r.requiredChanges as string[],
       revisionIteration: r.revisionIteration,
       sourceRolloutTaskId: r.sourceRolloutTaskId,
       sourceArtifactId: r.sourceArtifactId,
       targetTaskKind: r.targetTaskKind,
+      status: intentStatus,
     };
   }
 

@@ -158,6 +158,11 @@ export { MemoryCommitStore } from './store/commit/memory-commit-store.js';
 export { MemoryCandidateStore } from './store/candidate/memory-candidate-store.js';
 export { MemoryArtifactStore } from './store/artifact/memory-artifact-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
+export {
+  SqliteReconciliationCursorStore,
+  SUCCEEDED_TRANSITIONS_SCOPE,
+} from './store/reconciliation-cursor-store.js';
+export type { ReconciliationCursor } from './store/reconciliation-cursor-store.js';
 export type { SqlitePragmaReport } from './store/sqlite-connection.js';
 export { guardWorkspaceLeak, isMockLeakPath } from './store/workspace-leak-guard.js';
 export { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';

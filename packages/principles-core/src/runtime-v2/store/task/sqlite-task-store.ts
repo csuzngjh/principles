@@ -161,7 +161,21 @@ export class SqliteTaskStore implements TaskStore {
       conditions.push('lease_expires_at IS NOT NULL AND lease_expires_at < ?');
       values.push(filter.leaseExpiresAtBefore);
     }
+    if (filter?.afterCursor) {
+      // Exclusive tuple cursor under the deterministic (updated_at, task_id)
+      // order — pagination must never run on a non-deterministic ORDER BY.
+      if (filter.orderBy === 'updated_at_asc') {
+        conditions.push('(updated_at > ? OR (updated_at = ? AND task_id > ?))');
+      } else if (filter.orderBy === 'updated_at_desc') {
+        conditions.push('(updated_at < ? OR (updated_at = ? AND task_id < ?))');
+      } else {
+        throw new PDRuntimeError('input_invalid', 'afterCursor requires orderBy updated_at_asc|desc');
+      }
+      values.push(filter.afterCursor.updatedAt, filter.afterCursor.updatedAt, filter.afterCursor.taskId);
+    }
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
+    if (filter?.orderBy === 'updated_at_asc') { sql += ' ORDER BY updated_at ASC, task_id ASC'; }
+    else if (filter?.orderBy === 'updated_at_desc') { sql += ' ORDER BY updated_at DESC, task_id DESC'; }
     if (filter?.limit) { sql += ' LIMIT ?'; values.push(filter.limit); }
     if (filter?.offset) { sql += ' OFFSET ?'; values.push(filter.offset); }
 

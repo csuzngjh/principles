@@ -38,6 +38,25 @@ export class MemoryTaskStore implements TaskStore {
     let results = [...this.tasks.values()];
     if (filter?.status) results = results.filter((t) => t.status === filter.status);
     if (filter?.taskKind) results = results.filter((t) => t.taskKind === filter.taskKind);
+    // Parity with SqliteTaskStore (A-liveness): silently ignoring
+    // orderBy/afterCursor here would make cursor-based scans return wrong
+    // pages under the memory store — a rc-9 silent degradation.
+    if (filter?.afterCursor) {
+      if (filter.orderBy !== 'updated_at_asc' && filter.orderBy !== 'updated_at_desc') {
+        throw new Error('MemoryTaskStore.listTasks: afterCursor requires orderBy updated_at_asc|desc');
+      }
+      const { updatedAt, taskId } = filter.afterCursor;
+      results = results.filter((t) => filter.orderBy === 'updated_at_asc'
+        ? (t.updatedAt > updatedAt || (t.updatedAt === updatedAt && t.taskId > taskId))
+        : (t.updatedAt < updatedAt || (t.updatedAt === updatedAt && t.taskId < taskId)));
+    }
+    if (filter?.orderBy === 'updated_at_asc') {
+      results.sort((a, b) => a.updatedAt === b.updatedAt ? (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0) : (a.updatedAt < b.updatedAt ? -1 : 1));
+    } else if (filter?.orderBy === 'updated_at_desc') {
+      results.sort((a, b) => a.updatedAt === b.updatedAt ? (a.taskId < b.taskId ? 1 : a.taskId > b.taskId ? -1 : 0) : (a.updatedAt > b.updatedAt ? -1 : 1));
+    }
+    if (filter?.offset) results = results.slice(filter.offset);
+    if (filter?.limit) results = results.slice(0, filter.limit);
     return results;
   }
 

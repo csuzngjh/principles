@@ -724,7 +724,10 @@ export class InternalizationOrchestrator {
    * collapse into the idempotent commit results above.
    */
   async reconcileSucceededTransitions(options?: {
+    /** 每周期处理条数上限 (bounded budget, 1..50) */
     limit?: number;
+    /** caller 持久化的扫描游标 (restart-durable);缺省从头开始 */
+    cursor?: { updatedAt: string; taskId: string };
     logger?: { info?: (msg: string) => void };
   }): Promise<{
     scanned: number;
@@ -732,20 +735,38 @@ export class InternalizationOrchestrator {
     alreadyMaterialized: number;
     blocked: number;
     outcomes: { taskId: string; decision: string }[];
+    /** 本周期后的游标 — caller 必须持久化 (A3 restart 语义) */
+    nextCursor: { lastUpdatedAt: string; lastTaskId: string };
+    /** true = 已扫到尾部,caller 应将游标重置回开头 (wrap-around) */
+    wrappedAround: boolean;
   }> {
     const limit = Math.max(1, Math.min(options?.limit ?? 10, 50));
-    const succeeded = await this.stateManager.listTasks({ status: 'succeeded', limit: 500 });
-    // most recent first; bounded to `limit` AFTER kind filtering
-    const recent = [...succeeded]
-      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-      .filter((t) => isPeerRunnerKind(t.taskKind))
-      .slice(0, limit);
+    // A (最终复核): BOUNDED + FAIR + RESTART-DURABLE。
+    // - ASC 全序扫描 (updated_at ASC, task_id ASC — SQL 层 ORDER BY, 不是
+    //   "LIMIT 后 JS 排序"): 最老的 orphan 优先,天然反 starvation;
+    // - 每周期只处理 limit 条 (bounded);
+    // - 游标为独占元组 (updatedAt, taskId),重启后从持久位置继续;
+    // - 扫到尾部 (返回行数 < limit) → wrappedAround,caller 重置游标回开头,
+    //   下一轮重新覆盖新增的 succeeded 任务 (eventual completeness);
+    // - 仲裁唯一入口仍是 commitNextTaskProposal;needs_revision/rejected/
+    //   missing verdict 在其中继续 fail-closed。
+    const fetchLimit = limit; // 仅取本预算行;peer-kind 过滤后不足也不补页
+    // (非 peer 行也会推进游标 — 它们无需 reconciliation,跳过即前进)
+    const page = await this.stateManager.listTasks({
+      status: 'succeeded',
+      orderBy: 'updated_at_asc',
+      afterCursor: options?.cursor,
+      limit: fetchLimit,
+    });
 
     const outcomes: { taskId: string; decision: string }[] = [];
     let recovered = 0;
     let alreadyMaterialized = 0;
     let blocked = 0;
-    for (const task of recent) {
+    let last: { lastUpdatedAt: string; lastTaskId: string } | undefined;
+    for (const task of page) {
+      last = { lastUpdatedAt: task.updatedAt, lastTaskId: task.taskId };
+      if (!isPeerRunnerKind(task.taskKind)) continue;
       try {
         const result = await this.commitNextTaskProposal(task.taskId);
         outcomes.push({ taskId: task.taskId, decision: result.decision });
@@ -760,12 +781,30 @@ export class InternalizationOrchestrator {
           blocked += 1;
         }
       } catch (err) {
-        // per-task failure must not abort the sweep (rc-9: surfaced via outcome)
+        // per-task failure must not abort the sweep; P1: caller 必须让
+        // reconcile_error 显式可观测 (不能只在 recovered>0 时打日志)
         outcomes.push({ taskId: task.taskId, decision: `reconcile_error:${err instanceof Error ? err.message : String(err)}` });
         blocked += 1;
       }
     }
-    return { scanned: recent.length, recovered, alreadyMaterialized, blocked, outcomes };
+
+    if (page.length === 0) {
+      // 尾部已到 (或起点即空): caller 重置游标
+      const cur = options?.cursor;
+      return {
+        scanned: 0, recovered, alreadyMaterialized, blocked, outcomes,
+        nextCursor: { lastUpdatedAt: cur?.updatedAt ?? '', lastTaskId: cur?.taskId ?? '' },
+        wrappedAround: true,
+      };
+    }
+    const cur = options?.cursor;
+    const tail = last ?? { lastUpdatedAt: cur?.updatedAt ?? '', lastTaskId: cur?.taskId ?? '' };
+    return {
+      scanned: outcomes.length + page.filter((t) => !isPeerRunnerKind(t.taskKind)).length,
+      recovered, alreadyMaterialized, blocked, outcomes,
+      nextCursor: tail,
+      wrappedAround: page.length < fetchLimit,
+    };
   }
 
   // ── Revision reopen (P0-D, MVP_CORE_LOOP_CONTRACT INV-02/INV-07/INV-08) ─────

@@ -138,8 +138,11 @@ describe('C — rollout revision budget persistence fail-closed (record-first)',
     await succeed(ARTIFICER_ID);
     await mkTask(EVAL_ID, 'evaluator', [ARTIFICER_ID]);
     await succeed(EVAL_ID);
-    const evalPi = hydratePITaskRecord(await stateManager.getTask(EVAL_ID) as TaskRecord);
-    await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(evalPi!, { runnerDecision: 'approved' })));
+    const evalRaw = await stateManager.getTask(EVAL_ID);
+    if (!evalRaw) throw new Error('seed: evaluator missing');
+    const evalPi = hydratePITaskRecord(evalRaw);
+    if (!evalPi) throw new Error('seed: evaluator not hydratable');
+    await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(evalPi, { runnerDecision: 'approved' })));
     await mkTask(ROLLOUT_ID, 'rollout_reviewer', [EVAL_ID]);
 
     const conn = new SqliteConnection(workspaceDir);
@@ -191,5 +194,133 @@ describe('C — rollout revision budget persistence fail-closed (record-first)',
     expect(r4.status).toBe('succeeded'); // runner 完成
     expect((await stateManager.getTask(ROLLOUT_ID))?.status).toBe('needs_human_review');
     expect((await stateManager.getTask(SCRIBE_ID))?.status).toBe('succeeded'); // 未产生额外 revision
+  });
+});
+
+
+describe('B — revision intent materialization state machine', () => {
+  // 复用 C describe 的 lineage 构造: 提取为 helper
+  async function seedLineage(): Promise<void> {
+    await mkTask(SCRIBE_ID, 'scribe', []);
+    await succeed(SCRIBE_ID);
+    await mkTask(ARTIFICER_ID, 'artificer', [SCRIBE_ID]);
+    await succeed(ARTIFICER_ID);
+    await mkTask(EVAL_ID, 'evaluator', [ARTIFICER_ID]);
+    await succeed(EVAL_ID);
+    const evalRaw = await stateManager.getTask(EVAL_ID);
+    if (!evalRaw) throw new Error('seed: evaluator missing');
+    const evalPi = hydratePITaskRecord(evalRaw);
+    if (!evalPi) throw new Error('seed: evaluator not hydratable');
+    await stateManager.updateTaskDiagnosticJson(EVAL_ID, createPITaskDiagnosticJson(mergePITaskMetadata(evalPi, { runnerDecision: 'approved' })));
+    await mkTask(ROLLOUT_ID, 'rollout_reviewer', [EVAL_ID]);
+
+    const conn = new SqliteConnection(workspaceDir);
+    const store = new SqlitePIArtifactStore(conn);
+    await store.upsertArtifact({
+      artifactId: 'pi-art-eval-c', artifactKind: 'principle', sourceTaskId: EVAL_ID,
+      lineageArtifactIds: [], validationStatus: 'pending',
+      contentJson: JSON.stringify({ evaluation: { decision: 'approved', score: 0.9, strengths: [], concerns: [], requiredChanges: [] } }),
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    await store.upsertArtifact({
+      artifactId: SCRIBE_ART, artifactKind: 'principle', sourceTaskId: SCRIBE_ID,
+      lineageArtifactIds: [], validationStatus: 'validated',
+      contentJson: JSON.stringify({ principleId: 'c-p', text: '原则', principleDraft: { title: 'c-p', statement: '原则' } }),
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    conn.close();
+  }
+
+  function runnerWithInjectedWriteFailure(failures: { count: number }): RolloutReviewerRunner {
+    return makeRunner(wrapRoutingWriteFailure(failures));
+  }
+
+  async function readIntent(): Promise<{ iteration?: number; status?: string }> {
+    const pi = hydratePITaskRecord(await stateManager.getTask(ROLLOUT_ID) as TaskRecord);
+    return { iteration: pi?.rolloutRevisionPayload?.revisionIteration, status: pi?.rolloutRevisionPayload?.status };
+  }
+
+  async function scribeRc(): Promise<number> {
+    const pi = hydratePITaskRecord(await stateManager.getTask(SCRIBE_ID) as TaskRecord);
+    return pi?.revisionCount ?? 0;
+  }
+
+  it('B1: persist intent r1 → crash before reopen → restart 继续执行 r1 (不自动 r2),budget 只耗 1', async () => {
+    await seedLineage();
+    // 手工构造 crash 态: 只完成 intent 持久化 (status pending, r1), 不 reopen
+    const raw = await stateManager.getTask(ROLLOUT_ID);
+    if (!raw) throw new Error('B1: rollout task missing');
+    const pi = hydratePITaskRecord(raw);
+    if (!pi) throw new Error('B1: rollout task not hydratable');
+    await stateManager.updateTaskDiagnosticJson(ROLLOUT_ID, createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
+      rolloutRevisionPayload: {
+        requiredChanges: ['x'], revisionIteration: 1, sourceRolloutTaskId: ROLLOUT_ID,
+        sourceArtifactId: SCRIBE_ART, targetTaskKind: 'scribe', status: 'pending',
+      },
+    })));
+    // restart 后 revision flow 重放 (rollout runner 正常跑 needs_revision)
+    const r = await makeRunner(stateManager).run(ROLLOUT_ID);
+    expect(r.status).toBe('succeeded');
+    const intent = await readIntent();
+    expect(intent.iteration).toBe(1);   // 继续 r1, 未跳 r2
+    expect(intent.status).toBe('applied');
+    expect(await scribeRc()).toBe(1);   // target revisionCount 只 +1
+  });
+
+  it('B2: persist r1 + reopen r1 → crash before rollout succeeded → restart 识别已 materialize,不 reopen r2,revisionCount 不变', async () => {
+    await seedLineage();
+    // 正常跑完第一轮 (含 reopen + applied + succeeded)
+    const r1 = await makeRunner(stateManager).run(ROLLOUT_ID);
+    expect(r1.status).toBe('succeeded');
+    expect(await scribeRc()).toBe(1);
+    const rcAfterRound1 = await scribeRc();
+
+    // 构造 B2 crash 态: 模拟"reopen 已发生但 rollout 未标 succeeded 前崩溃"
+    // = 回滚 rollout 到 pending + intent 回 pending (保留 target 的 causeId=r1)
+    const raw = await stateManager.getTask(ROLLOUT_ID);
+    if (!raw) throw new Error('B2: rollout task missing');
+    const pi = hydratePITaskRecord(raw);
+    if (!pi) throw new Error('B2: rollout task not hydratable');
+    const payload = pi.rolloutRevisionPayload;
+    if (!payload) throw new Error('B2: revision intent payload missing');
+    await stateManager.updateTaskDiagnosticJson(ROLLOUT_ID, createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
+      rolloutRevisionPayload: { ...payload, status: 'pending' as const },
+    })));
+    await stateManager.updateTask(ROLLOUT_ID, { status: 'pending', attemptCount: 0 });
+
+    // restart 后重放: 必须识别 r1 已 materialize (target causeId 匹配)
+    const r2 = await makeRunner(stateManager).run(ROLLOUT_ID);
+    expect(r2.status).toBe('succeeded');
+    const intent = await readIntent();
+    expect(intent.iteration).toBe(1);       // 未进到 r2
+    expect(intent.status).toBe('applied');
+    expect(await scribeRc()).toBe(rcAfterRound1); // 未产生额外 reopen
+  });
+
+  it('B3: budget 按 materialized 计数 — r1/r2 applied 后第三个 verdict 才 needs_human_review', async () => {
+    await seedLineage();
+    // r1
+    expect((await makeRunner(stateManager).run(ROLLOUT_ID)).status).toBe('succeeded');
+    await succeed(SCRIBE_ID);
+    await resetRolloutForRerun();
+    // r2
+    expect((await makeRunner(stateManager).run(ROLLOUT_ID)).status).toBe('succeeded');
+    expect((await readIntent()).iteration).toBe(2);
+    await succeed(SCRIBE_ID);
+    await resetRolloutForRerun();
+    // 第三个 verdict → exhausted (applied=2)
+    const r3 = await makeRunner(stateManager).run(ROLLOUT_ID);
+    expect(r3.status).toBe('succeeded');
+    expect((await stateManager.getTask(ROLLOUT_ID))?.status).toBe('needs_human_review');
+    expect(await scribeRc()).toBe(2); // 恰两次 materialized reopen
+  });
+
+  it('B4: intent 写失败 → 无 reopen,任务重试,budget/intent 不变', async () => {
+    await seedLineage();
+    const before = await readIntent();
+    const r = await runnerWithInjectedWriteFailure({ count: 1 }).run(ROLLOUT_ID);
+    expect(r.status).not.toBe('succeeded');
+    expect((await stateManager.getTask(SCRIBE_ID))?.status).toBe('succeeded'); // 未 reopen
+    expect(await readIntent()).toEqual(before); // budget 未写
   });
 });

@@ -44,7 +44,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
-| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210 |
+| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358 |
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
 | ERR-041 | Install success reported when delivered components are incomplete | PRI-247 |
 | ERR-042 | Output reports requested config instead of actual disk state | PRI-247 |
@@ -182,7 +182,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-091 | CI checkout lacks `lfs: true` when tests read LFS-tracked binary assets — assertion fails on 132-byte pointer files | PR #1159 |
 | ERR-092 | Module-level cache leaks across workspace instances when not keyed by workspaceDir | PRI-504 / PR #1164 review |
 | ERR-095 | Additive envelope/`contentJson` merge uses a key that collides with an existing output-schema field — silently overwrites the legitimate field | PR #1273 |
-| ERR-098 | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing dirs, never silence errors on critical cleanup | PRI-538 |
+| ERR-098 | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing dirs, never silence errors on critical cleanup | PRI-538; PR #1358 (near-miss: worktree node_modules junctioned into shared repo) |
 
 ---
 
@@ -561,6 +561,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
+  - 2026-08-19 PR #1358 final-review blocker A self-review: the succeeded-transition reconciliation was moved into a per-cycle bounded budget executed in `runConsumerCycle`'s `finally`, but the budget was gated on `if (orchestrator)` — and the orchestrator was constructed only AFTER the `!decision.shouldConsume` early return. With `readyTaskCount === 0` (the pure crash-orphan scenario the reconciliation exists for: task succeeded → crash before commit → queue empty), the cycle returned before construction and the budget never ran — the safety net existed with green orchestrator-level tests (A1/A3/A4) but was dead on exactly the production path it was built to defend. Fixed by constructing the orchestrator immediately after the state handle opens (before all queue-state early returns) and adding the A2-idle test that recovers an orphan through the REAL `runConsumerCycle` with an empty queue. Rule of thumb: a finally-blocked budget/cleanup must not depend on any resource constructed after an early-return branch — enumerate every early return between handle-open and the budget and prove the budget still runs on each.
   - 2026-07-04 PRI-510 (PR#1188, fixing PRI-509/PR#1186): `EvaluatorRunnerDeps` added optional `isRepairLoopEnabled` + `seedArtificerRepairTask` with isolated tests in `evaluator-runner.ts`, but 2 CLI construction sites (`rulehost-pipeline-runner.ts:366`, `runtime-internalization-run-once.ts:518`) only passed the 5 base deps — repair loop was dead code at runtime. Fixed by centralizing deps construction in `createEvaluatorRunnerDeps` helper used by both CLI sites.
   - 2026-06-25 PRI-467 (PR#1059): `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — size guard couldn't strip INTENT by priority. Fixed by adding to `blocks` + Step 1.5 strip
   - 2026-06-19 PRI-408 (PR#972): `activateArtifact()` accepted `rolloutDecision='approved'` without verifying approval record — require `approvalId` + independent verification
@@ -1493,7 +1494,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-071 (cleanup hygiene family — async cleanup/finally leaks; different prevention rule: resource cleanup vs destructive-op safety), ERR-074 (update-flow backup leak cleanup family; different root cause), ERR-050 (wrong-target file operations family).
 - **Source**: PRI-538 (pr-review session 2026-08-16, PRs #1332-1335 verification cleanup)
 - **Date**: 2026-08-16
-- **Recurrence**: None
+- **Recurrence**: Yes — shared-repo reparse-point hazard re-encountered (caught before damage this time).
+  - 2026-08-19 PR #1358 session (near-miss, no damage): the `principles-mvp-core-loop` worktree's `node_modules` was itself a JUNCTION into the main repo's shared `D:\Code\principles\node_modules` (leftover of the same junction-reuse pattern). Symptom: workspace package resolution silently hit the MAIN checkout's packages (different branch → `mergePITaskMetadata` "not a function" in spawned pd-cli while vitest imports passed). Nearly ran `npm ci` in the worktree — npm's rimraf of existing node_modules FOLLOWS the junction and would have deleted the main repo's entire node_modules. Safe recovery: `cmd /c rmdir node_modules` (removes the link only, verified main intact), then a fresh `npm ci` INSIDE the worktree so it owns a real node_modules with junctions to its own packages. Extra hazard observed: MSYS `ln -sfn` on Windows silently falls back to DEEP-COPYING the target (2000+ partial `Cu*` temp dirs when it hit the huge `packages/website`) — use PowerShell `New-Item -ItemType Junction` instead. Reinforces rule (5) of Correct approach: never junction a worktree's node_modules into a shared repo; install inside the worktree.
 
 ---
 

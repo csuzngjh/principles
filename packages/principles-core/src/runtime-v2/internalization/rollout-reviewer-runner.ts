@@ -11,7 +11,7 @@ import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata, type RolloutRevisionPayload } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
@@ -759,12 +759,23 @@ export class RolloutReviewerRunner {
    * needs_human_review 覆盖回 succeeded。
    */
   private async handleRevisionRouting(ctx: SucceedContext): Promise<boolean> {
-    const priorIteration = await this.resolvePriorRevisionIteration(ctx.taskId);
-    const iteration = priorIteration + 1;
-
-    if (iteration > 2) {
-      await this.markNeedsHumanReview(ctx.taskId, `rollout_revision_budget_exhausted_iteration_${priorIteration}`);
-      return false;
+    // ── B (最终复核): intent 状态机 — pending 继续执行,applied 才计 budget ──
+    // invariant: 同一个 needs_revision transition 无论 crash/retry/restart
+    // 多少次,只消耗一个 revision iteration,只 materialize 一个 reopen。
+    const storedIntent = await this.readStoredRevisionIntent(ctx.taskId);
+    let iteration: number;
+    if (storedIntent && storedIntent.status === 'pending') {
+      // B1: intent 已持久化但未 materialize — crash 后必须继续同一轮 N
+      iteration = storedIntent.revisionIteration;
+    } else {
+      // 无 intent,或上一 intent 已 applied → 只有"新 verdict"才 N→N+1;
+      // budget 按 APPLIED (materialized) 计数,不按 intent 写入次数计
+      const appliedCount = storedIntent ? storedIntent.revisionIteration : 0;
+      if (appliedCount >= 2) {
+        await this.markNeedsHumanReview(ctx.taskId, `rollout_revision_budget_exhausted_applied_${appliedCount}`);
+        return false;
+      }
+      iteration = appliedCount + 1;
     }
 
     const target = await this.resolveRevisionTarget(ctx.taskId, ctx.channel ?? 'prompt');
@@ -782,33 +793,53 @@ export class RolloutReviewerRunner {
     }
 
     const feedback = RolloutReviewerRunner.formatRevisionFeedback(ctx.output);
-    // ── C (外部复核): budget/cause 先持久化,再 reopen ──
-    // record 位于 try 之外: 持久化失败 = transient 存储错误 → 直接冒泡到
-    // run() 的 retryOrFail (retry_wait 自动重放; record 幂等覆盖写);
-    // reopen 的失败才走 catch → needs_human_review。
-    // 禁止 "reopen 成功 + budget metadata 丢失 + rollout 正常完成"。
+    // ── C (前轮) + B (本轮): intent 先持久化 (status=pending),再 materialize ──
+    // record 位于 try 之外: 持久化失败 = transient 存储错误 → 冒泡到
+    // retryOrFail (retry_wait; record 幂等覆盖写,B4: 无 reopen、budget 不增)。
     await this.recordRolloutRevisionRoutingOrThrow(ctx.taskId, {
       requiredChanges: [...ctx.output.review.requiredChanges],
       revisionIteration: iteration,
       sourceRolloutTaskId: ctx.taskId,
       sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
       targetTaskKind: target.kind,
+      status: 'pending',
     });
     try {
-      const outcome = await this.reopenRevisionTarget({
-        targetTaskId: target.taskId,
-        targetKind: target.kind,
-        revisionFeedback: feedback,
-        revisionIteration: iteration,
+      const causeId = `rollout-${ctx.taskId}-r${iteration}`;
+      // B2 materialize 检查: target 已携带本 cause → 这轮 reopen 已发生过
+      // (crash before rollout succeeded 的重放) — 不得再次 reopen
+      const targetTask = await this.stateManager.getTask(target.taskId);
+      const targetPi = targetTask ? hydratePITaskRecord(targetTask) : null;
+      if (targetPi && targetPi.revisionCauseId === causeId) {
+        this.emitRolloutReviewerEvent('rollout_revision_already_materialized', ctx.taskId, {
+          targetTaskId: target.taskId,
+          revisionIteration: iteration,
+          causeId,
+        });
+      } else {
+        const outcome = await this.reopenRevisionTarget({
+          targetTaskId: target.taskId,
+          targetKind: target.kind,
+          revisionFeedback: feedback,
+          revisionIteration: iteration,
+          sourceRolloutTaskId: ctx.taskId,
+          sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+        });
+        if (!outcome.ok) {
+          await this.markNeedsHumanReview(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`);
+          return false;
+        }
+      }
+      // B: transition materialized → intent 标 applied (写失败 fail loud,
+      // 重放经上面的 materialize 检查安全);此后 rollout 才允许 succeeded
+      await this.markRevisionIntentAppliedOrThrow(ctx.taskId, iteration, {
+        requiredChanges: [...ctx.output.review.requiredChanges],
         sourceRolloutTaskId: ctx.taskId,
         sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+        targetTaskKind: target.kind,
       });
-      if (!outcome.ok) {
-        await this.markNeedsHumanReview(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`);
-        return false;
-      }
       this.emitRolloutReviewerEvent('rollout_revision_routed', ctx.taskId, {
-        targetTaskId: outcome.reopenedTaskId ?? target.taskId,
+        targetTaskId: target.taskId,
         targetKind: target.kind,
         revisionIteration: iteration,
       });
@@ -820,17 +851,6 @@ export class RolloutReviewerRunner {
       await this.markNeedsHumanReview(ctx.taskId, 'rollout_revision_route_threw');
       return false;
     }
-  }
-
-  /** revision budget: rollout 任务元数据上已记录的修订轮数 (rc-7: 每轮现读) */
-  private async resolvePriorRevisionIteration(taskId: string): Promise<number> {
-    const task = await this.stateManager.getTask(taskId);
-    if (!task) return 0;
-    const piTask = hydratePITaskRecord(task);
-    if (!piTask?.rolloutRevisionPayload) return 0;
-    return typeof piTask.rolloutRevisionPayload.revisionIteration === 'number'
-      ? piTask.rolloutRevisionPayload.revisionIteration
-      : 0;
   }
 
   /**
@@ -936,10 +956,37 @@ export class RolloutReviewerRunner {
     }
   }
 
+  /** B: 读取已持久化的 revision intent (无 → null;旧形状缺 status 视为 applied) */
+  private async readStoredRevisionIntent(taskId: string): Promise<RolloutRevisionPayload | null> {
+    const raw = await this.stateManager.getTask(taskId);
+    if (!raw) return null;
+    const piTask = hydratePITaskRecord(raw);
+    return piTask?.rolloutRevisionPayload ?? null;
+  }
+
+  /**
+   * B: intent 标 APPLIED — transition 已 materialize 后的持久化确认。
+   * 写失败 throw (fail loud): 重放会经 materialize 检查安全收敛。
+   */
+  private async markRevisionIntentAppliedOrThrow(
+    taskId: string,
+    iteration: number,
+    payload: { requiredChanges: string[]; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer' },
+  ): Promise<void> {
+    await this.recordRolloutRevisionRouting(taskId, {
+      requiredChanges: payload.requiredChanges,
+      revisionIteration: iteration,
+      sourceRolloutTaskId: payload.sourceRolloutTaskId,
+      sourceArtifactId: payload.sourceArtifactId,
+      targetTaskKind: payload.targetTaskKind,
+      status: 'applied',
+    });
+  }
+
   /** 记录修订路由 (budget 依据) */
   private async recordRolloutRevisionRouting(
     taskId: string,
-    payload: { requiredChanges: string[]; revisionIteration: number; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer' },
+    payload: { requiredChanges: string[]; revisionIteration: number; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer'; status?: 'pending' | 'applied' },
   ): Promise<void> {
     try {
       const raw = await this.stateManager.getTask(taskId);
@@ -964,7 +1011,7 @@ export class RolloutReviewerRunner {
   /** C: 显式 fail-loud 包装 — routing intent 是 transition 的组成部分。 */
   private async recordRolloutRevisionRoutingOrThrow(
     taskId: string,
-    payload: { requiredChanges: string[]; revisionIteration: number; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer' },
+    payload: { requiredChanges: string[]; revisionIteration: number; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer'; status?: 'pending' | 'applied' },
   ): Promise<void> {
     await this.recordRolloutRevisionRouting(taskId, payload);
   }
