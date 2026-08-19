@@ -96,10 +96,11 @@ describe('legacy cleanup workspace boundary', () => {
 // ── Integration: normal cleanup flow ───────────────────────────────────────
 
 describe('legacy cleanup flow', () => {
-  const tmpDir = path.join(os.tmpdir(), `pd-test-cleanup-${Date.now()}`);
+  let tmpDir: string;
 
   beforeEach(() => {
-    fs.mkdirSync(tmpDir, { recursive: true });
+    // mkdtempSync: CodeQL-safe random directory under os.tmpdir
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-cleanup-'));
   });
 
   afterEach(() => {

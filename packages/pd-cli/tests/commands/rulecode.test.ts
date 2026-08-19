@@ -70,12 +70,10 @@ describe('loadGoldenTraceCases containment', () => {
   it('rejects sibling-prefix attack (/work/a vs /work/ab)', () => {
     // workspace root is /tmp/xxx-a; a sibling /tmp/xxx-ab must NOT be
     // considered inside it, even though its string starts with the root.
-    const parent = wsDir.replace(/-ws-/, '-ws-');
-    const siblingRoot = `${parent}ab`; // e.g. ...-ws-123ab
+    const parent = wsDir;
     const siblingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rulecode-sib-'));
     // Build a sibling whose path starts with the workspace root string
-    const sibling = siblingDir; // separate temp dir
-    const trace = writeTrace(sibling, 'golden.json');
+    const trace = writeTrace(siblingDir, 'golden.json');
     // Also construct an explicit prefix-collision sibling: same basename + 'x'
     const collisionDir = path.join(path.dirname(parent), `${path.basename(parent)}x`);
     fs.mkdirSync(collisionDir, { recursive: true });
@@ -89,7 +87,6 @@ describe('loadGoldenTraceCases containment', () => {
     // Unrelated sibling also rejected
     const result2 = loadGoldenTraceCases(trace, parent);
     expect(result2.error).toBeDefined();
-    void siblingRoot;
   });
 
   it('rejects parent traversal in golden trace path', () => {

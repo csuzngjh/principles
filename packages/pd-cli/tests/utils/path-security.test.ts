@@ -30,7 +30,6 @@ describe('canonicalPath', () => {
   });
 
   it('collapses parent traversal', () => {
-    const cwd = process.cwd();
     const result = canonicalPath('/tmp/a/../b');
     // After resolve, /tmp/a/../b = /tmp/b
     expect(result).toBe(path.resolve('/tmp/b'));
@@ -102,9 +101,6 @@ describe('isPathInside', () => {
     const child = path.resolve('C:\\workspace\\memory\\logs\\X.log');
     // On POSIX, both resolve to cwd-based paths; the containment should still
     // be consistent: child must be inside parent after canonicalization.
-    const root = canonicalPath(parent);
-    const target = canonicalPath(child);
-    // If they resolve to the same root, child is inside parent.
     // This test verifies no crash and consistent behavior.
     expect(() => isPathInside(parent, child)).not.toThrow();
   });
