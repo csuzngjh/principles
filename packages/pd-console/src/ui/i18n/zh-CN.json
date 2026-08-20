@@ -475,11 +475,11 @@
           "timelineEmpty": "暂时没有可用的治理事件。",
           "unavailable": "治理视图暂不可用",
           "unavailableReason": "治理证据无法通过校验或安全加载。",
-          "unavailableNextAction": "请刷新一次；若问题持续，在执行审批动作前先检查 Console 诊断信息。",
+          "unavailableNextAction": "请刷新一次；若问题持续，在执行审批动作前先检查控制台诊断信息。",
           "none": "无",
           "fact": "事实",
           "derived": "推导",
-          "actionsNotAuthorized": "当前不需要 Owner 决策。",
+          "actionsNotAuthorized": "当前不需要拥有者决策。",
           "confidence": { "strong": "有来源支撑", "degraded": "证据不完整" },
           "state": { "candidate": "候选", "active": "已生效", "archived": "已归档", "deprecated": "已弃用", "probation": "观察中" },
           "stage": { "generating": "生成中", "reviewing": "审查中", "revising": "修订中", "approval": "待审批", "activation": "激活中" },
@@ -500,7 +500,7 @@
             "processing": "当前有来源支撑的任务仍在运行或排队。",
             "activation_active": "至少一个已验证的激活通道正在生效。",
             "data_incomplete": "现有记录无法建立完整的治理视图。",
-            "no_current_process": "当前没有已记录的处理或 Owner 动作。"
+            "no_current_process": "当前没有已记录的处理或拥有者动作。"
           },
           "next": {
             "review": "使用下方现有审批操作完成审查。",
@@ -531,8 +531,8 @@
             "review_started": "自动审查已开始",
             "revision_requested": "已请求修订",
             "revision_reopened": "修订任务已重新打开",
-            "approved": "Owner 已批准",
-            "rejected": "Owner 已拒绝",
+            "approved": "拥有者已批准",
+            "rejected": "拥有者已拒绝",
             "activated": "通道已激活",
             "deactivated": "通道已停用",
             "failed": "Runtime 任务失败",

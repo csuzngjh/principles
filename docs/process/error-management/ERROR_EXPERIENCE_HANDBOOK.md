@@ -1200,6 +1200,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-20
 - **Recurrence**: Yes — same EP-11 pattern (i18n-enabled component gets hardcoded source-language strings for new UI elements).
   - 2026-07-01 PR #1143: Three signal-keywords components (KeywordListSection, PendingTermsSection, KeywordEditDialog) hardcoded PHASE2_TOOLTIP, table headers (Term/Category/Precision/Weight/Reason/Actions), category labels, and "X terms" count in English while the component already imported useTranslation — 15 i18n keys added in fix commit b566e886
+  - 2026-08-20 PRI-553: newly added zh-CN governance strings used bare `Owner` and `Console`, creating mixed-language visible copy. The existing CR10 locale audit caught all five values; fixed with `拥有者` and `控制台`, and the full Console suite verifies recurrence.
 
 ---
 
