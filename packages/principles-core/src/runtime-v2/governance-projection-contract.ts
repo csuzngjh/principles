@@ -79,6 +79,40 @@ export const GovernanceFactsSchema = Type.Object({
   timelineEvents: Type.Array(TimelineEventSchema), collectionIssues: Type.Array(DataQualityIssueSchema),
 }, { additionalProperties: false });
 
+export const PrincipleStateSchema = Type.Object({
+  value: Type.Union([Type.Literal('candidate'), Type.Literal('active'), Type.Literal('archived'), Type.Literal('deprecated'), Type.Literal('probation')]),
+  sourceRefs: Type.Array(SourceRefSchema),
+}, { additionalProperties: false });
+export const ProcessViewSchema = Type.Object({
+  stage: Type.Optional(Type.Union([Type.Literal('generating'), Type.Literal('reviewing'), Type.Literal('revising'), Type.Literal('approval'), Type.Literal('activation')])),
+  currentTaskKind: Type.Optional(TaskFactSchema.properties.taskKind), sourceRefs: Type.Array(SourceRefSchema),
+}, { additionalProperties: false });
+export const AutomationViewSchema = Type.Object({
+  state: Type.Union([Type.Literal('idle'), Type.Literal('queued'), Type.Literal('running'), Type.Literal('retry_scheduled'), Type.Literal('stalled')]),
+  sourceRefs: Type.Array(SourceRefSchema),
+}, { additionalProperties: false });
+export const AttentionItemSchema = Type.Object({
+  kind: Type.Union([Type.Literal('owner_decision'), Type.Literal('recovery')]), reasonCode: NonEmptyStringSchema, sourceRef: SourceRefSchema,
+}, { additionalProperties: false });
+export const AttentionViewSchema = Type.Object({
+  primary: Type.Union([Type.Literal('none'), Type.Literal('owner_required'), Type.Literal('recovery_required')]), items: Type.Array(AttentionItemSchema),
+}, { additionalProperties: false });
+export const ActivationSummarySchema = Type.Object({
+  state: Type.Union([Type.Literal('none'), Type.Literal('active'), Type.Literal('partially_active'), Type.Literal('deactivated')]),
+  channels: Type.Array(GovernanceChannelSchema), observedChannels: Type.Array(GovernanceChannelSchema), sourceRefs: Type.Array(SourceRefSchema),
+}, { additionalProperties: false });
+export const OwnerGovernanceSummarySchema = Type.Object({
+  headlineCode: NonEmptyStringSchema, reasonCode: NonEmptyStringSchema, nextActionCode: NonEmptyStringSchema,
+  ownerActionRequired: Type.Boolean(), safeReasonSummary: Type.Optional(NonEmptyStringSchema), sourceRefs: Type.Array(SourceRefSchema),
+}, { additionalProperties: false });
+export const DataQualitySchema = Type.Object({ degraded: Type.Boolean(), issues: Type.Array(DataQualityIssueSchema) }, { additionalProperties: false });
+export const OwnerGovernanceViewSchema = Type.Object({
+  schemaVersion: Type.Literal('1'), principleId: NonEmptyStringSchema, asOf: TimestampSchema,
+  summary: OwnerGovernanceSummarySchema, principleState: PrincipleStateSchema, process: ProcessViewSchema,
+  automation: AutomationViewSchema, attention: AttentionViewSchema, activationSummary: ActivationSummarySchema,
+  timeline: Type.Array(TimelineEventSchema), sourceRefs: Type.Array(SourceRefSchema), dataQuality: DataQualitySchema,
+}, { additionalProperties: false });
+
 export type GovernanceChannel = Static<typeof GovernanceChannelSchema>;
 export type LineageConfidence = Static<typeof LineageConfidenceSchema>;
 export type SourceRef = Static<typeof SourceRefSchema>;
@@ -93,3 +127,12 @@ export type TimelineEvent = Static<typeof TimelineEventSchema>;
 export type DataQualityIssue = Static<typeof DataQualityIssueSchema>;
 export type LineageContext = Static<typeof LineageContextSchema>;
 export type GovernanceFacts = Static<typeof GovernanceFactsSchema>;
+export type PrincipleState = Static<typeof PrincipleStateSchema>;
+export type ProcessView = Static<typeof ProcessViewSchema>;
+export type AutomationView = Static<typeof AutomationViewSchema>;
+export type AttentionItem = Static<typeof AttentionItemSchema>;
+export type AttentionView = Static<typeof AttentionViewSchema>;
+export type ActivationSummary = Static<typeof ActivationSummarySchema>;
+export type OwnerGovernanceSummary = Static<typeof OwnerGovernanceSummarySchema>;
+export type DataQuality = Static<typeof DataQualitySchema>;
+export type OwnerGovernanceView = Static<typeof OwnerGovernanceViewSchema>;

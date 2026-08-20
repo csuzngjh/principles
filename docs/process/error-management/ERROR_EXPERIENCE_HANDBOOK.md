@@ -293,7 +293,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-190
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — lineage/source fields come from the wrong task or are racy across a read-then-write.
-  - 2026-08-20 PRI-550: a revision task rejected by canonical-lineage validation could still be referenced by generic dependency relations. Fixed by deriving every downstream relation from the same validated strong-task set, with a conflict regression.
+  - 2026-08-20 PRI-550/PRI-551: a revision task rejected by canonical-lineage validation could still be referenced by generic dependency relations, and cross-channel dependencies could collapse independent frontiers. Fixed by deriving every downstream relation from the same validated strong-task set and channel partition, with conflict and cross-channel regressions.
   - 2026-08-13 PRI-523 C1.3 quality review: a supplied host event ID could override canonical identity, so its lineage no longer matched a changed payload/outcome. Fixed by binding workspace/source/session/tool/sanitized payload/outcome and supplied ID into one digest, with collision and exact-retry regressions.
   - 2026-06-20 PRI-435 (PR#982): `resolveSourcePainIdFromDiagnostician()` lacked `taskKind === 'diagnostician'` guard — added kind guard + corruption regression
   - 2026-06-19 PRI-408 (PR#972): `assembleRuleArtifact` set `sourcePrincipleId: undefined`; `sqlite-approval-store.edit()` read-then-write race → atomic `SET previous_artifact_id`
