@@ -365,6 +365,43 @@ describe('review-round regressions (PR #1316 review)', () => {
   }, 60_000);
 });
 
+describe('pd-cli discovery Windows fallback (pd-locate)', () => {
+  async function loadLocate() {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    return req(path.join(pluginDir, 'scripts', 'pd-locate.cjs')) as {
+      pdEntryFromGlobalRoot: (root: string) => string | undefined;
+      pdEntryFromShimLines: (lines: string[]) => string | undefined;
+    };
+  }
+
+  it('pdEntryFromShimLines derives the JS entry from an npm bin dir that owns pd-cli', async () => {
+    const locate = await loadLocate();
+    const binDir = tempDir('pd-bindir-');
+    const entry = path.join(binDir, 'node_modules', '@principles', 'pd-cli', 'dist', 'index.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, 'module.exports = {};\n', 'utf8');
+    expect(locate.pdEntryFromShimLines([path.join(binDir, 'pd.cmd')])).toBe(entry);
+    // A shim whose bin dir does NOT own pd-cli (non-npm `pd` on PATH) is skipped.
+    const foreign = path.join(tempDir('pd-foreign-bin-'), 'pd.cmd');
+    expect(locate.pdEntryFromShimLines([foreign, path.join(binDir, 'pd.cmd')])).toBe(entry);
+    expect(locate.pdEntryFromShimLines([foreign])).toBeUndefined();
+    // Empty lines and trailing whitespace are tolerated (ERR-001: external input).
+    expect(locate.pdEntryFromShimLines(['', '   ', path.join(binDir, 'pd.cmd')])).toBe(entry);
+    expect(locate.pdEntryFromShimLines([])).toBeUndefined();
+  }, 60_000);
+
+  it('pdEntryFromGlobalRoot returns the entry only when it exists', async () => {
+    const locate = await loadLocate();
+    const root = tempDir('pd-globalroot-');
+    expect(locate.pdEntryFromGlobalRoot(root)).toBeUndefined();
+    const entry = path.join(root, '@principles', 'pd-cli', 'dist', 'index.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, 'module.exports = {};\n', 'utf8');
+    expect(locate.pdEntryFromGlobalRoot(root)).toBe(entry);
+  }, 60_000);
+});
+
 describe('first-run $pd-setup (real user flow)', () => {
   it('creates the plugin data dir Codex never creates, and npm-installs the pinned runtime', () => {
     // Codex 0.147 SETS PLUGIN_DATA for hooks but does NOT create the dir —
