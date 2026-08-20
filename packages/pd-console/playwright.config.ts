@@ -4,6 +4,8 @@ import { dirname } from 'path';
 
 // ESM 环境下 __dirname 不可用（package.json 有 "type": "module"），需手动构造
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const e2ePort = process.env.PD_CONSOLE_E2E_PORT ?? '3101';
+const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 
 export default defineConfig({
   // Playwright 1.61 顶层 testDir 只接受 string,不接受数组。
@@ -20,7 +22,7 @@ export default defineConfig({
     ['list'],
   ],
   use: {
-    baseURL: 'http://127.0.0.1:3100',
+    baseURL: e2eBaseUrl,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -35,8 +37,9 @@ export default defineConfig({
   ],
   webServer: {
     command: 'node scripts/e2e-start.mjs',
-    url: 'http://127.0.0.1:3100/api/health',
-    reuseExistingServer: !process.env.CI,
+    url: `${e2eBaseUrl}/api/health`,
+    env: { PD_CONSOLE_E2E_PORT: e2ePort },
+    reuseExistingServer: false,
     timeout: 60000,
     cwd: __dirname,
   },

@@ -461,7 +461,84 @@
         "reasonAlreadyHandled": "已处理",
         "reasonNoRecords": "暂无待审批记录",
         "reasonUnsupportedChannel": "当前版本暂不支持该通道",
-        "unactionableReasonPrefix": "不可操作原因: "
+        "unactionableReasonPrefix": "不可操作原因: ",
+        "governance": {
+          "title": "治理状态",
+          "principleState": "原则状态",
+          "process": "当前阶段",
+          "automation": "自动化状态",
+          "nextAction": "下一步安全动作",
+          "blockers": "需要关注",
+          "uncertainty": "证据不确定性",
+          "provenance": "规范证据引用",
+          "timeline": "治理时间线",
+          "timelineEmpty": "暂时没有可用的治理事件。",
+          "unavailable": "治理视图暂不可用",
+          "unavailableReason": "治理证据无法通过校验或安全加载。",
+          "unavailableNextAction": "请刷新一次；若问题持续，在执行审批动作前先检查 Console 诊断信息。",
+          "none": "无",
+          "fact": "事实",
+          "derived": "推导",
+          "actionsNotAuthorized": "当前不需要 Owner 决策。",
+          "confidence": { "strong": "有来源支撑", "degraded": "证据不完整" },
+          "state": { "candidate": "候选", "active": "已生效", "archived": "已归档", "deprecated": "已弃用", "probation": "观察中" },
+          "stage": { "generating": "生成中", "reviewing": "审查中", "revising": "修订中", "approval": "待审批", "activation": "激活中" },
+          "automationState": { "idle": "空闲", "queued": "已排队", "running": "运行中", "retry_scheduled": "已安排重试", "stalled": "已停滞" },
+          "headline": {
+            "owner_decision": "需要你的决策",
+            "recovery": "需要恢复 Runtime",
+            "revision": "PD 正在修订这条原则",
+            "processing": "PD 正在处理这条原则",
+            "active": "这条原则正在生效",
+            "unavailable": "治理证据不完整",
+            "recorded": "原则已记录"
+          },
+          "reason": {
+            "approval_pending": "一项有来源支撑的审批正在等待你审查。",
+            "recovery_required": "当前处理前沿无法自动继续。",
+            "automatic_revision": "修订或重试已经在进行中。",
+            "processing": "当前有来源支撑的任务仍在运行或排队。",
+            "activation_active": "至少一个已验证的激活通道正在生效。",
+            "data_incomplete": "现有记录无法建立完整的治理视图。",
+            "no_current_process": "当前没有已记录的处理或 Owner 动作。"
+          },
+          "next": {
+            "review": "使用下方现有审批操作完成审查。",
+            "inspect_recovery": "先检查阻塞证据；Runtime 恢复前不要批准。",
+            "wait": "当前无需操作，等待 PD 完成正在进行的工作。",
+            "monitor": "当前无需操作，继续观察生效通道。",
+            "inspect_data": "检查证据诊断，并修复所引用的持久化记录。",
+            "none": "当前无需操作。"
+          },
+          "attention": {
+            "approval_pending": "审批待处理",
+            "task_failed": "当前 Runtime 任务失败",
+            "human_review_required": "Runtime 请求人工恢复审查",
+            "revision_not_materialized": "请求的修订尚未物化"
+          },
+          "issue": {
+            "lineage_not_available": "规范血缘尚不可用。",
+            "lease_not_current": "当前任务租约缺失或已过期。",
+            "ledger_activation_mismatch": "Ledger 与激活记录不一致。",
+            "weak_fact_ignored": "弱事实已从当前权威结论中排除。",
+            "lineage_conflict": "冲突血缘证据已被排除。",
+            "lineage_cycle": "血缘环路阻止形成权威投影。",
+            "lineage_limit_exceeded": "血缘超过安全投影上限。"
+          },
+          "timelineCode": {
+            "pain_created": "痛点证据已记录",
+            "candidate_generated": "候选原则已生成",
+            "review_started": "自动审查已开始",
+            "revision_requested": "已请求修订",
+            "revision_reopened": "修订任务已重新打开",
+            "approved": "Owner 已批准",
+            "rejected": "Owner 已拒绝",
+            "activated": "通道已激活",
+            "deactivated": "通道已停用",
+            "failed": "Runtime 任务失败",
+            "human_review": "已请求人工恢复审查"
+          }
+        }
       }
     },
     "activation": {

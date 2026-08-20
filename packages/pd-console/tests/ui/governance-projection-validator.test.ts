@@ -21,4 +21,11 @@ describe('PRI-552 governance projection client validator', () => {
     Object.assign(inherited, { ...valid, summary: undefined });
     expect(validateOwnerGovernanceView(inherited)).toBeNull();
   });
+
+  it.each(['headlineCode', 'reasonCode', 'nextActionCode'] as const)('rejects an unregistered summary %s', codeField => {
+    expect(validateOwnerGovernanceView({
+      ...valid,
+      summary: { ...valid.summary, [codeField]: 'governance.unregistered' },
+    })).toBeNull();
+  });
 });

@@ -41,6 +41,17 @@ describe('PRI-550 governance projection contracts', () => {
     expect(Value.Check(runtimeV2.GovernanceFactsSchema, validFacts)).toBe(true);
   });
 
+  it.each(['headlineCode', 'reasonCode', 'nextActionCode'] as const)(
+    'rejects an unregistered summary %s',
+    codeField => {
+      const view = runtimeV2.deriveOwnerGovernanceView(validFacts);
+      expect(Value.Check(runtimeV2.OwnerGovernanceViewSchema, {
+        ...view,
+        summary: { ...view.summary, [codeField]: 'governance.unregistered' },
+      })).toBe(false);
+    },
+  );
+
   it.each([
     ['missing principle', { ...validFacts, principle: undefined }],
     ['non-object task element', { ...validFacts, tasks: [42] }],

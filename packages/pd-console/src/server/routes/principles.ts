@@ -110,7 +110,7 @@ export async function handlePrinciplesRoute({
     if (flag?.enabled !== true) {
       sendError(res, 403, 'principle_governance_projection_disabled',
         'Principle governance projection is disabled.',
-        { nextAction: 'Enable features.principle_governance_projection_v2 in .pd/config.yaml.' });
+        { reason: 'feature_disabled', nextAction: 'Enable features.principle_governance_projection_v2 in .pd/config.yaml.' });
       return;
     }
     const [, rawPrincipleId] = governanceMatch;

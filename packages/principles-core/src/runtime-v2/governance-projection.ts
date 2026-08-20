@@ -107,7 +107,10 @@ export function deriveOwnerGovernanceView(input: unknown): OwnerGovernanceView {
       : currentTask !== undefined ? 'generating' : active.length > 0 ? 'activation' : undefined;
   const processRefs = stableRefs(ownerItems.length > 0 ? ownerItems.map(item => item.sourceRef) : currentTask !== undefined ? frontiers.map(task => task.sourceRef) : active.map(row => row.sourceRef));
 
-  let headlineCode = 'governance.headline.recorded'; let reasonCode = 'governance.reason.no_current_process'; let nextActionCode = 'governance.next.none'; let summaryRefs: SourceRef[] = [facts.principle.sourceRef];
+  let headlineCode: OwnerGovernanceView['summary']['headlineCode'] = 'governance.headline.recorded';
+  let reasonCode: OwnerGovernanceView['summary']['reasonCode'] = 'governance.reason.no_current_process';
+  let nextActionCode: OwnerGovernanceView['summary']['nextActionCode'] = 'governance.next.none';
+  let summaryRefs: SourceRef[] = [facts.principle.sourceRef];
   if (attentionPrimary === 'owner_required') { headlineCode = 'governance.headline.owner_decision'; reasonCode = 'governance.reason.approval_pending'; nextActionCode = 'governance.next.review'; summaryRefs = ownerItems.map(item => item.sourceRef); }
   else if (attentionPrimary === 'recovery_required') { headlineCode = 'governance.headline.recovery'; reasonCode = 'governance.reason.recovery_required'; nextActionCode = 'governance.next.inspect_recovery'; summaryRefs = recovery.map(item => item.sourceRef); }
   else if (stage === 'revising' || automationState === 'retry_scheduled') { headlineCode = 'governance.headline.revision'; reasonCode = 'governance.reason.automatic_revision'; nextActionCode = 'governance.next.wait'; summaryRefs = processRefs; }

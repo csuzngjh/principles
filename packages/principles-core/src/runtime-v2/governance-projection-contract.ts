@@ -101,8 +101,25 @@ export const ActivationSummarySchema = Type.Object({
   state: Type.Union([Type.Literal('none'), Type.Literal('active'), Type.Literal('partially_active'), Type.Literal('deactivated')]),
   channels: Type.Array(GovernanceChannelSchema), observedChannels: Type.Array(GovernanceChannelSchema), sourceRefs: Type.Array(SourceRefSchema),
 }, { additionalProperties: false });
+export const GovernanceHeadlineCodeSchema = Type.Union([
+  Type.Literal('governance.headline.owner_decision'), Type.Literal('governance.headline.recovery'),
+  Type.Literal('governance.headline.revision'), Type.Literal('governance.headline.processing'),
+  Type.Literal('governance.headline.active'), Type.Literal('governance.headline.unavailable'),
+  Type.Literal('governance.headline.recorded'),
+]);
+export const GovernanceReasonCodeSchema = Type.Union([
+  Type.Literal('governance.reason.approval_pending'), Type.Literal('governance.reason.recovery_required'),
+  Type.Literal('governance.reason.automatic_revision'), Type.Literal('governance.reason.processing'),
+  Type.Literal('governance.reason.activation_active'), Type.Literal('governance.reason.data_incomplete'),
+  Type.Literal('governance.reason.no_current_process'),
+]);
+export const GovernanceNextActionCodeSchema = Type.Union([
+  Type.Literal('governance.next.review'), Type.Literal('governance.next.inspect_recovery'),
+  Type.Literal('governance.next.wait'), Type.Literal('governance.next.monitor'),
+  Type.Literal('governance.next.inspect_data'), Type.Literal('governance.next.none'),
+]);
 export const OwnerGovernanceSummarySchema = Type.Object({
-  headlineCode: NonEmptyStringSchema, reasonCode: NonEmptyStringSchema, nextActionCode: NonEmptyStringSchema,
+  headlineCode: GovernanceHeadlineCodeSchema, reasonCode: GovernanceReasonCodeSchema, nextActionCode: GovernanceNextActionCodeSchema,
   ownerActionRequired: Type.Boolean(), safeReasonSummary: Type.Optional(NonEmptyStringSchema), sourceRefs: Type.Array(SourceRefSchema),
 }, { additionalProperties: false });
 export const DataQualitySchema = Type.Object({ degraded: Type.Boolean(), issues: Type.Array(DataQualityIssueSchema) }, { additionalProperties: false });
@@ -133,6 +150,9 @@ export type AutomationView = Static<typeof AutomationViewSchema>;
 export type AttentionItem = Static<typeof AttentionItemSchema>;
 export type AttentionView = Static<typeof AttentionViewSchema>;
 export type ActivationSummary = Static<typeof ActivationSummarySchema>;
+export type GovernanceHeadlineCode = Static<typeof GovernanceHeadlineCodeSchema>;
+export type GovernanceReasonCode = Static<typeof GovernanceReasonCodeSchema>;
+export type GovernanceNextActionCode = Static<typeof GovernanceNextActionCodeSchema>;
 export type OwnerGovernanceSummary = Static<typeof OwnerGovernanceSummarySchema>;
 export type DataQuality = Static<typeof DataQualitySchema>;
 export type OwnerGovernanceView = Static<typeof OwnerGovernanceViewSchema>;

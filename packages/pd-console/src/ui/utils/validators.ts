@@ -71,6 +71,9 @@ function validateArray<T>(v: unknown, validateElement: (el: unknown) => T | null
 
 const governanceSourceTypes = new Set(['principle', 'artifact', 'task', 'run', 'approval', 'activation', 'trajectory']);
 const governanceChannels = new Set(['prompt', 'code_tool_hook', 'defer_archive']);
+const governanceHeadlineCodes = new Set(['governance.headline.owner_decision', 'governance.headline.recovery', 'governance.headline.revision', 'governance.headline.processing', 'governance.headline.active', 'governance.headline.unavailable', 'governance.headline.recorded']);
+const governanceReasonCodes = new Set(['governance.reason.approval_pending', 'governance.reason.recovery_required', 'governance.reason.automatic_revision', 'governance.reason.processing', 'governance.reason.activation_active', 'governance.reason.data_incomplete', 'governance.reason.no_current_process']);
+const governanceNextActionCodes = new Set(['governance.next.review', 'governance.next.inspect_recovery', 'governance.next.wait', 'governance.next.monitor', 'governance.next.inspect_data', 'governance.next.none']);
 const lineageConfidences = new Set(['strong', 'weak', 'unknown']);
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
@@ -116,7 +119,7 @@ function isOwnerGovernanceView(value: unknown): value is OwnerGovernanceView {
     activationSummary: activation, dataQuality: quality,
   } = value;
   if (!isObject(summary) || !hasOwnFields(summary, ['headlineCode', 'reasonCode', 'nextActionCode', 'ownerActionRequired', 'sourceRefs'])
-    || typeof summary.headlineCode !== 'string' || typeof summary.reasonCode !== 'string' || typeof summary.nextActionCode !== 'string'
+    || !isStringEnum(summary.headlineCode, governanceHeadlineCodes) || !isStringEnum(summary.reasonCode, governanceReasonCodes) || !isStringEnum(summary.nextActionCode, governanceNextActionCodes)
     || typeof summary.ownerActionRequired !== 'boolean' || !isGovernanceSourceRefs(summary.sourceRefs)
     || (Object.hasOwn(summary, 'safeReasonSummary') && (typeof summary.safeReasonSummary !== 'string' || summary.safeReasonSummary.length === 0))) return false;
   if (!isObject(principle) || !hasOwnFields(principle, ['value', 'sourceRefs'])

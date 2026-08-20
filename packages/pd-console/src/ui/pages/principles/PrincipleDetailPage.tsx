@@ -11,10 +11,12 @@ import {
   fetchApprovalsGrouped,
   fetchLifecycleMetrics,
   fetchPrincipleTrajectory,
+  fetchPrincipleGovernance,
   approveApproval,
   rejectApproval,
   editApproval,
 } from "../../api.js";
+import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   PrincipleDetail,
   PrincipleDetailData,
@@ -123,6 +125,8 @@ export function PrincipleDetailPage() {
   const [approvalGroup, setApprovalGroup] = useState<ApprovalGroup | null>(null);
   const [lifecycle, setLifecycle] = useState<LifecycleMetricsData | null>(null);
   const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
+  const [governance, setGovernance] = useState<OwnerGovernanceView | null>(null);
+  const [governanceUnavailable, setGovernanceUnavailable] = useState<{ reason: string; nextAction?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,12 +149,15 @@ export function PrincipleDetailPage() {
     setLoading(true);
     setError(null);
     setApprovalGroup(null); // Clear previous approval group to prevent stale actionability (P1)
+    setGovernance(null);
+    setGovernanceUnavailable(null);
     try {
-      const [pResult, aResult, lResult, tResult] = await Promise.all([
+      const [pResult, aResult, lResult, tResult, gResult] = await Promise.all([
         fetchPrincipleDetail(id),
         fetchApprovalsGrouped(),
         fetchLifecycleMetrics(id),
         fetchPrincipleTrajectory(id),
+        fetchPrincipleGovernance(id),
       ]);
 
       if (!pResult.success) {
@@ -181,6 +188,12 @@ export function PrincipleDetailPage() {
         setTrajectory(tResult.data);
       } else {
         setTrajectory(null);
+      }
+
+      if (gResult.success && gResult.data) {
+        setGovernance(gResult.data);
+      } else if (!gResult.success && gResult.reason !== 'feature_disabled') {
+        setGovernanceUnavailable({ reason: gResult.error, ...(gResult.nextAction === undefined ? {} : { nextAction: gResult.nextAction }) });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -219,6 +232,12 @@ export function PrincipleDetailPage() {
     } else {
       isActionable = true;
     }
+  }
+  const governanceOwnerRequired = governance !== null && governance.attention.primary === 'owner_required';
+  if (governance !== null && !governanceOwnerRequired) {
+    isActionable = false;
+    reasonKey = 'principles.detail.governance.actionsNotAuthorized';
+    defaultReason = 'No current Owner decision is required.';
   }
 
   const handleApprove = () => {
@@ -459,6 +478,88 @@ export function PrincipleDetailPage() {
           </Button>
         </div>
       </section>
+
+      {(governance !== null || governanceUnavailable !== null) && (
+        <section className="mb-8" aria-labelledby="governance-summary-title">
+          <SectionTitle>{t('principles.detail.governance.title')}</SectionTitle>
+          {governance !== null ? (
+            <div
+              data-testid="governance-summary"
+              className={`rounded-[var(--radius-md)] border p-4 ${governance.dataQuality.degraded ? 'border-amber/30 bg-amber/5' : 'border-gov/25 bg-gov/5'}`}
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 id="governance-summary-title" className="text-[18px] font-semibold text-ink">
+                    {t(`principles.detail.${governance.summary.headlineCode}`, { defaultValue: governance.summary.headlineCode })}
+                  </h2>
+                  <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+                    {t(`principles.detail.${governance.summary.reasonCode}`, { defaultValue: governance.summary.reasonCode })}
+                  </p>
+                </div>
+                <span className="w-fit rounded-full border border-line px-2 py-1 font-mono text-[11px] text-ink-3">
+                  {t(`principles.detail.governance.confidence.${governance.dataQuality.degraded ? 'degraded' : 'strong'}`)}
+                </span>
+              </div>
+
+              <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div><dt className="font-mono text-[11px] text-ink-4">{t('principles.detail.governance.principleState')}</dt><dd className="text-[13px] text-ink-2">{t(`principles.detail.governance.state.${governance.principleState.value}`)}</dd></div>
+                <div><dt className="font-mono text-[11px] text-ink-4">{t('principles.detail.governance.process')}</dt><dd className="text-[13px] text-ink-2">{governance.process.stage === undefined ? t('principles.detail.governance.none') : t(`principles.detail.governance.stage.${governance.process.stage}`)}</dd></div>
+                <div><dt className="font-mono text-[11px] text-ink-4">{t('principles.detail.governance.automation')}</dt><dd className="text-[13px] text-ink-2">{t(`principles.detail.governance.automationState.${governance.automation.state}`)}</dd></div>
+              </dl>
+
+              <div data-testid="governance-next-action" className="mt-4 border-l-2 border-l-gov pl-3">
+                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{t('principles.detail.governance.nextAction')}</p>
+                <p className="text-[13px] text-ink-2">{t(`principles.detail.${governance.summary.nextActionCode}`, { defaultValue: governance.summary.nextActionCode })}</p>
+              </div>
+
+              {governance.attention.items.length > 0 && (
+                <div className="mt-4">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{t('principles.detail.governance.blockers')}</p>
+                  <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                    {governance.attention.items.map(item => <li key={`${item.kind}-${item.sourceRef.type}-${item.sourceRef.id}`}>{t(`principles.detail.governance.attention.${item.reasonCode}`, { defaultValue: item.reasonCode })}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {governance.dataQuality.degraded && (
+                <div data-testid="governance-data-quality" className="mt-4 rounded-[var(--radius-sm)] border border-amber/20 p-3">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-amber">{t('principles.detail.governance.uncertainty')}</p>
+                  <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
+                    {governance.dataQuality.issues.map((item, index) => <li key={`${item.source}-${item.reasonCode}-${index}`}>{t(`principles.detail.governance.issue.${item.reasonCode}`, { defaultValue: item.reasonCode })}</li>)}
+                  </ul>
+                </div>
+              )}
+
+            </div>
+          ) : (
+            <div data-testid="governance-data-quality" className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
+              <h2 id="governance-summary-title" className="text-[16px] font-semibold text-ink">{t('principles.detail.governance.unavailable')}</h2>
+              <p className="mt-1 text-[13px] text-ink-2">{t('principles.detail.governance.unavailableReason')}</p>
+              <p className="mt-2 text-[12px] text-ink-3">{t('principles.detail.governance.unavailableNextAction')}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {governance !== null && (
+        <section className="mb-8" data-testid="governance-timeline">
+          <SectionTitle>{t('principles.detail.governance.timeline')}</SectionTitle>
+          {governance.timeline.length === 0 ? <p className="text-[13px] text-ink-4">{t('principles.detail.governance.timelineEmpty')}</p> : (
+            <ol className="space-y-3 border-l border-line pl-4">
+              {governance.timeline.map((event, index) => {
+                const derived = event.code === 'revision_requested' || event.code === 'revision_reopened';
+                return <li key={`${event.sourceRef.type}-${event.sourceRef.id}-${event.code}-${index}`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[13px] text-ink-2">{t(`principles.detail.governance.timelineCode.${event.code}`, { defaultValue: event.code })}</span>
+                    <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-ink-4">{t(`principles.detail.governance.${derived ? 'derived' : 'fact'}`)}</span>
+                  </div>
+                  <p className="mt-0.5 font-mono text-[11px] text-ink-4">{event.occurredAt ?? event.recordedAt}</p>
+                </li>;
+              })}
+            </ol>
+          )}
+        </section>
+      )}
 
       {/* ── Channel info (F.4 — read only, no selector) ─────────────────── */}
       <section className="mb-8">

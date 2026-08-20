@@ -184,6 +184,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-092 | Module-level cache leaks across workspace instances when not keyed by workspaceDir | PRI-504 / PR #1164 review |
 | ERR-095 | Additive envelope/`contentJson` merge uses a key that collides with an existing output-schema field — silently overwrites the legitimate field | PR #1273 |
 | ERR-098 | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing dirs, never silence errors on critical cleanup | PRI-538; PR #1358 (near-miss: worktree node_modules junctioned into shared repo) |
+| ERR-101 | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree | PRI-553 |
 
 ---
 
@@ -283,6 +284,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: `npm run build:ui` now passes, while `governance-projection-validator.test.ts` verifies the browser-local validator accepts the frozen view and rejects corrupt nested values.
 - **Related ERRs**: ERR-025, ERR-040, ERR-070
 - **Source**: PRI-552
+- **Date**: 2026-08-20
+- **Recurrence**: None
+
+---
+
+**[ERR-101]** | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree
+
+- **What happened**: PRI-553's browser BDD reused an already-running installed PD Console on port 3100 because `reuseExistingServer` was enabled outside CI. The API route mock responded, but the loaded JavaScript bundle came from the installed extension rather than the current worktree, so the new governance card was absent and the test reported a misleading product failure.
+- **Why it's wrong**: A real-browser test is valid only when its server and assets come from the revision under test. Reusing any process that happens to answer a health URL makes the test environment depend on unrelated local state and can produce false failures or, worse, false passes against stale code.
+- **Generalized failure mode**: When an E2E harness uses a fixed/shared port, assistants must not reuse an unidentified existing server; otherwise the browser can exercise a different checkout or installed product than the code under test.
+- **Correct approach**: Make the E2E port explicitly configurable, use a non-production default, pass the same port to Playwright and the spawned server, and set `reuseExistingServer: false` so a collision fails loud instead of silently changing the tested revision.
+- **How to prevent**: In under 30 seconds, inspect Playwright `webServer`: require `reuseExistingServer: false`, a test-only configurable port, and one shared base URL consumed by the launcher and request clients.
+- **Regression guard**: `principle-governance-projection.test.ts` statically asserts the isolation settings; the two real-browser governance BDD scenarios pass while an unrelated installed Console remains bound to port 3100.
+- **Related ERRs**: ERR-025, ERR-078, ERR-084
+- **Source**: PRI-553
 - **Date**: 2026-08-20
 - **Recurrence**: None
 
@@ -617,6 +633,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-24
 - **Recurrence**: Yes - same class as ERR-027
 
+  - 2026-08-20 PRI-553: the first Governance Status Card exposed raw task/approval source IDs because a child issue's provenance wording was followed more broadly than the frozen design authority. SPEC §16 explicitly keeps source references in diagnostics/tests and forbids them in the Phase 1 default card. Fixed by retaining references in the validated view while removing them from visible card/timeline copy and adding browser assertions that technical IDs are absent.
+
 ---
 
 **[ERR-033]** | Operator failure path returns success exit code and breaks JSON contract
@@ -809,7 +827,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 100 |
+| Total lessons | 101 |
 | Last updated | 2026-08-20 |
 | Top category | Schema & Type |
 | Recurring errors | 51 |
@@ -1350,6 +1368,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
 - **Recurrence**: 2026-08-13 PRI-523 C1.1 spec review: the production OpenClaw BDD seeded a Runtime V2 activation only, then asserted its unique text appeared once. That signal could not exercise or prove the legacy/Runtime V2 overlap branch, so the test stayed green while shared exclusion metadata misreported `all_deduped_against_legacy` as `no_validated_activations`. Fixed by seeding the identical ID/text in the real legacy probation reducer and Runtime V2 SQLite, asserting one combined prompt occurrence, absence of a duplicate Runtime V2 directive, and the persisted exact skip reason/next action. 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
+
+  - 2026-08-20 PRI-553: governance BDD treated non-empty body text as proof the SPA was ready. That signal was true before the initial `#/focus` redirect settled, so the delayed redirect could overwrite detail navigation; fixed by waiting for the canonical focus URL and then asserting the detail URL.
 
 ---
 
