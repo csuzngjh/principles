@@ -18,7 +18,7 @@ import type { TaskRecord, PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from './pitask-metadata.js';
 import type { PITaskMetadata } from './pitask-metadata.js';
 import { isPeerRunnerKind, isDiagnosticianStageKind, isRunnerKind } from './peer-runner-contracts.js';
 import {
@@ -26,6 +26,10 @@ import {
   createNextTaskProposal,
 } from './internalization-state-machine.js';
 import { getDiagSuccessors } from './internalization-job-graph.js';
+import {
+  decideInternalizationTransition,
+  transitionInputFromTask,
+} from './internalization-transition-decision.js';
 import { PDRuntimeError } from '../error-categories.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -138,7 +142,19 @@ export type CommitNextTaskResult =
   | { decision: 'no_successor'; sourceTaskId: string; reason: string }
   | { decision: 'invalid_task_metadata'; taskId: string; reason: string }
   | { decision: 'source_not_succeeded'; taskId: string; status: PDTaskStatus }
-  | { decision: 'task_not_found'; taskId: string };
+  | { decision: 'task_not_found'; taskId: string }
+  /** INV-02: needs_revision — 不 seed 正常后继 (revision 由 runner 侧 repair/reopen 承担) */
+  | { decision: 'blocked_by_revision'; sourceTaskId: string; reason: string; runnerDecision: string }
+  /** INV-04: rejected — 终态拒绝, 无后继无 approval */
+  | { decision: 'blocked_by_rejection'; sourceTaskId: string; reason: string; runnerDecision: string }
+  /** artificer repair 任务完成 → 来源 evaluator 被 reopen 重跑修订轮 */
+  | { decision: 'revision_reopened'; sourceTaskId: string; reopenedTaskId: string; reason: string }
+  /** revision 波及下游: 已存在的 succeeded 后继被 reopen 重跑 (级联修订) */
+  | { decision: 'successor_reopened'; sourceTaskId: string; reopenedTaskId: string; successorKind: RunnerKind }
+  /** A/B: 同 causeId 重放的 no-op reopen — 已 materialized,不计数为恢复 */
+  | { decision: 'revision_reopen_noop'; sourceTaskId: string; reopenedTaskId: string; reason: string }
+  /** P0-3: 决策型任务缺少 durable + legacy verdict — fail-closed, 不 seed 任何后继 */
+  | { decision: 'blocked_missing_verdict'; taskId: string; reason: string };
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
@@ -404,6 +420,84 @@ export class InternalizationOrchestrator {
       return { decision: 'invalid_task_metadata', taskId, reason: 'Failed to hydrate PITaskRecord from diagnosticJson' };
     }
 
+    // ── 单一迁移决策 (P0-D/P0-3, INV-02) ──
+    // runner 的 verdict 与状态迁移在此仲裁: needs_revision/rejected 不 seed
+    // 正常后继; artificer repair 完成 reopen 来源 evaluator。
+    // P0-3: durable runnerDecision 缺失时,用 runs.output_payload 的**显式可解析**
+    // verdict 作 legacy 判据; 两者皆无 → BLOCKED_MISSING_VERDICT (fail-closed,
+    // 禁止 missing=ADVANCE 复活审计的错误旁路)。
+    const legacyVerdict = await this.resolveLegacyRunnerVerdict(taskId, rawTask.taskKind);
+    const transition = decideInternalizationTransition(transitionInputFromTask(piTask, legacyVerdict));
+    if (transition.kind === 'HUMAN_REVIEW_REQUIRED') {
+      return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+    if (transition.kind === 'NOT_ADVANCEABLE') {
+      return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+    if (transition.kind === 'BLOCKED_MISSING_VERDICT') {
+      return { decision: 'blocked_missing_verdict', taskId, reason: transition.reason };
+    }
+    if (transition.kind === 'REVISION_REQUIRED') {
+      return {
+        decision: 'blocked_by_revision',
+        sourceTaskId: taskId,
+        reason: transition.reason,
+        runnerDecision: piTask.runnerDecision ?? 'unknown',
+      };
+    }
+    if (transition.kind === 'TERMINAL_REJECT') {
+      return {
+        decision: 'blocked_by_rejection',
+        sourceTaskId: taskId,
+        reason: transition.reason,
+        runnerDecision: piTask.runnerDecision ?? 'unknown',
+      };
+    }
+    if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
+      const causeId = `repair-${taskId}`;
+      // A/B: cause 已 materialize 的判定前移 — 目标(任意状态)的 revisionCauseId
+      // 与本 repair 的 causeId 相同,说明这轮 reopen 已发生过: 目标可能仍在
+      // pending(等待重跑),也可能已经跑完(succeeded 且带新 verdict)。两种
+      // 情况重放都不得再次 reopen(后者会丢弃已完成的修订轮 verdict)。
+      const srcRaw = await this.stateManager.getTask(piTask.repairPayload.sourceEvaluatorTaskId);
+      const srcPi = srcRaw ? hydratePITaskRecord(srcRaw) : null;
+      if (srcPi && srcPi.revisionCauseId === causeId) {
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+          reason: 'revision_cause_already_materialized',
+        };
+      }
+      const reopened = await this.reopenTaskForRevision(piTask.repairPayload.sourceEvaluatorTaskId, {
+        replaceArtificerDependencyWith: taskId,
+        reason: 'artificer_repair_complete',
+        revisionCauseId: causeId,
+      });
+      if (!reopened.ok) {
+        // reopen 失败 (evaluator 缺失/状态不可 reopen) — 不 seed 正常后继,
+        // 结构化返回让 host 层观测 (rc-9)。
+        return { decision: 'no_successor', sourceTaskId: taskId, reason: `evaluator_reopen_failed:${reopened.reason}` };
+      }
+      // A (crash window): 同 causeId 重放 = 真 no-op — 单独 decision 使
+      // reconciliation 不把它计为"恢复" (already materialized)。
+      if (reopened.reason === 'idempotent_replay_same_revision') {
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+          reason: reopened.reason,
+        };
+      }
+      return {
+        decision: 'revision_reopened',
+        sourceTaskId: taskId,
+        reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+        reason: transition.reason,
+      };
+    }
+    // transition.kind === 'ADVANCE' → 正常推进
+
     if (piTask.status !== 'succeeded') {
       return { decision: 'source_not_succeeded', taskId, status: piTask.status };
     }
@@ -451,6 +545,68 @@ export class InternalizationOrchestrator {
     const successorTaskId = proposal.channel
       ? `${proposal.taskKind}-${successorRoot}-${proposal.channel}`
       : `${proposal.taskKind}-${successorRoot}`;
+
+    // ── 级联 reopen (revision wave) ──
+    // 稳定 id 后继已存在且为 succeeded: 仅当源任务经历过 revision
+    // (revisionCount > 0, 即上游被 reopen 后重新完成)时, 下游才必须重跑
+    // (而非 successor_exists 停摆)。普通幂等重扫 (revisionCount=0) 不级联,
+    // 保持既有 successor_exists 语义。pending/retry_wait 的存在后继仍走
+    // findExistingSuccessor 的 successor_exists 分支。
+    const existingById = (piTask.revisionCount ?? 0) > 0
+      ? await this.stateManager.getTask(successorTaskId)
+      : null;
+    if (existingById && (existingById.status === 'succeeded' || existingById.status === 'needs_human_review')) {
+      const cascadeCauseId = `cascade-${taskId}-rc${piTask.revisionCount ?? 0}-${successorTaskId}`;
+      // B: 对称的 cause 前置 — 该 wave 的 cascade reopen 已 materialize
+      // (successor 可能 pending 或已重跑完成),重放不得再 reopen。
+      const succPi = hydratePITaskRecord(existingById);
+      if (succPi && succPi.revisionCauseId === cascadeCauseId) {
+        return {
+          decision: 'revision_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: successorTaskId,
+          reason: 'revision_cause_already_materialized',
+        };
+      }
+      const reopened = await this.reopenTaskForRevision(successorTaskId, {
+        reason: 'upstream_revision_cascade',
+        // B (外部复核): causal idempotency — 同一 upstream revision wave 的
+        // reconciliation/commit 重放不得再次 reopen 或递增 revisionCount。
+        revisionCauseId: cascadeCauseId,
+      });
+      if (reopened.ok) {
+        if (reopened.reason === 'idempotent_replay_same_revision') {
+          return {
+            decision: 'revision_reopen_noop',
+            sourceTaskId: taskId,
+            reopenedTaskId: successorTaskId,
+            reason: reopened.reason,
+          };
+        }
+        return {
+          decision: 'successor_reopened',
+          sourceTaskId: taskId,
+          reopenedTaskId: successorTaskId,
+          successorKind: proposal.taskKind,
+        };
+      }
+      return {
+        decision: 'successor_exists',
+        sourceTaskId: taskId,
+        successorTaskId,
+        successorKind: proposal.taskKind,
+      };
+    }
+    if (existingById) {
+      // leased / retry_wait / pending(经直查而非 findExistingSuccessor 命中) — 在途,不重复处理
+      return {
+        decision: 'successor_exists',
+        sourceTaskId: taskId,
+        successorTaskId,
+        successorKind: proposal.taskKind,
+      };
+    }
+
     const successorMetadata: PITaskMetadata = {
       dependencyTaskIds: proposal.dependencyTaskIds,
       channel: proposal.channel,
@@ -496,6 +652,239 @@ export class InternalizationOrchestrator {
       successorTaskId: successorRecord.taskId,
       successorKind: proposal.taskKind,
     };
+  }
+
+  /**
+   * P0-3 legacy 判据: 从该任务最近 succeeded run 的 output_payload **显式解析**
+   * verdict (evaluation.decision / review.decision / rolloutDecision)。
+   * 这是修复前唯一持久 verdict 载体 — 对历史数据是真实证据而非猜测;
+   * 新数据由 runner 的 durable runnerDecision 承载。解析失败/缺失 → undefined。
+   * rc-1/rc-2: output_payload 按不可信 JSON 处理,逐字段类型守卫。
+   */
+  private async resolveLegacyRunnerVerdict(taskId: string, taskKind: string): Promise<string | undefined> {
+    if (taskKind !== 'evaluator' && taskKind !== 'rollout_reviewer') return undefined;
+    let runs: { outputPayload?: string }[];
+    try {
+      runs = await this.stateManager.getRunsByTask(taskId);
+    } catch {
+      return undefined;
+    }
+    for (const run of [...runs].reverse()) {
+      // RunRecord.outputPayload 已是类型化 string|undefined (store 层映射);
+      // JSON.parse 结果仍按 rc-1 逐字段守卫 (下方 evaluation/review 检查)
+      const raw = run.outputPayload;
+      if (typeof raw !== 'string' || raw.length === 0) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (typeof parsed !== 'object' || parsed === null) continue;
+      const obj = parsed as Record<string, unknown>;
+      const verdictHolders: unknown[] = [obj.evaluation, obj.review];
+      for (const holder of verdictHolders) {
+        if (typeof holder === 'object' && holder !== null) {
+          const d = (holder as Record<string, unknown>).decision;
+          if (typeof d === 'string' && d.length > 0) return d;
+        }
+      }
+      if (typeof obj.rolloutDecision === 'string' && obj.rolloutDecision.length > 0) {
+        return obj.rolloutDecision;
+      }
+    }
+    return undefined;
+  }
+
+  // ── A: succeeded-transition reconciliation (crash window 修复) ─────────────
+
+  /**
+   * Bounded reconciliation for the crash window between markTaskSucceeded
+   * (durable, inside the runner) and commitNextTaskProposal (in-process,
+   * called by the consumer AFTER run() returns). If the process dies between
+   * them, the task stays succeeded forever and its outgoing transition
+   * (successor seed / repair-source reopen / cascade reopen) is lost —
+   * wakeOnce only scans pending/retry_wait.
+   *
+   * Strategy (bounded, not a blind sweep):
+   *   - scan only the N most recently updated succeeded tasks (default 10);
+   *   - only peer-runner kinds whose commit semantics are outgoing
+   *     transitions (rollout_reviewer included: its commit is a harmless
+   *     no-op verified by the verdict gate);
+   *   - arbitration ALWAYS goes through commitNextTaskProposal — the single
+   *     state-machine authority — whose paths are idempotent:
+   *       successor_exists / blocked_by_revision / blocked_by_rejection /
+   *       revision_reopened (same revisionCauseId → no-op) /
+   *       blocked_missing_verdict (fail-closed, surfaced not retried
+   *       aggressively — logged once per sweep).
+   *   - verdict semantics remain authoritative: needs_revision/rejected
+   *     never seed successors through this path.
+   *
+   * Restart-safe: calling this every consumer cycle is safe; duplicates
+   * collapse into the idempotent commit results above.
+   */
+  async reconcileSucceededTransitions(options?: {
+    /** 每周期处理条数上限 (bounded budget, 1..50) */
+    limit?: number;
+    /** caller 持久化的扫描游标 (restart-durable);缺省从头开始 */
+    cursor?: { updatedAt: string; taskId: string };
+    logger?: { info?: (msg: string) => void };
+  }): Promise<{
+    scanned: number;
+    recovered: number;
+    alreadyMaterialized: number;
+    blocked: number;
+    outcomes: { taskId: string; decision: string }[];
+    /** 本周期后的游标 — caller 必须持久化 (A3 restart 语义) */
+    nextCursor: { lastUpdatedAt: string; lastTaskId: string };
+    /** true = 已扫到尾部,caller 应将游标重置回开头 (wrap-around) */
+    wrappedAround: boolean;
+  }> {
+    const limit = Math.max(1, Math.min(options?.limit ?? 10, 50));
+    // A (最终复核): BOUNDED + FAIR + RESTART-DURABLE。
+    // - ASC 全序扫描 (updated_at ASC, task_id ASC — SQL 层 ORDER BY, 不是
+    //   "LIMIT 后 JS 排序"): 最老的 orphan 优先,天然反 starvation;
+    // - 每周期只处理 limit 条 (bounded);
+    // - 游标为独占元组 (updatedAt, taskId),重启后从持久位置继续;
+    // - 扫到尾部 (返回行数 < limit) → wrappedAround,caller 重置游标回开头,
+    //   下一轮重新覆盖新增的 succeeded 任务 (eventual completeness);
+    // - 仲裁唯一入口仍是 commitNextTaskProposal;needs_revision/rejected/
+    //   missing verdict 在其中继续 fail-closed。
+    const fetchLimit = limit; // 仅取本预算行;peer-kind 过滤后不足也不补页
+    // (非 peer 行也会推进游标 — 它们无需 reconciliation,跳过即前进)
+    const page = await this.stateManager.listTasks({
+      status: 'succeeded',
+      orderBy: 'updated_at_asc',
+      afterCursor: options?.cursor,
+      limit: fetchLimit,
+    });
+
+    const outcomes: { taskId: string; decision: string }[] = [];
+    let recovered = 0;
+    let alreadyMaterialized = 0;
+    let blocked = 0;
+    let last: { lastUpdatedAt: string; lastTaskId: string } | undefined;
+    for (const task of page) {
+      last = { lastUpdatedAt: task.updatedAt, lastTaskId: task.taskId };
+      if (!isPeerRunnerKind(task.taskKind)) continue;
+      try {
+        const result = await this.commitNextTaskProposal(task.taskId);
+        outcomes.push({ taskId: task.taskId, decision: result.decision });
+        if (result.decision === 'successor_created' || result.decision === 'revision_reopened' || result.decision === 'successor_reopened') {
+          recovered += 1;
+          options?.logger?.info?.(`[PD:Reconcile] recovered missing transition for ${task.taskId} (${result.decision})`);
+        } else if (result.decision === 'successor_exists' || result.decision === 'revision_reopen_noop') {
+          alreadyMaterialized += 1;
+        } else {
+          // blocked_by_revision / blocked_by_rejection / blocked_missing_verdict /
+          // no_successor — legitimate terminal/no-op verdicts, counted not acted on
+          blocked += 1;
+        }
+      } catch (err) {
+        // per-task failure must not abort the sweep; P1: caller 必须让
+        // reconcile_error 显式可观测 (不能只在 recovered>0 时打日志)
+        outcomes.push({ taskId: task.taskId, decision: `reconcile_error:${err instanceof Error ? err.message : String(err)}` });
+        blocked += 1;
+      }
+    }
+
+    if (page.length === 0) {
+      // 尾部已到 (或起点即空): caller 重置游标
+      const cur = options?.cursor;
+      return {
+        scanned: 0, recovered, alreadyMaterialized, blocked, outcomes,
+        nextCursor: { lastUpdatedAt: cur?.updatedAt ?? '', lastTaskId: cur?.taskId ?? '' },
+        wrappedAround: true,
+      };
+    }
+    const cur = options?.cursor;
+    const tail = last ?? { lastUpdatedAt: cur?.updatedAt ?? '', lastTaskId: cur?.taskId ?? '' };
+    return {
+      scanned: outcomes.length + page.filter((t) => !isPeerRunnerKind(t.taskKind)).length,
+      recovered, alreadyMaterialized, blocked, outcomes,
+      nextCursor: tail,
+      wrappedAround: page.length < fetchLimit,
+    };
+  }
+
+  // ── Revision reopen (P0-D, MVP_CORE_LOOP_CONTRACT INV-02/INV-07/INV-08) ─────
+
+  /**
+   * Reopen a terminal (succeeded / needs_human_review) task for a revision round:
+   * status → pending, attemptCount reset (revision is a new round, not a failure
+   * retry), revisionCount++, optional feedback injected, optional artificer
+   * dependency swap (evaluator rounds read the repair artificer's payload and
+   * artifacts via the FIRST artificer dep — resolvePriorRepairIteration).
+   *
+   * Idempotent (INV-08): target already pending/retry_wait → no-op ok.
+   * Restart-safe: all state is durable; double-reopen collapses to a no-op.
+   */
+  async reopenTaskForRevision(
+    taskId: string,
+    options?: {
+      revisionFeedback?: string;
+      replaceArtificerDependencyWith?: string;
+      reason?: string;
+      /**
+       * P0-4 revision identity: 同一逻辑修订动作的稳定标识。相同 causeKey 对
+       * 已 reopen 目标重放 = 真正 no-op (不递增 revisionCount,不重写反馈);
+       * 不同 causeKey = 新修订轮 (正常递增)。未提供时退化为旧行为 (每次 +1,
+       * 仅建议内部测试使用;生产调用方必须传)。
+       */
+      revisionCauseId?: string;
+    },
+  ): Promise<{ ok: boolean; reason: string }> {
+    const rawTask = await this.stateManager.getTask(taskId);
+    if (!rawTask) {
+      return { ok: false, reason: 'task_not_found' };
+    }
+    const piTask = hydratePITaskRecord(rawTask);
+    if (!piTask) {
+      return { ok: false, reason: 'invalid_task_metadata' };
+    }
+    if (rawTask.status === 'pending' || rawTask.status === 'retry_wait') {
+      // P0-4 幂等: 同一 causeKey 重放 → 真 no-op (revisionCount 不再递增,
+      // 防止 consumer 重复周期烧穿 revision budget)
+      if (options?.revisionCauseId && piTask.revisionCauseId === options.revisionCauseId) {
+        return { ok: true, reason: 'idempotent_replay_same_revision' };
+      }
+      // 不同 causeKey / 无 causeKey — 更新依赖/反馈后继续 (保证 revision 输入最新)
+    } else if (rawTask.status !== 'succeeded' && rawTask.status !== 'needs_human_review') {
+      return { ok: false, reason: `task_in_flight_${rawTask.status}` };
+    }
+
+    const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
+      runnerDecision: undefined, // 新一轮 verdict 未定,清空旧判定 (INV-02 单一决策依据)
+      // P0 verdict drift: revision reopen = 新 execution epoch — 旧 completion
+      // intent 失去 authority,必须随旧 verdict 一并清空;否则重跑时入口门
+      // 会 resume 旧 intent,新 epoch 的重新评估被永远跳过。
+      completionIntent: undefined,
+      revisionCount: (piTask.revisionCount ?? 0) + 1,
+      revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
+      revisionCauseId: options?.revisionCauseId,
+    });
+
+    if (options?.replaceArtificerDependencyWith) {
+      // 替换 artificer 依赖为指定任务(修订轮读取其 repairPayload/artifacts)。
+      // 链是线性的: evaluator 的 artificer dep 只有一个。
+      const nonArtificerDeps: string[] = [];
+      for (const depId of piTask.dependencyTaskIds) {
+        if (depId === options.replaceArtificerDependencyWith) continue;
+        const dep = await this.stateManager.getTask(depId);
+        if (dep && dep.taskKind === 'artificer') continue;
+        nonArtificerDeps.push(depId);
+      }
+      merged.dependencyTaskIds = [...nonArtificerDeps, options.replaceArtificerDependencyWith];
+      // 修订轮 evaluator 的输入 artifact 来自新 artificer 任务的产出
+      merged.inputArtifactRefs = [];
+    }
+
+    await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+    await this.stateManager.updateTask(taskId, {
+      status: 'pending',
+      attemptCount: 0,
+    });
+    return { ok: true, reason: options?.reason ?? 'revision_reopen' };
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

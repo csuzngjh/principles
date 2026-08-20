@@ -246,11 +246,21 @@ describe('Internalization Task Guards (PRI-62)', () => {
       expect(canTransitionTo('retry_wait', 'retry_wait')).toBe(false);
     });
 
-    it('disallows succeeded -> any state', () => {
-      expect(canTransitionTo('succeeded', 'pending')).toBe(false);
+    it('allows succeeded -> pending ONLY for revision reopen (P0-D, INV-02); disallows other successors', () => {
+      // 契约变更 (2026-08-18, MVP core-loop closure): succeeded → pending 是
+      // revision reopen 的合法出边 (orchestrator.reopenTaskForRevision:
+      // evaluator repair 轮、rollout revision 路由、上游修订级联)。
+      // 其余 succeeded 出边仍然全部禁止。
+      expect(canTransitionTo('succeeded', 'pending')).toBe(true);
       expect(canTransitionTo('succeeded', 'leased')).toBe(false);
       expect(canTransitionTo('succeeded', 'failed')).toBe(false);
       expect(canTransitionTo('succeeded', 'retry_wait')).toBe(false);
+    });
+
+    it('allows needs_human_review -> pending (owner retry out-edge, INV-03); disallows others', () => {
+      expect(canTransitionTo('needs_human_review', 'pending')).toBe(true);
+      expect(canTransitionTo('needs_human_review', 'leased')).toBe(false);
+      expect(canTransitionTo('needs_human_review', 'failed')).toBe(false);
     });
 
     it('disallows failed -> any state', () => {

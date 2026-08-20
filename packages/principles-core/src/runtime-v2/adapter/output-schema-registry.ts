@@ -28,6 +28,7 @@ import { EvaluatorOutputV1Schema } from '../internalization/evaluator-output.js'
 import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-reviewer-output.js';
 import { EmpathyObserverOutputV1Schema } from '../observer/empathy-observer.js';
 import { CorrectionObserverOutputV1Schema } from '../observer/correction-observer.js';
+import { SignalClassificationOutputV1Schema } from '../signal-collector/types.js';
 
 /**
  * Map of `outputSchemaRef` string → TypeBox schema. Keys match the
@@ -45,6 +46,7 @@ export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<stri
   ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema],
   ['empathy-observer-output-v1', EmpathyObserverOutputV1Schema],
   ['correction-observer-output-v1', CorrectionObserverOutputV1Schema],
+  ['signal-classification-output-v1', SignalClassificationOutputV1Schema],
 ]);
 
 /**

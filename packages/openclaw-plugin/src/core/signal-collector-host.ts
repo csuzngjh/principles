@@ -22,7 +22,8 @@ import {
   collectSync,
   mapLlmResultToOutput,
   buildLlmPrompt,
-  parseLlmClassification,
+  resolveLlmClassificationPayload,
+  safeStringifyPreview,
   PiAiRuntimeAdapter,
   type UnifiedKeywordStore,
   type SignalCollectorConfig,
@@ -95,6 +96,8 @@ interface PendingSignal {
   sessionId: string;
   text: string;
   traceId: string;
+  /** Stage1 扫描时的词库快照(异步路径复用同一份,避免检测期间词库漂移) */
+  storeSnapshot: UnifiedKeywordStore;
 }
 
 /**
@@ -109,6 +112,12 @@ export type SignalLlmClassifier = (text: string, promptTemplate: string) =>
 
 export interface SignalCollectorHostOptions {
   keywordStore?: UnifiedKeywordStore;
+  /**
+   * Live store provider (P0-B Learn→Detect 闭环): 每次检测调用,mtime 变化时
+   * 重载 learned correction cues。设置后优先于 keywordStore 静态快照——
+   * optimizer 学到的词无需重启 OpenClaw 即进入下一次检测。
+   */
+  keywordStoreProvider?: () => UnifiedKeywordStore;
   config?: SignalCollectorConfig;
   /** Stage2 LLM 分类器。null/undefined → 降级纯关键词。 */
   llmClassifier?: SignalLlmClassifier | null;
@@ -116,7 +125,7 @@ export interface SignalCollectorHostOptions {
 
 export class SignalCollectorHost {
   private readonly wctx: WorkspaceContext;
-  private readonly store: UnifiedKeywordStore;
+  private readonly storeProvider: () => UnifiedKeywordStore;
   private readonly config: SignalCollectorConfig;
   private readonly llmClassifier: SignalLlmClassifier | null;
 
@@ -125,7 +134,8 @@ export class SignalCollectorHost {
 
   constructor(wctx: WorkspaceContext, options: SignalCollectorHostOptions = {}) {
     this.wctx = wctx;
-    this.store = options.keywordStore ?? buildDefaultKeywordStore();
+    this.storeProvider = options.keywordStoreProvider
+      ?? (options.keywordStore ? () => options.keywordStore as UnifiedKeywordStore : () => buildDefaultKeywordStore());
     this.config = options.config ?? DEFAULT_SIGNAL_CONFIG;
     this.llmClassifier = options.llmClassifier ?? null;
   }
@@ -155,8 +165,10 @@ export class SignalCollectorHost {
     }
 
     // 2. Stage1 关键词快扫 (同步,零成本)。detectedAt 由 plugin 层注入(core 不取时间,CodeRabbit #11)
+    //    词库经 provider 按次解析(P0-B: learned cues 无需重启即生效)。
     const detectedAt = new Date().toISOString();
-    const output = collectSync(userMessage, sessionId, this.store, this.config, detectedAt);
+    const store = this.storeProvider();
+    const output = collectSync(userMessage, sessionId, store, this.config, detectedAt);
 
     // 3. 写 user_turns (复用 recordUserTurn)
     //    correctionDetected 含义扩展:isSignal && strength=STRONG (spec §5.2)
@@ -188,6 +200,7 @@ export class SignalCollectorHost {
         sessionId,
         text: userMessage,
         traceId: createTraceId(),
+        storeSnapshot: store,
       };
       // fire-and-forget,失败不影响用户消息处理 (spec §4.2)
       void this.detectAsyncAndRoute(pending);
@@ -230,7 +243,7 @@ export class SignalCollectorHost {
       // 不触发 trackFriction,仅 recordUserTurn,已在 detectSync 中完成)。
       if (pending.output.matchedPrecision === 'ambiguous' && pending.output.matchedTerms.length > 0) {
         const hasEmpathyMatch = pending.output.matchedTerms.some(
-          (term) => this.store.terms[term]?.category === 'empathy',
+          (term) => pending.storeSnapshot.terms[term]?.category === 'empathy',
         );
         if (hasEmpathyMatch) {
           SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_DEGRADED_WEAK',
@@ -391,7 +404,12 @@ export function createSignalLlmClassifierFromConfig(
       workspace: wctx.workspaceDir,
     });
 
-    // 包装成 SignalLlmClassifier:内部调 startRun/pollRun/fetchOutput + buildLlmPrompt + parseLlmClassification
+    // 包装成 SignalLlmClassifier:内部调 startRun/pollRun/fetchOutput。
+    // Runtime contract (MVP_CORE_LOOP_CONTRACT INV-01): startRun 携带
+    // outputSchemaRef='signal-classification-output-v1',adapter 负责 JSON
+    // extraction + schema validation(+bounded repair),分类器 canonical 路径
+    // 直接消费 validated structured payload;string payload 仅作其他 adapter
+    // 的 compatibility fallback(不再有 object→stringify→parse 补丁路径)。
     const classifier: SignalLlmClassifier = async (text: string, _promptTemplate: string) => {
       void _promptTemplate;  // 用 core 的 buildLlmPrompt(标准化的),不用外部传入
       const prompt = buildLlmPrompt(text);
@@ -401,6 +419,7 @@ export function createSignalLlmClassifierFromConfig(
           inputPayload: { prompt },
           contextItems: [],
           timeoutMs: cfg.timeoutMs ?? 30_000,
+          outputSchemaRef: 'signal-classification-output-v1',
         });
         let status = await adapter.pollRun(handle.runId);
         const deadline = Date.now() + (cfg.timeoutMs ?? 30_000);
@@ -413,18 +432,22 @@ export function createSignalLlmClassifierFromConfig(
           return null;
         }
         const output = await adapter.fetchOutput(handle.runId);
-        const payload: unknown = output?.payload;
-        let rawOutput = '';
-        if (typeof payload === 'string') {
-          rawOutput = payload;
-        } else if (typeof payload === 'object' && payload !== null && Object.hasOwn(payload, 'output')) {
-          const maybeOutput = (payload as { output?: unknown }).output;
-          if (typeof maybeOutput === 'string') {
-            rawOutput = maybeOutput;
-          }
+        const resolved = resolveLlmClassificationPayload(output?.payload);
+
+        if (resolved.path === 'structured' && resolved.value) {
+          return resolved.value;
         }
-        const parsed = parseLlmClassification(rawOutput);
-        return parsed.valid ? parsed.value : null;
+        if ((resolved.path === 'legacy_string' || resolved.path === 'legacy_envelope') && resolved.value) {
+          SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_LEGACY_STRING_PAYLOAD',
+            `adapter payload path=${resolved.path} (no outputSchemaRef support); parsed via legacy path`);
+          return resolved.value;
+        }
+
+        // invalid — 带 bounded preview 降级 (rc-8/rc-9,ISSUE-022: 不可诊断的
+        // PARSE_FAIL 是审计开放项,preview 必须有界)。
+        SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL',
+          `unusable classifier payload path=${resolved.path}: ${safeStringifyPreview(output?.payload)}`);
+        return null;
       } catch (e) {
         SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_FAILED', String(e).slice(0, 200));
         return null;

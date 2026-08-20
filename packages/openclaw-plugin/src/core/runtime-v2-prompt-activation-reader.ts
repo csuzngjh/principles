@@ -58,6 +58,15 @@ export class PromptActivationReader {
 
         const result = resolvePrincipleFromArtifact(artifactRow, activation);
         if (result.ok) {
+          // P0-G (INV-05): authority 推导 — approvals 上存在 approved 行
+          // (artifact_id+channel join, approvalId 确定性) → owner;否则该激活
+          // 经低风险 policy 自动激活 → system_policy。查询失败不阻塞注入,
+          // authority 留空 (渲染层宁缺毋假)。
+          const authorityInfo = this.deriveAuthority(sqliteConn, activation.artifactId, 'prompt');
+          if (authorityInfo.authority) {
+            result.principle.authority = authorityInfo.authority;
+            if (authorityInfo.approvedBy) result.principle.approvedBy = authorityInfo.approvedBy;
+          }
           principles.push(result.principle);
         } else {
           warnings.push(result.warning);
@@ -92,6 +101,40 @@ export class PromptActivationReader {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       throw new Error(`artifact_query_failed: artifactId=${artifactId} reason=${msg}; nextAction=check_pi_artifacts_table`);
+    }
+  }
+
+  /**
+   * P0-G (INV-05): activation authority 推导 (derived join, 无 schema 迁移)。
+   * approvals 的 approvalId 是确定性的 (apr_<channel>_<artifactId>), 因此
+   * artifact_id+channel 上存在 status='approved' 行 ⟺ owner 授权;
+   * 无行 ⟺ 低风险 policy 自动激活 (system_policy)。rc-1/rc-5: 行字段按
+   * unknown 校验, 键存在性用 Object.hasOwn。
+   */
+  private deriveAuthority(
+    sqliteConn: SqliteConnection,
+    artifactId: string,
+    channel: string,
+  ): { authority?: 'owner' | 'system_policy'; approvedBy?: string } {
+    try {
+      const db = sqliteConn.getDb();
+      const row: unknown = db.prepare(`
+        SELECT decided_by FROM approvals
+        WHERE artifact_id = ? AND channel = ? AND status = 'approved'
+        ORDER BY decided_at DESC LIMIT 1
+      `).get(artifactId, channel);
+      if (row !== null && typeof row === 'object' && Object.hasOwn(row, 'decided_by')) {
+        const decidedBy = (row as Record<string, unknown>).decided_by;
+        return {
+          authority: 'owner',
+          approvedBy: typeof decidedBy === 'string' && decidedBy.length > 0 ? decidedBy : undefined,
+        };
+      }
+      return { authority: 'system_policy' };
+    } catch {
+      // 查询失败 (旧库无 approvals 表等) — 不阻塞注入, authority 不标注
+      this.deps.logger?.warn?.(`[PD:RuntimeV2] authority derivation failed for artifactId=${artifactId}; rendering without authority attribute`);
+      return {};
     }
   }
 

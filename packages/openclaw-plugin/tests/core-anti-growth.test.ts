@@ -77,6 +77,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'replay-engine.ts',
     'pd-task-reconciler.ts',
     'correction-cue-learner.ts',
+  // MVP core-loop closure (P0-B): live correction-cue store projection — reads
+  // correction_keywords.json (I/O) and projects to core's UnifiedKeywordStore.
+  'signal-keyword-store.ts',
     'principle-compiler/compiler.ts',
     'pain.ts',
     'config.ts',

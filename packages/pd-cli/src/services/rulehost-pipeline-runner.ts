@@ -66,7 +66,7 @@ import type {
   SeedArtificerRepairParams,
   EvaluatorValidator,
 } from '@principles/core/runtime-v2';
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { loadPdConfig } from './pd-config-loader.js';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
 import { compileDemoRule } from './demo-rule-compiler.js';
@@ -646,7 +646,10 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
     },
     seedArtificerRepairTask: async (params: SeedArtificerRepairParams): Promise<string> => {
       // rc-7: each call gets a fresh task ID — never reuse a cached ID.
-      const repairTaskId = `artificer-repair-${randomUUID()}`;
+      // P0-4: deterministic revision identity + reuse on replay
+      const repairTaskId = `artificer-repair-${params.repairPayload.sourceEvaluatorTaskId}-r${params.repairPayload.repairIteration}`;
+      const existing = await stateManager.getTask(repairTaskId);
+      if (existing) return repairTaskId;
       await stateManager.createTask({
         taskId: repairTaskId,
         // D1 (PRI-509): task kind is 'artificer' — reuses the artificer

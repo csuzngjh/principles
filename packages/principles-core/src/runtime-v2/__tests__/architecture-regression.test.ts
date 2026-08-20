@@ -312,6 +312,12 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'merge-gate-audit.ts',
   'pd-task-reconciler.ts',
   'correction-cue-learner.ts',
+  // MVP core-loop closure (P0-B/P0-D/E/F): live correction-cue store projection
+  // (learn->detect feedback) and auto-consumer governance wiring (dispatcher +
+  // repair deps). Both are plugin I/O boundary modules; core logic lives in
+  // @principles/core.
+  'signal-keyword-store.ts',
+  'auto-consumer-governance-wiring.ts',
   'principle-compiler/compiler.ts',
   'pain.ts',
   'pain-context-extractor.ts',
@@ -413,7 +419,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (94 files)', async () => {
+  it('known baseline count is self-consistent (96 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -456,7 +462,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // 2026-08-19 retirement: Removed control-ui-db.ts and thinking-models.ts
     // (96 → 94) — zero production consumers after the Thinking Activity
     // writer retirement (census in the PR description).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
+    // MVP core-loop closure (P0-B/P0-D): Added signal-keyword-store.ts +
+    // auto-consumer-governance-wiring.ts (94 → 96) — live correction-cue store
+    // projection + auto-consumer governance dispatcher/repair wiring (I/O boundary).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
   });
 });
 

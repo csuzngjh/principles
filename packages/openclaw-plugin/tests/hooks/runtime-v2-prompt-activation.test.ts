@@ -777,7 +777,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    expect(result?.prependSystemContext).toContain('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+    expect(result?.prependSystemContext).toContain('ACTIVE BEHAVIOR DIRECTIVES');
     expect(result?.prependSystemContext).toContain('<directive');
     expect(result?.prependSystemContext).toContain('</directive>');
   });
@@ -794,7 +794,9 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
 
     const ctx = result?.prependSystemContext ?? '';
     expect(ctx).toContain('MANDATORY');
-    expect(ctx).toContain('Owner-approved');
+    // P0-G: 中性标题 + authority 标注 (不再无条件声称 Owner-approved)
+    expect(ctx).toContain('ACTIVE BEHAVIOR DIRECTIVES');
+    expect(ctx).toContain('authority=');
     expect(ctx).toContain('active behavior constraint');
     expect(ctx).toContain('Do not treat this as background context');
   });
@@ -827,7 +829,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     // Directives should be in prependSystemContext, NOT in appendSystemContext
     const prependCtx = result?.prependSystemContext ?? '';
     const appendCtx = result?.appendSystemContext ?? '';
-    const directiveMarker = 'OWNER-APPROVED BEHAVIOR DIRECTIVES';
+    const directiveMarker = 'ACTIVE BEHAVIOR DIRECTIVES';
     expect(prependCtx).toContain(directiveMarker);
     // Should NOT be duplicated in appendSystemContext
     expect(appendCtx).not.toContain(directiveMarker);
@@ -844,8 +846,12 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const ctx = result?.prependSystemContext ?? '';
+    // main (PRI-547) renamed AGENT IDENTITY → PD GOVERNANCE CONTEXT; this
+    // branch (P0-G) renamed OWNER-APPROVED → ACTIVE BEHAVIOR DIRECTIVES with
+    // authority= annotation. The merged runtime emits BOTH new names — the
+    // assertion must match the surviving pair, not main's pre-P0-G wording.
     const identityIdx = ctx.indexOf('PD GOVERNANCE CONTEXT');
-    const directiveIdx = ctx.indexOf('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+    const directiveIdx = ctx.indexOf('ACTIVE BEHAVIOR DIRECTIVES');
     expect(identityIdx).toBeGreaterThanOrEqual(0);
     expect(directiveIdx).toBeGreaterThan(identityIdx);
   });
@@ -862,7 +868,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const ctx = result?.prependSystemContext ?? '';
-    expect(ctx).toContain(`<directive id="princ-mvp-acceptance-confirm-first" source="runtime_v2_activation">`);
+    expect(ctx).toContain('<directive id="princ-mvp-acceptance-confirm-first" source="runtime_v2_activation"');
     expect(ctx).toContain('MANDATORY: Before starting any coding task');
   });
 
@@ -871,7 +877,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     const prependCtx = result?.prependSystemContext ?? '';
-    expect(prependCtx).not.toContain('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+    expect(prependCtx).not.toContain('ACTIVE BEHAVIOR DIRECTIVES');
   });
 
   it('existing evolution_principles behavior for legacy principles remains intact', async () => {

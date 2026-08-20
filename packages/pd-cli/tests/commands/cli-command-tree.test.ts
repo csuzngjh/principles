@@ -126,4 +126,19 @@ describe('CLI command tree structure', () => {
     const output = runPdHelp(['legacy', 'cleanup', '--help']);
     expect(output).toContain('V1 Artificer');
   });
+
+  // cli-7-test-wiring (PR #1358 known gap 补齐): retry 是 INV-03 的核心 Owner
+  // 出边,command-tree 注册必须有 wiring 证明,不能只靠 handler 测试。
+  it('internalization retry command exists under runtime internalization (pd runtime internalization retry --help)', () => {
+    const output = runPdHelp(['runtime', 'internalization', 'retry', '--help']);
+    expect(output).toContain('--task');
+    expect(output).toContain('--confirm');
+    expect(output).toContain('--workspace');
+    expect(output).toContain('--json');
+  });
+
+  it('internalization subcommand list includes retry (pd runtime internalization --help)', () => {
+    const output = runPdHelp(['runtime', 'internalization', '--help']);
+    expect(output).toMatch(/retry\s/);
+  });
 });

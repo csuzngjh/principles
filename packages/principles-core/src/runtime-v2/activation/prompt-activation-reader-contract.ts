@@ -7,6 +7,15 @@ export interface ActivatedPrinciple {
   text: string;
   artifactId: string;
   activationId: string;
+  /**
+   * 谁授权了这条激活 (INV-05, P0-G):
+   * - owner: 经 approvals 队列 approve (derived join on artifact_id+channel)
+   * - system_policy: 低风险渠道经 policy 自动激活 (无 approval 行)
+   * - undefined: 读取层无法判定 (旧数据/查询失败) — 渲染层不得声称 owner
+   */
+  authority?: 'owner' | 'system_policy';
+  /** owner 授权时的决定者 (approvals.decided_by) */
+  approvedBy?: string;
 }
 
 export interface PromptActivationReaderResult {
@@ -112,7 +121,7 @@ export function trimToBudget(
   let remaining = budget;
   let truncated = false;
 
-  const header = 'Runtime V2 activated principles (owner-approved):';
+  const header = 'Runtime V2 activated principles:';
   lines.push(header);
   remaining -= header.length;
 
@@ -143,24 +152,31 @@ export interface RenderDirectivesOptions {
 }
 
 export function renderPrinciplesToDirectives(
-  principles: { principleId: string; text: string; artifactId: string; activationId: string }[],
+  principles: { principleId: string; text: string; artifactId: string; activationId: string; authority?: 'owner' | 'system_policy'; approvedBy?: string }[],
   injectedIds: Set<string>,
   options?: RenderDirectivesOptions,
 ): string {
   if (injectedIds.size === 0) return '';
-  const escapeFn = options?.escapeFn ?? ((s: string) => s);
+  const escapeFn = options?.escapeFn ?? ((s) => s);
 
   const directiveLines: string[] = [];
   directiveLines.push('');
-  directiveLines.push('## 【OWNER-APPROVED BEHAVIOR DIRECTIVES】');
+  // P0-G (MVP_CORE_LOOP_CONTRACT INV-05 / §12): 中性标题。低风险渠道的
+  // system-policy 自动激活不得被表示为 Owner-approved; 具体授权逐项标注
+  // authority 属性 (owner=审批队列批准, system_policy=策略自动激活)。
+  directiveLines.push('## 【ACTIVE BEHAVIOR DIRECTIVES】');
   directiveLines.push('');
-  directiveLines.push('Owner-approved behavior directives are active operating constraints learned from prior owner corrections.');
+  directiveLines.push('Active behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority="owner" (approved in the owner approval queue) or authority="system_policy" (auto-activated by low-risk policy).');
   directiveLines.push('These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.');
   directiveLines.push('For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.');
   directiveLines.push('');
   for (const p of principles) {
     if (!injectedIds.has(p.principleId)) continue;
-    directiveLines.push(`<directive id="${escapeFn(p.principleId)}" source="runtime_v2_activation">`);
+    // authority 已知才标注; 未知(旧数据/查询失败)宁缺毋假 (INV-05)
+    const authorityAttr = p.authority === 'owner' || p.authority === 'system_policy'
+      ? ` authority="${p.authority}"`
+      : '';
+    directiveLines.push(`<directive id="${escapeFn(p.principleId)}" source="runtime_v2_activation"${authorityAttr}>`);
     directiveLines.push(`MANDATORY: ${escapeFn(p.text)}`);
     directiveLines.push('Apply this as an active behavior constraint. Do not treat this as background context.');
     directiveLines.push('</directive>');

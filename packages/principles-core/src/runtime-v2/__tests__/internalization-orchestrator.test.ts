@@ -811,7 +811,10 @@ describe('InternalizationOrchestrator', () => {
 
       const result = await orchestrator.commitNextTaskProposal('rollout-reviewer-1');
 
-      expect(result.decision).toBe('no_successor');
+      // P0-3 (外部复核): 无 durable verdict 且 runs 无 legacy verdict 的决策型
+      // 任务 → BLOCKED_MISSING_VERDICT (fail-closed)。语义等价于旧断言: 不 seed
+      // 任何后继;但原因从"终节点无后继"变为"verdict 缺失,不可判定"。
+      expect(result.decision).toBe('blocked_missing_verdict');
       if (result.decision === 'no_successor') {
         expect(result.sourceTaskId).toBe('rollout-reviewer-1');
       }

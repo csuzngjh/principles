@@ -209,6 +209,22 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
   // ── Optional hooks (default no-op) ─────────────────────────────────────────
 
+  /**
+   * P0 (verdict drift) — completion-intent resume gate. Called right after
+   * lease acquisition, BEFORE any LLM invocation. A runner whose task carries
+   * a pending durable completion intent in the same revision epoch must
+   * resume that intent's effects and return the result here; returning null
+   * proceeds with the normal LLM pipeline. Only runners with verdict
+   * semantics (evaluator / rollout_reviewer) need to override this.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  protected async maybeResumePendingIntent(
+    _taskId: string,
+    _leasedTask: TaskRecord,
+  ): Promise<PeerRunnerResult<TOutput> | null> {
+    return null;
+  }
+
   /** Emit runner-specific success telemetry. Called after validation passes. */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected emitSuccessTelemetry(_taskId: string, _output: TOutput, _context: TContext): void {
@@ -289,6 +305,17 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       taskKind: this.config.expectedTaskKind,
       attemptCount: leasedTask.attemptCount,
     });
+
+    // 1c. P0 (verdict drift) — completion-intent resume gate. A pending durable
+    // completion intent from the SAME revision epoch is the recovery authority:
+    // its effects are resumed idempotently; the LLM is NOT re-invoked, so a
+    // non-deterministic re-run can never drift the verdict against side
+    // effects that already happened (activation / repair seed / validation).
+    const resumed = await this.maybeResumePendingIntent(taskId, leasedTask);
+    if (resumed) {
+      this.phase = RunnerPhase.Completed;
+      return resumed;
+    }
 
     // All subsequent errors use the real leasedTask — no synthetic TaskRecord allowed
     try {
