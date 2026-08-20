@@ -40,10 +40,14 @@ vi.mock('principles-disciple', () => ({
   initWorkflowSchema: mockState.initWorkflowSchema,
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
-  SqliteConnection: mockState.sqliteConnectionCtor,
-  SchemaConformanceReadModel: mockState.schemaConformanceCtor,
-}));
+vi.mock('@principles/core/runtime-v2', async () => {
+  const actual = await vi.importActual<typeof import('@principles/core/runtime-v2')>('@principles/core/runtime-v2');
+  return {
+    ...actual,
+    SqliteConnection: mockState.sqliteConnectionCtor,
+    SchemaConformanceReadModel: mockState.schemaConformanceCtor,
+  };
+});
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: mockState.resolveWorkspaceDir,
@@ -340,6 +344,69 @@ describe('pd runtime init', () => {
       try {
         await handleRuntimeInit({ json: true });
         expect(mockState.resolveWorkspaceDir).toHaveBeenCalledTimes(1);
+      } finally { rmTmpDir(tmp); }
+    });
+  });
+
+  // ── INIT-07: config.yaml scaffolding (P0: runtime discovery) ───────────────
+
+  describe('INIT-07: config.yaml scaffolding', () => {
+    it('dry-run reports config.yaml as skipped without writing the file', () => {
+      const tmp = mkTmpDir();
+      try {
+        const output = buildRuntimeInitOutput(tmp, false);
+        expect(output.config).toBeDefined();
+        expect(output.config?.status).toBe('skipped');
+        expect(fs.existsSync(path.join(tmp, '.pd', 'config.yaml'))).toBe(false);
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('--confirm writes a valid config.yaml with version and workspace.default', async () => {
+      const tmp = mkTmpDir();
+      try {
+        const output = buildRuntimeInitOutput(tmp, true);
+        expect(output.config?.status).toBe('initialized');
+        const configPath = path.join(tmp, '.pd', 'config.yaml');
+        expect(fs.existsSync(configPath)).toBe(true);
+        const yaml = (await import('js-yaml')).default;
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+        expect(typeof parsed).toBe('object');
+        const obj = parsed as { version?: unknown; workspace?: { default?: unknown }; features?: unknown };
+        expect(obj.version).toBe(1);
+        expect(obj.workspace?.default).toBe(path.resolve(tmp));
+        expect(obj.features).toBeDefined();
+        expect(Object.keys(obj.features as Record<string, unknown>).length).toBeGreaterThan(0);
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('round-trip: generated config passes validatePdConfig', async () => {
+      const tmp = mkTmpDir();
+      try {
+        buildRuntimeInitOutput(tmp, true);
+        const configPath = path.join(tmp, '.pd', 'config.yaml');
+        const yaml = (await import('js-yaml')).default;
+        const { validatePdConfig } = await import('@principles/core/runtime-v2');
+        const parsed: unknown = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+        const result = validatePdConfig(parsed);
+        expect(result.ok).toBe(true);
+      } finally { rmTmpDir(tmp); }
+    });
+
+    it('--confirm skips when config.yaml already exists (preserves user file)', () => {
+      const tmp = mkTmpDir();
+      try {
+        // Pre-create a user-modified config.yaml
+        const configDir = path.join(tmp, '.pd');
+        fs.mkdirSync(configDir, { recursive: true });
+        const userConfig = '# user config\nversion: 1\n';
+        fs.writeFileSync(path.join(configDir, 'config.yaml'), userConfig, 'utf8');
+
+        const output = buildRuntimeInitOutput(tmp, true);
+        expect(output.config?.status).toBe('skipped');
+        expect(output.config?.warnings.some(w => w.includes('already exists'))).toBe(true);
+        // Content must be preserved
+        expect(fs.readFileSync(path.join(configDir, 'config.yaml'), 'utf8')).toBe(userConfig);
       } finally { rmTmpDir(tmp); }
     });
   });

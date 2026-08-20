@@ -183,6 +183,14 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // never ALSO seeds a normal successor. Roll back = set enabled: false in config
   // (restores legacy dead-end behavior for diagnosis only).
   { id: 'evaluator_artificer_repair_loop', category: 'quiet', enabled: true, since: '2026-07-04', description: 'PRI-509/P0-D: Evaluator→Artificer repair loop — auto-seed artificer repair on needs_revision (2-round cap → needs_human_review). Default ON (INV-02 liveness); production-wired in auto-consumer since 2026-08-18.' },
+  // Issue 2 (Codex E2E): artificer pipeline fails with `output_invalid` when the
+  // LLM returns malformed output instead of calling submit_rulecode. `output_invalid`
+  // is in ArtificerRunner.permanentErrorCategories → immediate permanent failure,
+  // no fallback. This quiet flag (default off) moves `output_invalid` OUT of
+  // permanentErrorCategories so the base runner's retry policy (bounded by
+  // task.maxAttempts) retries it instead of failing permanently. Flag-off =
+  // legacy behavior: output_invalid is permanent. Roll back = set enabled: false.
+  { id: 'artificer_output_retry', category: 'quiet', enabled: false, since: '2026-08-20', description: 'Issue 2: retry Artificer `output_invalid` (malformed LLM output, e.g. missed submit_rulecode) via the base retry policy (max 3 attempts) instead of permanent failure. Default off; flag-off = output_invalid permanent (legacy).' },
   // Internalization progressive disclosure — Layer 0 (design §6.1, §8, PR 1).
   // Writer-side ArtifactSummary + PredecessorSummaryRef envelope, merged into
   // contentJson for all 8 SummaryRunnerKind stages. Default off; flag-off =

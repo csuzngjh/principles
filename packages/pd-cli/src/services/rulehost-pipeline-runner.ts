@@ -272,6 +272,11 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
   try {
     const artifactStore = stateManager.piArtifactStore;
     const eventEmitter = new StoreEventEmitter();
+    // Issue 2: load effective config once so every stage runner can resolve
+    // feature flags (e.g. `artificer_output_retry`). Mirrors
+    // createEvaluatorRunnerDeps (rc-9: malformed config → fallback defaults).
+    const configLoad = loadPdConfig(opts.workspaceDir);
+    const effectiveConfig = configLoad.ok ? configLoad.effective : configLoad.defaults;
     // Allow the caller's adapter to resolve real artifactIds (needed by
     // test-double adapters whose scripted outputs must match store-assigned IDs).
     opts.onStoreReady?.(artifactStore);
@@ -282,7 +287,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       scribe: opts.runtimeAdapter,
       evaluator: opts.runtimeAdapter,
     };
-    const runnerOptsFor = (adapter: PDRuntimeAdapter) => ({ owner, runtimeKind: adapter.kind(), pollIntervalMs, timeoutMs });
+    const runnerOptsFor = (adapter: PDRuntimeAdapter) => ({ owner, runtimeKind: adapter.kind(), pollIntervalMs, timeoutMs, effectiveConfig });
 
     // ── Stage: pain lookup ──
     // Find a dreamer task already seeded for this pain (the pain→dreamer bridge

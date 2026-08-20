@@ -37,6 +37,7 @@ import type { ArtificerRuleOutput, ArtificerValidator } from './artificer-output
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
+import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
 import { ARTIFICER_MANIFEST } from './context-manifests.js';
@@ -49,6 +50,7 @@ import type {
   PeerRunnerResult,
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 
 // ── Artificer-specific context ──────────────────────────────────────────────
@@ -420,17 +422,28 @@ function validateContextModeOutput(
 
 // ── ArtificerRunner ──────────────────────────────────────────────────────────
 
+/** Options for the ArtificerRunner. Adds effectiveConfig for feature flag
+ * resolution (Issue 2: `artificer_output_retry`), mirroring the diagnostician
+ * runners' pattern (diag-rootcause/diag-distiller). */
+export interface ArtificerRunnerOptions extends PeerRunnerOptions {
+  /** Effective PD config for feature flag resolution (ADR-0019). */
+  readonly effectiveConfig?: EffectivePdConfig;
+}
+
 export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerRuleOutput> {
   private readonly validator: ArtificerValidator;
   private readonly contextMode: 'v1' | 'v2';
   private readonly behaviorExamplePack: BehaviorExamplePack | undefined;
 
-  constructor(deps: ArtificerRunnerDeps, options: PeerRunnerOptions) {
+  constructor(deps: ArtificerRunnerDeps, options: ArtificerRunnerOptions) {
     super(deps, options, {
       runnerName: 'artificer',
       expectedTaskKind: 'artificer',
       defaultAgentId: 'artificer',
       resultRefPrefix: 'artificer',
+      // ADR-0019: pass effectiveConfig so isArtificerOutputRetryEnabled() can
+      // read the `artificer_output_retry` feature flag (Issue 2).
+      effectiveConfig: options.effectiveConfig,
     });
     this.validator = deps.validator;
     this.contextMode = deps.contextMode ?? 'v1';
@@ -439,9 +452,40 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
 
   // ── Abstract implementations ───────────────────────────────────────────────
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  /**
+   * Permanent error categories for the artificer runner.
+   *
+   * Issue 2 (Codex E2E): `output_invalid` (malformed LLM output, e.g. the LLM
+   * never calls submit_rulecode) was unconditionally permanent → the
+   * internalization pipeline dead-ends with no retry/fallback. When the
+   * `artificer_output_retry` flag is ON, `output_invalid` is excluded so the
+   * base runner's retry policy (bounded by task.maxAttempts) retries it.
+   * Flag-off / no effectiveConfig = legacy behavior (permanent failure).
+   */
   get permanentErrorCategories(): ReadonlySet<PDErrorCategory> {
-    return new Set(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid', 'output_invalid']);
+    const base = new Set<PDErrorCategory>([
+      'storage_unavailable',
+      'workspace_invalid',
+      'capability_missing',
+      'cancelled',
+      'input_invalid',
+    ]);
+    if (!this.isArtificerOutputRetryEnabled()) {
+      base.add('output_invalid');
+    }
+    return base;
+  }
+
+  /**
+   * Issue 2: whether the `artificer_output_retry` feature flag is on.
+   * Reads from effectiveConfig; returns false when absent (legacy behavior —
+   * output_invalid stays permanent). Mirrors isDegradationEnabled (ADR-0019).
+   */
+  private isArtificerOutputRetryEnabled(): boolean {
+    const { effectiveConfig } = this.config;
+    if (!effectiveConfig) return false;
+    const flags = computeFeatureFlagsFromConfig(effectiveConfig);
+    return isFeatureEnabled(flags, 'artificer_output_retry');
   }
 
   async buildContext(taskId: string): Promise<ArtificerContext> {

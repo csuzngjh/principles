@@ -279,7 +279,10 @@ export async function runConsumerCycle(
 
     const taskId = wakeResult.taskId;
     const taskKind = wakeResult.taskKind;
-    const runnerOptions = { owner: 'auto-consumer' as const, runtimeKind };
+    // Issue 2: forward effectiveConfig so runners can resolve feature flags
+    // (e.g. `artificer_output_retry`) — mirrors the diagnostician wiring
+    // (ADR-0019). Flag-off / absent = legacy behavior.
+    const runnerOptions = { owner: 'auto-consumer' as const, runtimeKind, effectiveConfig: configResult.effective };
 
     // Dispatch by leased task kind. Only kinds listed in
     // FULL_CHAIN_CONSUMER_RUNNER_KINDS can be leased here; anything else

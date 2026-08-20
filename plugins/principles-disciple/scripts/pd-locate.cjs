@@ -150,12 +150,52 @@ function locateWorkspace(startDir) {
   };
 }
 
+/** The pd-cli JS entry inside an npm global root, or undefined. */
+function pdEntryFromGlobalRoot(globalRoot) {
+  const entry = path.join(globalRoot, '@principles', 'pd-cli', 'dist', 'index.js');
+  return fs.existsSync(entry) ? entry : undefined;
+}
+
+/**
+ * First `where pd` shim line whose npm bin dir owns the pd-cli JS entry.
+ * Pure (no I/O beyond the entry existence probe) — exported for unit tests.
+ */
+function pdEntryFromShimLines(lines) {
+  for (const line of lines) {
+    const candidate = line.trim();
+    if (!candidate) continue;
+    const entry = path.join(path.dirname(candidate), 'node_modules', '@principles', 'pd-cli', 'dist', 'index.js');
+    if (fs.existsSync(entry)) return entry;
+  }
+  return undefined;
+}
+
+/**
+ * Windows-only: locate the `pd` shim on PATH via `where pd`, then derive the
+ * real pd-cli JS entry from its npm bin dir. Returns the entry path or
+ * undefined. ERR-001: `where pd` output is external input — each line is
+ * trimmed independently and never trusted verbatim; only a shim whose bin dir
+ * owns node_modules/@principles/pd-cli counts (a non-npm `pd` on PATH is not
+ * misidentified). ERR-024: stays on process.execPath + argv — no shell spawn.
+ */
+function pdEntryFromPath() {
+  let output;
+  try {
+    output = execSync('where pd', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 }).trim();
+  } catch { /* pd not on PATH */ }
+  if (!output) return undefined;
+  return pdEntryFromShimLines(output.split(/\r?\n/));
+}
+
 /**
  * Resolve how to invoke the `pd` CLI without a shell: prefer the real JS
  * entry of a globally installed @principles/pd-cli (process.execPath + entry,
  * spaces-safe, no .cmd spawning — spawnSync('pd.cmd') without a shell fails
  * with EINVAL on modern Windows Node). POSIX can exec 'pd' directly.
- * Returns { command, prefix } or undefined (caller fails loud).
+ * On Windows, if `npm root -g` is unavailable or its prefix does not own the
+ * shim on PATH (npm registry/PATH quirks), fall back to `where pd` so the
+ * globally installed CLI is still found.
+ * Returns { command, prefix } or undefined (caller fails loud, ERR-002).
  */
 function pdCliCommand() {
   let globalRoot;
@@ -163,11 +203,12 @@ function pdCliCommand() {
     globalRoot = execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 }).trim();
   } catch { /* npm unavailable below */ }
   if (globalRoot) {
-    const entry = path.join(globalRoot, '@principles', 'pd-cli', 'dist', 'index.js');
-    if (fs.existsSync(entry)) return { command: process.execPath, prefix: [entry] };
+    const entry = pdEntryFromGlobalRoot(globalRoot);
+    if (entry) return { command: process.execPath, prefix: [entry] };
   }
   if (process.platform !== 'win32') return { command: 'pd', prefix: [] };
-  return undefined;
+  const entry = pdEntryFromPath();
+  return entry ? { command: process.execPath, prefix: [entry] } : undefined;
 }
 
 /** Guard a flag that takes a value: returns { ok, value } and rejects a
@@ -188,5 +229,8 @@ module.exports = {
   locatePluginRoot,
   locateWorkspace,
   pdCliCommand,
+  pdEntryFromGlobalRoot,
+  pdEntryFromPath,
+  pdEntryFromShimLines,
   requireFlagValue,
 };
