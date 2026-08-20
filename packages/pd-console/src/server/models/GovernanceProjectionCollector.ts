@@ -8,12 +8,15 @@ import {
   parsePITaskMetadata,
 } from '@principles/core/runtime-v2';
 import type {
+  ActivationFact,
+  ApprovalFact,
   DataQualityIssue,
   GovernanceFacts,
   GovernanceChannel,
   RevisionIdentity,
   SourceRef,
   TaskFact,
+  TimelineEvent,
 } from '@principles/core/runtime-v2';
 
 const GOVERNANCE_TASK_KINDS = new Set([
@@ -38,6 +41,10 @@ function readOwnString(record: Record<string, unknown>, key: string): string | u
 
 function isTimestamp(value: string | undefined): value is string {
   return value !== undefined && ISO_UTC.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function isGovernanceChannel(value: string | undefined): value is GovernanceChannel {
+  return value === 'prompt' || value === 'code_tool_hook' || value === 'defer_archive';
 }
 
 function issue(value: DataQualityIssue): DataQualityIssue {
@@ -164,9 +171,87 @@ export class GovernanceProjectionCollector {
       }
       tasks.sort((left, right) => (left.taskId ?? '').localeCompare(right.taskId ?? ''));
 
+      const strongArtifactIds = new Set(artifactIds);
+      const approvals: ApprovalFact[] = [];
+      const activations: ActivationFact[] = [];
+      const timelineEvents: TimelineEvent[] = [];
+      for (const row of db.prepare('SELECT * FROM approvals ORDER BY approval_id ASC').all()) {
+        if (!isRecord(row)) continue;
+        const artifactId = readOwnString(row, 'artifact_id');
+        if (artifactId === undefined || !strongArtifactIds.has(artifactId)) continue;
+        const approvalId = readOwnString(row, 'approval_id');
+        const channel = readOwnString(row, 'channel');
+        const outcome = readOwnString(row, 'status');
+        const requestedAt = readOwnString(row, 'requested_at');
+        const decidedAt = readOwnString(row, 'decided_at');
+        const approvalRef = approvalId === undefined ? undefined : { type: 'approval' as const, id: approvalId };
+        if (approvalId === undefined || !isGovernanceChannel(channel) || !isTimestamp(requestedAt)
+          || (outcome !== 'pending' && outcome !== 'approved' && outcome !== 'rejected' && outcome !== 'cancelled')
+          || (decidedAt !== undefined && !isTimestamp(decidedAt))) {
+          collectionIssues.push(issue(approvalRef === undefined
+            ? { source: 'approval', reasonCode: 'metadata_malformed', nextActionCode: 'repair_approval_record' }
+            : { source: 'approval', reasonCode: 'metadata_malformed', nextActionCode: 'repair_approval_record', sourceRef: approvalRef }));
+          continue;
+        }
+        const strongApprovalRef: SourceRef = { type: 'approval', id: approvalId };
+        const fact: ApprovalFact = {
+          schemaVersion: '1', family: 'approval', sourceRef: strongApprovalRef, principleId, artifactId,
+          approvalId, channel, outcome, lineageConfidence: 'strong', recordedAt: decidedAt ?? requestedAt,
+        };
+        if (decidedAt !== undefined) fact.occurredAt = decidedAt;
+        approvals.push(fact);
+        sourceRefs.push(strongApprovalRef);
+        if (outcome === 'approved' || outcome === 'rejected') {
+          timelineEvents.push({
+            code: outcome, occurredAt: decidedAt ?? requestedAt, recordedAt: decidedAt ?? requestedAt,
+            summaryCode: `governance.timeline.${outcome}`, sourceRef: strongApprovalRef, lineageConfidence: 'strong',
+          });
+        }
+      }
+
+      for (const row of db.prepare('SELECT * FROM activations ORDER BY activated_at ASC, activation_id ASC').all()) {
+        if (!isRecord(row)) continue;
+        const artifactId = readOwnString(row, 'artifact_id');
+        if (artifactId === undefined || !strongArtifactIds.has(artifactId)) continue;
+        const activationId = readOwnString(row, 'activation_id');
+        const channel = readOwnString(row, 'channel');
+        const activatedAt = readOwnString(row, 'activated_at');
+        const deactivatedAt = readOwnString(row, 'deactivated_at');
+        const activationRef = activationId === undefined ? undefined : { type: 'activation' as const, id: activationId };
+        if (activationId === undefined || !isGovernanceChannel(channel) || !isTimestamp(activatedAt)
+          || (deactivatedAt !== undefined && !isTimestamp(deactivatedAt))) {
+          collectionIssues.push(issue(activationRef === undefined
+            ? { source: 'activation', reasonCode: 'metadata_malformed', nextActionCode: 'repair_activation_record' }
+            : { source: 'activation', reasonCode: 'metadata_malformed', nextActionCode: 'repair_activation_record', sourceRef: activationRef }));
+          continue;
+        }
+        const strongActivationRef: SourceRef = { type: 'activation', id: activationId };
+        const fact: ActivationFact = {
+          schemaVersion: '1', family: 'activation', sourceRef: strongActivationRef, principleId, artifactId,
+          activationId, channel, outcome: deactivatedAt === undefined ? 'active' : 'deactivated',
+          activatedAt, lineageConfidence: 'strong', recordedAt: deactivatedAt ?? activatedAt,
+        };
+        if (deactivatedAt !== undefined) fact.deactivatedAt = deactivatedAt;
+        activations.push(fact);
+        sourceRefs.push(strongActivationRef);
+        timelineEvents.push({ code: 'activated', occurredAt: activatedAt, recordedAt: activatedAt, summaryCode: 'governance.timeline.activated', sourceRef: strongActivationRef, lineageConfidence: 'strong' });
+        if (deactivatedAt !== undefined) {
+          timelineEvents.push({ code: 'deactivated', occurredAt: deactivatedAt, recordedAt: deactivatedAt, summaryCode: 'governance.timeline.deactivated', sourceRef: strongActivationRef, lineageConfidence: 'strong' });
+        }
+      }
+      timelineEvents.sort((left, right) => {
+        const timeOrder = (left.occurredAt ?? left.recordedAt).localeCompare(right.occurredAt ?? right.recordedAt);
+        if (timeOrder !== 0) return timeOrder;
+        const typeOrder = left.sourceRef.type.localeCompare(right.sourceRef.type);
+        if (typeOrder !== 0) return typeOrder;
+        const idOrder = left.sourceRef.id.localeCompare(right.sourceRef.id);
+        return idOrder !== 0 ? idOrder : left.code.localeCompare(right.code);
+      });
+
       return GovernanceProjectionCollector.finish({
         principleId, asOf, principle, collectionIssues, artifactIds,
         taskIds: [...connected].sort(), tasks, revisionIdentities, sourceRefs,
+        approvals, activations, timelineEvents,
       });
     } catch (error: unknown) {
       if (error instanceof GovernanceProjectionCollectionError) throw error;
@@ -323,6 +408,7 @@ export class GovernanceProjectionCollector {
   private static finish(input: {
     principleId: string; asOf: string; principle: GovernanceFacts['principle']; collectionIssues: DataQualityIssue[];
     artifactIds?: string[]; taskIds?: string[]; tasks?: TaskFact[]; revisionIdentities?: RevisionIdentity[]; sourceRefs?: SourceRef[];
+    approvals?: ApprovalFact[]; activations?: ActivationFact[]; timelineEvents?: TimelineEvent[];
   }): GovernanceFacts {
     const hasArtifacts = (input.artifactIds?.length ?? 0) > 0;
     const facts: GovernanceFacts = {
@@ -335,8 +421,9 @@ export class GovernanceProjectionCollector {
           : 'unknown',
         sourceRefs: input.sourceRefs ?? [{ type: 'principle', id: input.principleId }],
       },
-      principle: input.principle, tasks: input.tasks ?? [], runnerVerdicts: [], derivedRelations: [], approvals: [], activations: [],
-      timelineEvents: [], collectionIssues: input.collectionIssues,
+      principle: input.principle, tasks: input.tasks ?? [], runnerVerdicts: [], derivedRelations: [],
+      approvals: input.approvals ?? [], activations: input.activations ?? [],
+      timelineEvents: input.timelineEvents ?? [], collectionIssues: input.collectionIssues,
     };
     if (!Value.Check(GovernanceFactsSchema, facts)) {
       throw new GovernanceProjectionCollectionError('governance_projection_error', 'inspect_projection_contract');

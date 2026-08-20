@@ -186,4 +186,38 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
       source: 'lineage', reasonCode: 'lineage_cycle', nextActionCode: 'repair_task_dependencies',
     }));
   });
+
+  it('collects approvals and activation history only through strong artifact lineage', async () => {
+    const connection = createStateDb();
+    const db = connection.getDb();
+    const metadata = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] });
+    db.prepare(`INSERT INTO tasks
+      (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES ('task-root', 'artificer', 'succeeded', ?, ?, 1, 3, ?)`)
+      .run('2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', metadata);
+    db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-root', 'principle', 'task-root', 'principle-1', '[]', 'validated', '{}', ?, ?)`)
+      .run('2026-08-20T08:05:00.000Z', '2026-08-20T08:10:00.000Z');
+    db.prepare(`INSERT INTO approvals
+      (approval_id, artifact_id, channel, risk_level, status, requested_at, decided_at)
+      VALUES ('approval-1', 'artifact-root', 'prompt', 'medium', 'approved', ?, ?)`)
+      .run('2026-08-20T08:20:00.000Z', '2026-08-20T08:30:00.000Z');
+    db.prepare(`INSERT INTO activations
+      (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('activation-1', 'key-1', 'artifact-root', 'prompt', 'activate', 'target', ?, ?)`)
+      .run('2026-08-20T08:40:00.000Z', '2026-08-20T09:00:00.000Z');
+    connection.close();
+
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    expect(facts.approvals).toContainEqual(expect.objectContaining({
+      approvalId: 'approval-1', artifactId: 'artifact-root', channel: 'prompt', outcome: 'approved', lineageConfidence: 'strong',
+    }));
+    expect(facts.activations).toContainEqual(expect.objectContaining({
+      activationId: 'activation-1', artifactId: 'artifact-root', channel: 'prompt', outcome: 'deactivated',
+      activatedAt: '2026-08-20T08:40:00.000Z', deactivatedAt: '2026-08-20T09:00:00.000Z',
+    }));
+    expect(facts.timelineEvents.map(event => event.code)).toEqual(['approved', 'activated', 'deactivated']);
+  });
 });
