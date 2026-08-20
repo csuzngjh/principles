@@ -18,7 +18,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import * as yaml from 'js-yaml';
 import Database from 'better-sqlite3';
+import { validatePdConfig } from '@principles/core/runtime-v2';
 import { buildRuntimeInitOutput } from '../../src/commands/runtime-init.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -190,6 +192,26 @@ describe('pd runtime init — empty workspace integration', () => {
         db.close();
       }
     });
+
+    // ── P0: config.yaml scaffolding (Issue 1b) ────────────────────────────────
+
+    it('creates .pd/config.yaml with version 1 and workspace.default set', () => {
+      buildRuntimeInitOutput(tmpDir, true);
+      const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+      expect(fs.existsSync(configPath)).toBe(true);
+      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+      const obj = parsed as { version?: unknown; workspace?: { default?: unknown } };
+      expect(obj.version).toBe(1);
+      expect(obj.workspace?.default).toBe(path.resolve(tmpDir));
+    });
+
+    it('generated config.yaml passes validatePdConfig (round-trip)', () => {
+      buildRuntimeInitOutput(tmpDir, true);
+      const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+      const parsed: unknown = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+      const result = validatePdConfig(parsed);
+      expect(result.ok).toBe(true);
+    });
   });
 
   // ── EMPTY-02: idempotency ──────────────────────────────────────────────────
@@ -215,6 +237,12 @@ describe('pd runtime init — empty workspace integration', () => {
       // Table set should be unchanged
       const tables2 = getTableNames(trajDbPath);
       expect(tables2).toEqual(tables1);
+
+      // config.yaml is preserved: second run reports skipped, content unchanged
+      expect(output2.config?.status).toBe('skipped');
+      const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+      const config1 = fs.readFileSync(configPath, 'utf8');
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(config1);
     });
 
     it('dry-run after confirm does not modify existing DBs', () => {
