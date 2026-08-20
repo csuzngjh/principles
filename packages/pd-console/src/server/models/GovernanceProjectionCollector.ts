@@ -11,9 +11,11 @@ import type {
   ActivationFact,
   ApprovalFact,
   DataQualityIssue,
+  DerivedRelationFact,
   GovernanceFacts,
   GovernanceChannel,
   RevisionIdentity,
+  RunnerVerdictFact,
   SourceRef,
   TaskFact,
   TimelineEvent,
@@ -75,6 +77,7 @@ interface ValidTaskRow {
   dependencyTaskIds: string[];
   revisionIdentity?: RevisionIdentity;
   completionIntent?: TaskFact['completionIntent'];
+  runnerDecision?: RunnerVerdictFact['outcome'];
 }
 
 export class GovernanceProjectionCollector {
@@ -146,6 +149,8 @@ export class GovernanceProjectionCollector {
         }
       }
       const tasks: TaskFact[] = [];
+      const runnerVerdicts: RunnerVerdictFact[] = [];
+      const derivedRelations: DerivedRelationFact[] = [];
       const revisionIdentities: RevisionIdentity[] = [];
       for (const taskId of connected) {
         const task = validTasks.get(taskId);
@@ -168,8 +173,33 @@ export class GovernanceProjectionCollector {
         if (task.completionIntent !== undefined) fact.completionIntent = task.completionIntent;
         tasks.push(fact);
         sourceRefs.push(fact.sourceRef);
+        if ((task.taskKind === 'evaluator' || task.taskKind === 'rollout_reviewer') && task.runnerDecision !== undefined) {
+          runnerVerdicts.push({
+            schemaVersion: '1', family: 'runner_verdict', sourceRef: fact.sourceRef, principleId,
+            taskId: task.taskId, lineageConfidence: 'strong', recordedAt: task.updatedAt,
+            runnerKind: task.taskKind, outcome: task.runnerDecision,
+          });
+        } else if ((task.taskKind === 'evaluator' || task.taskKind === 'rollout_reviewer') && task.status === 'succeeded') {
+          derivedRelations.push({
+            schemaVersion: '1', family: 'derived_relation', sourceRef: fact.sourceRef, principleId,
+            taskId: task.taskId, lineageConfidence: 'strong', recordedAt: task.updatedAt,
+            relation: 'verdict_missing', evidenceRefs: [fact.sourceRef],
+          });
+        }
       }
       tasks.sort((left, right) => (left.taskId ?? '').localeCompare(right.taskId ?? ''));
+      for (const successor of [...validTasks.values()].sort((left, right) => left.taskId.localeCompare(right.taskId))) {
+        if (!connected.has(successor.taskId)) continue;
+        for (const dependencyTaskId of [...successor.dependencyTaskIds].sort()) {
+          if (!connected.has(dependencyTaskId)) continue;
+          derivedRelations.push({
+            schemaVersion: '1', family: 'derived_relation', sourceRef: { type: 'task', id: dependencyTaskId }, principleId,
+            taskId: dependencyTaskId, lineageConfidence: 'strong', recordedAt: successor.updatedAt,
+            relation: 'successor_present',
+            evidenceRefs: [{ type: 'task', id: dependencyTaskId }, { type: 'task', id: successor.taskId }],
+          });
+        }
+      }
 
       const strongArtifactIds = new Set(artifactIds);
       const approvals: ApprovalFact[] = [];
@@ -251,7 +281,7 @@ export class GovernanceProjectionCollector {
       return GovernanceProjectionCollector.finish({
         principleId, asOf, principle, collectionIssues, artifactIds,
         taskIds: [...connected].sort(), tasks, revisionIdentities, sourceRefs,
-        approvals, activations, timelineEvents,
+        runnerVerdicts, derivedRelations, approvals, activations, timelineEvents,
       });
     } catch (error: unknown) {
       if (error instanceof GovernanceProjectionCollectionError) throw error;
@@ -350,6 +380,7 @@ export class GovernanceProjectionCollector {
     if (metadata.completionIntent !== undefined) {
       result.completionIntent = { status: metadata.completionIntent.status, revisionEpoch: metadata.completionIntent.revisionEpoch, effect: metadata.completionIntent.effect ?? 'governance_transition' };
     }
+    if (metadata.runnerDecision !== undefined) result.runnerDecision = metadata.runnerDecision;
     return result;
   }
 
@@ -409,6 +440,7 @@ export class GovernanceProjectionCollector {
     principleId: string; asOf: string; principle: GovernanceFacts['principle']; collectionIssues: DataQualityIssue[];
     artifactIds?: string[]; taskIds?: string[]; tasks?: TaskFact[]; revisionIdentities?: RevisionIdentity[]; sourceRefs?: SourceRef[];
     approvals?: ApprovalFact[]; activations?: ActivationFact[]; timelineEvents?: TimelineEvent[];
+    runnerVerdicts?: RunnerVerdictFact[]; derivedRelations?: DerivedRelationFact[];
   }): GovernanceFacts {
     const hasArtifacts = (input.artifactIds?.length ?? 0) > 0;
     const facts: GovernanceFacts = {
@@ -421,7 +453,7 @@ export class GovernanceProjectionCollector {
           : 'unknown',
         sourceRefs: input.sourceRefs ?? [{ type: 'principle', id: input.principleId }],
       },
-      principle: input.principle, tasks: input.tasks ?? [], runnerVerdicts: [], derivedRelations: [],
+      principle: input.principle, tasks: input.tasks ?? [], runnerVerdicts: input.runnerVerdicts ?? [], derivedRelations: input.derivedRelations ?? [],
       approvals: input.approvals ?? [], activations: input.activations ?? [],
       timelineEvents: input.timelineEvents ?? [], collectionIssues: input.collectionIssues,
     };

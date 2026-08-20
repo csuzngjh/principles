@@ -220,4 +220,34 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
     }));
     expect(facts.timelineEvents.map(event => event.code)).toEqual(['approved', 'activated', 'deactivated']);
   });
+
+  it('projects durable runner verdicts and successor relationships from validated task metadata', async () => {
+    const connection = createStateDb();
+    const db = connection.getDb();
+    const rootMetadata = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] });
+    const evaluatorMetadata = createPITaskDiagnosticJson({
+      dependencyTaskIds: ['task-root'], channel: 'prompt', timeoutMs: 30_000,
+      inputArtifactRefs: [], outputArtifactRefs: [], runnerDecision: 'approved',
+    });
+    const insertTask = db.prepare(`INSERT INTO tasks
+      (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES (?, ?, 'succeeded', ?, ?, 1, 3, ?)`);
+    insertTask.run('task-root', 'artificer', '2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', rootMetadata);
+    insertTask.run('task-evaluator', 'evaluator', '2026-08-20T08:11:00.000Z', '2026-08-20T08:20:00.000Z', evaluatorMetadata);
+    db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-root', 'principle', 'task-root', 'principle-1', '[]', 'validated', '{}', ?, ?)`)
+      .run('2026-08-20T08:05:00.000Z', '2026-08-20T08:10:00.000Z');
+    connection.close();
+
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    expect(facts.runnerVerdicts).toContainEqual(expect.objectContaining({
+      runnerKind: 'evaluator', outcome: 'approved', taskId: 'task-evaluator', lineageConfidence: 'strong',
+    }));
+    expect(facts.derivedRelations).toContainEqual(expect.objectContaining({
+      relation: 'successor_present', taskId: 'task-root',
+      evidenceRefs: [{ type: 'task', id: 'task-root' }, { type: 'task', id: 'task-evaluator' }],
+    }));
+  });
 });
