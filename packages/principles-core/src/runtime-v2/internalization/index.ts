@@ -19,6 +19,12 @@ export type {
 export type { RuleHostHelpers } from './rule-host-helpers.js';
 export { createRuleHostHelpers } from './rule-host-helpers.js';
 
+// Legacy contract dependency scanner — detects persisted RuleCode that
+// still references retired RuleHost contract symbols (recentThinking,
+// planStatus, hasPlanFile, getPlanStatus(), hasPlanFile()).
+export type { LegacyRuleContractSymbol, LegacyRuleContractRuleSource, LegacyRuleContractFinding } from './legacy-rule-contract-scanner.js';
+export { scanLegacyRuleContractDependencies, formatLegacyRuleContractRemediation } from './legacy-rule-contract-scanner.js';
+
 // RuleHost input builder (PRI-439 Phase 3 — pure action snapshot)
 export type { ExtractFilePathOptions, BuildRuleHostActionOptions } from './rule-host-input-builder.js';
 export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction } from './rule-host-input-builder.js';

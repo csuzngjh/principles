@@ -1,14 +1,9 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import type { PluginHookLlmOutputEvent, PluginHookAgentContext, TokenUsage } from '../openclaw-sdk.js';
-import { trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
+import { trackLlmOutput, resetFriction } from '../core/session-tracker.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
-import { ControlUiDatabase } from '../core/control-ui-db.js';
 import { DetectionService } from '../core/detection-service.js';
-import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thinking-models.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
-import { atomicWriteFileSync } from '../utils/io.js';
 import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
@@ -212,9 +207,8 @@ export function handleLlmOutput(
     const signal = extractEmpathySignal(text);
     const enhancedFields = extractAssistantEnhancedFields(event.lastAssistant);
     const createdAt = new Date().toISOString();
-    let assistantTurnId: number | null = null;
     try {
-        assistantTurnId = wctx.trajectory?.recordAssistantTurn?.({
+        wctx.trajectory?.recordAssistantTurn?.({
             sessionId: ctx.sessionId,
             runId: event.runId ?? 'unknown',
             provider: event.provider ?? 'unknown',
@@ -405,118 +399,4 @@ export function handleLlmOutput(
         }
     }
 
-    // ═══ Thinking OS: Mental Model Usage Tracking ═══
-     
-     
-    trackThinkingModelUsage({
-        text,
-        wctx,
-        sessionId: ctx.sessionId ?? 'unknown',
-        runId: event.runId ?? 'unknown',
-        assistantTurnId,
-        createdAt,
-        logger: ctx.logger,
-    });
-}
-
-function trackThinkingModelUsage(args: {
-    text: string;
-    wctx: WorkspaceContext;
-    sessionId?: string;
-    runId: string;
-    assistantTurnId: number | null;
-    createdAt: string;
-    logger?: PluginHookAgentContext['logger'];
-}): void {
-    const { text, wctx, sessionId, runId, assistantTurnId, createdAt, logger } = args;
-    const logPath = wctx.resolve('THINKING_OS_USAGE');
-    const logDir = path.dirname(logPath);
-    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-
-    let usageLog: Record<string, number> = {};
-
-    if (fs.existsSync(logPath)) {
-        try {
-            usageLog = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        } catch (e) {
-            logger?.error?.(`[PD:LLM] Failed to parse thinking OS usage log: ${String(e)}`);
-        }
-    }
-
-    const matches = detectThinkingModelMatches(text, wctx.workspaceDir);
-    for (const match of matches) {
-        usageLog[match.modelId] = (usageLog[match.modelId] || 0) + 1;
-    }
-
-    usageLog._total_turns = (usageLog._total_turns || 0) + 1;
-
-    try {
-        atomicWriteFileSync(logPath, JSON.stringify(usageLog, null, 2));
-    } catch (e) {
-        logger?.error?.(`[PD:LLM] Failed to write thinking OS usage log: ${String(e)}`);
-    }
-
-    if (matches.length === 0) {
-        return;
-    }
-
-    if (sessionId) {
-        recordThinkingCheckpoint(sessionId, wctx.workspaceDir);
-    }
-
-    if (!sessionId || !assistantTurnId) {
-        return;
-    }
-
-    const uiDb = new ControlUiDatabase({ workspaceDir: wctx.workspaceDir });
-    try {
-        const recentContext = uiDb.getRecentThinkingContext(sessionId, createdAt);
-        const toolContext = recentContext.toolCalls.map((call) => ({
-            toolName: call.toolName,
-            outcome: call.outcome,
-            errorType: call.errorType,
-        }));
-        const painContext = recentContext.painEvents.map((event) => ({
-            source: event.source,
-            score: event.score,
-        }));
-        const principleContext = recentContext.principleEvents.map((event) => ({
-            principleId: event.principleId,
-            eventType: event.eventType,
-        }));
-        const triggerExcerpt = text.length > 280 ? `${text.slice(0, 277)}...` : text;
-
-        for (const match of matches) {
-            const scenarios = deriveThinkingScenarios(match.modelId, {
-                recentToolCalls: toolContext,
-                recentPainEvents: painContext,
-                recentGateBlocks: recentContext.gateBlocks.map((block) => ({
-                    toolName: block.toolName,
-                    reason: block.reason,
-                })),
-                recentUserCorrections: recentContext.userCorrections.map((correction) => ({
-                    correctionCue: correction.correctionCue,
-                })),
-                recentPrincipleEvents: principleContext,
-            });
-
-            uiDb.recordThinkingModelEvent({
-                sessionId,
-                runId,
-                assistantTurnId,
-                modelId: match.modelId,
-                matchedPattern: match.matchedPattern,
-                scenarioJson: scenarios,
-                toolContextJson: toolContext,
-                painContextJson: painContext,
-                principleContextJson: principleContext,
-                triggerExcerpt,
-                createdAt,
-            });
-        }
-    } catch (error) {
-        logger?.warn?.(`[PD:LLM] Failed to persist thinking model events: ${String(error)}`);
-    } finally {
-        uiDb.dispose();
-    }
 }

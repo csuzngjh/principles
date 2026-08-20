@@ -28,7 +28,6 @@ import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/r
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn(() => ({ currentGfi: 0 })),
   trackBlock: vi.fn(),
-  hasRecentThinking: vi.fn(() => false),
 }));
 
 vi.mock('../../src/core/evolution-engine.js', () => ({

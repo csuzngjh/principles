@@ -83,8 +83,9 @@ function hasNameField(row: object): row is { name: unknown } {
  * (dependency direction), so DDL is duplicated intentionally. When adding/migrating a
  * table in applyTrajectorySchema(), update this function too.
  *
- * Views are intentionally NOT created here — they belong to ControlUiDatabase's
- * responsibility and are not needed by the pain record path.
+ * Views are intentionally NOT created here — the Thinking Activity analytics
+ * views were retired (2026-08-19) along with their writer, and no reader
+ * needs them on the pain record path.
  */
 function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warnings: string[] } {
   const warnings: string[] = [];
@@ -169,7 +170,6 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       tool_name TEXT NOT NULL,
       file_path TEXT,
       reason TEXT NOT NULL,
-      plan_status TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS trust_changes (

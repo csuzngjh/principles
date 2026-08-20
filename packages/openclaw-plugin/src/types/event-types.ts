@@ -8,7 +8,6 @@ export type {
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,
-  PlanApprovalEventData,
   EvolutionTaskEventData,
   EmpathyRollbackEventData,
   HeartbeatDiagnosisEventData,

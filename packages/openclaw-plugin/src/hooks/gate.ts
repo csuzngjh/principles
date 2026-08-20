@@ -15,13 +15,14 @@ import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
-import { getSession, hasRecentThinking } from '../core/session-tracker.js';
+import { getSession } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordPrincipleApplication } from '../core/principle-application-ledger.js';
 import { buildProductionRuleContext } from '../core/rule-context-assembler.js';
+import { isCompatibilityGuardBlock } from '../core/rule-host.js';
 import type { HostEventResult } from '@principles/core/host';
 
 export function handleBeforeToolCall(
@@ -70,17 +71,10 @@ export function handleBeforeToolCall(
       action,
       workspace: {
         isRiskPath: false, // Rule Host determines risk dynamically
-        // DEPRECATED (PRI-286): planStatus/hasPlanFile are legacy compatibility fields.
-        // Live PD no longer reads or manages PLAN.md state. These fields must not be
-        // used for new MVP behavior. Future "plan-first" enforcement must come from
-        // owner-approved RuleHost/code_tool_hook activation, not built-in state.
-        planStatus: 'NONE' as const,
-        hasPlanFile: false,
       },
       session: {
         sessionId: ctx.sessionId,
         currentGfi: _getCurrentGfi(ctx.sessionId),
-        recentThinking: _hasRecentThinking(ctx.sessionId),
       },
       evolution: {
         epTier: _getEpTier(wctx.workspaceDir),
@@ -130,6 +124,39 @@ export function handleBeforeToolCall(
       });
     } catch (evErr) {
       logger?.warn?.(`[PD_GATE] Failed to record rulehost_evaluated: ${String(evErr)}`);
+    }
+
+    // P1 (2026-08-20): Compatibility Guard isolation.
+    //
+    // A fail-closed block caused by an incompatible persisted RuleCode (the
+    // RuleCode was NEVER executed) is a RUNTIME compatibility guard — not a
+    // Principle enforcement and not Agent behavioral friction. It must NOT
+    // enter the behavioral evidence chain:
+    //   - no rule_enforced          (the Principle never ran)
+    //   - no principle application receipt (kind=rule_blocked)
+    //   - no GFI / Pain / diagnostic path (recordGateBlockAndReturn)
+    // The safety block itself is preserved, and the operator audit trail is
+    // preserved via rulehost_evaluated (already recorded above) plus the
+    // rulehost_blocked event recorded here.
+    if (isCompatibilityGuardBlock(hostResult)) {
+      try {
+        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+        eventLog.recordRuleHostBlocked({
+          toolName: event.toolName,
+          filePath: relPath,
+          reason: hostResult.reason,
+          ruleId: hostResult.ruleId,
+        });
+      } catch (evErr) {
+        logger?.warn?.(`[PD_GATE] Failed to record compatibility guard block: ${String(evErr)}`);
+      }
+
+      const nextAction =
+        typeof hostResult.diagnostics?.nextAction === 'string'
+          ? hostResult.diagnostics.nextAction
+          : 'Migrate or deactivate this legacy RuleCode and approve a compatible replacement.';
+
+      return buildCompatibilityGuardBlock(hostResult.ruleId, hostResult.reason, nextAction);
     }
 
     if (hostResult?.decision === 'block') {
@@ -422,15 +449,6 @@ function _getCurrentGfi(sessionId?: string): number {
   }
 }
 
-function _hasRecentThinking(sessionId?: string): boolean {
-  if (!sessionId) return false;
-  try {
-    return hasRecentThinking(sessionId);
-  } catch {
-    return false;
-  }
-}
-
 function _getEpTier(workspaceDir: string): number {
   try {
     const engine = getEvolutionEngine(workspaceDir);
@@ -454,6 +472,32 @@ function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' |
   }
 }
 
+/**
+ * P1 (2026-08-20): Lightweight operator-facing result for a Compatibility
+ * Guard block.
+ *
+ * This is intentionally NOT the Security Gate copy used by normal RuleHost
+ * blocks: confirming the current tool action cannot resolve a runtime
+ * compatibility problem — the legacy RuleCode stays incompatible and would be
+ * blocked again, producing an infinite confirm loop. The remediation is
+ * migration/deactivation + re-approval, which the nextAction carries.
+ */
+function buildCompatibilityGuardBlock(
+  ruleId: string | undefined,
+  reason: string,
+  nextAction: string,
+): PluginHookBeforeToolCallResult {
+  return {
+    block: true,
+    blockReason:
+      `[Principles Disciple] Runtime compatibility guard blocked this action.\n` +
+      `Active rule: ${ruleId ?? 'unknown'}\n` +
+      `Reason: ${reason}\n\n` +
+      `This block cannot be bypassed by confirming the current action.\n` +
+      `${nextAction}`,
+  };
+}
+
 export function buildOpenClawRuleInputEnrichment(
   event: PluginHookBeforeToolCallEvent,
   workspaceDir: string,
@@ -461,7 +505,6 @@ export function buildOpenClawRuleInputEnrichment(
 ) {
   return {
     currentGfi: _getCurrentGfi(sessionId),
-    recentThinking: _hasRecentThinking(sessionId),
     epTier: _getEpTier(workspaceDir),
     bashRisk: _getBashRisk(event),
   };

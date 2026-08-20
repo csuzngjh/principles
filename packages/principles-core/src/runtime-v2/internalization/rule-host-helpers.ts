@@ -17,14 +17,16 @@ export interface RuleHostHelpers {
   getToolName(): string;
   getEstimatedLineChanges(): number;
   getBashRisk(): 'safe' | 'normal' | 'dangerous' | 'unknown';
-  hasPlanFile(): boolean;
-  getPlanStatus(): 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN';
   getEpTier(): number;
 }
 
 /**
  * Create a frozen helper object from the pre-computed input snapshot.
  * Implementations receive this via the vm context — they cannot modify it.
+ *
+ * PRI-286 retirement cleanup (2026-08-19): the plan-state helper entries were
+ * removed — the built-in PLAN.md gate is retired and no production rule reads
+ * plan state. Do not reintroduce plan-state helpers without owner approval.
  */
 export function createRuleHostHelpers(input: RuleHostInput): RuleHostHelpers {
   return Object.freeze({
@@ -32,8 +34,6 @@ export function createRuleHostHelpers(input: RuleHostInput): RuleHostHelpers {
     getToolName: () => input.action.toolName,
     getEstimatedLineChanges: () => input.derived.estimatedLineChanges,
     getBashRisk: () => input.derived.bashRisk,
-    hasPlanFile: () => input.workspace.hasPlanFile,
-    getPlanStatus: () => input.workspace.planStatus,
     getEpTier: () => input.evolution.epTier,
   });
 }

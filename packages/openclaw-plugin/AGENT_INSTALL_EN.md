@@ -17,7 +17,6 @@
 | `AGENTS.md` | Agent identity and memory | 🔴 Delete = Lose identity cognition |
 | `SOUL.md` | Agent core personality | 🔴 Delete = Lose personality |
 | `USER.md` | User preferences and context | 🟡 Delete = Lose user preferences |
-| `PLAN.md` | Current work plan | 🟡 Delete = Lose work context |
 | `MEMORY.md` | Long-term memory | 🔴 Delete = Lose long-term memory |
 
 ### State Files (Do Not Delete)

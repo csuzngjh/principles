@@ -28,6 +28,7 @@ import { createRuleHostHelpers } from '@principles/core/runtime-v2';
 import { mergeDecisions } from '@principles/core/runtime-v2';
 import { validateRuleHostResult } from '@principles/core/runtime-v2';
 import { SqliteConnection } from '@principles/core/runtime-v2';
+import { scanLegacyRuleContractDependencies } from '@principles/core/runtime-v2';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import { EventLogService } from './event-log.js';
 import type {
@@ -113,6 +114,34 @@ function isRuleHostMeta(value: unknown): value is RuleHostMeta {
     typeof v['version'] === 'string' &&
     typeof v['ruleId'] === 'string' &&
     typeof v['coversCondition'] === 'string'
+  );
+}
+
+/**
+ * P1 (2026-08-20): Compatibility Guard type guard.
+ *
+ * Distinguishes a runtime compatibility fail-closed block (an active
+ * owner-approved RuleCode depends on a retired contract symbol and was NEVER
+ * executed) from a real Principle-enforcement block (RuleCode actually ran
+ * and returned block).
+ *
+ * Machine semantics: the block is a RUNTIME safety guard, not behavioral
+ * evidence. The OpenClaw gate MUST use this guard (branching on
+ * `diagnostics.kind` / `diagnostics.code`) and must NOT use
+ * reason.startsWith/includes text matching.
+ */
+export function isCompatibilityGuardBlock(
+  result: RuleHostResult | undefined,
+): result is RuleHostResult & {
+  diagnostics: {
+    kind: 'compatibility_guard';
+    code: 'legacy_rule_contract_dependency';
+  };
+} {
+  return (
+    result?.decision === 'block' &&
+    result.diagnostics?.kind === 'compatibility_guard' &&
+    result.diagnostics?.code === 'legacy_rule_contract_dependency'
   );
 }
 
@@ -219,6 +248,58 @@ export class RuleHost {
           );
         },
       });
+      // P0-1 (2026-08-20): an owner-approved LIVE rule whose RuleCode depends
+      // on a retired contract symbol was skipped at load time (never
+      // executed). Skipping an enforcement rule is NOT the same as it not
+      // existing — if the only live rule is skipped, the merged decision is
+      // `undefined` and the caller falls back to 'allow', a governance
+      // fail-open. The current tool action must instead fail closed. SHADOW
+      // rules are observation-only (never enforce), so a skipped shadow rule
+      // correctly remains diagnostic-only and does not force a block.
+      const incompatibleLive = skipped.find(
+        (s) => s.mode === 'live' && s.reason.startsWith('legacy_rule_contract_dependency'),
+      );
+      if (incompatibleLive) {
+        const nextAction = 'Migrate or deactivate this legacy RuleCode and approve a compatible replacement.';
+        // P1 (2026-08-20): machine-readable Compatibility Guard semantics.
+        // This fail-closed block is a RUNTIME safety guard caused by an
+        // incompatible persisted RuleCode — it is NOT evidence that the
+        // owner-approved RuleCode itself executed. `kind` + `code` are the
+        // machine discriminator fields; downstream (gate.ts) MUST branch on
+        // them, never on reason.startsWith/includes text.
+        const diagnostics: Record<string, unknown> = {
+          kind: 'compatibility_guard',
+          code: 'legacy_rule_contract_dependency',
+          activationId: incompatibleLive.activationId,
+          nextAction,
+        };
+        // Case D (legacy LIVE + healthy LIVE block): preserve the decision
+        // already produced by healthy rules so the diagnostic surface is not
+        // lost when the fail-closed override wins.
+        if (liveDecision && liveDecision.matched) {
+          diagnostics.underlying = {
+            decision: liveDecision.decision,
+            reason: liveDecision.reason,
+            ruleId: liveDecision.ruleId,
+          };
+        }
+        return {
+          liveDecision: {
+            decision: 'block',
+            matched: true,
+            reason:
+              `legacy_rule_contract_dependency: active owner-approved rule ` +
+              `${incompatibleLive.ruleId} cannot run safely on this runtime`,
+            ruleId: incompatibleLive.ruleId,
+            diagnostics,
+          },
+          // P1 (ISSUE-023): the fail-closed block is contributed by the
+          // incompatible live activation itself.
+          liveDecisionActivationId: incompatibleLive.activationId,
+          shadowDecisions,
+          skippedActivations: skipped,
+        };
+      }
       // P1 (ISSUE-023): 经 ruleId 反查 live 决策的 activationId (可审计溯源)
       let liveDecisionActivationId: string | undefined;
       if (liveDecision?.ruleId) {
@@ -550,6 +631,39 @@ export class RuleHost {
             });
             this._recordSkipped(activationId, artifactId, typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId), activationMode, reason, nextAction);
             continue;
+          }
+
+          // Retired-contract backstop (2026-08-19): persisted RuleCode may
+          // still reference RuleHost contract symbols this runtime removed
+          // (session.recentThinking, workspace.planStatus/hasPlanFile,
+          // getPlanStatus()/hasPlanFile() helpers). Executing such a rule
+          // would silently change owner-approved semantics (undefined reads);
+          // refuse to load it and surface exactly which symbol blocks it.
+          {
+            const legacyFindings = scanLegacyRuleContractDependencies([{
+              activationId,
+              artifactId,
+              ruleId: typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId),
+              principleId: sourcePrincipleId ?? undefined,
+              implementationCode,
+            }]);
+            if (legacyFindings.length > 0) {
+              const symbols = legacyFindings.map(f => f.symbol).join(', ');
+              const reason = `legacy_rule_contract_dependency: ${symbols}`;
+              const nextAction = 'Migrate the RuleCode off the retired contract symbols, or deactivate this activation (pd activation deactivate) and re-approve a migrated rule';
+              this.logger.warn?.(
+                `[RuleHost] Activation ${activationId}: ${reason}, skipping (never executed). nextAction=${nextAction}`
+              );
+              skipped.push({
+                activationId,
+                ruleId: typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId),
+                mode: activationMode,
+                reason,
+                nextAction,
+              });
+              this._recordSkipped(activationId, artifactId, typeof contentObj['ruleId'] === 'string' ? contentObj['ruleId'] : (sourceRuleId ?? artifactId), activationMode, reason, nextAction);
+              continue;
+            }
           }
 
           const ruleId = typeof contentObj['ruleId'] === 'string'

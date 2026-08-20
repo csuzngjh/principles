@@ -29,10 +29,6 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '研究工具升级方案',
     en: 'Research tool upgrade solutions'
   },
-  'pd-thinking': {
-    zh: '管理思维模型 [status|propose|audit]（默认关闭，/pd-context thinking on 开启）',
-    en: 'Manage Thinking OS [status|propose|audit] (off by default, enable via /pd-context thinking on)'
-  },
   'pd-help': {
     zh: '显示所有命令和使用指南',
     en: 'Show all commands and usage guide'

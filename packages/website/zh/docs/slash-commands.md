@@ -26,7 +26,6 @@ PD 通过 OpenClaw 斜杠命令与你交互。本文档列出所有可用的命�
 | [`/pd-evolution-status`](#pd-evolution-status) | — | 监控 | 查看原则演化闭环状态 |
 | [`/pd-context`](#pd-context) | — | 配置 | 控制上下文注入(思维模型/项目焦点) |
 | [`/pd-focus`](#pd-focus) | — | 配置 | 管理 CURRENT_FOCUS.md(压缩/回滚) |
-| [`/pd-thinking`](#pd-thinking) | `/pdt` | 配置 | 管理思维模型(查看/提议/审计) |
 | [`/pd-rollback`](#pd-rollback) | — | 回滚 | 回滚一次误判的情绪事件惩罚 |
 | [`/pd-principle-rollback`](#pd-principle-rollback) | — | 回滚 | 回滚一条原则并加黑名单 |
 | [`/pd-export`](#pd-export) | — | 数据 | 导出分析数据或纠错样本 |
@@ -356,52 +355,6 @@ GFI(Global Friction Index)是当前会话的"疲劳指数"。Agent 每次犯错�
 ::: tip 自动压缩
 PD 也会在后台自动压缩 `CURRENT_FOCUS.md`。`/pd-focus compress` 是手动触发,适合你想立即清理时使用。
 :::
-
----
-
-### `/pd-thinking`
-
-**简写**:`/pdt`
-
-管理思维模型(Thinking OS)。思维模型是 PD 的"认知层"——它告诉 Agent 在不同场景下应该用哪种思维方式。
-
-::: warning 默认关闭
-思维模型默认是关闭的。要启用,先运行 `/pd-context thinking on`,然后再用 `/pd-thinking` 查看。
-:::
-
-**用法**
-
-```
-/pd-thinking [子命令]
-```
-
-**子命令**
-
-| 子命令 | 说明 |
-|--------|------|
-| `status` | 查看各思维模型的使用统计(命中率、休眠模型) |
-| `propose <描述>` | 提议一个新思维模型(需含"信号检测"部分) |
-| `audit` | 审计模型健康度(过度触发/休眠/待审候选) |
-| (无) | 显示帮助 |
-
-**示例**
-
-```
-/pd-thinking status
-/pd-thinking propose 一个用于代码审查的思维模型,信号检测:正则 /review|审查/
-/pd-thinking audit
-```
-
-**`propose` 的要求**
-
-提议必须包含"signal(信号)"或"信号"关键词,描述如何用正则检测该模型的使用。提议写入 `THINKING_OS_CANDIDATES.md`,需要在 3 种以上不同任务中验证并经人工审批后才能晋升。
-
-**`audit` 会告诉你什么**
-
-- ✅ 健康模型(命中率合理)
-- 🔸 过度触发模型(命中率 >50%,可能模式太宽)
-- ⚠️ 休眠模型(0 命中,考虑归档)
-- 📝 待审候选数量
 
 ---
 

@@ -45,27 +45,12 @@ function createTestWorkspace(): TestWorkspace {
   // Create default PROFILE.json
   const defaultProfile = {
     risk_paths: ['/etc/', '/usr/', '~/.ssh/'],
-    gate: {
-      require_plan_for_risk_paths: true,
-    },
-    progressive_gate: {
-      enabled: true,
-      plan_approvals: {
-        enabled: false,
-        max_lines_override: -1,
-        allowed_patterns: [],
-        allowed_operations: [],
-      },
-    },
     edit_verification: {
       enabled: true,
       max_file_size_bytes: 10 * 1024 * 1024,
       fuzzy_match_enabled: true,
       fuzzy_match_threshold: 0.8,
       skip_large_file_action: 'warn',
-    },
-    thinking_checkpoint: {
-      enabled: false,
     },
   };
   fs.writeFileSync(profilePath, JSON.stringify(defaultProfile, null, 2));
@@ -213,8 +198,11 @@ describe('Gate: Resilience', () => {
       const profile = JSON.parse(profileContent);
 
       // INVARIANT: Valid profile must have expected structure
+      // (gate/progressive_gate/thinking_checkpoint retired — PRI-286 cleanup;
+      // risk_paths + edit_verification are the canonical profile fields.)
       expect(profile).toBeDefined();
-      expect(profile.gate).toBeDefined();
+      expect(profile.risk_paths).toBeDefined();
+      expect(profile.edit_verification).toBeDefined();
     });
 
     it('Gate MUST handle corrupted PROFILE.json gracefully', () => {

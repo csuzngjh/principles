@@ -119,7 +119,6 @@ All commands support **short aliases** for easier input:
 | `/pdi` | `/pd-init` | Initialize workspace (generate PRINCIPLES.md, THINKING_OS.md, etc.) |
 | `/pdb` | `/pd-bootstrap` | Scan environment tools and suggest upgrades |
 | `/pdr` | `/pd-research` | Research tool upgrade solutions |
-| `/pdt` | `/pd-thinking` | Manage Thinking OS [status\|propose\|audit] (off by default) |
 | `/pdh` | `/pd-help` | Show all commands and usage guide |
 
 | Command | Description |
@@ -162,8 +161,8 @@ The plugin accepts the following configuration options:
   approved principles.
 - **Context injection** — feeding approved principles into the agent's
   context (see `/pd-context`).
-- **Thinking OS** — optional thinking-model management, off by default
-  (`/pd-thinking`, enable via `/pd-context thinking on`).
+- **Thinking OS** — optional thinking-model guidance injected into context
+  (enable via `/pd-context thinking on`).
 
 For the full architecture, runtime adapters (OpenClaw, Codex), and product
 boundary, see the project documentation linked below.

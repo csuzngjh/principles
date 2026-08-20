@@ -108,8 +108,8 @@ function makeRuleHostInput(estimatedLineChanges = 0): RuleHostInput {
       normalizedPath: '/workspace/a.ts',
       paramsSummary: {},
     },
-    workspace: { isRiskPath: false, planStatus: 'READY', hasPlanFile: true },
-    session: { currentGfi: 0, recentThinking: true },
+    workspace: { isRiskPath: false },
+    session: { currentGfi: 0 },
     evolution: { epTier: 0 },
     derived: { estimatedLineChanges, bashRisk: 'safe' },
   };

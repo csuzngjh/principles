@@ -30,6 +30,24 @@ import {
   reservePdBackupDestination,
   resolvePdBackupsRoot,
 } from '../utils/pd-backups.js';
+import { ActivationCompatibilityReadModel } from '@principles/core/runtime-v2';
+
+/**
+ * Legacy rule contract preflight (2026-08-19): refuse to swap the runtime
+ * while an ACTIVE owner-approved rule still depends on a RuleHost contract
+ * symbol the new runtime removed (recentThinking, planStatus, hasPlanFile,
+ * ...). Executing such a rule against the new contract silently changes its
+ * semantics; refusing before any mutation leaves the installation untouched.
+ */
+function runLegacyRuleContractPreflight(workspaceDir: string): { ok: true } | { ok: false; reason: string; nextAction: string } {
+  const scan = new ActivationCompatibilityReadModel({ workspaceDir }).scan();
+  if (scan.ok) return { ok: true };
+  return {
+    ok: false,
+    reason: scan.reason ?? 'legacy_rule_contract_dependency',
+    nextAction: scan.nextAction ?? 'Migrate or deactivate the listed rules before updating.',
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -464,6 +482,19 @@ async function doApplyUpdate(
   let gatewayWasStopped = false;
   const codexInstalled = detectCodexInstall();
 
+  // Legacy-contract preflight BEFORE the gateway stop and any file mutation:
+  // an active rule depending on a removed RuleHost contract symbol must
+  // block the update while the installation is still untouched.
+  const compat = runLegacyRuleContractPreflight(workspaceDir);
+  if (!compat.ok) {
+    return {
+      success: false,
+      message: compat.reason,
+      reason: 'legacy_rule_contract_dependency',
+      nextAction: compat.nextAction,
+    };
+  }
+
   // Fix 5: stop the OpenClaw gateway before file mutations to release file
   // locks on native modules. Best-effort — if `openclaw` is not in PATH or
   // the gateway isn't running, we proceed (dist/*.js files are not locked).
@@ -695,6 +726,20 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
   requiresRestart: boolean;
 }> {
   const extDir = resolvePluginDir(workspaceDir);
+
+  // Legacy-contract preflight BEFORE stopping the gateway or touching files:
+  // refuse while an active rule still uses a removed RuleHost contract
+  // symbol — the running installation stays exactly as it was.
+  const compat = runLegacyRuleContractPreflight(workspaceDir);
+  if (!compat.ok) {
+    return {
+      success: false,
+      message: compat.reason,
+      reason: 'legacy_rule_contract_dependency',
+      nextAction: compat.nextAction,
+      requiresRestart: false,
+    };
+  }
 
   // 1. Stop gateway (releases native module locks held by the gateway process)
   const gatewayStatus = await checkOpenClawGateway();

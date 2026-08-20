@@ -23,12 +23,13 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
             { legacy: path.join(legacyDocsDir, '.pain_flag'), newKey: 'PAIN_FLAG' },
             { legacy: path.join(legacyDocsDir, 'SYSTEM_CAPABILITIES.json'), newKey: 'SYSTEM_CAPABILITIES' },
             { legacy: path.join(legacyDocsDir, 'SYSTEM.log'), newKey: 'SYSTEM_LOG' },
-            { legacy: path.join(legacyDocsDir, 'THINKING_OS_CANDIDATES.md'), newKey: 'THINKING_OS_CANDIDATES' },
+            // THINKING_OS_CANDIDATES migration removed (2026-08-20): the
+            // /pd-thinking propose writer it served is retired (no reader).
 
             // From memory/.state/ (The hidden legacy state)
             { legacy: path.join(legacyStateDir, 'pain_dictionary.json'), newKey: 'DICTIONARY' },
             { legacy: path.join(legacyStateDir, 'pain_settings.json'), newKey: 'PAIN_SETTINGS' },
-            { legacy: path.join(legacyStateDir, 'thinking_os_usage.json'), newKey: 'THINKING_OS_USAGE' },
+            // THINKING_OS_USAGE migration removed (2026-08-19): usage tracking retired; the legacy file is inert.
             { legacy: path.join(legacyStateDir, 'pain_candidates.json'), newKey: 'PAIN_CANDIDATES' },
             { legacy: path.join(legacyStateDir, 'evolution_directive.json'), newKey: 'EVOLUTION_DIRECTIVE' },
             { legacy: path.join(legacyStateDir, 'sessions'), newKey: 'SESSION_DIR' },

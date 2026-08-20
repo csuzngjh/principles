@@ -209,13 +209,10 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
       },
       workspace: {
         isRiskPath: false,
-        planStatus: 'NONE',
-        hasPlanFile: false,
       },
       session: {
         sessionId: 'session-eval-001',
         currentGfi: 50,
-        recentThinking: false,
       },
       evolution: {
         epTier: 0,
@@ -255,13 +252,10 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
       },
       workspace: {
         isRiskPath: false,
-        planStatus: 'NONE',
-        hasPlanFile: false,
       },
       session: {
         sessionId: 'session-eval-002',
         currentGfi: 50,
-        recentThinking: false,
       },
       evolution: {
         epTier: 0,
@@ -287,13 +281,10 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
       },
       workspace: {
         isRiskPath: true,
-        planStatus: 'NONE',
-        hasPlanFile: false,
       },
       session: {
         sessionId: 'session-empty-001',
         currentGfi: 0,
-        recentThinking: false,
       },
       evolution: {
         epTier: 0,

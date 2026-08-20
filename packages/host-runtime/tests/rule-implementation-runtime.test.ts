@@ -3,7 +3,7 @@ import { createNodeRuleImplementationRuntime } from '../src/rule-implementation-
 
 const sampleInput = {
   action: { toolName: 'write_file', normalizedPath: '/ws/file.txt' },
-  workspace: { workspaceDir: '/ws', isRiskPath: false, hasPlanFile: false, planStatus: 'none' },
+  workspace: { workspaceDir: '/ws', isRiskPath: false },
   derived: { estimatedLineChanges: 3, bashRisk: 'none' },
   evolution: { epTier: 2 },
 };
@@ -42,8 +42,7 @@ describe('node rule implementation runtime sandbox boundary', () => {
       return {
         decision: 'allow', matched: false,
         reason: 'helpers:' + helpers.getToolName() + ':' + helpers.getBashRisk() + ':' + helpers.isRiskPath()
-          + ':' + helpers.getEpTier() + ':' + helpers.hasPlanFile() + ':' + helpers.getPlanStatus()
-          + ':' + helpers.getEstimatedLineChanges(),
+          + ':' + helpers.getEpTier() + ':' + helpers.getEstimatedLineChanges(),
       };
     }
     var meta = { name: 'helper-probe', version: '1', ruleId: 'R_HELPER_PROBE', coversCondition: 'all' };`;
@@ -57,7 +56,7 @@ describe('node rule implementation runtime sandbox boundary', () => {
     expect(first?.ok).toBe(true);
     expect(first?.result).toMatchObject({
       decision: 'allow',
-      reason: 'helpers:write_file:none:false:2:false:none:3',
+      reason: 'helpers:write_file:none:false:2:3',
     });
   });
 });

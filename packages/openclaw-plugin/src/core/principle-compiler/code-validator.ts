@@ -20,8 +20,8 @@ const MOCK_INPUT = {
     normalizedPath: '/tmp/test.ts',
     paramsSummary: { command: 'echo test' },
   },
-  workspace: { isRiskPath: false, planStatus: 'NONE', hasPlanFile: false },
-  session: { sessionId: 'test', currentGfi: 0, recentThinking: false },
+  workspace: { isRiskPath: false },
+  session: { sessionId: 'test', currentGfi: 0 },
   evolution: { epTier: 0 },
   derived: { estimatedLineChanges: 0, bashRisk: 'safe' },
 };

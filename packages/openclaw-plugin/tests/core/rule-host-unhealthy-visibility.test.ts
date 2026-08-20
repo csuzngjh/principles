@@ -101,8 +101,8 @@ function makeInput(): RuleHostInput {
       normalizedPath: '/etc/passwd',
       paramsSummary: { path: '/etc/passwd' },
     },
-    workspace: { isRiskPath: false, planStatus: 'NONE' as const, hasPlanFile: false },
-    session: { sessionId: 'test-session-unhealthy', currentGfi: 0, recentThinking: false },
+    workspace: { isRiskPath: false },
+    session: { sessionId: 'test-session-unhealthy', currentGfi: 0 },
     evolution: { epTier: 1 },
     derived: { estimatedLineChanges: 1, bashRisk: 'safe' as const },
   };

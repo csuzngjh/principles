@@ -9,41 +9,12 @@
     ".principles/PROFILE.json",
     "docs/PROFILE.json"
   ],
-  "gate": {
-    "require_plan_for_risk_paths": true,
-    "require_audit_before_write": true
-  },
-  "progressive_gate": {
-    "enabled": true,
-    "plan_approvals": {
-      "enabled": true,
-      "allowed_patterns": [
-        "AGENTS.md",
-        "SOUL.md",
-        "IDENTITY.md",
-        "USER.md",
-        "docs/PRINCIPLES.md",
-        ".principles/PROFILE.json",
-        "docs/PROFILE.json",
-        "docs/okr/**"
-      ],
-      "allowed_operations": [
-        "write",
-        "edit",
-        "replace"
-      ]
-    }
-  },
   "tests": {
     "on_change": "smoke",
     "commands": {
       "smoke": "",
       "unit": ""
     }
-  },
-  "permissions": {
-    "deny_skip_tests": true,
-    "deny_unsafe_db_ops": true
   },
   "custom_guards": [
     {

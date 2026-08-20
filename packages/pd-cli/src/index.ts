@@ -45,6 +45,7 @@ import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
 import { handleRuntimeInternalizationContextTrace } from './commands/runtime-internalization-context-trace.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
+import { registerRuntimeCompatibilityScanCommand } from './commands/runtime-compatibility-scan.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
 import {
@@ -341,6 +342,8 @@ runtimeCmd
     });
   });
 
+registerRuntimeCompatibilityScanCommand(runtimeCmd);
+
 const synthCmd = runtimeCmd
   .command('synthetic', { hidden: true })
   .description('Synthetic workload baseline commands');
@@ -455,11 +458,13 @@ demoCmd
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')
   .option('--channels <channels>', 'Comma-separated channel list (prompt,code_tool_hook,defer_archive)')
+  .option('--allow-demo-write-to-existing-workspace', 'Developer override: permit writing demo artifacts into a workspace that already contains PD state (demo isolation guard)')
   .action(async (opts) => {
     await handleDemoStoryA({
       workspace: opts.workspace,
       json: opts.json,
       channels: opts.channels,
+      allowDemoWriteToExistingWorkspace: opts.allowDemoWriteToExistingWorkspace === true,
     });
   });
 

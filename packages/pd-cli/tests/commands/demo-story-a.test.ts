@@ -238,6 +238,69 @@ describe('pd demo story-a CLI', () => {
     expect(parsed.narrative).toContain('[SIMULATED]');
     expect(parsed.narrative).toContain('[REAL]');
   });
+  // ── Demo isolation (2026-08-19): demo must not pollute real PD workspaces ──
+
+  it('refuses to write into a workspace that already contains PD state (default)', async () => {
+    const existing = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-demo-isolation-'));
+    try {
+      fs.mkdirSync(path.join(existing, '.pd'), { recursive: true });
+      fs.writeFileSync(path.join(existing, '.pd', 'state.db'), '');
+
+      await handleDemoStoryA({ workspace: existing, json: true });
+
+      expect(process.exitCode).toBe(1);
+      const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
+      const parsed = JSON.parse(output);
+      expect(parsed.status).toBe('refused');
+      expect(parsed.refusal.reason).toBe('demo_write_to_existing_workspace');
+      expect(parsed.refusal.nextAction).toContain('--allow-demo-write-to-existing-workspace');
+      // cli-5: no mutation on the refused path — the marker file is untouched.
+      const stat = fs.statSync(path.join(existing, '.pd', 'state.db'));
+      expect(stat.size).toBe(0);
+    } finally {
+      fs.rmSync(existing, { recursive: true, force: true });
+    }
+  });
+
+  it('text mode refusal points at the override flag', async () => {
+    const existing = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-demo-isolation-'));
+    try {
+      fs.mkdirSync(path.join(existing, '.pd'), { recursive: true });
+      fs.writeFileSync(path.join(existing, '.pd', 'state.db'), '');
+
+      await handleDemoStoryA({ workspace: existing });
+
+      expect(process.exitCode).toBe(1);
+      const output = stderrSpy.mock.calls.map(c => c[0]).join('');
+      expect(output).toContain('existing PD workspace');
+      expect(output).toContain('--allow-demo-write-to-existing-workspace');
+    } finally {
+      fs.rmSync(existing, { recursive: true, force: true });
+    }
+  });
+
+  it('developer override allows writing into the existing workspace with origin:demo provenance', async () => {
+    const existing = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-demo-override-'));
+    try {
+      fs.mkdirSync(path.join(existing, '.pd'), { recursive: true });
+      fs.writeFileSync(path.join(existing, '.pd', 'config.yaml'), 'features: {}');
+
+      await handleDemoStoryA({ workspace: existing, json: true, allowDemoWriteToExistingWorkspace: true });
+
+      const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
+      const parsed = JSON.parse(output);
+      expect(parsed.status).not.toBe('refused');
+      const db = new Database(path.join(existing, '.pd', 'state.db'), { readonly: true });
+      const rows = db.prepare('SELECT content_json FROM pi_artifacts').all() as { content_json: string }[];
+      db.close();
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(JSON.parse(row.content_json).origin).toBe('demo');
+      }
+    } finally {
+      fs.rmSync(existing, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('cleanupTempWorkspace', () => {

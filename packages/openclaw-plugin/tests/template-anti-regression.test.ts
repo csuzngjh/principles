@@ -151,9 +151,47 @@ function assertTemplatesClean(label: string, files: { dir?: string; file: string
   }
 }
 
+/**
+ * Retired built-in PLAN-gate configuration keys (PRI-286). Fresh installs
+ * must never receive these — the runtime only warns about them, so shipping
+ * them would tell every new user their config is retired on first boot.
+ */
+const RETIRED_PROFILE_KEYS = [
+  'require_plan_for_risk_paths',
+  'require_audit_before_write',
+  'require_reviewer_after_write',
+  'progressive_gate',
+  'plan_approvals',
+  'thinking_checkpoint',
+  'mandatory gating',
+  'Interception Database',
+] as const;
+
+function assertProfileTemplateClean(label: string, content: string): void {
+  for (const key of RETIRED_PROFILE_KEYS) {
+    expect(content.includes(key), `${label}: retired PLAN-gate key "${key}" must not ship in templates`).toBe(false);
+  }
+  const parsed: unknown = JSON.parse(content);
+  expect(parsed, `${label}: template must be valid JSON`).not.toBeNull();
+}
+
+
 describe('core template anti-regression contract (Round 3)', () => {
   it('source templates: only neutral PD-scoped files, no retired semantics', () => {
     assertTemplatesClean('source', collectCoreFiles());
+  });
+
+  it('source .principles/PROFILE templates carry no retired PLAN-gate keys', () => {
+    const profileDir = path.join(PACKAGE_ROOT, 'templates', 'workspace', '.principles');
+    for (const name of ['PROFILE.json', 'PROFILE.schema.json']) {
+      const content = fs.readFileSync(path.join(profileDir, name), 'utf8');
+      assertProfileTemplateClean(`source ${name}`, content);
+    }
+    // The schema's required list must not gate on retired blocks.
+    const schema = JSON.parse(fs.readFileSync(path.join(profileDir, 'PROFILE.schema.json'), 'utf8')) as { required?: unknown };
+    expect(Array.isArray(schema.required)).toBe(true);
+    const required = (schema.required as unknown[]).filter((v): v is string => typeof v === 'string');
+    expect(required).toEqual(['risk_paths', 'tests']);
   });
 
   it('source templates: PRINCIPLES.md is a neutral scaffold without author P-10', () => {
@@ -211,7 +249,12 @@ describe('packaged tarball anti-regression contract (Round 3)', () => {
     expect(fs.existsSync(tarballPath)).toBe(true);
 
     extractedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-tpl-extract-'));
-    execFileSync('tar', ['-xzf', tarballPath, '-C', extractedDir], { encoding: 'utf8' });
+    // Extract with cwd=tarballDir + a relative tarball name: a C:\… absolute
+    // path makes GNU tar treat "C:" as a remote host on Windows.
+    execFileSync('tar', ['-xzf', path.basename(tarballPath), '-C', extractedDir], {
+      encoding: 'utf8',
+      cwd: tarballDir,
+    });
   });
 
   it('tarball contains core templates with the expected file set', () => {
@@ -226,6 +269,14 @@ describe('packaged tarball anti-regression contract (Round 3)', () => {
     for (const lang of ['en', 'zh']) {
       const workspaceScaffold = path.join(extractedDir, 'package', 'templates', 'workspace', '.principles', 'PRINCIPLES.md');
       expect(fs.existsSync(workspaceScaffold), `tarball ${lang} workspace scaffold`).toBe(true);
+    }
+  });
+
+  it('tarball .principles/PROFILE templates carry no retired PLAN-gate keys', () => {
+    const profileDir = path.join(extractedDir, 'package', 'templates', 'workspace', '.principles');
+    for (const name of ['PROFILE.json', 'PROFILE.schema.json']) {
+      const content = fs.readFileSync(path.join(profileDir, name), 'utf8');
+      assertProfileTemplateClean(`tarball ${name}`, content);
     }
   });
 

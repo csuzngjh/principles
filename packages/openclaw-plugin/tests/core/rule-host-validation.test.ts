@@ -123,13 +123,10 @@ function makeInput(normalizedPath: string): RuleHostInput {
     },
     workspace: {
       isRiskPath: false,
-      planStatus: 'NONE',
-      hasPlanFile: false,
     },
     session: {
       sessionId: 'test-session',
       currentGfi: 0,
-      recentThinking: false,
     },
     evolution: {
       epTier: 1,

@@ -14,6 +14,7 @@ import {
   type RuleHostMeta,
   type RuleHostResult,
 } from '@principles/core/runtime-v2';
+import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 import {
   createNodeRuleImplementationRuntime,
@@ -100,7 +101,6 @@ export interface ProductionRuleContextRequest {
 export type RuleContextProvider = (request: ProductionRuleContextRequest) => unknown | Promise<unknown>;
 export interface RuleInputEnrichment {
   currentGfi: number;
-  recentThinking: boolean;
   epTier: number;
   bashRisk: 'safe' | 'normal' | 'dangerous' | 'unknown';
 }
@@ -128,7 +128,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     if (action.normalizedPath === null) return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
 
     let context: RuleContextV2 | undefined;
-    let enrichment: RuleInputEnrichment = { currentGfi: 0, recentThinking: false, epTier: 0, bashRisk: 'unknown' };
+    let enrichment: RuleInputEnrichment = { currentGfi: 0, epTier: 0, bashRisk: 'unknown' };
     const request: ProductionRuleContextRequest = {
       workspaceDir: event.context.workspaceDir, sessionId: event.context.sessionId,
       targetPath: action.normalizedPath, toolName: input.toolName, rawPayload: event.rawPayload,
@@ -137,9 +137,9 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       try {
         const candidate: unknown = await withinGateDeadline(options.ruleInputEnrichmentProvider(request), startedAt);
         if (isRecord(candidate) && typeof candidate.currentGfi === 'number' && Number.isFinite(candidate.currentGfi)
-          && typeof candidate.recentThinking === 'boolean' && typeof candidate.epTier === 'number' && Number.isFinite(candidate.epTier)
+          && typeof candidate.epTier === 'number' && Number.isFinite(candidate.epTier)
           && (candidate.bashRisk === 'safe' || candidate.bashRisk === 'normal' || candidate.bashRisk === 'dangerous' || candidate.bashRisk === 'unknown')) {
-          enrichment = { currentGfi: candidate.currentGfi, recentThinking: candidate.recentThinking, epTier: candidate.epTier, bashRisk: candidate.bashRisk };
+          enrichment = { currentGfi: candidate.currentGfi, epTier: candidate.epTier, bashRisk: candidate.bashRisk };
         } else addWarning(warnings, 'rule_input_enrichment_invalid', 'repair the host enrichment provider');
       } catch (error: unknown) {
         addWarning(warnings, `rule_input_enrichment_failed: ${error instanceof Error ? error.message : String(error)}`, 'inspect the host enrichment provider');
@@ -261,6 +261,29 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             }
             const ruleId = typeof content.ruleId === 'string' ? content.ruleId : typeof row.source_rule_id === 'string' ? row.source_rule_id : artifactId;
             const principleId = typeof content.principleId === 'string' ? content.principleId : typeof row.source_principle_id === 'string' ? row.source_principle_id : ruleId;
+            // Retired-contract backstop (2026-08-19 / P0-1 2026-08-20):
+            // persisted LIVE RuleCode that references removed RuleHost
+            // contract symbols can never run safely against the new contract
+            // — reads silently resolve to undefined and change owner-approved
+            // behavior. Skipping the rule and then allowing the action would
+            // treat an owner-approved enforcement rule as if it did not exist
+            // (governance fail-open); the action must instead FAIL CLOSED
+            // with a structured deny naming the exact blocking symbols. The
+            // scan is a local copy (see legacy-rule-contract-symbols.ts) so
+            // the published bundle keeps working against the currently
+            // published core.
+            const retiredSymbols = scanRetiredContractSymbols(content.implementationCode);
+            if (retiredSymbols.length > 0) {
+              const nextAction = 'migrate the RuleCode off the retired contract symbols or deactivate the activation, then re-approve a migrated rule';
+              addWarning(warnings, `legacy_rule_contract_dependency: ${retiredSymbols.join(', ')} (activation=${activationId})`, nextAction);
+              return {
+                decision: 'deny',
+                reason: `legacy_rule_contract_dependency: active owner-approved rule ${ruleId} references retired contract symbols (${retiredSymbols.join(', ')}) and cannot run safely on this runtime`,
+                source: event.source,
+                ...(warnings.length ? { warnings } : {}),
+                metadata: { evaluatedLiveRules: 0, ruleId, principleId },
+              };
+            }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
             candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode });
           } catch (error: unknown) {
@@ -271,8 +294,8 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
 
       const hostInput: RuleHostInput = {
         action,
-        workspace: { isRiskPath: false, planStatus: 'NONE', hasPlanFile: false },
-        session: { sessionId: event.context.sessionId, currentGfi: enrichment.currentGfi, recentThinking: enrichment.recentThinking },
+        workspace: { isRiskPath: false },
+        session: { sessionId: event.context.sessionId, currentGfi: enrichment.currentGfi },
         evolution: { epTier: enrichment.epTier },
         derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }), bashRisk: enrichment.bashRisk },
         ...(context ? { context } : {}),

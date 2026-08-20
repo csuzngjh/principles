@@ -416,8 +416,8 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     // undefined (no block) for shadow activations, even for /etc/passwd.
     const makeRuleHostInput = (targetPath: string): RuleHostInput => ({
       action: { toolName: 'write_file', normalizedPath: targetPath, paramsSummary: { path: targetPath } },
-      workspace: { isRiskPath: targetPath.startsWith('/etc'), planStatus: 'NONE', hasPlanFile: false },
-      session: { currentGfi: 0, recentThinking: false },
+      workspace: { isRiskPath: targetPath.startsWith('/etc') },
+      session: { currentGfi: 0 },
       evolution: { epTier: 0 },
       derived: { estimatedLineChanges: 1, bashRisk: 'safe' },
     });

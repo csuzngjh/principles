@@ -196,13 +196,10 @@ export function createSyntheticRuleHostInput(
     action,
     workspace: {
       isRiskPath: false,
-      planStatus: 'UNKNOWN',
-      hasPlanFile: false,
       ...overrides.workspace,
     },
     session: {
       currentGfi: 0,
-      recentThinking: false,
       ...overrides.session,
     },
     evolution: {

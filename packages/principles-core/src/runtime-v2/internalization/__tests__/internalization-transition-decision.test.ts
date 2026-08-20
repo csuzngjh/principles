@@ -120,7 +120,7 @@ function makeTask(overrides: {
     attemptCount: 0,
     maxAttempts: 3,
     diagnosticJson: createPITaskDiagnosticJson(overrides.meta ?? makeMeta()),
-  } as TaskRecord;
+  };
 }
 
 function makeRepairPayload(iteration: number, evaluatorTaskId: string): RepairPayload {

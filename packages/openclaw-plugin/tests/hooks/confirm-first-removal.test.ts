@@ -169,6 +169,104 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
     );
     expect(fs.existsSync(testPath)).toBe(false);
   });
+
+  // ── Round 3 (2026-08-19): PLAN contract / config / telemetry retirement ──
+
+  it('RuleHostInput no longer exposes planStatus/hasPlanFile', () => {
+    const source = fs.readFileSync(
+      path.join(ROOT, 'packages/principles-core/src/runtime-v2/internalization/rule-host-contracts.ts'),
+      'utf8',
+    );
+    expect(source).not.toContain('planStatus');
+    expect(source).not.toContain('hasPlanFile');
+  });
+
+  it('RuleHostHelpers no longer expose getPlanStatus()/hasPlanFile()', () => {
+    const source = fs.readFileSync(
+      path.join(ROOT, 'packages/principles-core/src/runtime-v2/internalization/rule-host-helpers.ts'),
+      'utf8',
+    );
+    expect(source).not.toMatch(/hasPlanFile\(\)/);
+    expect(source).not.toMatch(/getPlanStatus\(\)/);
+  });
+
+  it('gate.ts and production-rulehost-gate.ts do not fabricate plan state', () => {
+    for (const rel of [
+      'packages/openclaw-plugin/src/hooks/gate.ts',
+      'packages/host-runtime/src/production-rulehost-gate.ts',
+    ]) {
+      const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      expect(source, `${rel} must not reference planStatus`).not.toContain('planStatus');
+      expect(source, `${rel} must not reference hasPlanFile`).not.toContain('hasPlanFile');
+    }
+  });
+
+  it('vm helper wiring (both runtimes) does not expose plan helpers', () => {
+    for (const rel of [
+      'packages/openclaw-plugin/src/core/rule-implementation-runtime.ts',
+      'packages/host-runtime/src/rule-implementation-runtime.ts',
+      'packages/principles-core/src/runtime-v2/internalization/refiner-sandbox-wrapper.ts',
+      'packages/principles-core/src/runtime-v2/golden-trace-replay-validator.ts',
+    ]) {
+      const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      expect(source, `${rel} must not expose hasPlanFile helper`).not.toContain('hasPlanFile');
+      expect(source, `${rel} must not expose getPlanStatus helper`).not.toContain('getPlanStatus');
+    }
+  });
+
+  it('PROFILE defaults no longer contain gate/progressive_gate/thinking_checkpoint', async () => {
+    // Core defaults are internal to the config modules (not re-exported from
+    // the runtime-v2 barrel), so verify the source plus the plugin runtime.
+    const coreConstantsSource = fs.readFileSync(
+      path.join(ROOT, 'packages/principles-core/src/runtime-v2/config/pd-profile-constants.ts'),
+      'utf8',
+    );
+    expect(coreConstantsSource).not.toContain('PROFILE_DEFAULT_GATE');
+    expect(coreConstantsSource).not.toContain('PROFILE_DEFAULT_PROGRESSIVE_GATE');
+    expect(coreConstantsSource).not.toContain('PROFILE_DEFAULT_THINKING_CHECKPOINT');
+    const pluginDefaults = (await import('../../src/core/profile.js')).PROFILE_DEFAULTS as Record<string, unknown>;
+    expect(pluginDefaults).not.toHaveProperty('gate');
+    expect(pluginDefaults).not.toHaveProperty('progressive_gate');
+    expect(pluginDefaults).not.toHaveProperty('thinking_checkpoint');
+  });
+
+  it('legacy gate-family profile keys warn instead of normalizing', () => {
+    const source = fs.readFileSync(
+      path.join(ROOT, 'packages/openclaw-plugin/src/core/profile.ts'),
+      'utf8',
+    );
+    // The retired keys must not be normalized into the output anymore…
+    expect(source).not.toMatch(/normalized\.gate\./);
+    expect(source).not.toMatch(/normalized\.progressive_gate\./);
+    expect(source).not.toMatch(/normalized\.thinking_checkpoint\./);
+  });
+
+  it('event-log no longer exposes recordPlanApproval and the plan_approval event type is gone', async () => {
+    const eventLogSource = fs.readFileSync(
+      path.join(ROOT, 'packages/openclaw-plugin/src/core/event-log.ts'),
+      'utf8',
+    );
+    expect(eventLogSource).not.toContain('recordPlanApproval');
+    const core = await import('@principles/core/runtime-v2');
+    const eventLog = core as unknown as Record<string, unknown>;
+    expect(Object.keys(eventLog)).not.toContain('PlanApprovalEventData');
+    expect(Object.keys(eventLog)).not.toContain('isPlanApprovalEventEntry');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    expect((EventLogService.prototype as Record<string, unknown>).recordPlanApproval).toBeUndefined();
+  });
+
+  it('trajectory new-schema and writer no longer carry plan_status', () => {
+    const trajectorySource = fs.readFileSync(
+      path.join(ROOT, 'packages/openclaw-plugin/src/core/trajectory.ts'),
+      'utf8',
+    );
+    expect(trajectorySource).not.toContain('plan_status');
+    const coreSchemaSource = fs.readFileSync(
+      path.join(ROOT, 'packages/principles-core/src/runtime-v2/pain-signal-observability.ts'),
+      'utf8',
+    );
+    expect(coreSchemaSource).not.toContain('plan_status');
+  });
 });
 
 function findFiles(dir: string, filename: string): string[] {

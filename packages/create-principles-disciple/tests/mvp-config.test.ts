@@ -888,12 +888,23 @@ describe('Structured failure reason reflects actual failure (P2 fix)', () => {
   });
 });
 
-describe('Story A verification uses execFileSync, not shell (P1-1 fix)', () => {
+describe('Story A verification uses a parameterized subprocess, not shell (P1-1 fix)', () => {
   it('installer.ts uses process.execPath for story-a verification', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     expect(content).toContain('process.execPath');
-    expect(content).toContain("installedPdCliEntry, 'demo', 'story-a'");
+    expect(content).toContain("'demo', 'story-a', '--json'");
+  });
+
+  it('installer.ts runs story-a WITHOUT --workspace (demo isolation, P0-1 fix)', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const startMarker = "updateProgress(spinner, stepIndex, 'Verifying demo...'";
+    const storyASection = content.substring(content.indexOf(startMarker), content.indexOf('verification.storyA'));
+    // The install target already holds PD state at verification time; the
+    // demo must run in pd-cli's own throwaway workspace, never the target.
+    expect(storyASection).not.toContain("'--workspace'");
+    expect(storyASection).not.toContain('options.workspaceDir');
   });
 
   it('installer.ts does not use shell:cmd for story-a', () => {
@@ -903,7 +914,10 @@ describe('Story A verification uses execFileSync, not shell (P1-1 fix)', () => {
     const storyASection = content.substring(content.indexOf(startMarker), content.indexOf('verification.storyA'));
     expect(storyASection).not.toContain("shell: 'cmd'");
     expect(storyASection).not.toContain('execSync');
-    expect(storyASection).toContain('execFileSync');
+    // Parameterized argv-array invocation (promisified execFile), no shell.
+    expect(storyASection).toContain('execFile');
+    // Boundary-checked entry path before it becomes the subprocess target.
+    expect(storyASection).toContain('startsWith(pdCliRoot + path.sep)');
   });
 
   it('CLI verification uses process.execPath for localOk', () => {

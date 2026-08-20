@@ -26,13 +26,10 @@ export interface RuleHostInput {
   };
   workspace: {
     isRiskPath: boolean;
-    planStatus: 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN';
-    hasPlanFile: boolean;
   };
   session: {
     sessionId?: string;
     currentGfi: number;
-    recentThinking: boolean;
   };
   evolution: {
     epTier: number;

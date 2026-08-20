@@ -356,7 +356,7 @@ describe('createSyntheticRuleHostInput', () => {
     const input = createSyntheticRuleHostInput(
       { toolName: 'Write', params: { file_path: '/tmp/x', content: '' } },
       {
-        workspace: { isRiskPath: true, planStatus: 'NONE', hasPlanFile: false },
+        workspace: { isRiskPath: true },
         derived: { estimatedLineChanges: 50, bashRisk: 'dangerous' },
       },
     );
@@ -480,7 +480,7 @@ describe('PRI-481 Phase 2 — createSyntheticRuleHostInput context propagation',
       { toolName: 'Write', params: { file_path: 'src/a.ts', content: 'x' } },
       {
         context: sampleRuleContextV2,
-        workspace: { isRiskPath: true, planStatus: 'NONE', hasPlanFile: false },
+        workspace: { isRiskPath: true },
       },
     );
     expect(input.context).toBe(sampleRuleContextV2);

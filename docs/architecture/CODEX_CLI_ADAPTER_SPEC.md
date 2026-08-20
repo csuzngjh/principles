@@ -2,6 +2,8 @@
 
 > Status: SPEC v4.1 (supersedes v4, v3, v2, v1, and draft `CODEX_CLI_ADAPTER_DESIGN.md`) | Date: 2026-08-11 (verified against Codex source `codex-rs/` commit at HEAD) | Issues: PRI-278, PRI-279 (deferred to Post-MVP), PRI-280, PRI-281, PRI-282
 >
+> ⚠️ **RETIRED CONTENT NOTICE (2026-08-19)**: This spec predates PRI-286. The hardcoded confirm-first / PLAN.md gate it repeatedly references was REMOVED from PD on 2026-06-01 (PRI-286, PR #764); the sole authoritative gate is the dynamic RuleHost (owner-approved `code_tool_hook` activations), on both OpenClaw and Codex hosts. Read every "confirm-first gate" mention below as a historical mechanism, not a current capability. The Codex host abstraction itself (ADR-0020) remains current.
+>
 > **Changelog v4.1**: Corrected 3 serious errors introduced in v4 (found by second external review):
 > - **E1**: v4 claimed `continue: false` "terminates the entire Codex session." **Wrong.** Source verification: PostToolUse `PostToolUseOutcome` has NO `should_stop` field (post_tool_use.rs:40-45) — `continue: false` only sets `status = Stopped` with no session/turn effect. UserPromptSubmit/SessionStart set `should_stop = true` which rejects the current input and stops the current turn, but the session survives (test `continue_false_preserves_context_for_later_turns`). PreToolUse/PermissionRequest reject `continue: false` as `unsupported` → `invalid_reason`.
 > - **E2**: v4 §5.3.1 said `permissionDecision: "ask"` is "treated like `allow`, only rejected when combined with `updatedInput`." **Wrong.** `ask` UNCONDITIONALLY produces `invalid_reason` (output_parser.rs:445-447). No conditional.
@@ -1046,8 +1048,8 @@ These were discovered during source-code verification but are not explicitly sco
 
 #### Hidden ticket B: Slash command migration to pd-cli
 
-**Scope**: 19 OpenClaw slash commands that have no Codex equivalent (v4.1 correction: v4 said 16, but the list below actually contains 19 commands):
-- `/pd-init`, `/pd-bootstrap`, `/pd-research`, `/pd-thinking`, `/pd-help`
+**Scope**: 18 OpenClaw slash commands that have no Codex equivalent (v4.1 correction: v4 said 16, but the list below actually contained 19 commands; `/pd-thinking` was retired 2026-08-20 as a write-only orphan, so 18 remain):
+- `/pd-init`, `/pd-bootstrap`, `/pd-research`, `/pd-help`
 - `/pd-status`, `/pd-pain`, `/pd-context`, `/pd-focus`
 - `/pd-evolution-status`, `/pd-principle-rollback`, `/pd-rollback`
 - `/pd-export`, `/pd-samples`, `/pd-workflow-debug`

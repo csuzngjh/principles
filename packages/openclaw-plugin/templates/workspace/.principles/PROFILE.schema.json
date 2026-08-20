@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "System Profile Schema",
-  "description": "Schema for the evolutionary agent framework configuration (The Interception Database)",
+  "title": "Principles Disciple Workspace Profile Schema",
+  "description": "Schema for the Principles Disciple workspace profile configuration",
   "type": "object",
   "properties": {
     "audit_level": {
@@ -13,17 +13,9 @@
       "type": "array",
       "items": {
         "type": "string",
-        "description": "Project-relative directory or file paths that require mandatory gating."
+        "description": "Project-relative paths treated as higher-risk context for evidence triage, risk classification, and related governance signals. Blocking behavior is determined by owner-approved RuleHost rules, not by listing a path here."
       },
       "default": []
-    },
-    "gate": {
-      "type": "object",
-      "properties": {
-        "require_plan_for_risk_paths": { "type": "boolean", "default": true },
-        "require_audit_before_write": { "type": "boolean", "default": true },
-        "require_reviewer_after_write": { "type": "boolean", "default": true }
-      }
     },
     "tests": {
       "type": "object",
@@ -37,20 +29,19 @@
         }
       }
     },
-    "permissions": {
-      "type": "object",
-      "properties": {
-        "deny_skip_tests": { "type": "boolean", "default": true },
-        "deny_unsafe_db_ops": { "type": "boolean", "default": true }
-      }
-    },
-    "output": {
-      "type": "object",
-      "properties": {
-        "verbosity": { "type": "string", "enum": ["concise", "balanced", "detailed"], "default": "balanced" },
-        "show_evidence": { "type": "boolean", "default": true }
-      }
+    "custom_guards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string" },
+          "message": { "type": "string" },
+          "severity": { "type": "string", "enum": ["info", "warning", "error", "fatal"], "default": "error" }
+        },
+        "required": ["pattern", "message"]
+      },
+      "default": []
     }
   },
-  "required": ["risk_paths", "gate", "tests"]
+  "required": ["risk_paths", "tests"]
 }

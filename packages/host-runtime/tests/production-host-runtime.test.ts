@@ -391,14 +391,14 @@ describe('shared production RuleHost gate kernel', () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, `
       function evaluate(input) {
-        if (input.session.currentGfi === 523 && input.session.recentThinking === true && input.evolution.epTier === 7) {
+        if (input.session.currentGfi === 523 && input.evolution.epTier === 7) {
           return { decision: 'block', matched: true, reason: 'HOST_ENRICHMENT_PARITY_523' };
         }
         return { decision: 'allow', matched: false, reason: 'host enrichment absent' };
       }
     `);
     const runtime = createProductionHostRuntime({
-      ruleInputEnrichmentProvider: () => ({ currentGfi: 523, recentThinking: true, epTier: 7, bashRisk: 'normal' }),
+      ruleInputEnrichmentProvider: () => ({ currentGfi: 523, epTier: 7, bashRisk: 'normal' }),
       afterToolCall: async (event) => ({ decision: 'observe', source: event.source }),
     });
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/safe/project.txt'))).resolves.toMatchObject({
@@ -474,6 +474,46 @@ describe('shared production RuleHost gate kernel', () => {
       decision: 'deny', reason: SHARED_GATE_REASON,
       warnings: [expect.stringMatching(/implementation_unhealthy.*nextAction=/)],
       metadata: { evaluatedLiveRules: 1 },
+    });
+  });
+});
+
+describe('retired-contract backstop (persisted legacy RuleCode)', () => {
+  // 2026-08-19: an upgraded workspace may hold an ACTIVE rule whose RuleCode
+  // reads a removed RuleHost contract symbol (session.recentThinking). The
+  // host-runtime gate must never execute it (undefined reads would silently
+  // change owner-approved behavior) and must name the blocking symbols.
+  const LEGACY_CONTRACT_CODE = `
+function evaluate(input) {
+  if (input.session && input.session.recentThinking === true) {
+    return { decision: 'block', matched: true, reason: 'LEGACY_RECENT_THINKING_MUST_NOT_RUN' };
+  }
+  return { decision: 'allow', matched: false };
+}
+`;
+
+  it('fails closed on an active rule reading the retired recentThinking contract', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, LEGACY_CONTRACT_CODE, undefined, '-legacy-contract');
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'deny',
+      reason: expect.stringContaining('legacy_rule_contract_dependency:'),
+      warnings: [expect.stringContaining('legacy_rule_contract_dependency: recentThinking')],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
+  it('does not let a healthy sibling rescue an active legacy rule (fail closed)', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, LEGACY_CONTRACT_CODE, undefined, '-legacy-contract');
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE, undefined, '-healthy-contract');
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'deny',
+      reason: expect.stringContaining('legacy_rule_contract_dependency:'),
+      warnings: [expect.stringMatching(/legacy_rule_contract_dependency.*nextAction=/)],
+      metadata: { evaluatedLiveRules: 0 },
     });
   });
 });

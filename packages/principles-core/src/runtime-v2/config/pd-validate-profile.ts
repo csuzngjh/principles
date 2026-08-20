@@ -59,20 +59,33 @@ const VALID_SEVERITIES = new Set(['info', 'warning', 'error', 'fatal']);
 
 // ── Sub-validators ──────────────────────────────────────────────────────────
 
-function validateGate(raw: unknown, path: string): { value?: Record<string, unknown>; warnings: ProfileValidationWarning[] } {
+// PRI-286 retirement cleanup (2026-08-19): gate / progressive_gate /
+// thinking_checkpoint are retired profile keys. They are neither validated
+// into the effective config nor hard-rejected — old workspaces must keep
+// starting. Each occurrence surfaces a deprecation warning (rc-9: the
+// degradation is observable) so owners learn the key has no effect.
+//
+// The historical plugin normalizer also accepted camelCase aliases
+// (progressiveGate / thinkingCheckpoint). Those are flagged the same way:
+// ignore + warn, never restored to canonical config (P2-8, 2026-08-20).
+function warnLegacyGateKeys(raw: Record<string, unknown>, path: string): ProfileValidationWarning[] {
   const warnings: ProfileValidationWarning[] = [];
-  if (!isRecord(raw)) {
-    warnings.push(warn(path, `gate must be an object, got ${typeof raw}`));
-    return { warnings };
+  if (readOwn(raw, 'gate') !== undefined) {
+    warnings.push(warn(`${path}.gate`, 'deprecated: the built-in PLAN/confirm-first gate was removed (PRI-286); this key has no effect and can be deleted'));
   }
-  const value: Record<string, unknown> = {};
-  const bv = readOwn(raw, 'require_plan_for_risk_paths');
-  if (bv !== undefined) { if (isBoolean(bv)) value.require_plan_for_risk_paths = bv; else warnings.push(warn(`${path}.require_plan_for_risk_paths`, `must be boolean`)); }
-  const ba = readOwn(raw, 'require_audit_before_write');
-  if (ba !== undefined) { if (isBoolean(ba)) value.require_audit_before_write = ba; else warnings.push(warn(`${path}.require_audit_before_write`, `must be boolean`)); }
-  const br = readOwn(raw, 'require_reviewer_after_write');
-  if (br !== undefined) { if (isBoolean(br)) value.require_reviewer_after_write = br; else warnings.push(warn(`${path}.require_reviewer_after_write`, `must be boolean`)); }
-  return { value, warnings };
+  if (readOwn(raw, 'progressive_gate') !== undefined || readOwn(raw, 'progressiveGate') !== undefined) {
+    warnings.push(warn(`${path}.progressive_gate`, 'deprecated: plan-approval gating was removed (PRI-286); this key has no effect and can be deleted'));
+  }
+  if (readOwn(raw, 'progressiveGate') !== undefined) {
+    warnings.push(warn(`${path}.progressiveGate`, 'deprecated: plan-approval gating was removed (PRI-286); legacy camelCase alias, this key has no effect and can be deleted'));
+  }
+  if (readOwn(raw, 'thinking_checkpoint') !== undefined || readOwn(raw, 'thinkingCheckpoint') !== undefined) {
+    warnings.push(warn(`${path}.thinking_checkpoint`, 'deprecated: the thinking-checkpoint gate is retired; this key has no effect and can be deleted'));
+  }
+  if (readOwn(raw, 'thinkingCheckpoint') !== undefined) {
+    warnings.push(warn(`${path}.thinkingCheckpoint`, 'deprecated: the thinking-checkpoint gate is retired; legacy camelCase alias, this key has no effect and can be deleted'));
+  }
+  return warnings;
 }
 
 function validateTests(raw: unknown, path: string): { value?: Record<string, unknown>; warnings: ProfileValidationWarning[] } {
@@ -161,24 +174,6 @@ function validateLifecycle(raw: unknown, path: string): { value?: Record<string,
   return { value, warnings };
 }
 
-function validatePlanApprovals(raw: unknown, path: string): { value?: Record<string, unknown>; warnings: ProfileValidationWarning[] } {
-  const warnings: ProfileValidationWarning[] = [];
-  if (!isRecord(raw)) {
-    warnings.push(warn(path, `plan_approvals must be an object, got ${typeof raw}`));
-    return { warnings };
-  }
-  const value: Record<string, unknown> = {};
-  const en = readOwn(raw, 'enabled');
-  if (en !== undefined) { if (isBoolean(en)) value.enabled = en; else warnings.push(warn(`${path}.enabled`, `must be boolean`)); }
-  const ml = readOwn(raw, 'max_lines_override');
-  if (ml !== undefined) { if (isNumber(ml) && Number.isInteger(ml)) value.max_lines_override = ml; else warnings.push(warn(`${path}.max_lines_override`, `must be an integer`)); }
-  const ap = readOwn(raw, 'allowed_patterns');
-  if (ap !== undefined) { if (Array.isArray(ap)) value.allowed_patterns = ap.filter(isString); else warnings.push(warn(`${path}.allowed_patterns`, `must be an array of strings`)); }
-  const ao = readOwn(raw, 'allowed_operations');
-  if (ao !== undefined) { if (Array.isArray(ao)) value.allowed_operations = ao.filter(isString); else warnings.push(warn(`${path}.allowed_operations`, `must be an array of strings`)); }
-  return { value, warnings };
-}
-
 function validateEditVerification(raw: unknown, path: string): { value?: Record<string, unknown>; warnings: ProfileValidationWarning[] } {
   const warnings: ProfileValidationWarning[] = [];
   if (!isRecord(raw)) {
@@ -196,22 +191,6 @@ function validateEditVerification(raw: unknown, path: string): { value?: Record<
   if (fmt !== undefined) { if (isNumber(fmt) && fmt > 0 && fmt <= 1) value.fuzzy_match_threshold = fmt; else warnings.push(warn(`${path}.fuzzy_match_threshold`, `must be a number in (0, 1]`)); }
   const sla = readOwn(raw, 'skip_large_file_action');
   if (sla !== undefined) { if (sla === 'warn' || sla === 'block') value.skip_large_file_action = sla; else warnings.push(warn(`${path}.skip_large_file_action`, `must be "warn" or "block"`)); }
-  return { value, warnings };
-}
-
-function validateThinkingCheckpoint(raw: unknown, path: string): { value?: Record<string, unknown>; warnings: ProfileValidationWarning[] } {
-  const warnings: ProfileValidationWarning[] = [];
-  if (!isRecord(raw)) {
-    warnings.push(warn(path, `thinking_checkpoint must be an object, got ${typeof raw}`));
-    return { warnings };
-  }
-  const value: Record<string, unknown> = {};
-  const en = readOwn(raw, 'enabled');
-  if (en !== undefined) { if (isBoolean(en)) value.enabled = en; else warnings.push(warn(`${path}.enabled`, `must be boolean`)); }
-  const wm = readOwn(raw, 'window_ms');
-  if (wm !== undefined) { if (isNumber(wm) && wm > 0) value.window_ms = wm; else warnings.push(warn(`${path}.window_ms`, `must be a positive number`)); }
-  const hrt = readOwn(raw, 'high_risk_tools');
-  if (hrt !== undefined) { if (Array.isArray(hrt)) value.high_risk_tools = hrt.filter(isString); else warnings.push(warn(`${path}.high_risk_tools`, `must be an array of strings`)); }
   return { value, warnings };
 }
 
@@ -292,13 +271,9 @@ export function validateProfileConfig(raw: unknown, path = 'profile'): ProfileVa
     }
   }
 
-  // Sub-objects
-  const gateRaw = readOwn(raw, 'gate');
-  if (gateRaw !== undefined) {
-    const r = validateGate(gateRaw, `${path}.gate`);
-    if (r.value) result.gate = r.value;
-    warnings.push(...r.warnings);
-  }
+  // Retired gate-family keys: deprecation warnings instead of validation
+  // (PRI-286 cleanup — legacy workspaces keep loading, keys are dropped).
+  warnings.push(...warnLegacyGateKeys(raw, path));
 
   const testsRaw = readOwn(raw, 'tests');
   if (testsRaw !== undefined) {
@@ -321,39 +296,13 @@ export function validateProfileConfig(raw: unknown, path = 'profile'): ProfileVa
     warnings.push(...r.warnings);
   }
 
-  // progressive_gate
-  const pgRaw = readOwn(raw, 'progressive_gate');
-  if (pgRaw !== undefined) {
-    const warnings2: ProfileValidationWarning[] = [];
-    const pgResult: Record<string, unknown> = {};
-    if (isRecord(pgRaw)) {
-      // Inside isRecord guard, TypeScript narrows pgRaw to Record<string, unknown>
-      const pgEnabled = readOwn(pgRaw, 'enabled');
-      if (pgEnabled !== undefined) { if (isBoolean(pgEnabled)) pgResult.enabled = pgEnabled; else warnings2.push(warn(`${path}.progressive_gate.enabled`, `must be boolean`)); }
-      const paRaw = readOwn(pgRaw, 'plan_approvals');
-      if (paRaw !== undefined) {
-        const r = validatePlanApprovals(paRaw, `${path}.progressive_gate.plan_approvals`);
-        if (r.value) pgResult.plan_approvals = r.value;
-        warnings2.push(...r.warnings);
-      }
-    } else {
-      warnings2.push(warn(`${path}.progressive_gate`, `must be an object`));
-    }
-    if (Object.keys(pgResult).length > 0) result.progressive_gate = pgResult;
-    warnings.push(...warnings2);
-  }
+  // progressive_gate / thinking_checkpoint: retired — already covered by
+  // warnLegacyGateKeys above; no validation, no value passthrough.
 
   const evRaw = readOwn(raw, 'edit_verification');
   if (evRaw !== undefined) {
     const r = validateEditVerification(evRaw, `${path}.edit_verification`);
     if (r.value) result.edit_verification = r.value;
-    warnings.push(...r.warnings);
-  }
-
-  const tcRaw = readOwn(raw, 'thinking_checkpoint');
-  if (tcRaw !== undefined) {
-    const r = validateThinkingCheckpoint(tcRaw, `${path}.thinking_checkpoint`);
-    if (r.value) result.thinking_checkpoint = r.value;
     warnings.push(...r.warnings);
   }
 

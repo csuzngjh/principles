@@ -58,7 +58,6 @@ After installation, wake up through the workspace memory:
 2. Read `USER.md` → who you serve
 3. Read `memory/YYYY-MM-DD.md` → what happened recently
 4. Read `AGENTS.md` → how this workspace works
-5. Check `PLAN.md` → whether the current task is ready
 
 *Do not ask the human "what should I do?" before reading the workspace memory. The filesystem is your durable memory.*
 
@@ -114,11 +113,7 @@ Then in a Codex session: run $pd-setup once per workspace, trust the hooks via /
 
 ### 1. Workspace guardrails
 
-Principles Disciple can block risky edits until the agent has a clear `PLAN.md` marked as:
-
-```text
-STATUS: READY
-```
+Blocking is dynamic and owner-governed: when you approve a principle into the RuleHost channel, PD evaluates that rule against every write/bash/agent tool call and can block risky edits before they run. Which edits get blocked is entirely determined by the principles you approved — PD ships no hardcoded gate of its own.
 
 This protects important files such as agent identity files, memory files, strategy files, project plans, and custom high-risk paths.
 
@@ -127,11 +122,12 @@ When blocked, the agent should not retry blindly.
 It should:
 
 ```text
-1. update PLAN.md
-2. explain the risk
-3. set STATUS: READY
-4. retry the operation
+1. read the block reason (it names the principle that blocked the action)
+2. adjust the approach to satisfy the principle
+3. retry the operation
 ```
+
+If you want "plan before action" behavior, approve a principle that requires it — do not expect a built-in PLAN.md state machine (that mechanism was retired in PRI-286).
 
 ### 2. Pain-signal capture
 
@@ -193,7 +189,6 @@ The console can show:
 - pain and friction trends;
 - evolution events;
 - correction samples;
-- thinking model activity;
 - principle and implementation status.
 
 State is stored locally.
@@ -281,7 +276,7 @@ Principles Disciple is an attempt to turn that loop into a local, inspectable, o
 ## ❓ FAQ & Troubleshooting
 
 **Q: AI refuses to modify files?**
-A: Check `docs/PLAN.md` — it needs `STATUS: READY` for risky paths
+A: Read the block message — it names the owner-approved principle that blocked the action. Review or roll back active rules with `/pd-status` and the console's activation view.
 
 **Q: AI seems dumbed down?**
 A: Check your expertise level: `/profile "Domain: Expert"`

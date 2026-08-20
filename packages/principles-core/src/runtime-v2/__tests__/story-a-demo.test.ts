@@ -244,8 +244,8 @@ describe('Story A\' pure helpers', () => {
       const fn = createDemoSandboxEvaluate(code);
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: { path: '/etc/passwd', content: 'bad' } },
-        workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
-        session: { currentGfi: 0, recentThinking: false },
+        workspace: { isRiskPath: false },
+        session: { currentGfi: 0 },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;
@@ -258,8 +258,8 @@ describe('Story A\' pure helpers', () => {
       const fn = createDemoSandboxEvaluate(code);
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: { path: '/project/src/config.json', content: '{}' } },
-        workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
-        session: { currentGfi: 0, recentThinking: false },
+        workspace: { isRiskPath: false },
+        session: { currentGfi: 0 },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;
@@ -272,8 +272,8 @@ describe('Story A\' pure helpers', () => {
       const fn = createDemoSandboxEvaluate(code);
       const input = {
         action: { toolName: 'write_file', normalizedPath: '/etc/passwd', paramsSummary: { path: '/project/../../etc/passwd', content: 'bad' } },
-        workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
-        session: { currentGfi: 0, recentThinking: false },
+        workspace: { isRiskPath: false },
+        session: { currentGfi: 0 },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;
@@ -286,8 +286,8 @@ describe('Story A\' pure helpers', () => {
       const fn = createDemoSandboxEvaluate('return "other";');
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: {} },
-        workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
-        session: { currentGfi: 0, recentThinking: false },
+        workspace: { isRiskPath: false },
+        session: { currentGfi: 0 },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;

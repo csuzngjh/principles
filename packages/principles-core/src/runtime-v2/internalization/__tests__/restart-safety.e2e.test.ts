@@ -23,7 +23,7 @@ interface StageSummary {
   stage: string;
   tasks: Record<string, string>;
   approvals: number;
-  activations: Array<{ activation_id: string; action: string }>;
+  activations: { activation_id: string; action: string }[];
   commit?: string;
   runStatus?: string;
   reconcile?: { scanned: number; recovered: number; alreadyMaterialized: number; blocked: number };

@@ -36,7 +36,7 @@
 *   **`stages` (阶级门槛)**:
     *   `stage_1_observer` (默认: 30): 低于 30 分，AI 沦为纯“只读”模式，只能帮你查 Bug，不能改代码。
     *   `stage_2_editor` (默认: 60): 能改小段代码，不能碰核心区。
-    *   `stage_3_developer` (默认: 80): 可以修改核心代码，但必须先写 `PLAN.md` 计划书。
+    *   `stage_3_developer` (默认: 80): 可以修改核心代码，但需要遵守 Owner 已审批的行为原则。
 *   **`penalties` (扣分项)**:
     *   `tool_failure_base` (默认: -8): 报错一次扣 8 分。
     *   `risky_failure_base` (默认: -15): 在核心保护区报错，罪加一等，扣 15 分。

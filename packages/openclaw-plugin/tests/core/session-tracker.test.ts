@@ -11,7 +11,6 @@ import {
     resetFriction,
     initPersistence,
     trackBlock,
-    recordThinkingCheckpoint,
 } from '../../src/core/session-tracker.js';
 
 describe('Session Tracker', () => {
@@ -178,14 +177,15 @@ describe('Session Tracker', () => {
         expect(fs.existsSync(path.join(tempDir, 'sessions', 'session-b.json'))).toBe(true);
     });
 
-    it('should refresh control activity timestamps for block and thinking updates', () => {
+    it('should refresh control activity timestamps for block updates', () => {
         trackBlock(sessionId);
-        let state = getSession(sessionId);
+        const state = getSession(sessionId);
         const blockTs = state?.lastControlActivityAt ?? 0;
         expect(blockTs).toBeGreaterThan(0);
-
-        recordThinkingCheckpoint(sessionId);
-        state = getSession(sessionId);
-        expect((state?.lastControlActivityAt ?? 0) >= blockTs).toBe(true);
     });
+
+    // Thinking checkpoint retirement (2026-08-19, Wave 4): the
+    // recordThinkingCheckpoint/hasRecentThinking tests were removed together
+    // with the API — the retired recentThinking rule input had no remaining
+    // consumer after rule-real-diagnosis-first v2 migration.
 });

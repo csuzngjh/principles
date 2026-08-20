@@ -314,7 +314,6 @@ export class PathResolver {
             'SYSTEM_CAPABILITIES': workspacePath.join(state, 'SYSTEM_CAPABILITIES.json'),
             'PAIN_SETTINGS': workspacePath.join(state, 'pain_settings.json'),
             'PAIN_CANDIDATES': workspacePath.join(state, 'pain_candidates.json'),
-            'THINKING_OS_USAGE': workspacePath.join(state, 'thinking_os_usage.json'),
             'DICTIONARY': workspacePath.join(state, 'pain_dictionary.json'),
             'STATE_DIR': state,
             'EXTENSION_ROOT': extensionRoot,
@@ -328,7 +327,8 @@ export class PathResolver {
             'OKR_DIR': workspacePath.join(memory, 'okr'),
             'CURRENT_FOCUS': workspacePath.join(memory, 'okr', 'CURRENT_FOCUS.md'),
             'WEEK_STATE': workspacePath.join(memory, 'okr', 'WEEK_STATE.json'),
-            'THINKING_OS_CANDIDATES': workspacePath.join(memory, 'THINKING_OS_CANDIDATES.md'),
+            // THINKING_OS_CANDIDATES removed (2026-08-20): /pd-thinking
+            // propose retired — write-only orphan with no reader/promoter.
             'EVOLUTION_STREAM': workspacePath.join(memory, 'evolution.jsonl'),
             'EVOLUTION_LOCK': workspacePath.join(memory, '.locks', 'evolution'),
             'PRINCIPLE_BLACKLIST': workspacePath.join(state, 'principle_blacklist.json'),

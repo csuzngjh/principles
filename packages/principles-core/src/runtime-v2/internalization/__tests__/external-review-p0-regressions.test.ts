@@ -48,9 +48,9 @@ function meta(o: Record<string, unknown> = {}): string {
   });
 }
 
-async function mkTask(taskId: string, taskKind: string, diagnosticJson: string, status = 'pending'): Promise<void> {
+async function mkTask(taskId: string, taskKind: string, diagnosticJson: string): Promise<void> {
   await stateManager.createTask({
-    taskId, taskKind, status: status as never, attemptCount: 0, maxAttempts: 3, diagnosticJson,
+    taskId, taskKind, status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson,
   });
 }
 
@@ -189,7 +189,7 @@ describe('P1-1 — artificer 真实消费 rollout requiredChanges', () => {
 
     const runner = new ArtificerRunner({
       stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
-      artifactStore, validator: new DefaultArtificerValidator(), contentHashFn: undefined as never,
+      artifactStore, validator: new DefaultArtificerValidator(), contentHashFn: undefined,
     }, { owner: 'p11', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
 
     // fetchOutput 返回 null → runner 走失败路径;但 prompt 已捕获 — 断言 prompt 内容

@@ -38,7 +38,6 @@ const mockEvolution = {
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn(() => ({ currentGfi: 0 })),
   trackBlock: vi.fn(),
-  hasRecentThinking: vi.fn(() => false),
 }));
 
 vi.mock('../../src/core/evolution-engine.js', () => ({
@@ -66,6 +65,10 @@ vi.mock('../../src/core/rule-host.js', () => ({
     // "this._ruleHost?.dispose is not a function".
     this.dispose = () => {};
   }),
+  // P1 (2026-08-20): gate.ts routes compatibility-guard blocks through this type
+  // guard; the mocked rule-host must export it so mocked evaluate() results are
+  // not misrouted.
+  isCompatibilityGuardBlock: vi.fn(() => false),
 }));
 
 vi.mock('../../src/core/principle-tree-ledger.js', () => ({

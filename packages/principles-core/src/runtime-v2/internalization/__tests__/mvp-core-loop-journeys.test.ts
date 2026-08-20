@@ -16,6 +16,7 @@ import * as os from 'os';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import { InternalizationOrchestrator } from '../internalization-orchestrator.js';
 import { RolloutReviewerRunner } from '../rollout-reviewer-runner.js';
+import type { RolloutReviewerRunnerDeps } from '../rollout-reviewer-runner.js';
 import { EvaluatorRunner } from '../evaluator-runner.js';
 import { DefaultEvaluatorValidator } from '../evaluator-output.js';
 import { DefaultRolloutReviewerValidator } from '../rollout-reviewer-output.js';
@@ -99,6 +100,35 @@ async function countTasks(): Promise<Map<string, { status: string; kind: string 
   const map = new Map<string, { status: string; kind: string }>();
   for (const t of tasks) map.set(t.taskId, { status: t.status, kind: t.taskKind });
   return map;
+}
+
+// ── SQL 计数 helpers (经独立只读连接) ───────────────────────────────────────
+
+function withDb<T>(fn: (db: { prepare: (sql: string) => { get: (...a: unknown[]) => T; all: (...a: unknown[]) => unknown[] } }) => T): T {
+  const conn = new SqliteConnection(workspaceDir);
+  try {
+    return fn(conn.getDb() as never);
+  } finally {
+    try { conn.close(); } catch { /* best-effort */ }
+  }
+}
+
+function countApprovals(): number {
+  return withDb((db) => {
+    const row = db.prepare('SELECT COUNT(*) AS c FROM approvals').get() as unknown as { c: number };
+    return row.c;
+  });
+}
+
+function countActivations(): number {
+  return withDb((db) => {
+    const row = db.prepare('SELECT COUNT(*) AS c FROM activations').get() as unknown as { c: number };
+    return row.c;
+  });
+}
+
+function listActivations(): Record<string, unknown>[] {
+  return withDb((db) => db.prepare('SELECT * FROM activations').all() as Record<string, unknown>[]);
 }
 
 // ── Journey 5/6: evaluator revision 状态机 ──────────────────────────────────
@@ -263,7 +293,7 @@ async function seedRolloutLineage(evaluatorValidated: boolean): Promise<SqlitePI
   return artifactStore;
 }
 
-function makeDispatcherDeps(): { dispatchActivation: NonNullable<import('../rollout-reviewer-runner.js').RolloutReviewerRunnerDeps['dispatchActivation']> } {
+function makeDispatcherDeps(): { dispatchActivation: NonNullable<RolloutReviewerRunnerDeps['dispatchActivation']> } {
   return {
     dispatchActivation: async (input) => {
       // 与 plugin auto-consumer-governance-wiring 相同的真实接线 (core 内联版)
@@ -516,32 +546,3 @@ describe('Journey 8 — 真实 EvaluatorRunner → RolloutReviewerRunner → Act
     expect(countActivations()).toBe(0);
   });
 });
-
-// ── SQL 计数 helpers (经独立只读连接) ───────────────────────────────────────
-
-function withDb<T>(fn: (db: { prepare: (sql: string) => { get: (...a: unknown[]) => T; all: (...a: unknown[]) => unknown[] } }) => T): T {
-  const conn = new SqliteConnection(workspaceDir);
-  try {
-    return fn(conn.getDb() as never);
-  } finally {
-    try { conn.close(); } catch { /* best-effort */ }
-  }
-}
-
-function countApprovals(): number {
-  return withDb((db) => {
-    const row = db.prepare('SELECT COUNT(*) AS c FROM approvals').get() as unknown as { c: number };
-    return row.c;
-  });
-}
-
-function countActivations(): number {
-  return withDb((db) => {
-    const row = db.prepare('SELECT COUNT(*) AS c FROM activations').get() as unknown as { c: number };
-    return row.c;
-  });
-}
-
-function listActivations(): Array<Record<string, unknown>> {
-  return withDb((db) => db.prepare('SELECT * FROM activations').all() as Array<Record<string, unknown>>);
-}
