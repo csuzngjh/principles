@@ -33,6 +33,7 @@ registry.given('workspace 中存在可查看的原则', async (ctx, page, api) =
 });
 
 registry.given('该原则的治理投影需要 Owner 决策', async (ctx, page) => {
+  await page.setViewportSize({ width: 375, height: 812 });
   const principleId = String(ctx.state.principleId);
   await page.route(`**/api/v1/principles/${encodeURIComponent(principleId)}/governance`, async route => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
@@ -87,6 +88,7 @@ registry.then('Owner 能看到治理状态、来源可信度和下一步安全�
   await expect(summary).toContainText(/decision|决策/i);
   await expect(summary).toContainText(/Source-backed|有来源支撑/i);
   await expect(page.getByTestId('governance-next-action')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 registry.then('默认视图不暴露技术证据标识', async (ctx, page) => {
