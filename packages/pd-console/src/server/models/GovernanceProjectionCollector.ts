@@ -152,11 +152,48 @@ export class GovernanceProjectionCollector {
       const runnerVerdicts: RunnerVerdictFact[] = [];
       const derivedRelations: DerivedRelationFact[] = [];
       const revisionIdentities: RevisionIdentity[] = [];
+      const timelineEvents: TimelineEvent[] = [];
+      const strongArtifactIds = new Set(artifactIds);
+      const materializedRevisionSources = new Set<string>();
       for (const taskId of connected) {
         const task = validTasks.get(taskId);
         if (task === undefined) {
           collectionIssues.push(issue({ source: 'task', reasonCode: 'metadata_malformed', nextActionCode: 'repair_task_metadata', sourceRef: { type: 'task', id: taskId } }));
           continue;
+        }
+        if (task.revisionIdentity !== undefined) {
+          const identity = task.revisionIdentity;
+          const sourceTaskId = identity.kind === 'evaluator_repair'
+            ? identity.sourceEvaluatorTaskId
+            : identity.kind === 'rollout_reopen' ? identity.sourceRolloutTaskId : undefined;
+          const sourceArtifactId = identity.kind === 'evaluator_repair'
+            ? identity.sourceArtificerArtifactId
+            : identity.kind === 'rollout_reopen' ? identity.sourceArtifactId : undefined;
+          if (sourceTaskId === undefined || sourceArtifactId === undefined
+            || !connected.has(sourceTaskId) || !strongArtifactIds.has(sourceArtifactId)) {
+            collectionIssues.push(issue({
+              source: 'lineage', reasonCode: 'lineage_conflict', nextActionCode: 'repair_revision_lineage',
+              sourceRef: { type: 'task', id: task.taskId },
+            }));
+            continue;
+          }
+          revisionIdentities.push(identity);
+          materializedRevisionSources.add(sourceTaskId);
+          derivedRelations.push({
+            schemaVersion: '1', family: 'derived_relation', sourceRef: { type: 'task', id: task.taskId }, principleId,
+            taskId: task.taskId, lineageConfidence: 'strong', recordedAt: task.updatedAt,
+            revisionIdentity: identity, relation: 'revision_materialized',
+            evidenceRefs: [
+              { type: 'task', id: sourceTaskId },
+              { type: 'artifact', id: sourceArtifactId },
+              { type: 'task', id: task.taskId },
+            ],
+          });
+          timelineEvents.push({
+            code: 'revision_reopened', occurredAt: task.createdAt, recordedAt: task.updatedAt,
+            summaryCode: 'governance.timeline.revision_reopened', sourceRef: { type: 'task', id: task.taskId },
+            lineageConfidence: 'strong',
+          });
         }
         const fact: TaskFact = {
           schemaVersion: '1', family: 'task', sourceRef: { type: 'task', id: task.taskId }, principleId,
@@ -168,7 +205,6 @@ export class GovernanceProjectionCollector {
         if (task.lastErrorCategory !== undefined) fact.lastErrorCategory = task.lastErrorCategory;
         if (task.revisionIdentity !== undefined) {
           fact.revisionIdentity = task.revisionIdentity;
-          revisionIdentities.push(task.revisionIdentity);
         }
         if (task.completionIntent !== undefined) fact.completionIntent = task.completionIntent;
         tasks.push(fact);
@@ -179,6 +215,16 @@ export class GovernanceProjectionCollector {
             taskId: task.taskId, lineageConfidence: 'strong', recordedAt: task.updatedAt,
             runnerKind: task.taskKind, outcome: task.runnerDecision,
           });
+          timelineEvents.push({
+            code: 'review_started', occurredAt: task.createdAt, recordedAt: task.updatedAt,
+            summaryCode: 'governance.timeline.review_started', sourceRef: fact.sourceRef, lineageConfidence: 'strong',
+          });
+          if (task.runnerDecision === 'needs_revision') {
+            timelineEvents.push({
+              code: 'revision_requested', occurredAt: task.updatedAt, recordedAt: task.updatedAt,
+              summaryCode: 'governance.timeline.revision_requested', sourceRef: fact.sourceRef, lineageConfidence: 'strong',
+            });
+          }
         } else if ((task.taskKind === 'evaluator' || task.taskKind === 'rollout_reviewer') && task.status === 'succeeded') {
           derivedRelations.push({
             schemaVersion: '1', family: 'derived_relation', sourceRef: fact.sourceRef, principleId,
@@ -186,12 +232,29 @@ export class GovernanceProjectionCollector {
             relation: 'verdict_missing', evidenceRefs: [fact.sourceRef],
           });
         }
+        if (task.status === 'failed' || task.status === 'needs_human_review') {
+          const code = task.status === 'failed' ? 'failed' : 'human_review';
+          timelineEvents.push({
+            code, occurredAt: task.updatedAt, recordedAt: task.updatedAt,
+            summaryCode: `governance.timeline.${code}`, sourceRef: fact.sourceRef, lineageConfidence: 'strong',
+          });
+        }
       }
       tasks.sort((left, right) => (left.taskId ?? '').localeCompare(right.taskId ?? ''));
+      const strongTaskIds = new Set(tasks.map(task => task.taskId).filter((taskId): taskId is string => taskId !== undefined));
+      for (const task of tasks) {
+        const {taskId} = task;
+        if (taskId === undefined || task.completionIntent?.status !== 'pending' || materializedRevisionSources.has(taskId)) continue;
+        derivedRelations.push({
+          schemaVersion: '1', family: 'derived_relation', sourceRef: task.sourceRef, principleId,
+          taskId, lineageConfidence: 'strong', recordedAt: task.recordedAt,
+          relation: 'revision_pending', evidenceRefs: [task.sourceRef],
+        });
+      }
       for (const successor of [...validTasks.values()].sort((left, right) => left.taskId.localeCompare(right.taskId))) {
-        if (!connected.has(successor.taskId)) continue;
+        if (!strongTaskIds.has(successor.taskId)) continue;
         for (const dependencyTaskId of [...successor.dependencyTaskIds].sort()) {
-          if (!connected.has(dependencyTaskId)) continue;
+          if (!strongTaskIds.has(dependencyTaskId)) continue;
           derivedRelations.push({
             schemaVersion: '1', family: 'derived_relation', sourceRef: { type: 'task', id: dependencyTaskId }, principleId,
             taskId: dependencyTaskId, lineageConfidence: 'strong', recordedAt: successor.updatedAt,
@@ -201,10 +264,8 @@ export class GovernanceProjectionCollector {
         }
       }
 
-      const strongArtifactIds = new Set(artifactIds);
       const approvals: ApprovalFact[] = [];
       const activations: ActivationFact[] = [];
-      const timelineEvents: TimelineEvent[] = [];
       for (const row of db.prepare('SELECT * FROM approvals ORDER BY approval_id ASC').all()) {
         if (!isRecord(row)) continue;
         const artifactId = readOwnString(row, 'artifact_id');
@@ -280,7 +341,7 @@ export class GovernanceProjectionCollector {
 
       return GovernanceProjectionCollector.finish({
         principleId, asOf, principle, collectionIssues, artifactIds,
-        taskIds: [...connected].sort(), tasks, revisionIdentities, sourceRefs,
+        taskIds: [...strongTaskIds].sort(), tasks, revisionIdentities, sourceRefs,
         runnerVerdicts, derivedRelations, approvals, activations, timelineEvents,
       });
     } catch (error: unknown) {

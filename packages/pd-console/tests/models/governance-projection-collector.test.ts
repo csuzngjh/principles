@@ -250,4 +250,154 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
       evidenceRefs: [{ type: 'task', id: 'task-root' }, { type: 'task', id: 'task-evaluator' }],
     }));
   });
+
+  it('distinguishes pending revision intent from a materialized evaluator repair', async () => {
+    const connection = createStateDb();
+    const db = connection.getDb();
+    const evaluatorMetadata = createPITaskDiagnosticJson({
+      dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000,
+      inputArtifactRefs: [], outputArtifactRefs: [], runnerDecision: 'needs_revision',
+      completionIntent: {
+        decision: 'needs_revision', sourceRunId: 'run-evaluator', status: 'pending',
+        revisionEpoch: 1, effect: 'governance_transition',
+      },
+    });
+    const repairMetadata = createPITaskDiagnosticJson({
+      dependencyTaskIds: ['task-evaluator'], channel: 'prompt', timeoutMs: 30_000,
+      inputArtifactRefs: [], outputArtifactRefs: [],
+      repairPayload: {
+        requiredChanges: ['tighten evidence'], concerns: [], previousScore: 0.6,
+        repairIteration: 1, sourceArtificerArtifactId: 'artifact-root',
+        sourceEvaluatorTaskId: 'task-evaluator',
+      },
+    });
+    const insertTask = db.prepare(`INSERT INTO tasks
+      (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES (?, ?, ?, ?, ?, 1, 3, ?)`);
+    insertTask.run('task-evaluator', 'evaluator', 'succeeded', '2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', evaluatorMetadata);
+    insertTask.run('task-repair', 'artificer', 'pending', '2026-08-20T08:11:00.000Z', '2026-08-20T08:12:00.000Z', repairMetadata);
+    db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-root', 'principle', 'task-evaluator', 'principle-1', '[]', 'validated', '{}', ?, ?)`)
+      .run('2026-08-20T08:05:00.000Z', '2026-08-20T08:10:00.000Z');
+    connection.close();
+
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    expect(facts.derivedRelations).toContainEqual(expect.objectContaining({
+      relation: 'revision_materialized', taskId: 'task-repair',
+      evidenceRefs: [
+        { type: 'task', id: 'task-evaluator' },
+        { type: 'artifact', id: 'artifact-root' },
+        { type: 'task', id: 'task-repair' },
+      ],
+    }));
+    expect(facts.derivedRelations).not.toContainEqual(expect.objectContaining({
+      relation: 'revision_pending', taskId: 'task-evaluator',
+    }));
+    expect(facts.timelineEvents.map(event => event.code)).toEqual([
+      'review_started', 'revision_requested', 'revision_reopened',
+    ]);
+  });
+
+  it('reports a pending revision when durable intent has no materialized revision task', async () => {
+    const connection = createStateDb();
+    const db = connection.getDb();
+    const metadata = createPITaskDiagnosticJson({
+      dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000,
+      inputArtifactRefs: [], outputArtifactRefs: [], runnerDecision: 'needs_revision',
+      completionIntent: {
+        decision: 'needs_revision', sourceRunId: 'run-evaluator', status: 'pending',
+        revisionEpoch: 1, effect: 'governance_transition',
+      },
+    });
+    db.prepare(`INSERT INTO tasks
+      (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES ('task-evaluator', 'evaluator', 'succeeded', ?, ?, 1, 3, ?)`)
+      .run('2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', metadata);
+    db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-root', 'principle', 'task-evaluator', 'principle-1', '[]', 'validated', '{}', ?, ?)`)
+      .run('2026-08-20T08:05:00.000Z', '2026-08-20T08:10:00.000Z');
+    connection.close();
+
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    expect(facts.derivedRelations).toContainEqual(expect.objectContaining({
+      relation: 'revision_pending', taskId: 'task-evaluator',
+      evidenceRefs: [{ type: 'task', id: 'task-evaluator' }],
+    }));
+  });
+
+  it('rejects a revision identity whose source evidence is outside canonical lineage', async () => {
+    const connection = createStateDb();
+    const db = connection.getDb();
+    const repairMetadata = createPITaskDiagnosticJson({
+      dependencyTaskIds: ['task-root'], channel: 'prompt', timeoutMs: 30_000,
+      inputArtifactRefs: [], outputArtifactRefs: [],
+      repairPayload: {
+        requiredChanges: ['tighten evidence'], concerns: [], previousScore: 0.6,
+        repairIteration: 1, sourceArtificerArtifactId: 'artifact-foreign',
+        sourceEvaluatorTaskId: 'task-foreign',
+      },
+    });
+    const rootMetadata = createPITaskDiagnosticJson({
+      dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000,
+      inputArtifactRefs: [], outputArtifactRefs: [],
+    });
+    const insertTask = db.prepare(`INSERT INTO tasks
+      (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES (?, 'artificer', ?, ?, ?, 1, 3, ?)`);
+    insertTask.run('task-root', 'succeeded', '2026-08-20T07:50:00.000Z', '2026-08-20T07:55:00.000Z', rootMetadata);
+    insertTask.run('task-repair', 'pending', '2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', repairMetadata);
+    db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-root', 'principle', 'task-root', 'principle-1', '[]', 'validated', '{}', ?, ?)`)
+      .run('2026-08-20T08:05:00.000Z', '2026-08-20T08:10:00.000Z');
+    connection.close();
+
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    expect(facts.tasks.map(task => task.taskId)).toEqual(['task-root']);
+    expect(facts.derivedRelations).not.toContainEqual(expect.objectContaining({ relation: 'revision_materialized' }));
+    expect(facts.derivedRelations).not.toContainEqual(expect.objectContaining({
+      relation: 'successor_present', evidenceRefs: expect.arrayContaining([{ type: 'task', id: 'task-repair' }]),
+    }));
+    expect(facts.collectionIssues).toContainEqual(expect.objectContaining({
+      source: 'lineage', reasonCode: 'lineage_conflict', nextActionCode: 'repair_revision_lineage',
+      sourceRef: { type: 'task', id: 'task-repair' },
+    }));
+  });
+
+  it('bounds canonical lineage traversal and reports overflow instead of returning an unbounded graph', async () => {
+    const connection = createStateDb();
+    const db = connection.getDb();
+    const insertTask = db.prepare(`INSERT INTO tasks
+      (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES (?, 'artificer', 'succeeded', ?, ?, 1, 3, ?)`);
+    const transaction = db.transaction(() => {
+      for (let index = 0; index < 501; index += 1) {
+        const taskId = `task-${String(index).padStart(3, '0')}`;
+        const dependencyTaskIds = index === 0 ? [] : [`task-${String(index - 1).padStart(3, '0')}`];
+        insertTask.run(taskId, '2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', createPITaskDiagnosticJson({
+          dependencyTaskIds, channel: 'prompt', timeoutMs: 30_000,
+          inputArtifactRefs: [], outputArtifactRefs: [],
+        }));
+      }
+    });
+    transaction();
+    db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-root', 'principle', 'task-000', 'principle-1', '[]', 'validated', '{}', ?, ?)`)
+      .run('2026-08-20T08:05:00.000Z', '2026-08-20T08:10:00.000Z');
+    connection.close();
+
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    expect(facts.tasks).toHaveLength(500);
+    expect(facts.lineage.confidence).toBe('weak');
+    expect(facts.collectionIssues).toContainEqual(expect.objectContaining({
+      source: 'lineage', reasonCode: 'lineage_limit_exceeded', nextActionCode: 'reduce_or_repair_lineage',
+    }));
+  });
 });
