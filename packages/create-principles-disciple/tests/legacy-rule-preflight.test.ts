@@ -172,12 +172,83 @@ describe('parseCompatibilityScanStdout', () => {
     expect(out.remediation).toContain('Repair the workspace database');
   });
 
-  it('unknown status → fails closed as a refusal', () => {
+  it('scan_unavailable (ok=false) → refuse with scan_unavailable status preserved', () => {
+    const out = parseCompatibilityScanStdout(
+      JSON.stringify({ ok: false, status: 'scan_unavailable', reason: 'compatibility_scan_unavailable' }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_unavailable');
+    expect(out.reason).toContain('scan_unavailable');
+    expect(out.remediation).toContain('Re-download/rebuild the installer');
+  });
+
+  it('ok=false + clean → protocol invalid, fails closed (scan_failed)', () => {
+    const out = parseCompatibilityScanStdout(JSON.stringify({ ok: false, status: 'clean' }));
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('compatibility_scan_protocol_invalid');
+    expect(out.reason).toContain('ok=false with status=clean');
+    expect(out.remediation).toBeTruthy();
+  });
+
+  it('ok=false + no_state_db → protocol invalid, fails closed (scan_failed)', () => {
+    const out = parseCompatibilityScanStdout(JSON.stringify({ ok: false, status: 'no_state_db' }));
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('compatibility_scan_protocol_invalid');
+  });
+
+  it('ok=false + unknown status → protocol invalid, fails closed (scan_failed)', () => {
     const out = parseCompatibilityScanStdout(JSON.stringify({ ok: false, status: 'something_else' }));
     expect(out.ok).toBe(false);
     expect(out.status).toBe('scan_failed');
-    expect(out.reason).toContain('unknown scanner status');
+    expect(out.reason).toContain('compatibility_scan_protocol_invalid');
     expect(out.remediation).toBeTruthy();
+  });
+
+  it('ok=true + legacy_dependency → protocol contradiction, fails closed', () => {
+    const out = parseCompatibilityScanStdout(
+      JSON.stringify({ ok: true, status: 'legacy_dependency', reason: 'legacy_rule_contract_dependency' }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('compatibility_scan_protocol_invalid');
+    expect(out.reason).toContain('ok=true with status=legacy_dependency');
+  });
+
+  it('ok=true + scan_failed → protocol contradiction, fails closed', () => {
+    const out = parseCompatibilityScanStdout(JSON.stringify({ ok: true, status: 'scan_failed' }));
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('compatibility_scan_protocol_invalid');
+  });
+
+  it('ok=true + unknown status → protocol contradiction, fails closed', () => {
+    const out = parseCompatibilityScanStdout(JSON.stringify({ ok: true, status: 'mystery' }));
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('compatibility_scan_protocol_invalid');
+    expect(out.reason).toContain('ok=true with status=mystery');
+  });
+
+  it('ok=true + missing status → protocol contradiction, fails closed', () => {
+    const out = parseCompatibilityScanStdout(JSON.stringify({ ok: true }));
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('compatibility_scan_protocol_invalid');
+    expect(out.reason).toContain('ok=true with status=unknown');
+  });
+
+  it('missing / non-boolean ok → protocol invalid, fails closed', () => {
+    const missing = parseCompatibilityScanStdout(JSON.stringify({ status: 'clean' }));
+    expect(missing.ok).toBe(false);
+    expect(missing.status).toBe('scan_failed');
+    expect(missing.reason).toContain('compatibility_scan_protocol_invalid');
+
+    const stringOk = parseCompatibilityScanStdout(JSON.stringify({ ok: 'true', status: 'clean' }));
+    expect(stringOk.ok).toBe(false);
+    expect(stringOk.status).toBe('scan_failed');
+    expect(stringOk.reason).toContain('compatibility_scan_protocol_invalid');
   });
 
   it('empty / non-JSON stdout → unreadable scan_failed', () => {

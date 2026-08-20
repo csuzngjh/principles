@@ -46,6 +46,10 @@ vi.mock('../../src/core/rule-host.js', () => ({
   RuleHost: vi.fn(function(this: unknown, _stateDir: string, _logger: unknown) {
     this.evaluate = _mockEvaluate;
   }),
+  // P1 (2026-08-20): the gate now routes compatibility-guard blocks through
+  // this type guard; the mocked rule-host must export it so the mocked
+  // evaluate() results (no diagnostics.kind) are NOT misrouted.
+  isCompatibilityGuardBlock: vi.fn(() => false),
 }));
 vi.mock('../../src/core/workspace-context.js', () => ({
   WorkspaceContext: {

@@ -117,6 +117,34 @@ function isRuleHostMeta(value: unknown): value is RuleHostMeta {
   );
 }
 
+/**
+ * P1 (2026-08-20): Compatibility Guard type guard.
+ *
+ * Distinguishes a runtime compatibility fail-closed block (an active
+ * owner-approved RuleCode depends on a retired contract symbol and was NEVER
+ * executed) from a real Principle-enforcement block (RuleCode actually ran
+ * and returned block).
+ *
+ * Machine semantics: the block is a RUNTIME safety guard, not behavioral
+ * evidence. The OpenClaw gate MUST use this guard (branching on
+ * `diagnostics.kind` / `diagnostics.code`) and must NOT use
+ * reason.startsWith/includes text matching.
+ */
+export function isCompatibilityGuardBlock(
+  result: RuleHostResult | undefined,
+): result is RuleHostResult & {
+  diagnostics: {
+    kind: 'compatibility_guard';
+    code: 'legacy_rule_contract_dependency';
+  };
+} {
+  return (
+    result?.decision === 'block' &&
+    result.diagnostics?.kind === 'compatibility_guard' &&
+    result.diagnostics?.code === 'legacy_rule_contract_dependency'
+  );
+}
+
 export class RuleHost {
   private readonly stateDir: string;
   private logger: RuleHostLogger;
@@ -233,7 +261,15 @@ export class RuleHost {
       );
       if (incompatibleLive) {
         const nextAction = 'Migrate or deactivate this legacy RuleCode and approve a compatible replacement.';
+        // P1 (2026-08-20): machine-readable Compatibility Guard semantics.
+        // This fail-closed block is a RUNTIME safety guard caused by an
+        // incompatible persisted RuleCode — it is NOT evidence that the
+        // owner-approved RuleCode itself executed. `kind` + `code` are the
+        // machine discriminator fields; downstream (gate.ts) MUST branch on
+        // them, never on reason.startsWith/includes text.
         const diagnostics: Record<string, unknown> = {
+          kind: 'compatibility_guard',
+          code: 'legacy_rule_contract_dependency',
           activationId: incompatibleLive.activationId,
           nextAction,
         };

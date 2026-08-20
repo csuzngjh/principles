@@ -429,9 +429,12 @@ export type LegacyRulePreflightRunner = (
   workspaceDir: string,
 ) => Promise<LegacyRulePreflightOutcome>;
 
-/** Map a scanner status into the preflight refusal contract (P1-3). */
+/** Refusal statuses a scanner payload may legitimately carry (ok=false). */
+type PreflightRefusalStatus = Extract<CompatibilityStatus, 'legacy_dependency' | 'scan_failed' | 'scan_unavailable'>;
+
+/** Map a scanner refusal status into the preflight refusal contract (P1-3). */
 function refuseForStatus(
-  status: string,
+  status: PreflightRefusalStatus,
   parsedReason: string | undefined,
   remediation: string | undefined,
 ): LegacyRulePreflightOutcome {
@@ -452,20 +455,40 @@ function refuseForStatus(
           ? { remediation }
           : { remediation: 'Repair the workspace database or its permissions, then retry the upgrade. The current installation has not been replaced.' }),
       };
-    default:
-      // Unknown / unrecognized statuses fail closed: we cannot prove the
-      // active RuleCode is compatible, so we refuse rather than guess.
+    case 'scan_unavailable':
       return {
         ok: false,
-        status: 'scan_failed',
-        reason: parsedReason ?? `compatibility_scan_refused: unknown scanner status (${status})`,
+        status: 'scan_unavailable',
+        reason: parsedReason ?? 'compatibility_scan_unavailable',
         ...(remediation !== undefined
           ? { remediation }
-          : { remediation: 'The compatibility scanner returned an unexpected result. Re-download/rebuild the installer before upgrading. The current installation has not been replaced.' }),
+          : { remediation: 'Re-download/rebuild the installer before upgrading. The current installation has not been replaced.' }),
       };
   }
 }
 
+/** Fail closed with the strict protocol-violation reason (P2, 2026-08-20). */
+function protocolInvalid(detail: string): LegacyRulePreflightOutcome {
+  return {
+    ok: false,
+    status: 'scan_failed',
+    reason: `compatibility_scan_protocol_invalid: ${detail}`,
+    remediation: 'The compatibility scanner returned an unexpected result. Re-download/rebuild the installer before upgrading. The current installation has not been replaced.',
+  };
+}
+
+/**
+ * Strict (ok, status) protocol parse (P2, 2026-08-20).
+ *
+ * Boolean `ok` alone is NOT authoritative — the (ok, status) pair is the
+ * contract. Only ok=true + (clean|no_state_db) is a successful scan. Every
+ * other combination fails closed:
+ *   - ok=true + refusal/success-impossible status → protocol invalid
+ *   - ok=false + clean|no_state_db/unknown   → protocol invalid
+ *   - ok=false + legacy_dependency|scan_failed|scan_unavailable → refusal
+ *   - non-boolean / missing ok               → protocol invalid
+ * The payload is never trusted to self-describe a pass.
+ */
 export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflightOutcome {
   if (typeof stdout !== 'string' || stdout.trim().length === 0) {
     return { ok: false, status: 'scan_failed', reason: 'compatibility_scan_unreadable: empty stdout' };
@@ -479,15 +502,25 @@ export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflig
   if (!isRecord(parsed)) {
     return { ok: false, status: 'scan_failed', reason: 'compatibility_scan_unreadable: stdout is not an object' };
   }
-  const ok = parsed.ok === true;
   const status = typeof parsed.status === 'string' ? parsed.status : 'unknown';
   const reason = typeof parsed.reason === 'string' ? parsed.reason : undefined;
   const remediation = typeof parsed.remediation === 'string' ? parsed.remediation : undefined;
-  if (ok) {
-    const cleanStatus: CompatibilityStatus = status === 'no_state_db' ? 'no_state_db' : 'clean';
-    return { ok: true, status: cleanStatus };
+
+  if (parsed.ok === true) {
+    if (status === 'clean' || status === 'no_state_db') {
+      return { ok: true, status };
+    }
+    return protocolInvalid(`ok=true with status=${status}`);
   }
-  return refuseForStatus(status, reason, remediation);
+
+  if (parsed.ok === false) {
+    if (status === 'legacy_dependency' || status === 'scan_failed' || status === 'scan_unavailable') {
+      return refuseForStatus(status, reason, remediation);
+    }
+    return protocolInvalid(`ok=false with status=${status}`);
+  }
+
+  return protocolInvalid(`ok is not a boolean`);
 }
 
 async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir: string): Promise<LegacyRulePreflightOutcome> {
