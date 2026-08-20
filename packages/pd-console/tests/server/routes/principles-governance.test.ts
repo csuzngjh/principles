@@ -61,7 +61,7 @@ describe('PRI-552 GET /api/v1/principles/:id/governance', () => {
     const res = response();
     await handlePrinciplesRoute({ req: request(), res, workspaceDir, subPath: '/principle-1/governance', featureFlags: enableFlag(false), now: () => AS_OF });
     expect(res.statusCode).toBe(403);
-    expect(JSON.parse(res.body)).toMatchObject({ success: false, error: 'principle_governance_projection_disabled', nextAction: expect.any(String) });
+    expect(JSON.parse(res.body)).toMatchObject({ success: false, error: 'feature_disabled', nextAction: expect.any(String) });
     expect(fs.existsSync(path.join(workspaceDir, '.state', 'principle_training_state.json'))).toBe(false);
     expect(fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'))).toBe(false);
   });

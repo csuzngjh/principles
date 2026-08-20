@@ -54,7 +54,7 @@ registry.given('该原则的治理投影需要 Owner 决策', async (ctx, page) 
 registry.given('该原则的治理投影功能已关闭', async (ctx, page) => {
   const principleId = String(ctx.state.principleId);
   await page.route(`**/api/v1/principles/${encodeURIComponent(principleId)}/governance`, async route => {
-    await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'principle_governance_projection_disabled', message: 'disabled', reason: 'feature_disabled', nextAction: 'Enable the flag.' }) });
+    await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'feature_disabled', message: 'disabled', reason: 'feature_disabled', nextAction: 'Enable the flag.' }) });
   });
 });
 
@@ -99,7 +99,7 @@ registry.then('Owner 能看到修订状态和证据不确定性', async (ctx, pa
   await expect(page.getByTestId('governance-summary')).toContainText(/revis|修订/i);
   await expect(page.getByTestId('governance-data-quality')).toBeVisible();
   await expect(page.getByTestId('governance-summary')).toContainText(/Incomplete evidence|证据不完整/i);
-  await expect(page.getByRole('button', { name: /批准原则|Approve principle/i })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /批准原则|Approve principle/i })).toHaveCount(0);
 });
 
 registry.then('原有原则内容仍然显示', async (ctx, page) => {

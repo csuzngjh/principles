@@ -42,7 +42,10 @@ function readOwnString(record: Record<string, unknown>, key: string): string | u
 }
 
 function isTimestamp(value: string | undefined): value is string {
-  return value !== undefined && ISO_UTC.test(value) && Number.isFinite(Date.parse(value));
+  if (value === undefined || !ISO_UTC.test(value)) return false;
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return false;
+  return parsed.toISOString() === (value.includes('.') ? value : value.replace('Z', '.000Z'));
 }
 
 function isGovernanceChannel(value: string | undefined): value is GovernanceChannel {
@@ -80,6 +83,13 @@ interface ValidTaskRow {
   runnerDecision?: RunnerVerdictFact['outcome'];
 }
 
+interface ValidArtifactRow {
+  artifactId: string;
+  sourceTaskId: string;
+  sourcePrincipleId?: string;
+  lineageArtifactIds: string[];
+}
+
 export class GovernanceProjectionCollector {
   constructor(private readonly workspaceDir: string) {}
 
@@ -103,9 +113,11 @@ export class GovernanceProjectionCollector {
       const rootTaskIds: string[] = [];
       const sourceRefs: SourceRef[] = [{ type: 'principle', id: principleId }];
       const artifactRows = db.prepare(`
-        SELECT artifact_id, source_task_id, lineage_artifact_ids, updated_at
-        FROM pi_artifacts WHERE source_principle_id = ? ORDER BY artifact_id ASC
-      `).all(principleId);
+        SELECT artifact_id, source_task_id, source_principle_id, lineage_artifact_ids, updated_at
+        FROM pi_artifacts ORDER BY artifact_id ASC
+      `).all();
+
+      const validArtifacts = new Map<string, ValidArtifactRow>();
 
       for (const row of artifactRows) {
         if (!isRecord(row)) {
@@ -114,18 +126,44 @@ export class GovernanceProjectionCollector {
         }
         const artifactId = readOwnString(row, 'artifact_id');
         const sourceTaskId = readOwnString(row, 'source_task_id');
+        const sourcePrincipleId = readOwnString(row, 'source_principle_id');
         const updatedAt = readOwnString(row, 'updated_at');
         const lineageJson = readOwnString(row, 'lineage_artifact_ids');
+        const lineageArtifactIds = GovernanceProjectionCollector.parseStringArrayJson(lineageJson);
         const artifactRef = artifactId === undefined ? undefined : { type: 'artifact' as const, id: artifactId };
         if (artifactId === undefined || sourceTaskId === undefined || !isTimestamp(updatedAt)
-          || !GovernanceProjectionCollector.isStringArrayJson(lineageJson)) {
-          collectionIssues.push(issue(artifactRef === undefined
-            ? { source: 'artifact', reasonCode: 'metadata_malformed', nextActionCode: 'repair_artifact_metadata' }
-            : { source: 'artifact', reasonCode: 'metadata_malformed', nextActionCode: 'repair_artifact_metadata', sourceRef: artifactRef }));
+          || lineageArtifactIds === null) {
+          if (sourcePrincipleId === principleId) {
+            collectionIssues.push(issue(artifactRef === undefined
+              ? { source: 'artifact', reasonCode: 'metadata_malformed', nextActionCode: 'repair_artifact_metadata' }
+              : { source: 'artifact', reasonCode: 'metadata_malformed', nextActionCode: 'repair_artifact_metadata', sourceRef: artifactRef }));
+          }
           continue;
         }
+        validArtifacts.set(artifactId, {
+          artifactId, sourceTaskId, lineageArtifactIds,
+          ...(sourcePrincipleId === undefined ? {} : { sourcePrincipleId }),
+        });
+      }
+
+      const strongArtifactIds = new Set(
+        [...validArtifacts.values()].filter(row => row.sourcePrincipleId === principleId).map(row => row.artifactId),
+      );
+      let addedArtifact = true;
+      while (addedArtifact) {
+        addedArtifact = false;
+        for (const row of validArtifacts.values()) {
+          if (!strongArtifactIds.has(row.artifactId) && row.lineageArtifactIds.some(id => strongArtifactIds.has(id))) {
+            strongArtifactIds.add(row.artifactId);
+            addedArtifact = true;
+          }
+        }
+      }
+      for (const artifactId of [...strongArtifactIds].sort()) {
+        const artifact = validArtifacts.get(artifactId);
+        if (artifact === undefined) continue;
         artifactIds.push(artifactId);
-        rootTaskIds.push(sourceTaskId);
+        rootTaskIds.push(artifact.sourceTaskId);
         sourceRefs.push({ type: 'artifact', id: artifactId });
       }
 
@@ -143,6 +181,8 @@ export class GovernanceProjectionCollector {
       }
 
       const connected = GovernanceProjectionCollector.connectedTaskIds(rootTaskIds, validTasks, collectionIssues);
+      const taskLineageConfidence: TaskFact['lineageConfidence'] = collectionIssues.some(item =>
+        item.reasonCode === 'lineage_cycle' || item.reasonCode === 'lineage_limit_exceeded') ? 'weak' : 'strong';
       for (const taskIssue of taskRowIssues) {
         if (taskIssue.sourceRef?.type === 'task' && connected.has(taskIssue.sourceRef.id)) {
           collectionIssues.push(taskIssue);
@@ -153,7 +193,6 @@ export class GovernanceProjectionCollector {
       const derivedRelations: DerivedRelationFact[] = [];
       const revisionIdentities: RevisionIdentity[] = [];
       const timelineEvents: TimelineEvent[] = [];
-      const strongArtifactIds = new Set(artifactIds);
       const materializedRevisionSources = new Set<string>();
       for (const taskId of connected) {
         const task = validTasks.get(taskId);
@@ -181,7 +220,7 @@ export class GovernanceProjectionCollector {
           materializedRevisionSources.add(sourceTaskId);
           derivedRelations.push({
             schemaVersion: '1', family: 'derived_relation', sourceRef: { type: 'task', id: task.taskId }, principleId,
-            taskId: task.taskId, lineageConfidence: 'strong', recordedAt: task.updatedAt,
+            taskId: task.taskId, lineageConfidence: taskLineageConfidence, recordedAt: task.updatedAt,
             revisionIdentity: identity, relation: 'revision_materialized',
             evidenceRefs: [
               { type: 'task', id: sourceTaskId },
@@ -192,12 +231,12 @@ export class GovernanceProjectionCollector {
           timelineEvents.push({
             code: 'revision_reopened', occurredAt: task.createdAt, recordedAt: task.updatedAt,
             summaryCode: 'governance.timeline.revision_reopened', sourceRef: { type: 'task', id: task.taskId },
-            lineageConfidence: 'strong',
+            lineageConfidence: taskLineageConfidence,
           });
         }
         const fact: TaskFact = {
           schemaVersion: '1', family: 'task', sourceRef: { type: 'task', id: task.taskId }, principleId,
-          taskId: task.taskId, lineageConfidence: 'strong', recordedAt: task.updatedAt,
+          taskId: task.taskId, lineageConfidence: taskLineageConfidence, recordedAt: task.updatedAt,
           occurredAt: task.createdAt, taskKind: task.taskKind, channel: task.channel, status: task.status,
           attemptCount: task.attemptCount, maxAttempts: task.maxAttempts,
         };
@@ -212,23 +251,23 @@ export class GovernanceProjectionCollector {
         if ((task.taskKind === 'evaluator' || task.taskKind === 'rollout_reviewer') && task.runnerDecision !== undefined) {
           runnerVerdicts.push({
             schemaVersion: '1', family: 'runner_verdict', sourceRef: fact.sourceRef, principleId,
-            taskId: task.taskId, lineageConfidence: 'strong', recordedAt: task.updatedAt,
+            taskId: task.taskId, lineageConfidence: taskLineageConfidence, recordedAt: task.updatedAt,
             runnerKind: task.taskKind, outcome: task.runnerDecision,
           });
           timelineEvents.push({
             code: 'review_started', occurredAt: task.createdAt, recordedAt: task.updatedAt,
-            summaryCode: 'governance.timeline.review_started', sourceRef: fact.sourceRef, lineageConfidence: 'strong',
+            summaryCode: 'governance.timeline.review_started', sourceRef: fact.sourceRef, lineageConfidence: taskLineageConfidence,
           });
           if (task.runnerDecision === 'needs_revision') {
             timelineEvents.push({
               code: 'revision_requested', occurredAt: task.updatedAt, recordedAt: task.updatedAt,
-              summaryCode: 'governance.timeline.revision_requested', sourceRef: fact.sourceRef, lineageConfidence: 'strong',
+              summaryCode: 'governance.timeline.revision_requested', sourceRef: fact.sourceRef, lineageConfidence: taskLineageConfidence,
             });
           }
         } else if ((task.taskKind === 'evaluator' || task.taskKind === 'rollout_reviewer') && task.status === 'succeeded') {
           derivedRelations.push({
             schemaVersion: '1', family: 'derived_relation', sourceRef: fact.sourceRef, principleId,
-            taskId: task.taskId, lineageConfidence: 'strong', recordedAt: task.updatedAt,
+            taskId: task.taskId, lineageConfidence: taskLineageConfidence, recordedAt: task.updatedAt,
             relation: 'verdict_missing', evidenceRefs: [fact.sourceRef],
           });
         }
@@ -236,12 +275,12 @@ export class GovernanceProjectionCollector {
           const code = task.status === 'failed' ? 'failed' : 'human_review';
           timelineEvents.push({
             code, occurredAt: task.updatedAt, recordedAt: task.updatedAt,
-            summaryCode: `governance.timeline.${code}`, sourceRef: fact.sourceRef, lineageConfidence: 'strong',
+            summaryCode: `governance.timeline.${code}`, sourceRef: fact.sourceRef, lineageConfidence: taskLineageConfidence,
           });
         }
       }
       tasks.sort((left, right) => (left.taskId ?? '').localeCompare(right.taskId ?? ''));
-      const strongTaskIds = new Set(tasks.map(task => task.taskId).filter((taskId): taskId is string => taskId !== undefined));
+      const strongTaskIds = new Set(tasks.filter(task => task.lineageConfidence === 'strong').map(task => task.taskId).filter((taskId): taskId is string => taskId !== undefined));
       for (const task of tasks) {
         const {taskId} = task;
         if (taskId === undefined || task.completionIntent?.status !== 'pending' || materializedRevisionSources.has(taskId)) continue;
@@ -341,7 +380,7 @@ export class GovernanceProjectionCollector {
 
       return GovernanceProjectionCollector.finish({
         principleId, asOf, principle, collectionIssues, artifactIds,
-        taskIds: [...strongTaskIds].sort(), tasks, revisionIdentities, sourceRefs,
+        taskIds: tasks.map(task => task.taskId).filter((taskId): taskId is string => taskId !== undefined).sort(), tasks, revisionIdentities, sourceRefs,
         runnerVerdicts, derivedRelations, approvals, activations, timelineEvents,
       });
     } catch (error: unknown) {
@@ -386,13 +425,13 @@ export class GovernanceProjectionCollector {
     return { schemaVersion: '1', family: 'principle', sourceRef: { type: 'principle', id: principleId }, principleId, lineageConfidence: 'strong', recordedAt, state };
   }
 
-  private static isStringArrayJson(value: string | undefined): boolean {
-    if (value === undefined) return false;
+  private static parseStringArrayJson(value: string | undefined): string[] | null {
+    if (value === undefined) return null;
     try {
       const parsed: unknown = JSON.parse(value);
-      return Array.isArray(parsed) && parsed.every(item => typeof item === 'string' && item.length > 0);
+      return Array.isArray(parsed) && parsed.every(item => typeof item === 'string' && item.length > 0) ? parsed : null;
     } catch {
-      return false;
+      return null;
     }
   }
 

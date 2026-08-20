@@ -77,6 +77,13 @@ const governanceNextActionCodes = new Set(['governance.next.review', 'governance
 const lineageConfidences = new Set(['strong', 'weak', 'unknown']);
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
+function isGovernanceTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string' || !timestampPattern.test(value)) return false;
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return false;
+  return parsed.toISOString() === (value.includes('.') ? value : value.replace('Z', '.000Z'));
+}
+
 function hasOwnFields(value: Record<string, unknown>, fields: string[]): boolean {
   return fields.every(field => Object.hasOwn(value, field));
 }
@@ -105,15 +112,15 @@ function isDataQualityIssue(value: unknown): boolean {
 function isTimelineEvent(value: unknown): boolean {
   return isObject(value) && hasOwnFields(value, ['code', 'recordedAt', 'summaryCode', 'sourceRef', 'lineageConfidence'])
     && isStringEnum(value.code, new Set(['pain_created', 'candidate_generated', 'review_started', 'revision_requested', 'revision_reopened', 'approved', 'rejected', 'activated', 'deactivated', 'failed', 'human_review']))
-    && typeof value.recordedAt === 'string' && timestampPattern.test(value.recordedAt)
-    && (!Object.hasOwn(value, 'occurredAt') || (typeof value.occurredAt === 'string' && timestampPattern.test(value.occurredAt)))
+    && isGovernanceTimestamp(value.recordedAt)
+    && (!Object.hasOwn(value, 'occurredAt') || isGovernanceTimestamp(value.occurredAt))
     && typeof value.summaryCode === 'string' && value.summaryCode.length > 0
     && isGovernanceSourceRef(value.sourceRef) && isStringEnum(value.lineageConfidence, lineageConfidences);
 }
 
 function isOwnerGovernanceView(value: unknown): value is OwnerGovernanceView {
   if (!isObject(value) || !hasOwnFields(value, ['schemaVersion', 'principleId', 'asOf', 'summary', 'principleState', 'process', 'automation', 'attention', 'activationSummary', 'timeline', 'sourceRefs', 'dataQuality'])) return false;
-  if (value.schemaVersion !== '1' || typeof value.principleId !== 'string' || value.principleId.length === 0 || typeof value.asOf !== 'string' || !timestampPattern.test(value.asOf)) return false;
+  if (value.schemaVersion !== '1' || typeof value.principleId !== 'string' || value.principleId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
   const {
     summary, principleState: principle, process, automation, attention,
     activationSummary: activation, dataQuality: quality,

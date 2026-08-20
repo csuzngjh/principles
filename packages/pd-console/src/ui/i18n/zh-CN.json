@@ -514,7 +514,8 @@
             "approval_pending": "审批待处理",
             "task_failed": "当前 Runtime 任务失败",
             "human_review_required": "Runtime 请求人工恢复审查",
-            "revision_not_materialized": "请求的修订尚未物化"
+            "revision_not_materialized": "请求的修订尚未物化",
+            "verdict_missing": "自动审查已结束，但缺少持久化结论"
           },
           "issue": {
             "lineage_not_available": "规范血缘尚不可用。",
@@ -523,7 +524,10 @@
             "weak_fact_ignored": "弱事实已从当前权威结论中排除。",
             "lineage_conflict": "冲突血缘证据已被排除。",
             "lineage_cycle": "血缘环路阻止形成权威投影。",
-            "lineage_limit_exceeded": "血缘超过安全投影上限。"
+            "lineage_limit_exceeded": "血缘超过安全投影上限。",
+            "metadata_malformed": "一条持久化记录格式异常，已被排除。",
+            "timestamp_invalid": "一条持久化记录包含无效时间。",
+            "source_unavailable": "Runtime 治理数据源当前不可用。"
           },
           "timelineCode": {
             "pain_created": "痛点证据已记录",

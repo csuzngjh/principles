@@ -222,6 +222,7 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
     const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
 
     expect(facts.lineage.confidence).toBe('weak');
+    expect(facts.tasks.every(task => task.lineageConfidence === 'weak')).toBe(true);
     expect(facts.collectionIssues).toContainEqual(expect.objectContaining({
       source: 'lineage', reasonCode: 'lineage_cycle', nextActionCode: 'repair_task_dependencies',
     }));
@@ -230,11 +231,13 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
   it('collects approvals and activation history only through strong artifact lineage', async () => {
     const connection = createStateDb();
     const db = connection.getDb();
-    const metadata = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] });
-    db.prepare(`INSERT INTO tasks
+    const rootMetadata = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] });
+    const descendantMetadata = createPITaskDiagnosticJson({ dependencyTaskIds: ['task-root'], channel: 'prompt', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] });
+    const insertTask = db.prepare(`INSERT INTO tasks
       (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
-      VALUES ('task-root', 'artificer', 'succeeded', ?, ?, 1, 3, ?)`)
-      .run('2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', metadata);
+      VALUES (?, ?, 'succeeded', ?, ?, 1, 3, ?)`);
+    insertTask.run('task-root', 'artificer', '2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', rootMetadata);
+    insertTask.run('task-descendant', 'evaluator', '2026-08-20T08:15:00.000Z', '2026-08-20T08:20:00.000Z', descendantMetadata);
     db.prepare(`INSERT INTO pi_artifacts
       (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-root', 'principle', 'task-root', 'principle-1', '[]', 'validated', '{}', ?, ?)`)
@@ -259,6 +262,36 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
       activatedAt: '2026-08-20T08:40:00.000Z', deactivatedAt: '2026-08-20T09:00:00.000Z',
     }));
     expect(facts.timelineEvents.map(event => event.code)).toEqual(['approved', 'activated', 'deactivated']);
+  });
+
+  it('treats a validated descendant artifact as strong lineage', async () => {
+    const connection = createStateDb();
+    const db = connection.getDb();
+    const metadata = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000, inputArtifactRefs: [], outputArtifactRefs: [] });
+    db.prepare(`INSERT INTO tasks
+      (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
+      VALUES ('task-root', 'artificer', 'succeeded', ?, ?, 1, 3, ?)`)
+      .run('2026-08-20T08:00:00.000Z', '2026-08-20T08:10:00.000Z', metadata);
+    const insertArtifact = db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, 'principle', 'task-root', ?, ?, 'validated', '{}', ?, ?)`);
+    insertArtifact.run('artifact-root', 'principle-1', '[]', '2026-08-20T08:05:00.000Z', '2026-08-20T08:10:00.000Z');
+    db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-descendant', 'evaluation', 'task-descendant', NULL, '["artifact-root"]', 'validated', '{}', ?, ?)`)
+      .run('2026-08-20T08:15:00.000Z', '2026-08-20T08:20:00.000Z');
+    db.prepare(`INSERT INTO approvals
+      (approval_id, artifact_id, channel, risk_level, status, requested_at)
+      VALUES ('approval-descendant', 'artifact-descendant', 'prompt', 'medium', 'pending', ?)`)
+      .run('2026-08-20T08:30:00.000Z');
+    connection.close();
+
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    expect(facts.lineage.artifactIds).toEqual(['artifact-descendant', 'artifact-root']);
+    expect(facts.approvals).toContainEqual(expect.objectContaining({
+      approvalId: 'approval-descendant', artifactId: 'artifact-descendant', lineageConfidence: 'strong',
+    }));
   });
 
   it('projects durable runner verdicts and successor relationships from validated task metadata', async () => {
@@ -436,6 +469,7 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
 
     expect(facts.tasks).toHaveLength(500);
     expect(facts.lineage.confidence).toBe('weak');
+    expect(facts.tasks.every(task => task.lineageConfidence === 'weak')).toBe(true);
     expect(facts.collectionIssues).toContainEqual(expect.objectContaining({
       source: 'lineage', reasonCode: 'lineage_limit_exceeded', nextActionCode: 'reduce_or_repair_lineage',
     }));

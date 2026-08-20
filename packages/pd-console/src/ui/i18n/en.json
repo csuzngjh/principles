@@ -514,7 +514,8 @@
             "approval_pending": "Approval pending",
             "task_failed": "Current Runtime task failed",
             "human_review_required": "Runtime requested human recovery review",
-            "revision_not_materialized": "Requested revision was not materialized"
+            "revision_not_materialized": "Requested revision was not materialized",
+            "verdict_missing": "Automated review finished without a durable verdict"
           },
           "issue": {
             "lineage_not_available": "Canonical lineage is not available yet.",
@@ -523,7 +524,10 @@
             "weak_fact_ignored": "A weak fact was excluded from current authority.",
             "lineage_conflict": "Conflicting lineage evidence was excluded.",
             "lineage_cycle": "A lineage cycle prevents authoritative projection.",
-            "lineage_limit_exceeded": "The lineage exceeded the safe projection bound."
+            "lineage_limit_exceeded": "The lineage exceeded the safe projection bound.",
+            "metadata_malformed": "A durable record is malformed and was excluded.",
+            "timestamp_invalid": "A durable record has an invalid timestamp.",
+            "source_unavailable": "The Runtime governance source is unavailable."
           },
           "timelineCode": {
             "pain_created": "Pain evidence recorded",

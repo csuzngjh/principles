@@ -1,9 +1,17 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { FormatRegistry, Type, type Static } from '@sinclair/typebox';
 import { PDErrorCategorySchema } from './error-categories.js';
 
 const ISO_8601_UTC_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$';
 const NonEmptyStringSchema = Type.String({ minLength: 1 });
-const TimestampSchema = Type.String({ pattern: ISO_8601_UTC_PATTERN });
+const GOVERNANCE_TIMESTAMP_FORMAT = 'governance-iso-utc';
+FormatRegistry.Set(GOVERNANCE_TIMESTAMP_FORMAT, value => {
+  if (!new RegExp(ISO_8601_UTC_PATTERN).test(value)) return false;
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return false;
+  const normalized = value.includes('.') ? value : value.replace('Z', '.000Z');
+  return parsed.toISOString() === normalized;
+});
+const TimestampSchema = Type.String({ format: GOVERNANCE_TIMESTAMP_FORMAT });
 
 export const GovernanceChannelSchema = Type.Union([Type.Literal('prompt'), Type.Literal('code_tool_hook'), Type.Literal('defer_archive')]);
 export const LineageConfidenceSchema = Type.Union([Type.Literal('strong'), Type.Literal('weak'), Type.Literal('unknown')]);

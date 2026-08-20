@@ -72,6 +72,13 @@ describe('PRI-550 governance projection contracts', () => {
         principle: { ...validFacts.principle, recordedAt: 'not-a-timestamp' },
       },
     ],
+    [
+      'impossible required timestamp',
+      {
+        ...validFacts,
+        principle: { ...validFacts.principle, recordedAt: '2026-99-99T99:99:99.000Z' },
+      },
+    ],
   ])('rejects %s instead of silently skipping it', (_name, value) => {
     expect(Value.Check(runtimeV2.GovernanceFactsSchema, value)).toBe(false);
   });

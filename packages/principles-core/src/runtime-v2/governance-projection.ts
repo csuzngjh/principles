@@ -44,12 +44,14 @@ export function deriveOwnerGovernanceView(input: unknown): OwnerGovernanceView {
     .sort((a, b) => (a.taskId ?? '').localeCompare(b.taskId ?? ''));
   const materializedSources = new Set<string>();
   const revisionTaskIds = new Set<string>();
+  const missingVerdictTaskIds = new Set<string>();
   for (const relation of facts.derivedRelations.filter(item => item.lineageConfidence === 'strong')) {
     if (relation.relation === 'revision_materialized') {
       const source = relation.evidenceRefs.find(ref => ref.type === 'task' && ref.id !== relation.taskId);
       if (source !== undefined) materializedSources.add(source.id);
       if (relation.taskId !== undefined) revisionTaskIds.add(relation.taskId);
     } else if (relation.relation === 'revision_pending' && relation.taskId !== undefined) revisionTaskIds.add(relation.taskId);
+    else if (relation.relation === 'verdict_missing' && relation.taskId !== undefined) missingVerdictTaskIds.add(relation.taskId);
   }
   const verdicts = new Map(facts.runnerVerdicts.filter(v => v.lineageConfidence === 'strong' && v.taskId !== undefined).map(v => [v.taskId ?? '', v.outcome]));
   const recovery: OwnerGovernanceView['attention']['items'] = [];
@@ -67,6 +69,9 @@ export function deriveOwnerGovernanceView(input: unknown): OwnerGovernanceView {
     } else if (task.status === 'failed' || task.status === 'needs_human_review') {
       state = 'stalled';
       recovery.push({ kind: 'recovery', reasonCode: task.status === 'failed' ? 'task_failed' : 'human_review_required', sourceRef: task.sourceRef });
+    } else if (task.status === 'succeeded' && missingVerdictTaskIds.has(task.taskId ?? '')) {
+      state = 'stalled';
+      recovery.push({ kind: 'recovery', reasonCode: 'verdict_missing', sourceRef: task.sourceRef });
     } else if (task.status === 'succeeded' && task.completionIntent?.status === 'pending') state = 'running';
     else if (task.status === 'succeeded' && verdicts.get(task.taskId ?? '') === 'needs_revision' && !materializedSources.has(task.taskId ?? '')) {
       state = 'stalled';

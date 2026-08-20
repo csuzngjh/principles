@@ -185,6 +185,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-095 | Additive envelope/`contentJson` merge uses a key that collides with an existing output-schema field — silently overwrites the legitimate field | PR #1273 |
 | ERR-098 | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing dirs, never silence errors on critical cleanup | PRI-538; PR #1358 (near-miss: worktree node_modules junctioned into shared repo) |
 | ERR-101 | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree | PRI-553 |
+| ERR-102 | Optional governance projection fails open to legacy approval mutation authority | PRI-553 |
 
 ---
 
@@ -304,6 +305,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-102]** | Optional governance projection fails open to legacy approval mutation authority
+
+- **What happened**: The Principle Detail page disabled legacy approval actions only when a validated governance view explicitly said no Owner action was required. If the enabled projection endpoint failed validation or storage access, the page showed an unavailable card but left legacy approval/edit/reject controls authorized from the separate approval-group response.
+- **Why it's wrong**: The governance projection is the authority for whether a strong current pending approval exists. Once enabled, its absence cannot authorize a mutation; falling back to a less constrained reader turns a degraded read path into a privilege bypass.
+- **Generalized failure mode**: When a stricter optional authority gates an existing mutation, code handles explicit deny but not authority-unavailable, so failure falls through to the legacy allow decision.
+- **Correct approach**: Distinguish feature-disabled from enabled-but-unavailable. Preserve legacy behavior only when the feature is disabled; when enabled, show mutation controls only for a validated `owner_required` projection and hide them for deny or unavailable states.
+- **How to prevent**: For every optional authority gate, test all three states: disabled uses legacy behavior, validated allow exposes the action, and validated deny/unavailable hides or refuses the action. Never model unavailable as equivalent to feature-disabled.
+- **Regression guard**: `principle-governance-projection.test.ts` locks the fail-closed decision-control predicate; the browser BDD covers strong approval and flag-off rollback.
+- **Related ERRs**: ERR-009, ERR-024, ERR-033
+- **Source**: PRI-553
+- **Date**: 2026-08-20
+- **Recurrence**: None
+
+---
+
 **[ERR-003]** | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization
 
 - **What happened**: `SECRET_KEY_NAMES.includes()` performed substring matching, causing keys like `tokenizer` and `tokenCount` to be incorrectly sanitized because they contain the substring `"token"`.
@@ -326,6 +342,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — lineage/source fields come from the wrong task or are racy across a read-then-write.
   - 2026-08-20 PRI-550/PRI-551: a revision task rejected by canonical-lineage validation could still be referenced by generic dependency relations, and cross-channel dependencies could collapse independent frontiers. Fixed by deriving every downstream relation from the same validated strong-task set and channel partition, with conflict and cross-channel regressions.
+  - 2026-08-20 PRI-550 final review: cycle/overflow detection downgraded only aggregate lineage while still emitting affected task facts as `strong`, and direct-root-only artifact collection omitted valid descendant approvals/activations. Fixed by propagating task-graph confidence to every affected fact and computing transitive validated artifact lineage before authority folding.
   - 2026-08-13 PRI-523 C1.3 quality review: a supplied host event ID could override canonical identity, so its lineage no longer matched a changed payload/outcome. Fixed by binding workspace/source/session/tool/sanitized payload/outcome and supplied ID into one digest, with collision and exact-retry regressions.
   - 2026-06-20 PRI-435 (PR#982): `resolveSourcePainIdFromDiagnostician()` lacked `taskKind === 'diagnostician'` guard — added kind guard + corruption regression
   - 2026-06-19 PRI-408 (PR#972): `assembleRuleArtifact` set `sourcePrincipleId: undefined`; `sqlite-approval-store.edit()` read-then-write race → atomic `SET previous_artifact_id`
@@ -634,7 +651,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes - same class as ERR-027
 
   - 2026-08-20 PRI-553: the first Governance Status Card exposed raw task/approval source IDs because a child issue's provenance wording was followed more broadly than the frozen design authority. SPEC §16 explicitly keeps source references in diagnostics/tests and forbids them in the Phase 1 default card. Fixed by retaining references in the validated view while removing them from visible card/timeline copy and adding browser assertions that technical IDs are absent.
-  - 2026-08-20 PRI-551/PRI-553: final acceptance found two exact-contract drifts: the projection emitted the synonymous degradation code `lease_not_current` instead of frozen finite-set code `lease_expired_unrecovered`, and flag-on Principle Detail rendered a second timeline instead of enhancing/replacing the existing trajectory while preserving flag-off rollback. Fixed with exact reason-code and timeline-replacement assertions plus real-source degradation coverage.
+  - 2026-08-20 PRI-551/PRI-553: final acceptance/review found exact-contract drifts: a synonymous lease reason code, wrong flag-off API code, regex-only impossible timestamps, an ignored `verdict_missing` relation, and a second/replacement timeline that could hide durable history. Fixed with exact schema/API/derivation assertions and by embedding governance events into the existing trajectory.
 
 ---
 
@@ -1202,6 +1219,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — same EP-11 pattern (i18n-enabled component gets hardcoded source-language strings for new UI elements).
   - 2026-07-01 PR #1143: Three signal-keywords components (KeywordListSection, PendingTermsSection, KeywordEditDialog) hardcoded PHASE2_TOOLTIP, table headers (Term/Category/Precision/Weight/Reason/Actions), category labels, and "X terms" count in English while the component already imported useTranslation — 15 i18n keys added in fix commit b566e886
   - 2026-08-20 PRI-553: newly added zh-CN governance strings used bare `Owner` and `Console`, creating mixed-language visible copy. The existing CR10 locale audit caught all five values; fixed with `拥有者` and `控制台`, and the full Console suite verifies recurrence.
+  - 2026-08-20 PRI-553 final review: collector degradation codes (`metadata_malformed`, `timestamp_invalid`, `source_unavailable`) and the new `verdict_missing` attention reason had no locale entries, so visible degraded paths fell back to raw machine identifiers. Added both-locale keys and registry coverage assertions.
 
 ---
 

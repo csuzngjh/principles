@@ -15,6 +15,10 @@ describe('PRI-552 governance projection client validator', () => {
     expect(validateOwnerGovernanceView(valid)).toEqual(valid);
   });
 
+  it('rejects an impossible ISO-shaped timestamp', () => {
+    expect(validateOwnerGovernanceView({ ...valid, asOf: '2026-99-99T99:99:99.000Z' })).toBeNull();
+  });
+
   it('rejects corrupt nested arrays and inherited-key substitutes', () => {
     expect(validateOwnerGovernanceView({ ...valid, sourceRefs: [{ type: 'principle', id: 42 }] })).toBeNull();
     const inherited = Object.create({ summary: valid.summary });

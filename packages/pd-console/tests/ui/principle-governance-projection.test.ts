@@ -41,8 +41,14 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
     expect(page).not.toContain('{event.sourceRef.type}: {event.sourceRef.id}');
   });
 
-  it('replaces the legacy trajectory only when the governance projection is available', () => {
-    expect(page).toMatch(/governance === null\s*&&\s*\(\s*<details className="mb-8 border border-line/);
+  it('enhances the existing trajectory instead of adding or replacing its durable history', () => {
+    expect(page.indexOf('<details className="mb-8 border border-line')).toBeLessThan(page.indexOf('data-testid="governance-timeline"'));
+    expect(page).not.toContain('governance === null && (\n        <details');
+  });
+
+  it('fails closed and hides decision controls when projection authority is unavailable', () => {
+    expect(page).toContain('const showDecisionControls = governance === null ? governanceUnavailable === null : governanceOwnerRequired');
+    expect(page).toContain('{showDecisionControls && (');
   });
 
   it('gates existing approval actions on projection Owner authority when projection is present', () => {
@@ -59,11 +65,17 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
       expectRecord(governance.state);
       expectRecord(governance.stage);
       expectRecord(governance.automationState);
+      expectRecord(governance.attention);
       expect(Object.keys(governance.state).sort()).toEqual(['active', 'archived', 'candidate', 'deprecated', 'probation']);
       expect(Object.keys(governance.stage).sort()).toEqual(['activation', 'approval', 'generating', 'reviewing', 'revising']);
       expect(Object.keys(governance.automationState).sort()).toEqual(['idle', 'queued', 'retry_scheduled', 'running', 'stalled']);
+      expect(governance.attention.verdict_missing).toEqual(expect.any(String));
       expect(governance.unavailableReason).toEqual(expect.any(String));
       expect(governance.unavailableNextAction).toEqual(expect.any(String));
+      expectRecord(governance.issue);
+      for (const code of ['metadata_malformed', 'timestamp_invalid', 'source_unavailable']) {
+        expect(governance.issue[code]).toEqual(expect.any(String));
+      }
     }
   });
 

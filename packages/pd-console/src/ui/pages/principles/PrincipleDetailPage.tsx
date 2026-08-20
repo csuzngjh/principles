@@ -234,7 +234,8 @@ export function PrincipleDetailPage() {
     }
   }
   const governanceOwnerRequired = governance !== null && governance.attention.primary === 'owner_required';
-  if (governance !== null && !governanceOwnerRequired) {
+  const showDecisionControls = governance === null ? governanceUnavailable === null : governanceOwnerRequired;
+  if (!showDecisionControls) {
     isActionable = false;
     reasonKey = 'principles.detail.governance.actionsNotAuthorized';
     defaultReason = 'No current Owner decision is required.';
@@ -541,26 +542,6 @@ export function PrincipleDetailPage() {
         </section>
       )}
 
-      {governance !== null && (
-        <section className="mb-8" data-testid="governance-timeline">
-          <SectionTitle>{t('principles.detail.governance.timeline')}</SectionTitle>
-          {governance.timeline.length === 0 ? <p className="text-[13px] text-ink-4">{t('principles.detail.governance.timelineEmpty')}</p> : (
-            <ol className="space-y-3 border-l border-line pl-4">
-              {governance.timeline.map((event, index) => {
-                const derived = event.code === 'revision_requested' || event.code === 'revision_reopened';
-                return <li key={`${event.sourceRef.type}-${event.sourceRef.id}-${event.code}-${index}`}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] text-ink-2">{t(`principles.detail.governance.timelineCode.${event.code}`, { defaultValue: event.code })}</span>
-                    <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-ink-4">{t(`principles.detail.governance.${derived ? 'derived' : 'fact'}`)}</span>
-                  </div>
-                  <p className="mt-0.5 font-mono text-[11px] text-ink-4">{event.occurredAt ?? event.recordedAt}</p>
-                </li>;
-              })}
-            </ol>
-          )}
-        </section>
-      )}
-
       {/* ── Channel info (F.4 — read only, no selector) ─────────────────── */}
       <section className="mb-8">
         <SectionTitle>{t("principles.detail.channel")}</SectionTitle>
@@ -686,12 +667,30 @@ export function PrincipleDetailPage() {
       </section>
 
       {/* ── Layer 3: Full trajectory (collapsed by default, D section) ──── */}
-      {governance === null && (
-        <details className="mb-8 border border-line rounded-[var(--radius-md)]">
+      <details className="mb-8 border border-line rounded-[var(--radius-md)]">
         <summary className="px-4 py-3 cursor-pointer font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov">
           {t("principles.detail.trajectory")}
         </summary>
         <div className="px-4 pb-4 border-t border-line pt-4">
+          {governance !== null && (
+            <section className="mb-6" data-testid="governance-timeline">
+              <SectionTitle>{t('principles.detail.governance.timeline')}</SectionTitle>
+              {governance.timeline.length === 0 ? <p className="text-[13px] text-ink-4">{t('principles.detail.governance.timelineEmpty')}</p> : (
+                <ol className="space-y-3 border-l border-line pl-4">
+                  {governance.timeline.map((event, index) => {
+                    const derived = event.code === 'revision_requested' || event.code === 'revision_reopened';
+                    return <li key={`${event.sourceRef.type}-${event.sourceRef.id}-${event.code}-${index}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[13px] text-ink-2">{t(`principles.detail.governance.timelineCode.${event.code}`, { defaultValue: event.code })}</span>
+                        <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-ink-4">{t(`principles.detail.governance.${derived ? 'derived' : 'fact'}`)}</span>
+                      </div>
+                      <p className="mt-0.5 font-mono text-[11px] text-ink-4">{event.occurredAt ?? event.recordedAt}</p>
+                    </li>;
+                  })}
+                </ol>
+              )}
+            </section>
+          )}
           {/* Trajectory timeline — render from real data if available */}
           {trajectory?.degraded && (
             <div className="mb-4 p-3 bg-amber/5 border border-amber/20 rounded-[var(--radius-sm)]">
@@ -799,11 +798,11 @@ export function PrincipleDetailPage() {
             </div>
           )}
         </div>
-        </details>
-      )}
+      </details>
 
       {/* ── Decision section (PRI-387) ────────────────────────────────────── */}
-      <div className="border-t border-line pt-6 mt-6">
+      {showDecisionControls && (
+        <div className="border-t border-line pt-6 mt-6">
         <SectionTitle>{t("principles.detail.decisionTitle", { defaultValue: "决策操作" })}</SectionTitle>
         
         <div className="flex gap-3 flex-wrap items-center">
@@ -937,7 +936,8 @@ export function PrincipleDetailPage() {
             </div>
           </div>
         )}
-      </div>
+        </div>
+      )}
       </div>
     </PageShell>
   );

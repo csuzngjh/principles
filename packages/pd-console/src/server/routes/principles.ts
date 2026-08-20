@@ -108,7 +108,7 @@ export async function handlePrinciplesRoute({
   if (req.method === 'GET' && governanceMatch) {
     const flag = featureFlags?.principle_governance_projection_v2;
     if (flag?.enabled !== true) {
-      sendError(res, 403, 'principle_governance_projection_disabled',
+      sendError(res, 403, 'feature_disabled',
         'Principle governance projection is disabled.',
         { reason: 'feature_disabled', nextAction: 'Enable features.principle_governance_projection_v2 in .pd/config.yaml.' });
       return;
