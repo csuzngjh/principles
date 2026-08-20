@@ -20,6 +20,8 @@ import {
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
+import { loadPdConfig } from '../services/pd-config-loader.js';
+import type { EffectivePdConfig } from '@principles/core/runtime-v2';
 import {
   resolveRuntimeAdapterFromConfig,
   ConfigResolutionError,
@@ -447,6 +449,11 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
 
+  // Issue 2: resolve effective config for feature-flag-aware runners
+  // (e.g. `artificer_output_retry`). Mirrors rulehost-pipeline-runner.
+  const configLoad = loadPdConfig(workspaceDir);
+  const effectiveConfig: EffectivePdConfig | undefined = configLoad.ok ? configLoad.effective : configLoad.defaults;
+
   try {
     const orchestrator = new InternalizationOrchestrator(
       { stateManager },
@@ -515,7 +522,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           const validator = new DefaultArtificerValidator();
           const runner = new ArtificerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, effectiveConfig },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'evaluator') {
