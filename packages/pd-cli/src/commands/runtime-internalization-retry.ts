@@ -3,8 +3,19 @@
  * (MVP_CORE_LOOP_CONTRACT INV-03: inspect / retry / revise / reject-archive)。
  *
  * 修复前 needs_human_review 是 display-only 单向终态 (审计 ISSUE-006)。
- * 本命令把 needs_human_review 任务重新入队 (→ pending, attemptCount 重置,
- * runnerDecision 清空),由 auto-consumer / run-once 重新驱动。
+ * 本命令把 needs_human_review 任务重新入队 (→ pending, attemptCount 重置),
+ * 由 auto-consumer / run-once 重新驱动。
+ *
+ * Owner retry = 显式人类 authority reset,与 crash retry 严格区分:
+ * crash / lease recovery / automatic retry 保留 completionIntent(入口门
+ * resume 原 verdict,零 LLM);Owner retry 必须同时清空 runnerDecision 与
+ * completionIntent,允许新一轮 LLM verdict 成为 authority——否则入口门会
+ * resume/finalize 旧 verdict,LLM 永不运行,Owner retry 实际失效。
+ *
+ * 落库形态: status/attemptCount 与清空后的 metadata 在同一次 updateTask
+ * (SQLite 单条 UPDATE) 中原子生效——两个独立写之间失败会留下
+ * "authority 已清但任务仍 needs_human_review" 的 partial Owner action。
+ * metadata 不可 hydrate 时 fail closed (metadata_invalid),不得只改 status。
  *
  * CLI gate: 默认 dry-run;--confirm 才落地 (cli-4);JSON 模式严格单对象 (cli-1);
  * 失败路径不产生任何状态变更 (cli-5)。
@@ -97,13 +108,36 @@ export async function handleRuntimeInternalizationRetry(opts: InternalizationRet
       return;
     }
 
-    // 清空 runnerDecision(新轮次 verdict 未定),保留 revision 轮次与 lineage
+    // Owner retry = authority reset: runnerDecision 与 completionIntent 同时
+    // 清空 (保留 revisionCount / revisionCauseId / rolloutRevisionPayload /
+    // repairPayload / lineage — revision budget 证据不动)。
     const piTask = hydratePITaskRecord(task);
-    if (piTask) {
-      const merged = mergePITaskMetadata(piTask, { runnerDecision: undefined });
-      await stateManager.updateTaskDiagnosticJson(opts.taskId, createPITaskDiagnosticJson(merged));
+    if (!piTask) {
+      // fail closed: 只改 status 会把(可能损坏的)旧 authority 记录原样留在
+      // metadata 里,下一次 run 由它接管 —— 产生 partial retry。
+      const out: InternalizationRetryOutput = {
+        status: 'failed',
+        taskId: opts.taskId,
+        taskKind: task.taskKind,
+        previousStatus: task.status,
+        reason: 'metadata_invalid',
+        nextAction: 'Task metadata failed PI hydration; a retry now would risk a partial authority reset. Inspect: pd runtime internalization integrity --json',
+      };
+      emit(out, opts.json);
+      process.exitCode = 1;
+      return;
     }
-    await stateManager.updateTask(opts.taskId, { status: 'pending', attemptCount: 0 });
+    // 原子单写: 同一 patch 同时落 status=pending / attemptCount=0 / 清空后的
+    // diagnosticJson。updateTask 抛错时 DB 行保持原样(单条 UPDATE),无 partial reset。
+    const merged = mergePITaskMetadata(piTask, {
+      runnerDecision: undefined,
+      completionIntent: undefined,
+    });
+    await stateManager.updateTask(opts.taskId, {
+      status: 'pending',
+      attemptCount: 0,
+      diagnosticJson: createPITaskDiagnosticJson(merged),
+    });
 
     const out: InternalizationRetryOutput = {
       status: 'requeued',

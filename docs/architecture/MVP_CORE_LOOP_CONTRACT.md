@@ -49,6 +49,8 @@ Owner Message
 
 它属于 Exception/Attention Queue,与 Activation Approval(机器已完成验证,等待授权)严格区分。Owner 至少能够: inspect / retry / revise / reject-archive。它必须有出边(retry = 重新入队),不得是 display-only 终态。
 
+Owner retry(`pd runtime internalization retry --confirm`)= **显式人类 authority reset**: status→pending、attemptCount→0、runnerDecision 与 completionIntent 同时清空(单次原子 updateTask,metadata 不可 hydrate 时 fail closed),允许新一轮 LLM verdict 成为 authority;revision budget 证据(revisionCount / rolloutRevisionPayload / repairPayload)与 lineage 保留。与 crash / lease recovery / automatic retry 严格区分——后者保留 completionIntent,同 epoch resume 原 verdict(零 LLM),绝不能 reset completion authority(见 FINAL_COMPLETION_PROTOCOL_AUDIT INV-4 / 行 20)。
+
 ## INV-04 Rollout Reviewer 出边
 
 ```
