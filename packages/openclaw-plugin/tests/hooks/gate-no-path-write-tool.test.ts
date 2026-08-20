@@ -35,6 +35,8 @@ const { mockEvaluate, mockEventLog, mockEvolution } = vi.hoisted(() => {
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn(() => ({ currentGfi: 0 })),
   trackBlock: vi.fn(),
+  trackReceiptAutoCorrect: vi.fn(),
+  setInjectedPrincipleIds: vi.fn(),
 }));
 
 vi.mock('../../src/core/evolution-engine.js', () => ({
