@@ -28,7 +28,6 @@ disable-model-invocation: true
 | `/pd-init` | 初始化战略 | 新项目启动 |
 | `/pd-bootstrap` | 环境工具扫描与升级 | 装备升级 |
 | `/pd-research` | 发起工具升级研究 | 深度调研 |
-| `/pd-thinking` | 管理思维模型与候选方案 | 元认知管理 |
 | `/pd-evolution-status` | 查看EP等级与安全状态 | 状态查询 |
 | `/pd-status` | 查看系统状态（GFI和痛苦词典） | 健康检查 |
 | `/pd-help` | 获取交互式命令引导 | 本技能 |
@@ -44,7 +43,7 @@ disable-model-invocation: true
 **推荐流程**:
 1. `/pd-init` - 建立战略愿景和 OKR 框架
 2. `/pd-bootstrap` - 扫描环境工具，获取能力清单
-3. `/pd-thinking` - 建立项目的思维模型基线
+3. `/pd-context thinking on` - 开启 Thinking OS 指引注入
 
 **话术**: "新项目就像一张白纸。让我帮你打好地基：先定战略、再配装备、最后建立思维框架。"
 
@@ -175,8 +174,8 @@ A: Pain Signal 是系统检测到的问题信号。Runtime V2 通过 `PainSignal
 **Q: 如何查看已安装的工具能力？**
 A: 查看 `.state/SYSTEM_CAPABILITIES.json` 或运行 `/pd-bootstrap` 重新扫描。
 
-**Q: `/pd-thinking` 和 `/pd-research` 有什么区别？**
-A: `/pd-thinking` 管理思维模型和候选方案，用于元认知和决策支持；`/pd-research` 发起工具升级研究，用于技术调研。
+**Q: Thinking OS 和 `/pd-research` 有什么区别？**
+A: Thinking OS 是注入的指引（通过 `/pd-context thinking on/off` 管理）；`/pd-research` 发起工具升级研究，用于技术调研。
 
 ---
 

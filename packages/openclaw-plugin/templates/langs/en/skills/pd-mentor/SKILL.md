@@ -28,7 +28,6 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 | `/pd-init` | Initialize strategy | New project startup |
 | `/pd-bootstrap` | Environment tool scan and upgrade | Tool upgrade |
 | `/pd-research` | Initiate tool upgrade research | Deep research |
-| `/pd-thinking` | Manage mental models and candidates | Metacognition |
 | `/pd-evolution-status` | View trust score and security stage | Permission check |
 | `/pd-status` | View system status (GFI and Pain Dictionary) | Health check |
 | `/pd-help` | Get interactive command guidance | This skill |
@@ -44,7 +43,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 **Recommended Flow**:
 1. `/pd-init` - Establish strategic vision
 2. `/pd-bootstrap` - Scan environment tools, get capability list
-3. `/pd-thinking` - Establish project's mental model baseline
+3. `/pd-context thinking on` - Enable Thinking OS guidance injection
 
 **Script**: "A new project is like a blank canvas. Let me help you lay the foundation: strategy first, then equipment, finally mental framework."
 
@@ -175,8 +174,8 @@ A: Pain Signal is a problem signal detected by the system. Runtime V2 routes it 
 **Q: How to view installed tool capabilities?**
 A: Check `.state/SYSTEM_CAPABILITIES.json` or run `/pd-bootstrap` to rescan.
 
-**Q: What's the difference between `/pd-thinking` and `/pd-research`?**
-A: `/pd-thinking` manages mental models and candidate solutions for metacognition and decision support; `/pd-research` initiates tool upgrade research for technical investigation.
+**Q: What's the difference between Thinking OS and `/pd-research`?**
+A: Thinking OS is injected guidance (managed via `/pd-context thinking on/off`); `/pd-research` initiates tool upgrade research for technical investigation.
 
 ---
 

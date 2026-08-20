@@ -26,7 +26,6 @@ All commands start with `/pd-` (short aliases start with `/pd` + a single letter
 | [`/pd-evolution-status`](#pd-evolution-status) | — | Monitoring | View principle evolution loop status |
 | [`/pd-context`](#pd-context) | — | Config | Control context injection (Thinking OS / project focus) |
 | [`/pd-focus`](#pd-focus) | — | Config | Manage CURRENT_FOCUS.md (compress/rollback) |
-| [`/pd-thinking`](#pd-thinking) | `/pdt` | Config | Manage mental models (view/propose/audit) |
 | [`/pd-rollback`](#pd-rollback) | — | Rollback | Rollback a misjudged empathy event penalty |
 | [`/pd-principle-rollback`](#pd-principle-rollback) | — | Rollback | Rollback a principle and blacklist it |
 | [`/pd-export`](#pd-export) | — | Data | Export analytics or correction samples |
@@ -356,52 +355,6 @@ Manage the `CURRENT_FOCUS.md` file — this file records the current project foc
 ::: tip Auto-compression
 PD also auto-compresses `CURRENT_FOCUS.md` in the background. `/pd-focus compress` is a manual trigger for when you want to clean up immediately.
 :::
-
----
-
-### `/pd-thinking`
-
-**Short**:`/pdt`
-
-Manage mental models (Thinking OS). Mental models are PD's "cognitive layer" — they tell the Agent which thinking style to use in different scenarios.
-
-::: warning Off by default
-Thinking OS is off by default. To enable it, first run `/pd-context thinking on`, then use `/pd-thinking` to view stats.
-:::
-
-**Usage**
-
-```
-/pd-thinking [subcommand]
-```
-
-**Subcommands**
-
-| Subcommand | Description |
-|------------|-------------|
-| `status` | View usage stats for each mental model (hit rate, dormant models) |
-| `propose <description>` | Propose a new mental model (must include a "signal detection" section) |
-| `audit` | Audit model health (over-triggered/dormant/pending candidates) |
-| (none) | Show help |
-
-**Examples**
-
-```
-/pd-thinking status
-/pd-thinking propose A mental model for code review, signal detection: regex /review|audit/
-/pd-thinking audit
-```
-
-**`propose` Requirements**
-
-A proposal must include the keyword "signal" and describe how to detect the model's usage via regex. Proposals are written to `THINKING_OS_CANDIDATES.md` and require validation in 3+ different task types and human approval before promotion.
-
-**What `audit` Tells You**
-
-- ✅ Healthy models (reasonable hit rate)
-- 🔸 Over-triggered models (hit rate >50%, pattern may be too broad)
-- ⚠️ Dormant models (0 hits, consider archiving)
-- 📝 Number of pending candidates
 
 ---
 

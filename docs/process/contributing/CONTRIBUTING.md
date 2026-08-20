@@ -12,22 +12,22 @@ The most valuable co-creative aspect of this project lies in the mental model li
 
 ### Proposal Criteria
 
-Any mental model entering `THINKING_OS_CANDIDATES.md` (and eventually promoted to `THINKING_OS.md`) MUST meet these strict conditions:
+Any mental model promoted to `THINKING_OS.md` MUST meet these strict conditions:
 
 1. **Generality**: It cannot be a specific rule for a specific language (e.g., "Don't use Python 2") or library. It must be a fundamental way of thinking (e.g., "Via Negativa", "Minimum Viable Change").
-2. **Observable Signals**: It must leave detectable traces in the conversation, either through user prompts or AI text generation patterns (matchable by Regex).
+2. **Observable Trigger**: It must have a clear, concise trigger description so the Agent knows when to apply it.
 3. **Minimal Token Cost**: One sentence to explain the philosophy, one sentence to explain the disaster it avoids. The entire description must be highly compressed.
 
 ### How to Submit a New Model
 
-1. Test your model in your project via `/thinking-os propose "Model Name: Core philosophy and disaster prevention baseline"`.
+1. Test your model in your project by enabling Thinking OS guidance (`/pd-context thinking on`) and observing whether it prevents AI mistakes.
 2. Collect screenshots or logs demonstrating how it successfully prevented an AI mistake.
 3. Fork this repository.
-4. Add your proposal to the `docs/THINKING_OS_CANDIDATES.md` file.
+4. Add your proposal directly to the `THINKING_OS.md` file.
 5. Create a Pull Request, detailing in the PR description:
    * What core pain point does this model solve?
-   * What are its observable Regex signals?
-   * Does it overlap with the existing 9 base models?
+   * What are its observable triggers?
+   * Does it overlap with the existing base models?
 
 ## 💻 Code & Architecture Contributions
 

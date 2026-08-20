@@ -214,6 +214,47 @@ export class RuleHost {
           );
         },
       });
+      // P0-1 (2026-08-20): an owner-approved LIVE rule whose RuleCode depends
+      // on a retired contract symbol was skipped at load time (never
+      // executed). Skipping an enforcement rule is NOT the same as it not
+      // existing — if the only live rule is skipped, the merged decision is
+      // `undefined` and the caller falls back to 'allow', a governance
+      // fail-open. The current tool action must instead fail closed. SHADOW
+      // rules are observation-only (never enforce), so a skipped shadow rule
+      // correctly remains diagnostic-only and does not force a block.
+      const incompatibleLive = skipped.find(
+        (s) => s.mode === 'live' && s.reason.startsWith('legacy_rule_contract_dependency'),
+      );
+      if (incompatibleLive) {
+        const nextAction = 'Migrate or deactivate this legacy RuleCode and approve a compatible replacement.';
+        const diagnostics: Record<string, unknown> = {
+          activationId: incompatibleLive.activationId,
+          nextAction,
+        };
+        // Case D (legacy LIVE + healthy LIVE block): preserve the decision
+        // already produced by healthy rules so the diagnostic surface is not
+        // lost when the fail-closed override wins.
+        if (liveDecision && liveDecision.matched) {
+          diagnostics.underlying = {
+            decision: liveDecision.decision,
+            reason: liveDecision.reason,
+            ruleId: liveDecision.ruleId,
+          };
+        }
+        return {
+          liveDecision: {
+            decision: 'block',
+            matched: true,
+            reason:
+              `legacy_rule_contract_dependency: active owner-approved rule ` +
+              `${incompatibleLive.ruleId} cannot run safely on this runtime`,
+            ruleId: incompatibleLive.ruleId,
+            diagnostics,
+          },
+          shadowDecisions,
+          skippedActivations: skipped,
+        };
+      }
       return { liveDecision, shadowDecisions, skippedActivations: skipped };
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)

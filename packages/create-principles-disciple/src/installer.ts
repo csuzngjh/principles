@@ -394,8 +394,30 @@ function buildGatewayRefusalResult(
  * installation untouched (cli-5) and tells the owner exactly which rules
  * block the upgrade.
  */
+/**
+ * Compatibility preflight status taxonomy (P1-3, 2026-08-20).
+ *
+ * The scanner's status is preserved end-to-end so a refusal names the real
+ * cause instead of smearing every failure into "legacy RuleCode":
+ *
+ *   clean             → allow upgrade
+ *   no_state_db       → allow (nothing persisted to be incompatible)
+ *   legacy_dependency → refuse → migrate/deactivate the listed rules
+ *   scan_failed       → refuse → repair DB / permissions
+ *   scan_unavailable  → refuse → repair/re-download the installer
+ *
+ * Any unrecognized status is treated as a refusal (fail closed).
+ */
+export type CompatibilityStatus =
+  | 'clean'
+  | 'no_state_db'
+  | 'legacy_dependency'
+  | 'scan_failed'
+  | 'scan_unavailable';
+
 export interface LegacyRulePreflightOutcome {
   ok: boolean;
+  status?: CompatibilityStatus;
   /** rc-9: structured reason + remediation whenever ok=false. */
   reason?: string;
   remediation?: string;
@@ -407,28 +429,65 @@ export type LegacyRulePreflightRunner = (
   workspaceDir: string,
 ) => Promise<LegacyRulePreflightOutcome>;
 
-function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflightOutcome {
+/** Map a scanner status into the preflight refusal contract (P1-3). */
+function refuseForStatus(
+  status: string,
+  parsedReason: string | undefined,
+  remediation: string | undefined,
+): LegacyRulePreflightOutcome {
+  switch (status) {
+    case 'legacy_dependency':
+      return {
+        ok: false,
+        status: 'legacy_dependency',
+        reason: parsedReason ?? `legacy_rule_contract_dependency: ${status}`,
+        ...(remediation !== undefined ? { remediation } : {}),
+      };
+    case 'scan_failed':
+      return {
+        ok: false,
+        status: 'scan_failed',
+        reason: parsedReason ?? 'compatibility_scan_failed: workspace state could not be scanned',
+        ...(remediation !== undefined
+          ? { remediation }
+          : { remediation: 'Repair the workspace database or its permissions, then retry the upgrade. The current installation has not been replaced.' }),
+      };
+    default:
+      // Unknown / unrecognized statuses fail closed: we cannot prove the
+      // active RuleCode is compatible, so we refuse rather than guess.
+      return {
+        ok: false,
+        status: 'scan_failed',
+        reason: parsedReason ?? `compatibility_scan_refused: unknown scanner status (${status})`,
+        ...(remediation !== undefined
+          ? { remediation }
+          : { remediation: 'The compatibility scanner returned an unexpected result. Re-download/rebuild the installer before upgrading. The current installation has not been replaced.' }),
+      };
+  }
+}
+
+export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflightOutcome {
   if (typeof stdout !== 'string' || stdout.trim().length === 0) {
-    return { ok: false, reason: 'compatibility_scan_unreadable: empty stdout' };
+    return { ok: false, status: 'scan_failed', reason: 'compatibility_scan_unreadable: empty stdout' };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return { ok: false, reason: 'compatibility_scan_unreadable: stdout is not JSON' };
+    return { ok: false, status: 'scan_failed', reason: 'compatibility_scan_unreadable: stdout is not JSON' };
   }
   if (!isRecord(parsed)) {
-    return { ok: false, reason: 'compatibility_scan_unreadable: stdout is not an object' };
+    return { ok: false, status: 'scan_failed', reason: 'compatibility_scan_unreadable: stdout is not an object' };
   }
   const ok = parsed.ok === true;
   const status = typeof parsed.status === 'string' ? parsed.status : 'unknown';
+  const reason = typeof parsed.reason === 'string' ? parsed.reason : undefined;
   const remediation = typeof parsed.remediation === 'string' ? parsed.remediation : undefined;
-  if (ok) return { ok: true };
-  return {
-    ok: false,
-    reason: `legacy_rule_contract_dependency: ${status}`,
-    ...(remediation !== undefined ? { remediation } : {}),
-  };
+  if (ok) {
+    const cleanStatus: CompatibilityStatus = status === 'no_state_db' ? 'no_state_db' : 'clean';
+    return { ok: true, status: cleanStatus };
+  }
+  return refuseForStatus(status, reason, remediation);
 }
 
 async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir: string): Promise<LegacyRulePreflightOutcome> {
@@ -445,17 +504,19 @@ async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir
     );
     return parseCompatibilityScanStdout(result.stdout);
   } catch (err) {
-    // The scan command exits 1 WITH valid JSON when dependencies exist.
-    const {stdout} = (err as { stdout?: string });
-    const fromStdout = typeof stdout === 'string' && stdout.trim().length > 0
-      ? parseCompatibilityScanStdout(stdout)
-      : null;
-    if (fromStdout && !fromStdout.ok && fromStdout.reason?.startsWith('legacy_rule_contract_dependency')) {
-      return fromStdout;
+    // The scan command exits 1 WITH valid JSON for any refusal (legacy
+    // dependency, DB failure, ...). Preserve that structured result instead
+    // of smearing scan_failed into legacy_dependency (P1-3).
+    const { stdout } = (err as { stdout?: string });
+    if (typeof stdout === 'string' && stdout.trim().length > 0) {
+      const fromStdout = parseCompatibilityScanStdout(stdout);
+      if (!fromStdout.ok) return fromStdout;
     }
     return {
       ok: false,
+      status: 'scan_failed',
       reason: `compatibility_scan_failed: ${err instanceof Error ? err.message : String(err)}`,
+      remediation: 'Repair the workspace database or its permissions, then retry the upgrade. The current installation has not been replaced.',
     };
   }
 }
@@ -465,23 +526,52 @@ export async function runLegacyRuleContractPreflight(
   workspaceDir: string,
   runScan: LegacyRulePreflightRunner = defaultLegacyRulePreflightRunner,
 ): Promise<LegacyRulePreflightOutcome> {
+  const resolvedWorkspace = path.resolve(workspaceDir);
+  // Self-contained status decision (P0/P1-2): a workspace with no persisted
+  // PD state has nothing a contract change could break, so the scan is
+  // skipped cleanly. The function must NOT rely on the caller having
+  // pre-checked for state.db — Console/installer callers differ.
+  const stateDbPath = path.join(resolvedWorkspace, '.pd', 'state.db');
+  if (!existsSync(stateDbPath)) {
+    return {
+      ok: true,
+      status: 'no_state_db',
+      reason: 'state.db not found — no persisted activations to scan',
+    };
+  }
+
   const pdCliRoot = path.resolve(pluginDir, 'pd-cli');
   const pdCliEntry = path.resolve(pdCliRoot, 'dist', 'index.js');
   if (pdCliEntry !== pdCliRoot && !pdCliEntry.startsWith(pdCliRoot + path.sep)) {
-    return { ok: false, reason: `pd-cli entry escapes package dir: ${pdCliEntry}` };
+    return {
+      ok: false,
+      status: 'scan_unavailable',
+      reason: `compatibility_scan_unavailable: pd-cli entry escapes package dir (${pdCliEntry})`,
+      remediation: 'Re-download/rebuild the installer before upgrading. The current installation has not been replaced.',
+    };
   }
   if (!existsSync(pdCliEntry) || !statSync(pdCliEntry).isFile()) {
-    // Fresh-workspace installs without a bundled pd-cli entry cannot have
-    // legacy rules scanned by the new runtime; the runtime backstop in
-    // RuleHost still protects execution. Surface rather than block (rc-9).
-    return { ok: true, reason: 'preflight_skipped: bundled pd-cli entry not found (fresh package layout)' };
+    // A stateful workspace is about to be upgraded and we cannot prove its
+    // active RuleCode is compatible with the new runtime. This is NOT a
+    // "fresh layout, skip it" case — fresh workspaces were handled above by
+    // the no_state_db early return. Fail closed (P0/P1-2).
+    return {
+      ok: false,
+      status: 'scan_unavailable',
+      reason: 'compatibility_scan_unavailable',
+      remediation:
+        'The bundled compatibility scanner is missing. The package may be incomplete or corrupted. ' +
+        'Re-download/rebuild the installer before upgrading. The current installation has not been replaced.',
+    };
   }
   try {
-    return await runScan(pdCliEntry, path.resolve(workspaceDir));
+    return await runScan(pdCliEntry, resolvedWorkspace);
   } catch (err) {
     return {
       ok: false,
+      status: 'scan_failed',
       reason: `compatibility_scan_failed: ${err instanceof Error ? err.message : String(err)}`,
+      remediation: 'Repair the workspace database or its permissions, then retry the upgrade. The current installation has not been replaced.',
     };
   }
 }

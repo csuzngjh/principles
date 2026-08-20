@@ -1048,8 +1048,8 @@ These were discovered during source-code verification but are not explicitly sco
 
 #### Hidden ticket B: Slash command migration to pd-cli
 
-**Scope**: 19 OpenClaw slash commands that have no Codex equivalent (v4.1 correction: v4 said 16, but the list below actually contains 19 commands):
-- `/pd-init`, `/pd-bootstrap`, `/pd-research`, `/pd-thinking`, `/pd-help`
+**Scope**: 18 OpenClaw slash commands that have no Codex equivalent (v4.1 correction: v4 said 16, but the list below actually contained 19 commands; `/pd-thinking` was retired 2026-08-20 as a write-only orphan, so 18 remain):
+- `/pd-init`, `/pd-bootstrap`, `/pd-research`, `/pd-help`
 - `/pd-status`, `/pd-pain`, `/pd-context`, `/pd-focus`
 - `/pd-evolution-status`, `/pd-principle-rollback`, `/pd-rollback`
 - `/pd-export`, `/pd-samples`, `/pd-workflow-debug`

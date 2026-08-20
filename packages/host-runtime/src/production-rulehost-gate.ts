@@ -261,17 +261,28 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             }
             const ruleId = typeof content.ruleId === 'string' ? content.ruleId : typeof row.source_rule_id === 'string' ? row.source_rule_id : artifactId;
             const principleId = typeof content.principleId === 'string' ? content.principleId : typeof row.source_principle_id === 'string' ? row.source_principle_id : ruleId;
-            // Retired-contract backstop (2026-08-19): persisted RuleCode that
-            // references removed RuleHost contract symbols must never execute
-            // against the new contract — reads silently resolve to undefined
-            // and change owner-approved behavior. Skip with a structured
-            // warning naming the exact blocking symbols. The scan is a local
-            // copy (see legacy-rule-contract-symbols.ts) so the published
-            // bundle keeps working against the currently published core.
+            // Retired-contract backstop (2026-08-19 / P0-1 2026-08-20):
+            // persisted LIVE RuleCode that references removed RuleHost
+            // contract symbols can never run safely against the new contract
+            // — reads silently resolve to undefined and change owner-approved
+            // behavior. Skipping the rule and then allowing the action would
+            // treat an owner-approved enforcement rule as if it did not exist
+            // (governance fail-open); the action must instead FAIL CLOSED
+            // with a structured deny naming the exact blocking symbols. The
+            // scan is a local copy (see legacy-rule-contract-symbols.ts) so
+            // the published bundle keeps working against the currently
+            // published core.
             const retiredSymbols = scanRetiredContractSymbols(content.implementationCode);
             if (retiredSymbols.length > 0) {
-              addWarning(warnings, `legacy_rule_contract_dependency: ${retiredSymbols.join(', ')} (activation=${activationId})`, 'migrate the RuleCode off the retired contract symbols or deactivate the activation, then re-approve a migrated rule');
-              continue;
+              const nextAction = 'migrate the RuleCode off the retired contract symbols or deactivate the activation, then re-approve a migrated rule';
+              addWarning(warnings, `legacy_rule_contract_dependency: ${retiredSymbols.join(', ')} (activation=${activationId})`, nextAction);
+              return {
+                decision: 'deny',
+                reason: `legacy_rule_contract_dependency: active owner-approved rule ${ruleId} references retired contract symbols (${retiredSymbols.join(', ')}) and cannot run safely on this runtime`,
+                source: event.source,
+                ...(warnings.length ? { warnings } : {}),
+                metadata: { evaluatedLiveRules: 0, ruleId, principleId },
+              };
             }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
             candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode });

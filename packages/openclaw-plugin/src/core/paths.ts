@@ -70,7 +70,9 @@ export const PD_FILES = {
     OKR_DIR: PD_DIRS.OKR,
     CURRENT_FOCUS: posixJoin(PD_DIRS.OKR, 'CURRENT_FOCUS.md'),
     WEEK_STATE: posixJoin(PD_DIRS.OKR, 'WEEK_STATE.json'),
-    THINKING_OS_CANDIDATES: posixJoin(PD_DIRS.MEMORY, 'THINKING_OS_CANDIDATES.md'),
+    // THINKING_OS_CANDIDATES removed (2026-08-20): /pd-thinking propose was
+    // a write-only orphan (no reader/validator/promoter) and is retired.
+    // THINKING_OS.md guidance itself remains.
     // SEMANTIC_PAIN (confusion_samples.md) removed (PRI-451 Wave 1): the file
     // had zero readers. The lifecycle write that populated it was also removed.
     EVOLUTION_STREAM: posixJoin(PD_DIRS.MEMORY, 'evolution.jsonl'),

@@ -64,16 +64,26 @@ const VALID_SEVERITIES = new Set(['info', 'warning', 'error', 'fatal']);
 // into the effective config nor hard-rejected — old workspaces must keep
 // starting. Each occurrence surfaces a deprecation warning (rc-9: the
 // degradation is observable) so owners learn the key has no effect.
+//
+// The historical plugin normalizer also accepted camelCase aliases
+// (progressiveGate / thinkingCheckpoint). Those are flagged the same way:
+// ignore + warn, never restored to canonical config (P2-8, 2026-08-20).
 function warnLegacyGateKeys(raw: Record<string, unknown>, path: string): ProfileValidationWarning[] {
   const warnings: ProfileValidationWarning[] = [];
   if (readOwn(raw, 'gate') !== undefined) {
     warnings.push(warn(`${path}.gate`, 'deprecated: the built-in PLAN/confirm-first gate was removed (PRI-286); this key has no effect and can be deleted'));
   }
-  if (readOwn(raw, 'progressive_gate') !== undefined) {
+  if (readOwn(raw, 'progressive_gate') !== undefined || readOwn(raw, 'progressiveGate') !== undefined) {
     warnings.push(warn(`${path}.progressive_gate`, 'deprecated: plan-approval gating was removed (PRI-286); this key has no effect and can be deleted'));
   }
-  if (readOwn(raw, 'thinking_checkpoint') !== undefined) {
+  if (readOwn(raw, 'progressiveGate') !== undefined) {
+    warnings.push(warn(`${path}.progressiveGate`, 'deprecated: plan-approval gating was removed (PRI-286); legacy camelCase alias, this key has no effect and can be deleted'));
+  }
+  if (readOwn(raw, 'thinking_checkpoint') !== undefined || readOwn(raw, 'thinkingCheckpoint') !== undefined) {
     warnings.push(warn(`${path}.thinking_checkpoint`, 'deprecated: the thinking-checkpoint gate is retired; this key has no effect and can be deleted'));
+  }
+  if (readOwn(raw, 'thinkingCheckpoint') !== undefined) {
+    warnings.push(warn(`${path}.thinkingCheckpoint`, 'deprecated: the thinking-checkpoint gate is retired; legacy camelCase alias, this key has no effect and can be deleted'));
   }
   return warnings;
 }

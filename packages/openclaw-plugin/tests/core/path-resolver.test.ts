@@ -20,7 +20,7 @@ describe('PathResolver', () => {
         const { PathResolver } = await import('../../src/core/path-resolver.js');
         const resolver = new PathResolver({ workspaceDir: '/test/workspace' });
 
-        const requiredKeys = ['PROFILE', 'AGENT_SCORECARD', 'PAIN_FLAG', 'EVOLUTION_QUEUE', 'THINKING_OS', 'THINKING_OS_CANDIDATES'];
+        const requiredKeys = ['PROFILE', 'AGENT_SCORECARD', 'PAIN_FLAG', 'EVOLUTION_QUEUE', 'THINKING_OS'];
 
         for (const key of requiredKeys) {
             expect(() => resolver.resolve(key)).not.toThrow();

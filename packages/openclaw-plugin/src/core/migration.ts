@@ -23,7 +23,8 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
             { legacy: path.join(legacyDocsDir, '.pain_flag'), newKey: 'PAIN_FLAG' },
             { legacy: path.join(legacyDocsDir, 'SYSTEM_CAPABILITIES.json'), newKey: 'SYSTEM_CAPABILITIES' },
             { legacy: path.join(legacyDocsDir, 'SYSTEM.log'), newKey: 'SYSTEM_LOG' },
-            { legacy: path.join(legacyDocsDir, 'THINKING_OS_CANDIDATES.md'), newKey: 'THINKING_OS_CANDIDATES' },
+            // THINKING_OS_CANDIDATES migration removed (2026-08-20): the
+            // /pd-thinking propose writer it served is retired (no reader).
 
             // From memory/.state/ (The hidden legacy state)
             { legacy: path.join(legacyStateDir, 'pain_dictionary.json'), newKey: 'DICTIONARY' },

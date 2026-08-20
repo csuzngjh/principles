@@ -28,7 +28,6 @@ import { handleLlmOutput } from './hooks/llm.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
-import { handleThinkingOs } from './commands/thinking-os.js';
 import { handlePainCommand, handlePainReportCommand } from './commands/pain.js';
 import { handleContextCommand } from './commands/context.js';
 import { handleFocusCommand } from './commands/focus.js';
@@ -709,8 +708,6 @@ const plugin = {
 
     registerCommandWithAlias('pd-research', 'pdr', getCommandDescription('pd-research', language), (ctx: any) => handleResearchTools(ctx));
 
-    registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
-
     registerCommandWithAlias('pd-help', 'pdh', getCommandDescription('pd-help', language), () => {
         if (language === 'zh') {
           return { text: `
@@ -726,7 +723,6 @@ const plugin = {
 ## 📊 状态与监控
 | 短命令 | 长命令 | 用途 |
 |--------|--------|------|
-| \`/pdt\` | \`/pd-thinking\` | 思维模型管理 [status\\|propose\\|audit] |
 |  | \`/pd-status\` | 查看系统状态（GFI、Pain 词典） |
 |  | \`/pd-pain\` | 从 OpenClaw 会话报告 pain |
 |  | \`/pd-evolution-status\` | 查看 evolution 闭环状态（candidate/probation/active） |
@@ -781,7 +777,6 @@ const plugin = {
 ## 📊 Status & Monitoring
 | Short | Full | Purpose |
 |-------|------|---------|
-| \`/pdt\` | \`/pd-thinking\` | Manage Thinking OS [status\\|propose\\|audit] |
 |  | \`/pd-status\` | View system status (GFI, Pain dictionary) |
 |  | \`/pd-pain\` | Report pain from OpenClaw session |
 |  | \`/pd-evolution-status\` | Show evolution loop status (candidate/probation/active) |

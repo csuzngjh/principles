@@ -12,22 +12,22 @@
 
 ### 提议原则 (Proposal Criteria)
 
-所有进入 `THINKING_OS_CANDIDATES.md` 甚至最终晋升到 `THINKING_OS.md` 的思维模型，必须满足以下严苛条件：
+所有晋升到 `THINKING_OS.md` 的思维模型，必须满足以下严苛条件：
 
 1. **普适性 (Generality)**: 它不能是针对某个特定语言（如“不要用 Python 2”）或特定项目库的规则，它应当是一种底层的思考方式（如“否定优于肯定”、“最小必要干预”）。
-2. **可观测信号 (Observable Signals)**: 它能在对话中产生可被检测的痕迹，无论是用户输入的 prompt，还是 AI 回复的文本规律（Regex 可被匹配）。
+2. **可观测触发条件 (Observable Trigger)**: 它必须有清晰、简洁的触发描述，让 Agent 知道何时应用它。
 3. **极简表达 (Minimal Token Cost)**: 一句话说明理念，一句话说明要避免的灾难。整个描述必须高度压缩。
 
 ### 如何提交新模型
 
-1. 在你的项目里通过 `/thinking-os propose "模型名称：核心理念和防灾底线"` 试运行你的模型。
+1. 在你的项目里开启 Thinking OS 指引（`/pd-context thinking on`），观察该模型是否成功防范 AI 犯错。
 2. 收集它成功防范 AI 犯错的截图或日志。
 3. Fork 本仓库。
-4. 将你的提议添加到 `docs/THINKING_OS_CANDIDATES.md` 文件中。
+4. 将你的提议直接添加到 `THINKING_OS.md` 文件中。
 5. 提交 Pull Request，并在 PR 描述中详细说明：
    * 这个模型解决的核心痛点是什么？
-   * 它的可观测 Regex 信号是什么？
-   * 它是否与现有的 9 个基础模型重叠？
+   * 它的可观测触发条件是什么？
+   * 它是否与现有的基础模型重叠？
 
 ## 💻 代码与架构贡献
 

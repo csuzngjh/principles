@@ -492,26 +492,28 @@ function evaluate(input) {
 }
 `;
 
-  it('never executes an active rule reading the retired recentThinking contract', async () => {
+  it('fails closed on an active rule reading the retired recentThinking contract', async () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, LEGACY_CONTRACT_CODE, undefined, '-legacy-contract');
     const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
-      decision: 'allow',
+      decision: 'deny',
+      reason: expect.stringContaining('legacy_rule_contract_dependency:'),
       warnings: [expect.stringContaining('legacy_rule_contract_dependency: recentThinking')],
       metadata: { evaluatedLiveRules: 0 },
     });
   });
 
-  it('blocks the retired-contract rule observably while a healthy sibling still denies', async () => {
+  it('does not let a healthy sibling rescue an active legacy rule (fail closed)', async () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, LEGACY_CONTRACT_CODE, undefined, '-legacy-contract');
     await seedLiveRule(workspaceDir, SHARED_GATE_CODE, undefined, '-healthy-contract');
     const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
-      decision: 'deny', reason: SHARED_GATE_REASON,
+      decision: 'deny',
+      reason: expect.stringContaining('legacy_rule_contract_dependency:'),
       warnings: [expect.stringMatching(/legacy_rule_contract_dependency.*nextAction=/)],
-      metadata: { evaluatedLiveRules: 1 },
+      metadata: { evaluatedLiveRules: 0 },
     });
   });
 });
