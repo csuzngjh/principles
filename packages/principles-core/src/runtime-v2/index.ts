@@ -158,6 +158,11 @@ export { MemoryCommitStore } from './store/commit/memory-commit-store.js';
 export { MemoryCandidateStore } from './store/candidate/memory-candidate-store.js';
 export { MemoryArtifactStore } from './store/artifact/memory-artifact-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
+export {
+  SqliteReconciliationCursorStore,
+  SUCCEEDED_TRANSITIONS_SCOPE,
+} from './store/reconciliation-cursor-store.js';
+export type { ReconciliationCursor } from './store/reconciliation-cursor-store.js';
 export type { SqlitePragmaReport } from './store/sqlite-connection.js';
 export { guardWorkspaceLeak, isMockLeakPath } from './store/workspace-leak-guard.js';
 export { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
@@ -717,9 +722,25 @@ export {
   validateInternalizationGraph,
 } from './internalization/internalization-state-machine.js';
 
+// ── Internalization Transition Decision (P0-D, INV-02/INV-07) ────────────────
+
+export type {
+  InternalizationTransitionDecisionKind,
+  TransitionDecision,
+  TransitionDecisionInput,
+} from './internalization/internalization-transition-decision.js';
+export {
+  decideInternalizationTransition,
+  transitionInputFromTask,
+} from './internalization/internalization-transition-decision.js';
+
 // ── PITask Persistence & Hydration (PRI-65) ──────────────────────────────────
 
-export type { PITaskMetadata } from './internalization/pitask-metadata.js';
+export type {
+  PITaskMetadata,
+  RunnerDecision,
+  RolloutRevisionPayload,
+} from './internalization/pitask-metadata.js';
 
 export {
   PI_METADATA_KEY,
@@ -727,6 +748,7 @@ export {
   parsePITaskMetadata,
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
+  mergePITaskMetadata,
 } from './internalization/pitask-metadata.js';
 
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
@@ -957,6 +979,9 @@ export type {
   RolloutReviewerRunnerOptions,
   ResolvedRolloutReviewerRunnerOptions,
   RolloutReviewerRunnerDeps,
+  RolloutAutoDispatchInput,
+  RolloutAutoDispatchOutcome,
+  RolloutRevisionRoutingInput,
 } from './internalization/rollout-reviewer-runner.js';
 
 export {
@@ -1856,6 +1881,8 @@ export {
   scanKeywords,
   buildLlmPrompt,
   parseLlmClassification,
+  resolveLlmClassificationPayload,
+  SignalClassificationOutputV1Schema,
   collectSync,
   mapLlmResultToOutput,
   buildEvidence,
@@ -1876,4 +1903,7 @@ export type {
   LlmClassificationResult,
   KeywordScanResult,
   ParseResult,
+  PayloadResolveResult,
+  ClassifierPayloadPath,
+  SignalClassificationOutputV1,
 } from './signal-collector/index.js';

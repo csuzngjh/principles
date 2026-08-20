@@ -15,7 +15,7 @@
  */
 
 import type { TaskRecord } from '../task-status.js';
-import type { RepairPayload } from './pitask-metadata.js';
+import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent } from './pitask-metadata.js';
 
 // ── Internalization Channel Types ─────────────────────────────────────────────
 
@@ -142,6 +142,22 @@ export interface PITaskRecord extends TaskRecord {
   adversarialFeedback?: string;
   /** Evaluator repair payload (PRI-509); present only on artificer repair tasks. */
   repairPayload?: RepairPayload;
+  /** Runner decision (evaluator/rollout_reviewer LLM verdict) — transition control (INV-02). */
+  runnerDecision?: RunnerDecision;
+  /** Times this task has been reopened for revision (bounded revision budget). */
+  revisionCount?: number;
+  /** Feedback injected when this task is reopened by rollout needs_revision routing. */
+  revisionFeedback?: string;
+  /** P0-4 stable revision identity — same-cause reopen replays are no-ops. */
+  revisionCauseId?: string;
+  /** Rollout needs_revision routing payload; present on rollout_reviewer tasks that routed a revision. */
+  rolloutRevisionPayload?: RolloutRevisionPayload;
+  /**
+   * P0 (verdict drift): durable completion intent of one LLM verdict. Pending
+   * intent in the same revision epoch is the recovery authority — re-runs
+   * resume it instead of re-invoking the LLM. See pitask-metadata.ts.
+   */
+  completionIntent?: RunnerCompletionIntent;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

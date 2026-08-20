@@ -31,6 +31,12 @@ import {
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { createEvaluatorRepairDeps, createRolloutGovernanceDeps } from './auto-consumer-governance-wiring.js';
+import {
+  SqliteConnection,
+  SqliteReconciliationCursorStore,
+  SUCCEEDED_TRANSITIONS_SCOPE,
+} from '@principles/core/runtime-v2';
 import { SystemLogger } from '../core/system-logger.js';
 import { computeHash as contentHashFn } from '../utils/hashing.js';
 
@@ -90,6 +96,7 @@ export async function runConsumerCycle(
   workspaceDir: string,
   logger: PluginLogger,
 ): Promise<void> {
+  let orchestrator: InternalizationOrchestrator | null = null;
   const flag = loadFeatureFlagFromConfig(workspaceDir, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, {
     info: (msg: string) => logger.info(msg),
     warn: (msg: string) => logger.warn(msg),
@@ -139,6 +146,16 @@ export async function runConsumerCycle(
     handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
     const { stateManager } = handle;
 
+    // A (最终复核): orchestrator 必须在所有队列状态相关的早退之前创建 —
+    // 纯 orphan 场景 (succeeded 后 crash、队列全空 → readyTaskCount=0) 恰恰
+    // 是 reconciliation 存在的理由; 若 orchestrator 为 null, finally 的
+    // bounded budget 不会执行, orphan 永远无法恢复。
+    const runtimeKind = runtimeConfigResult.runtimeKind;
+    orchestrator = new InternalizationOrchestrator(
+      { stateManager },
+      { owner: 'auto-consumer', runtimeKind, dryRun: true },
+    );
+
     const readModel = new InternalizationQueueReadModel(stateManager);
     readModel.setPolicy({
       enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
@@ -167,19 +184,13 @@ export async function runConsumerCycle(
     });
 
     if (!decision.shouldConsume) {
+      // 早退不跳过 reconciliation — finally 的 bounded budget 仍会执行
       SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({
         reason: decision.reason,
         readyTaskCount: snapshot.readyTasks.length,
       }));
       return;
     }
-
-    const runtimeKind = runtimeConfigResult.runtimeKind;
-
-    const orchestrator = new InternalizationOrchestrator(
-      { stateManager },
-      { owner: 'auto-consumer', runtimeKind, dryRun: true },
-    );
 
     // Advance the configured runner kinds in priority order (dreamer first,
     // then philosopher→…→rollout_reviewer under full-chain scope). Lease the
@@ -200,6 +211,7 @@ export async function runConsumerCycle(
     }
 
     if (!wakeResult) {
+      // A: 预算由周期 finally 统一执行 (每周期恰一次,含 backlog 场景)
       const skipPayload: Record<string, unknown> = { decision: lastSkipDecision };
       if (lastSkipReason) {
         skipPayload.reason = lastSkipReason;
@@ -299,13 +311,15 @@ export async function runConsumerCycle(
         );
         break;
       case 'evaluator':
-        // Base construction — the PRI-509 repair loop is intentionally NOT
-        // wired here; it stays opt-in via the separate evaluator_artificer_repair_loop
-        // flag (quiet, default off). When omitted, evaluator follows the legacy
-        // needs_revision path (no repair task seeded), which is sufficient for
-        // artifacts to reach validation_status='validated' on approved candidates.
+        // P0-D 生产接线: PRI-509 repair loop 正式进入 auto-consumer (bounded,
+        // flag evaluator_artificer_repair_loop 保留运行时关闭能力)。needs_revision
+        // → seed artificer repair; commit 门控保证不再并行 seed rollout_reviewer。
         runner = new EvaluatorRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator() },
+          {
+            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
+            artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
+            ...createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
+          },
           runnerOptions,
         );
         break;
@@ -314,8 +328,16 @@ export async function runConsumerCycle(
         // taskId / sourceEvaluatorArtifactId echoes are overwritten with the
         // authoritative values before validation, so a bad echo no longer
         // dead-ends the candidate before the approval queue.
+        //
+        // P0-E/F 治理接线: approve_rollout → 自动 ActivationDispatcher (低风险
+        // auto_activate / 高风险 approvals.pending); needs_revision → reopen
+        // scribe/artificer 修订 (绝不进入 approval 队列, INV-04)。
         runner = new RolloutReviewerRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultRolloutReviewerValidator() },
+          {
+            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
+            artifactStore: stateManager.piArtifactStore, validator: new DefaultRolloutReviewerValidator(),
+            ...createRolloutGovernanceDeps(workspaceDir, orchestrator, logger),
+          },
           runnerOptions,
         );
         break;
@@ -381,9 +403,70 @@ export async function runConsumerCycle(
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_ERROR', String(err));
     logger.error(`[PD:AutoConsumer] Cycle error: ${String(err)}`);
   } finally {
+    // A (最终复核): 每周期固定小预算 — continuous backlog 下 reconciliation
+    // 不会被 ready 任务永久饿死 (公平性);游标 restart-durable。
+    // 必须在 handle.close() 之前执行 (orchestrator 共享该 stateManager)。
+    if (orchestrator) {
+      await runReconciliationBudget(workspaceDir, orchestrator, logger);
+    }
     if (handle) {
       await handle.close().catch(() => {});
     }
+  }
+}
+
+/**
+ * A (crash window / 最终复核): bounded + fair + restart-durable 的
+ * succeeded-transition reconciliation 预算。
+ * - ASC 稳定全序 (SQL ORDER BY updated_at, task_id) + 独占元组游标;
+ * - 每周期 RECONCILIATION_BUDGET 条,扫到尾部 wrap-around 重置;
+ * - 游标持久化于 state.db reconciliation_cursor — restart 后继续;
+ * - P1: 任何 reconcile_error 显式留痕 (不依赖 recovered>0)。
+ */
+const RECONCILIATION_BUDGET = 5;
+
+async function runReconciliationBudget(
+  workspaceDir: string,
+  orchestrator: InternalizationOrchestrator,
+  logger: PluginLogger,
+): Promise<void> {
+  try {
+    const conn = new SqliteConnection(workspaceDir);
+    try {
+      const cursorStore = new SqliteReconciliationCursorStore(conn);
+      const stored = cursorStore.get(SUCCEEDED_TRANSITIONS_SCOPE);
+      const recon = await orchestrator.reconcileSucceededTransitions({
+        limit: RECONCILIATION_BUDGET,
+        cursor: stored ? { updatedAt: stored.lastUpdatedAt, taskId: stored.lastTaskId } : undefined,
+        logger: { info: (msg) => logger.info(msg) },
+      });
+      if (recon.wrappedAround) {
+        cursorStore.clear(SUCCEEDED_TRANSITIONS_SCOPE);
+      } else {
+        cursorStore.set(SUCCEEDED_TRANSITIONS_SCOPE, recon.nextCursor);
+      }
+
+      const errors = recon.outcomes.filter((o) => o.decision.startsWith('reconcile_error'));
+      if (recon.recovered > 0 || errors.length > 0) {
+        SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RECONCILED', JSON.stringify({
+          scanned: recon.scanned,
+          recovered: recon.recovered,
+          alreadyMaterialized: recon.alreadyMaterialized,
+          blocked: recon.blocked,
+          wrappedAround: recon.wrappedAround,
+          recoveries: recon.outcomes.filter((o) => o.decision === 'successor_created' || o.decision.includes('reopened')),
+          // P1 (最终复核): per-task 错误显式可观测 — 即使 recovered=0
+          errors,
+        }));
+        logger.info(`[PD:AutoConsumer] Reconciliation: recovered=${recon.recovered} errors=${errors.length} wrapped=${recon.wrappedAround}`);
+      }
+    } finally {
+      try { conn.close(); } catch { /* best-effort */ }
+    }
+  } catch (reconErr) {
+    // reconciliation 失败不阻塞周期 (下轮再试);显式留痕 (rc-9)
+    SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RECONCILE_FAILED', String(reconErr));
+    logger.warn(`[PD:AutoConsumer] Succeeded-transition reconciliation failed: ${String(reconErr)}`);
   }
 }
 

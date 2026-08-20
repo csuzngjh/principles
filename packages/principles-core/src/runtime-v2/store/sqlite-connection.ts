@@ -448,6 +448,13 @@ export class SqliteConnection {
         deactivated_at TEXT
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_activations_idempotency ON activations(idempotency_key);
+      -- A-liveness: durable reconciliation cursor (single row per scope).
+      CREATE TABLE IF NOT EXISTS reconciliation_cursor (
+        scope TEXT PRIMARY KEY,
+        last_updated_at TEXT NOT NULL,
+        last_task_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
       -- PRI-531: Principle Receipt ledger (SPEC 5.3). Two levels: effect
       -- (rule_blocked / auto_correct_applied / self_reported) vs presence
       -- (prompt_injected, deduped per session x principle via partial unique

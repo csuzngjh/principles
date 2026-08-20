@@ -1,7 +1,9 @@
+import { Type, type Static } from '@sinclair/typebox';
+
 // ── Unified Keyword Store (合并后的统一词库,纯数据) ──
 
 export type KeywordCategory = 'correction' | 'empathy';
-export type TermSource = 'seed' | 'migrated' | 'owner_promoted';
+export type TermSource = 'seed' | 'migrated' | 'owner_promoted' | 'llm_learned';
 
 export interface UnifiedKeyword {
   term: string;
@@ -102,3 +104,18 @@ export function validateLlmClassification(value: unknown): value is LlmClassific
   if (typeof v.reason !== 'string') return false;
   return true;
 }
+
+// ── Stage2 structured-output contract (signal-classification-output-v1) ──
+//
+// RuntimeAdapter 的 canonical 输出契约: 分类器以 outputSchemaRef 引用本 schema,
+// adapter 负责 JSON extraction + schema validation (+ bounded repair),分类器直接
+// 消费 validated structured payload (MVP_CORE_LOOP_CONTRACT INV-01)。
+// 字段名与 LlmClassificationResult 保持一致(snake_case 即 prompt 中的字面格式)。
+
+export const SignalClassificationOutputV1Schema = Type.Object({
+  is_feedback: Type.Boolean(),
+  type: Type.Union([Type.Literal('correction'), Type.Literal('empathy'), Type.Literal('none')]),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  reason: Type.String(),
+});
+export type SignalClassificationOutputV1 = Static<typeof SignalClassificationOutputV1Schema>;

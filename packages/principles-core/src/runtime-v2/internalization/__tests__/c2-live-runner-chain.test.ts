@@ -19,6 +19,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import { InternalizationOrchestrator } from '../internalization-orchestrator.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import {
   buildDreamerTaskSeed,
   computeBridgeDecision,
@@ -120,6 +121,34 @@ async function simulateTaskSuccess(
     runtimeKind: RUNTIME_KIND,
   });
   await stateManager.markTaskSucceeded(taskId);
+  // P0-3: 生产 runner 现在把 verdict durable 写进任务元数据 (succeeded 前置)。
+  // evaluator/rollout 模拟必须同构,否则 commit 门正确地 fail-closed。
+  const task = await stateManager.getTask(taskId);
+  const piTask = task ? hydratePITaskRecord(task) : null;
+  if (piTask && (piTask.taskKind === 'evaluator')) {
+    await stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson({
+      dependencyTaskIds: piTask.dependencyTaskIds,
+      channel: piTask.channel,
+      timeoutMs: piTask.timeoutMs,
+      inputArtifactRefs: piTask.inputArtifactRefs,
+      outputArtifactRefs: piTask.outputArtifactRefs,
+      parentTaskId: piTask.parentTaskId,
+      correlationId: piTask.correlationId,
+      runnerDecision: 'approved',
+    }));
+  }
+  if (piTask && piTask.taskKind === 'rollout_reviewer') {
+    await stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson({
+      dependencyTaskIds: piTask.dependencyTaskIds,
+      channel: piTask.channel,
+      timeoutMs: piTask.timeoutMs,
+      inputArtifactRefs: piTask.inputArtifactRefs,
+      outputArtifactRefs: piTask.outputArtifactRefs,
+      parentTaskId: piTask.parentTaskId,
+      correlationId: piTask.correlationId,
+      runnerDecision: 'approve_rollout',
+    }));
+  }
 }
 
 /**

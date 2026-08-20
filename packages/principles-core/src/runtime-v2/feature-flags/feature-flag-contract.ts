@@ -172,13 +172,17 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // operators can list failed tasks out of the box; disable via .pd/config.yaml:
   // failed_tasks_observability: { enabled: false }.
   { id: 'failed_tasks_observability', category: 'quiet', enabled: true, since: '2026-07-04', description: 'Failed tasks observability — list/view failed pipeline tasks' },
-  // PRI-509: Evaluator→Artificer repair loop. When evaluator returns needs_revision,
+  // PRI-509/P0-D: Evaluator→Artificer repair loop. When evaluator returns needs_revision,
   // auto-seed an artificer repair task carrying the evaluator's requiredChanges/concerns
   // as repairPayload. Repair iteration capped at 2 rounds; on the 3rd needs_revision the
-  // task enters needs_human_review (fail loud, EP-03). Default off; flag-off = current
-  // behavior (no repair task seeded, evaluator needs_revision just succeeds the task
-  // with pending validation). Roll back = leave flag off (or set enabled: false in config).
-  { id: 'evaluator_artificer_repair_loop', category: 'quiet', enabled: false, since: '2026-07-04', description: 'PRI-509: Evaluator→Artificer repair loop — auto-seed artificer repair task on needs_revision. Default off; flag-off = current behavior (no repair task seeded).' },
+  // task enters needs_human_review (fail loud, EP-03). Default ON since MVP core-loop
+  // closure (MVP_CORE_LOOP_CONTRACT INV-02: needs_revision MUST have an automatic
+  // revision out-edge; INV-07 liveness) and now wired in the production auto-consumer
+  // (previously intentionally NOT wired — audit ISSUE-005). The commit gate
+  // (commitNextTaskProposal single transition decision) guarantees needs_revision
+  // never ALSO seeds a normal successor. Roll back = set enabled: false in config
+  // (restores legacy dead-end behavior for diagnosis only).
+  { id: 'evaluator_artificer_repair_loop', category: 'quiet', enabled: true, since: '2026-07-04', description: 'PRI-509/P0-D: Evaluator→Artificer repair loop — auto-seed artificer repair on needs_revision (2-round cap → needs_human_review). Default ON (INV-02 liveness); production-wired in auto-consumer since 2026-08-18.' },
   // Internalization progressive disclosure — Layer 0 (design §6.1, §8, PR 1).
   // Writer-side ArtifactSummary + PredecessorSummaryRef envelope, merged into
   // contentJson for all 8 SummaryRunnerKind stages. Default off; flag-off =

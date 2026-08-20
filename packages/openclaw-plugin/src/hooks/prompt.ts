@@ -33,6 +33,7 @@ import {
   assembleAppendSystemContext,
 } from './prompt-helpers.js';
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
+import { createLiveSignalKeywordStore } from '../core/signal-keyword-store.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
 import type { InjectablePrinciple } from '../core/principle-injection.js';
 
@@ -207,7 +208,10 @@ function getSignalCollectorHost(wctx: WorkspaceContext, logger?: PluginLogger): 
     // 从 .pd/config.yaml 的 signalCollector runtimeProfile 构造 LLM classifier(配置单轨化)。
     // 未配置/降级时返回 null,host 走纯关键词模式(spec §3.3 决策3)。
     const llmClassifier = createSignalLlmClassifierFromConfig(wctx, logger);
-    host = new SignalCollectorHost(wctx, { llmClassifier });
+    // P0-B: 检测词库走 live provider(learned correction cues 无需重启即生效,
+    // optimizer 写 correction_keywords.json 后下一次 detectSync 消费)。
+    const liveStore = createLiveSignalKeywordStore(wctx, logger);
+    host = new SignalCollectorHost(wctx, { llmClassifier, keywordStoreProvider: () => liveStore.resolve() });
     _signalCollectorHosts.set(wctx.workspaceDir, host);
   }
   return host;

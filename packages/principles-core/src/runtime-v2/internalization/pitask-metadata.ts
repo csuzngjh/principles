@@ -80,8 +80,8 @@ export interface PITaskMetadata {
   /**
    * Prior adversarial replay failures to inject into a Round-2+ Artificer
    * prompt (RuleHost MVP, PRI-428). Set by runAdversarialLoop when a prior
-   * Evaluator round returned needs_revision. Treated as opaque text by the
-   * metadata layer; the ArtificerRunner forwards it to the prompt builder.
+   * Evaluator round returned needs_revision. Treated as opaque text by
+   * the metadata layer; the ArtificerRunner forwards it to the prompt builder.
    */
   adversarialFeedback?: string;
   /**
@@ -91,6 +91,105 @@ export interface PITaskMetadata {
    * can address each required change. Undefined on Round-1 artificer tasks.
    */
   repairPayload?: RepairPayload;
+  /**
+   * Runner 判定(evaluator / rollout_reviewer 的 LLM 决策),由 runner 在
+   * succeedTask 收尾时写入。commitNextTaskProposal 依据它做单一迁移决策
+   * (MVP_CORE_LOOP_CONTRACT INV-02: needs_revision 不得同时 seed 正常后继)。
+   */
+  runnerDecision?: RunnerDecision;
+  /**
+   * 该任务被 revision reopen 的次数(每次 reopen +1)。revision 有界性的
+   * 一部分: 配合 rolloutRevisionPayload.revisionIteration / repairIteration
+   * 构成 lineage 级 revision budget。
+   */
+  revisionCount?: number;
+  /**
+   * Rollout reviewer needs_revision 时注入到被 reopen 修订目标的反馈
+   * (scribe / artificer 的 prompt 侧注入,由各 runner buildContext 消费)。
+   */
+  revisionFeedback?: string;
+  /**
+   * P0-4 revision identity: 触发本次 reopen 的稳定 cause 标识
+   * (如 `repair-<repairTaskId>` / `rollout-<rolloutTaskId>-r<iteration>`)。
+   * reopenTaskForRevision 对相同 causeId 的重放是真正 no-op。
+   */
+  revisionCauseId?: string;
+  /**
+   * Rollout reviewer needs_revision 的修订路由载荷: 记录修订目标 stage、
+   * 迭代号与来源,保证 revision budget 可判定 (MVP_CORE_LOOP_CONTRACT INV-07)。
+   */
+  rolloutRevisionPayload?: RolloutRevisionPayload;
+  /**
+   * P0 (verdict drift): 一次 LLM verdict 的 durable completion intent。
+   *
+   * 与 runnerDecision 在同一次 metadata 写入中落库 (原子): intent 存在且
+   * status='pending' ⇒ 该 verdict 的治理 transition 尚未完成。同一
+   * execution epoch 内 crash/retry/restart 重跑时,run() 入口必须 RESUME
+   * 该 intent (跳过 LLM,幂等重放 effects),禁止让新的 LLM 输出覆盖它
+   * —— LLM 非确定性下,重问可能产生 approve/reject 漂移,与已发生的
+   * side effect (activation / repair seed / validation) 形成治理矛盾。
+   *
+   * epoch 语义: revisionEpoch = 落库时的 revisionCount。真正的 revision
+   * reopen 会递增 revisionCount 并清空本字段 (新 epoch 允许新 verdict);
+   * epoch 不匹配的残留 intent 视为 stale,不得 resume。
+   */
+  completionIntent?: RunnerCompletionIntent;
+}
+
+/** evaluator / rollout_reviewer 的合法 runner 决策值 */
+export type RunnerDecision =
+  | 'approved'
+  | 'needs_revision'
+  | 'rejected'
+  | 'approve_rollout'
+  | 'reject';
+
+const RUNNER_DECISIONS: ReadonlySet<string> = new Set([
+  'approved', 'needs_revision', 'rejected', 'approve_rollout', 'reject',
+]);
+
+/**
+ * 一次 verdict completion 的 durable intent (P0 verdict drift 修复)。
+ * effectPayload 语义按 decision 分派:
+ *   - needs_revision (rollout): revisionIteration = 本次 completion 的修订轮号
+ *     (record 时由已 APPLIED 的 rolloutRevisionPayload 计出并锁定,resume
+ *     据此继续同一轮,消除"applied 载荷属于上一轮还是本轮"的歧义);
+ *   - 其余 decision: 无 effect 载荷。
+ */
+export interface RunnerCompletionIntent {
+  readonly decision: RunnerDecision;
+  /** 产出该 verdict 的 run — resume 时从其 outputPayload 恢复已验证输出 */
+  readonly sourceRunId: string;
+  /** 落库时任务的 revisionCount — 同 epoch 才允许 resume */
+  readonly revisionEpoch: number;
+  readonly status: 'pending' | 'applied';
+  readonly revisionIteration?: number;
+  /**
+   * P0-A (completion-intent 完整性): 该 completion 的效果类型。
+   * - 'governance_transition' (缺省): 正常治理 transition (dispatch /
+   *   revision routing / repair seed / validation),由 runner 的 effects 执行;
+   * - 'needs_human_review': 终态人工裁决效果 (rollout budget exhausted 等)
+   *   — crash resume 必须继续该效果 (重写 needs_human_review),禁止重问 LLM。
+   */
+  readonly effect?: 'governance_transition' | 'needs_human_review';
+}
+
+/** rollout needs_revision 的修订路由载荷 */
+export interface RolloutRevisionPayload {
+  readonly requiredChanges: readonly string[];
+  readonly revisionIteration: number;
+  readonly sourceRolloutTaskId: string;
+  readonly sourceArtifactId: string;
+  readonly targetTaskKind: 'scribe' | 'artificer';
+  /**
+   * B (最终复核) intent 状态机:
+   * - 'pending': intent 已持久化,transition 尚未 materialize — crash/retry/
+   *   restart 必须继续执行同一 iteration N,禁止自动 N+1;
+   * - 'applied': reopen 已 materialize — 只有新的 needs_revision verdict 才
+   *   能 N→N+1;budget 按 APPLIED 计数,不按 intent 写入次数计。
+   * - undefined: 旧形状 (本状态机引入前) — 兼容视为 'applied'。
+   */
+  readonly status?: 'pending' | 'applied';
 }
 
 // ── Serialization ──────────────────────────────────────────────────────────────
@@ -112,12 +211,49 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       rejectionCount: metadata.rejectionCount,
       adversarialFeedback: metadata.adversarialFeedback,
       repairPayload: metadata.repairPayload,
+      runnerDecision: metadata.runnerDecision,
+      revisionCount: metadata.revisionCount,
+      revisionFeedback: metadata.revisionFeedback,
+      revisionCauseId: metadata.revisionCauseId,
+      rolloutRevisionPayload: metadata.rolloutRevisionPayload,
+      completionIntent: metadata.completionIntent,
     },
   });
 }
 
 /** Alias for serializePITaskMetadata — explicit name for adapter/consumer use. */
 export const createPITaskDiagnosticJson = serializePITaskMetadata;
+
+/**
+ * 从已 hydrate 的 PITaskRecord 重建可写 PITaskMetadata,浅覆盖指定字段。
+ *
+ * 单一重建点 (DRY): evaluator/rollout 的 verdict 记录、修订路由记录、
+ * orchestrator 的 revision reopen 共用同一字段搬运逻辑——此前 4 处手写
+ * 逐字段 spread,新增字段时容易漏抄 (Phase 3.5 consolidation)。
+ * 注意: overrides 中显式 undefined 会覆盖为 undefined (serialize 时省略键),
+ * 用于"清除旧 verdict"语义。
+ */
+export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITaskMetadata>): PITaskMetadata {
+  return {
+    dependencyTaskIds: base.dependencyTaskIds,
+    channel: base.channel,
+    timeoutMs: base.timeoutMs,
+    inputArtifactRefs: base.inputArtifactRefs,
+    outputArtifactRefs: base.outputArtifactRefs,
+    parentTaskId: base.parentTaskId,
+    correlationId: base.correlationId,
+    rejectionCount: base.rejectionCount,
+    adversarialFeedback: base.adversarialFeedback,
+    repairPayload: base.repairPayload,
+    runnerDecision: base.runnerDecision,
+    revisionCount: base.revisionCount,
+    revisionFeedback: base.revisionFeedback,
+    revisionCauseId: base.revisionCauseId,
+    rolloutRevisionPayload: base.rolloutRevisionPayload,
+    completionIntent: base.completionIntent,
+    ...overrides,
+  };
+}
 
 // ── ArtifactRef validation ─────────────────────────────────────────────────────
 
@@ -258,6 +394,85 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ repairPayload } = m);
   }
 
+  // runnerDecision (transition control, INV-02): optional literal union.
+  if (Object.hasOwn(m, 'runnerDecision') && m.runnerDecision !== undefined) {
+    if (typeof m.runnerDecision !== 'string' || !RUNNER_DECISIONS.has(m.runnerDecision)) return null;
+  }
+
+  // revisionCount: optional non-negative integer.
+  if (Object.hasOwn(m, 'revisionCount') && m.revisionCount !== undefined) {
+    if (typeof m.revisionCount !== 'number' || !Number.isInteger(m.revisionCount) || m.revisionCount < 0) return null;
+  }
+
+  // revisionFeedback / revisionCauseId: optional non-empty strings.
+  if (Object.hasOwn(m, 'revisionFeedback') && m.revisionFeedback !== undefined) {
+    if (typeof m.revisionFeedback !== 'string' || m.revisionFeedback.trim() === '') return null;
+  }
+  if (Object.hasOwn(m, 'revisionCauseId') && m.revisionCauseId !== undefined) {
+    if (typeof m.revisionCauseId !== 'string' || m.revisionCauseId.trim() === '') return null;
+  }
+
+  // rolloutRevisionPayload: optional, full validation (rc-1/rc-4).
+  let rolloutRevisionPayload: RolloutRevisionPayload | undefined;
+  if (Object.hasOwn(m, 'rolloutRevisionPayload') && m.rolloutRevisionPayload !== undefined) {
+    const p = m.rolloutRevisionPayload;
+    if (typeof p !== 'object' || p === null || Array.isArray(p)) return null;
+    const r = p as Record<string, unknown>;
+    if (!Array.isArray(r.requiredChanges) || r.requiredChanges.length === 0) return null;
+    for (const c of r.requiredChanges) {
+      if (typeof c !== 'string' || c.trim() === '') return null;
+    }
+    if (typeof r.revisionIteration !== 'number' || !Number.isInteger(r.revisionIteration)
+      || r.revisionIteration < 1 || r.revisionIteration > 2) return null;
+    if (typeof r.sourceRolloutTaskId !== 'string' || r.sourceRolloutTaskId.trim() === '') return null;
+    if (typeof r.sourceArtifactId !== 'string' || r.sourceArtifactId.trim() === '') return null;
+    if (r.targetTaskKind !== 'scribe' && r.targetTaskKind !== 'artificer') return null;
+    // B: 可选 intent 状态,缺失视为旧形状 (=applied)
+    let intentStatus: 'pending' | 'applied' | undefined;
+    if (r.status !== undefined && r.status !== 'pending' && r.status !== 'applied') return null;
+    if (r.status === 'pending' || r.status === 'applied') intentStatus = r.status;
+    rolloutRevisionPayload = {
+      requiredChanges: r.requiredChanges as string[],
+      revisionIteration: r.revisionIteration,
+      sourceRolloutTaskId: r.sourceRolloutTaskId,
+      sourceArtifactId: r.sourceArtifactId,
+      targetTaskKind: r.targetTaskKind,
+      status: intentStatus,
+    };
+  }
+
+  // completionIntent: optional, full validation (rc-1/rc-4). Malformed intent
+  // invalidates the whole metadata (fail-closed) — a corrupted authority
+  // record must never silently degrade into "no intent, re-ask the LLM".
+  let completionIntent: RunnerCompletionIntent | undefined;
+  if (Object.hasOwn(m, 'completionIntent') && m.completionIntent !== undefined) {
+    const p = m.completionIntent;
+    if (typeof p !== 'object' || p === null || Array.isArray(p)) return null;
+    const r = p as Record<string, unknown>;
+    if (typeof r.decision !== 'string' || !RUNNER_DECISIONS.has(r.decision)) return null;
+    if (typeof r.sourceRunId !== 'string' || r.sourceRunId.trim() === '') return null;
+    if (typeof r.revisionEpoch !== 'number' || !Number.isInteger(r.revisionEpoch) || r.revisionEpoch < 0) return null;
+    if (r.status !== 'pending' && r.status !== 'applied') return null;
+    let revisionIteration: number | undefined;
+    if (r.revisionIteration !== undefined) {
+      if (typeof r.revisionIteration !== 'number' || !Number.isInteger(r.revisionIteration)
+        || r.revisionIteration < 1 || r.revisionIteration > 2) return null;
+      ({ revisionIteration } = r);
+    }
+    // P0-A: 可选效果类型,缺失 = governance_transition
+    let effect: 'governance_transition' | 'needs_human_review' | undefined;
+    if (r.effect !== undefined && r.effect !== 'governance_transition' && r.effect !== 'needs_human_review') return null;
+    if (r.effect === 'needs_human_review') ({ effect } = r);
+    completionIntent = {
+      decision: r.decision as RunnerDecision,
+      sourceRunId: r.sourceRunId,
+      revisionEpoch: r.revisionEpoch,
+      status: r.status,
+      revisionIteration,
+      ...(effect !== undefined ? { effect } : {}),
+    };
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -269,6 +484,14 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     rejectionCount,
     adversarialFeedback: typeof m.adversarialFeedback === 'string' ? m.adversarialFeedback : undefined,
     repairPayload,
+    runnerDecision: typeof m.runnerDecision === 'string' && RUNNER_DECISIONS.has(m.runnerDecision)
+      ? m.runnerDecision as RunnerDecision
+      : undefined,
+    revisionCount: typeof m.revisionCount === 'number' ? m.revisionCount : undefined,
+    revisionFeedback: typeof m.revisionFeedback === 'string' ? m.revisionFeedback : undefined,
+    revisionCauseId: typeof m.revisionCauseId === 'string' ? m.revisionCauseId : undefined,
+    rolloutRevisionPayload,
+    completionIntent,
   };
 }
 
@@ -317,5 +540,11 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     rejectionCount: meta.rejectionCount ?? 0,
     adversarialFeedback: meta.adversarialFeedback,
     repairPayload: meta.repairPayload,
+    runnerDecision: meta.runnerDecision,
+    revisionCount: meta.revisionCount,
+    revisionFeedback: meta.revisionFeedback,
+    revisionCauseId: meta.revisionCauseId,
+    rolloutRevisionPayload: meta.rolloutRevisionPayload,
+    completionIntent: meta.completionIntent,
   } as unknown as PITaskRecord;
 }

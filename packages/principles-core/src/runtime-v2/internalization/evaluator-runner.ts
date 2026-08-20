@@ -36,7 +36,7 @@ import type {
 import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type RepairPayload, type PITaskMetadata, type RunnerDecision } from './pitask-metadata.js';
 import { EvaluatorPromptBuilder } from './evaluator-prompt-builder.js';
 import { reconcileLineageEcho, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -78,6 +78,17 @@ interface EvaluatorContext {
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * P0-B (verdict drift 完整性): rule assembly 的稳定输入。fresh 路径来自
+ * buildContext 的内存结果;resume 路径从 durable lineage 重建 (store 按
+ * output.sourceArtificerArtifactId 取 contentJson) — 瞬时内存 context 不得
+ * 作为 recovery authority。
+ */
+interface RuleAssemblyInput {
+  readonly artificerArtifact: string | null;
+  readonly sourceArtificerArtifactId: string | null;
 }
 
 /**
@@ -690,118 +701,33 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
 
-    // ── PRI-427: rule artifact assembly ──
-    // When the evaluator output is V2 AND the adversarial replay passed, write
-    // a second artifact with artifactKind='rule' carrying the executable code
-    // + golden trace + gate decision, then mark it 'validated' so the downstream
-    // RuleHostWriter.canActivate path accepts it.
-    //
-    // PRD Decision 5 contract:
-    //   - rule artifact goldenTrace = Artificer's FULL trace (buildGoldenTraceFromArtificer),
-    //     NOT the adversarial replay trace. The adversarial trace was only used
-    //     to TEST the code in PRI-426; enforcement uses the production trace.
-    //   - ruleHostGateDecision must be 'accepted_shadow' for RuleHostWriter to
-    //     accept (rule-host-writer.ts extractRuleHostGateDecision).
-    //   - Assembly failure is non-fatal: principle artifact is already written,
-    //     prompt-channel fallback remains available (PRD Decision 5 degradation).
-    let ruleArtifactId: string | null = null;
-    if (isEvaluatorOutputV2(finalOutput) && finalOutput.adversarialResult?.passed === true) {
-      ruleArtifactId = await this.assembleRuleArtifact(finalOutput, taskId, runId, context, lineageArtifactIds);
+    // ── P0 (verdict drift): verdict + completion intent 原子落库 ──
+    // 必须先于一切治理 side effect (validate bearer / seed repair / rule
+    // assembly):side effect 已发生而 intent 未落 = crash 后重跑会重新问
+    // LLM,新 verdict 与已发生副作用形成治理矛盾 (repair drift /
+    // validation drift / validated-rule drift)。同 epoch crash/retry 重跑经
+    // maybeResumePendingIntent resume,不重问。
+    await this.recordCompletionOrThrow(taskId, runId, finalOutput.evaluation.decision);
+
+    const ruleAssemblyInput = {
+      artificerArtifact: context.artificerArtifact ?? null,
+      sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? null,
+    };
+    const sourceArtificerArtifactId = context.sourceArtificerArtifactId
+      ?? finalOutput.sourceArtificerArtifactId
+      ?? null;
+    const effectResult = await this.applyEvaluatorDecisionEffects({
+      taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId, ruleAssemblyInput,
+    });
+    if (effectResult.kind === 'human_review') {
+      return effectResult.result;
     }
 
-    // ── Evaluator-specific: validate principle-bearing Scribe artifact ──
-    // This is the critical business logic: approved evaluator must validate
-    // the Scribe principle artifact, NOT the Artificer plan artifact.
-    if (output.evaluation.decision === 'approved') {
-      const principleArtifactId = await this.resolvePrincipleBearerArtifact(output, taskId);
-      if (principleArtifactId) {
-        try {
-          const updated = await this.artifactStore.updateValidationStatus(
-            principleArtifactId,
-            'validated',
-          );
-          if (!updated) {
-            // updateValidationStatus returned false — fail loud with structured telemetry (ERR-018)
-            this.emitEvent('source_validation_update_not_found', taskId, {
-              runId,
-              sourceArtifactId: principleArtifactId,
-              reason: 'principle_artifact_not_found_in_store',
-              nextAction: 'verify_artifact_lineage_and_store_consistency',
-            });
-          }
-        } catch (updateErr) {
-          this.emitEvent('source_validation_update_failed', taskId, {
-            runId,
-            sourceArtifactId: principleArtifactId,
-            errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
-          });
-        }
-      }
-    }
+    // ── P0 invariant 5: intent APPLIED 后才允许 terminal ──
+    await this.markCompletionIntentAppliedOrThrow(taskId);
 
-    // ── PRI-509: Evaluator→Artificer Repair Loop ──
-    // When decision === 'needs_revision' AND the feature flag is enabled:
-    //   1. Resolve priorRepairIteration from the dependency artificer task's
-    //      repairPayload (rc-7: read at task creation, never inferred).
-    //   2. If priorRepairIteration >= 2 (max 2 rounds reached):
-    //      - Mark the evaluator task needs_human_review (fail loud, EP-03/ERR-002).
-    //      - Emit a structured repair_loop_max_iterations event with reason +
-    //        nextAction (rc-9: no silent fallback).
-    //      - Return succeeded (the evaluator produced a valid verdict; the task
-    //        status reflects the need for human review, not a runner failure).
-    //   3. Else (priorRepairIteration < 2):
-    //      - Seed a new artificer repair task carrying a fresh repairPayload
-    //        (repairIteration = priorRepairIteration + 1) so the artificer can
-    //        address the evaluator's structured feedback.
-    //      - Fall through to the normal markTaskSucceeded path.
-    if (output.evaluation.decision === 'needs_revision' && this.isRepairLoopEnabled()) {
-      const repairOutcome = await this.maybeSeedArtificerRepair(
-        taskId,
-        { runId, output, context },
-      );
-      if (repairOutcome.kind === 'max_iterations_reached') {
-        // Fail loud (rc-9, EP-03, ERR-002): mark the task needs_human_review
-        // so it does NOT stay in 'leased' state (which would cause the lease
-        // to expire and the evaluator to re-run the same verdict infinitely).
-        //
-        // The runner result remains 'succeeded' — the evaluator produced a
-        // valid verdict; the *task status* reflects that human review is
-        // required, not that the runner failed.
-        const resultRef = `${this.config.resultRefPrefix}://${runId}`;
-        try {
-          await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
-        } catch (stateErr) {
-          // Surface the state-update failure observably (rc-9 — never silent).
-          this.emitEvent('repair_loop_mark_review_failed', taskId, {
-            runId,
-            errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-            nextAction: 'manual_intervention_required',
-          });
-        }
-        this.emitEvent('task_needs_human_review', taskId, {
-          attemptCount: task.attemptCount,
-          resultRef,
-          evaluationDecision: finalOutput.evaluation.decision,
-          evaluationScore: finalOutput.evaluation.score,
-          ruleArtifactId: null,
-          reason: 'repair_loop_max_iterations_or_seed_failure',
-        });
-        return {
-          status: 'succeeded',
-          taskId,
-          runId,
-          artifactId,
-          resultRef,
-          contextHash,
-          output: finalOutput,
-          attemptCount: task.attemptCount,
-        };
-      }
-      // repairOutcome.kind === 'repair_seeded' → fall through to markTaskSucceeded.
-    }
-
-    // Mark task succeeded
     const resultRef = `${this.config.resultRefPrefix}://${runId}`;
+
     try {
       await this.stateManager.markTaskSucceeded(taskId, resultRef);
     } catch (stateErr) {
@@ -818,7 +744,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       resultRef,
       evaluationDecision: finalOutput.evaluation.decision,
       evaluationScore: finalOutput.evaluation.score,
-      ruleArtifactId,
+      ruleArtifactId: effectResult.ruleArtifactId,
     });
 
     return {
@@ -831,6 +757,140 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       output: finalOutput,
       attemptCount: task.attemptCount,
     };
+  }
+
+  /**
+   * P0 (verdict drift): 执行 decision 的治理效果 (fresh 与 resume 共用,
+   * 幂等): approved → validate principle bearer;needs_revision (repair loop
+   * on) → deterministic repair seed / max-iterations needs_human_review;
+   * rejected → 无效果。
+   *
+   * 返回非 null = terminal 结果 (needs_human_review 族,caller 直接返回,
+   * 不得 markTaskSucceeded);null = effects 完成,caller 标 intent applied
+   * 后 markSucceeded。
+   */
+  private async applyEvaluatorDecisionEffects(args: {
+    taskId: string;
+    runId: string;
+    finalOutput: EvaluatorOutputV1;
+    task: TaskRecord;
+    artifactId: string;
+    contextHash: string;
+    sourceArtificerArtifactId: string | null;
+    ruleAssemblyInput: RuleAssemblyInput;
+  }): Promise<
+    | { kind: 'human_review'; result: PeerRunnerResult<EvaluatorOutputV1> }
+    | { kind: 'completed'; ruleArtifactId: string | null }
+  > {
+    const { taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId } = args;
+    const {decision} = finalOutput.evaluation;
+
+    // ── Evaluator-specific: validate principle-bearing Scribe artifact ──
+    // This is the critical business logic: approved evaluator must validate
+    // the Scribe principle artifact, NOT the Artificer plan artifact.
+    // Idempotent: repeated updateValidationStatus('validated') is safe —
+    // crash-resume re-applies without contradiction.
+    if (decision === 'approved') {
+      const principleArtifactId = await this.resolvePrincipleBearerArtifact(finalOutput, taskId);
+      if (principleArtifactId) {
+        try {
+          const updated = await this.artifactStore.updateValidationStatus(
+            principleArtifactId,
+            'validated',
+          );
+          if (!updated) {
+            // updateValidationStatus returned false — deterministic store
+            // inconsistency (bearer 不在 store);结构化降级 (telemetry +
+            // rollout 侧 resolveActivationCandidate 兜底 needs_human_review)。
+            this.emitEvent('source_validation_update_not_found', taskId, {
+              runId,
+              sourceArtifactId: principleArtifactId,
+              reason: 'principle_artifact_not_found_in_store',
+              nextAction: 'verify_artifact_lineage_and_store_consistency',
+            });
+          }
+        } catch (updateErr) {
+          this.emitEvent('source_validation_update_failed', taskId, {
+            runId,
+            sourceArtifactId: principleArtifactId,
+            errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
+            nextAction: 'task_will_retry; repeated validated write is idempotent',
+          });
+          // P0 (INV-2): bearer validated 是 approved 的 required effect —
+          // 存储写失败必须重试 (resume 幂等重放),不得吞掉后标 intent applied。
+          throw updateErr;
+        }
+      }
+
+      // ── P0-B (verdict drift 完整性): rule assembly 是治理 side effect ──
+      // validated rule 会被 RuleHostWriter.canActivate 消费,必须在 durable
+      // completion intent 之后执行 (原顺序: assembly 在 intent 前 → crash 后
+      // 新 verdict 可与已 validated rule 冲突)。fresh 与 resume 共用本路径;
+      // resume 的 assembly 输入由 durable lineage 重建 (store 按
+      // sourceArtificerArtifactId 取 contentJson),deterministic
+      // pi-rule-<taskId>-<runId> 保证重放不重复。
+      if (isEvaluatorOutputV2(finalOutput) && finalOutput.adversarialResult?.passed === true) {
+        let lineageIds: readonly string[] = [];
+        try {
+          lineageIds = (await this.resolveLineageArtifactIds(taskId)).ids;
+        } catch (lineageErr) {
+          this.emitEvent('lineage_resolve_failed', taskId, {
+            runId,
+            errorMessage: lineageErr instanceof Error ? lineageErr.message : String(lineageErr),
+          });
+        }
+        const ruleArtifactId = await this.assembleRuleArtifact(
+          finalOutput, taskId, runId, args.ruleAssemblyInput, lineageIds,
+        );
+        return { kind: 'completed', ruleArtifactId };
+      }
+      return { kind: 'completed', ruleArtifactId: null };
+    }
+
+    // ── PRI-509: Evaluator→Artificer Repair Loop ──
+    // needs_revision 且 repair loop 开启: seed 确定性 ID 的 repair 任务
+    // (幂等,crash-resume 不重复);max iterations (2) → needs_human_review。
+    if (decision === 'needs_revision' && this.isRepairLoopEnabled()) {
+      const repairOutcome = await this.maybeSeedArtificerRepair(
+        taskId,
+        { runId, output: finalOutput, sourceArtificerArtifactId },
+      );
+      if (repairOutcome.kind === 'max_iterations_reached') {
+        // Fail loud (rc-9, EP-03, ERR-002): mark the task needs_human_review
+        // so it does NOT stay in 'leased' state (which would cause the lease
+        // to expire and the evaluator to re-run the same verdict infinitely).
+        // P0 (INV-2): needs_human_review 是本 completion 的 materialize 操作 —
+        // fail-closed: 写失败 throw → retry_wait → 入口门 resume 同一效果,
+        // 不问 LLM;禁止吞错后继续 (intent applied ⇔ effect 已 durable)。
+        const resultRef = `${this.config.resultRefPrefix}://${runId}`;
+        await this.markNeedsHumanReviewOrThrow(taskId, runId, 'repair_loop_max_iterations_or_seed_failure');
+        this.emitEvent('task_needs_human_review', taskId, {
+          attemptCount: task.attemptCount,
+          resultRef,
+          evaluationDecision: finalOutput.evaluation.decision,
+          evaluationScore: finalOutput.evaluation.score,
+          ruleArtifactId: null,
+          reason: 'repair_loop_max_iterations_or_seed_failure',
+        });
+        return {
+          kind: 'human_review',
+          result: {
+            status: 'succeeded',
+            taskId,
+            runId,
+            artifactId,
+            resultRef,
+            contextHash,
+            output: finalOutput,
+            attemptCount: task.attemptCount,
+          },
+        };
+      }
+      // repairOutcome.kind === 'repair_seeded' → fall through (completed)
+    }
+    // rejected / needs_revision (repair loop off): 无治理效果 — commit 门的
+    // transition decision 依据 durable runnerDecision fail-closed。
+    return { kind: 'completed', ruleArtifactId: null };
   }
 
   /**
@@ -866,6 +926,278 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   /**
+   * 把 runner verdict 持久化进任务 diagnosticJson(commit 门控的输入)。
+   * 失败不静默 (rc-9): emitEvent 后吞掉 — verdict 已在 events/runs 中可观测,
+   * 且 commit 门对缺失 verdict 走 legacy 推进,不会因记录失败而卡链。
+   */
+  // ── P0 (verdict drift): completion intent — record / applied / resume ──
+
+  /**
+   * P0 (INV-2): needs_human_review 是 completion effect 的 materialize 操作 —
+   * fail-closed + read-back。写失败 throw → retry_wait → 入口门 resume 同一
+   * effect,不问 LLM;禁止吞错后让 caller 标 intent applied
+   * (intent applied ⇔ 其 durable effect 已 materialize)。
+   */
+  private async markNeedsHumanReviewOrThrow(taskId: string, runId: string, reason: string): Promise<void> {
+    try {
+      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+      // read-back invariant (INV-2): 只有 effect durable 才允许 caller 标 applied
+      const current = await this.stateManager.getTask(taskId);
+      if (!current || current.status !== 'needs_human_review') {
+        throw new PDRuntimeError(
+          'storage_unavailable',
+          `needs_human_review effect not durable for task ${taskId} (read-back status: ${current?.status ?? 'task_missing'})`,
+        );
+      }
+    } catch (err) {
+      this.emitEvent('repair_loop_mark_review_failed', taskId, {
+        runId,
+        reason,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'task_will_retry_then_resume_completion_intent_without_llm',
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * verdict + completion intent 原子落库 (单次 metadata 写)。intent 的存在
+   * 证明 output 已 durable (updateRunOutput 在 succeedTask 最前)。
+   * 同 epoch crash/retry 重跑经 maybeResumePendingIntent resume,不重问 LLM。
+   */
+  private async recordCompletionOrThrow(taskId: string, runId: string, decision: string): Promise<void> {
+    try {
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) throw new Error(`task ${taskId} not found`);
+      const piTask = hydratePITaskRecord(raw);
+      if (!piTask) throw new Error(`task ${taskId} not hydratable`);
+      const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
+        runnerDecision: decision === 'approved' || decision === 'needs_revision' || decision === 'rejected'
+          ? decision
+          : piTask.runnerDecision,
+        completionIntent: {
+          decision: decision as RunnerDecision,
+          sourceRunId: runId,
+          revisionEpoch: piTask.revisionCount ?? 0,
+          status: 'pending',
+        },
+      });
+      await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+    } catch (err) {
+      // P0-3 (外部复核): 吞掉写失败 = succeeded 任务无 durable verdict,
+      // commit 门退化为不可判定 — fail loud,由重试机制重写 (verdict 仍在 runs)。
+      this.emitEvent('completion_record_failed', taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        decision,
+        nextAction: 'task_will_retry; record is idempotent overwrite',
+      });
+      throw err;
+    }
+  }
+
+  /** intent APPLIED 后才允许 terminal (P0 invariant 5)。写失败 fail loud。 */
+  private async markCompletionIntentAppliedOrThrow(taskId: string): Promise<void> {
+    try {
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) throw new Error(`task ${taskId} not found`);
+      const piTask = hydratePITaskRecord(raw);
+      if (!piTask?.completionIntent) return;
+      const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
+        completionIntent: { ...piTask.completionIntent, status: 'applied' },
+      });
+      await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+    } catch (err) {
+      this.emitEvent('completion_mark_applied_failed', taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'task_will_retry; effects are idempotent on resume',
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * 入口恢复门 (BasePeerRunner hook): pending completion intent (同 epoch)
+   * 是 recovery authority。返回非 null = 本次 run 以 resume 完成 (LLM 未被
+   * 调用);返回 null = 走正常 LLM 管线。真正的 revision reopen 已清空
+   * intent (新 epoch 允许新 verdict);epoch 不匹配的残留视为 stale。
+   */
+  protected override async maybeResumePendingIntent(
+    taskId: string,
+    leasedTask: TaskRecord,
+  ): Promise<PeerRunnerResult<EvaluatorOutputV1> | null> {
+    const piTask = hydratePITaskRecord(leasedTask);
+    const intent = piTask?.completionIntent;
+    if (!piTask || !intent || intent.status !== 'pending') {
+      // P0 (INV-1/INV-5): applied 但任务未 terminal (标 applied 后、
+      // markTaskSucceeded 写失败/crash 的窗口) — effects 已 materialize,
+      // 不重问 LLM,直接补 terminal。
+      if (piTask && intent && intent.status === 'applied'
+        && intent.revisionEpoch === (piTask.revisionCount ?? 0)
+        && leasedTask.status !== 'needs_human_review') {
+        return await this.finalizeAppliedIntentTerminal({ taskId, decision: intent.decision, sourceRunId: intent.sourceRunId, leasedTask });
+      }
+      return null;
+    }
+    if (intent.revisionEpoch !== (piTask.revisionCount ?? 0)) {
+      this.emitEvent('completion_intent_stale_epoch', taskId, {
+        intentEpoch: intent.revisionEpoch,
+        currentEpoch: piTask.revisionCount ?? 0,
+        nextAction: 'reopen should have cleared intent; verify reopenTaskForRevision path',
+      });
+      return null;
+    }
+    this.emitEvent('completion_intent_resumed', taskId, {
+      decision: intent.decision,
+      sourceRunId: intent.sourceRunId,
+    });
+
+    const output = await this.recoverIntentOutput(taskId, intent.sourceRunId, intent.decision);
+    const artifactId = `pi-art-${taskId}-${intent.sourceRunId}`;
+    const contextHash = `resume-${intent.sourceRunId}`;
+    // P0-B: rule assembly 输入由 durable lineage 重建 (fresh 路径来自内存
+    // context;resume 不得依赖瞬时内存) — store 按 output 的
+    // sourceArtificerArtifactId 取 artificer contentJson。
+    const assemblySourceId = output.sourceArtificerArtifactId ?? null;
+    let artificerContent: string | null = null;
+    if (assemblySourceId) {
+      try {
+        const rec = await this.artifactStore.getArtifactById(assemblySourceId);
+        artificerContent = rec?.contentJson ?? null;
+      } catch {
+        artificerContent = null; // assembly 将结构化降级 (rule_assembly_failed)
+      }
+    }
+    const effectResult = await this.applyEvaluatorDecisionEffects({
+      taskId,
+      runId: intent.sourceRunId,
+      finalOutput: output,
+      task: leasedTask,
+      artifactId,
+      contextHash,
+      sourceArtificerArtifactId: assemblySourceId,
+      ruleAssemblyInput: { artificerArtifact: artificerContent, sourceArtificerArtifactId: assemblySourceId },
+    });
+    if (effectResult.kind === 'human_review') {
+      return effectResult.result;
+    }
+    await this.markCompletionIntentAppliedOrThrow(taskId);
+    const resultRef = `${this.config.resultRefPrefix}://${intent.sourceRunId}`;
+    try {
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+    } catch (stateErr) {
+      this.emitEvent('mark_succeeded_failed', taskId, {
+        taskId,
+        runId: intent.sourceRunId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
+    this.emitEvent('task_succeeded', taskId, {
+      attemptCount: leasedTask.attemptCount,
+      resultRef,
+      evaluationDecision: output.evaluation.decision,
+      evaluationScore: output.evaluation.score,
+      ruleArtifactId: effectResult.ruleArtifactId,
+      resumedFromCompletionIntent: true,
+    });
+    return {
+      status: 'succeeded',
+      taskId,
+      runId: intent.sourceRunId,
+      artifactId,
+      resultRef,
+      contextHash,
+      output,
+      attemptCount: leasedTask.attemptCount,
+    };
+  }
+
+  /**
+   * P0 (INV-1/INV-5): applied intent 的补 terminal — effects 已 materialize
+   * (applied ⇒ INV-2 保证),仅 markTaskSucceeded 缺失。不调用 LLM。
+   */
+  private async finalizeAppliedIntentTerminal(args: {
+    taskId: string;
+    decision: RunnerDecision;
+    sourceRunId: string;
+    leasedTask: TaskRecord;
+  }): Promise<PeerRunnerResult<EvaluatorOutputV1>> {
+    const { taskId, decision, sourceRunId, leasedTask } = args;
+    this.emitEvent('completion_intent_finalize_terminal', taskId, {
+      sourceRunId,
+      taskStatus: leasedTask.status,
+    });
+    const output = await this.recoverIntentOutput(taskId, sourceRunId, decision);
+    const resultRef = `${this.config.resultRefPrefix}://${sourceRunId}`;
+    try {
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+    } catch (stateErr) {
+      this.emitEvent('mark_succeeded_failed', taskId, {
+        taskId,
+        runId: sourceRunId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
+    this.emitEvent('task_succeeded', taskId, {
+      attemptCount: leasedTask.attemptCount,
+      resultRef,
+      evaluationDecision: output.evaluation.decision,
+      evaluationScore: output.evaluation.score,
+      ruleArtifactId: null,
+      finalizedFromAppliedIntent: true,
+    });
+    return {
+      status: 'succeeded',
+      taskId,
+      runId: sourceRunId,
+      artifactId: `pi-art-${taskId}-${sourceRunId}`,
+      resultRef,
+      contextHash: `resume-${sourceRunId}`,
+      output,
+      attemptCount: leasedTask.attemptCount,
+    };
+  }
+
+  /**
+   * 从 runs 表恢复 intent 落库前已持久化的 validated output,并交叉核对
+   * decision 与 intent 一致 (authority 记录一致性)。intent 的存在保证
+   * updateRunOutput 曾成功;缺失/损坏/漂移 = 存储腐坏 → fail loud。
+   */
+  private async recoverIntentOutput(
+    taskId: string,
+    sourceRunId: string,
+    expectedDecision: RunnerDecision,
+  ): Promise<EvaluatorOutputV1> {
+    const runs = await this.stateManager.getRunsByTask(taskId);
+    const run = runs.find((r) => r.runId === sourceRunId);
+    const raw = run?.outputPayload;
+    if (typeof raw !== 'string' || raw.length === 0) {
+      throw new PDRuntimeError('storage_unavailable', `completion intent output unrecoverable: run ${sourceRunId} of task ${taskId} has no outputPayload`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new PDRuntimeError('storage_unavailable', `completion intent output unrecoverable: run ${sourceRunId} of task ${taskId} has unparseable outputPayload`);
+    }
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new PDRuntimeError('storage_unavailable', `completion intent output unrecoverable: run ${sourceRunId} of task ${taskId} payload is not an object`);
+    }
+    // runtime-contract-exempt: ERR-001 field access on object-guarded unknown; the decision value is typeof-checked immediately below and must equal the durable intent's decision
+    const {evaluation} = (parsed as Record<string, unknown>);
+    const decision = typeof evaluation === 'object' && evaluation !== null
+      // runtime-contract-exempt: ERR-001 same object-guarded field access pattern as above; value compared against the expected decision, never trusted
+      ? (evaluation as Record<string, unknown>).decision
+      : undefined;
+    if (decision !== expectedDecision) {
+      throw new PDRuntimeError('storage_unavailable', `completion intent output unrecoverable: run ${sourceRunId} of task ${taskId} decision '${String(decision)}' does not match intent '${expectedDecision}'`);
+    }
+    // runtime-contract-exempt: ERR-001 output passed the full validate pipeline before persistence (run() trust boundary); this cast only narrows stored-not-fresh data whose decision was cross-checked above
+    return parsed as EvaluatorOutputV1;
+  }
+
+  /**
    * PRI-509: Seed an artificer repair task or mark the evaluator task
    * needs_human_review when max iterations (2) are reached.
    *
@@ -883,10 +1215,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     ctx: {
       runId: string;
       output: EvaluatorOutputV1;
-      context: EvaluatorContext;
+      sourceArtificerArtifactId: string | null;
     },
   ): Promise<{ kind: 'repair_seeded'; taskId: string } | { kind: 'max_iterations_reached' }> {
-    const { runId: evaluatorRunId, output, context } = ctx;
+    const { runId: evaluatorRunId, output } = ctx;
     const priorRepairIteration = await this.resolvePriorRepairIteration(evaluatorTaskId);
 
     // ── Slice 5: max iterations (2) reached → fail loud ──
@@ -903,7 +1235,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     }
 
     // ── Slice 4: seed artificer repair task ──
-    const sourceArtificerArtifactId = context.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId;
+    // sourceArtificerArtifactId 由 caller 解析 (fresh: context ?? output;
+    // resume: output — intent 落库前 output 已 durable)。
+    const sourceArtificerArtifactId = ctx.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId;
     if (!sourceArtificerArtifactId) {
       // Lineage missing — cannot construct repairPayload. Fail loud (rc-3).
       this.emitEvent('repair_loop_lineage_missing', evaluatorTaskId, {
@@ -1444,10 +1778,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     output: EvaluatorOutputV2,
     taskId: string,
     runId: string,
-    context: EvaluatorContext,
+    assemblyInput: RuleAssemblyInput,
     lineageArtifactIds: readonly string[],
   ): Promise<string | null> {
-    if (!context.artificerArtifact) {
+    if (!assemblyInput.artificerArtifact) {
       this.emitEvent('rule_assembly_failed', taskId, {
         runId,
         reason: 'no_artificer_artifact_in_context',
@@ -1456,7 +1790,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return null;
     }
 
-    const artificerParsed = this.parseArtificerArtifact(context.artificerArtifact);
+    const artificerParsed = this.parseArtificerArtifact(assemblyInput.artificerArtifact);
     if (!artificerParsed) {
       this.emitEvent('rule_assembly_failed', taskId, {
         runId,
@@ -1495,7 +1829,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // + ≥1 negative case.
     const traceBuild = buildGoldenTraceFromArtificer({
       cases: goldenTraceCases,
-      sourceArtifactId: context.sourceArtificerArtifactId ?? undefined,
+      sourceArtifactId: assemblyInput.sourceArtificerArtifactId ?? undefined,
     });
     if (!traceBuild.ok) {
       this.emitEvent('rule_assembly_failed', taskId, {
@@ -1520,7 +1854,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // adversarialResult.passed === true is the precondition for this method;
       // the gate decision is therefore accepted_shadow.
       ruleHostGateDecision: 'accepted_shadow',
-      sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
+      sourceArtificerArtifactId: assemblyInput.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
       adversarialResult: output.adversarialResult,
       ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
       // PRI-490: preserve evidenceRefs from Artificer artifact into rule artifact.

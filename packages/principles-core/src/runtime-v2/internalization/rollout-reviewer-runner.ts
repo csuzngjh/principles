@@ -11,7 +11,7 @@ import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata, type RolloutRevisionPayload, type RunnerDecision } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
@@ -73,6 +73,43 @@ export interface RolloutReviewerRunnerDeps {
   readonly eventEmitter: StoreEventEmitter;
   readonly validator: RolloutReviewerValidator;
   readonly artifactStore: PIArtifactStore;
+  /**
+   * P0-F (INV-06): approve_rollout → 自动 activation policy dispatch。
+   * 核心 runner 保持纯编排 (架构边界,同 PRI-509 seeder 模式); 由 host
+   * (auto-consumer / run-once) 注入真实的 ActivationDispatcher 调用。
+   * 未注入 → 显式 degraded 事件 (rc-9), 不静默跳过。
+   */
+  readonly dispatchActivation?: (input: RolloutAutoDispatchInput) => Promise<RolloutAutoDispatchOutcome>;
+  /**
+   * P0-E (INV-04): needs_revision → reopen 最近可修复 stage (scribe/artificer)。
+   * 未注入 → needs_human_review (Owner 注意队列, 不入 approval)。
+   */
+  readonly reopenRevisionTarget?: (input: RolloutRevisionRoutingInput) => Promise<{ ok: boolean; reason: string; reopenedTaskId?: string }>;
+}
+
+/** approve_rollout 自动 dispatch 的输入 (host 负责接线 ActivationDispatcher) */
+export interface RolloutAutoDispatchInput {
+  /** 被评审且已 validated 的 principle/rule artifact (dispatch 目标) */
+  readonly artifactId: string;
+  readonly channel: string;
+  readonly confidence?: number;
+  readonly rolloutTaskId: string;
+}
+
+export interface RolloutAutoDispatchOutcome {
+  readonly decision: string;
+  readonly activationId?: string;
+  readonly reason?: string;
+}
+
+/** needs_revision 修订路由输入 (host 层经 orchestrator 的 revision-reopen 能力实现,注入式) */
+export interface RolloutRevisionRoutingInput {
+  readonly targetTaskId: string;
+  readonly targetKind: 'scribe' | 'artificer';
+  readonly revisionFeedback: string;
+  readonly revisionIteration: number;
+  readonly sourceRolloutTaskId: string;
+  readonly sourceArtifactId: string;
 }
 
 interface FailureContext {
@@ -88,6 +125,10 @@ interface SucceedContext {
   readonly output: RolloutReviewerOutputV1;
   readonly task: TaskRecord;
   readonly contextHash: string;
+  /** 被评审的 evaluator artifact (dispatch 目标) — 由 buildContext 解析 */
+  readonly sourceEvaluatorArtifactId?: string;
+  /** 本 lineage 的 activation channel (路由修订目标 + dispatch 用) */
+  readonly channel?: string;
 }
 
 interface ValidationErrorContext {
@@ -110,12 +151,17 @@ export class RolloutReviewerRunner {
   private readonly validator: RolloutReviewerValidator;
   private readonly artifactStore: PIArtifactStore;
 
+  private readonly dispatchActivation?: RolloutReviewerRunnerDeps['dispatchActivation'];
+  private readonly reopenRevisionTarget?: RolloutReviewerRunnerDeps['reopenRevisionTarget'];
+
   constructor(deps: RolloutReviewerRunnerDeps, options: RolloutReviewerRunnerOptions) {
     this.stateManager = deps.stateManager;
     this.runtimeAdapter = deps.runtimeAdapter;
     this.eventEmitter = deps.eventEmitter;
     this.validator = deps.validator;
     this.artifactStore = deps.artifactStore;
+    this.dispatchActivation = deps.dispatchActivation;
+    this.reopenRevisionTarget = deps.reopenRevisionTarget;
     this.resolvedOptions = resolveRolloutReviewerRunnerOptions(options);
   }
 
@@ -170,7 +216,18 @@ export class RolloutReviewerRunner {
       attemptCount: leasedTask.attemptCount,
     });
 
+    // P0 (verdict drift) — pending completion intent 是 recovery authority:
+    // 同 epoch 的 crash/retry 重跑必须 resume 其 effects,禁止重新调用 LLM
+    // (非确定性重问可能产生 approve/reject 漂移,与已发生的 activation /
+    // revision side effect 形成治理矛盾)。置于主 try 内:resume 的 transient
+    // 失败走 retryOrFail → retry_wait → 下一轮继续 resume。
     try {
+      const resumed = await this.maybeResumePendingIntent(taskId, leasedTask);
+      if (resumed) {
+        this.phase = RunnerPhase.Completed;
+        return resumed;
+      }
+
       const storeRunId = await this.resolveStoreRunId(taskId);
 
       this.phase = RunnerPhase.BuildingContext;
@@ -238,6 +295,8 @@ export class RolloutReviewerRunner {
         output,
         task: leasedTask,
         contextHash,
+        sourceEvaluatorArtifactId,
+        channel: hydratePITaskRecord(leasedTask)?.channel,
       });
     } catch (error) {
       return await this.handlePostLeaseError(taskId, leasedTask, error);
@@ -487,6 +546,37 @@ export class RolloutReviewerRunner {
     }
 
     const resultRef = `rollout-reviewer://${ctx.runId}`;
+
+    // ── P0 (verdict drift): decision + completion intent 原子落库 ──
+    // 单次 metadata 写同时持久 verdict 与 completion intent — intent 存在即
+    // 证明该 verdict 的 output/run 均已 durable (updateRunOutput 与 artifact
+    // 写均在前)。同 epoch crash/retry 重跑经入口门 resume 此 intent,不再
+    // 调用 LLM。needs_revision 的 iteration 在此锁定,resume 据此继续同一轮。
+    const { decision } = ctx.output.review;
+    const recorded = await this.recordCompletionOrThrow(ctx.taskId, ctx.runId, decision);
+    if (recorded.kind === 'budget_exhausted') {
+      // P0-A: verdict + completion intent (effect=needs_human_review) 已
+      // durable;执行终态效果后标 applied — crash 窗口内 resume 会重写
+      // needs_human_review,绝不重问 LLM。
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_budget_exhausted_applied_${recorded.appliedCount}`);
+      await this.markCompletionIntentAppliedOrThrow(ctx.taskId);
+      this.phase = RunnerPhase.Completed;
+      return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
+    }
+
+    // ── P0-2 (外部复核): dispatch/routing 是 governance transition 的组成
+    // 部分,在 markTaskSucceeded 之前执行;transient 失败 throw → retry →
+    // 入口门 resume (幂等 effects,无 LLM 重问)。
+    const effect = await this.applyDecisionEffects(ctx, recorded.kind === 'intent' ? recorded.iteration : undefined);
+    if (effect.kind === 'human_review') {
+      // 任务已转入 needs_human_review — 不得再 markTaskSucceeded 覆盖
+      this.phase = RunnerPhase.Completed;
+      return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
+    }
+
+    // ── P0 invariant 5: intent APPLIED 后才允许 terminal ──
+    await this.markCompletionIntentAppliedOrThrow(ctx.taskId);
+
     try {
       await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
     } catch (stateErr) {
@@ -503,9 +593,18 @@ export class RolloutReviewerRunner {
       resultRef,
       reviewDecision: ctx.output.review.decision,
       reviewConfidence: ctx.output.review.confidence,
+      ...(effect.dispatchArtifactId ? { dispatchedArtifactId: effect.dispatchArtifactId } : {}),
     });
 
     this.phase = RunnerPhase.Completed;
+    return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
+  }
+
+  private static buildSucceededResult(
+    ctx: SucceedContext,
+    artifactId: string,
+    resultRef: string,
+  ): RolloutReviewerRunnerResult {
     return {
       status: 'succeeded',
       taskId: ctx.taskId,
@@ -516,6 +615,679 @@ export class RolloutReviewerRunner {
       output: ctx.output,
       attemptCount: ctx.task.attemptCount,
     };
+  }
+
+  /**
+   * P0-1 (外部复核): 解析 activation 候选 artifact — 与 review source 分离。
+   *
+   * 事实基线 (evaluator-runner 产物形状):
+   *   - evaluator 任务名下存在 kind='principle' 但 **pending** 的 evaluation
+   *     输出 artifact (pi-art-<evalTask>-<run>),其 contentJson 是 EvaluatorOutputV1,
+   *     不含可激活的 principleId/text —— 不是合法 activation 目标。
+   *   - prompt/defer_archive 渠道的合法目标 = **scribe** 的 validated principle
+   *     artifact (evaluator approved 时被 updateValidationStatus 翻 validated)。
+   *   - code_tool_hook 渠道的合法目标 = evaluator assemble 的 validated **rule**
+   *     artifact (pi-rule-<evalTask>-<run>, V2 对抗通过)。
+   *
+   * 解析策略: 沿 dep 链 (rollout→evaluator→artificer→scribe) 收集各 source task
+   * 的 artifacts,按 channel 期望的 kind+validated 过滤;恰好一个候选才接受;
+   * 零候选或多个候选 (历史脏数据) 一律 unresolved → needs_human_review,
+   * 禁止 firstArtifact/created_at 猜测。
+   */
+  private async resolveActivationCandidate(ctx: SucceedContext): Promise<string | null> {
+    const channel = ctx.channel ?? 'prompt';
+    const wantKind = channel === 'code_tool_hook' ? 'rule' : 'principle';
+
+    const chainIds = await this.collectLineageSourceTaskIds(ctx.taskId, [ctx.taskId], 0);
+    const matches: string[] = [];
+    for (const taskId of chainIds) {
+      // P0-1 加固: prompt/defer 渠道排除决策型 runner 名下的 artifacts —
+      // evaluator 名下的 principle 是评审输出(即使历史脏数据把它翻成
+      // validated 也不是可激活的原则文本;合法 bearer 属于 scribe)。
+      if (wantKind === 'principle') {
+        const ownerTask = await this.stateManager.getTask(taskId);
+        if (ownerTask?.taskKind === 'evaluator' || ownerTask?.taskKind === 'rollout_reviewer') {
+          continue;
+        }
+      }
+      const artifacts = await this.artifactStore.listBySourceTaskId(taskId).catch(() => null);
+      if (!artifacts) continue;
+      for (const a of artifacts) {
+        if (a.artifactKind === wantKind && a.validationStatus === 'validated') {
+          matches.push(a.artifactId);
+        }
+      }
+    }
+
+    if (matches.length === 1) {
+      const [candidateId] = matches;
+      this.emitRolloutReviewerEvent('rollout_activation_candidate_resolved', ctx.taskId, {
+        artifactId: candidateId ?? '',
+        channel,
+        kind: wantKind,
+        searchedTaskIds: chainIds,
+      });
+      return candidateId ?? null;
+    }
+    this.emitRolloutReviewerEvent('rollout_activation_candidate_unresolved', ctx.taskId, {
+      channel,
+      kind: wantKind,
+      matchCount: matches.length,
+      matchedArtifactIds: matches,
+      reason: matches.length === 0 ? 'no_validated_candidate_in_lineage' : 'ambiguous_validated_candidates',
+      nextAction: 'inspect lineage artifacts; dispatch manually via pd activation dispatch after fixing',
+    });
+    return null;
+  }
+
+  /** 收集 lineage 上所有 source task id (BFS 沿 dependencyTaskIds, 有界深度)。 */
+  private static readonly LINEAGE_MAX_DEPTH = 5;
+
+  private async collectLineageSourceTaskIds(
+    rootTaskId: string,
+    acc: string[],
+    depth: number,
+  ): Promise<string[]> {
+    if (depth > RolloutReviewerRunner.LINEAGE_MAX_DEPTH) return acc;
+    const task = await this.stateManager.getTask(rootTaskId);
+    if (!task) return acc;
+    const piTask = hydratePITaskRecord(task);
+    for (const depId of piTask?.dependencyTaskIds ?? []) {
+      if (acc.includes(depId)) continue;
+      acc.push(depId);
+      await this.collectLineageSourceTaskIds(depId, acc, depth + 1);
+    }
+    return acc;
+  }
+
+  /**
+   * P0-2 (外部复核): dispatch + 结果分类。
+   * 返回 true = governance transition 完成 (activated / already_activated /
+   * queued_for_approval);false = 已转入 needs_human_review。
+   * transient 异常直接冒泡 (caller → retryOrFail → retry_wait 自动重试)。
+   */
+  private async dispatchOrRouteFailure(ctx: SucceedContext, candidateArtifactId: string): Promise<boolean> {
+    if (!this.dispatchActivation) {
+      this.emitRolloutReviewerEvent('rollout_dispatch_not_wired', ctx.taskId, {
+        reason: 'dispatch_activation_dep_not_injected',
+        nextAction: 'wire_activation_dispatcher_in_auto_consumer_or_run_once',
+      });
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_dispatch_not_wired');
+      return false;
+    }
+    // throw 在此冒泡: transient (db locked / network) → retry_wait,由消费循环重试
+    const outcome = await this.dispatchActivation({
+      artifactId: candidateArtifactId,
+      channel: ctx.channel ?? 'prompt',
+      confidence: ctx.output.review.confidence,
+      rolloutTaskId: ctx.taskId,
+    });
+
+    const completed = outcome.decision === 'activated'
+      || outcome.decision === 'already_activated'
+      || outcome.decision === 'queued_for_approval';
+    this.emitRolloutReviewerEvent(
+      completed ? 'rollout_activation_dispatched' : 'rollout_activation_dispatch_refused',
+      ctx.taskId,
+      {
+        artifactId: candidateArtifactId,
+        channel: ctx.channel ?? 'prompt',
+        decision: outcome.decision,
+        activationId: outcome.activationId ?? null,
+        reason: outcome.reason ?? null,
+        nextAction: completed ? null : 'owner_inspect_artifact_then_manual_dispatch_or_archive',
+      },
+    );
+    if (!completed) {
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_dispatch_${outcome.decision}`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * P0-E: needs_revision → reopen 最近可修复 stage (INV-04, 禁止入 approval)。
+   * 路由: code_tool_hook → artificer (规则实现); 其他 channel → scribe (原则措辞)。
+   *
+   * P0 (verdict drift): iteration 由 completion intent 注入 — record 阶段已按
+   * "已 APPLIED 的 rolloutRevisionPayload" 锁定本轮 N。同一 completion 的
+   * fresh 执行与 crash resume 使用同一 N,消除"applied 载荷属于上一轮还是
+   * 本轮"的歧义;budget 判定不在本方法内。
+   *
+   * 返回 true = revision transition 完成 (target 已 reopen);false = 任务已
+   * 转入 needs_human_review。transient 错误 throw → retryOrFail → retry_wait
+   * → 入口门 resume 同一 completion (无 LLM 重问)。
+   */
+  private async handleRevisionRouting(ctx: SucceedContext, iteration: number): Promise<boolean> {
+    const target = await this.resolveRevisionTarget(ctx.taskId, ctx.channel ?? 'prompt');
+    if (!target) {
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_target_unresolved');
+      return false;
+    }
+    if (!this.reopenRevisionTarget) {
+      this.emitRolloutReviewerEvent('rollout_revision_not_wired', ctx.taskId, {
+        reason: 'reopen_revision_target_dep_not_injected',
+        nextAction: 'wire_revision_routing_in_auto_consumer_or_run_once',
+      });
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_routing_not_wired');
+      return false;
+    }
+
+    const feedback = RolloutReviewerRunner.formatRevisionFeedback(ctx.output);
+    // intent 载荷先持久化 (status=pending, N): 失败 = transient 存储错误 →
+    // throw (B4: 无 reopen、budget 不增;重试经入口门 resume,不重问 LLM)。
+    await this.recordRolloutRevisionRoutingOrThrow(ctx.taskId, {
+      requiredChanges: [...ctx.output.review.requiredChanges],
+      revisionIteration: iteration,
+      sourceRolloutTaskId: ctx.taskId,
+      sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+      targetTaskKind: target.kind,
+      status: 'pending',
+    });
+    try {
+      const causeId = `rollout-${ctx.taskId}-r${iteration}`;
+      // materialize 检查: target 已携带本 cause → 这轮 reopen 已发生过
+      // (crash before rollout succeeded 的重放) — 不得再次 reopen
+      const targetTask = await this.stateManager.getTask(target.taskId);
+      const targetPi = targetTask ? hydratePITaskRecord(targetTask) : null;
+      if (targetPi && targetPi.revisionCauseId === causeId) {
+        this.emitRolloutReviewerEvent('rollout_revision_already_materialized', ctx.taskId, {
+          targetTaskId: target.taskId,
+          revisionIteration: iteration,
+          causeId,
+        });
+      } else {
+        const outcome = await this.reopenRevisionTarget({
+          targetTaskId: target.taskId,
+          targetKind: target.kind,
+          revisionFeedback: feedback,
+          revisionIteration: iteration,
+          sourceRolloutTaskId: ctx.taskId,
+          sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+        });
+        if (!outcome.ok) {
+          await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`);
+          return false;
+        }
+      }
+      // transition materialized → 载荷标 applied (写失败 fail loud,
+      // 重放经上面的 materialize 检查安全收敛)
+      await this.markRevisionIntentAppliedOrThrow(ctx.taskId, iteration, {
+        requiredChanges: [...ctx.output.review.requiredChanges],
+        sourceRolloutTaskId: ctx.taskId,
+        sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
+        targetTaskKind: target.kind,
+      });
+      this.emitRolloutReviewerEvent('rollout_revision_routed', ctx.taskId, {
+        targetTaskId: target.taskId,
+        targetKind: target.kind,
+        revisionIteration: iteration,
+      });
+      return true;
+    } catch (err) {
+      this.emitRolloutReviewerEvent('rollout_revision_route_failed', ctx.taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'task_will_retry_then_resume_completion_intent_without_llm',
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * 解析修订目标任务 (只读遍历 dep 链):
+   *   rollout → evaluator → artificer → scribe
+   * code_tool_hook → artificer; 其他 → scribe (走到底)。
+   */
+  private async resolveRevisionTarget(
+    taskId: string,
+    channel: string,
+  ): Promise<{ taskId: string; kind: 'scribe' | 'artificer'; viaArtifactId?: string } | null> {
+    const rawTask = await this.stateManager.getTask(taskId);
+    if (!rawTask) return null;
+    const piTask = hydratePITaskRecord(rawTask);
+
+    // 第一跳: rollout deps → evaluator; evaluator deps → artificer
+    let artificerTaskId: string | null = null;
+    let artificerDeps: string[] = [];
+    const firstHop = piTask?.dependencyTaskIds ?? [];
+    for (const depId of firstHop) {
+      const dep = await this.stateManager.getTask(depId);
+      if (!dep) continue;
+      if (dep.taskKind === 'artificer') {
+        const depPi = hydratePITaskRecord(dep);
+        artificerTaskId = dep.taskId;
+        artificerDeps = depPi?.dependencyTaskIds ?? [];
+        break;
+      }
+      if (dep.taskKind === 'evaluator') {
+        const evalPi = hydratePITaskRecord(dep);
+        for (const evalDepId of evalPi?.dependencyTaskIds ?? []) {
+          const evalDep = await this.stateManager.getTask(evalDepId);
+          if (!evalDep || evalDep.taskKind !== 'artificer') continue;
+          const evalDepPi = hydratePITaskRecord(evalDep);
+          artificerTaskId = evalDep.taskId;
+          artificerDeps = evalDepPi?.dependencyTaskIds ?? [];
+          break;
+        }
+        if (artificerTaskId) break;
+      }
+    }
+    if (!artificerTaskId) return null;
+
+    if (channel === 'code_tool_hook') {
+      return { taskId: artificerTaskId, kind: 'artificer' };
+    }
+    for (const depId of artificerDeps) {
+      const dep = await this.stateManager.getTask(depId);
+      if (!dep || dep.taskKind !== 'scribe') continue;
+      return { taskId: dep.taskId, kind: 'scribe' };
+    }
+    return null;
+  }
+
+  private static formatRevisionFeedback(output: RolloutReviewerOutputV1): string {
+    const lines = ['Rollout review 判定 needs_revision,请修订后重新走验证链:'];
+    for (const change of output.review.requiredChanges) {
+      lines.push(`- 必须修改: ${change}`);
+    }
+    for (const risk of output.review.rolloutRisks) {
+      lines.push(`- 风险: ${risk}`);
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * P0 (INV-2): needs_human_review 是 completion effect 的 materialize 操作 —
+   * fail-closed。写失败/读回不一致必须 throw (→ retry_wait → 入口门 resume
+   * 同一 effect,不问 LLM),禁止 catch+swallow 后让 caller 把 intent 标
+   * applied (intent applied ⇔ 其 durable effect 已 materialize)。
+   */
+  private async markNeedsHumanReviewOrThrow(taskId: string, reason: string): Promise<void> {
+    this.emitRolloutReviewerEvent('rollout_reviewer_task_needs_human_review', taskId, {
+      reason,
+      nextAction: 'owner_inspect_retry_or_archive',
+    });
+    try {
+      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+      // read-back invariant (INV-2): 只有 effect durable 才允许 caller 标 applied
+      const current = await this.stateManager.getTask(taskId);
+      if (!current || current.status !== 'needs_human_review') {
+        throw new PDRuntimeError(
+          'storage_unavailable',
+          `needs_human_review effect not durable for task ${taskId} (read-back status: ${current?.status ?? 'task_missing'})`,
+        );
+      }
+    } catch (err) {
+      this.emitRolloutReviewerEvent('rollout_mark_human_review_failed', taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        reason,
+        nextAction: 'task_will_retry_then_resume_completion_intent_without_llm',
+      });
+      throw err;
+    }
+  }
+
+  /** B: 读取已持久化的 revision intent (无 → null;旧形状缺 status 视为 applied) */
+  private async readRolloutRevisionPayload(taskId: string): Promise<RolloutRevisionPayload | null> {
+    const raw = await this.stateManager.getTask(taskId);
+    if (!raw) return null;
+    const piTask = hydratePITaskRecord(raw);
+    return piTask?.rolloutRevisionPayload ?? null;
+  }
+
+  // ── P0 (verdict drift): completion intent — record / effects / applied / resume ──
+
+  /**
+   * verdict + completion intent 原子落库 (单次 metadata 写)。
+   * needs_revision 同时锁定本轮 iteration:
+   *   - stored payload pending → 沿用其 iteration (同 epoch 在途修订继续,
+   *     兼容旧形状 crash 态,B1);
+   *   - stored applied → iteration + 1;appliedCount ≥ 2 → budget_exhausted
+   *     (P0-A: 也必须记 completion intent,effect=needs_human_review —
+   *     decision durable 而 crash before needs_human_review 写入时,retry
+   *     不得重问 LLM 漂移 verdict)。
+   */
+  private async recordCompletionOrThrow(
+    taskId: string,
+    runId: string,
+    decision: string,
+  ): Promise<
+    | { kind: 'intent'; iteration?: number }
+    | { kind: 'budget_exhausted'; appliedCount: number }
+  > {
+    const stored = await this.readRolloutRevisionPayload(taskId);
+    let iteration: number | undefined;
+    let budgetExhausted = false;
+    let appliedCount = 0;
+    if (decision === 'needs_revision') {
+      appliedCount = stored && stored.status !== 'pending' ? stored.revisionIteration : 0;
+      if (appliedCount >= 2) {
+        budgetExhausted = true;
+      } else {
+        iteration = stored && stored.status === 'pending' ? stored.revisionIteration : appliedCount + 1;
+      }
+    }
+    try {
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) throw new Error(`task ${taskId} not found`);
+      const pi = hydratePITaskRecord(raw);
+      if (!pi) throw new Error(`task ${taskId} not hydratable`);
+      const merged: PITaskMetadata = mergePITaskMetadata(pi, {
+        runnerDecision: decision === 'approve_rollout' || decision === 'needs_revision' || decision === 'reject'
+          ? decision
+          : pi.runnerDecision,
+        completionIntent: {
+          decision: decision as RunnerDecision,
+          sourceRunId: runId,
+          revisionEpoch: pi.revisionCount ?? 0,
+          status: 'pending',
+          ...(iteration !== undefined ? { revisionIteration: iteration } : {}),
+          ...(budgetExhausted ? { effect: 'needs_human_review' as const } : {}),
+        },
+      });
+      await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+    } catch (err) {
+      this.emitRolloutReviewerEvent('rollout_completion_record_failed', taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'task_will_retry; record is idempotent overwrite',
+      });
+      throw err;
+    }
+    if (budgetExhausted) {
+      return { kind: 'budget_exhausted', appliedCount };
+    }
+    return { kind: 'intent', iteration };
+  }
+
+  /**
+   * 执行 decision 的治理效果 (fresh 与 resume 共用,幂等):
+   * approve → activation dispatch (幂等 key,重放 already_activated);
+   * needs_revision → revision routing (iteration 由 intent 注入);
+   * reject → 无效果 (terminal)。
+   */
+  private async applyDecisionEffects(
+    ctx: SucceedContext,
+    iteration?: number,
+  ): Promise<{ kind: 'completed'; dispatchArtifactId?: string } | { kind: 'human_review' }> {
+    if (ctx.output.review.decision === 'approve_rollout') {
+      const candidate = await this.resolveActivationCandidate(ctx);
+      if (!candidate) {
+        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_activation_candidate_unresolved');
+        return { kind: 'human_review' };
+      }
+      const completed = await this.dispatchOrRouteFailure(ctx, candidate);
+      return completed ? { kind: 'completed', dispatchArtifactId: candidate } : { kind: 'human_review' };
+    }
+    if (ctx.output.review.decision === 'needs_revision') {
+      if (iteration === undefined) {
+        // intent 缺 iteration 却走到 needs_revision 效果 — authority 记录损坏
+        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_iteration_missing');
+        return { kind: 'human_review' };
+      }
+      const completed = await this.handleRevisionRouting(ctx, iteration);
+      return completed ? { kind: 'completed' } : { kind: 'human_review' };
+    }
+    // 'reject' → terminal: 无 dispatch、无 approval、无后继 (INV-04)
+    return { kind: 'completed' };
+  }
+
+  /** intent APPLIED 后才允许 terminal (P0 invariant 5)。写失败 fail loud。 */
+  private async markCompletionIntentAppliedOrThrow(taskId: string): Promise<void> {
+    try {
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) throw new Error(`task ${taskId} not found`);
+      const pi = hydratePITaskRecord(raw);
+      if (!pi?.completionIntent) return; // budget_exhausted 路径无 intent
+      const merged: PITaskMetadata = mergePITaskMetadata(pi, {
+        completionIntent: { ...pi.completionIntent, status: 'applied' },
+      });
+      await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+    } catch (err) {
+      this.emitRolloutReviewerEvent('rollout_completion_mark_applied_failed', taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'task_will_retry; resume re-passes materialize checks',
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * 入口恢复门: pending completion intent (同 epoch) 是 recovery authority。
+   * 返回非 null = 本次 run 以 resume 完成 (LLM 未被调用);
+   * 返回 null = 走正常 LLM 管线。epoch 不匹配的残留 intent 视为 stale。
+   */
+  private async maybeResumePendingIntent(
+    taskId: string,
+    leasedTask: TaskRecord,
+  ): Promise<RolloutReviewerRunnerResult | null> {
+    const piTask = hydratePITaskRecord(leasedTask);
+    const intent = piTask?.completionIntent;
+    if (!piTask || !intent || intent.status !== 'pending') {
+      // P0 (INV-1/INV-5): applied 但任务未 terminal (标 applied 后、
+      // markTaskSucceeded 写失败/crash 的窗口) — effects 已 materialize,
+      // 不重问 LLM,直接补 terminal,消除 "applied+非终态" 的 LLM 重开窗口。
+      if (piTask && intent && intent.status === 'applied'
+        && intent.revisionEpoch === (piTask.revisionCount ?? 0)
+        && leasedTask.status !== 'needs_human_review') {
+        return await this.finalizeAppliedIntentTerminal(taskId, intent.sourceRunId, leasedTask);
+      }
+      return null;
+    }
+    if (intent.revisionEpoch !== (piTask.revisionCount ?? 0)) {
+      this.emitRolloutReviewerEvent('rollout_completion_intent_stale_epoch', taskId, {
+        intentEpoch: intent.revisionEpoch,
+        currentEpoch: piTask.revisionCount ?? 0,
+        nextAction: 'reopen should have cleared intent; verify reopenTaskForRevision path',
+      });
+      return null;
+    }
+    this.emitRolloutReviewerEvent('rollout_completion_intent_resumed', taskId, {
+      decision: intent.decision,
+      sourceRunId: intent.sourceRunId,
+    });
+
+    // P0-A: needs_human_review 效果 (budget exhausted 等) 的 resume —
+    // 恢复 durable output (intent 落库前已持久),重写终态人工裁决状态,
+    // 不路由、不 dispatch、不问 LLM。
+    if (intent.effect === 'needs_human_review') {
+      const budgetOutput = await this.recoverIntentOutput(taskId, intent.sourceRunId);
+      const stored = await this.readRolloutRevisionPayload(taskId);
+      const appliedCount = stored && stored.status !== 'pending' ? stored.revisionIteration : 2;
+      await this.markNeedsHumanReviewOrThrow(taskId, `rollout_revision_budget_exhausted_applied_${appliedCount}`);
+      await this.markCompletionIntentAppliedOrThrow(taskId);
+      this.phase = RunnerPhase.Completed;
+      return RolloutReviewerRunner.buildResumeResult({
+        taskId,
+        runId: intent.sourceRunId,
+        artifactId: `pi-art-${taskId}-${intent.sourceRunId}`,
+        resultRef: `rollout-reviewer://${intent.sourceRunId}`,
+        output: budgetOutput,
+        attemptCount: leasedTask.attemptCount,
+      });
+    }
+
+    const output = await this.recoverIntentOutput(taskId, intent.sourceRunId);
+    const ctx: SucceedContext = {
+      taskId,
+      runId: intent.sourceRunId,
+      output,
+      task: leasedTask,
+      contextHash: `resume-${intent.sourceRunId}`,
+      sourceEvaluatorArtifactId: output.sourceEvaluatorArtifactId,
+      channel: piTask.channel,
+    };
+    const artifactId = `pi-art-${taskId}-${intent.sourceRunId}`;
+    const resultRef = `rollout-reviewer://${intent.sourceRunId}`;
+
+    const effect = await this.applyDecisionEffects(ctx, intent.revisionIteration);
+    if (effect.kind === 'human_review') {
+      this.phase = RunnerPhase.Completed;
+      return RolloutReviewerRunner.buildResumeResult({ taskId, runId: intent.sourceRunId, artifactId, resultRef, output, attemptCount: leasedTask.attemptCount });
+    }
+    await this.markCompletionIntentAppliedOrThrow(taskId);
+    try {
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+    } catch (stateErr) {
+      this.emitRolloutReviewerEvent('rollout_reviewer_mark_succeeded_failed', taskId, {
+        taskId,
+        runId: intent.sourceRunId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
+    this.emitRolloutReviewerEvent('rollout_reviewer_task_succeeded', taskId, {
+      attemptCount: leasedTask.attemptCount,
+      resultRef,
+      reviewDecision: intent.decision,
+      reviewConfidence: output.review.confidence,
+      resumedFromCompletionIntent: true,
+      ...(effect.dispatchArtifactId ? { dispatchedArtifactId: effect.dispatchArtifactId } : {}),
+    });
+    this.phase = RunnerPhase.Completed;
+    return RolloutReviewerRunner.buildResumeResult({ taskId, runId: intent.sourceRunId, artifactId, resultRef, output, attemptCount: leasedTask.attemptCount });
+  }
+
+  /**
+   * P0 (INV-1/INV-5): applied intent 的补 terminal — effects 已 materialize
+   * (applied ⇒ INV-2 保证),仅 markTaskSucceeded 缺失。不调用 LLM。
+   */
+  private async finalizeAppliedIntentTerminal(
+    taskId: string,
+    sourceRunId: string,
+    leasedTask: TaskRecord,
+  ): Promise<RolloutReviewerRunnerResult> {
+    this.emitRolloutReviewerEvent('rollout_completion_intent_finalize_terminal', taskId, {
+      sourceRunId,
+      taskStatus: leasedTask.status,
+    });
+    const output = await this.recoverIntentOutput(taskId, sourceRunId);
+    const resultRef = `rollout-reviewer://${sourceRunId}`;
+    try {
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+    } catch (stateErr) {
+      this.emitRolloutReviewerEvent('rollout_reviewer_mark_succeeded_failed', taskId, {
+        taskId,
+        runId: sourceRunId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
+    this.phase = RunnerPhase.Completed;
+    return RolloutReviewerRunner.buildResumeResult({
+      taskId,
+      runId: sourceRunId,
+      artifactId: `pi-art-${taskId}-${sourceRunId}`,
+      resultRef,
+      output,
+      attemptCount: leasedTask.attemptCount,
+    });
+  }
+
+  /**
+   * 从 runs 表恢复 intent 落库前已持久化的 validated output。
+   * intent 的存在保证 updateRunOutput 曾成功 (顺序: output → artifact →
+   * decision+intent);缺失/损坏 = authority 记录的存储腐坏 → fail loud
+   * (storage_unavailable → retryOrFail → max attempts → failed,人工介入)。
+   */
+  private async recoverIntentOutput(taskId: string, sourceRunId: string): Promise<RolloutReviewerOutputV1> {
+    const runs = await this.stateManager.getRunsByTask(taskId);
+    const run = runs.find((r) => r.runId === sourceRunId);
+    const raw = run?.outputPayload;
+    if (typeof raw !== 'string' || raw.length === 0) {
+      throw new PDRuntimeError('storage_unavailable', `completion intent output unrecoverable: run ${sourceRunId} of task ${taskId} has no outputPayload`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new PDRuntimeError('storage_unavailable', `completion intent output unrecoverable: run ${sourceRunId} of task ${taskId} has unparseable outputPayload`);
+    }
+    // rc-1: 提取 echo 的 lineage 供验证器交叉核对 (持久化前已经过完整
+    // validate + lineage echo reconciliation,这里是对存储腐坏的防御)
+    let echoedArtifactId: string | undefined;
+    if (typeof parsed === 'object' && parsed !== null) {
+      const v = (parsed as Record<string, unknown>).sourceEvaluatorArtifactId;
+      if (typeof v === 'string') echoedArtifactId = v;
+    }
+    // runtime-contract-exempt: ERR-001 minimal shape check then full validator.validate — same pattern as fetchAndParseOutput; the cast only narrows post-validation
+    const candidate = parsed as RolloutReviewerOutputV1;
+    const vr = await this.validator.validate(candidate, taskId, echoedArtifactId);
+    if (!vr.valid) {
+      throw new PDRuntimeError('storage_unavailable', `completion intent output unrecoverable: run ${sourceRunId} of task ${taskId} failed revalidation (${vr.errors.join('; ')})`);
+    }
+    return candidate;
+  }
+
+  private static buildResumeResult(r: {
+    taskId: string;
+    runId: string;
+    artifactId: string;
+    resultRef: string;
+    output: RolloutReviewerOutputV1;
+    attemptCount: number;
+  }): RolloutReviewerRunnerResult {
+    return {
+      status: 'succeeded',
+      taskId: r.taskId,
+      runId: r.runId,
+      artifactId: r.artifactId,
+      resultRef: r.resultRef,
+      contextHash: `resume-${r.runId}`,
+      output: r.output,
+      attemptCount: r.attemptCount,
+    };
+  }
+
+  /**
+   * B: intent 标 APPLIED — transition 已 materialize 后的持久化确认。
+   * 写失败 throw (fail loud): 重放会经 materialize 检查安全收敛。
+   */
+  private async markRevisionIntentAppliedOrThrow(
+    taskId: string,
+    iteration: number,
+    payload: { requiredChanges: string[]; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer' },
+  ): Promise<void> {
+    await this.recordRolloutRevisionRouting(taskId, {
+      requiredChanges: payload.requiredChanges,
+      revisionIteration: iteration,
+      sourceRolloutTaskId: payload.sourceRolloutTaskId,
+      sourceArtifactId: payload.sourceArtifactId,
+      targetTaskKind: payload.targetTaskKind,
+      status: 'applied',
+    });
+  }
+
+  /** 记录修订路由 (budget 依据) */
+  private async recordRolloutRevisionRouting(
+    taskId: string,
+    payload: { requiredChanges: string[]; revisionIteration: number; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer'; status?: 'pending' | 'applied' },
+  ): Promise<void> {
+    try {
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) return;
+      const piTask = hydratePITaskRecord(raw);
+      if (!piTask) return;
+      const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
+        rolloutRevisionPayload: payload,
+      });
+      await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+    } catch (err) {
+      // C (外部复核): routing intent 持久化失败必须 fail loud (caller 已把
+      // record 前置于 reopen — 此 throw 阻止无 budget 记录的 reopen 发生)
+      this.emitRolloutReviewerEvent('rollout_revision_record_failed', taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'task_will_retry; record is idempotent overwrite',
+      });
+      throw err;
+    }
+  }
+
+  /** C: 显式 fail-loud 包装 — routing intent 是 transition 的组成部分。 */
+  private async recordRolloutRevisionRoutingOrThrow(
+    taskId: string,
+    payload: { requiredChanges: string[]; revisionIteration: number; sourceRolloutTaskId: string; sourceArtifactId: string; targetTaskKind: 'scribe' | 'artificer'; status?: 'pending' | 'applied' },
+  ): Promise<void> {
+    await this.recordRolloutRevisionRouting(taskId, payload);
   }
 
   private async handleRuntimeFailure(

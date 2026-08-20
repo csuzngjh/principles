@@ -89,7 +89,8 @@ export function areDependenciesMet(
 // ── Status Transition Guards ─────────────────────────────────────────────────
 
 /**
- * Returns true if a PDTaskStatus transition is valid per ADR-0003 Section 3.8.
+ * Returns true if a PDTaskStatus transition is valid per ADR-0003 Section 3.8
+ * (+ revision/review 扩展, MVP_CORE_LOOP_CONTRACT INV-02/03/07)。
  *
  * Valid transitions:
  *   pending     → leased
@@ -97,9 +98,15 @@ export function areDependenciesMet(
  *   leased      → retry_wait
  *   leased      → failed
  *   leased      → pending   (lease release / force-expire — e.g. LeaseManager.releaseLease)
+ *   leased      → needs_human_review  (repair/revision budget exhausted — runner fail-loud)
  *   retry_wait  → pending   (recovery sweep resets)
+ *   succeeded   → pending   (revision reopen ONLY: orchestrator.reopenTaskForRevision
+ *                            — evaluator repair rounds, rollout revision routing,
+ *                            upstream revision cascade. Not a general-purpose edge.)
+ *   needs_human_review → pending (owner-initiated retry: pd runtime internalization
+ *                            retry — INV-03 出边)
  *
- * Terminal states (succeeded, failed) cannot transition to any other state.
+ * Terminal states (failed) cannot transition to any other state.
  */
 export function canTransitionTo(currentStatus: PDTaskStatus, newStatus: PDTaskStatus): boolean {
   switch (currentStatus) {
@@ -110,11 +117,15 @@ export function canTransitionTo(currentStatus: PDTaskStatus, newStatus: PDTaskSt
         newStatus === 'succeeded' ||
         newStatus === 'retry_wait' ||
         newStatus === 'failed' ||
-        newStatus === 'pending'
+        newStatus === 'pending' ||
+        newStatus === 'needs_human_review'
       );
     case 'retry_wait':
       return newStatus === 'pending';
     case 'succeeded':
+      return newStatus === 'pending';
+    case 'needs_human_review':
+      return newStatus === 'pending';
     case 'failed':
       return false;
     default:

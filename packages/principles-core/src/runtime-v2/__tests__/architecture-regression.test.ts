@@ -314,6 +314,12 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'thinking-models.ts',
   'pd-task-reconciler.ts',
   'correction-cue-learner.ts',
+  // MVP core-loop closure (P0-B/P0-D/E/F): live correction-cue store projection
+  // (learn->detect feedback) and auto-consumer governance wiring (dispatcher +
+  // repair deps). Both are plugin I/O boundary modules; core logic lives in
+  // @principles/core.
+  'signal-keyword-store.ts',
+  'auto-consumer-governance-wiring.ts',
   'principle-compiler/compiler.ts',
   'pain.ts',
   'pain-context-extractor.ts',
@@ -415,7 +421,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (94 files)', async () => {
+  it('known baseline count is self-consistent (98 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -455,7 +461,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-530: Added principle-receipt-metadata.ts (94 → 95) — plugin I/O boundary
     // for principle receipt attribution reads (readonly state.db joins).
     // PRI-531: Added principle-application-ledger.ts (95 → 96) — receipt ledger writer.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
+    // MVP core-loop closure (P0-B/P0-D): Added signal-keyword-store.ts +
+    // auto-consumer-governance-wiring.ts (96 → 98) — live correction-cue store
+    // projection + auto-consumer governance dispatcher/repair wiring (I/O boundary).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
   });
 });
 

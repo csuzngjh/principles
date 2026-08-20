@@ -33,6 +33,7 @@ import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
 import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
 import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
+import { handleRuntimeInternalizationRetry } from './commands/runtime-internalization-retry.js';
 import { registerRunRuleHostCommand } from './commands/runtime-internalization-run-rulehost.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
@@ -552,6 +553,17 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationWakeOnce({ workspace: opts.workspace, dryRun: opts.dryRun, json: opts.json });
+  });
+
+internalizationCmd
+  .command('retry')
+  .description('Requeue a needs_human_review task (owner attention queue out-edge)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .requiredOption('--task <taskId>', 'Task id to requeue')
+  .option('--confirm', 'Actually requeue (default is dry-run)')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    await handleRuntimeInternalizationRetry({ workspace: opts.workspace, taskId: opts.task, confirm: opts.confirm, json: opts.json });
   });
 
 internalizationCmd

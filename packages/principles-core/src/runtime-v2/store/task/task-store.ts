@@ -14,6 +14,17 @@ export interface TaskStoreFilter {
   leaseExpiresAtBefore?: string;
   limit?: number;
   offset?: number;
+  /**
+   * Stable total order for pagination-backed scans (A-liveness). Only this
+   * ordering is legal to combine with afterCursor — cursor pagination on a
+   * non-deterministic ORDER BY silently skips/duplicates rows.
+   */
+  orderBy?: 'updated_at_asc' | 'updated_at_desc';
+  /**
+   * Exclusive tuple cursor: rows strictly after (updatedAt, taskId) under the
+   * selected orderBy. Requires orderBy to be set.
+   */
+  afterCursor?: { updatedAt: string; taskId: string };
 }
 
 /** Narrow patch type — only the fields that are mutable in practice.

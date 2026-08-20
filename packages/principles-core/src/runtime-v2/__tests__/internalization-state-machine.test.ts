@@ -190,9 +190,10 @@ describe('canTransitionTo', () => {
     expect(canTransitionTo('retry_wait', 'pending')).toBe(true);
   });
 
-  it('succeeded → any state is invalid (terminal)', async () => {
+  it('succeeded → pending allowed ONLY as revision reopen; other transitions invalid (P0-D contract)', async () => {
     const { canTransitionTo } = await import('../internalization/internalization-task-guards.js');
-    expect(canTransitionTo('succeeded', 'pending')).toBe(false);
+    // 契约变更 (2026-08-18, INV-02): succeeded→pending 是 revision reopen 出边
+    expect(canTransitionTo('succeeded', 'pending')).toBe(true);
     expect(canTransitionTo('succeeded', 'leased')).toBe(false);
     expect(canTransitionTo('succeeded', 'retry_wait')).toBe(false);
     expect(canTransitionTo('succeeded', 'failed')).toBe(false);

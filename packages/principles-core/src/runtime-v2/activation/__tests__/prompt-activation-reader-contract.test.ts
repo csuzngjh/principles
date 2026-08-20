@@ -367,7 +367,7 @@ describe('prompt-activation-reader-contract', () => {
       expect(result).toContain('MANDATORY: Always use typeof');
       expect(result).toContain('<directive id="P-002"');
       expect(result).toContain('MANDATORY: Never use as');
-      expect(result).toContain('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+      expect(result).toContain('ACTIVE BEHAVIOR DIRECTIVES');
     });
 
     it('returns empty string when no principles injected', () => {
@@ -421,6 +421,31 @@ describe('prompt-activation-reader-contract', () => {
       const result = renderPrinciplesToDirectives(principles, injectedIds, { escapeFn: escapeXml });
       expect(result).toContain('P&lt;001&gt;');
       expect(result).toContain('A&amp;B');
+    });
+  });
+
+  describe('P0-G activation authority provenance (Journey-9)', () => {
+    it('system_policy 激活不得声称 OWNER-APPROVED,逐项标注 authority', () => {
+      const principles = [
+        { principleId: 'sys-1', text: 'system policy principle', artifactId: 'a1', activationId: 'act1', authority: 'system_policy' as const },
+        { principleId: 'own-1', text: 'owner approved principle', artifactId: 'a2', activationId: 'act2', authority: 'owner' as const, approvedBy: 'console-owner' },
+        { principleId: 'unk-1', text: 'unknown authority', artifactId: 'a3', activationId: 'act3' },
+      ];
+      const injectedIds = new Set(['sys-1', 'own-1', 'unk-1']);
+      const result = renderPrinciplesToDirectives(principles, injectedIds);
+
+      expect(result).not.toContain('OWNER-APPROVED');
+      expect(result).toContain('ACTIVE BEHAVIOR DIRECTIVES');
+      expect(result).toContain('<directive id="sys-1" source="runtime_v2_activation" authority="system_policy">');
+      expect(result).toContain('<directive id="own-1" source="runtime_v2_activation" authority="owner">');
+      expect(result).toContain('<directive id="unk-1" source="runtime_v2_activation">');
+    });
+
+    it('trimToBudget header 不再无条件声称 owner-approved', () => {
+      const { lines } = trimToBudget([
+        { principleId: 'p1', text: 't', artifactId: 'a', activationId: 'act' },
+      ], 2000);
+      expect(lines[0]).toBe('Runtime V2 activated principles:');
     });
   });
 

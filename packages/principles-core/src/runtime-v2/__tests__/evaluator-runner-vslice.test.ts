@@ -176,6 +176,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined), // P0-3: runner verdict 前置写入
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
@@ -621,6 +622,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined), // P0-3: runner verdict 前置写入
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
@@ -738,6 +740,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined), // P0-3: runner verdict 前置写入
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
@@ -868,6 +871,7 @@ describe('EvaluatorRunner (vertical slice)', () => {
       }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined), // P0-3: runner verdict 前置写入
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
@@ -1478,6 +1482,7 @@ describe('EvaluatorRunner integration: test-double captures sourceArtificerArtif
       }),
       updateRunOutput: vi.fn().mockResolvedValue(undefined),
       markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      updateTaskDiagnosticJson: vi.fn().mockResolvedValue(undefined), // P0-3: runner verdict 前置写入
       markTaskFailed: vi.fn().mockResolvedValue(undefined),
       markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
       getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
