@@ -51,7 +51,9 @@ import {
   validateIntentSaveResult,
   validateIntentRawContent,
   validateIntentVersions,
+  validateOwnerGovernanceView,
 } from "./utils/validators.js";
+import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   FeedbackReportData,
   FeedbackDraftSummaryData,
@@ -253,6 +255,10 @@ async function fetchPrinciples(filter?: 'all' | 'actionable'): Promise<ApiRespon
 // This endpoint is marked legacy/deferred for full validation.
 async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<unknown>> {
   return request(`/api/principles/${encodeURIComponent(principleId)}`);
+}
+
+async function fetchPrincipleGovernance(principleId: string): Promise<ApiResponse<OwnerGovernanceView>> {
+  return request<OwnerGovernanceView>(`/api/v1/principles/${encodeURIComponent(principleId)}/governance`, undefined, validateOwnerGovernanceView);
 }
 
 async function archivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
@@ -762,6 +768,7 @@ export {
   editApproval,
   fetchPrinciples,
   fetchPrincipleDetail,
+  fetchPrincipleGovernance,
   fetchPrincipleTrajectory,
   archivePrinciple,
   unarchivePrinciple,

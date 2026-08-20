@@ -55,6 +55,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 | ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
+| ERR-100 | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle | PRI-552 |
 
 ---
 
@@ -268,6 +269,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When adding validation to a config resolver, distinguish between "required for the resolver to produce a valid config" and "required for the consumer to operate". The resolver should produce the config; the consumer should validate its own requirements. Add tests for each runtime kind without optional flags.
 - **Source**: PRI-162 / PR #700
 - **Date**: 2026-05-24
+- **Recurrence**: None
+
+---
+
+**[ERR-100]** | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle
+
+- **What happened**: PRI-552 initially reused `OwnerGovernanceViewSchema` in the browser validator by runtime-importing `@principles/core/runtime-v2`. That barrel also exports Node-only Runtime modules, so esbuild attempted to resolve `fs`, `path`, `crypto`, `better-sqlite3`, and other server dependencies and the Console UI build failed.
+- **Why it's wrong**: A package barrel is a runtime dependency boundary, not merely a convenient symbol index. Browser consumers cannot safely import a barrel whose export graph includes Node I/O, even when they need only one pure schema.
+- **Generalized failure mode**: When browser code imports a shared package at runtime, assistants must inspect the selected export graph and prove it is browser-safe; otherwise a pure-looking symbol can transitively pull Node-only modules into the client bundle.
+- **Correct approach**: Keep the UI runtime validator browser-local and import the shared shape with `import type`, which is erased. Keep the authoritative TypeBox output validation on the server boundary. A dedicated browser-safe subpath could be introduced only as an explicitly approved package contract, not ad hoc in this feature.
+- **How to prevent**: For every new runtime import in `src/ui`, run the UI bundler and inspect whether the imported entry point exports Node built-ins or native packages. Prefer type-only imports across mixed-runtime packages.
+- **Regression guard**: `npm run build:ui` now passes, while `governance-projection-validator.test.ts` verifies the browser-local validator accepts the frozen view and rejects corrupt nested values.
+- **Related ERRs**: ERR-025, ERR-040, ERR-070
+- **Source**: PRI-552
+- **Date**: 2026-08-20
 - **Recurrence**: None
 
 ---
@@ -793,7 +809,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 99 |
+| Total lessons | 100 |
 | Last updated | 2026-08-20 |
 | Top category | Schema & Type |
 | Recurring errors | 51 |

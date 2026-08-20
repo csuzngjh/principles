@@ -8,6 +8,7 @@
  * - Uses `Object.hasOwn()` for untrusted object keys (Rule 5)
  * - Graceful degradation includes a reason (Rule 9)
  */
+import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 
 // ── Primitive guards ──────────────────────────────────────────────────────────
 
@@ -66,6 +67,81 @@ function validateArray<T>(v: unknown, validateElement: (el: unknown) => T | null
     result.push(validated);
   }
   return result;
+}
+
+const governanceSourceTypes = new Set(['principle', 'artifact', 'task', 'run', 'approval', 'activation', 'trajectory']);
+const governanceChannels = new Set(['prompt', 'code_tool_hook', 'defer_archive']);
+const lineageConfidences = new Set(['strong', 'weak', 'unknown']);
+const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
+function hasOwnFields(value: Record<string, unknown>, fields: string[]): boolean {
+  return fields.every(field => Object.hasOwn(value, field));
+}
+
+function isStringEnum(value: unknown, allowed: Set<string>): value is string {
+  return typeof value === 'string' && allowed.has(value);
+}
+
+function isGovernanceSourceRef(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['type', 'id'])
+    && isStringEnum(value.type, governanceSourceTypes) && typeof value.id === 'string' && value.id.length > 0;
+}
+
+function isGovernanceSourceRefs(value: unknown): boolean {
+  return Array.isArray(value) && value.every(isGovernanceSourceRef);
+}
+
+function isDataQualityIssue(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['source', 'reasonCode', 'nextActionCode'])
+    && isStringEnum(value.source, new Set(['ledger', 'artifact', 'task', 'approval', 'activation', 'trajectory', 'lineage']))
+    && typeof value.reasonCode === 'string' && value.reasonCode.length > 0
+    && typeof value.nextActionCode === 'string' && value.nextActionCode.length > 0
+    && (!Object.hasOwn(value, 'sourceRef') || isGovernanceSourceRef(value.sourceRef));
+}
+
+function isTimelineEvent(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['code', 'recordedAt', 'summaryCode', 'sourceRef', 'lineageConfidence'])
+    && isStringEnum(value.code, new Set(['pain_created', 'candidate_generated', 'review_started', 'revision_requested', 'revision_reopened', 'approved', 'rejected', 'activated', 'deactivated', 'failed', 'human_review']))
+    && typeof value.recordedAt === 'string' && timestampPattern.test(value.recordedAt)
+    && (!Object.hasOwn(value, 'occurredAt') || (typeof value.occurredAt === 'string' && timestampPattern.test(value.occurredAt)))
+    && typeof value.summaryCode === 'string' && value.summaryCode.length > 0
+    && isGovernanceSourceRef(value.sourceRef) && isStringEnum(value.lineageConfidence, lineageConfidences);
+}
+
+function isOwnerGovernanceView(value: unknown): value is OwnerGovernanceView {
+  if (!isObject(value) || !hasOwnFields(value, ['schemaVersion', 'principleId', 'asOf', 'summary', 'principleState', 'process', 'automation', 'attention', 'activationSummary', 'timeline', 'sourceRefs', 'dataQuality'])) return false;
+  if (value.schemaVersion !== '1' || typeof value.principleId !== 'string' || value.principleId.length === 0 || typeof value.asOf !== 'string' || !timestampPattern.test(value.asOf)) return false;
+  const {
+    summary, principleState: principle, process, automation, attention,
+    activationSummary: activation, dataQuality: quality,
+  } = value;
+  if (!isObject(summary) || !hasOwnFields(summary, ['headlineCode', 'reasonCode', 'nextActionCode', 'ownerActionRequired', 'sourceRefs'])
+    || typeof summary.headlineCode !== 'string' || typeof summary.reasonCode !== 'string' || typeof summary.nextActionCode !== 'string'
+    || typeof summary.ownerActionRequired !== 'boolean' || !isGovernanceSourceRefs(summary.sourceRefs)
+    || (Object.hasOwn(summary, 'safeReasonSummary') && (typeof summary.safeReasonSummary !== 'string' || summary.safeReasonSummary.length === 0))) return false;
+  if (!isObject(principle) || !hasOwnFields(principle, ['value', 'sourceRefs'])
+    || !isStringEnum(principle.value, new Set(['candidate', 'active', 'archived', 'deprecated', 'probation'])) || !isGovernanceSourceRefs(principle.sourceRefs)) return false;
+  if (!isObject(process) || !hasOwnFields(process, ['sourceRefs']) || !isGovernanceSourceRefs(process.sourceRefs)
+    || (Object.hasOwn(process, 'stage') && !isStringEnum(process.stage, new Set(['generating', 'reviewing', 'revising', 'approval', 'activation'])))
+    || (Object.hasOwn(process, 'currentTaskKind') && !isStringEnum(process.currentTaskKind, new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'])))) return false;
+  if (!isObject(automation) || !hasOwnFields(automation, ['state', 'sourceRefs'])
+    || !isStringEnum(automation.state, new Set(['idle', 'queued', 'running', 'retry_scheduled', 'stalled'])) || !isGovernanceSourceRefs(automation.sourceRefs)) return false;
+  if (!isObject(attention) || !hasOwnFields(attention, ['primary', 'items'])
+    || !isStringEnum(attention.primary, new Set(['none', 'owner_required', 'recovery_required'])) || !Array.isArray(attention.items)
+    || !attention.items.every(item => isObject(item) && hasOwnFields(item, ['kind', 'reasonCode', 'sourceRef'])
+      && isStringEnum(item.kind, new Set(['owner_decision', 'recovery'])) && typeof item.reasonCode === 'string' && item.reasonCode.length > 0 && isGovernanceSourceRef(item.sourceRef))) return false;
+  if (!isObject(activation) || !hasOwnFields(activation, ['state', 'channels', 'observedChannels', 'sourceRefs'])
+    || !isStringEnum(activation.state, new Set(['none', 'active', 'partially_active', 'deactivated']))
+    || !Array.isArray(activation.channels) || !activation.channels.every(channel => isStringEnum(channel, governanceChannels))
+    || !Array.isArray(activation.observedChannels) || !activation.observedChannels.every(channel => isStringEnum(channel, governanceChannels))
+    || !isGovernanceSourceRefs(activation.sourceRefs)) return false;
+  return Array.isArray(value.timeline) && value.timeline.every(isTimelineEvent) && isGovernanceSourceRefs(value.sourceRefs)
+    && isObject(quality) && hasOwnFields(quality, ['degraded', 'issues']) && typeof quality.degraded === 'boolean'
+    && Array.isArray(quality.issues) && quality.issues.every(isDataQualityIssue);
+}
+
+export function validateOwnerGovernanceView(value: unknown): OwnerGovernanceView | null {
+  return isOwnerGovernanceView(value) ? value : null;
 }
 
 // ── Error response validator (best-effort) ────────────────────────────────────
