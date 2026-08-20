@@ -314,6 +314,30 @@ describe('Feature flag loading from .pd/config.yaml', () => {
       expect(result).toEqual({ enabled: false, source: 'user_config' });
     } finally { rmTmpDir(tmp); }
   });
+
+  it('keeps principle_governance_projection_v2 disabled through the production loader by default', () => {
+    const tmp = mkTmpDir();
+    try {
+      expect(loadFeatureFlagFromConfig(tmp, 'principle_governance_projection_v2')).toEqual({
+        enabled: false,
+        source: 'defaults',
+      });
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('allows controlled dogfood enablement of principle_governance_projection_v2', () => {
+    const tmp = mkTmpDir();
+    const parsed = yaml.load(makeValidConfigWithObserverDisabled()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    features.principle_governance_projection_v2 = { category: 'quiet', enabled: true, since: '2026-08-20' };
+    writeConfig(tmp, yaml.dump(parsed));
+    try {
+      expect(loadFeatureFlagFromConfig(tmp, 'principle_governance_projection_v2')).toEqual({
+        enabled: true,
+        source: 'user_config',
+      });
+    } finally { rmTmpDir(tmp); }
+  });
 });
 
 // ── Plugin config load ───────────────────────────────────────────────────────

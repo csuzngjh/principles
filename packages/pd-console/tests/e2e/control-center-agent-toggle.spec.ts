@@ -20,7 +20,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 
-const BASE_URL = 'http://127.0.0.1:3100';
+const BASE_URL = `http://127.0.0.1:${process.env.PD_CONSOLE_E2E_PORT ?? '3101'}`;
 
 // ── API 辅助 ─────────────────────────────────────────────────────────────────
 

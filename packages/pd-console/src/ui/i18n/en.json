@@ -461,7 +461,88 @@
         "reasonAlreadyHandled": "Already handled",
         "reasonNoRecords": "No pending approval records",
         "reasonUnsupportedChannel": "Not a supported channel in the current version",
-        "unactionableReasonPrefix": "Unactionable reason: "
+        "unactionableReasonPrefix": "Unactionable reason: ",
+        "governance": {
+          "title": "Governance status",
+          "principleState": "Principle state",
+          "process": "Current stage",
+          "automation": "Automation",
+          "nextAction": "Next safe action",
+          "blockers": "Needs attention",
+          "uncertainty": "Evidence uncertainty",
+          "provenance": "Canonical evidence references",
+          "timeline": "Governance timeline",
+          "timelineEmpty": "No governance events are available yet.",
+          "unavailable": "Governance view unavailable",
+          "unavailableReason": "The governance evidence could not be validated or loaded safely.",
+          "unavailableNextAction": "Refresh once. If this persists, inspect the Console diagnostics before taking an approval action.",
+          "none": "None",
+          "fact": "Fact",
+          "derived": "Derived",
+          "actionsNotAuthorized": "No current Owner decision is required.",
+          "confidence": { "strong": "Source-backed", "degraded": "Incomplete evidence" },
+          "state": { "candidate": "Candidate", "active": "Active", "archived": "Archived", "deprecated": "Deprecated", "probation": "Probation" },
+          "stage": { "generating": "Generating", "reviewing": "Reviewing", "revising": "Revising", "approval": "Approval", "activation": "Activation" },
+          "automationState": { "idle": "Idle", "queued": "Queued", "running": "Running", "retry_scheduled": "Retry scheduled", "stalled": "Stalled" },
+          "headline": {
+            "owner_decision": "Your decision is needed",
+            "recovery": "Runtime recovery is needed",
+            "revision": "PD is revising this principle",
+            "processing": "PD is processing this principle",
+            "active": "This principle is active",
+            "unavailable": "Governance evidence is incomplete",
+            "recorded": "Principle recorded"
+          },
+          "reason": {
+            "approval_pending": "A source-backed approval is waiting for your review.",
+            "recovery_required": "The current processing frontier cannot continue automatically.",
+            "automatic_revision": "A revision or retry is already in progress.",
+            "processing": "The current source-backed task is still running or queued.",
+            "activation_active": "At least one validated activation channel is active.",
+            "data_incomplete": "Available records cannot establish a complete governance view.",
+            "no_current_process": "No current processing or Owner action is recorded."
+          },
+          "next": {
+            "review": "Review the existing approval actions below.",
+            "inspect_recovery": "Inspect the blocker evidence; do not approve until Runtime recovers.",
+            "wait": "No action is needed now. Wait for PD to finish the current work.",
+            "monitor": "No action is needed. Monitor the active behavior channel.",
+            "inspect_data": "Inspect the evidence diagnostics and repair the referenced durable record.",
+            "none": "No action is needed."
+          },
+          "attention": {
+            "approval_pending": "Approval pending",
+            "task_failed": "Current Runtime task failed",
+            "human_review_required": "Runtime requested human recovery review",
+            "revision_not_materialized": "Requested revision was not materialized",
+            "verdict_missing": "Automated review finished without a durable verdict"
+          },
+          "issue": {
+            "lineage_not_available": "Canonical lineage is not available yet.",
+            "lease_expired_unrecovered": "The current task lease is missing or expired.",
+            "ledger_activation_mismatch": "Ledger and activation records disagree.",
+            "weak_fact_ignored": "A weak fact was excluded from current authority.",
+            "lineage_conflict": "Conflicting lineage evidence was excluded.",
+            "lineage_cycle": "A lineage cycle prevents authoritative projection.",
+            "lineage_limit_exceeded": "The lineage exceeded the safe projection bound.",
+            "metadata_malformed": "A durable record is malformed and was excluded.",
+            "timestamp_invalid": "A durable record has an invalid timestamp.",
+            "source_unavailable": "The Runtime governance source is unavailable."
+          },
+          "timelineCode": {
+            "pain_created": "Pain evidence recorded",
+            "candidate_generated": "Candidate generated",
+            "review_started": "Automated review started",
+            "revision_requested": "Revision requested",
+            "revision_reopened": "Revision task reopened",
+            "approved": "Owner approved",
+            "rejected": "Owner rejected",
+            "activated": "Channel activated",
+            "deactivated": "Channel deactivated",
+            "failed": "Runtime task failed",
+            "human_review": "Human recovery review requested"
+          }
+        }
       }
     },
     "activation": {

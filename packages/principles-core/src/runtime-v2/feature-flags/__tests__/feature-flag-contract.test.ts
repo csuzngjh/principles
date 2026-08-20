@@ -643,3 +643,24 @@ describe('PRI-523 shared host runtime rollout flag', () => {
     expect(result.flags.abstraction_layer_v1?.enabled).toBe(false);
   });
 });
+
+describe('PRI-550 principle governance projection rollout flag', () => {
+  it('registers the projection as quiet and default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(
+      candidate => candidate.id === 'principle_governance_projection_v2',
+    );
+
+    expect(flag).toMatchObject({
+      id: 'principle_governance_projection_v2',
+      category: 'quiet',
+      enabled: false,
+      since: '2026-08-20',
+    });
+  });
+
+  it('keeps the projection disabled when workspace config omits it', () => {
+    const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
+
+    expect(result.flags.principle_governance_projection_v2?.enabled).toBe(false);
+  });
+});

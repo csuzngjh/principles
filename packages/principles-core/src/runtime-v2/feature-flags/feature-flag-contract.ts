@@ -235,6 +235,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // principle×session). Governs P1-a's own ledger writes; principle_receipt_ledger
   // governs the P1-b write points. Default off; flag-off = byte-identical template.
   { id: 'principle_receipt_self_report', category: 'quiet', enabled: false, since: '2026-08-16', description: 'Principle Receipt P1-a — agent self-report 📌 line (injection instruction + capture, PRI-532). Default off; flag-off = directive template unchanged, no capture.' },
+  { id: 'principle_governance_projection_v2', category: 'quiet', enabled: false, since: '2026-08-20', description: 'Read-only per-principle Owner governance projection (PRI-549). Default off; flag-off preserves the existing Principle Detail experience.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },

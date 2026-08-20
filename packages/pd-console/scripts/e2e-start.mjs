@@ -6,6 +6,7 @@ import { join } from 'path';
 import { spawn, spawnSync } from 'child_process';
 
 const workspaceDir = mkdtempSync(join(tmpdir(), 'pd-console-e2e-'));
+const e2ePort = process.env.PD_CONSOLE_E2E_PORT ?? '3101';
 console.log(`[e2e] workspace: ${workspaceDir}`);
 
 // 前置检查：前端静态资源必须存在（由 test:e2e 脚本的 build:ui 步骤保证）
@@ -36,7 +37,7 @@ if (seedResult.status !== 0) {
 // Windows 上 npx.cmd 仍需 shell 解析，故按平台条件开启。
 const child = spawn(
   'npx',
-  ['tsx', 'src/server/index.ts', '--no-auth', '--port', '3100', '--workspace', workspaceDir],
+  ['tsx', 'src/server/index.ts', '--no-auth', '--port', e2ePort, '--workspace', workspaceDir],
   {
     stdio: 'inherit',
     shell: process.platform === 'win32',
