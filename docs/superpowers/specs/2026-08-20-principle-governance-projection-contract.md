@@ -1,9 +1,9 @@
 # Principle Governance Projection Contract
 
-> **Version:** 1.0 (design-frozen successor to review drafts v1.0-v1.3.2)  
-> **Date:** 2026-08-20  
-> **Status:** Phase 0 Design Frozen; implementation proceeds in the order defined in §18  
-> **Scope:** `packages/pd-console`  
+> **Version:** 1.0 (design-frozen successor to review drafts v1.0-v1.3.2)
+> **Date:** 2026-08-20
+> **Status:** Phase 0 Design Frozen; implementation proceeds in the order defined in §18
+> **Scope:** `packages/pd-console`
 > **Product boundary:** Owner-facing interpretation of existing Runtime v2 durable facts
 
 ## 1. Decision
