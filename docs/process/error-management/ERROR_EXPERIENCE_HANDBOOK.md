@@ -634,6 +634,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes - same class as ERR-027
 
   - 2026-08-20 PRI-553: the first Governance Status Card exposed raw task/approval source IDs because a child issue's provenance wording was followed more broadly than the frozen design authority. SPEC §16 explicitly keeps source references in diagnostics/tests and forbids them in the Phase 1 default card. Fixed by retaining references in the validated view while removing them from visible card/timeline copy and adding browser assertions that technical IDs are absent.
+  - 2026-08-20 PRI-551/PRI-553: final acceptance found two exact-contract drifts: the projection emitted the synonymous degradation code `lease_not_current` instead of frozen finite-set code `lease_expired_unrecovered`, and flag-on Principle Detail rendered a second timeline instead of enhancing/replacing the existing trajectory while preserving flag-off rollback. Fixed with exact reason-code and timeline-replacement assertions plus real-source degradation coverage.
 
 ---
 

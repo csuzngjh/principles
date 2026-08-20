@@ -54,6 +54,18 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
     ).resolves.toHaveProperty('GovernanceProjectionCollector');
   });
 
+  it('reports the runtime source as unavailable when state.db does not exist', async () => {
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    expect(facts.principle.state).toBe('candidate');
+    expect(facts.lineage).toMatchObject({ confidence: 'unknown', artifactIds: [], taskIds: [] });
+    expect(facts.collectionIssues).toContainEqual(expect.objectContaining({
+      source: 'lineage',
+      reasonCode: 'source_unavailable',
+      nextActionCode: 'initialize_runtime_state',
+    }));
+  });
+
   it('returns ledger-only facts with explicit unknown lineage when no artifact root exists', async () => {
     const connection = createStateDb();
     connection.close();
@@ -103,6 +115,34 @@ describe('PRI-550 GovernanceProjectionCollector production boundary', () => {
       family: 'task', taskId: 'task-1', taskKind: 'artificer', channel: 'prompt', status: 'succeeded',
     }));
     expect(fs.statSync(dbPath)).toMatchObject({ size: before.size, mtimeMs: before.mtimeMs });
+  });
+
+  it('omits an invalid task lease timestamp and reports the exact degradation', async () => {
+    const connection = createStateDb();
+    const db = connection.getDb();
+    const diagnosticJson = createPITaskDiagnosticJson({
+      dependencyTaskIds: [], channel: 'prompt', timeoutMs: 30_000,
+      inputArtifactRefs: [], outputArtifactRefs: [],
+    });
+    db.prepare(`INSERT INTO tasks
+      (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_expires_at, diagnostic_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run('task-leased', 'artificer', 'leased', '2026-08-20T08:30:00.000Z', '2026-08-20T08:45:00.000Z', 1, 3, 'not-a-timestamp', diagnosticJson);
+    db.prepare(`INSERT INTO pi_artifacts
+      (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run('artifact-leased', 'principle', 'task-leased', 'principle-1', '[]', 'validated', '{}', '2026-08-20T08:40:00.000Z', '2026-08-20T08:45:00.000Z');
+    connection.close();
+
+    const facts = await new GovernanceProjectionCollector(workspaceDir).collect('principle-1', AS_OF);
+
+    const leasedTask = facts.tasks.find(task => task.taskId === 'task-leased');
+    expect(leasedTask).toMatchObject({ taskId: 'task-leased', status: 'leased' });
+    expect(leasedTask).not.toHaveProperty('leaseExpiresAt');
+    expect(facts.collectionIssues).toContainEqual(expect.objectContaining({
+      source: 'task', reasonCode: 'timestamp_invalid', nextActionCode: 'repair_task_timestamp',
+      sourceRef: { type: 'task', id: 'task-leased' },
+    }));
   });
 
   it('rejects malformed PI metadata and reports the omission instead of guessing a channel', async () => {

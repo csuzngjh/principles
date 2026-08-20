@@ -518,7 +518,7 @@
           },
           "issue": {
             "lineage_not_available": "规范血缘尚不可用。",
-            "lease_not_current": "当前任务租约缺失或已过期。",
+            "lease_expired_unrecovered": "当前任务租约缺失或已过期。",
             "ledger_activation_mismatch": "Ledger 与激活记录不一致。",
             "weak_fact_ignored": "弱事实已从当前权威结论中排除。",
             "lineage_conflict": "冲突血缘证据已被排除。",

@@ -518,7 +518,7 @@
           },
           "issue": {
             "lineage_not_available": "Canonical lineage is not available yet.",
-            "lease_not_current": "The current task lease is missing or expired.",
+            "lease_expired_unrecovered": "The current task lease is missing or expired.",
             "ledger_activation_mismatch": "Ledger and activation records disagree.",
             "weak_fact_ignored": "A weak fact was excluded from current authority.",
             "lineage_conflict": "Conflicting lineage evidence was excluded.",

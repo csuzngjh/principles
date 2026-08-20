@@ -62,7 +62,7 @@ export function deriveOwnerGovernanceView(input: unknown): OwnerGovernanceView {
       if (task.leaseExpiresAt !== undefined && task.leaseExpiresAt > facts.asOf) state = 'running';
       else {
         state = 'stalled';
-        issues.push({ source: 'task', reasonCode: 'lease_not_current', nextActionCode: 'wait_for_runtime_recovery', sourceRef: task.sourceRef });
+        issues.push({ source: 'task', reasonCode: 'lease_expired_unrecovered', nextActionCode: 'wait_for_runtime_recovery', sourceRef: task.sourceRef });
       }
     } else if (task.status === 'failed' || task.status === 'needs_human_review') {
       state = 'stalled';

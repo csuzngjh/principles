@@ -686,7 +686,8 @@ export function PrincipleDetailPage() {
       </section>
 
       {/* ── Layer 3: Full trajectory (collapsed by default, D section) ──── */}
-      <details className="mb-8 border border-line rounded-[var(--radius-md)]">
+      {governance === null && (
+        <details className="mb-8 border border-line rounded-[var(--radius-md)]">
         <summary className="px-4 py-3 cursor-pointer font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov">
           {t("principles.detail.trajectory")}
         </summary>
@@ -798,7 +799,8 @@ export function PrincipleDetailPage() {
             </div>
           )}
         </div>
-      </details>
+        </details>
+      )}
 
       {/* ── Decision section (PRI-387) ────────────────────────────────────── */}
       <div className="border-t border-line pt-6 mt-6">

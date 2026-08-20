@@ -30,12 +30,12 @@ function task(taskId: string, status: GovernanceFacts['tasks'][number]['status']
 describe('PRI-551 deriveOwnerGovernanceView decision matrix', () => {
   const cases: {
     name: string; input: GovernanceFacts;
-    expected: { automation: string; attention: string; stage?: string; headline: string };
+    expected: { automation: string; attention: string; stage?: string; headline: string; reasonCode?: string };
   }[] = [
     { name: 'ledger only / missing artifact root', input: facts({ lineage: { principleId: 'principle-1', artifactIds: [], taskIds: [], revisionIdentities: [], confidence: 'unknown', sourceRefs: [{ type: 'principle', id: 'principle-1' }] }, collectionIssues: [{ source: 'lineage', reasonCode: 'lineage_not_available', nextActionCode: 'wait_for_durable_lineage' }] }), expected: { automation: 'idle', attention: 'none', headline: 'governance.headline.unavailable' } },
     { name: 'current pending task', input: facts({ tasks: [task('task-1', 'pending')] }), expected: { automation: 'queued', attention: 'none', stage: 'generating', headline: 'governance.headline.processing' } },
     { name: 'current leased task with valid lease', input: facts({ tasks: [task('task-1', 'leased', { leaseExpiresAt: '2026-08-20T11:00:00.000Z' })] }), expected: { automation: 'running', attention: 'none', stage: 'generating', headline: 'governance.headline.processing' } },
-    { name: 'current leased task with expired lease', input: facts({ tasks: [task('task-1', 'leased', { leaseExpiresAt: '2026-08-20T09:00:00.000Z' })] }), expected: { automation: 'stalled', attention: 'none', stage: 'generating', headline: 'governance.headline.unavailable' } },
+    { name: 'current leased task with expired lease', input: facts({ tasks: [task('task-1', 'leased', { leaseExpiresAt: '2026-08-20T09:00:00.000Z' })] }), expected: { automation: 'stalled', attention: 'none', stage: 'generating', headline: 'governance.headline.unavailable', reasonCode: 'lease_expired_unrecovered' } },
     { name: 'current retry-wait task', input: facts({ tasks: [task('task-1', 'retry_wait')] }), expected: { automation: 'retry_scheduled', attention: 'none', stage: 'generating', headline: 'governance.headline.revision' } },
     { name: 'succeeded task with pending intent', input: facts({ tasks: [task('task-1', 'succeeded', { completionIntent: { status: 'pending', revisionEpoch: 1, effect: 'governance_transition' } })] }), expected: { automation: 'running', attention: 'none', stage: 'revising', headline: 'governance.headline.revision' } },
     { name: 'needs revision without intent or repair', input: facts({ tasks: [task('task-1', 'succeeded', { taskKind: 'evaluator' })], runnerVerdicts: [{ schemaVersion: '1', family: 'runner_verdict', sourceRef: { type: 'task', id: 'task-1' }, principleId: 'principle-1', taskId: 'task-1', lineageConfidence: 'strong', recordedAt: '2026-08-20T08:10:00.000Z', runnerKind: 'evaluator', outcome: 'needs_revision' }] }), expected: { automation: 'stalled', attention: 'recovery_required', stage: 'reviewing', headline: 'governance.headline.recovery' } },
@@ -51,6 +51,12 @@ describe('PRI-551 deriveOwnerGovernanceView decision matrix', () => {
       expect(view.attention.primary).toBe(scenario.expected.attention);
       expect(view.process.stage).toBe(scenario.expected.stage);
       expect(view.summary.headlineCode).toBe(scenario.expected.headline);
+      if (scenario.expected.reasonCode !== undefined) {
+        expect(view.dataQuality.issues).toContainEqual(expect.objectContaining({
+          reasonCode: scenario.expected.reasonCode,
+          nextActionCode: 'wait_for_runtime_recovery',
+        }));
+      }
       expect(Value.Check(OwnerGovernanceViewSchema, view)).toBe(true);
     });
   }

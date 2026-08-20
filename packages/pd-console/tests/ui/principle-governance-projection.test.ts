@@ -41,6 +41,10 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
     expect(page).not.toContain('{event.sourceRef.type}: {event.sourceRef.id}');
   });
 
+  it('replaces the legacy trajectory only when the governance projection is available', () => {
+    expect(page).toMatch(/governance === null\s*&&\s*\(\s*<details className="mb-8 border border-line/);
+  });
+
   it('gates existing approval actions on projection Owner authority when projection is present', () => {
     expect(page).toContain("governance.attention.primary === 'owner_required'");
   });
