@@ -48,6 +48,7 @@ import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-e
 import { registerRuntimeCompatibilityScanCommand } from './commands/runtime-compatibility-scan.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
+import { handleRuntimeArtifactRepair } from './commands/runtime-artifact-repair.js';
 import {
   handleRuntimeActivationDeactivate,
   handleRuntimeActivationList,
@@ -698,6 +699,26 @@ const diagnosticsCmd = runtimeCmd
 const recoveryCmd = runtimeCmd
   .command('recovery', { hidden: true })
   .description('Runtime V2 lease recovery operations');
+
+// PRI-555 phase 1: dry-run-only artifact identity drift repair planner.
+runtimeCmd
+  .command('artifact-repair')
+  .description('Plan repairs for unreachable scribe artifacts (dry-run only; writes migration-plan.json, never modifies state.db)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Build migration-plan.json only (default)')
+  .option('--confirm', 'Not implemented in this phase — refused')
+  .option('--out <path>', 'Output path for migration-plan.json (default: ./migration-plan.json)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeArtifactRepair({
+      workspace: opts.workspace,
+      dryRun: opts.dryRun,
+      confirm: opts.confirm,
+      out: opts.out,
+      json: opts.json,
+    });
+  });
+
 
 recoveryCmd
   .command('sweep')
