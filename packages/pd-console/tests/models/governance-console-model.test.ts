@@ -354,6 +354,193 @@ describe('GovernanceConsoleModel — state priority', () => {
   });
 });
 
+// ── PRI-556: degraded time window + bounded summary ──────────────────────────
+
+describe('GovernanceConsoleModel — PRI-556 degraded time window', () => {
+  it('8-day-old failed/retry_wait tasks do NOT trigger degraded (historical pollution fix)', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES
+        ('task-old-failed', 'artificer', 'failed', '${eightDaysAgo}', '${eightDaysAgo}', 3, 'output_invalid'),
+        ('task-old-retry', 'dreamer', 'retry_wait', '${eightDaysAgo}', '${eightDaysAgo}', 1, 'timeout')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    // Historical rows still count as pipeline activity, but not as degradation.
+    expect(result.governanceState).toBe('in_progress');
+    expect(result.degradedSignals).toBeUndefined();
+  });
+
+  it('a 2-day-old failed task still triggers degraded', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ('task-fresh-failed', 'artificer', 'failed', '${twoDaysAgo}', '${twoDaysAgo}', 3, 'input_invalid')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    expect(result.degradedSignals).toBeDefined();
+    expect(result.degradedSignals!.length).toBe(1);
+    expect(result.degradedSignals![0].reasonCode).toBe('task_failed');
+    expect(result.degradedSignals![0].reason).toContain('1 internalization failures require attention');
+    expect(result.degradedSignals![0].failureSummary?.count).toBe(1);
+    expect(result.degradedSignals![0].failureSummary?.details.length).toBe(1);
+  });
+
+  it('pending approvals take priority over a recent failure (owner_review_ready first)', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    db.exec(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
+      VALUES ('apr-pri-556', 'artifact-pri-556', 'prompt', 'low', 'pending', '${now}')
+    `);
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ('task-fresh-failed-2', 'artificer', 'failed', '${twoDaysAgo}', '${twoDaysAgo}', 3, 'input_invalid')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('owner_review_ready');
+    expect(result.pendingReviewCount).toBe(1);
+    // degraded signal still reported alongside the owner-ready state
+    expect(result.degradedSignals).toBeDefined();
+    expect(result.degradedSignals!.some((s) => s.reasonCode === 'task_failed')).toBe(true);
+  });
+
+  it('many recent failures produce a bounded structured summary, not an overlong string', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    const values: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      values.push(`('task-many-${i}', 'artificer', 'failed', '${twoDaysAgo}', '${twoDaysAgo}', 3, 'input_invalid')`);
+    }
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ${values.join(', ')}
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    const failedSignal = result.degradedSignals!.find((s) => s.reasonCode === 'task_failed');
+    expect(failedSignal).toBeDefined();
+    // Bounded summary: count + at most 5 details + overflow marker — never the
+    // unbounded "kind: error; kind: error; …" concatenation of all 20 rows.
+    expect(failedSignal!.reason.length).toBeLessThan(1000);
+    expect(failedSignal!.reason).toContain('20 internalization failures require attention');
+    expect(failedSignal!.reason).toContain('+15 more');
+    expect(failedSignal!.failureSummary?.count).toBe(20);
+    expect(failedSignal!.failureSummary?.details.length).toBe(5);
+    expect(failedSignal!.failureSummary?.details[0].kind).toBe('artificer');
+    expect(failedSignal!.failureSummary?.details[0].taskId.length).toBeLessThanOrEqual(12);
+    expect(failedSignal!.failureSummary?.details[0].reason).toBe('input_invalid');
+  });
+
+  it('window applies to retry_wait as well: old failed + fresh retry_wait yields only the retry signal', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES
+        ('task-old-failed-2', 'artificer', 'failed', '${eightDaysAgo}', '${eightDaysAgo}', 3, 'output_invalid'),
+        ('task-fresh-retry', 'dreamer', 'retry_wait', '${twoDaysAgo}', '${twoDaysAgo}', 1, 'timeout')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    expect(result.degradedSignals!.length).toBe(1);
+    expect(result.degradedSignals![0].reasonCode).toBe('task_retry_wait');
+    expect(result.degradedSignals![0].failureSummary?.count).toBe(1);
+  });
+
+  it('short ids stay distinguishable when tasks share the same channel suffix (UUID head preferred over tail slice)', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Three distinct tasks whose ids differ ONLY in the UUID token and share
+    // the identical repeated channel suffix — a tail slice would give all
+    // three the same short code ("mpt-prompt"), defeating attribution.
+    const uuids = [
+      'aaaaaaaa-1111-2222-3333-444444444444',
+      'bbbbbbbb-1111-2222-3333-444444444444',
+      'cccccccc-1111-2222-3333-444444444444',
+    ];
+    const values = uuids.map(
+      (uuid) => `('artificer-scribe-philosopher-dreamer-${uuid}-prompt-prompt-prompt', 'artificer', 'failed', '${twoDaysAgo}', '${twoDaysAgo}', 3, 'input_invalid')`,
+    );
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ${values.join(', ')}
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    const failedSignal = result.degradedSignals!.find((s) => s.reasonCode === 'task_failed');
+    expect(failedSignal).toBeDefined();
+    const shortIds = failedSignal!.failureSummary!.details.map((d) => d.taskId);
+    // ERR-088: assert exact values AND set distinctness — a length-only
+    // assertion passes for any truncation scheme, including the broken one.
+    expect(shortIds).toEqual(['aaaaaaaa', 'bbbbbbbb', 'cccccccc']);
+    expect(new Set(shortIds).size).toBe(shortIds.length);
+  });
+
+  it('task ids without a UUID token fall back to the tail slice without throwing', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ('rulehost-manual_1781970379703_kklqs19g-artificer-r1-mqmj8yaa', 'evaluator', 'failed', '${twoDaysAgo}', '${twoDaysAgo}', 3, 'input_invalid')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    const failedSignal = result.degradedSignals!.find((s) => s.reasonCode === 'task_failed');
+    expect(failedSignal).toBeDefined();
+    const detail = failedSignal!.failureSummary!.details[0];
+    // No canonical UUID token in this id shape → tail-slice fallback (last 12 chars).
+    expect(detail.taskId).toBe('-r1-mqmj8yaa');
+  });
+});
+
 // ── Data Computation ─────────────────────────────────────────────────────────
 
 describe('GovernanceConsoleModel — data computation', () => {

@@ -44,6 +44,73 @@ export interface DegradedSignal {
   nextAction: string;
   /** Source of the degraded signal, e.g. 'internalization_task', 'source_unavailable' */
   source: string;
+  /**
+   * PRI-556: bounded structured summary of the tasks behind this signal.
+   * `reason` carries the same content as one bounded string; this field keeps
+   * count + per-task details machine-readable for API consumers. The UI
+   * validator currently ignores it (additive field).
+   */
+  failureSummary?: DegradedFailureSummary;
+}
+
+export interface DegradedFailureDetail {
+  /** Task kind, e.g. 'artificer' */
+  kind: string;
+  /**
+   * Short high-entropy task code — first 8 chars of the embedded UUID token
+   * when present, else the last 12 chars. Full task id remains visible on
+   * detail pages.
+   */
+  taskId: string;
+  /** Bounded last_error excerpt */
+  reason: string;
+}
+
+export interface DegradedFailureSummary {
+  /** Bounded human-readable summary, e.g. "3 internalization failures require attention: …" */
+  summary: string;
+  /** Total number of in-window tasks behind this signal (may exceed details.length) */
+  count: number;
+  /** At most DEGRADED_SIGNAL_MAX_DETAILS entries */
+  details: DegradedFailureDetail[];
+}
+
+/**
+ * PRI-556: only failures/retries whose updated_at falls inside this window
+ * drive the homepage degraded signal. Terminal `failed` rows have no cleanup
+ * path, so counting all history made 'degraded' permanent (signal pollution).
+ * Historical rows remain queryable on detail pages.
+ */
+const DEGRADED_SIGNAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** PRI-556: max per-task detail entries embedded in a degraded signal summary. */
+const DEGRADED_SIGNAL_MAX_DETAILS = 5;
+
+/**
+ * Canonical UUID token inside a task id (`<role>-<chain>-<uuid>-<channel>×N`).
+ * No `g` flag on purpose: stateless `match`, safe to share across calls.
+ */
+const TASK_ID_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/**
+ * PRI-556: short display code for a task id. Prefers the high-entropy UUID
+ * head because most task ids end with the same repeated channel suffix
+ * (e.g. `…-prompt-prompt-prompt`) — a tail slice would collapse distinct
+ * tasks into identical short codes and defeat attribution. Falls back to the
+ * tail slice for ids without a canonical UUID token; never throws on
+ * unexpected id shapes (rc-1).
+ */
+function shortTaskId(taskId: string): string {
+  const uuidMatch = TASK_ID_UUID_RE.exec(taskId);
+  if (uuidMatch) return uuidMatch[0].slice(0, 8);
+  return taskId.length <= 12 ? taskId : taskId.slice(-12);
+}
+
+function buildFailureSummary(prefix: string, details: DegradedFailureDetail[]): DegradedFailureSummary {
+  const shown = details.slice(0, DEGRADED_SIGNAL_MAX_DETAILS);
+  const shownText = shown.map((d) => `${d.kind}#${d.taskId} (${d.reason})`).join('; ');
+  const remaining = details.length - shown.length;
+  const summary = `${details.length} ${prefix}${shownText ? `: ${shownText}` : ''}${remaining > 0 ? `; +${remaining} more` : ''}`;
+  return { summary, count: details.length, details: shown };
 }
 
 /**
@@ -189,28 +256,34 @@ export class GovernanceConsoleModel {
         });
 
       // 2. Check internalization pipeline activity (tasks)
+      // PRI-556: pipeline activity still counts ALL tasks (drives in_progress),
+      // but only in-window failures/retries produce degraded signals.
       let hasInternalizationTasks = false;
-      let hasRetryWaitTasks = false;
-      let hasFailedTasks = false;
-      const retryWaitReasons: string[] = [];
-      const failedReasons: string[] = [];
+      const retryWaitDetails: DegradedFailureDetail[] = [];
+      const failedDetails: DegradedFailureDetail[] = [];
       try {
         const tasks = db.prepare(
-          `SELECT task_kind, status, last_error FROM tasks WHERE task_kind IN ('dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator')`
-        ).all() as { task_kind: string; status: string; last_error: string | null }[];
+          `SELECT task_id, task_kind, status, last_error, updated_at FROM tasks WHERE task_kind IN ('dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator')`
+        ).all() as { task_id: string; task_kind: string; status: string; last_error: string | null; updated_at: string }[];
 
         hasInternalizationTasks = tasks.length > 0;
+        const actionableCutoff = Date.now() - DEGRADED_SIGNAL_WINDOW_MS;
 
         for (const task of tasks) {
+          if (task.status !== 'retry_wait' && task.status !== 'failed') continue;
+          // updated_at is untrusted row data — malformed timestamps fall
+          // outside the window rather than poisoning the signal (rc-1).
+          const updatedAtMs = new Date(task.updated_at).getTime();
+          if (Number.isNaN(updatedAtMs) || updatedAtMs < actionableCutoff) continue;
+          const detail: DegradedFailureDetail = {
+            kind: task.task_kind,
+            taskId: shortTaskId(task.task_id),
+            reason: task.last_error ? task.last_error.substring(0, 120) : 'unknown error',
+          };
           if (task.status === 'retry_wait') {
-            hasRetryWaitTasks = true;
-            const errText = task.last_error ? task.last_error.substring(0, 120) : 'unknown error';
-            retryWaitReasons.push(`${task.task_kind}: ${errText}`);
-          }
-          if (task.status === 'failed') {
-            hasFailedTasks = true;
-            const errText = task.last_error ? task.last_error.substring(0, 120) : 'unknown error';
-            failedReasons.push(`${task.task_kind}: ${errText}`);
+            retryWaitDetails.push(detail);
+          } else {
+            failedDetails.push(detail);
           }
         }
       } catch (err) {
@@ -236,23 +309,28 @@ export class GovernanceConsoleModel {
       // 4. Degraded signals
       const degradedSignals: DegradedSignal[] = [];
 
-      if (hasRetryWaitTasks) {
+      if (retryWaitDetails.length > 0) {
+        // PRI-556: bounded structured summary instead of unbounded concatenation
+        const failureSummary = buildFailureSummary('internalization tasks waiting for retry', retryWaitDetails);
         degradedSignals.push({
           reasonCode: 'task_retry_wait',
           nextActionCode: 'check_task_status',
-          reason: `Internalization task waiting for retry: ${retryWaitReasons.join('; ')}`,
+          reason: failureSummary.summary,
           nextAction: 'Check internalization pipeline status, or wait for automatic retry.',
           source: 'internalization_task',
+          failureSummary,
         });
       }
 
-      if (hasFailedTasks) {
+      if (failedDetails.length > 0) {
+        const failureSummary = buildFailureSummary('internalization failures require attention', failedDetails);
         degradedSignals.push({
           reasonCode: 'task_failed',
           nextActionCode: 'fix_and_retry',
-          reason: `Internalization task failed: ${failedReasons.join('; ')}`,
+          reason: failureSummary.summary,
           nextAction: 'Check failure details, fix the issue and retry.',
           source: 'internalization_task',
+          failureSummary,
         });
       }
 

@@ -1,0 +1,1147 @@
+{
+  "generatedAt": "2026-08-21T01:26:01.515Z",
+  "workspace": "D:\\.openclaw\\workspace",
+  "dryRun": true,
+  "summary": {
+    "scanned_failed_tasks": 63,
+    "rule1_remap": 0,
+    "rule2_reconstruct": 63,
+    "needs_human_review": 0
+  },
+  "entries": [
+    {
+      "failed_task_id": "philosopher-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt_3 has output_payload; propose reconstructing a principle artifact for dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt_3",
+        "new_source_task_id": "dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook_1",
+        "new_source_task_id": "dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt_1",
+        "new_source_task_id": "philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt_1",
+        "new_source_task_id": "dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt_1",
+        "new_source_task_id": "dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook_1",
+        "new_source_task_id": "philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt_1",
+        "new_source_task_id": "philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt_1",
+        "new_source_task_id": "philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt_1",
+        "new_source_task_id": "dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt_2 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt_2",
+        "new_source_task_id": "philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-06cebaad-3912-42f1-ae69-3e9a17663075-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt_1",
+        "new_source_task_id": "dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt_1",
+        "new_source_task_id": "dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-06cebaad-3912-42f1-ae69-3e9a17663075-prompt",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt_1",
+        "new_source_task_id": "philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt_1",
+        "new_source_task_id": "philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook_1",
+        "new_source_task_id": "dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook_1",
+        "new_source_task_id": "philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt_1",
+        "new_source_task_id": "dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt_1",
+        "new_source_task_id": "dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-351f9550-c851-40c8-a06e-02dac61b91dd-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-351f9550-c851-40c8-a06e-02dac61b91dd-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-351f9550-c851-40c8-a06e-02dac61b91dd-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-351f9550-c851-40c8-a06e-02dac61b91dd-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-351f9550-c851-40c8-a06e-02dac61b91dd-prompt_1",
+        "new_source_task_id": "dreamer-351f9550-c851-40c8-a06e-02dac61b91dd-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-a52732e0-ffe6-4b89-8db8-bb7b130d8305-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-a52732e0-ffe6-4b89-8db8-bb7b130d8305-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-a52732e0-ffe6-4b89-8db8-bb7b130d8305-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-a52732e0-ffe6-4b89-8db8-bb7b130d8305-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-a52732e0-ffe6-4b89-8db8-bb7b130d8305-prompt_1",
+        "new_source_task_id": "dreamer-a52732e0-ffe6-4b89-8db8-bb7b130d8305-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-b96e538d-6c6e-4163-8992-01412470fa0c-code_tool_hook",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-b96e538d-6c6e-4163-8992-01412470fa0c-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-b96e538d-6c6e-4163-8992-01412470fa0c-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for dreamer-b96e538d-6c6e-4163-8992-01412470fa0c-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-b96e538d-6c6e-4163-8992-01412470fa0c-code_tool_hook_1",
+        "new_source_task_id": "dreamer-b96e538d-6c6e-4163-8992-01412470fa0c-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-514fe63b-e15d-4884-8ee7-fac3b1264c06-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-514fe63b-e15d-4884-8ee7-fac3b1264c06-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-514fe63b-e15d-4884-8ee7-fac3b1264c06-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-514fe63b-e15d-4884-8ee7-fac3b1264c06-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-514fe63b-e15d-4884-8ee7-fac3b1264c06-prompt_1",
+        "new_source_task_id": "dreamer-514fe63b-e15d-4884-8ee7-fac3b1264c06-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-9dc84b6f-cf48-4704-a57d-bd8917576ca6-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-9dc84b6f-cf48-4704-a57d-bd8917576ca6-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-9dc84b6f-cf48-4704-a57d-bd8917576ca6-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-9dc84b6f-cf48-4704-a57d-bd8917576ca6-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-9dc84b6f-cf48-4704-a57d-bd8917576ca6-prompt_1",
+        "new_source_task_id": "dreamer-9dc84b6f-cf48-4704-a57d-bd8917576ca6-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-a2db537b-a757-454d-9e16-316cfefdf6cc-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-a2db537b-a757-454d-9e16-316cfefdf6cc-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-a2db537b-a757-454d-9e16-316cfefdf6cc-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-a2db537b-a757-454d-9e16-316cfefdf6cc-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-a2db537b-a757-454d-9e16-316cfefdf6cc-prompt_1",
+        "new_source_task_id": "dreamer-a2db537b-a757-454d-9e16-316cfefdf6cc-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-619c3bd5-450f-4a6f-bf03-c69f90ff3eb6-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-619c3bd5-450f-4a6f-bf03-c69f90ff3eb6-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-619c3bd5-450f-4a6f-bf03-c69f90ff3eb6-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-619c3bd5-450f-4a6f-bf03-c69f90ff3eb6-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-619c3bd5-450f-4a6f-bf03-c69f90ff3eb6-prompt_1",
+        "new_source_task_id": "dreamer-619c3bd5-450f-4a6f-bf03-c69f90ff3eb6-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-6a680845-f1f2-48b4-91f8-73bdc7a4bb00-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-6a680845-f1f2-48b4-91f8-73bdc7a4bb00-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-6a680845-f1f2-48b4-91f8-73bdc7a4bb00-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-6a680845-f1f2-48b4-91f8-73bdc7a4bb00-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-6a680845-f1f2-48b4-91f8-73bdc7a4bb00-prompt_1",
+        "new_source_task_id": "dreamer-6a680845-f1f2-48b4-91f8-73bdc7a4bb00-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-b115449e-ec98-462c-857c-09719151d9a1-code_tool_hook",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-b115449e-ec98-462c-857c-09719151d9a1-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-b115449e-ec98-462c-857c-09719151d9a1-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for dreamer-b115449e-ec98-462c-857c-09719151d9a1-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-b115449e-ec98-462c-857c-09719151d9a1-code_tool_hook_1",
+        "new_source_task_id": "dreamer-b115449e-ec98-462c-857c-09719151d9a1-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-660e73ea-a44b-4ccb-8404-8b78896e12b4-code_tool_hook",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-660e73ea-a44b-4ccb-8404-8b78896e12b4-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-660e73ea-a44b-4ccb-8404-8b78896e12b4-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for dreamer-660e73ea-a44b-4ccb-8404-8b78896e12b4-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-660e73ea-a44b-4ccb-8404-8b78896e12b4-code_tool_hook_1",
+        "new_source_task_id": "dreamer-660e73ea-a44b-4ccb-8404-8b78896e12b4-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-54bb7e9e-8c40-49b9-aedd-5a30fec6e404-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-54bb7e9e-8c40-49b9-aedd-5a30fec6e404-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-54bb7e9e-8c40-49b9-aedd-5a30fec6e404-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-54bb7e9e-8c40-49b9-aedd-5a30fec6e404-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-54bb7e9e-8c40-49b9-aedd-5a30fec6e404-prompt_1",
+        "new_source_task_id": "dreamer-54bb7e9e-8c40-49b9-aedd-5a30fec6e404-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-a16273cd-cb87-460d-ae99-841ac23d325a-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-a16273cd-cb87-460d-ae99-841ac23d325a-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-a16273cd-cb87-460d-ae99-841ac23d325a-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-a16273cd-cb87-460d-ae99-841ac23d325a-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-a16273cd-cb87-460d-ae99-841ac23d325a-prompt_1",
+        "new_source_task_id": "dreamer-a16273cd-cb87-460d-ae99-841ac23d325a-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-e330ab24-d170-4571-8ebc-410301fec40b-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-e330ab24-d170-4571-8ebc-410301fec40b-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-e330ab24-d170-4571-8ebc-410301fec40b-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-e330ab24-d170-4571-8ebc-410301fec40b-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-e330ab24-d170-4571-8ebc-410301fec40b-prompt_1",
+        "new_source_task_id": "dreamer-e330ab24-d170-4571-8ebc-410301fec40b-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-2c4c3b7b-1e34-4af4-8ac6-7db18ec2062b-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-2c4c3b7b-1e34-4af4-8ac6-7db18ec2062b-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-2c4c3b7b-1e34-4af4-8ac6-7db18ec2062b-prompt_2 has output_payload; propose reconstructing a principle artifact for dreamer-2c4c3b7b-1e34-4af4-8ac6-7db18ec2062b-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-2c4c3b7b-1e34-4af4-8ac6-7db18ec2062b-prompt_2",
+        "new_source_task_id": "dreamer-2c4c3b7b-1e34-4af4-8ac6-7db18ec2062b-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "philosopher-be138cba-3703-4821-82d7-c7291e1284af-prompt",
+      "failed_task_kind": "philosopher",
+      "dependency_task_id": "dreamer-be138cba-3703-4821-82d7-c7291e1284af-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_dreamer-be138cba-3703-4821-82d7-c7291e1284af-prompt_1 has output_payload; propose reconstructing a principle artifact for dreamer-be138cba-3703-4821-82d7-c7291e1284af-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_dreamer-be138cba-3703-4821-82d7-c7291e1284af-prompt_1",
+        "new_source_task_id": "dreamer-be138cba-3703-4821-82d7-c7291e1284af-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt-prompt_2 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt-prompt_2",
+        "new_source_task_id": "scribe-philosopher-dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt-prompt_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt-prompt_2 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt-prompt_2",
+        "new_source_task_id": "scribe-philosopher-dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt-prompt_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook-code_tool_hook_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook-code_tool_hook-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt_1",
+        "new_source_task_id": "philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt-prompt_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt_1",
+        "new_source_task_id": "philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt-prompt_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-repair-evaluator-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-r1",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-rulehost-manual_1781959391155_16cywind-philosopher-mqmcsj5p-code_tool_hook",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "rulehost-manual_1781959391155_16cywind-philosopher-mqmcsj5p",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781959391155_16cywind-philosopher-mqmcsj5p_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781959391155_16cywind-philosopher-mqmcsj5p",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781959391155_16cywind-philosopher-mqmcsj5p_1",
+        "new_source_task_id": "rulehost-manual_1781959391155_16cywind-philosopher-mqmcsj5p",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-rulehost-manual_1781959391155_16cywind-scribe-mqmctmlp-code_tool_hook",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "rulehost-manual_1781959391155_16cywind-scribe-mqmctmlp",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781959391155_16cywind-scribe-mqmctmlp_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781959391155_16cywind-scribe-mqmctmlp",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781959391155_16cywind-scribe-mqmctmlp_1",
+        "new_source_task_id": "rulehost-manual_1781959391155_16cywind-scribe-mqmctmlp",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-rulehost-manual_1781959895631_l5dfts01-philosopher-mqmd283b-code_tool_hook",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "rulehost-manual_1781959895631_l5dfts01-philosopher-mqmd283b",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781959895631_l5dfts01-philosopher-mqmd283b_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781959895631_l5dfts01-philosopher-mqmd283b",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781959895631_l5dfts01-philosopher-mqmd283b_1",
+        "new_source_task_id": "rulehost-manual_1781959895631_l5dfts01-philosopher-mqmd283b",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-rulehost-manual_1781959895631_l5dfts01-scribe-mqmd3gfc-code_tool_hook",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "rulehost-manual_1781959895631_l5dfts01-scribe-mqmd3gfc",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781959895631_l5dfts01-scribe-mqmd3gfc_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781959895631_l5dfts01-scribe-mqmd3gfc",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781959895631_l5dfts01-scribe-mqmd3gfc_1",
+        "new_source_task_id": "rulehost-manual_1781959895631_l5dfts01-scribe-mqmd3gfc",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "evaluator-rulehost-manual_1781959895631_l5dfts01-artificer-r1-mqmd4s39-code_tool_hook",
+      "failed_task_kind": "evaluator",
+      "dependency_task_id": "rulehost-manual_1781959895631_l5dfts01-artificer-r1-mqmd4s39",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781959895631_l5dfts01-artificer-r1-mqmd4s39_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781959895631_l5dfts01-artificer-r1-mqmd4s39",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781959895631_l5dfts01-artificer-r1-mqmd4s39_1",
+        "new_source_task_id": "rulehost-manual_1781959895631_l5dfts01-artificer-r1-mqmd4s39",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-rulehost-manual_1781964158958_d1gj1w7r-philosopher-mqmfj60a-code_tool_hook",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "rulehost-manual_1781964158958_d1gj1w7r-philosopher-mqmfj60a",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781964158958_d1gj1w7r-philosopher-mqmfj60a_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781964158958_d1gj1w7r-philosopher-mqmfj60a",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781964158958_d1gj1w7r-philosopher-mqmfj60a_1",
+        "new_source_task_id": "rulehost-manual_1781964158958_d1gj1w7r-philosopher-mqmfj60a",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-rulehost-manual_1781964158958_d1gj1w7r-scribe-mqmfkcom-code_tool_hook",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "rulehost-manual_1781964158958_d1gj1w7r-scribe-mqmfkcom",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781964158958_d1gj1w7r-scribe-mqmfkcom_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781964158958_d1gj1w7r-scribe-mqmfkcom",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781964158958_d1gj1w7r-scribe-mqmfkcom_1",
+        "new_source_task_id": "rulehost-manual_1781964158958_d1gj1w7r-scribe-mqmfkcom",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "evaluator-rulehost-manual_1781964158958_d1gj1w7r-artificer-r1-mqmfkn1k-code_tool_hook",
+      "failed_task_kind": "evaluator",
+      "dependency_task_id": "rulehost-manual_1781964158958_d1gj1w7r-artificer-r1-mqmfkn1k",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781964158958_d1gj1w7r-artificer-r1-mqmfkn1k_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781964158958_d1gj1w7r-artificer-r1-mqmfkn1k",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781964158958_d1gj1w7r-artificer-r1-mqmfkn1k_1",
+        "new_source_task_id": "rulehost-manual_1781964158958_d1gj1w7r-artificer-r1-mqmfkn1k",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgeds1-code_tool_hook",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgeds1",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgeds1_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgeds1",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgeds1_1",
+        "new_source_task_id": "rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgeds1",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgff2e-code_tool_hook",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgff2e",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgff2e_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgff2e",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgff2e_1",
+        "new_source_task_id": "rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgff2e",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "evaluator-rulehost-manual_1781965295572_8v4g6s1o-artificer-r1-mqmgghzu-code_tool_hook",
+      "failed_task_kind": "evaluator",
+      "dependency_task_id": "rulehost-manual_1781965295572_8v4g6s1o-artificer-r1-mqmgghzu",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781965295572_8v4g6s1o-artificer-r1-mqmgghzu_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781965295572_8v4g6s1o-artificer-r1-mqmgghzu",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781965295572_8v4g6s1o-artificer-r1-mqmgghzu_1",
+        "new_source_task_id": "rulehost-manual_1781965295572_8v4g6s1o-artificer-r1-mqmgghzu",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgngha-code_tool_hook",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgngha",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgngha_2 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgngha",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgngha_2",
+        "new_source_task_id": "rulehost-manual_1781965295572_8v4g6s1o-philosopher-mqmgngha",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgo9ga-code_tool_hook",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgo9ga",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgo9ga_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgo9ga",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgo9ga_1",
+        "new_source_task_id": "rulehost-manual_1781965295572_8v4g6s1o-scribe-mqmgo9ga",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "scribe-rulehost-manual_1781970379703_kklqs19g-philosopher-mqmj87i3-code_tool_hook",
+      "failed_task_kind": "scribe",
+      "dependency_task_id": "rulehost-manual_1781970379703_kklqs19g-philosopher-mqmj87i3",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781970379703_kklqs19g-philosopher-mqmj87i3_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781970379703_kklqs19g-philosopher-mqmj87i3",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781970379703_kklqs19g-philosopher-mqmj87i3_1",
+        "new_source_task_id": "rulehost-manual_1781970379703_kklqs19g-philosopher-mqmj87i3",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-rulehost-manual_1781970379703_kklqs19g-scribe-mqmj8lyh-code_tool_hook",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "rulehost-manual_1781970379703_kklqs19g-scribe-mqmj8lyh",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781970379703_kklqs19g-scribe-mqmj8lyh_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781970379703_kklqs19g-scribe-mqmj8lyh",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781970379703_kklqs19g-scribe-mqmj8lyh_1",
+        "new_source_task_id": "rulehost-manual_1781970379703_kklqs19g-scribe-mqmj8lyh",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "evaluator-rulehost-manual_1781970379703_kklqs19g-artificer-r1-mqmj8yaa-code_tool_hook",
+      "failed_task_kind": "evaluator",
+      "dependency_task_id": "rulehost-manual_1781970379703_kklqs19g-artificer-r1-mqmj8yaa",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_rulehost-manual_1781970379703_kklqs19g-artificer-r1-mqmj8yaa_1 has output_payload; propose reconstructing a principle artifact for rulehost-manual_1781970379703_kklqs19g-artificer-r1-mqmj8yaa",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_rulehost-manual_1781970379703_kklqs19g-artificer-r1-mqmj8yaa_1",
+        "new_source_task_id": "rulehost-manual_1781970379703_kklqs19g-artificer-r1-mqmj8yaa",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    },
+    {
+      "failed_task_id": "artificer-repair-evaluator-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-r1",
+      "failed_task_kind": "artificer",
+      "dependency_task_id": "scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt",
+      "existing_artifact": null,
+      "artifact_source": "run_output_payload",
+      "repair_action": "reconstruct_from_run_payload",
+      "confidence": "medium",
+      "reason": "no principle artifact under any key, but succeeded run run_scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt_1 has output_payload; propose reconstructing a principle artifact for scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt",
+      "proposal": {
+        "action": "reconstruct_from_run_payload",
+        "run_id": "run_scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt_1",
+        "new_source_task_id": "scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt",
+        "artifact_kind": "principle",
+        "validation_status": "pending"
+      },
+      "unresolved_dep_count": 1
+    }
+  ]
+}

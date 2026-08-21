@@ -15,7 +15,7 @@ import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
-import { getSession } from '../core/session-tracker.js';
+import { getSession, trackReceiptAutoCorrect } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime-v2';
@@ -344,6 +344,8 @@ export function handleBeforeToolCall(
             // PRI-531: durable receipt ledger row — only after the correction
             // verifiably applied (SPEC honesty rule: no applied row before D2).
             try {
+              // PRI-534: session receipt counter (independent of the ledger flag).
+              trackReceiptAutoCorrect(ctx.sessionId, wctx.workspaceDir);
               if (loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_ledger').enabled) {
                 const ledgerPrincipleId = proposal.principleId != null
                   ? String(proposal.principleId)
