@@ -32,6 +32,17 @@ Feature: OpenClaw shared host runtime preserves MVP behavior
     When OpenClaw checks a write to a safe project path
     Then the tool call is allowed by the evaluated live rule
 
+  Scenario: Comment-only retired context text cannot disable host tools
+    Given an approved live RuleHost rule mentions recentThinking only in a comment
+    When OpenClaw checks a write to a safe project path
+    Then the tool call is allowed by the evaluated live rule
+
+  Scenario: An incompatible live RuleHost rule is skipped without blocking the host
+    Given an approved live RuleHost rule reads the retired recentThinking context
+    When OpenClaw checks a write to a protected system path
+    Then the incompatible rule is skipped and the current tool call remains allowed
+    And the Owner can see the activation ID and remediation
+
   Scenario: An owner pain signal is persisted as evidence
     When OpenClaw reports an owner pain signal after a tool call
     Then a pain evidence row is persisted in the workspace trajectory
