@@ -154,14 +154,22 @@ export class RuleCodeOwnerDecisionService {
       evidenceSnapshotId: readiness.evidenceSnapshot.snapshotId,
       decidedAt,
     };
-    const committed = await this.deps.commitPromotion({
-      decision,
-      evidenceSnapshot: readiness.evidenceSnapshot,
-      readinessEvaluationId: readiness.evaluationId,
-      evidenceSnapshotDigest: readiness.evidenceSnapshot.snapshotDigest,
-      expectedControlVersion: request.expectedControlVersion,
-      idempotencyKey: request.idempotencyKey,
-    });
-    return { ok: true, decision: 'promoted', ...committed };
+    try {
+      const committed = await this.deps.commitPromotion({
+        decision,
+        evidenceSnapshot: readiness.evidenceSnapshot,
+        readinessEvaluationId: readiness.evaluationId,
+        evidenceSnapshotDigest: readiness.evidenceSnapshot.snapshotDigest,
+        expectedControlVersion: request.expectedControlVersion,
+        idempotencyKey: request.idempotencyKey,
+      });
+      return { ok: true, decision: 'promoted', ...committed };
+    } catch {
+      return refused({
+        reasonCode: 'promotion_commit_failed',
+        summary: 'Failed to record the promotion decision in the durable safety store.',
+        nextAction: 'Check store permissions and retry the Owner review.',
+      });
+    }
   }
 }
