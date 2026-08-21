@@ -44,28 +44,44 @@ function validateHostContract(value: unknown): HostLivenessContract | null {
     || !Array.isArray(outOfBandControls)
     || !Array.isArray(protectedCapabilities)
     || !Array.isArray(neutralProbes)) return null;
-  const requiredControls = ['activation_deactivate', 'global_rulecode_pause', 'owner_review_console'];
+  const requiredControls = ['activation_deactivate', 'global_rulecode_pause', 'owner_review_console'] as const;
   if (!requiredControls.every(control => outOfBandControls.includes(control))) return null;
   const protectedIds = new Set<string>();
+  const protectedCapabilityList: HostLivenessContract['protectedCapabilities'][number][] = [];
   for (const capability of protectedCapabilities) {
     if (!isRecord(capability) || !isNonEmptyString(capability.capabilityId)
       || !Array.isArray(capability.hostToolAliases)
       || !capability.hostToolAliases.every(isNonEmptyString)) return null;
+    // RUNTIME_CONTRACT: hostToolAliases elements validated individually above.
+    protectedCapabilityList.push({ capabilityId: capability.capabilityId, hostToolAliases: capability.hostToolAliases });
     protectedIds.add(capability.capabilityId);
   }
-  const requiredCapabilities = ['pd_status', 'rulecode_deactivate', 'rulecode_global_pause', 'owner_review_access'];
+  const requiredCapabilities = ['pd_status', 'rulecode_deactivate', 'rulecode_global_pause', 'owner_review_access'] as const;
   if (!requiredCapabilities.every(capability => protectedIds.has(capability))) return null;
+  const neutralProbeList: HostLivenessContract['neutralProbes'][number][] = [];
   for (const probe of neutralProbes) {
     if (!isRecord(probe) || !isNonEmptyString(probe.probeId)
       || !isNonEmptyString(probe.capabilityId) || !protectedIds.has(probe.capabilityId)
       || !isNonEmptyString(probe.toolName) || !isRecord(probe.params)
       || probe.expectedDecision !== 'allow') return null;
+    neutralProbeList.push({
+      probeId: probe.probeId,
+      capabilityId: probe.capabilityId,
+      toolName: probe.toolName,
+      params: probe.params,
+      expectedDecision: 'allow',
+    });
   }
-  if (!requiredCapabilities.every(capability => neutralProbes.some(
-    probe => isRecord(probe) && probe.capabilityId === capability,
+  if (!requiredCapabilities.every(capability => neutralProbeList.some(
+    probe => probe.capabilityId === capability,
   ))) return null;
-  // RUNTIME_CONTRACT: every nested field was validated above; preserve readonly typing.
-  return value as unknown as HostLivenessContract;
+  return {
+    version: 'openclaw-legacy@1',
+    supportsShadowEvidence: true,
+    outOfBandControls: requiredControls,
+    protectedCapabilities: protectedCapabilityList,
+    neutralProbes: neutralProbeList,
+  };
 }
 
 function parseArtifactContent(artifact: PIArtifactSnapshot): Record<string, unknown> | null {
