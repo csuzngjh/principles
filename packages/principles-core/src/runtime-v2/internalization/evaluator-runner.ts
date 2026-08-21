@@ -329,7 +329,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   get permanentErrorCategories(): ReadonlySet<PDErrorCategory> {
-    return new Set(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid', 'output_invalid']);
+    return new Set(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid']);
   }
 
   async buildContext(taskId: string): Promise<EvaluatorContext> {
