@@ -608,6 +608,16 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       attemptCount: 1,
       maxAttempts: this.resolvedOptions.defaultMaxAttempts,
     };
+
+    // PRI-559 P0-2: 同步持久化失败详情（若 PDRuntimeError 携带 details）。
+    if (classified.details && Object.keys(classified.details).length > 0) {
+      await this.persistOutputFailureDetails(taskId, undefined, {
+        errorCategory: classified.category,
+        errorMessage: classified.message,
+        ...classified.details,
+      });
+    }
+
     return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
 
@@ -622,6 +632,17 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       errorCategory: classified.category,
       errorMessage: classified.message,
     });
+
+    // PRI-559 P0-2: 适配器抛出的 PDRuntimeError 可能携带 evidencePack
+    // （schemaRef/validationErrors/repairAttempts 等），持久化到 diagnosticJson
+    // 使失败详情可追溯。details 不存在时跳过（其他错误类别无此信息）。
+    if (classified.details && Object.keys(classified.details).length > 0) {
+      await this.persistOutputFailureDetails(taskId, task.diagnosticJson, {
+        errorCategory: classified.category,
+        errorMessage: classified.message,
+        ...classified.details,
+      });
+    }
 
     return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
@@ -659,6 +680,14 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     this.emitEvent('output_invalid', ctx.taskId, {
       errorCount: ctx.errors.length,
       errorCategory: category,
+    });
+
+    // PRI-559 P0-2: validator 失败的具体错误列表（字符串数组）持久化到
+    // diagnosticJson，使“哪个字段校验失败”可追溯（此前只进 runs.reason）。
+    await this.persistOutputFailureDetails(ctx.taskId, ctx.task.diagnosticJson, {
+      errorCategory: category,
+      validatorErrors: [...ctx.errors],
+      errorCount: ctx.errors.length,
     });
 
     return this.retryOrFail({
@@ -827,14 +856,59 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   // ── Error classification ──────────────────────────────────────────────────
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  private classifyError(error: unknown): { category: PDErrorCategory; message: string } {
+  private classifyError(error: unknown): {
+    category: PDErrorCategory;
+    message: string;
+    details?: Record<string, unknown>;
+  } {
     if (error instanceof PDRuntimeError) {
-      return { category: error.category, message: error.message };
+      // PRI-559 P0-2: 保留 details（如结构化输出失败的 evidencePack），
+      // 供失败详情持久化到 diagnosticJson，避免“为什么失败”不可追溯。
+      return { category: error.category, message: error.message, details: error.details };
     }
     if (error instanceof Error) {
       return { category: 'execution_failed', message: error.message };
     }
     return { category: 'execution_failed', message: String(error) };
+  }
+
+  /**
+   * PRI-559 P0-2: 把结构化输出失败详情持久化到 task.diagnosticJson。
+   *
+   * 与 pi_metadata 信封并列新增 `output_failure_details` 键（不破坏
+   * parsePITaskMetadata 对 pi_metadata 的严格校验）。失败详情包括：
+   *   - schemaRef / provider / model（定位环境）
+   *   - validationErrors（具体字段路径 + 错误消息 + 实际值预览）
+   *   - repairAttempts / repairSummary / finalFailureReason（修复循环诊断）
+   *   - rawOutputPreview（原始输出预览）
+   *   - validatorErrors（runner 层 validator 的字符串错误列表）
+   *
+   * 持久化失败不影响主流程（best-effort，记录事件即可）。
+   */
+  protected async persistOutputFailureDetails(
+    taskId: string,
+    existingDiagnosticJson: string | null | undefined,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      let parsed: Record<string, unknown> = {};
+      if (existingDiagnosticJson) {
+        const candidate = JSON.parse(existingDiagnosticJson) as unknown;
+        if (typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate)) {
+          parsed = candidate as Record<string, unknown>;
+        }
+      }
+      parsed.output_failure_details = {
+        recordedAt: new Date().toISOString(),
+        ...details,
+      };
+      await this.stateManager.updateTask(taskId, { diagnosticJson: JSON.stringify(parsed) });
+    } catch (err) {
+      this.emitEvent('mark_failed_error', taskId, {
+        errorCategory: 'storage_unavailable',
+        errorMessage: `persistOutputFailureDetails failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
