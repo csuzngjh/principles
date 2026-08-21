@@ -46,7 +46,7 @@ export interface SplitDiagnosticianRunnerDeps {
   readonly routerRunner: DiagRouterRunner;
   readonly stateManager: RuntimeStateManager;
   readonly committer: DiagnosticianCommitter;
-  /** Per-stage timeout in ms. Default: 300_000 (5 min). Split pipeline total = 3 × this value. */
+  /** Per-stage timeout in ms. Default: 600_000 (10 min). Split pipeline total = 3 × this value. */
   readonly perStageTimeoutMs?: number;
   /** Retry policy for backoff calculation. Defaults to stateManager.getRetryPolicy(). */
   readonly retryPolicy?: RetryPolicy;
@@ -78,7 +78,7 @@ export class SplitDiagnosticianRunner {
     this.distillerRunner = deps.distillerRunner;
     this.routerRunner = deps.routerRunner;
     this.stateManager = deps.stateManager;
-    this.perStageTimeoutMs = deps.perStageTimeoutMs ?? 300_000;
+    this.perStageTimeoutMs = deps.perStageTimeoutMs ?? 600_000;
     this.retryPolicy = deps.retryPolicy ?? deps.stateManager.getRetryPolicy();
   }
 

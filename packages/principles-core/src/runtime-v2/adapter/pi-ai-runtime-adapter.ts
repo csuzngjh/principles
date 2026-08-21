@@ -24,6 +24,7 @@ import { resolveOutputSchema } from './output-schema-registry.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
+import { typeboxToOpenAIJsonSchema, sanitizeSchemaName } from './schema-json-converter.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
 import { formatValidationErrorEntry, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
 import { buildSchemaToolDefinition } from './tools/diagnostician-tool.js';
@@ -1025,7 +1026,16 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
-            p.response_format = { type: 'json_object' };
+            // PRI-559: json_object 只保证“是 JSON”，不保证符合 schema（实测丢字段）。
+            // 升级为 json_schema 约束：llamacpp / OpenAI 兼容端点原生支持，
+            // 由模型侧约束解码，输出直接符合 schema。
+            p.response_format = {
+              type: 'json_schema',
+              json_schema: {
+                name: sanitizeSchemaName(params.schemaRef),
+                schema: typeboxToOpenAIJsonSchema(params.schema),
+              },
+            };
           }
           return payload;
         },

@@ -98,7 +98,7 @@ interface ArtificerL2RunState {
   reason?: string;
 }
 
-const DEFAULT_MAX_TURNS = 8;
+const DEFAULT_MAX_TURNS = 12;
 const DEFAULT_TOTAL_BUDGET_MS = 300_000;
 const DEFAULT_MAX_TOKENS = 8192;
 const MAX_RETAINED_RUNS = 100;
