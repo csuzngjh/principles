@@ -31,6 +31,7 @@ import { SqliteConnection } from '@principles/core/runtime-v2';
 import { scanLegacyRuleContractDependencies } from '@principles/core/runtime-v2';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import { EventLogService } from './event-log.js';
+import { observeRuleCodeSafety } from './rulecode-safety-circuit.js';
 import type {
   RuleHostInput,
   RuleHostResult,
@@ -114,34 +115,6 @@ function isRuleHostMeta(value: unknown): value is RuleHostMeta {
     typeof v['version'] === 'string' &&
     typeof v['ruleId'] === 'string' &&
     typeof v['coversCondition'] === 'string'
-  );
-}
-
-/**
- * P1 (2026-08-20): Compatibility Guard type guard.
- *
- * Distinguishes a runtime compatibility fail-closed block (an active
- * owner-approved RuleCode depends on a retired contract symbol and was NEVER
- * executed) from a real Principle-enforcement block (RuleCode actually ran
- * and returned block).
- *
- * Machine semantics: the block is a RUNTIME safety guard, not behavioral
- * evidence. The OpenClaw gate MUST use this guard (branching on
- * `diagnostics.kind` / `diagnostics.code`) and must NOT use
- * reason.startsWith/includes text matching.
- */
-export function isCompatibilityGuardBlock(
-  result: RuleHostResult | undefined,
-): result is RuleHostResult & {
-  diagnostics: {
-    kind: 'compatibility_guard';
-    code: 'legacy_rule_contract_dependency';
-  };
-} {
-  return (
-    result?.decision === 'block' &&
-    result.diagnostics?.kind === 'compatibility_guard' &&
-    result.diagnostics?.code === 'legacy_rule_contract_dependency'
   );
 }
 
@@ -248,58 +221,9 @@ export class RuleHost {
           );
         },
       });
-      // P0-1 (2026-08-20): an owner-approved LIVE rule whose RuleCode depends
-      // on a retired contract symbol was skipped at load time (never
-      // executed). Skipping an enforcement rule is NOT the same as it not
-      // existing — if the only live rule is skipped, the merged decision is
-      // `undefined` and the caller falls back to 'allow', a governance
-      // fail-open. The current tool action must instead fail closed. SHADOW
-      // rules are observation-only (never enforce), so a skipped shadow rule
-      // correctly remains diagnostic-only and does not force a block.
-      const incompatibleLive = skipped.find(
-        (s) => s.mode === 'live' && s.reason.startsWith('legacy_rule_contract_dependency'),
-      );
-      if (incompatibleLive) {
-        const nextAction = 'Migrate or deactivate this legacy RuleCode and approve a compatible replacement.';
-        // P1 (2026-08-20): machine-readable Compatibility Guard semantics.
-        // This fail-closed block is a RUNTIME safety guard caused by an
-        // incompatible persisted RuleCode — it is NOT evidence that the
-        // owner-approved RuleCode itself executed. `kind` + `code` are the
-        // machine discriminator fields; downstream (gate.ts) MUST branch on
-        // them, never on reason.startsWith/includes text.
-        const diagnostics: Record<string, unknown> = {
-          kind: 'compatibility_guard',
-          code: 'legacy_rule_contract_dependency',
-          activationId: incompatibleLive.activationId,
-          nextAction,
-        };
-        // Case D (legacy LIVE + healthy LIVE block): preserve the decision
-        // already produced by healthy rules so the diagnostic surface is not
-        // lost when the fail-closed override wins.
-        if (liveDecision && liveDecision.matched) {
-          diagnostics.underlying = {
-            decision: liveDecision.decision,
-            reason: liveDecision.reason,
-            ruleId: liveDecision.ruleId,
-          };
-        }
-        return {
-          liveDecision: {
-            decision: 'block',
-            matched: true,
-            reason:
-              `legacy_rule_contract_dependency: active owner-approved rule ` +
-              `${incompatibleLive.ruleId} cannot run safely on this runtime`,
-            ruleId: incompatibleLive.ruleId,
-            diagnostics,
-          },
-          // P1 (ISSUE-023): the fail-closed block is contributed by the
-          // incompatible live activation itself.
-          liveDecisionActivationId: incompatibleLive.activationId,
-          shadowDecisions,
-          skippedActivations: skipped,
-        };
-      }
+      // Host-liveness correction (2026-08-21): incompatible activations stay
+      // visible in skippedActivations but never synthesize a global block.
+      // Only RuleCode that actually evaluated may contribute liveDecision.
       // P1 (ISSUE-023): 经 ruleId 反查 live 决策的 activationId (可审计溯源)
       let liveDecisionActivationId: string | undefined;
       if (liveDecision?.ruleId) {
@@ -344,7 +268,7 @@ export class RuleHost {
       if (loaded.length === 0) {
         this._emitEmptyLoadWarn(
           'armed but empty — 0 active code_tool_hook activations loaded (RuleHost will not block or require approval)',
-          'If this is unexpected, run `pd activation list --channel code_tool_hook` to inspect activations, or `pd activation promote --activation-id <id> --confirm` to enable a live rule',
+          'If this is unexpected, run `pd activation list --channel code_tool_hook` to inspect activations; keep the rule in shadow until an authenticated Owner decision has immutable evidence bindings and a passing Promotion Readiness result',
         );
       }
       return { loaded, skipped };
@@ -395,11 +319,17 @@ export class RuleHost {
     this.sqliteConnection = sqliteConn;
     {
       const db = sqliteConn.getDb();
+      const pauseRow: unknown = db.prepare(`
+        SELECT pause_id FROM global_rulecode_pauses WHERE status = 'paused' LIMIT 1
+      `).get();
+      const globalPauseActive = pauseRow !== undefined;
       const rows = db.prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
+               c.enforcement, c.isolation_decision_id,
                p.content_json, p.source_rule_id, p.source_principle_id
         FROM activations a
         JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
+        LEFT JOIN activation_control_states c ON a.activation_id = c.activation_id
         WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
         ORDER BY a.activated_at ASC
       `).all() as unknown;
@@ -411,12 +341,15 @@ export class RuleHost {
         return { loaded: [], skipped: [] };
       }
 
-      const fingerprintParts: string[] = [supportsContextV2 ? 'context-v2' : 'context-v1'];
+      const fingerprintParts: string[] = [
+        supportsContextV2 ? 'context-v2' : 'context-v1',
+        globalPauseActive ? 'global-pause-active' : 'global-pause-inactive',
+      ];
       for (const row of rows) {
         if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
         const record = row as Record<string, unknown>;
         fingerprintParts.push([
-          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['content_json'], record['source_rule_id'], record['source_principle_id'],
+          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['enforcement'], record['isolation_decision_id'], record['content_json'], record['source_rule_id'], record['source_principle_id'],
         ].map((value) => typeof value === 'string' ? value : '').join('\u0001'));
       }
       const fingerprint = fingerprintParts.join('\u0002');
@@ -430,6 +363,7 @@ export class RuleHost {
       // Duplicate groups are skipped entirely (zero executions) and emit
       // structured unhealthy evidence. Non-duplicate rows proceed to compilation.
       const rowsByTargetRef = new Map<string, Record<string, unknown>[]>();
+      const skipped: SkippedActivation[] = [];
       for (const row of rows) {
         if (!row || typeof row !== 'object') {
           continue;
@@ -437,6 +371,32 @@ export class RuleHost {
         const r = row as Record<string, unknown>;
         const targetRef = typeof r['target_ref'] === 'string' ? r['target_ref'] : '';
         const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';
+        const ruleId = typeof r['source_rule_id'] === 'string' ? r['source_rule_id'] : targetRef;
+        const action = typeof r['action'] === 'string' ? r['action'] : '';
+        const mode: RuleHostActivationMode | undefined = action === 'code_tool_hook_live_activate'
+          ? 'live'
+          : action === 'code_tool_hook_shadow_activate' ? 'shadow' : undefined;
+        if (mode === 'live' && globalPauseActive) {
+          const reason = 'global_rulecode_pause_active';
+          const nextAction = 'Review the incident in the Owner Console before releasing the global pause';
+          skipped.push({ activationId, ruleId, mode, reason, nextAction });
+          this.logger.warn?.(`[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`);
+          continue;
+        }
+        if (r['enforcement'] === 'safety_isolated') {
+          const reason = 'activation_safety_isolated';
+          const nextAction = 'Recover the activation to shadow after reviewing safety evidence';
+          skipped.push({ activationId, ruleId, mode, reason, nextAction });
+          this.logger.warn?.(`[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`);
+          continue;
+        }
+        if (r['enforcement'] !== 'eligible') {
+          const reason = 'activation_control_state_invalid';
+          const nextAction = 'Repair the activation control state before RuleCode enforcement';
+          skipped.push({ activationId, ruleId, mode, reason, nextAction });
+          this.logger.warn?.(`[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`);
+          continue;
+        }
         if (!targetRef) {
           this.logger.warn?.(
             `[RuleHost] Activation ${activationId}: missing target_ref, skipping`
@@ -458,7 +418,6 @@ export class RuleHost {
       // Both paths are populated (rc-9-no-silent-fallback): event log for
       // telemetry, skipped array for structured caller-facing observability.
       const validRows: Record<string, unknown>[] = [];
-      const skipped: SkippedActivation[] = [];
       for (const [targetRef, group] of rowsByTargetRef) {
         if (group.length > 1) {
           const activationIds: string[] = [];
@@ -557,7 +516,7 @@ export class RuleHost {
           this.logger.warn?.(
             `[RuleHost] Activation ${activationId}: loaded in shadow (observation-only) mode; ` +
             'it will NOT block or require approval (shadowDecisions only). ' +
-            `nextAction=run \`pd activation promote --activation-id ${activationId} --confirm\` to enable live blocking, ` +
+            'nextAction=keep shadow until an authenticated Owner decision has immutable evidence bindings and a passing Promotion Readiness result, ' +
             'or leave as-is for shadow observation.',
           );
         }
@@ -776,6 +735,7 @@ export class RuleHost {
     reason: string,
     nextAction: string,
   ): void {
+    if (this.workspaceDir) observeRuleCodeSafety({ workspaceDir: this.workspaceDir, activationId, toolName: 'rulehost_load', params: {}, decision: 'error', matched: false, healthFailure: reason.includes('compatib') ? 'compatibility' : 'load', logger: this.logger });
     try {
       // Pass undefined as logger: RuleHostLogger only has warn(), but EventLog
       // calls this.logger.error() without optional chaining. Passing the

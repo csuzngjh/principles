@@ -371,6 +371,10 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // mapping from safeReadIntentDoc result to the core-owned IntentDocReadResult.
   // No new I/O; delegates to intent-doc-reader.ts above.
   'intent-doc-reader-adapter.ts',
+  // RuleCode safety containment I/O boundary — reads approved artifact scope and
+  // persists circuit-breaker isolation through the core-owned SQLite safety store.
+  // Pure threshold policy remains in principles-core.
+  'rulecode-safety-circuit.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -419,7 +423,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (96 files)', async () => {
+  it('known baseline count is self-consistent (97 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -465,7 +469,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // MVP core-loop closure (P0-B/P0-D): Added signal-keyword-store.ts +
     // auto-consumer-governance-wiring.ts (94 → 96) — live correction-cue store
     // projection + auto-consumer governance dispatcher/repair wiring (I/O boundary).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
+    // RuleCode Owner Live Decision: Added rulecode-safety-circuit.ts (96 → 97)
+    // as the plugin I/O shell for scope reads and durable safety isolation.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
   });
 });
 

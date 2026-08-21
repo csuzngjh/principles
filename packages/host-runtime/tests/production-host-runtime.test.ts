@@ -7,6 +7,7 @@ import * as yaml from 'js-yaml';
 import {
   getDefaultPdConfig,
   SqliteActivationStateStore,
+  SqliteActivationSafetyStore,
   SqliteConnection,
   renderPrinciplesToDirectives,
 } from '@principles/core/runtime-v2';
@@ -342,6 +343,61 @@ describe('shared production RuleHost gate kernel', () => {
     });
   });
 
+  it('never executes a safety-isolated live RuleCode and surfaces the recovery action', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE);
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      connection.getDb().prepare(`
+        UPDATE activation_control_states
+        SET enforcement = 'safety_isolated', isolation_decision_id = 'decision-isolate', version = 2, updated_at = ?
+        WHERE activation_id = 'act-shared-gate'
+      `).run(new Date().toISOString());
+    } finally { connection.close(); }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow',
+      warnings: [expect.stringMatching(/activation_safety_isolated: act-shared-gate.*nextAction=.*recover.*shadow/i)],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
+  it('fails open while the durable global RuleCode pause latch is active', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE);
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      await new SqliteActivationSafetyStore(connection).pauseAllLive({
+        decisionId: 'pause-decision', subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause',
+        principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' },
+        reasonCode: 'host_runtime_test', note: null, evidenceSnapshotId: null, decidedAt: '2026-08-21T00:00:00.000Z',
+      }, 'pause-1', 'pause-idempotency');
+    } finally { connection.close(); }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow',
+      warnings: [expect.stringMatching(/global_rulecode_pause_active.*nextAction=/)],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
+  it('does not infer eligibility when RuleCode control authority is missing', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE);
+    const connection = new SqliteConnection(workspaceDir);
+    try { connection.getDb().prepare("DELETE FROM activation_control_states WHERE activation_id = 'act-shared-gate'").run(); }
+    finally { connection.close(); }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow',
+      warnings: [expect.stringMatching(/activation_control_state_invalid: act-shared-gate.*nextAction=/)],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
   it('fails open observably for malformed implementation output', async () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, `function evaluate() { return { decision: 'block' }; }`);
@@ -492,28 +548,27 @@ function evaluate(input) {
 }
 `;
 
-  it('fails closed on an active rule reading the retired recentThinking contract', async () => {
+  it('fails open and skips an active rule reading the retired recentThinking contract', async () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, LEGACY_CONTRACT_CODE, undefined, '-legacy-contract');
     const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
-      decision: 'deny',
-      reason: expect.stringContaining('legacy_rule_contract_dependency:'),
+      decision: 'allow',
       warnings: [expect.stringContaining('legacy_rule_contract_dependency: recentThinking')],
       metadata: { evaluatedLiveRules: 0 },
     });
   });
 
-  it('does not let a healthy sibling rescue an active legacy rule (fail closed)', async () => {
+  it('skips an incompatible rule while preserving a healthy sibling block', async () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, LEGACY_CONTRACT_CODE, undefined, '-legacy-contract');
     await seedLiveRule(workspaceDir, SHARED_GATE_CODE, undefined, '-healthy-contract');
     const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
       decision: 'deny',
-      reason: expect.stringContaining('legacy_rule_contract_dependency:'),
+      reason: SHARED_GATE_REASON,
       warnings: [expect.stringMatching(/legacy_rule_contract_dependency.*nextAction=/)],
-      metadata: { evaluatedLiveRules: 0 },
+      metadata: { evaluatedLiveRules: 1 },
     });
   });
 });

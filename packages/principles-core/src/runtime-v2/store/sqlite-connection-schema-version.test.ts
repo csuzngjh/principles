@@ -32,22 +32,21 @@ describe('schema_version table (P2-10)', () => {
     expect(tables).toHaveLength(1);
   });
 
-  it('returns "001" for fresh database after migrateSchema (F12)', () => {
+  it('returns "002" for fresh database after RuleCode safety migration', () => {
     // F12 (PRI-442): migrateSchema now records '001' after migrations are
     // applied. Previously this returned '000' (the seed) because
     // migrateSchema never called setSchemaVersion.
     const conn = makeConnection();
     conn.getDb();
-    expect(conn.getSchemaVersion()).toBe('001');
+    expect(conn.getSchemaVersion()).toBe('002');
   });
 
   it('tracks version increments', () => {
     const conn = makeConnection();
     conn.getDb();
-    // F12: fresh DB starts at '001' (after migrateSchema), not '000'
-    expect(conn.getSchemaVersion()).toBe('001');
-    conn.setSchemaVersion('002');
     expect(conn.getSchemaVersion()).toBe('002');
+    conn.setSchemaVersion('003');
+    expect(conn.getSchemaVersion()).toBe('003');
   });
 
   it('persists version across reconnection', () => {
@@ -80,10 +79,11 @@ describe('schema_version table (P2-10)', () => {
     const rows = conn2.getDb().prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: string }[];
     conn2.close();
 
-    // Should have exactly 2 rows: '000' (seed) + '001' (migration record)
-    expect(rows.length).toBe(2);
+    // Seed plus the legacy migration and RuleCode safety authority migration.
+    expect(rows.length).toBe(3);
     expect(rows[0]?.version).toBe('000');
     expect(rows[1]?.version).toBe('001');
+    expect(rows[2]?.version).toBe('002');
   });
 
   // PRI-442 F12: migrateSchema() must call setSchemaVersion('001') after
@@ -96,7 +96,7 @@ describe('schema_version table (P2-10)', () => {
     // After migrateSchema, the version should be '001' (not the seed '000')
     // because the principle_candidates table is created with migration columns
     // (recommendation_kind, trigger_pattern, action, abstracted_principle).
-    expect(conn.getSchemaVersion()).toBe('001');
+    expect(conn.getSchemaVersion()).toBe('002');
   });
 
   it('F12: does not duplicate "001" row on re-init', () => {
@@ -106,7 +106,7 @@ describe('schema_version table (P2-10)', () => {
 
     const conn1 = new SqliteConnection(dir);
     conn1.getDb();
-    expect(conn1.getSchemaVersion()).toBe('001');
+    expect(conn1.getSchemaVersion()).toBe('002');
     conn1.close();
 
     // Re-open: migrateSchema runs again, but should NOT insert another '001'
@@ -115,9 +115,9 @@ describe('schema_version table (P2-10)', () => {
     const rows = conn2.getDb().prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: string }[];
     conn2.close();
 
-    // Should have exactly 2 rows: '000' (seed) and '001' (migration record)
-    expect(rows.length).toBe(2);
+    expect(rows.length).toBe(3);
     expect(rows[0]?.version).toBe('000');
     expect(rows[1]?.version).toBe('001');
+    expect(rows[2]?.version).toBe('002');
   });
 });

@@ -13,6 +13,7 @@ import {
   approveApproval,
   rejectApproval,
   editApproval,
+  fetchAllActivations,
 } from "../../api.js";
 import type {
   GovernanceQueueData,
@@ -20,6 +21,7 @@ import type {
   ApprovalGroup,
   StagnationSignal,
   DegradedSignal,
+  ActivationRecord,
 } from "../../api.js";
 
 type DecisionResult =
@@ -760,15 +762,19 @@ export function FocusPage() {
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [groupedErrorReason, setGroupedErrorReason] = useState<string | null>(null);
+  const [ruleCodeItems, setRuleCodeItems] = useState<ActivationRecord[]>([]);
+  const [ruleCodeErrorReason, setRuleCodeErrorReason] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
     setErrorMessage(null);
     setGroupedErrorReason(null);
+    setRuleCodeErrorReason(null);
 
-    const [queueResult, groupedResult] = await Promise.all([
+    const [queueResult, groupedResult, activationsResult] = await Promise.all([
       fetchGovernanceQueue(),
       fetchApprovalsGrouped(),
+      fetchAllActivations(),
     ]);
 
     // Queue data is already validated by the API layer (validateGovernanceQueue)
@@ -789,6 +795,16 @@ export function FocusPage() {
       if (validatedGrouped === null) {
         setGroupedErrorReason("Approvals data has unexpected shape");
       }
+    }
+    if (activationsResult.success) {
+      setRuleCodeItems(
+        activationsResult.data.activations.filter(
+          (item) => item.channel === "code_tool_hook" && item.status === "active",
+        ),
+      );
+    } else {
+      setRuleCodeItems([]);
+      setRuleCodeErrorReason(activationsResult.error);
     }
 
     setLoadingState("loaded");
@@ -841,6 +857,8 @@ export function FocusPage() {
   const evidenceCount = queueData?.evidenceInProgressCount ?? 0;
   const gateBlocksToday = queueData?.gateBlocksToday ?? 0;
   const approvalDataUnavailable = (groupedData === null || groupedData.groups.length === 0) && pendingCount > 0;
+  const ruleCodePending = ruleCodeItems.filter(item => item.action === 'code_tool_hook_shadow_activate' && item.enforcement !== 'safety_isolated');
+  const ruleCodeAlerts = ruleCodeItems.filter(item => item.enforcement === 'safety_isolated');
 
   // Map codes to i18n text
   const stateReason = getStateReasonText(stateReasonCode, t, pendingCount);
@@ -937,6 +955,37 @@ export function FocusPage() {
       )}
 
       {/* Layer 2: Why — three sections with evidence summaries */}
+
+      {(ruleCodeErrorReason || ruleCodePending.length > 0 || ruleCodeAlerts.length > 0) && (
+        <section className="mt-8" aria-labelledby="section-rulecode-owner">
+          <SectionTitle id="section-rulecode-owner">{t("pages.focus.ruleCodeOwnerQueue")}</SectionTitle>
+          {ruleCodeErrorReason && (
+            <div className="mb-3 rounded border border-amber/30 bg-panel p-4 text-[12px] text-ink-3">
+              <div className="font-medium text-amber">{t("pages.focus.ruleCodeUnavailable")}</div>
+              <div className="mt-1 font-mono">{ruleCodeErrorReason}</div>
+              <div className="mt-1">{t("pages.focus.ruleCodeUnavailableNextAction")}</div>
+            </div>
+          )}
+          <div className="grid gap-3 md:grid-cols-2">
+            {ruleCodePending.length > 0 && (
+              <Link to="/activation" className="rounded border border-gov/30 bg-panel p-4 hover:border-gov">
+                <div className="font-medium text-ink">{t("pages.focus.ruleCodePending")}</div>
+                <div className="mt-1 text-[12px] text-ink-3">
+                  {t("pages.focus.ruleCodePendingCount", { count: ruleCodePending.length })}
+                </div>
+              </Link>
+            )}
+            {ruleCodeAlerts.length > 0 && (
+              <Link to="/activation" className="rounded border border-danger/30 bg-panel p-4 hover:border-danger">
+                <div className="font-medium text-danger">{t("pages.focus.ruleCodeAlerts")}</div>
+                <div className="mt-1 text-[12px] text-ink-3">
+                  {t("pages.focus.ruleCodeAlertCount", { count: ruleCodeAlerts.length })}
+                </div>
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Section 1: Pending Review */}
       <section className="mt-8" aria-labelledby="section-pending">

@@ -52,6 +52,8 @@ import {
   validateIntentRawContent,
   validateIntentVersions,
   validateOwnerGovernanceView,
+  validateRuleCodeOwnerReview,
+  validateRuleCodeMutation,
 } from "./utils/validators.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
@@ -94,6 +96,8 @@ import type {
   IntentSaveResultData,
   IntentRawContentData,
   IntentVersionData,
+  RuleCodeOwnerReviewData,
+  RuleCodeMutationData,
 } from "./utils/validators.js";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -668,6 +672,21 @@ async function disableActivation(activationId: string): Promise<ApiResponse<Disa
   );
 }
 
+async function fetchRuleCodeOwnerReview(activationId: string): Promise<ApiResponse<RuleCodeOwnerReviewData>> {
+  return request(`/api/v1/activations/${encodeURIComponent(activationId)}/owner-review`, undefined, validateRuleCodeOwnerReview);
+}
+
+async function mutateRuleCode(path: string, body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> {
+  return request(path, { method: 'POST', body: JSON.stringify(body) }, validateRuleCodeMutation);
+}
+
+function ruleCodeDecision(activationId: string, action: 'continue-observing' | 'reject-after-shadow' | 'emergency-deactivate' | 'promote' | 'recover-to-shadow', body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> {
+  return mutateRuleCode(`/api/v1/activations/${encodeURIComponent(activationId)}/${action}`, body);
+}
+
+function pauseAllRuleCode(body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> { return mutateRuleCode('/api/v1/activations/emergency-pause', body); }
+function releaseRuleCodePause(pauseId: string, body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> { return mutateRuleCode(`/api/v1/activations/emergency-pause/${encodeURIComponent(pauseId)}/release`, body); }
+
 async function fetchLifecycleMetrics(principleId: string): Promise<ApiResponse<LifecycleMetricsData>> {
   return request<LifecycleMetricsData>(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`, undefined, validateLifecycleMetrics);
 }
@@ -914,6 +933,10 @@ export {
   fetchApprovalsGrouped,
   fetchAllActivations,
   disableActivation,
+  fetchRuleCodeOwnerReview,
+  ruleCodeDecision,
+  pauseAllRuleCode,
+  releaseRuleCodePause,
   fetchLifecycleMetrics,
   fetchUpdateStatus,
   fetchUpdateHistory,
@@ -958,6 +981,8 @@ export type {
   GovernanceQueueData,
   ActivationsData,
   DisableActivationData,
+  RuleCodeOwnerReviewData,
+  RuleCodeMutationData,
   LifecycleMetricsData,
   UpdateStatusData,
   UpdateHistoryData,

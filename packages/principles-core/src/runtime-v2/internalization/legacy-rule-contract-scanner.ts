@@ -16,10 +16,10 @@
  *   - upgrade preflights (installer, console update) — refuse to replace the
  *     runtime while an active rule depends on a removed contract.
  *
- * Matching is deliberately conservative: a symbol mentioned anywhere in the
- * implementation source (including comments) is reported. A false positive
- * costs one migration/deactivation; a false negative silently changes the
- * behavior of an owner-approved rule.
+ * Matching examines executable source only. Comments and string literals are
+ * masked before symbol matching so explanatory text cannot disable a host.
+ * A true executable reference is still rejected because reading a retired
+ * field would silently change owner-approved behavior.
  */
 
 /** Retired public RuleHost contract symbols and how they appear in RuleCode. */
@@ -67,6 +67,92 @@ const SYMBOL_PATTERNS: readonly SymbolPattern[] = [
   { symbol: 'hasPlanFile', pattern: /\bhasPlanFile\b(?!\s*\()/ },
 ];
 
+function maskNonExecutableText(source: string): string {
+  type State = 'code' | 'line_comment' | 'block_comment' | 'single_quote' | 'double_quote' | 'template';
+  let state: State = 'code';
+  let templateExpressionDepth = 0;
+  let masked = '';
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index] ?? '';
+    const next = source[index + 1] ?? '';
+
+    if (state === 'code') {
+      if (templateExpressionDepth > 0 && char === '{') {
+        templateExpressionDepth += 1;
+        masked += char;
+      } else if (templateExpressionDepth > 0 && char === '}') {
+        templateExpressionDepth -= 1;
+        masked += char;
+        if (templateExpressionDepth === 0) state = 'template';
+      } else if (char === '/' && next === '/') {
+        masked += '  ';
+        index += 1;
+        state = 'line_comment';
+      } else if (char === '/' && next === '*') {
+        masked += '  ';
+        index += 1;
+        state = 'block_comment';
+      } else if (char === "'") {
+        masked += ' ';
+        state = 'single_quote';
+      } else if (char === '"') {
+        masked += ' ';
+        state = 'double_quote';
+      } else if (char === '`') {
+        masked += ' ';
+        state = 'template';
+      } else {
+        masked += char;
+      }
+      continue;
+    }
+
+    if (state === 'line_comment') {
+      masked += char === '\n' || char === '\r' ? char : ' ';
+      if (char === '\n' || char === '\r') state = 'code';
+      continue;
+    }
+
+    if (state === 'block_comment') {
+      if (char === '*' && next === '/') {
+        masked += '  ';
+        index += 1;
+        state = 'code';
+      } else {
+        masked += char === '\n' || char === '\r' ? char : ' ';
+      }
+      continue;
+    }
+
+    if (state === 'template' && char === '$' && next === '{') {
+      masked += ' {';
+      index += 1;
+      templateExpressionDepth = 1;
+      state = 'code';
+      continue;
+    }
+
+    if (char === '\\') {
+      masked += ' ';
+      if (index + 1 < source.length) {
+        masked += source[index + 1] === '\n' || source[index + 1] === '\r' ? source[index + 1] : ' ';
+        index += 1;
+      }
+      continue;
+    }
+
+    const closesLiteral =
+      (state === 'single_quote' && char === "'") ||
+      (state === 'double_quote' && char === '"') ||
+      (state === 'template' && char === '`');
+    masked += char === '\n' || char === '\r' ? char : ' ';
+    if (closesLiteral) state = 'code';
+  }
+
+  return masked;
+}
+
 /**
  * Scan persisted RuleCode sources for retired RuleHost contract symbols.
  * Pure function — no I/O; callers own loading the code from persistence.
@@ -79,10 +165,11 @@ export function scanLegacyRuleContractDependencies(
     if (typeof rule.implementationCode !== 'string' || rule.implementationCode.length === 0) {
       continue;
     }
+    const executableSource = maskNonExecutableText(rule.implementationCode);
     const seen = new Set<LegacyRuleContractSymbol>();
     for (const { symbol, pattern } of SYMBOL_PATTERNS) {
       if (seen.has(symbol)) continue;
-      if (pattern.test(rule.implementationCode)) {
+      if (pattern.test(executableSource)) {
         seen.add(symbol);
         findings.push({
           ...(rule.activationId !== undefined ? { activationId: rule.activationId } : {}),

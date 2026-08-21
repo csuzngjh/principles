@@ -40,6 +40,22 @@ function evaluate(input) {
 }
 var meta = { name: 'shared-runtime-parity', version: '1', ruleId: 'R_SHARED_523', coversCondition: 'all' };
 `;
+const COMMENT_ONLY_RULE_CODE = `
+function evaluate(input) {
+  // Legacy note: input.session.recentThinking was retired.
+  return { decision: 'allow', matched: false, reason: 'comment is not executable' };
+}
+var meta = { name: 'comment-only', version: '1', ruleId: 'R_COMMENT_ONLY', coversCondition: 'all' };
+`;
+const INCOMPATIBLE_RULE_CODE = `
+function evaluate(input) {
+  if (input.session && input.session.recentThinking === true) {
+    return { decision: 'block', matched: true, reason: 'must never execute' };
+  }
+  return { decision: 'allow', matched: false };
+}
+var meta = { name: 'incompatible', version: '1', ruleId: 'R_INCOMPATIBLE', coversCondition: 'all' };
+`;
 
 type Hook = (...args: unknown[]) => unknown;
 const registry = createStepRegistry();
@@ -219,6 +235,20 @@ registry.given('an approved live RuleHost rule is active', async () => {
   } });
   await activate({ id: 'art-rule-523', channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_SHARED_523' });
 });
+async function activateRuleFixture(input: { artifactId: string; principleId: string; ruleId: string; code: string }): Promise<void> {
+  insertArtifact({ id: input.artifactId, kind: 'rule', principleId: input.principleId, ruleId: input.ruleId, content: {
+    principleId: input.principleId, ruleId: input.ruleId, implementationCode: input.code,
+    goldenTrace: { traceId: `trace-${input.ruleId}`, cases: [], createdAt: new Date().toISOString(), version: 1 },
+    ruleHostGateDecision: 'accepted_shadow', affectedTools: ['write_file'], painReasonSummary: 'host-liveness BDD',
+  } });
+  await activate({ id: input.artifactId, channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: `impl://${input.ruleId}` });
+}
+registry.given('an approved live RuleHost rule mentions recentThinking only in a comment', async () => {
+  await activateRuleFixture({ artifactId: 'art-comment-only', principleId: 'P_COMMENT_ONLY', ruleId: 'R_COMMENT_ONLY', code: COMMENT_ONLY_RULE_CODE });
+});
+registry.given('an approved live RuleHost rule reads the retired recentThinking context', async () => {
+  await activateRuleFixture({ artifactId: 'art-incompatible', principleId: 'P_INCOMPATIBLE', ruleId: 'R_INCOMPATIBLE', code: INCOMPATIBLE_RULE_CODE });
+});
 registry.when('OpenClaw checks a write to a protected system path', async () => {
   result = await hooks.get('before_tool_call')!({ toolName: 'write_file', params: { file_path: '/etc/passwd', content: 'bad' } }, { workspaceDir, sessionId: 'session-gate-523', agentId: 'main' });
 });
@@ -233,6 +263,17 @@ registry.then('the tool call is allowed by the evaluated live rule', () => {
   expect(logMessages.join('\n')).not.toContain(RULE_REASON);
   expect(logMessages.join('\n')).not.toContain('activation_db_not_found');
   expect(logMessages.join('\n')).toContain('shared production gate evaluated; liveRules=1 decision=allow');
+});
+registry.then('the incompatible rule is skipped and the current tool call remains allowed', () => {
+  expect(result).toBeUndefined();
+  expect(logMessages.join('\n')).toContain('shared production gate evaluated; liveRules=0 decision=allow');
+  expect(logMessages.join('\n')).not.toContain('must never execute');
+});
+registry.then('the Owner can see the activation ID and remediation', () => {
+  const logs = logMessages.join('\n');
+  expect(logs).toContain('activation=act-art-incompatible');
+  expect(logs).toContain('nextAction=');
+  expect(logs.toLowerCase()).toContain('deactivate');
 });
 registry.when('OpenClaw reports an owner pain signal after a tool call', async () => {
   await hooks.get('after_tool_call')!({ toolName: 'pain', params: { input: 'owner correction 523' }, result: {} }, { workspaceDir, sessionId: 'session-pain-523', agentId: 'main' });

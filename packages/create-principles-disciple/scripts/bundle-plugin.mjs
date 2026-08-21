@@ -297,6 +297,12 @@ rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principl
 // separate npm install. The installer creates the corresponding symlink.
 rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime', '@principles/core', 'file:../core');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
+// console statically imports OPENCLAW_HOST_LIVENESS_CONTRACT at runtime for the
+// RuleCode owner live-decision readiness checks. Rewrite to a local file reference
+// (same as pd-cli) so the bundled package self-resolves the freshly built
+// host-runtime; otherwise the installer resolves @principles/host-runtime from the
+// npm registry and crashes with an ESM named-export SyntaxError.
+rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/host-runtime', 'file:../host-runtime');
 // pd-cli also depends on principles-disciple (the plugin package). Rewrite to a local
 // file reference so the bundled package is self-contained. The installer's syncPdCli()
 // creates a node_modules/principles-disciple symlink to the installed plugin directory.

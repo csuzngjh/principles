@@ -25,6 +25,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { handleActivationsRoute, disposeActivationsModels } from '../../../src/server/routes/activations.js';
+import { SqliteConnection } from '@principles/core/runtime-v2';
 
 // ── Test utilities ───────────────────────────────────────────────────────────
 
@@ -216,6 +217,58 @@ describe('Activation disable route', () => {
       const body = parseResponseBody<{ success: true; data: { activations: unknown[]; status: string } }>(res);
       expect(body.success).toBe(true);
       expect(body.data.activations).toEqual([]);
+    });
+  });
+
+  describe('GET /api/v1/activations/:id/owner-review', () => {
+    it('returns the production Owner review projection', async () => {
+      const conn = new SqliteConnection({ workspaceDir: tempDir, readonly: false });
+      const db = conn.getDb();
+      const now = '2026-08-21T06:00:00.000Z';
+      db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-review', 'diagnosis', 'pending', ?, ?)").run(now, now);
+      db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('artifact-review', 'rule', 'task-review', '["parent-1"]', 'validated', '{}', ?, ?)`).run(now, now);
+      db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at) VALUES ('act-review', 'idem-review', 'artifact-review', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-review', ?, NULL)`).run(now);
+      db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-review', 'eligible', 1, ?)`).run(now);
+      conn.close();
+      const req = createMockRequest('GET', { subPath: '/act-review/owner-review' });
+      const res = createMockResponse();
+
+      await handleActivationsRoute(req, res, tempDir, '/act-review/owner-review');
+
+      expect(res.statusCode).toBe(200);
+      const body = parseResponseBody<{ success: true; data: { activation: { activationId: string }; readiness: { status: string } } }>(res);
+      expect(body.data.activation.activationId).toBe('act-review');
+      expect(body.data.readiness.status).not.toBe('ready');
+    });
+  });
+
+  describe('Owner RuleCode decisions', () => {
+    it('refuses governance mutation when server has no authenticated Owner identity', async () => {
+      const req = createMockRequest('POST', { subPath: '/act-review/continue-observing', body: { idempotencyKey: 'idem-1', reasonCode: 'observe_more' } });
+      const res = createMockResponse();
+      await handleActivationsRoute(req, res, tempDir, '/act-review/continue-observing', {
+        ownerActor: null,
+        breakGlassActor: { principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' } },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(parseResponseBody<{ error: string; nextAction: string }>(res)).toMatchObject({ error: 'owner_authentication_required', nextAction: expect.any(String) });
+    });
+
+    it('allows local break-glass global pause without fabricating Owner identity', async () => {
+      const conn = new SqliteConnection({ workspaceDir: tempDir, readonly: false });
+      const now = '2026-08-21T06:00:00.000Z'; const db = conn.getDb();
+      db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-pause', 'diagnosis', 'pending', ?, ?)").run(now, now);
+      db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('artifact-pause', 'rule', 'task-pause', '[]', 'validated', '{}', ?, ?)`).run(now, now);
+      db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at) VALUES ('act-pause', 'idem-pause-source', 'artifact-pause', 'code_tool_hook', 'code_tool_hook_live_activate', 'impl://rule-pause', ?, NULL)`).run(now);
+      db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-pause', 'eligible', 1, ?)`).run(now); conn.close();
+      const req = createMockRequest('POST', { subPath: '/emergency-pause', body: { idempotencyKey: 'pause-request-1', reasonCode: 'host_unusable' } });
+      const res = createMockResponse();
+      await handleActivationsRoute(req, res, tempDir, '/emergency-pause', {
+        ownerActor: null,
+        breakGlassActor: { principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' } },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(parseResponseBody<{ data: { status: string; affectedActivationIds: string[] } }>(res).data).toMatchObject({ status: 'paused', affectedActivationIds: ['act-pause'] });
     });
   });
 

@@ -289,6 +289,30 @@ describe('ActivationsConsoleModel — deactivateActivation', () => {
   });
 });
 
+describe('ActivationsConsoleModel — Owner review', () => {
+  it('returns artifact-bound readiness and represents missing shadow telemetry as unavailable', async () => {
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    const now = '2026-08-21T06:00:00.000Z';
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-review', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-review', 'rule', 'task-review', 'rule-review', '["parent-1"]', 'validated', ?, ?, ?)`)
+      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-review', 'idem-review', 'artifact-review', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-review', ?, NULL)`).run(now);
+    db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-review', 'eligible', 1, ?)`).run(now);
+    conn.close();
+
+    const review = await model.getOwnerReview('act-review');
+
+    expect(review.activation.activationId).toBe('act-review');
+    expect(review.artifact.artifactId).toBe('artifact-review');
+    expect(review.artifact.digest).toMatch(/^sha256:/);
+    expect(review.readiness.evidenceSnapshot.shadowSummary).toEqual({ observed: null, matched: null, wouldBlock: null, wouldAllow: null, requireApproval: null, autoCorrect: null, errors: null, neutralControl: null, firstObservedAt: null, lastObservedAt: null });
+    expect(review.readiness.status).not.toBe('ready');
+  });
+});
+
 // ── PRI-491: Owner Observability (mode / status / contextVersion / evidenceRefs) ──
 
 /**
@@ -389,7 +413,8 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     expect(rec.evidenceRefs).toEqual(['ex-1', 'ex-2']);
     expect(rec.evidenceSummary).toContain('2 evidence ref(s)');
     expect(rec.nextAction).toContain('Enable rulecode_context_v2 flag');
-    expect(rec.nextAction).toContain('pd activation deactivate --activation-id act-v2-shadow --confirm');
+    expect(rec.nextAction).toContain('pd activation deactivate --activation-id act-v2-shadow');
+    expect(rec.nextAction).not.toContain('--confirm');
     expect(rec.deactivatedAt).toBeNull();
   });
 
@@ -438,7 +463,9 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     expect(rec.mode).toBe('shadow');
     expect(rec.contextVersion).toBe('v1');
     expect(rec.evidenceRefs).toBeUndefined();
-    expect(rec.nextAction).toBe('pd activation promote --activation-id act-v1-shadow --confirm');
+    expect(rec.nextAction).toBe(
+      'Keep shadow; promotion requires an authenticated Owner decision, immutable evidence bindings, and a passing Promotion Readiness result.',
+    );
   });
 
   it('live v1 activation shows status=active and deactivate nextAction', async () => {
@@ -458,7 +485,7 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     const rec = result.activations[0]!;
     expect(rec.status).toBe('active');
     expect(rec.mode).toBe('live');
-    expect(rec.nextAction).toBe('pd activation deactivate --activation-id act-v1-live --confirm');
+    expect(rec.nextAction).toBe('pd activation deactivate --activation-id act-v1-live');
   });
 
   it('deactivated activation shows status=deactivated regardless of contextVersion or flag (precedence)', async () => {
@@ -536,7 +563,9 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     expect(rec.status).toBe('active');
     expect(rec.mode).toBe('shadow');
     expect(rec.contextVersion).toBe('v2');
-    expect(rec.nextAction).toBe('pd activation promote --activation-id act-v2-flag-on --confirm');
+    expect(rec.nextAction).toBe(
+      'Keep shadow; promotion requires an authenticated Owner decision, immutable evidence bindings, and a passing Promotion Readiness result.',
+    );
   });
 
   it('evidenceSummary truncates long evidence refs list', async () => {

@@ -878,6 +878,9 @@ export interface ActivationRecordData {
   targetRef: string;
   activatedAt: string | null;
   status: string;
+  enforcement?: 'eligible' | 'safety_isolated';
+  legacyDecisionUnknown?: boolean;
+  ownerReviewDueAt?: string;
 }
 
 function validateActivationRecord(v: unknown): ActivationRecordData | null {
@@ -891,11 +894,17 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
   const activatedAt = readNullableString(v, 'activatedAt');
   if (!activatedAt.valid) return null;
   if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
+  const enforcement = Object.hasOwn(v, 'enforcement') && (v.enforcement === 'eligible' || v.enforcement === 'safety_isolated')
+    ? v.enforcement
+    : undefined;
   return {
     activationId: v.activationId, artifactId: v.artifactId, principleId: v.principleId,
     channel: v.channel, action: v.action, targetRef: v.targetRef,
     activatedAt: activatedAt.value,
     status: v.status,
+    ...(enforcement ? { enforcement } : {}),
+    ...(Object.hasOwn(v, 'legacyDecisionUnknown') && v.legacyDecisionUnknown === true ? { legacyDecisionUnknown: true } : {}),
+    ...(Object.hasOwn(v, 'ownerReviewDueAt') && isString(v.ownerReviewDueAt) ? { ownerReviewDueAt: v.ownerReviewDueAt } : {}),
   };
 }
 
@@ -921,6 +930,140 @@ export function validateActivations(v: unknown): ActivationsData | null {
 export interface DisableActivationData {
   activationId: string;
   status: string;
+}
+
+export interface RuleCodeOwnerReviewData {
+  activation: { activationId: string; artifactId: string; action: string };
+  artifact: { artifactId: string; digest: string; content: Record<string, unknown> | null };
+  readiness: { status: 'ready' | 'evidence_insufficient' | 'blocked' | 'unavailable'; evaluationId: string; failedChecks: { checkId: string; reasonCode: string }[]; evidenceSnapshot: { snapshotDigest: string; shadowSummary: RuleCodeShadowSummaryData; safetyGateResults: { checkId: string; status: 'passed' | 'failed'; reasonCode?: string }[] } };
+  controlState: { enforcement: 'eligible' | 'safety_isolated'; version: number } | null;
+  globalPause: { pauseId: string; status: 'paused' | 'released'; version: number } | null;
+  decisions: RuleCodeOwnerDecisionData[];
+  ownerDecisionEnabled: boolean;
+  runtimeCapability: { hostRuntimeVersion: string; shadowEvidence: boolean };
+  liveMetrics: { last24Hours: RuleCodeTelemetryWindowData; last7Days: RuleCodeTelemetryWindowData; representativeSamples: { toolName: string; decision: string; pathCategory: string }[] };
+  behaviorDrift: { approvedBlockRate: number | null; liveBlockRate: number | null; delta: number | null };
+}
+
+interface RuleCodeOwnerDecisionData {
+  decisionId: string;
+  decision: string;
+  principalKind: string;
+  actorId: string;
+  authenticationMethod: string;
+  reasonCode: string;
+  note: string | null;
+  decidedAt: string;
+}
+
+interface RuleCodeShadowSummaryData {
+  observed: number | null;
+  matched: number | null;
+  wouldBlock: number | null;
+  wouldAllow: number | null;
+  requireApproval: number | null;
+  autoCorrect: number | null;
+  errors: number | null;
+  neutralControl: number | null;
+  firstObservedAt: string | null;
+  lastObservedAt: string | null;
+}
+
+interface RuleCodeTelemetryWindowData { eligible: number | null; matched: number | null; blocked: number | null; unhealthy: number | null; circuitTrips: number; toolDistribution: Record<string, number> | null }
+
+function validateTelemetryWindow(value: unknown): RuleCodeTelemetryWindowData | null {
+  if (!isObject(value)) return null;
+  const keys = ['eligible', 'matched', 'blocked', 'unhealthy'] as const;
+  if (!keys.every(key => value[key] === null || isNumber(value[key])) || !isNumber(value.circuitTrips)) return null;
+  if (value.toolDistribution !== null && (!isObject(value.toolDistribution) || !Object.values(value.toolDistribution).every(isNumber))) return null;
+  return { eligible: typeof value.eligible === 'number' ? value.eligible : null, matched: typeof value.matched === 'number' ? value.matched : null, blocked: typeof value.blocked === 'number' ? value.blocked : null, unhealthy: typeof value.unhealthy === 'number' ? value.unhealthy : null, circuitTrips: value.circuitTrips, toolDistribution: isObject(value.toolDistribution) ? Object.fromEntries(Object.entries(value.toolDistribution).filter((entry): entry is [string, number] => typeof entry[1] === 'number')) : null };
+}
+
+function validateRuleCodeDecision(value: unknown): RuleCodeOwnerDecisionData | null {
+  if (!isObject(value) || !isString(value.decisionId) || !isString(value.decision)
+    || !isObject(value.principal) || !isString(value.principal.kind)
+    || !isObject(value.authentication) || !isString(value.authentication.method)
+    || !isString(value.reasonCode) || (value.note !== null && !isString(value.note))
+    || !isString(value.decidedAt)) return null;
+  const actorId = typeof value.principal.ownerId === 'string'
+    ? value.principal.ownerId
+    : typeof value.principal.policyVersion === 'string'
+      ? value.principal.policyVersion
+      : typeof value.principal.reason === 'string' ? value.principal.reason : value.principal.kind;
+  return {
+    decisionId: value.decisionId,
+    decision: value.decision,
+    principalKind: value.principal.kind,
+    actorId,
+    authenticationMethod: value.authentication.method,
+    reasonCode: value.reasonCode,
+    note: typeof value.note === 'string' ? value.note : null,
+    decidedAt: value.decidedAt,
+  };
+}
+
+export function validateRuleCodeOwnerReview(v: unknown): RuleCodeOwnerReviewData | null {
+  if (!isObject(v) || !isObject(v.activation) || !isObject(v.artifact) || !isObject(v.readiness)) return null;
+  const { activation, artifact, readiness } = v;
+  if (!isString(activation.activationId) || !isString(activation.artifactId) || !isString(activation.action)
+    || !isString(artifact.artifactId) || !isString(artifact.digest)
+    || (artifact.content !== null && !isObject(artifact.content))
+    || !isString(readiness.status) || !['ready', 'evidence_insufficient', 'blocked', 'unavailable'].includes(readiness.status)
+    || !isString(readiness.evaluationId) || !Array.isArray(readiness.failedChecks)
+    || !readiness.failedChecks.every(item => isObject(item) && isString(item.checkId) && isString(item.reasonCode))
+    || !isObject(readiness.evidenceSnapshot) || !isString(readiness.evidenceSnapshot.snapshotDigest)
+    || !isObject(readiness.evidenceSnapshot.shadowSummary) || !Array.isArray(readiness.evidenceSnapshot.safetyGateResults)
+    || !readiness.evidenceSnapshot.safetyGateResults.every(item => isObject(item) && isString(item.checkId) && (item.status === 'passed' || item.status === 'failed') && (!Object.hasOwn(item, 'reasonCode') || isString(item.reasonCode)))) return null;
+  const summary = readiness.evidenceSnapshot.shadowSummary;
+  const summaryCounts = ['observed', 'matched', 'wouldBlock', 'wouldAllow', 'requireApproval', 'autoCorrect', 'errors', 'neutralControl'] as const;
+  if (!summaryCounts.every(key => summary[key] === null || isNumber(summary[key]))) return null;
+  if (![summary.firstObservedAt, summary.lastObservedAt].every(value => value === null || isString(value))) return null;
+  let controlState: RuleCodeOwnerReviewData['controlState'] = null;
+  if (v.controlState !== null) { if (!isObject(v.controlState) || (v.controlState.enforcement !== 'eligible' && v.controlState.enforcement !== 'safety_isolated') || !isNumber(v.controlState.version)) return null; controlState = { enforcement: v.controlState.enforcement, version: v.controlState.version }; }
+  let globalPause: RuleCodeOwnerReviewData['globalPause'] = null;
+  if (v.globalPause !== null) { if (!isObject(v.globalPause) || !isString(v.globalPause.pauseId) || (v.globalPause.status !== 'paused' && v.globalPause.status !== 'released') || !isNumber(v.globalPause.version)) return null; globalPause = { pauseId: v.globalPause.pauseId, status: v.globalPause.status, version: v.globalPause.version }; }
+  if (!isBoolean(v.ownerDecisionEnabled)) return null;
+  if (!Array.isArray(v.decisions) || !isObject(v.runtimeCapability) || !isString(v.runtimeCapability.hostRuntimeVersion) || !isBoolean(v.runtimeCapability.shadowEvidence) || !isObject(v.liveMetrics) || !Array.isArray(v.liveMetrics.representativeSamples) || !v.liveMetrics.representativeSamples.every(sample => isObject(sample) && isString(sample.toolName) && isString(sample.decision) && isString(sample.pathCategory)) || !isObject(v.behaviorDrift)) return null;
+  const {behaviorDrift} = v;
+  const decisions = v.decisions.map(validateRuleCodeDecision); if (decisions.some(decision => decision === null)) return null;
+  const driftKeys = ['approvedBlockRate', 'liveBlockRate', 'delta'] as const;
+  if (!driftKeys.every(key => behaviorDrift[key] === null || isNumber(behaviorDrift[key]))) return null;
+  const last24Hours = validateTelemetryWindow(v.liveMetrics.last24Hours); const last7Days = validateTelemetryWindow(v.liveMetrics.last7Days); if (!last24Hours || !last7Days) return null;
+  const readinessStatus = readiness.status === 'ready' || readiness.status === 'evidence_insufficient' || readiness.status === 'blocked' || readiness.status === 'unavailable' ? readiness.status : null;
+  const shadowSummary: RuleCodeShadowSummaryData = {
+    observed: typeof summary.observed === 'number' ? summary.observed : null,
+    matched: typeof summary.matched === 'number' ? summary.matched : null,
+    wouldBlock: typeof summary.wouldBlock === 'number' ? summary.wouldBlock : null,
+    wouldAllow: typeof summary.wouldAllow === 'number' ? summary.wouldAllow : null,
+    requireApproval: typeof summary.requireApproval === 'number' ? summary.requireApproval : null,
+    autoCorrect: typeof summary.autoCorrect === 'number' ? summary.autoCorrect : null,
+    errors: typeof summary.errors === 'number' ? summary.errors : null,
+    neutralControl: typeof summary.neutralControl === 'number' ? summary.neutralControl : null,
+    firstObservedAt: typeof summary.firstObservedAt === 'string' ? summary.firstObservedAt : null,
+    lastObservedAt: typeof summary.lastObservedAt === 'string' ? summary.lastObservedAt : null,
+  };
+  if (readinessStatus === null) return null;
+  return {
+    activation: { activationId: activation.activationId, artifactId: activation.artifactId, action: activation.action },
+    artifact: { artifactId: artifact.artifactId, digest: artifact.digest, content: artifact.content },
+    readiness: { status: readinessStatus, evaluationId: readiness.evaluationId, failedChecks: readiness.failedChecks.map(item => ({ checkId: item.checkId, reasonCode: item.reasonCode })), evidenceSnapshot: { snapshotDigest: readiness.evidenceSnapshot.snapshotDigest, shadowSummary, safetyGateResults: readiness.evidenceSnapshot.safetyGateResults.map(item => ({ checkId: item.checkId, status: item.status, ...(typeof item.reasonCode === 'string' ? { reasonCode: item.reasonCode } : {}) })) } },
+    controlState, globalPause, decisions: decisions.filter((decision): decision is RuleCodeOwnerDecisionData => decision !== null), ownerDecisionEnabled: v.ownerDecisionEnabled,
+    runtimeCapability: { hostRuntimeVersion: v.runtimeCapability.hostRuntimeVersion, shadowEvidence: v.runtimeCapability.shadowEvidence },
+    liveMetrics: { last24Hours, last7Days, representativeSamples: v.liveMetrics.representativeSamples.map(sample => ({ toolName: sample.toolName, decision: sample.decision, pathCategory: sample.pathCategory })) },
+    behaviorDrift: {
+      approvedBlockRate: typeof behaviorDrift.approvedBlockRate === 'number' ? behaviorDrift.approvedBlockRate : null,
+      liveBlockRate: typeof behaviorDrift.liveBlockRate === 'number' ? behaviorDrift.liveBlockRate : null,
+      delta: typeof behaviorDrift.delta === 'number' ? behaviorDrift.delta : null,
+    },
+  };
+}
+
+export interface RuleCodeMutationData { decisionId?: string; activationId?: string; status?: string; pauseId?: string; version?: number }
+export function validateRuleCodeMutation(v: unknown): RuleCodeMutationData | null {
+  if (!isObject(v)) return null; const result: RuleCodeMutationData = {};
+  for (const key of ['decisionId', 'activationId', 'status', 'pauseId'] as const) { if (Object.hasOwn(v, key)) { if (!isString(v[key])) return null; result[key] = v[key]; } }
+  if (Object.hasOwn(v, 'version')) { if (!isNumber(v.version)) return null; result.version = v.version; }
+  return result;
 }
 
 export function validateDisableActivation(v: unknown): DisableActivationData | null {

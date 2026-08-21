@@ -117,7 +117,7 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
       INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run('perf-rule-artifact', 'rule', 'perf-task-perf-rule-artifact', 'perf-rule', '[]', 'validated', JSON.stringify({
-      ruleId: 'perf-rule', requiresContextVersion: 2,
+      ruleId: 'perf-rule', requiresContextVersion: 2, affectedTools: ['write_file'],
       implementationCode: "function evaluate(input, helpers) { var p = input.action.normalizedPath || ''; if (p === '/etc/passwd') { return { decision: 'block', matched: true, reason: '" + PERF_BASELINE_BLOCK + "' }; } return { decision: 'allow', matched: false, reason: 'perf allow' }; } var meta = { name: 'perf', version: '1', ruleId: 'perf-rule', coversCondition: 'write' };",
     }), now, now);
     const store = new SqliteActivationStateStore(connection);

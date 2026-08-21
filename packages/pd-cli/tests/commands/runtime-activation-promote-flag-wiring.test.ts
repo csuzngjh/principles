@@ -85,6 +85,14 @@ describe('pd activation promote — flag wiring (CLI gate rule 7)', () => {
     expect(opt?.long).toBe('--json');
   });
 
+  it.each(['--artifact-id', '--artifact-digest', '--control-version', '--idempotency-key', '--reason', '--note'])(
+    'registers Owner authority binding option %s', (flag) => {
+      const program = freshProgram();
+      const promoteCmd = registerRuntimeActivationPromoteCommand(program.command('activation'));
+      expect(promoteCmd.options.find(option => option.long === flag)).toBeDefined();
+    },
+  );
+
   it('registers --activation-id as required option', () => {
     const program = freshProgram();
     const activationCmd = program.command('activation');
@@ -207,6 +215,24 @@ describe('pd activation promote — flag wiring (CLI gate rule 7)', () => {
 
     expect(captured.opts).not.toBeNull();
     expect(captured.opts?.workspace).toBe('/tmp/test');
+  });
+
+  it('parses all Owner authority binding values through the real command', async () => {
+    const program = freshProgram();
+    const promoteCmd = registerRuntimeActivationPromoteCommand(program.command('activation'));
+    const captured: CapturedAction = { opts: null };
+    attachCapture(promoteCmd, captured);
+
+    await program.parseAsync([
+      'node', 'pd', 'activation', 'promote', '--activation-id', 'act-1',
+      '--artifact-id', 'art-1', '--artifact-digest', 'sha256:one', '--control-version', '7',
+      '--idempotency-key', 'idem-1', '--reason', 'owner_review', '--note', 'reviewed', '--confirm',
+    ]);
+
+    expect(captured.opts).toMatchObject({
+      artifactId: 'art-1', artifactDigest: 'sha256:one', controlVersion: 7,
+      idempotencyKey: 'idem-1', reason: 'owner_review', note: 'reviewed', confirm: true,
+    });
   });
 
   it('rejects missing --activation-id (required option)', async () => {

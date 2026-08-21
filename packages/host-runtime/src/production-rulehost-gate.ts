@@ -175,11 +175,25 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     const connection = new SqliteConnection({ workspaceDir: event.context.workspaceDir, readonly: true, bootstrapIfMissing: false });
     const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string }[] = [];
     try {
+      const globalPause: unknown = connection.getDb().prepare(`
+        SELECT pause_id FROM global_rulecode_pauses WHERE status = 'paused' LIMIT 1
+      `).get();
+      if (globalPause !== undefined) {
+        return {
+          decision: 'allow',
+          source: event.source,
+          warnings: [boundedWarning('global_rulecode_pause_active', 'review the incident in the Owner Console before releasing the global pause')],
+          metadata: { evaluatedLiveRules: 0 },
+        };
+      }
       const rows: unknown = connection.getDb().prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
+               c.enforcement, c.isolation_decision_id,
                p.source_rule_id, p.source_principle_id,
                length(CAST(p.content_json AS BLOB)) AS content_bytes
-        FROM activations a JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
+        FROM activations a
+        JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
+        LEFT JOIN activation_control_states c ON a.activation_id = c.activation_id
         WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
         ORDER BY a.activated_at ASC
         LIMIT ?
@@ -202,6 +216,15 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         for (const row of rows) {
           if (!isRecord(row) || typeof row.target_ref !== 'string' || row.target_ref.length === 0) {
             addWarning(warnings, 'activation_row_invalid', 'deactivate and recreate the malformed activation');
+            continue;
+          }
+          const activationId = typeof row.activation_id === 'string' ? row.activation_id : 'unknown';
+          if (row.enforcement === 'safety_isolated') {
+            addWarning(warnings, `activation_safety_isolated: ${activationId}`, 'recover the activation to shadow after reviewing safety evidence');
+            continue;
+          }
+          if (row.enforcement !== 'eligible') {
+            addWarning(warnings, `activation_control_state_invalid: ${activationId}`, 'repair the activation control state before RuleCode enforcement');
             continue;
           }
           const group = groups.get(row.target_ref) ?? [];
@@ -261,28 +284,22 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
             }
             const ruleId = typeof content.ruleId === 'string' ? content.ruleId : typeof row.source_rule_id === 'string' ? row.source_rule_id : artifactId;
             const principleId = typeof content.principleId === 'string' ? content.principleId : typeof row.source_principle_id === 'string' ? row.source_principle_id : ruleId;
-            // Retired-contract backstop (2026-08-19 / P0-1 2026-08-20):
+            // Retired-contract backstop (2026-08-19; host-liveness correction
+            // 2026-08-21):
             // persisted LIVE RuleCode that references removed RuleHost
             // contract symbols can never run safely against the new contract
             // — reads silently resolve to undefined and change owner-approved
-            // behavior. Skipping the rule and then allowing the action would
-            // treat an owner-approved enforcement rule as if it did not exist
-            // (governance fail-open); the action must instead FAIL CLOSED
-            // with a structured deny naming the exact blocking symbols. The
-            // scan is a local copy (see legacy-rule-contract-symbols.ts) so
-            // the published bundle keeps working against the currently
-            // published core.
+            // behavior. The incompatible activation is therefore skipped and
+            // surfaced with an actionable warning. It must not turn a runtime
+            // compatibility defect into a host-wide deny; healthy sibling
+            // rules continue to evaluate. The scan is a local copy (see
+            // legacy-rule-contract-symbols.ts) so the published bundle keeps
+            // working against the currently published core.
             const retiredSymbols = scanRetiredContractSymbols(content.implementationCode);
             if (retiredSymbols.length > 0) {
               const nextAction = 'migrate the RuleCode off the retired contract symbols or deactivate the activation, then re-approve a migrated rule';
               addWarning(warnings, `legacy_rule_contract_dependency: ${retiredSymbols.join(', ')} (activation=${activationId})`, nextAction);
-              return {
-                decision: 'deny',
-                reason: `legacy_rule_contract_dependency: active owner-approved rule ${ruleId} references retired contract symbols (${retiredSymbols.join(', ')}) and cannot run safely on this runtime`,
-                source: event.source,
-                ...(warnings.length ? { warnings } : {}),
-                metadata: { evaluatedLiveRules: 0, ruleId, principleId },
-              };
+              continue;
             }
             const fallbackMeta: RuleHostMeta = { name: activationId, version: '1', ruleId, coversCondition: 'all' };
             candidates.push({ implId: activationId, ruleId, principleId, meta: isRuleMeta(content.meta) ? content.meta : fallbackMeta, source: content.implementationCode });

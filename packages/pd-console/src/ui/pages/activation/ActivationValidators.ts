@@ -69,6 +69,9 @@ export function validateActivationRecord(raw: unknown): ActivationRecord | null 
     targetRef: targetRef,
     activatedAt: activatedAt,
     status: narrowStatus,
+    ...(Object.hasOwn(raw, "enforcement") && (raw.enforcement === "eligible" || raw.enforcement === "safety_isolated") ? { enforcement: raw.enforcement } : {}),
+    ...(Object.hasOwn(raw, "legacyDecisionUnknown") && raw.legacyDecisionUnknown === true ? { legacyDecisionUnknown: true } : {}),
+    ...(Object.hasOwn(raw, "ownerReviewDueAt") && typeof raw.ownerReviewDueAt === "string" ? { ownerReviewDueAt: raw.ownerReviewDueAt } : {}),
   };
 }
 

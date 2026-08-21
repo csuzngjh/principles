@@ -242,12 +242,22 @@ describe('computeEffectiveFlags', () => {
     }
   });
 
-  it('core flags are enabled by default', () => {
+  it('enables every approved MVP-Core flag after the RuleCode rollout gate', () => {
     const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
     const coreFlags = Object.values(result.flags).filter(f => f.category === 'core');
     for (const flag of coreFlags) {
-      expect(flag.enabled, `core flag ${flag.id} should default on`).toBe(true);
+      expect(flag.enabled, `core flag ${flag.id} has the wrong approved default`).toBe(true);
     }
+  });
+
+  it('keeps the rulecode_owner_live_decision emergency disable observable in this loader path too', () => {
+    const result = computeEffectiveFlags(
+      { rulecode_owner_live_decision: { enabled: false, since: '2026-08-21' } },
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/feature-flags.yaml',
+    );
+    expect(result.flags.rulecode_owner_live_decision?.enabled).toBe(false);
+    expect(result.warnings.some(w => w.includes('core flag explicitly disabled') && w.includes('rulecode_owner_live_decision'))).toBe(true);
   });
 
   it('gone flags are always disabled regardless of config', () => {
@@ -304,6 +314,16 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
       expect(flag.category).toBe('core');
       expect(flag.enabled).toBe(true);
     }
+  });
+
+  it('contains RuleCode safety controls as an enabled MVP-Core flag', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'rulecode_safety_controls');
+    expect(flag).toMatchObject({ category: 'core', enabled: true, since: '2026-08-21' });
+  });
+
+  it('contains Owner live decision authority as enabled MVP-Core after rollout acceptance', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'rulecode_owner_live_decision');
+    expect(flag).toMatchObject({ category: 'core', enabled: true, since: '2026-08-21' });
   });
 
   it('contains code_rule_capability core flag (PRI-435: promoted to MVP-Core, default on)', () => {

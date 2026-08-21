@@ -400,7 +400,7 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     // PRI-489: Owner approval creates a SHADOW activation first (not live).
     // Shadow activations are observation-only — they record would-block into
     // shadowDecisions but never actually block the tool call. The only
-    // shadow -> live transition is `pd activation promote --confirm`.
+    // shadow -> live transition requires the Owner decision service.
     expect(activationRecord!.action).toBe('code_tool_hook_shadow_activate');
 
     // Verify via listCodeToolHookActivations (P2 #5: default excludes deactivated)
@@ -437,10 +437,8 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     }
 
     // ── Step 7b: Promote shadow → live (PRI-489) ──────────────────────────
-    // `pd activation promote --activation-id ... --confirm` is the ONLY
-    // shadow → live entry. SqliteActivationStateStore.promoteActivation
-    // atomically rewrites action to `code_tool_hook_live_activate` inside a
-    // BEGIN IMMEDIATE transaction.
+    // This lower-level store call verifies the persistence transition only;
+    // production callers must enter through RuleCodeOwnerDecisionService.
     const activationId = activationRecord!.activationId;
     const promoteResult = await stateStore.promoteActivation(activationId, new Date().toISOString());
     expect(promoteResult).toBe(true);

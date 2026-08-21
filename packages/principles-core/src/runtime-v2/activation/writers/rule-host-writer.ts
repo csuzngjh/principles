@@ -272,6 +272,14 @@ export class RuleHostWriter implements ChannelWriter {
       };
     }
 
+    const affectedTools = Array.isArray(parsed.affectedTools)
+      ? parsed.affectedTools.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : [];
+    const protectedCapabilities = new Set(['pd_status', 'rulecode_deactivate', 'rulecode_global_pause', 'owner_review_access']);
+    if (affectedTools.length === 0) return { ok: false, reason: 'rulecode_scope_empty', riskLevel: 'high' };
+    if (affectedTools.some(value => value === '*' || value.toLowerCase() === 'all')) return { ok: false, reason: 'rulecode_scope_wildcard_forbidden', riskLevel: 'high' };
+    if (affectedTools.some(value => protectedCapabilities.has(value))) return { ok: false, reason: 'rulecode_scope_protected_capability', riskLevel: 'high' };
+
     const riskLevel = assessRiskLevel(parsed);
     return { ok: true, riskLevel };
   }

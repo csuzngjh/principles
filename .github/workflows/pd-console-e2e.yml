@@ -4,6 +4,11 @@ on:
   pull_request:
     paths:
       - 'packages/pd-console/**'
+      - 'packages/principles-core/**'
+      - 'packages/host-runtime/**'
+      - 'packages/openclaw-plugin/**'
+      - 'packages/pd-cli/**'
+      - 'docs/specs/features/story-a/rulecode-owner-live-decision.feature'
       - '.github/workflows/pd-console-e2e.yml'
   workflow_dispatch:
 
@@ -38,6 +43,9 @@ jobs:
 
       - name: Run E2E tests
         run: cd packages/pd-console && npx playwright test
+
+      - name: Run authenticated RuleCode Owner E2E
+        run: cd packages/pd-console && npx playwright test --config playwright.owner.config.ts
 
       - name: Upload Playwright report
         if: always()

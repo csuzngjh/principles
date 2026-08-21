@@ -34,15 +34,17 @@ describe('deriveActivationStatusAndNextAction', () => {
     expect(nextAction).not.toContain('--confirm');
   });
 
-  it('shadow mode: promote nextAction MUST contain --confirm', () => {
+  it('shadow mode: nextAction requires Owner review instead of advertising direct mutation', () => {
     const { status, nextAction } = deriveActivationStatusAndNextAction({
       ...base,
       mode: 'shadow',
     });
     expect(status).toBe('active');
     expect(nextAction).toBeDefined();
-    expect(nextAction).toContain('pd activation promote');
-    expect(nextAction).toContain('--confirm');
+    expect(nextAction).toBe(
+      'Keep shadow; promotion requires an authenticated Owner decision, immutable evidence bindings, and a passing Promotion Readiness result.',
+    );
+    expect(nextAction).not.toContain('pd activation promote');
   });
 
   it('deactivated record: status deactivated, no nextAction', () => {

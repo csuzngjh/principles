@@ -14,6 +14,7 @@ export * from './pd-config.js';
 export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';
 export * from './production-pain-evidence.js';
+export * from './host-liveness-contract.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',

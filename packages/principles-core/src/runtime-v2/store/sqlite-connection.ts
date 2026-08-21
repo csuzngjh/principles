@@ -495,6 +495,90 @@ export class SqliteConnection {
       }
     }
 
+    // RuleCode safety authority: decisions are append-only and control state is
+    // the durable enforcement gate. Existing RuleCode activations are explicitly
+    // backfilled so eligibility is never inferred from a missing authority row.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS activation_decisions (
+        decision_id TEXT PRIMARY KEY,
+        idempotency_key TEXT UNIQUE,
+        subject_kind TEXT NOT NULL CHECK (subject_kind IN ('activation', 'all_live_rulecode')),
+        activation_id TEXT,
+        artifact_id TEXT,
+        artifact_digest TEXT,
+        decision TEXT NOT NULL CHECK (decision IN ('continue_observing', 'promote_live', 'reject_after_shadow', 'emergency_deactivate', 'global_emergency_pause', 'global_emergency_pause_release', 'safety_isolate', 'recover_to_shadow', 'supersede')),
+        principal_kind TEXT NOT NULL CHECK (principal_kind IN ('configured_owner', 'system_safety', 'break_glass')),
+        owner_id TEXT,
+        policy_version TEXT,
+        break_glass_reason TEXT,
+        authentication_method TEXT NOT NULL CHECK (authentication_method IN ('console_token', 'cli_owner_credential', 'system', 'local_break_glass')),
+        credential_id TEXT,
+        operator_kind TEXT CHECK (operator_kind IS NULL OR operator_kind = 'local_user'),
+        operator_id TEXT,
+        reason_code TEXT NOT NULL,
+        note TEXT,
+        evidence_snapshot_id TEXT,
+        readiness_evaluation_id TEXT,
+        evidence_snapshot_digest TEXT,
+        decided_at TEXT NOT NULL,
+        CHECK (
+          (subject_kind = 'activation' AND activation_id IS NOT NULL AND artifact_id IS NOT NULL AND artifact_digest IS NOT NULL)
+          OR (subject_kind = 'all_live_rulecode' AND activation_id IS NULL AND artifact_id IS NULL AND artifact_digest IS NULL)
+        ),
+        CHECK (
+          (principal_kind = 'configured_owner' AND owner_id IS NOT NULL AND policy_version IS NULL AND break_glass_reason IS NULL)
+          OR (principal_kind = 'system_safety' AND owner_id IS NULL AND policy_version IS NOT NULL AND break_glass_reason IS NULL)
+          OR (principal_kind = 'break_glass' AND owner_id IS NULL AND policy_version IS NULL AND break_glass_reason = 'local_no_auth_emergency')
+        ),
+        CHECK (
+          (authentication_method IN ('console_token', 'cli_owner_credential') AND credential_id IS NOT NULL)
+          OR (authentication_method IN ('system', 'local_break_glass') AND credential_id IS NULL)
+        ),
+        CHECK ((operator_kind IS NULL AND operator_id IS NULL) OR (operator_kind = 'local_user' AND operator_id IS NOT NULL))
+      );
+      CREATE INDEX IF NOT EXISTS idx_activation_decisions_activation
+        ON activation_decisions(activation_id, decided_at);
+      CREATE TRIGGER IF NOT EXISTS activation_decisions_no_update
+        BEFORE UPDATE ON activation_decisions BEGIN SELECT RAISE(ABORT, 'activation decisions are immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS activation_decisions_no_delete
+        BEFORE DELETE ON activation_decisions BEGIN SELECT RAISE(ABORT, 'activation decisions are immutable'); END;
+      CREATE TABLE IF NOT EXISTS activation_control_states (
+        activation_id TEXT PRIMARY KEY,
+        enforcement TEXT NOT NULL CHECK (enforcement IN ('eligible', 'safety_isolated')),
+        isolation_decision_id TEXT,
+        version INTEGER NOT NULL CHECK (version >= 1),
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS activation_evidence_snapshots (
+        snapshot_id TEXT PRIMARY KEY,
+        snapshot_digest TEXT NOT NULL UNIQUE,
+        artifact_digest TEXT NOT NULL,
+        lineage_refs TEXT NOT NULL,
+        host_runtime_version TEXT NOT NULL,
+        safety_gate_results TEXT NOT NULL,
+        shadow_summary TEXT NOT NULL,
+        configuration_version TEXT NOT NULL,
+        redaction_metadata TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TRIGGER IF NOT EXISTS activation_evidence_snapshots_no_update
+        BEFORE UPDATE ON activation_evidence_snapshots BEGIN SELECT RAISE(ABORT, 'activation evidence snapshots are immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS activation_evidence_snapshots_no_delete
+        BEFORE DELETE ON activation_evidence_snapshots BEGIN SELECT RAISE(ABORT, 'activation evidence snapshots are immutable'); END;
+      CREATE TABLE IF NOT EXISTS global_rulecode_pauses (
+        pause_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL CHECK (status IN ('paused', 'released')),
+        incident_decision_id TEXT NOT NULL UNIQUE,
+        release_decision_id TEXT UNIQUE,
+        affected_activation_ids TEXT NOT NULL,
+        paused_at TEXT NOT NULL,
+        released_at TEXT,
+        version INTEGER NOT NULL CHECK (version >= 1)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_global_rulecode_one_active_pause
+        ON global_rulecode_pauses(status) WHERE status = 'paused';
+    `);
+
     // PRI-286: confirm_first_state table is orphaned (SqliteConfirmFirstStateStore class deleted).
     // Drop legacy table if exists; CREATE is no longer needed.
     db.exec(`
@@ -638,6 +722,30 @@ export class SqliteConnection {
       db.exec("CREATE INDEX IF NOT EXISTS idx_candidates_recommendation_kind ON principle_candidates(recommendation_kind)");
     } catch {
       // index may already exist
+    }
+
+    // Version 002 installs the explicit RuleCode enforcement authority once.
+    // Run it after legacy migrations and only when initSchema created the
+    // required tables; partial legacy schemas must not block their older repair.
+    const activationTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='activations'").get();
+    const controlTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='activation_control_states'").get();
+    const versionTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'").get();
+    if (activationTable && controlTable && versionTable && this.getSchemaVersion() < '002') {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (this.getSchemaVersion() === '000') this.setSchemaVersion('001');
+        db.exec(`
+          INSERT OR IGNORE INTO activation_control_states
+            (activation_id, enforcement, isolation_decision_id, version, updated_at)
+          SELECT activation_id, 'eligible', NULL, 1, activated_at
+          FROM activations WHERE channel = 'code_tool_hook';
+        `);
+        this.setSchemaVersion('002');
+        db.exec('COMMIT');
+      } catch (error) {
+        try { db.exec('ROLLBACK'); } catch { /* best effort */ }
+        throw error;
+      }
     }
 
     // F12 (PRI-442): Record schema version after migrations are applied or

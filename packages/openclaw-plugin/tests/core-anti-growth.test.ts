@@ -109,6 +109,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-468: Plugin adapter implementing core IntentDocReader port — pure type
     // mapping from safeReadIntentDoc result to core IntentDocReadResult. No new I/O.
     'intent-doc-reader-adapter.ts',
+    // RuleCode safety containment I/O boundary — reads approved scope from
+    // state.db and persists circuit isolation through the core safety store.
+    'rulecode-safety-circuit.ts',
     // PRI-530: Principle receipt metadata reader — plugin I/O boundary
     // (readonly state.db joins resolving block copy attribution).
     'principle-receipt-metadata.ts',
