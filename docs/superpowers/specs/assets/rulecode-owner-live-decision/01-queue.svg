@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960">
+  <defs><filter id="s"><feDropShadow dx="0" dy="6" stdDeviation="14" flood-opacity=".08"/></filter></defs>
+  <rect width="1440" height="960" fill="#f5f7fb"/>
+  <rect width="248" height="960" fill="#0d1628"/>
+  <text x="32" y="54" fill="#fff" font-family="Inter,Microsoft YaHei,sans-serif" font-size="20" font-weight="700">Principles Disciple</text>
+  <text x="32" y="79" fill="#8290aa" font-family="Inter,Microsoft YaHei,sans-serif" font-size="12">OWNER CONTROL PLANE</text>
+  <g font-family="Inter,Microsoft YaHei,sans-serif" font-size="14">
+    <rect x="18" y="112" width="212" height="42" rx="8" fill="#1c2940"/><text x="48" y="138" fill="#fff">治理焦点</text><circle cx="210" cy="133" r="11" fill="#f59e0b"/><text x="206" y="138" fill="#111827" font-size="11" font-weight="700">3</text>
+    <text x="48" y="190" fill="#9aa7ba">Principles 审批</text><text x="48" y="238" fill="#9aa7ba">规则激活</text><text x="48" y="286" fill="#9aa7ba">证据与审计</text><text x="48" y="334" fill="#9aa7ba">系统设置</text>
+  </g>
+  <rect x="280" y="32" width="1128" height="72" rx="14" fill="#fff" filter="url(#s)"/>
+  <text x="312" y="62" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="22" font-weight="700">治理焦点</text>
+  <text x="312" y="86" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">需要 Owner 处理的规则与安全事件，按影响优先排序</text>
+  <rect x="1194" y="49" width="182" height="38" rx="8" fill="#991b1b"/><text x="1222" y="74" fill="#fff" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13" font-weight="600">暂停全部 Live 规则</text>
+  <text x="280" y="153" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="18" font-weight="700">待上线规则</text>
+  <text x="397" y="153" fill="#b45309" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">3 条需要决策</text>
+  <rect x="280" y="176" width="1128" height="292" rx="16" fill="#fff" stroke="#f59e0b" stroke-width="2" filter="url(#s)"/>
+  <rect x="304" y="200" width="118" height="28" rx="14" fill="#fff7ed"/><text x="324" y="219" fill="#b45309" font-family="Inter,Microsoft YaHei,sans-serif" font-size="12" font-weight="700">证据不足</text>
+  <rect x="430" y="200" width="94" height="28" rx="14" fill="#f3e8ff"/><text x="448" y="219" fill="#7e22ce" font-family="Inter,Microsoft YaHei,sans-serif" font-size="12" font-weight="700">高风险</text>
+  <text x="304" y="266" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="20" font-weight="700">变更网络配置前必须先完成根因诊断</text>
+  <text x="304" y="294" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">RuleCode v2 · 影子观察 18 小时 · pri-real-network-change-gate-f953c3b5</text>
+  <g font-family="Inter,Microsoft YaHei,sans-serif">
+    <rect x="304" y="326" width="168" height="84" rx="10" fill="#f8fafc"/><text x="320" y="350" fill="#667085" font-size="12">Eligible evaluations</text><text x="320" y="386" fill="#111827" font-size="24" font-weight="700">14</text>
+    <rect x="484" y="326" width="168" height="84" rx="10" fill="#f8fafc"/><text x="500" y="350" fill="#667085" font-size="12">实际匹配</text><text x="500" y="386" fill="#111827" font-size="24" font-weight="700">2</text>
+    <rect x="664" y="326" width="168" height="84" rx="10" fill="#fff7ed"/><text x="680" y="350" fill="#92400e" font-size="12">预计阻断</text><text x="680" y="386" fill="#b45309" font-size="24" font-weight="700">2</text>
+    <rect x="844" y="326" width="220" height="84" rx="10" fill="#ecfdf3"/><text x="860" y="350" fill="#047857" font-size="12">硬安全门禁</text><text x="860" y="386" fill="#047857" font-size="16" font-weight="700">7 / 7 通过</text>
+  </g>
+  <rect x="1182" y="342" width="194" height="44" rx="8" fill="#111827"/><text x="1221" y="370" fill="#fff" font-family="Inter,Microsoft YaHei,sans-serif" font-size="14" font-weight="600">查看并作出决策</text>
+  <text x="280" y="520" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="18" font-weight="700">安全告警</text>
+  <rect x="280" y="544" width="1128" height="142" rx="16" fill="#fff1f2" stroke="#ef4444"/>
+  <circle cx="322" cy="587" r="18" fill="#dc2626"/><text x="316" y="594" fill="#fff" font-family="Inter" font-size="18" font-weight="700">!</text>
+  <text x="354" y="581" fill="#991b1b" font-family="Inter,Microsoft YaHei,sans-serif" font-size="16" font-weight="700">1 条历史 Live 规则需要安全隔离</text>
+  <text x="354" y="610" fill="#7f1d1d" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">检测到已退役上下文字段，运行时已 fail-open 并暂停该规则，不影响宿主工具调用。</text>
+  <rect x="1190" y="584" width="186" height="40" rx="8" fill="#fff" stroke="#dc2626"/><text x="1231" y="609" fill="#b91c1c" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13" font-weight="600">查看隔离详情</text>
+  <text x="280" y="742" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="18" font-weight="700">已安排复审</text>
+  <rect x="280" y="766" width="1128" height="104" rx="16" fill="#fff" stroke="#e5e7eb"/>
+  <text x="304" y="806" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="15" font-weight="600">Require Root Cause Diagnosis Before Alternatives</text>
+  <text x="304" y="835" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">继续观察 · 建议 8 月 23 日复审 · Owner: gong wesley</text>
+</svg>

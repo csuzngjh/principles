@@ -261,9 +261,11 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   const pdFlags = computeFlagsFromLoadResult(configResult);
   const feedbackChannelEnabled = pdFlags.flags.feedback_channel?.enabled ?? false;
   const failedTasksObservabilityEnabled = pdFlags.flags.failed_tasks_observability?.enabled ?? true;
+  const governanceProjectionEnabled = pdFlags.flags.principle_governance_projection_v2?.enabled ?? false;
   const feedbackFlags: Record<string, { enabled: boolean }> = {
     feedback_channel: { enabled: feedbackChannelEnabled },
     failed_tasks_observability: { enabled: failedTasksObservabilityEnabled },
+    principle_governance_projection_v2: { enabled: governanceProjectionEnabled },
   };
   if (!configResult.ok) {
     console.warn('[pd-console] PD config loading failed (using defaults for feedback channel):', configResult.errors.map(e => e.reason).join('; '));
@@ -389,6 +391,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/principles' || urlPath.startsWith('/api/principles/')) {
         const subPath = urlPath.slice('/api/principles'.length);
         asyncHandler(() => handlePrinciplesRoute({ req, res, workspaceDir: services.workspaceDir, subPath }))(req, res);
+        return;
+      }
+
+      // GET /api/v1/principles/:id/governance
+      if (urlPath.startsWith('/api/v1/principles/')) {
+        const subPath = urlPath.slice('/api/v1/principles'.length);
+        asyncHandler(() => handlePrinciplesRoute({ req, res, workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
         return;
       }
 

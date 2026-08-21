@@ -3,6 +3,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { PrinciplesConsoleModel, type PrincipleFilter } from '../models/PrinciplesConsoleModel.js';
 import { PrincipleTrajectoryModel } from '../models/PrincipleTrajectoryModel.js';
+import { GovernanceProjectionCollector, GovernanceProjectionCollectionError } from '../models/GovernanceProjectionCollector.js';
+import { OwnerGovernanceViewSchema, deriveOwnerGovernanceView } from '@principles/core/runtime-v2';
+import { Value } from '@sinclair/typebox/value';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
 const models = new Map<string, PrinciplesConsoleModel>();
@@ -87,6 +90,8 @@ interface PrinciplesRouteParams {
   res: ServerResponse;
   workspaceDir: string;
   subPath: string;
+  featureFlags?: Record<string, { enabled: boolean }>;
+  now?: () => string;
 }
 
 export async function handlePrinciplesRoute({
@@ -94,7 +99,50 @@ export async function handlePrinciplesRoute({
   res,
   workspaceDir,
   subPath,
+  featureFlags,
+  now = () => new Date().toISOString(),
 }: PrinciplesRouteParams): Promise<void> {
+  // GET /api/v1/principles/:id/governance. Gate before constructing any
+  // Console model or projection reader so flag-off is a true no-read path.
+  const governanceMatch = /^\/([^/]+)\/governance$/.exec(subPath);
+  if (req.method === 'GET' && governanceMatch) {
+    const flag = featureFlags?.principle_governance_projection_v2;
+    if (flag?.enabled !== true) {
+      sendError(res, 403, 'feature_disabled',
+        'Principle governance projection is disabled.',
+        { reason: 'feature_disabled', nextAction: 'Enable features.principle_governance_projection_v2 in .pd/config.yaml.' });
+      return;
+    }
+    const [, rawPrincipleId] = governanceMatch;
+    let principleId: string;
+    try {
+      principleId = decodeURIComponent(rawPrincipleId ?? '');
+    } catch {
+      sendError(res, 400, 'invalid_principle_id', 'Principle ID contains invalid URL encoding', { nextAction: 'Check the principle ID and retry.' });
+      return;
+    }
+    if (principleId.length === 0) {
+      sendError(res, 400, 'invalid_principle_id', 'Principle ID is missing', { nextAction: 'Provide a non-empty principle ID.' });
+      return;
+    }
+    try {
+      const facts = await new GovernanceProjectionCollector(workspaceDir).collect(principleId, now());
+      const view = deriveOwnerGovernanceView(facts);
+      if (!Value.Check(OwnerGovernanceViewSchema, view)) {
+        sendError(res, 500, 'governance_projection_error', 'Derived governance view failed contract validation.', { nextAction: 'Inspect projection diagnostics and Runtime state.' });
+        return;
+      }
+      sendSuccess(res, view);
+    } catch (error: unknown) {
+      if (error instanceof GovernanceProjectionCollectionError) {
+        sendError(res, error.reasonCode === 'principle_not_found' ? 404 : 500, error.reasonCode, error.message, { nextAction: error.nextActionCode });
+        return;
+      }
+      sendError(res, 500, 'governance_projection_error', error instanceof Error ? error.message : String(error), { nextAction: 'inspect_runtime_state' });
+    }
+    return;
+  }
+
   const model = getModel(workspaceDir);
 
   // ── POST Routes ─────────────────────────────────────────────────────────────

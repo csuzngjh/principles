@@ -55,6 +55,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 | ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
+| ERR-100 | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle | PRI-552 |
 
 ---
 
@@ -183,6 +184,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-092 | Module-level cache leaks across workspace instances when not keyed by workspaceDir | PRI-504 / PR #1164 review |
 | ERR-095 | Additive envelope/`contentJson` merge uses a key that collides with an existing output-schema field — silently overwrites the legitimate field | PR #1273 |
 | ERR-098 | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing dirs, never silence errors on critical cleanup | PRI-538; PR #1358 (near-miss: worktree node_modules junctioned into shared repo) |
+| ERR-101 | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree | PRI-553 |
+| ERR-102 | Optional governance projection fails open to legacy approval mutation authority | PRI-553 |
 
 ---
 
@@ -272,6 +275,51 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-100]** | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle
+
+- **What happened**: PRI-552 initially reused `OwnerGovernanceViewSchema` in the browser validator by runtime-importing `@principles/core/runtime-v2`. That barrel also exports Node-only Runtime modules, so esbuild attempted to resolve `fs`, `path`, `crypto`, `better-sqlite3`, and other server dependencies and the Console UI build failed.
+- **Why it's wrong**: A package barrel is a runtime dependency boundary, not merely a convenient symbol index. Browser consumers cannot safely import a barrel whose export graph includes Node I/O, even when they need only one pure schema.
+- **Generalized failure mode**: When browser code imports a shared package at runtime, assistants must inspect the selected export graph and prove it is browser-safe; otherwise a pure-looking symbol can transitively pull Node-only modules into the client bundle.
+- **Correct approach**: Keep the UI runtime validator browser-local and import the shared shape with `import type`, which is erased. Keep the authoritative TypeBox output validation on the server boundary. A dedicated browser-safe subpath could be introduced only as an explicitly approved package contract, not ad hoc in this feature.
+- **How to prevent**: For every new runtime import in `src/ui`, run the UI bundler and inspect whether the imported entry point exports Node built-ins or native packages. Prefer type-only imports across mixed-runtime packages.
+- **Regression guard**: `npm run build:ui` now passes, while `governance-projection-validator.test.ts` verifies the browser-local validator accepts the frozen view and rejects corrupt nested values.
+- **Related ERRs**: ERR-025, ERR-040, ERR-070
+- **Source**: PRI-552
+- **Date**: 2026-08-20
+- **Recurrence**: None
+
+---
+
+**[ERR-101]** | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree
+
+- **What happened**: PRI-553's browser BDD reused an already-running installed PD Console on port 3100 because `reuseExistingServer` was enabled outside CI. The API route mock responded, but the loaded JavaScript bundle came from the installed extension rather than the current worktree, so the new governance card was absent and the test reported a misleading product failure.
+- **Why it's wrong**: A real-browser test is valid only when its server and assets come from the revision under test. Reusing any process that happens to answer a health URL makes the test environment depend on unrelated local state and can produce false failures or, worse, false passes against stale code.
+- **Generalized failure mode**: When an E2E harness uses a fixed/shared port, assistants must not reuse an unidentified existing server; otherwise the browser can exercise a different checkout or installed product than the code under test.
+- **Correct approach**: Make the E2E port explicitly configurable, use a non-production default, pass the same port to Playwright and the spawned server, and set `reuseExistingServer: false` so a collision fails loud instead of silently changing the tested revision.
+- **How to prevent**: In under 30 seconds, inspect Playwright `webServer`: require `reuseExistingServer: false`, a test-only configurable port, and one shared base URL consumed by the launcher and request clients.
+- **Regression guard**: `principle-governance-projection.test.ts` statically asserts the isolation settings; the two real-browser governance BDD scenarios pass while an unrelated installed Console remains bound to port 3100.
+- **Related ERRs**: ERR-025, ERR-078, ERR-084
+- **Source**: PRI-553
+- **Date**: 2026-08-20
+- **Recurrence**: None
+
+---
+
+**[ERR-102]** | Optional governance projection fails open to legacy approval mutation authority
+
+- **What happened**: The Principle Detail page disabled legacy approval actions only when a validated governance view explicitly said no Owner action was required. If the enabled projection endpoint failed validation or storage access, the page showed an unavailable card but left legacy approval/edit/reject controls authorized from the separate approval-group response.
+- **Why it's wrong**: The governance projection is the authority for whether a strong current pending approval exists. Once enabled, its absence cannot authorize a mutation; falling back to a less constrained reader turns a degraded read path into a privilege bypass.
+- **Generalized failure mode**: When a stricter optional authority gates an existing mutation, code handles explicit deny but not authority-unavailable, so failure falls through to the legacy allow decision.
+- **Correct approach**: Distinguish feature-disabled from enabled-but-unavailable. Preserve legacy behavior only when the feature is disabled; when enabled, show mutation controls only for a validated `owner_required` projection and hide them for deny or unavailable states.
+- **How to prevent**: For every optional authority gate, test all three states: disabled uses legacy behavior, validated allow exposes the action, and validated deny/unavailable hides or refuses the action. Never model unavailable as equivalent to feature-disabled.
+- **Regression guard**: `principle-governance-projection.test.ts` locks the fail-closed decision-control predicate; the browser BDD covers strong approval and flag-off rollback.
+- **Related ERRs**: ERR-009, ERR-024, ERR-033
+- **Source**: PRI-553
+- **Date**: 2026-08-20
+- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must refuse promotion. That left room for the stricter Owner decision authority to disappear while the legacy unchecked mutation remained available. The same review also found that local no-auth Console had been allowed to write `reject-after-shadow`, incorrectly granting governance authority to a break-glass operator. Fixed before implementation by making feature-off refuse promotion across Console and CLI, requiring both paths to use one application service, and restricting unauthenticated authority to inspect/deactivate/global-pause only. Regression requirement: disabled, unavailable, validated-deny, and authenticated-allow must be exercised at every promotion entry point; no-auth tests must prove governance writes are refused.
+
+---
+
 **[ERR-003]** | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization
 
 - **What happened**: `SECRET_KEY_NAMES.includes()` performed substring matching, causing keys like `tokenizer` and `tokenCount` to be incorrectly sanitized because they contain the substring `"token"`.
@@ -293,6 +341,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-190
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — lineage/source fields come from the wrong task or are racy across a read-then-write.
+  - 2026-08-20 PRI-550/PRI-551: a revision task rejected by canonical-lineage validation could still be referenced by generic dependency relations, and cross-channel dependencies could collapse independent frontiers. Fixed by deriving every downstream relation from the same validated strong-task set and channel partition, with conflict and cross-channel regressions.
+  - 2026-08-20 PRI-550 final review: cycle/overflow detection downgraded only aggregate lineage while still emitting affected task facts as `strong`, and direct-root-only artifact collection omitted valid descendant approvals/activations. Fixed by propagating task-graph confidence to every affected fact and computing transitive validated artifact lineage before authority folding.
   - 2026-08-13 PRI-523 C1.3 quality review: a supplied host event ID could override canonical identity, so its lineage no longer matched a changed payload/outcome. Fixed by binding workspace/source/session/tool/sanitized payload/outcome and supplied ID into one digest, with collision and exact-retry regressions.
   - 2026-06-20 PRI-435 (PR#982): `resolveSourcePainIdFromDiagnostician()` lacked `taskKind === 'diagnostician'` guard — added kind guard + corruption regression
   - 2026-06-19 PRI-408 (PR#972): `assembleRuleArtifact` set `sourcePrincipleId: undefined`; `sqlite-approval-store.edit()` read-then-write race → atomic `SET previous_artifact_id`
@@ -600,6 +650,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-24
 - **Recurrence**: Yes - same class as ERR-027
 
+  - 2026-08-20 PRI-553: the first Governance Status Card exposed raw task/approval source IDs because a child issue's provenance wording was followed more broadly than the frozen design authority. SPEC §16 explicitly keeps source references in diagnostics/tests and forbids them in the Phase 1 default card. Fixed by retaining references in the validated view while removing them from visible card/timeline copy and adding browser assertions that technical IDs are absent.
+  - 2026-08-20 PRI-551/PRI-553: final acceptance/review found exact-contract drifts: a synonymous lease reason code, wrong flag-off API code, regex-only impossible timestamps, an ignored `verdict_missing` relation, and a second/replacement timeline that could hide durable history. Fixed with exact schema/API/derivation assertions and by embedding governance events into the existing trajectory.
+
 ---
 
 **[ERR-033]** | Operator failure path returns success exit code and breaks JSON contract
@@ -792,10 +845,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 99 |
-| Last updated | 2026-08-18 |
+| Total lessons | 101 |
+| Last updated | 2026-08-20 |
 | Top category | Schema & Type |
-| Recurring errors | 50 |
+| Recurring errors | 51 |
 
 ---
 
@@ -1165,6 +1218,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-20
 - **Recurrence**: Yes — same EP-11 pattern (i18n-enabled component gets hardcoded source-language strings for new UI elements).
   - 2026-07-01 PR #1143: Three signal-keywords components (KeywordListSection, PendingTermsSection, KeywordEditDialog) hardcoded PHASE2_TOOLTIP, table headers (Term/Category/Precision/Weight/Reason/Actions), category labels, and "X terms" count in English while the component already imported useTranslation — 15 i18n keys added in fix commit b566e886
+  - 2026-08-20 PRI-553: newly added zh-CN governance strings used bare `Owner` and `Console`, creating mixed-language visible copy. The existing CR10 locale audit caught all five values; fixed with `拥有者` and `控制台`, and the full Console suite verifies recurrence.
+  - 2026-08-20 PRI-553 final review: collector degradation codes (`metadata_malformed`, `timestamp_invalid`, `source_unavailable`) and the new `verdict_missing` attention reason had no locale entries, so visible degraded paths fell back to raw machine identifiers. Added both-locale keys and registry coverage assertions.
 
 ---
 
@@ -1333,6 +1388,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
 - **Recurrence**: 2026-08-13 PRI-523 C1.1 spec review: the production OpenClaw BDD seeded a Runtime V2 activation only, then asserted its unique text appeared once. That signal could not exercise or prove the legacy/Runtime V2 overlap branch, so the test stayed green while shared exclusion metadata misreported `all_deduped_against_legacy` as `no_validated_activations`. Fixed by seeding the identical ID/text in the real legacy probation reducer and Runtime V2 SQLite, asserting one combined prompt occurrence, absence of a duplicate Runtime V2 directive, and the persisted exact skip reason/next action. 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
+
+  - 2026-08-20 PRI-553: governance BDD treated non-empty body text as proof the SPA was ready. That signal was true before the initial `#/focus` redirect settled, so the delayed redirect could overwrite detail navigation; fixed by waiting for the canonical focus URL and then asserting the detail URL.
 
 ---
 
