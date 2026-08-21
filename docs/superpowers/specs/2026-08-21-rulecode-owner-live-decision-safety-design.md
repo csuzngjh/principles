@@ -2,7 +2,7 @@
 
 > **Version:** 1.0
 > **Date:** 2026-08-21
-> **Status:** Owner design approved; implementation requires maintainer approval for the MVP-Core surface change
+> **Status:** Owner and maintainer approved; ADR-0014 amendment is the implementation authorization
 > **Scope:** `principles-core`, `openclaw-plugin`, `host-runtime`, `pd-console`, and CLI parity
 > **Product boundary:** Owner-reviewed, reversible `code_tool_hook` behavior internalization
 
@@ -32,7 +32,7 @@ Owner approves generated RuleCode
 
 The product identity promises Owner approval, rejection, channel selection, reversible activation, and observable later behavior. Completing that loop is not a new activation channel or a general execution subsystem.
 
-This SPEC supersedes the earlier assumption in ADR-0014 that no additional Owner approval UI was required for shadow-to-enforce. Implementation must record that amendment through the repository's ADR process before shipping.
+This SPEC supersedes the earlier assumption in ADR-0014 that no additional Owner approval UI was required for shadow-to-enforce. The 2026-08-21 ADR-0014 amendment records that authorization and the bounded MVP-Core scope.
 
 ## 3. Incident and root cause
 
@@ -118,6 +118,30 @@ Invariants:
 Generated RuleCode must declare a bounded `RuleCode Scope` containing explicit tool/action/path categories. Generated rules may not use wildcard or implicit global blocking scope. Empty scope must not degrade to match-all.
 
 RuleCode cannot change the Host Liveness Contract or govern PD's out-of-band Console, HTTP control plane, or recovery interface.
+
+The host adapter must provide this minimum contract before promotion is available:
+
+```ts
+interface HostLivenessContract {
+  version: string;
+  outOfBandControls: ReadonlyArray<
+    'activation_deactivate' | 'global_rulecode_pause' | 'owner_review_console'
+  >;
+  protectedCapabilities: ReadonlyArray<{
+    capabilityId: string;
+    hostToolAliases: ReadonlyArray<string>;
+  }>;
+  neutralProbes: ReadonlyArray<{
+    probeId: string;
+    capabilityId: string;
+    expectedDecision: 'allow';
+  }>;
+}
+```
+
+The minimum protected capabilities are `pd_status`, `rulecode_deactivate`, `rulecode_global_pause`, and `owner_review_access`. Tool aliases are adapter facts, not generated RuleCode input. Every neutral probe must run through the production-equivalent composition evaluator and return allow.
+
+Missing, invalid, stale, or unsupported Host Liveness Contract is a hard promotion failure. The system must not infer safety from an empty tool list.
 
 ### 8.2 Pre-shadow validation
 
@@ -253,7 +277,7 @@ Both operations:
 MVP does not add multi-user accounts. Promotion requires existing Console token authentication plus a server-configured single Owner identity. The actor is bound by the server, never accepted from the request body.
 
 - Authenticated Console: review, promote, reject, continue observing, deactivate, pause.
-- Local no-auth Console: read, reject/deactivate, and emergency pause are allowed; promotion is disabled.
+- Local no-auth Console: read, emergency deactivate, and emergency pause are allowed. It cannot promote, reject-after-shadow, continue-observing, supersede, or write any other Owner governance decision.
 - CLI promotion: requires the configured Owner credential, records the local operator identity plus a required note, and uses the same application service and safety gate. An unauthenticated local operator may emergency-deactivate or pause but may not promote.
 
 Audit must distinguish `configured_owner`, `console_token`, `local_no_auth_emergency`, and `cli_operator`; it must not fabricate a user ID.
@@ -279,10 +303,20 @@ interface ActivationDecisionRecord {
     | 'reject_after_shadow'
     | 'emergency_deactivate'
     | 'global_emergency_pause'
+    | 'global_emergency_pause_release'
     | 'safety_isolate'
+    | 'recover_to_shadow'
     | 'supersede';
-  actorKind: 'configured_owner' | 'console_token' | 'local_no_auth_emergency' | 'cli_operator' | 'system_safety';
-  actorId?: string;
+  principal:
+    | { kind: 'configured_owner'; ownerId: string }
+    | { kind: 'system_safety'; policyVersion: string }
+    | { kind: 'break_glass'; reason: 'local_no_auth_emergency' };
+  authentication:
+    | { method: 'console_token'; credentialId: string }
+    | { method: 'cli_owner_credential'; credentialId: string }
+    | { method: 'system' }
+    | { method: 'local_break_glass' };
+  operator?: { kind: 'local_user'; operatorId: string };
   reasonCode: string;
   note?: string;
   evidenceSnapshotId?: string;
@@ -292,7 +326,38 @@ interface ActivationDecisionRecord {
 
 `promote_live` requires an immutable evidence snapshot containing artifact digest, lineage refs, host/runtime version, safety-gate results, shadow summary, configuration version, and redaction metadata.
 
-`global_emergency_pause` requires the global subject. Every other decision requires an activation subject. Runtime validation rejects invalid decision/subject combinations.
+`global_emergency_pause` and `global_emergency_pause_release` require the global subject. Every other decision requires an activation subject. Runtime validation rejects invalid decision/subject combinations.
+
+Owner governance decisions, including pause release and recovery-to-shadow, require `configured_owner` plus an authenticated Owner credential. `system_safety` is valid only for `safety_isolate`; `break_glass` is valid only for emergency deactivation or global pause. An unauthenticated actor can stop enforcement but cannot release or restore it.
+
+### 12.1 Durable runtime control authority
+
+Audit events alone are not runtime state. Add two durable control records at the I/O boundary:
+
+```ts
+interface ActivationControlState {
+  activationId: string;
+  enforcement: 'eligible' | 'safety_isolated';
+  isolationDecisionId?: string;
+  version: number;
+  updatedAt: string;
+}
+
+interface GlobalRuleCodePause {
+  pauseId: string;
+  status: 'paused' | 'released';
+  incidentDecisionId: string;
+  releaseDecisionId?: string;
+  affectedActivationIds: string[];
+  pausedAt: string;
+  releasedAt?: string;
+  version: number;
+}
+```
+
+Effective enforcement requires all of: live activation action, no deactivation timestamp, activation control `eligible`, and no active global pause. Runtime reads these durable facts on every refresh path; process restart cannot clear them.
+
+Global pause atomically isolates every currently live activation and writes the affected-ID snapshot before acknowledging success. Releasing the global latch requires an authenticated Owner, atomically records `global_emergency_pause_release`, and does not restore those activations. Recovery atomically records `recover_to_shadow` and creates a new shadow activation linked to the isolated activation; it must collect/revalidate evidence and receive a new Owner Live Decision. There is no bulk-resume transaction.
 
 All parsed JSON, DB rows, artifact metadata, and telemetry enter validators as `unknown`. Required malformed fields fail loud. Optional degradation emits a reason and next action.
 
@@ -307,13 +372,17 @@ POST /api/v1/activations/:id/promote
 POST /api/v1/activations/:id/reject-after-shadow
 POST /api/v1/activations/:id/emergency-deactivate
 POST /api/v1/activations/emergency-pause
+POST /api/v1/activations/emergency-pause/:pauseId/release
+POST /api/v1/activations/:id/recover-to-shadow
 ```
 
-Mutating requests use idempotency keys and optimistic preconditions containing activation ID, artifact digest, readiness-evaluation ID, and evidence snapshot digest. A stale snapshot returns a conflict and requires refresh.
+Mutating requests use idempotency keys and subject-appropriate optimistic preconditions. Activation decisions bind activation ID, artifact digest, readiness-evaluation ID, and evidence snapshot digest. Global pause release binds pause ID and pause-record version. A stale activation or pause snapshot returns a conflict and requires refresh.
 
 `promote` accepts only reason/note and confirmation metadata; actor identity comes from server context. It re-runs hard gates immediately before an atomic decision-write and state transition.
 
 Every refused/degraded response returns structured `reasonCode`, safe summary, failed checks, and `nextAction`.
+
+Releasing a global pause only releases the global latch and writes its immutable release decision. `recover-to-shadow` writes its immutable recovery decision and creates the linked shadow recovery activation; neither endpoint restores live enforcement.
 
 CLI JSON mode remains exactly one JSON object on stdout. The existing deactivate help contract must be authoritative; Console next-action strings must not invent unsupported `--confirm` flags.
 
@@ -359,16 +428,27 @@ No migration fabricates Owner identity or evidence.
 
 ## 18. Feature flags and disable paths
 
-This surfaced MVP-Core change requires maintainer approval and a registered, production-consumed flag, proposed as:
+The maintainer approves two bounded MVP-Core controls:
 
 ```yaml
 rulecode_owner_live_decision:
   category: core
   enabled: false
   since: 2026-08-21
+
+rulecode_safety_controls:
+  category: core
+  enabled: true
+  since: 2026-08-21
 ```
 
-Flag off restores the existing Console presentation and does not delete decisions or activations. It must not disable emergency deactivation or global pause.
+`rulecode_owner_live_decision` controls the new shadow evidence reader, decision API, decision writer, and Console review UI. While false, shadow observation may continue but promotion is refused across Console and CLI with `feature_not_enabled`; the system must never fall back to the legacy unchecked CLI promotion path. It becomes true only after the rollout gate in §22.
+
+`rulecode_safety_controls` controls the durable isolation, circuit breaker, and global pause subsystem. It is enabled as a correctness and recovery control for the existing MVP-Core RuleHost channel. If it cannot operate, promotion is refused. Its emergency disable path is to set the existing `code_tool_hook` capability false and fail open all RuleCode enforcement; disabling safety controls alone while leaving live enforcement active is forbidden.
+
+The comment-only compatibility correction and RuleCode execution fail-open behavior are bug fixes to existing RuleHost invariants, not flag-gated optional behavior.
+
+Both registered flags count only after production loaders and tests consume them. Flag-off never deletes decisions or activations and never removes emergency deactivation.
 
 Runtime emergency controls are separate from startup-cached feature flags. Disabling a dangerous rule must not require config reload, host restart, PR revert, or a functioning host Agent.
 
@@ -433,19 +513,31 @@ Each slice must ship with a user-visible observation path and a non-PR-revert di
 ## 23. Prototype references
 
 - Figma skeleton: https://www.figma.com/design/2khF5MvuhVkZSZjSS5jjG1
-- Static queue prototype: `01-queue.png`
-- Static decision prototype: `02-decision.png`
-- Static live prototype: `03-live.png`
+- Static queue prototype: [queue](./assets/rulecode-owner-live-decision/01-queue.svg)
+- Static decision prototype: [decision](./assets/rulecode-owner-live-decision/02-decision.svg)
+- Static live prototype: [live monitoring](./assets/rulecode-owner-live-decision/03-live.svg)
 
 The Figma Starter plan hit its MCP write-call limit after the three screen wrappers were created. The static prototypes are the current visual authority until the editable Figma screens are completed.
 
-## 24. Remaining approval gate
+## 24. Approval record
 
-The Owner product decisions in this SPEC are settled. No silent product decision remains.
+The Owner product decisions in this SPEC are settled. No silent product decision remains. On 2026-08-21 the authenticated repository administrator `csuzngjh` explicitly instructed the assistant to complete the formal MVP-Core gate after review. GitHub reported `viewerPermission=ADMIN` for `csuzngjh/principles`; this is the maintainer authority evidence recorded by the ADR amendment.
 
-Before implementation begins, the maintainer must explicitly approve:
+The maintainer approves:
 
-1. surfacing `rulecode_owner_live_decision` as MVP-Core;
-2. amending the conflicting ADR-0014 UI assumption;
-3. the bounded single-Owner token identity model;
-4. the implementation slices and rollout order above.
+1. the `rulecode_owner_live_decision` evidence reader, application service, immutable decision/evidence writer, and Console UI as bounded MVP-Core;
+2. the `rulecode_safety_controls` durable isolation, circuit breaker, global pause, and recovery-to-shadow controls as bounded MVP-Core safety infrastructure;
+3. the fail-open compatibility correction as an existing RuleHost bug fix;
+4. amending the conflicting ADR-0014 UI assumption;
+5. the bounded single-Owner token identity model;
+6. the implementation slices and rollout order above.
+
+## 25. Formal review closure and relevant ERR checklist
+
+The 2026-08-21 formal review ran two independent axes against the pre-review commit: repository/ADR standards and product/safety requirements. All reported P1/P2 findings were corrected before this approval record was finalized.
+
+- **ERR-024 — defense exists but is not wired into the production path.** Avoided by requiring Console and CLI promotion to use the same application service and Promotion Safety Gate, and by making production-equivalent Host Liveness probes a hard prerequisite rather than a standalone validator.
+- **ERR-097 — host contract assumed from PD's side.** Avoided by making the host adapter declare tool aliases, protected capabilities, out-of-band controls, and neutral probes. Missing, stale, or unsupported Host Liveness Contract blocks promotion.
+- **ERR-102 — optional governance authority fails open to legacy mutation authority.** Avoided by distinguishing feature-disabled/unavailable from authenticated allow: both disabled and unavailable refuse promotion across all entry points, while local break-glass may stop harm but cannot write Owner governance decisions.
+
+Implementation review must cite production-path tests for these three contracts. A leaf-helper test, a UI-only disabled state, or a CLI-only gate is insufficient evidence.

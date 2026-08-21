@@ -49,8 +49,8 @@ The explicit, bounded set of host tools and actions a RuleCode is permitted to e
 _Avoid_: All tools, default scope
 
 **Safety Isolation**:
-The fail-open containment of a RuleCode that fails to load, times out, throws, returns an invalid decision, or is incompatible with its runtime context.
-_Avoid_: Global deny, host failure
+The durable, non-enforcing containment state entered when a RuleCode fails to load, times out, throws, returns an invalid decision, is incompatible with its runtime context, or trips a Safety Circuit Breaker. It preserves evidence and requires a new Owner Live Decision before Live Enforcement can resume.
+_Avoid_: Global deny, host failure, automatically recovered, temporarily live
 
 **Safety Circuit Breaker**:
 An automatic suspension of Live Enforcement when a RuleCode threatens host liveness or exceeds its safety limits. Only a new Owner Live Decision can restore enforcement.
@@ -63,10 +63,6 @@ _Avoid_: Total tool calls, host activity
 **Evidence Readiness**:
 An advisory assessment of whether Shadow Observation gives the Owner enough representative information for an Owner Live Decision. Insufficient evidence may be overridden with a recorded reason; a failed Promotion Safety Gate may not.
 _Avoid_: Safe, approved, promotion permission
-
-**Safety Isolation State**:
-The non-enforcing state entered after a Safety Circuit Breaker trips. It preserves evidence and requires a new Owner Live Decision before Live Enforcement can resume.
-_Avoid_: Automatically recovered, temporarily live
 
 **Global Emergency Pause**:
 An immediate control-plane suspension of every Live Enforcement activation that does not require a host restart or pass through RuleHost.

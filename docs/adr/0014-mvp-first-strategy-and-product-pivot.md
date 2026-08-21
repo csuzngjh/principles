@@ -414,3 +414,57 @@ Both must be wired through the production loader and exercised by a test before 
 
 If dogfood re-scoring shows the new pipeline does not produce enforceable rules for the 3 `code_tool_hook` pains (or produces worse outcomes than prompt-only), flip both flags off and the system reverts to the V1 one-shot paths with zero data migration: Artificer emits `ArtificerOutputV1` (plan only), Evaluator runs existing logic and writes only the principle artifact, prompt/defer_archive channels are unaffected. The `ArtificerL2Adapter`, `EvaluatorOutputV2` schema fields, `adversarial-case.ts`, and `buildGoldenTraceFromArtificer()` then become MVP-Quiet code pending deletion (the pure functions remain reusable if a future design needs them). The rule artifact shape is additive — no existing artifact is rewritten.
 
+---
+
+## Amendment (2026-08-21): Owner Exception — RuleCode Live Decision and Host-Liveness Safety
+
+> **Status of amendment**: Accepted (owner exception, maintainer-approved)
+> **Maintainer approval evidence**: On 2026-08-21, repository administrator `csuzngjh` explicitly instructed the assistant to complete the formal MVP-Core gate and revise ADR-0014's old Owner-approval UI assumption. GitHub reported `viewerPermission=ADMIN` for `csuzngjh/principles` at the time of approval.
+> **Design source of truth**: `docs/superpowers/specs/2026-08-21-rulecode-owner-live-decision-safety-design.md`
+> **Supersedes**: Only the 2026-06-17 amendment's scope-guard statement **“No owner-approval UI changes”**. The remaining 2026-06-17 scope guards continue to apply unless this amendment explicitly narrows them.
+
+### A. Context — observed product and safety failure
+
+The RuleHost path can generate and shadow executable RuleCode, but the Owner lacks a complete product surface for reviewing shadow evidence, making the final Live decision, rejecting unsafe rules, and seeing the result after activation. The CLI has been the practical control path even though a seed customer should not need operator knowledge to govern learned behavior.
+
+More seriously, a real activated rule mentioned the retired `session.recentThinking` context symbol only in a comment. The compatibility scanner treated that comment as an executable reference, and the production guard returned global deny before the generated `evaluate()` function ran. The result intercepted essentially every host tool call and made OpenClaw unusable until the activation was manually deactivated. This is an observed MVP-Core reliability and Owner-control defect, not a request for general task execution or speculative extensibility.
+
+### B. Decision
+
+1. **Require an Owner Live Decision for every shadow → live transition.** The decision is bound to an immutable activation, artifact digest, readiness evaluation, evidence snapshot, and actor identity. No generated rule, timer, or system process may make this value decision for the Owner.
+2. **Authorize the bounded Owner Live Decision surface as MVP-Core.** This includes the shadow evidence/readiness reader, shared promotion application service, immutable decision/evidence writer, and Console queue/detail/live-monitoring pages described by the design source of truth.
+3. **Authorize RuleCode safety controls as MVP-Core safety infrastructure.** This includes durable per-activation safety isolation, the Safety Circuit Breaker, Global Emergency Pause, recovery-to-shadow, and the host-adapter-owned Host Liveness Contract. A process restart must not erase containment state.
+4. **Treat comment-only compatibility and RuleCode fail-open execution as corrections to the existing RuleHost contract.** Compatibility scanning evaluates executable syntax separately from comments and string literals when checking executable context references. Rule load, timeout, exception, invalid output, or incompatible context isolates the affected rule and allows the current host operation; it must never become global deny.
+5. **Use one promotion gate for Console and CLI.** Both entry points call the same application service and safety predicates. If the Owner Live Decision subsystem is disabled or unavailable, promotion is refused everywhere; there is no fallback to the legacy unchecked CLI path.
+6. **Limit unauthenticated break-glass authority to stopping harm.** A local unauthenticated operator may inspect, emergency-deactivate, or trigger Global Emergency Pause. It may not promote, reject after shadow, continue observation, supersede, release governance decisions, or impersonate the configured Owner.
+
+### C. MVP Four Questions
+
+1. **`mvp-q-1-what-if-skip` — What happens if we do not do this?** A broad or malformed RuleCode can again disable the host's tool surface, while an Owner still lacks a usable final review and recovery path. This has already happened and would be raised immediately by a seed customer.
+2. **`mvp-q-2-how-observed` — How is it observed?** The Owner sees readiness, representative allow/deny samples, protected-capability probes, failed safety checks, and exact rule scope in Console before deciding. After activation, live monitoring shows interception rate, deny rate, circuit state, and emergency controls. CLI exposes the same structured facts for operators.
+3. **`mvp-q-3-how-disabled` — How is it disabled?** `rulecode_owner_live_decision=false` stops every new promotion while retaining shadow observations and historical decisions. Safety controls remain available. If the safety-control subsystem itself is unavailable, disable the existing `code_tool_hook` capability and fail open all RuleCode enforcement; no PR revert or host-agent cooperation is required.
+4. **`mvp-q-4-emotional-value` — What emotional value does it deliver?** It converts the Owner's loss of control and distrust after a host-wide outage into reassurance and control: the system explains why a rule is or is not ready, reserves the final value decision for the Owner, and provides an out-of-band stop path that remains usable when the host agent is impaired.
+
+### D. Feature flags and rollout authorization
+
+| Flag | Category | Initial state | Controls |
+|------|----------|---------------|----------|
+| `rulecode_owner_live_decision` | core | `false` | Shadow evidence reader, common promotion service, immutable decision/evidence writer, and Console review UI. While false, all promotion entry points return `feature_not_enabled`. Enable only after the design SPEC's rollout gate passes. |
+| `rulecode_safety_controls` | core | `true` | Durable isolation, Safety Circuit Breaker, Global Emergency Pause, and recovery-to-shadow. It cannot be disabled while RuleCode enforcement remains active. |
+
+Both flags must be registered in `.pd/config.yaml`, consumed by the production loader, and covered by tests before the corresponding behavior counts as available. This amendment authorizes implementation; it does not treat an unwired registry entry as a shipped feature.
+
+### E. Scope guard
+
+- **No automatic promotion, automatic Owner decision, automatic recovery to live, or bulk resume.** Recovery returns an isolated activation to a new linked shadow lifecycle and requires a fresh Owner Live Decision.
+- **No multi-user account system or general RBAC.** MVP uses the bounded configured-Owner identity and existing Console token model.
+- **No new activation channel.** This amendment governs the existing `code_tool_hook` / RuleHost channel only.
+- **No general host tool repair, task execution, retry engine, memory subsystem, or autonomous value-decision system.**
+- **No reopening of deferred BALM, LRAS, GAP, MissionScheduler, Trainer, model-training, or attribution work.**
+- **No Console/CLI policy split.** Runtime promotion remains blocked until both surfaces enforce the same gate and record the same decision contract.
+
+### F. Reversibility and exit
+
+Turning off `rulecode_owner_live_decision` blocks new Live transitions but preserves shadow data, decision history, and emergency controls. Safety-isolated activations remain non-enforcing across restarts and cannot be restored by merely releasing a global pause. Every recovery creates a linked shadow activation with fresh evidence.
+
+If `rulecode_safety_controls` cannot provide its durable state or out-of-band recovery contract, the only safe disable path is `code_tool_hook=false`, with RuleCode enforcement failing open. Historical artifacts, evidence, and decisions remain available for audit; disabling either subsystem never fabricates approval or deletes governance records.
