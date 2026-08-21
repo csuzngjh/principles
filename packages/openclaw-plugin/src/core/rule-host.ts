@@ -320,9 +320,11 @@ export class RuleHost {
       const db = sqliteConn.getDb();
       const rows = db.prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
+               c.enforcement, c.isolation_decision_id,
                p.content_json, p.source_rule_id, p.source_principle_id
         FROM activations a
         JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
+        LEFT JOIN activation_control_states c ON a.activation_id = c.activation_id
         WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
         ORDER BY a.activated_at ASC
       `).all() as unknown;
@@ -339,7 +341,7 @@ export class RuleHost {
         if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
         const record = row as Record<string, unknown>;
         fingerprintParts.push([
-          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['content_json'], record['source_rule_id'], record['source_principle_id'],
+          record['activation_id'], record['artifact_id'], record['target_ref'], record['action'], record['enforcement'], record['isolation_decision_id'], record['content_json'], record['source_rule_id'], record['source_principle_id'],
         ].map((value) => typeof value === 'string' ? value : '').join('\u0001'));
       }
       const fingerprint = fingerprintParts.join('\u0002');
@@ -353,6 +355,7 @@ export class RuleHost {
       // Duplicate groups are skipped entirely (zero executions) and emit
       // structured unhealthy evidence. Non-duplicate rows proceed to compilation.
       const rowsByTargetRef = new Map<string, Record<string, unknown>[]>();
+      const skipped: SkippedActivation[] = [];
       for (const row of rows) {
         if (!row || typeof row !== 'object') {
           continue;
@@ -360,6 +363,25 @@ export class RuleHost {
         const r = row as Record<string, unknown>;
         const targetRef = typeof r['target_ref'] === 'string' ? r['target_ref'] : '';
         const activationId = typeof r['activation_id'] === 'string' ? r['activation_id'] : '';
+        const ruleId = typeof r['source_rule_id'] === 'string' ? r['source_rule_id'] : targetRef;
+        const action = typeof r['action'] === 'string' ? r['action'] : '';
+        const mode: RuleHostActivationMode | undefined = action === 'code_tool_hook_live_activate'
+          ? 'live'
+          : action === 'code_tool_hook_shadow_activate' ? 'shadow' : undefined;
+        if (r['enforcement'] === 'safety_isolated') {
+          const reason = 'activation_safety_isolated';
+          const nextAction = 'Recover the activation to shadow after reviewing safety evidence';
+          skipped.push({ activationId, ruleId, mode, reason, nextAction });
+          this.logger.warn?.(`[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`);
+          continue;
+        }
+        if (r['enforcement'] !== 'eligible') {
+          const reason = 'activation_control_state_invalid';
+          const nextAction = 'Repair the activation control state before RuleCode enforcement';
+          skipped.push({ activationId, ruleId, mode, reason, nextAction });
+          this.logger.warn?.(`[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`);
+          continue;
+        }
         if (!targetRef) {
           this.logger.warn?.(
             `[RuleHost] Activation ${activationId}: missing target_ref, skipping`
@@ -381,7 +403,6 @@ export class RuleHost {
       // Both paths are populated (rc-9-no-silent-fallback): event log for
       // telemetry, skipped array for structured caller-facing observability.
       const validRows: Record<string, unknown>[] = [];
-      const skipped: SkippedActivation[] = [];
       for (const [targetRef, group] of rowsByTargetRef) {
         if (group.length > 1) {
           const activationIds: string[] = [];

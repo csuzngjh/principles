@@ -94,6 +94,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // MVP-Core — always enabled, cannot be disabled
   { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24', description: 'Prompt injection for principle application' },
   { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24', description: 'Code tool hook for rule host enforcement' },
+  { id: 'rulecode_safety_controls', category: 'core', enabled: true, since: '2026-08-21', description: 'Durable RuleCode safety isolation authority. Default ON; emergency enforcement shutdown remains the code_tool_hook core flag.' },
   { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
   { id: 'correction_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Optional LLM optimization service for correction keywords; synchronous correction detection remains active independently' },
   { id: 'signal_collector', category: 'quiet', enabled: false, since: '2026-06-30', description: 'Unified signal collection host (correction + empathy upstream merge). NOTE: keyword detection (high-precision phrases) runs regardless of this flag; this flag only gates the LLM deep-judgment path (ambiguous terms / missed keywords). Quiet flag: dogfood-only until validated.' },

@@ -56,6 +56,8 @@ export {
 } from './memory-activation-state-store.js';
 
 export { SqliteActivationStateStore } from './sqlite-activation-state-store.js';
+export { SqliteActivationSafetyStore } from './sqlite-activation-safety-store.js';
+export type { ActivationDecisionRecord, ActivationDecisionSubject, ActivationDecisionKind, ActivationControlState } from './activation-control-types.js';
 
 export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 

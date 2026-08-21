@@ -80,22 +80,29 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
         `activations.artifact_id references non-existent pi_artifact: ${record.artifactId}`,
       );
     }
-    db.prepare(`
-      INSERT OR REPLACE INTO activations
-        (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
-      VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      record.activationId,
-      record.idempotencyKey,
-      record.artifactId,
-      record.channel,
-      record.action,
-      record.targetRef,
-      record.activatedAt,
-      record.promotedAt ?? null,
-      record.deactivatedAt,
-    );
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO activations
+          (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        record.activationId, record.idempotencyKey, record.artifactId, record.channel, record.action,
+        record.targetRef, record.activatedAt, record.promotedAt ?? null, record.deactivatedAt,
+      );
+      if (record.channel === 'code_tool_hook') {
+        db.prepare(`
+          INSERT OR IGNORE INTO activation_control_states
+            (activation_id, enforcement, isolation_decision_id, version, updated_at)
+          VALUES (?, 'eligible', NULL, 1, ?)
+        `).run(record.activationId, record.activatedAt);
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* best effort */ }
+      throw error;
+    }
   }
 
   async listPromptActivations(includeDeactivated = false): Promise<ActivationStatusRecord[]> {

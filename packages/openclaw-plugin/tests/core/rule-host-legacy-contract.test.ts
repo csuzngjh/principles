@@ -136,6 +136,47 @@ afterEach(() => {
 });
 
 describe('RuleHost retired-contract backstop (persisted workspace)', () => {
+  it('skips a safety-isolated live rule with an observable recovery action', async () => {
+    insertRuleArtifact(CLEAN_ARTIFACT_ID, CLEAN_RULE_ID, CLEAN_CODE);
+    await insertLiveActivation(CLEAN_ACTIVATION_ID, CLEAN_ARTIFACT_ID, CLEAN_RULE_ID);
+    sqliteConn.getDb().prepare(`
+      UPDATE activation_control_states
+      SET enforcement = 'safety_isolated', isolation_decision_id = 'decision-isolate', version = 2, updated_at = ?
+      WHERE activation_id = ?
+    `).run(new Date().toISOString(), CLEAN_ACTIVATION_ID);
+
+    const report = makeRuleHost().evaluateDetailed(makeInput('/etc/passwd'));
+
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.liveDecisionActivationId).toBeUndefined();
+    expect(report.skippedActivations).toEqual([
+      expect.objectContaining({
+        activationId: CLEAN_ACTIVATION_ID,
+        ruleId: CLEAN_RULE_ID,
+        mode: 'live',
+        reason: expect.stringContaining('activation_safety_isolated'),
+        nextAction: expect.stringMatching(/recover.*shadow/i),
+      }),
+    ]);
+  });
+
+  it('does not infer eligibility when the control authority row is missing', async () => {
+    insertRuleArtifact(CLEAN_ARTIFACT_ID, CLEAN_RULE_ID, CLEAN_CODE);
+    await insertLiveActivation(CLEAN_ACTIVATION_ID, CLEAN_ARTIFACT_ID, CLEAN_RULE_ID);
+    sqliteConn.getDb().prepare('DELETE FROM activation_control_states WHERE activation_id = ?').run(CLEAN_ACTIVATION_ID);
+
+    const report = makeRuleHost().evaluateDetailed(makeInput('/etc/passwd'));
+
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.skippedActivations).toEqual([
+      expect.objectContaining({
+        activationId: CLEAN_ACTIVATION_ID,
+        reason: 'activation_control_state_invalid',
+        nextAction: expect.stringContaining('Repair'),
+      }),
+    ]);
+  });
+
   it('Case A: a single incompatible LIVE rule is skipped and fails open', async () => {
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);

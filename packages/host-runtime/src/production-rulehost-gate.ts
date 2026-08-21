@@ -177,9 +177,12 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     try {
       const rows: unknown = connection.getDb().prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
+               c.enforcement, c.isolation_decision_id,
                p.source_rule_id, p.source_principle_id,
                length(CAST(p.content_json AS BLOB)) AS content_bytes
-        FROM activations a JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
+        FROM activations a
+        JOIN pi_artifacts p ON a.artifact_id = p.artifact_id
+        LEFT JOIN activation_control_states c ON a.activation_id = c.activation_id
         WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
         ORDER BY a.activated_at ASC
         LIMIT ?
@@ -202,6 +205,15 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         for (const row of rows) {
           if (!isRecord(row) || typeof row.target_ref !== 'string' || row.target_ref.length === 0) {
             addWarning(warnings, 'activation_row_invalid', 'deactivate and recreate the malformed activation');
+            continue;
+          }
+          const activationId = typeof row.activation_id === 'string' ? row.activation_id : 'unknown';
+          if (row.enforcement === 'safety_isolated') {
+            addWarning(warnings, `activation_safety_isolated: ${activationId}`, 'recover the activation to shadow after reviewing safety evidence');
+            continue;
+          }
+          if (row.enforcement !== 'eligible') {
+            addWarning(warnings, `activation_control_state_invalid: ${activationId}`, 'repair the activation control state before RuleCode enforcement');
             continue;
           }
           const group = groups.get(row.target_ref) ?? [];

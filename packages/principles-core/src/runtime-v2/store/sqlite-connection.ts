@@ -495,6 +495,44 @@ export class SqliteConnection {
       }
     }
 
+    // RuleCode safety authority: decisions are append-only and control state is
+    // the durable enforcement gate. Existing RuleCode activations are explicitly
+    // backfilled so eligibility is never inferred from a missing authority row.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS activation_decisions (
+        decision_id TEXT PRIMARY KEY,
+        subject_kind TEXT NOT NULL CHECK (subject_kind IN ('activation', 'all_live_rulecode')),
+        activation_id TEXT,
+        artifact_id TEXT,
+        artifact_digest TEXT,
+        decision TEXT NOT NULL CHECK (decision IN ('continue_observing', 'promote_live', 'reject_after_shadow', 'emergency_deactivate', 'global_emergency_pause', 'global_emergency_pause_release', 'safety_isolate', 'recover_to_shadow', 'supersede')),
+        principal TEXT NOT NULL CHECK (principal IN ('configured_owner', 'system_safety', 'break_glass')),
+        authentication TEXT NOT NULL CHECK (authentication IN ('console_token', 'cli_owner_credential', 'system', 'local_break_glass')),
+        operator TEXT,
+        reason_code TEXT NOT NULL,
+        note TEXT,
+        evidence_snapshot_id TEXT,
+        decided_at TEXT NOT NULL,
+        CHECK (
+          (subject_kind = 'activation' AND activation_id IS NOT NULL AND artifact_id IS NOT NULL AND artifact_digest IS NOT NULL)
+          OR (subject_kind = 'all_live_rulecode' AND activation_id IS NULL AND artifact_id IS NULL AND artifact_digest IS NULL)
+        )
+      );
+      CREATE INDEX IF NOT EXISTS idx_activation_decisions_activation
+        ON activation_decisions(activation_id, decided_at);
+      CREATE TRIGGER IF NOT EXISTS activation_decisions_no_update
+        BEFORE UPDATE ON activation_decisions BEGIN SELECT RAISE(ABORT, 'activation decisions are immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS activation_decisions_no_delete
+        BEFORE DELETE ON activation_decisions BEGIN SELECT RAISE(ABORT, 'activation decisions are immutable'); END;
+      CREATE TABLE IF NOT EXISTS activation_control_states (
+        activation_id TEXT PRIMARY KEY,
+        enforcement TEXT NOT NULL CHECK (enforcement IN ('eligible', 'safety_isolated')),
+        isolation_decision_id TEXT,
+        version INTEGER NOT NULL CHECK (version >= 1),
+        updated_at TEXT NOT NULL
+      );
+    `);
+
     // PRI-286: confirm_first_state table is orphaned (SqliteConfirmFirstStateStore class deleted).
     // Drop legacy table if exists; CREATE is no longer needed.
     db.exec(`
@@ -638,6 +676,30 @@ export class SqliteConnection {
       db.exec("CREATE INDEX IF NOT EXISTS idx_candidates_recommendation_kind ON principle_candidates(recommendation_kind)");
     } catch {
       // index may already exist
+    }
+
+    // Version 002 installs the explicit RuleCode enforcement authority once.
+    // Run it after legacy migrations and only when initSchema created the
+    // required tables; partial legacy schemas must not block their older repair.
+    const activationTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='activations'").get();
+    const controlTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='activation_control_states'").get();
+    const versionTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'").get();
+    if (activationTable && controlTable && versionTable && this.getSchemaVersion() < '002') {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (this.getSchemaVersion() === '000') this.setSchemaVersion('001');
+        db.exec(`
+          INSERT OR IGNORE INTO activation_control_states
+            (activation_id, enforcement, isolation_decision_id, version, updated_at)
+          SELECT activation_id, 'eligible', NULL, 1, activated_at
+          FROM activations WHERE channel = 'code_tool_hook';
+        `);
+        this.setSchemaVersion('002');
+        db.exec('COMMIT');
+      } catch (error) {
+        try { db.exec('ROLLBACK'); } catch { /* best effort */ }
+        throw error;
+      }
     }
 
     // F12 (PRI-442): Record schema version after migrations are applied or

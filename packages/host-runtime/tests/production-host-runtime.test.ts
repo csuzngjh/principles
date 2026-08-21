@@ -342,6 +342,41 @@ describe('shared production RuleHost gate kernel', () => {
     });
   });
 
+  it('never executes a safety-isolated live RuleCode and surfaces the recovery action', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE);
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      connection.getDb().prepare(`
+        UPDATE activation_control_states
+        SET enforcement = 'safety_isolated', isolation_decision_id = 'decision-isolate', version = 2, updated_at = ?
+        WHERE activation_id = 'act-shared-gate'
+      `).run(new Date().toISOString());
+    } finally { connection.close(); }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow',
+      warnings: [expect.stringMatching(/activation_safety_isolated: act-shared-gate.*nextAction=.*recover.*shadow/i)],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
+  it('does not infer eligibility when RuleCode control authority is missing', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE);
+    const connection = new SqliteConnection(workspaceDir);
+    try { connection.getDb().prepare("DELETE FROM activation_control_states WHERE activation_id = 'act-shared-gate'").run(); }
+    finally { connection.close(); }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow',
+      warnings: [expect.stringMatching(/activation_control_state_invalid: act-shared-gate.*nextAction=/)],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
   it('fails open observably for malformed implementation output', async () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, `function evaluate() { return { decision: 'block' }; }`);

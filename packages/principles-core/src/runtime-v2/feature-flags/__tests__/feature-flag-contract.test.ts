@@ -306,6 +306,11 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     }
   });
 
+  it('contains RuleCode safety controls as an enabled MVP-Core flag', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'rulecode_safety_controls');
+    expect(flag).toMatchObject({ category: 'core', enabled: true, since: '2026-08-21' });
+  });
+
   it('contains code_rule_capability core flag (PRI-435: promoted to MVP-Core, default on)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'code_rule_capability');
     expect(flag).toBeDefined();
