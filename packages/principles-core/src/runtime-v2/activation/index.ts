@@ -68,6 +68,11 @@ export { REQUIRED_PROMOTION_CHECK_IDS, evaluateRuleCodePromotionReadiness } from
 export type { PromotionCheckId, PromotionReadinessCheck, PromotionReadinessEvaluationInput } from './promotion-readiness-evaluator.js';
 export { PromotionReadinessReader } from './promotion-readiness-reader.js';
 export type { PromotionReadinessReaderDeps } from './promotion-readiness-reader.js';
+export { evaluateRuleCodeSafetyCircuit, initialRuleCodeSafetyCircuitState } from './rulecode-safety-circuit-breaker.js';
+export type { RuleCodeSafetySample, RuleCodeSafetyCircuitState, RuleCodeSafetyTripReason } from './rulecode-safety-circuit-breaker.js';
+export { collectOpenClawPromotionChecks } from './openclaw-promotion-checks.js';
+export { summarizeRuleCodeShadowEvents } from './rulecode-shadow-summary.js';
+export type { RuleCodeShadowSummary } from './rulecode-shadow-summary.js';
 
 export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 

@@ -23,6 +23,7 @@ import {
 } from "../../src/ui/pages/activation/ActivationValidators.js";
 import enJson from "../../src/ui/i18n/en.json" with { type: "json" };
 import zhJson from "../../src/ui/i18n/zh-CN.json" with { type: "json" };
+import { validateRuleCodeOwnerReview } from '../../src/ui/utils/validators.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,14 @@ function makeLifecycleMetrics(overrides?: Record<string, unknown>) {
     ...overrides,
   };
 }
+
+describe('RuleCode Owner review validator', () => {
+  it('preserves unavailable telemetry as null and rejects malformed failed checks', () => {
+    const value = { activation: { activationId: 'a', artifactId: 'x', action: 'code_tool_hook_shadow_activate' }, artifact: { artifactId: 'x', digest: 'sha256:x', content: {} }, readiness: { status: 'unavailable', evaluationId: 'e', failedChecks: [{ checkId: 'host', reasonCode: 'missing' }], evidenceSnapshot: { snapshotDigest: 'sha256:s', shadowSummary: { observed: null, wouldBlock: null, errors: null } } }, controlState: { enforcement: 'eligible', version: 1 }, globalPause: null, ownerDecisionEnabled: false };
+    expect(validateRuleCodeOwnerReview(value)?.readiness.evidenceSnapshot.shadowSummary.observed).toBeNull();
+    expect(validateRuleCodeOwnerReview({ ...value, readiness: { ...value.readiness, failedChecks: [{ checkId: 3, reasonCode: 'bad' }] } })).toBeNull();
+  });
+});
 
 // ── isRecord ─────────────────────────────────────────────────────────────────
 

@@ -878,6 +878,9 @@ export interface ActivationRecordData {
   targetRef: string;
   activatedAt: string | null;
   status: string;
+  enforcement?: 'eligible' | 'safety_isolated';
+  legacyDecisionUnknown?: boolean;
+  ownerReviewDueAt?: string;
 }
 
 function validateActivationRecord(v: unknown): ActivationRecordData | null {
@@ -891,11 +894,17 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
   const activatedAt = readNullableString(v, 'activatedAt');
   if (!activatedAt.valid) return null;
   if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
+  const enforcement = Object.hasOwn(v, 'enforcement') && (v.enforcement === 'eligible' || v.enforcement === 'safety_isolated')
+    ? v.enforcement
+    : undefined;
   return {
     activationId: v.activationId, artifactId: v.artifactId, principleId: v.principleId,
     channel: v.channel, action: v.action, targetRef: v.targetRef,
     activatedAt: activatedAt.value,
     status: v.status,
+    ...(enforcement ? { enforcement } : {}),
+    ...(Object.hasOwn(v, 'legacyDecisionUnknown') && v.legacyDecisionUnknown === true ? { legacyDecisionUnknown: true } : {}),
+    ...(Object.hasOwn(v, 'ownerReviewDueAt') && isString(v.ownerReviewDueAt) ? { ownerReviewDueAt: v.ownerReviewDueAt } : {}),
   };
 }
 
@@ -921,6 +930,54 @@ export function validateActivations(v: unknown): ActivationsData | null {
 export interface DisableActivationData {
   activationId: string;
   status: string;
+}
+
+export interface RuleCodeOwnerReviewData {
+  activation: { activationId: string; artifactId: string; action: string };
+  artifact: { artifactId: string; digest: string; content: Record<string, unknown> | null };
+  readiness: { status: 'ready' | 'evidence_insufficient' | 'blocked' | 'unavailable'; evaluationId: string; failedChecks: { checkId: string; reasonCode: string }[]; evidenceSnapshot: { snapshotDigest: string; shadowSummary: { observed: number | null; wouldBlock: number | null; errors: number | null } } };
+  controlState: { enforcement: 'eligible' | 'safety_isolated'; version: number } | null;
+  globalPause: { pauseId: string; status: 'paused' | 'released'; version: number } | null;
+  ownerDecisionEnabled: boolean;
+}
+
+export function validateRuleCodeOwnerReview(v: unknown): RuleCodeOwnerReviewData | null {
+  if (!isObject(v) || !isObject(v.activation) || !isObject(v.artifact) || !isObject(v.readiness)) return null;
+  const { activation, artifact, readiness } = v;
+  if (!isString(activation.activationId) || !isString(activation.artifactId) || !isString(activation.action)
+    || !isString(artifact.artifactId) || !isString(artifact.digest)
+    || (artifact.content !== null && !isObject(artifact.content))
+    || !isString(readiness.status) || !['ready', 'evidence_insufficient', 'blocked', 'unavailable'].includes(readiness.status)
+    || !isString(readiness.evaluationId) || !Array.isArray(readiness.failedChecks)
+    || !readiness.failedChecks.every(item => isObject(item) && isString(item.checkId) && isString(item.reasonCode))
+    || !isObject(readiness.evidenceSnapshot) || !isString(readiness.evidenceSnapshot.snapshotDigest)
+    || !isObject(readiness.evidenceSnapshot.shadowSummary)) return null;
+  const summary = readiness.evidenceSnapshot.shadowSummary;
+  if (![summary.observed, summary.wouldBlock, summary.errors].every(value => value === null || isNumber(value))) return null;
+  let controlState: RuleCodeOwnerReviewData['controlState'] = null;
+  if (v.controlState !== null) { if (!isObject(v.controlState) || (v.controlState.enforcement !== 'eligible' && v.controlState.enforcement !== 'safety_isolated') || !isNumber(v.controlState.version)) return null; controlState = { enforcement: v.controlState.enforcement, version: v.controlState.version }; }
+  let globalPause: RuleCodeOwnerReviewData['globalPause'] = null;
+  if (v.globalPause !== null) { if (!isObject(v.globalPause) || !isString(v.globalPause.pauseId) || (v.globalPause.status !== 'paused' && v.globalPause.status !== 'released') || !isNumber(v.globalPause.version)) return null; globalPause = { pauseId: v.globalPause.pauseId, status: v.globalPause.status, version: v.globalPause.version }; }
+  if (!isBoolean(v.ownerDecisionEnabled)) return null;
+  const readinessStatus = readiness.status === 'ready' || readiness.status === 'evidence_insufficient' || readiness.status === 'blocked' || readiness.status === 'unavailable' ? readiness.status : null;
+  const observed = summary.observed === null || typeof summary.observed === 'number' ? summary.observed : null;
+  const wouldBlock = summary.wouldBlock === null || typeof summary.wouldBlock === 'number' ? summary.wouldBlock : null;
+  const errors = summary.errors === null || typeof summary.errors === 'number' ? summary.errors : null;
+  if (readinessStatus === null) return null;
+  return {
+    activation: { activationId: activation.activationId, artifactId: activation.artifactId, action: activation.action },
+    artifact: { artifactId: artifact.artifactId, digest: artifact.digest, content: artifact.content },
+    readiness: { status: readinessStatus, evaluationId: readiness.evaluationId, failedChecks: readiness.failedChecks.map(item => ({ checkId: item.checkId, reasonCode: item.reasonCode })), evidenceSnapshot: { snapshotDigest: readiness.evidenceSnapshot.snapshotDigest, shadowSummary: { observed, wouldBlock, errors } } },
+    controlState, globalPause, ownerDecisionEnabled: v.ownerDecisionEnabled,
+  };
+}
+
+export interface RuleCodeMutationData { decisionId?: string; activationId?: string; status?: string; pauseId?: string; version?: number }
+export function validateRuleCodeMutation(v: unknown): RuleCodeMutationData | null {
+  if (!isObject(v)) return null; const result: RuleCodeMutationData = {};
+  for (const key of ['decisionId', 'activationId', 'status', 'pauseId'] as const) { if (Object.hasOwn(v, key)) { if (!isString(v[key])) return null; result[key] = v[key]; } }
+  if (Object.hasOwn(v, 'version')) { if (!isNumber(v.version)) return null; result.version = v.version; }
+  return result;
 }
 
 export function validateDisableActivation(v: unknown): DisableActivationData | null {

@@ -23,6 +23,7 @@ import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-con
 import { recordPrincipleApplication } from '../core/principle-application-ledger.js';
 import { buildProductionRuleContext } from '../core/rule-context-assembler.js';
 import type { HostEventResult } from '@principles/core/host';
+import { observeRuleCodeSafety } from '../core/rulecode-safety-circuit.js';
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
@@ -89,6 +90,12 @@ export function handleBeforeToolCall(
       ? ruleHost.evaluateDetailed(hostInput)
       : { liveDecision: ruleHost.evaluate(hostInput), shadowDecisions: [], skippedActivations: [] };
     const hostResult = report.liveDecision;
+
+    const circuitTripped = observeRuleCodeSafety({ workspaceDir: wctx.workspaceDir, activationId: report.liveDecisionActivationId, toolName: event.toolName, params: event.params ?? {}, decision: hostResult?.decision ?? 'allow', matched: hostResult?.matched ?? false, logger });
+    if (circuitTripped) {
+      logger.warn?.(`[PD_GATE] RuleCode ${report.liveDecisionActivationId ?? 'unknown'} safety-isolated; allowing current host call.`);
+      return;
+    }
 
     for (const shadowDecision of report.shadowDecisions) {
       try {

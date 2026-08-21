@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Command } from 'commander';
 import {
@@ -20,6 +21,8 @@ import {
   RuleCodeOwnerDecisionService,
   PromotionReadinessReader,
   SqliteActivationSafetyStore,
+  collectOpenClawPromotionChecks,
+  summarizeRuleCodeShadowEvents,
 } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
@@ -38,6 +41,14 @@ import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readShadowSummary(workspaceDir: string, activationId: string): { observed: number | null; wouldBlock: number | null; errors: number | null } {
+  const logsDir = path.join(workspaceDir, '.pd', 'logs'); if (!fs.existsSync(logsDir)) return { observed: null, wouldBlock: null, errors: null };
+  const entries: unknown[] = [];
+  try { for (const file of fs.readdirSync(logsDir).filter(name => /^events_.*\.jsonl$/.test(name)).sort().slice(-7)) for (const line of fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean)) { try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ } } }
+  catch { return { observed: null, wouldBlock: null, errors: null }; }
+  return summarizeRuleCodeShadowEvents(entries, activationId);
 }
 
 interface ActivationDispatchOptions {
@@ -434,7 +445,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
           getArtifactById: artifactId => manager.piArtifactStore.getArtifactById(artifactId),
           computeArtifactDigest: artifact => `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`,
           validateProductionArtifact: artifact => writer.canActivate(artifact),
-          collectHostChecks: async () => [],
+          collectHostChecks: async artifact => collectOpenClawPromotionChecks(artifact.contentJson, { ownerIdentityConfigured: actor.principal.kind === 'configured_owner' && actor.authentication.method === 'cli_owner_credential', safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls') }),
           buildEvidenceSnapshot: (checks, artifact) => {
             const createdAt = new Date().toISOString();
             const artifactDigest = artifact
@@ -446,8 +457,8 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               snapshotDigest: `sha256:${createHash('sha256').update(snapshotBody, 'utf8').digest('hex')}`,
               artifactDigest,
               lineageRefs: artifact ? [artifact.sourceTaskId, ...artifact.lineageArtifactIds] : [],
-              hostRuntimeVersion: 'unavailable', safetyGateResults: checks,
-              shadowSummary: { observed: null, wouldBlock: null, errors: null },
+              hostRuntimeVersion: 'openclaw-legacy@1', safetyGateResults: checks,
+              shadowSummary: readShadowSummary(workspaceDir, activationId),
               configurationVersion: 'pd-config-current',
               redaction: { version: 'v1', rawParametersStored: false }, createdAt,
             };

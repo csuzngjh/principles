@@ -1,6 +1,7 @@
 import type { SqliteConnection } from '../store/sqlite-connection.js';
 import type { ActivationControlState, ActivationDecisionKind, ActivationDecisionRecord, GlobalRuleCodePause } from './activation-control-types.js';
 import type { PromotionCommitInput } from './rulecode-owner-decision-service.js';
+import { createHash } from 'node:crypto';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -236,6 +237,26 @@ export class SqliteActivationSafetyStore {
     } catch (error) { try { db.exec('ROLLBACK'); } catch { /* best effort */ } throw error; }
   }
 
+  async recoverToShadow(decision: ActivationDecisionRecord, input: { expectedControlVersion: number; newActivationId: string; idempotencyKey: string }): Promise<{ sourceActivationId: string; shadowActivationId: string; decisionId: string }> {
+    if (decision.subject.kind !== 'activation' || decision.decision !== 'recover_to_shadow'
+      || decision.principal.kind !== 'configured_owner' || decision.authentication.method !== 'console_token') {
+      throw new Error('recoverToShadow requires authenticated configured_owner recovery decision');
+    }
+    const db = this.connection.getDb(); db.exec('BEGIN IMMEDIATE');
+    try {
+      const source: unknown = db.prepare(`SELECT artifact_id, target_ref FROM activations WHERE activation_id = ? AND artifact_id = ? AND channel = 'code_tool_hook' AND action = 'code_tool_hook_live_activate' AND deactivated_at IS NULL`).get(decision.subject.activationId, decision.subject.artifactId);
+      if (!isRecord(source) || requiredString(source, 'artifact_id') !== decision.subject.artifactId) throw new Error(`Recovery requires one isolated live activation: ${decision.subject.activationId}`);
+      const control: unknown = db.prepare(`SELECT enforcement, version FROM activation_control_states WHERE activation_id = ?`).get(decision.subject.activationId);
+      if (!isRecord(control) || control.enforcement !== 'safety_isolated' || control.version !== input.expectedControlVersion) throw new Error(`Recovery expected isolated control version ${input.expectedControlVersion}`);
+      db.prepare(`INSERT INTO activation_decisions (decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest, decision, principal_kind, owner_id, authentication_method, credential_id, reason_code, note, evidence_snapshot_id, decided_at) VALUES (?, ?, 'activation', ?, ?, ?, 'recover_to_shadow', 'configured_owner', ?, 'console_token', ?, ?, ?, ?, ?)`)
+        .run(decision.decisionId, input.idempotencyKey, decision.subject.activationId, decision.subject.artifactId, decision.subject.artifactDigest, decision.principal.ownerId, decision.authentication.credentialId, decision.reasonCode, decision.note, decision.evidenceSnapshotId, decision.decidedAt);
+      db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at) VALUES (?, ?, ?, 'code_tool_hook', 'code_tool_hook_shadow_activate', ?, ?, NULL, NULL)`)
+        .run(input.newActivationId, `recovery:${decision.subject.activationId}:${input.idempotencyKey}`, decision.subject.artifactId, requiredString(source, 'target_ref'), decision.decidedAt);
+      db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, isolation_decision_id, version, updated_at) VALUES (?, 'eligible', NULL, 1, ?)`).run(input.newActivationId, decision.decidedAt);
+      db.exec('COMMIT'); return { sourceActivationId: decision.subject.activationId, shadowActivationId: input.newActivationId, decisionId: decision.decisionId };
+    } catch (error) { try { db.exec('ROLLBACK'); } catch { /* best effort */ } throw error; }
+  }
+
   async listDecisions(activationId: string): Promise<ActivationDecisionRecord[]> {
     const rows: unknown = this.connection.getDb().prepare(`
       SELECT decision_id, activation_id, artifact_id, artifact_digest, decision, principal_kind,
@@ -364,6 +385,22 @@ export class SqliteActivationSafetyStore {
         decision.reasonCode, decision.note, decision.evidenceSnapshotId, input.readinessEvaluationId,
         input.evidenceSnapshotDigest, decision.decidedAt,
       );
+      const newPrinciple: unknown = db.prepare(`SELECT COALESCE(source_principle_id, json_extract(content_json, '$.principleId'), json_extract(content_json, '$.sourcePrincipleId')) AS principle_id FROM pi_artifacts WHERE artifact_id = ?`).get(decision.subject.artifactId);
+      const principleId = isRecord(newPrinciple) && (typeof newPrinciple.principle_id === 'string' ? newPrinciple.principle_id : null);
+      if (principleId) {
+        const oldRows: unknown = db.prepare(`SELECT a.activation_id, a.artifact_id, p.artifact_kind, p.source_task_id, p.source_principle_id, p.source_rule_id, p.lineage_artifact_ids, p.validation_status, p.content_json, p.created_at, p.updated_at FROM activations a JOIN pi_artifacts p ON p.artifact_id = a.artifact_id WHERE a.channel = 'code_tool_hook' AND a.action = 'code_tool_hook_live_activate' AND a.deactivated_at IS NULL AND a.activation_id <> ? AND COALESCE(p.source_principle_id, json_extract(p.content_json, '$.principleId'), json_extract(p.content_json, '$.sourcePrincipleId')) = ?`).all(decision.subject.activationId, principleId);
+        if (!Array.isArray(oldRows) || oldRows.length > 1) throw new Error(`Promotion replacement requires at most one prior live RuleCode for Principle ${principleId}`);
+        for (const old of oldRows) {
+          if (!isRecord(old)) throw new Error('Malformed prior live RuleCode row');
+          const lineage: unknown = JSON.parse(requiredString(old, 'lineage_artifact_ids'));
+          if (!Array.isArray(lineage) || !lineage.every(value => typeof value === 'string')) throw new Error('Malformed prior artifact lineage');
+          const oldArtifact = { artifactId: requiredString(old, 'artifact_id'), artifactKind: requiredString(old, 'artifact_kind'), sourceTaskId: requiredString(old, 'source_task_id'), ...(optionalString(old, 'source_principle_id') ? { sourcePrincipleId: optionalString(old, 'source_principle_id') } : {}), ...(optionalString(old, 'source_rule_id') ? { sourceRuleId: optionalString(old, 'source_rule_id') } : {}), lineageArtifactIds: lineage, validationStatus: requiredString(old, 'validation_status'), contentJson: requiredString(old, 'content_json'), createdAt: requiredString(old, 'created_at'), updatedAt: requiredString(old, 'updated_at') };
+          const oldActivationId = requiredString(old, 'activation_id'); const oldArtifactDigest = `sha256:${createHash('sha256').update(JSON.stringify(oldArtifact), 'utf8').digest('hex')}`;
+          db.prepare(`INSERT INTO activation_decisions (decision_id, subject_kind, activation_id, artifact_id, artifact_digest, decision, principal_kind, owner_id, authentication_method, credential_id, reason_code, note, evidence_snapshot_id, decided_at) VALUES (?, 'activation', ?, ?, ?, 'supersede', 'configured_owner', ?, ?, ?, 'new_rulecode_version_promoted', ?, NULL, ?)`)
+            .run(`${decision.decisionId}:supersede:${oldActivationId}`, oldActivationId, oldArtifact.artifactId, oldArtifactDigest, decision.principal.ownerId, decision.authentication.method, decision.authentication.credentialId, `Superseded by ${decision.subject.activationId}.`, decision.decidedAt);
+          db.prepare(`UPDATE activations SET deactivated_at = ? WHERE activation_id = ? AND deactivated_at IS NULL`).run(decision.decidedAt, oldActivationId);
+        }
+      }
       const activationResult = db.prepare(`
         UPDATE activations SET action = 'code_tool_hook_live_activate', promoted_at = ?
         WHERE activation_id = ? AND artifact_id = ? AND action = 'code_tool_hook_shadow_activate' AND deactivated_at IS NULL

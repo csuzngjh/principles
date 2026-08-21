@@ -12,12 +12,17 @@ import {
   disableActivation,
   fetchLifecycleMetrics,
   fetchReceiptCounts,
+  fetchRuleCodeOwnerReview,
+  ruleCodeDecision,
+  pauseAllRuleCode,
+  releaseRuleCodePause,
 } from "../../api.js";
 import type {
   ActivationRecord,
   ActivationsData,
   LifecycleMetricsData,
   ReceiptCountEntryData,
+  RuleCodeOwnerReviewData,
 } from "../../api.js";
 import {
   validateActivationsData,
@@ -47,12 +52,49 @@ function CapabilityBoundaryDeclaration() {
   );
 }
 
+function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; onChanged: () => void }) {
+  const [review, setReview] = useState<RuleCodeOwnerReviewData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const load = useCallback(async () => { const result = await fetchRuleCodeOwnerReview(record.activationId); if (result.success) { setReview(result.data); setError(null); } else setError(result.error); }, [record.activationId]);
+  useEffect(() => { void load(); }, [load]);
+  const decide = async (action: 'continue-observing' | 'reject-after-shadow' | 'emergency-deactivate' | 'promote' | 'recover-to-shadow') => {
+    if (!review) return; setBusy(true);
+    const body: Record<string, unknown> = { idempotencyKey: `${action}-${crypto.randomUUID()}`, reasonCode: action, note };
+    if (action === 'promote') Object.assign(body, { confirmed: true, artifactId: review.artifact.artifactId, artifactDigest: review.artifact.digest, controlVersion: review.controlState?.version });
+    if (action === 'recover-to-shadow') Object.assign(body, { controlVersion: review.controlState?.version });
+    const result = await ruleCodeDecision(record.activationId, action, body); setBusy(false);
+    if (result.success) { toast.success('RuleCode decision recorded'); onChanged(); await load(); } else { setError(result.error); if (result.nextAction) toast.info(result.nextAction); }
+  };
+  const releasePause = async () => { if (!review?.globalPause) return; setBusy(true); const result = await releaseRuleCodePause(review.globalPause.pauseId, { idempotencyKey: `release-${crypto.randomUUID()}`, reasonCode: 'owner_releases_global_latch', expectedVersion: review.globalPause.version, note }); setBusy(false); if (result.success) { toast.success('Global pause latch released; isolated rules remain stopped'); onChanged(); await load(); } else setError(result.error); };
+  if (error) return <div className="mt-3 border-l-2 border-danger px-3 text-[12px] text-danger">{error}</div>;
+  if (!review) return <div className="mt-3 text-[12px] text-ink-4">Loading safety evidence…</div>;
+  const summary = review.readiness.evidenceSnapshot.shadowSummary;
+  const value = (number: number | null) => number === null ? '未采集' : String(number);
+  return <div className="mt-4 rounded-[5px] border border-gov/25 bg-surface/70 p-4" data-testid={`owner-review-${record.activationId}`}>
+    <div className="flex flex-wrap items-center gap-2"><strong className="text-[13px] text-ink">Owner Live Decision</strong><span className="font-mono text-[11px] text-gov">{review.readiness.status}</span>{review.controlState?.enforcement === 'safety_isolated' && <span className="text-danger text-[11px]">Safety Isolation</span>}</div>
+    <div className="mt-2 grid grid-cols-3 gap-2 text-[12px] text-ink-3"><span>Eligible: {value(summary.observed)}</span><span>Would block: {value(summary.wouldBlock)}</span><span>Errors: {value(summary.errors)}</span></div>
+    {review.readiness.failedChecks.length > 0 && <ul className="mt-2 text-[12px] text-danger">{review.readiness.failedChecks.map(check => <li key={check.checkId}>{check.checkId}: {check.reasonCode}</li>)}</ul>}
+    <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">Scope, artifact and implementation</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-ink-3">{JSON.stringify(review.artifact.content, null, 2)}</pre></details>
+    <input value={note} onChange={event => setNote(event.target.value)} placeholder="Owner review note" className="mt-3 w-full rounded border border-line bg-panel px-3 py-2 text-[12px] text-ink" />
+    <div className="mt-3 flex flex-wrap gap-2">
+      {review.globalPause?.status === 'paused' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void releasePause()}>解除全局暂停（不恢复规则）</Button>}
+      {record.action === 'code_tool_hook_shadow_activate' && <><Button disabled={busy || !review.ownerDecisionEnabled} onClick={() => void decide('continue-observing')}>继续观察</Button><Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('reject-after-shadow')}>拒绝并停用</Button><Button disabled={busy || !review.ownerDecisionEnabled || (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient')} onClick={() => void decide('promote')}>确认上线</Button></>}
+      {(record.action === 'code_tool_hook_live_activate' || review.controlState?.enforcement === 'safety_isolated') && <Button disabled={busy} variant="destructive" onClick={() => void decide('emergency-deactivate')}>紧急停用</Button>}
+      {review.controlState?.enforcement === 'safety_isolated' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('recover-to-shadow')}>恢复到新 Shadow</Button>}
+    </div>
+    {!review.ownerDecisionEnabled && <div className="mt-2 text-[11px] text-amber">Owner decision rollout is disabled; emergency stop remains available.</div>}
+  </div>;
+}
+
 function ActivationFactCard({
   record,
   lifecycleData,
   receiptCount,
   onDisable,
   disabling,
+  onChanged,
 }: {
   record: ActivationRecord;
   lifecycleData: LifecycleMetricsData | null | undefined;
@@ -61,6 +103,7 @@ function ActivationFactCard({
   receiptCount?: ReceiptCountEntryData | null;
   onDisable: (record: ActivationRecord) => void;
   disabling: boolean;
+  onChanged: () => void;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -148,6 +191,7 @@ function ActivationFactCard({
       </div>
 
       {/* Action / target / time */}
+      {record.legacyDecisionUnknown && <div className="mt-3 border-l-2 border-amber px-3 text-[12px] text-amber">历史上线 / 决策人未知。请在 {record.ownerReviewDueAt ? new Date(record.ownerReviewDueAt).toLocaleString() : '7 天内'} 完成复核；系统不会伪造 Owner 身份。</div>}
       <div className="text-ink-3 text-[13px] leading-relaxed space-y-1">
         <div>
           <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.actionLabel")}</span>{" "}
@@ -275,6 +319,7 @@ function ActivationFactCard({
           )}
         </div>
       )}
+      {record.channel === 'code_tool_hook' && record.status === 'active' && <RuleCodeOwnerPanel record={record} onChanged={onChanged} />}
     </article>
   );
 }
@@ -422,6 +467,12 @@ export function ActivationPage() {
     });
   }, [t]);
 
+  const handleEmergencyPause = useCallback(async () => {
+    const result = await pauseAllRuleCode({ idempotencyKey: `pause-${crypto.randomUUID()}`, reasonCode: 'owner_emergency_pause' });
+    if (result.success) { toast.success('All live RuleCode enforcement paused'); await loadData(); }
+    else { toast.error(result.error); if (result.nextAction) toast.info(result.nextAction); }
+  }, [loadData]);
+
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
     return (
@@ -454,6 +505,9 @@ export function ActivationPage() {
   // ── Loaded state ─────────────────────────────────────────────────────────
   const activations = activationsData?.activations ?? [];
   const activeActivations = activations.filter((a) => a.status === "active");
+  const pendingRuleCode = activeActivations.filter(record => record.action === 'code_tool_hook_shadow_activate' && record.enforcement !== 'safety_isolated');
+  const safetyAlerts = activeActivations.filter(record => record.channel === 'code_tool_hook' && record.enforcement === 'safety_isolated');
+  const ordinaryActive = activeActivations.filter(record => !pendingRuleCode.includes(record) && !safetyAlerts.includes(record));
   const inactiveActivations = activations.filter((a) => a.status === "inactive");
   const neverActivatedCount = activations.filter((a) => a.activatedAt === null).length;
 
@@ -499,6 +553,7 @@ export function ActivationPage() {
 
       {/* Capability boundary declaration (F.5) — always visible */}
       <CapabilityBoundaryDeclaration />
+      {activeActivations.some(record => record.action === 'code_tool_hook_live_activate') && <div className="mt-4 flex justify-end"><Button variant="destructive" onClick={() => void handleEmergencyPause()}>暂停全部 Live RuleCode</Button></div>}
 
       {/* Degraded note (ERR-002) */}
       {degradedNote && (
@@ -520,15 +575,18 @@ export function ActivationPage() {
         </div>
       )}
 
+      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">待上线规则</SectionTitle><p className="mb-3 text-[12px] text-ink-3">Shadow Observation 已形成独立的 Owner Live Decision 队列。</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} />)}</div></section>}
+      {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">安全告警</SectionTitle><p className="mb-3 text-[12px] text-danger">这些规则已隔离并 fail-open；它们不会自动恢复上线。</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} />)}</div></section>}
+
       {/* Section: Active activations */}
       <section className="mt-8" aria-labelledby="section-active">
         <SectionTitle id="section-active">
           {t("pages.activation.sectionActive")}
         </SectionTitle>
 
-        {activeActivations.length > 0 ? (
+        {ordinaryActive.length > 0 ? (
           <div className="space-y-[14px]">
-            {activeActivations.map((record) => (
+            {ordinaryActive.map((record) => (
               <ActivationFactCard
                 key={record.activationId}
                 record={record}
@@ -536,6 +594,7 @@ export function ActivationPage() {
                 receiptCount={receiptCounts !== null ? (Object.hasOwn(receiptCounts, record.principleId) ? receiptCounts[record.principleId] : null) : undefined}
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
+                onChanged={() => void loadData()}
               />
             ))}
           </div>
@@ -561,6 +620,7 @@ export function ActivationPage() {
                 receiptCount={receiptCounts !== null ? (Object.hasOwn(receiptCounts, record.principleId) ? receiptCounts[record.principleId] : null) : undefined}
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
+                onChanged={() => void loadData()}
               />
             ))}
           </div>

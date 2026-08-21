@@ -31,6 +31,7 @@ import { SqliteConnection } from '@principles/core/runtime-v2';
 import { scanLegacyRuleContractDependencies } from '@principles/core/runtime-v2';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import { EventLogService } from './event-log.js';
+import { observeRuleCodeSafety } from './rulecode-safety-circuit.js';
 import type {
   RuleHostInput,
   RuleHostResult,
@@ -720,6 +721,7 @@ export class RuleHost {
     reason: string,
     nextAction: string,
   ): void {
+    if (this.workspaceDir) observeRuleCodeSafety({ workspaceDir: this.workspaceDir, activationId, toolName: 'rulehost_load', params: {}, decision: 'error', matched: false, healthFailure: reason.includes('compatib') ? 'compatibility' : 'load', logger: this.logger });
     try {
       // Pass undefined as logger: RuleHostLogger only has warn(), but EventLog
       // calls this.logger.error() without optional chaining. Passing the

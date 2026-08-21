@@ -10,6 +10,8 @@ import {
   SqliteActivationSafetyStore,
   isFeatureEnabled,
   RuleCodeOwnerDecisionService,
+  collectOpenClawPromotionChecks,
+  summarizeRuleCodeShadowEvents,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
@@ -70,6 +72,9 @@ export interface ActivationRecord {
   nextAction?: string;
   /** Present when the activation references a non-existent artifact. */
   warning?: string;
+  enforcement?: 'eligible' | 'safety_isolated';
+  legacyDecisionUnknown?: boolean;
+  ownerReviewDueAt?: string;
 }
 
 export interface ActivationsResponse {
@@ -134,6 +139,20 @@ function makeActivationDecision(value: { activation: ActivationStatusRecord; art
     ...(input.actor.operator ? { operator: input.actor.operator } : {}), reasonCode: input.reasonCode,
     note: input.note ?? null, evidenceSnapshotId: null, decidedAt: new Date().toISOString(),
   };
+}
+
+function readShadowSummary(workspaceDir: string, activationId: string): { observed: number | null; wouldBlock: number | null; errors: number | null } {
+  const logsDir = path.join(workspaceDir, '.pd', 'logs');
+  if (!fs.existsSync(logsDir)) return { observed: null, wouldBlock: null, errors: null };
+  const entries: unknown[] = [];
+  try {
+    for (const file of fs.readdirSync(logsDir).filter(name => /^events_.*\.jsonl$/.test(name)).sort().slice(-7)) {
+      for (const line of fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean)) {
+        try { entries.push(JSON.parse(line) as unknown); } catch { /* malformed telemetry is excluded, readiness remains bounded */ }
+      }
+    }
+  } catch { return { observed: null, wouldBlock: null, errors: null }; }
+  return summarizeRuleCodeShadowEvents(entries, activationId);
 }
 
 export class ActivationsConsoleModel {
@@ -223,6 +242,15 @@ export class ActivationsConsoleModel {
       // suspended (not executing) even though they remain active in the DB.
       const featureFlags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
       const v2FlagEnabled = featureFlags.flags.rulecode_context_v2?.enabled === true;
+      const safetyStore = new SqliteActivationSafetyStore(conn);
+      const controlByActivation = new Map<string, ActivationControlState>();
+      const hasPromotionDecision = new Set<string>();
+      for (const activation of allActivations) {
+        const control = await safetyStore.getControlState(activation.activationId);
+        if (control) controlByActivation.set(activation.activationId, control);
+        const decisions = await safetyStore.listDecisions(activation.activationId);
+        if (decisions.some(decision => decision.decision === 'promote_live')) hasPromotionDecision.add(activation.activationId);
+      }
 
       const facts: ActivationRecord[] = allActivations.map((record) => {
         const meta = artifactMetadata.get(record.artifactId);
@@ -275,6 +303,11 @@ export class ActivationsConsoleModel {
           evidenceRefs,
           evidenceSummary,
           nextAction,
+          enforcement: controlByActivation.get(record.activationId)?.enforcement,
+          ...(mode === 'live' && !hasPromotionDecision.has(record.activationId) ? {
+            legacyDecisionUnknown: true,
+            ownerReviewDueAt: new Date(new Date(record.promotedAt ?? record.activatedAt ?? Date.now()).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          } : {}),
         };
         if (danglingArtifactIds.has(record.artifactId)) {
           enriched.warning = `artifact_id "${record.artifactId}" does not exist in pi_artifacts - activation is orphaned`;
@@ -301,7 +334,7 @@ export class ActivationsConsoleModel {
     }
   }
 
-  async getOwnerReview(activationId: string): Promise<RuleCodeOwnerReview> {
+  async getOwnerReview(activationId: string, ownerIdentityConfigured = false): Promise<RuleCodeOwnerReview> {
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
       const activationStore = new SqliteActivationStateStore(conn);
@@ -321,7 +354,7 @@ export class ActivationsConsoleModel {
         getArtifactById: id => artifactStore.getArtifactById(id),
         computeArtifactDigest: value => `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`,
         validateProductionArtifact: value => writer.canActivate(value),
-        collectHostChecks: async () => [],
+        collectHostChecks: async value => collectOpenClawPromotionChecks(value.contentJson, { ownerIdentityConfigured, safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls') }),
         buildEvidenceSnapshot: (checks, value) => {
           const createdAt = new Date().toISOString();
           const artifactDigest = value
@@ -331,8 +364,8 @@ export class ActivationsConsoleModel {
             snapshotId: `snapshot-${randomUUID()}`,
             snapshotDigest: `sha256:${createHash('sha256').update(body, 'utf8').digest('hex')}`,
             artifactDigest, lineageRefs: value ? [value.sourceTaskId, ...value.lineageArtifactIds] : [],
-            hostRuntimeVersion: 'unavailable', safetyGateResults: checks,
-            shadowSummary: { observed: null, wouldBlock: null, errors: null },
+            hostRuntimeVersion: 'openclaw-legacy@1', safetyGateResults: checks,
+            shadowSummary: readShadowSummary(this.workspaceDir, activationId),
             configurationVersion: 'pd-config-current', redaction: { version: 'v1', rawParametersStored: false }, createdAt,
           };
         },
@@ -353,15 +386,25 @@ export class ActivationsConsoleModel {
   }
 
   async continueObserving(activationId: string, input: OwnerMutationInput): Promise<{ decisionId: string }> {
+    this.requireOwnerDecisionFeature();
     return this.withMutableRuleCode(activationId, async (store, activation, artifactDigest) => store.recordOwnerDecision(
       makeActivationDecision({ activation, artifactDigest, decision: 'continue_observing', input }), input.idempotencyKey,
     ));
   }
 
   async deactivateRuleCode(activationId: string, decision: 'reject_after_shadow' | 'emergency_deactivate', input: OwnerMutationInput): Promise<{ activationId: string; decisionId: string; deactivatedAt: string }> {
+    if (decision === 'reject_after_shadow') this.requireOwnerDecisionFeature();
     return this.withMutableRuleCode(activationId, async (store, activation, artifactDigest) => store.deactivateWithDecision(
       makeActivationDecision({ activation, artifactDigest, decision, input }), input.idempotencyKey,
     ));
+  }
+
+  async recoverRuleCodeToShadow(activationId: string, expectedControlVersion: number, input: OwnerMutationInput): Promise<{ sourceActivationId: string; shadowActivationId: string; decisionId: string }> {
+    this.requireOwnerDecisionFeature();
+    return this.withMutableRuleCode(activationId, async (store, activation, artifactDigest) => store.recoverToShadow({
+      ...makeActivationDecision({ activation, artifactDigest, decision: 'continue_observing', input }),
+      decision: 'recover_to_shadow',
+    }, { expectedControlVersion, newActivationId: `activation-recovery-${randomUUID()}`, idempotencyKey: input.idempotencyKey }));
   }
 
   async pauseAllRuleCode(input: OwnerMutationInput): Promise<GlobalRuleCodePause> {
@@ -391,7 +434,7 @@ export class ActivationsConsoleModel {
   }
 
   async promoteRuleCode(activationId: string, expected: { artifactId: string; artifactDigest: string; controlVersion: number; confirmed: boolean }, input: OwnerMutationInput): Promise<OwnerPromotionResult> {
-    const review = await this.getOwnerReview(activationId);
+    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner' && input.actor.authentication.method === 'console_token');
     const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
     try {
@@ -426,6 +469,11 @@ export class ActivationsConsoleModel {
       const artifactDigest = `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`;
       return await action(new SqliteActivationSafetyStore(conn), activation, artifactDigest);
     } finally { try { conn.close(); } catch { /* best effort */ } }
+  }
+
+  private requireOwnerDecisionFeature(): void {
+    const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
+    if (!isFeatureEnabled(flags, 'rulecode_owner_live_decision')) throw new Error('feature_not_enabled: enable rulecode_owner_live_decision only after the rollout gate passes');
   }
 
   async deactivateActivation(activationId: string): Promise<{ ok: true } | { ok: false; reason: string; nextAction: string }> {

@@ -50,8 +50,10 @@ export function evaluateRuleCodePromotionReadiness(input: PromotionReadinessEval
   const failedChecks = safetyGateResults
     .filter(check => check.status === 'failed')
     .map(check => ({ checkId: check.checkId, reasonCode: check.reasonCode ?? 'hard_check_failed' }));
+  const summary = evidenceSnapshot.shadowSummary;
+  const insufficientEvidence = summary.observed === null || summary.observed < 20;
   return {
-    status: failedChecks.length > 0 ? 'blocked' : 'ready', evaluationId: input.evaluationId,
+    status: failedChecks.length > 0 ? 'blocked' : insufficientEvidence ? 'evidence_insufficient' : 'ready', evaluationId: input.evaluationId,
     artifactId: input.artifactId, artifactDigest: input.artifactDigest, evidenceSnapshot, failedChecks,
   };
 }

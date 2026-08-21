@@ -158,6 +158,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
 | ERR-089 | Fix addresses primary failure path but leaves sibling failure branches (catch/!ok/throw) with stale state, wrong command path, or CLI contract violation | PR #1124 |
 | ERR-093 | New log sink emits full external identifier despite an established minimization convention | PRI-516 / PR #1230 |
+| ERR-103 | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior | RuleCode Owner Live Decision SPEC |
 
 ---
 
@@ -317,6 +318,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-553
 - **Date**: 2026-08-20
 - **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must refuse promotion. That left room for the stricter Owner decision authority to disappear while the legacy unchecked mutation remained available. The same review also found that local no-auth Console had been allowed to write `reject-after-shadow`, incorrectly granting governance authority to a break-glass operator. Fixed before implementation by making feature-off refuse promotion across Console and CLI, requiring both paths to use one application service, and restricting unauthenticated authority to inspect/deactivate/global-pause only. Regression requirement: disabled, unavailable, validated-deny, and authenticated-allow must be exercised at every promotion entry point; no-auth tests must prove governance writes are refused.
+
+---
+
+**[ERR-103]** | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior
+
+- **What happened**: `RuleHostWriter.canActivate()` validated executable code and GoldenTrace but accepted `affectedTools: []` and arrays containing no valid tool names. Downstream interpretation could therefore treat the missing effective scope as broadly applicable.
+- **Why it's wrong**: Enforcement scope is a safety authority boundary. Empty, wildcard, malformed, or protected-control scope must fail before shadow/live admission; risk scoring cannot substitute for a hard validation gate.
+- **Generalized failure mode**: When a generated policy declares the resources it may govern, assistants validate execution shape but omit the non-empty bounded-scope invariant, allowing missing scope to become implicit global authority.
+- **Correct approach**: Normalize declared scope, require at least one explicit valid member, reject wildcard/global aliases, and reject protected recovery/control capabilities before sandbox acceptance or activation.
+- **How to prevent**: In under 30 seconds, review every generated enforcement schema for four tests: empty, all-invalid, wildcard/global, and protected-control scope; every case must fail before activation.
+- **Regression guard**: `rule-host-writer.test.ts` exercises empty, all-invalid, wildcard, and protected-capability scope through the production writer.
+- **Related ERRs**: ERR-024, ERR-051, ERR-080, ERR-102
+- **Source**: RuleCode Owner Live Decision SPEC (no Linear issue)
+- **Date**: 2026-08-21
+- **Recurrence**: None
 
 ---
 
@@ -846,7 +862,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 101 |
+| Total lessons | 102 |
 | Last updated | 2026-08-21 |
 | Top category | Schema & Type |
 | Recurring errors | 51 |

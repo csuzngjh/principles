@@ -128,6 +128,17 @@ describe('RuleHostWriter', () => {
     expect(result.reason).toContain('no_golden_trace');
   });
 
+  it.each([
+    { affectedTools: [], reason: 'rulecode_scope_empty' },
+    { affectedTools: ['*'], reason: 'rulecode_scope_wildcard_forbidden' },
+    { affectedTools: ['rulecode_deactivate'], reason: 'rulecode_scope_protected_capability' },
+  ])('rejects unsafe generated scope before shadow: $reason', async ({ affectedTools, reason }) => {
+    const { RuleHostWriter } = await importWriter(); const base = makeRuleArtifact(); const content: unknown = JSON.parse(base.contentJson);
+    if (typeof content !== 'object' || content === null || Array.isArray(content)) throw new Error('fixture content malformed');
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    await expect(writer.canActivate({ ...base, contentJson: JSON.stringify({ ...content, affectedTools }) })).resolves.toMatchObject({ ok: false, reason });
+  });
+
   it('rejects when RefinerRuleHostGate decision is not accepted_shadow', async () => {
     const { RuleHostWriter } = await importWriter();
     const gateDeps = makeGateDeps();
@@ -409,7 +420,7 @@ describe('RuleHostWriter', () => {
     expect(result.reason).toContain('no_implementation_code');
   });
 
-  it('returns high riskLevel when affectedTools is empty array', async () => {
+  it('rejects affectedTools empty array because empty scope must not match all', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact({
@@ -421,7 +432,8 @@ describe('RuleHostWriter', () => {
       }),
     });
     const result = await writer.canActivate(artifact);
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('rulecode_scope_empty');
     expect(result.riskLevel).toBe('high');
   });
 
@@ -457,7 +469,7 @@ describe('RuleHostWriter', () => {
     expect(result.riskLevel).toBe('high');
   });
 
-  it('treats non-string items in affectedTools as safe', async () => {
+  it('rejects affectedTools containing no valid explicit tool names', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact({
@@ -469,7 +481,8 @@ describe('RuleHostWriter', () => {
       }),
     });
     const result = await writer.canActivate(artifact);
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('rulecode_scope_empty');
     expect(result.riskLevel).toBe('high');
   });
 

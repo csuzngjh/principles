@@ -214,6 +214,19 @@ describe('SqliteActivationSafetyStore', () => {
     connection.close();
   });
 
+  it('atomically supersedes the prior live version for the same Principle', async () => {
+    const connection = new SqliteConnection(makeWorkspace()); seedArtifact(connection); const db = connection.getDb();
+    db.prepare("UPDATE pi_artifacts SET source_principle_id = 'principle-1' WHERE artifact_id = 'artifact-1'").run();
+    await new SqliteActivationStateStore(connection).recordActivation(liveActivation());
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-2', 'diagnosis', 'pending', ?, ?)").run('2026-08-21T00:00:00.000Z', '2026-08-21T00:00:00.000Z');
+    db.prepare("INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('artifact-2', 'rule', 'task-2', 'principle-1', '[]', 'passed', '{}', ?, ?)").run('2026-08-21T00:00:00.000Z', '2026-08-21T00:00:00.000Z');
+    await new SqliteActivationStateStore(connection).recordActivation({ ...liveActivation(), activationId: 'activation-2', idempotencyKey: 'activation-2-key', artifactId: 'artifact-2', action: 'code_tool_hook_shadow_activate', promotedAt: null });
+    const input = promotionCommit(); input.decision = { ...input.decision, decisionId: 'decision-promote-2', subject: { kind: 'activation', activationId: 'activation-2', artifactId: 'artifact-2', artifactDigest: 'sha256:artifact' } }; input.idempotencyKey = 'promote-2';
+    await new SqliteActivationSafetyStore(connection).commitPromotion(input);
+    expect(db.prepare("SELECT activation_id FROM activations WHERE action = 'code_tool_hook_live_activate' AND deactivated_at IS NULL").all()).toEqual([{ activation_id: 'activation-2' }]);
+    expect(db.prepare("SELECT decision FROM activation_decisions WHERE activation_id = 'activation-1'").get()).toEqual({ decision: 'supersede' }); connection.close();
+  });
+
   it('atomically pauses every current live RuleCode and persists the affected snapshot', async () => {
     const connection = new SqliteConnection(makeWorkspace());
     seedArtifact(connection);
@@ -306,5 +319,16 @@ describe('SqliteActivationSafetyStore', () => {
     expect(connection.getDb().prepare("SELECT action, deactivated_at FROM activations WHERE activation_id = 'activation-1'").get())
       .toEqual({ action: 'code_tool_hook_shadow_activate', deactivated_at: null });
     connection.close();
+  });
+
+  it('recovers an isolated live rule only to a new linked shadow activation', async () => {
+    const connection = new SqliteConnection(makeWorkspace()); seedArtifact(connection);
+    await new SqliteActivationStateStore(connection).recordActivation(liveActivation()); const store = new SqliteActivationSafetyStore(connection);
+    await store.safetyIsolate(isolateDecision(), 1);
+    const recovery: ActivationDecisionRecord = { decisionId: 'recover-1', subject: { kind: 'activation', activationId: 'activation-1', artifactId: 'artifact-1', artifactDigest: 'sha256:artifact' }, decision: 'recover_to_shadow', principal: { kind: 'configured_owner', ownerId: 'owner-1' }, authentication: { method: 'console_token', credentialId: 'console-1' }, reasonCode: 'owner_requests_revalidation', note: 'Collect fresh shadow evidence.', evidenceSnapshotId: null, decidedAt: '2026-08-21T06:00:00.000Z' };
+    await expect(store.recoverToShadow(recovery, { expectedControlVersion: 2, newActivationId: 'activation-recovery-1', idempotencyKey: 'recover-key-1' })).resolves.toMatchObject({ sourceActivationId: 'activation-1', shadowActivationId: 'activation-recovery-1' });
+    expect(connection.getDb().prepare("SELECT action FROM activations WHERE activation_id = 'activation-recovery-1'").get()).toEqual({ action: 'code_tool_hook_shadow_activate' });
+    await expect(store.getControlState('activation-1')).resolves.toMatchObject({ enforcement: 'safety_isolated' });
+    await expect(store.getControlState('activation-recovery-1')).resolves.toMatchObject({ enforcement: 'eligible' }); connection.close();
   });
 });
