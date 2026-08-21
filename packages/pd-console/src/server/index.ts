@@ -456,7 +456,15 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // CR8: GET /api/v1/activations
       if (urlPath === '/api/v1/activations' || urlPath.startsWith('/api/v1/activations/')) {
         const subPath = urlPath.slice('/api/v1/activations'.length);
-        asyncHandler(() => handleActivationsRoute(req, res, services.workspaceDir, subPath))(req, res);
+        const ownerId = process.env.PD_OWNER_ID?.trim();
+        const credentialId = process.env.PD_OWNER_CREDENTIAL_ID?.trim();
+        const ownerActor = services.authConfig.isEnabled() && ownerId && credentialId
+          ? { principal: { kind: 'configured_owner' as const, ownerId }, authentication: { method: 'console_token' as const, credentialId } }
+          : null;
+        asyncHandler(() => handleActivationsRoute(req, res, services.workspaceDir, subPath, {
+          ownerActor,
+          breakGlassActor: { principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' } },
+        }))(req, res);
         return;
       }
 

@@ -9,8 +9,9 @@ import {
   createProductionGateDeps,
   SqliteActivationSafetyStore,
   isFeatureEnabled,
+  RuleCodeOwnerDecisionService,
 } from '@principles/core/runtime-v2';
-import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause } from '@principles/core/runtime-v2';
+import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -91,6 +92,13 @@ export interface RuleCodeOwnerReview {
   ownerDecisionEnabled: boolean;
 }
 
+export interface OwnerMutationInput {
+  actor: OwnerPromotionActor;
+  idempotencyKey: string;
+  reasonCode: string;
+  note?: string;
+}
+
 function isMissingTableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes('no such table');
@@ -114,6 +122,17 @@ function toSnapshot(record: PIArtifactRecord): PIArtifactSnapshot {
     contentJson: record.contentJson,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+  };
+}
+
+function makeActivationDecision(value: { activation: ActivationStatusRecord; artifactDigest: string; decision: 'continue_observing' | 'reject_after_shadow' | 'emergency_deactivate'; input: OwnerMutationInput }): ActivationDecisionRecord {
+  const { activation, artifactDigest, decision, input } = value;
+  return {
+    decisionId: `decision-${randomUUID()}`,
+    subject: { kind: 'activation', activationId: activation.activationId, artifactId: activation.artifactId, artifactDigest },
+    decision, principal: input.actor.principal, authentication: input.actor.authentication,
+    ...(input.actor.operator ? { operator: input.actor.operator } : {}), reasonCode: input.reasonCode,
+    note: input.note ?? null, evidenceSnapshotId: null, decidedAt: new Date().toISOString(),
   };
 }
 
@@ -330,6 +349,82 @@ export class ActivationsConsoleModel {
         globalPause: await safetyStore.getActiveGlobalPause(),
         ownerDecisionEnabled: isFeatureEnabled(flags, 'rulecode_owner_live_decision'),
       };
+    } finally { try { conn.close(); } catch { /* best effort */ } }
+  }
+
+  async continueObserving(activationId: string, input: OwnerMutationInput): Promise<{ decisionId: string }> {
+    return this.withMutableRuleCode(activationId, async (store, activation, artifactDigest) => store.recordOwnerDecision(
+      makeActivationDecision({ activation, artifactDigest, decision: 'continue_observing', input }), input.idempotencyKey,
+    ));
+  }
+
+  async deactivateRuleCode(activationId: string, decision: 'reject_after_shadow' | 'emergency_deactivate', input: OwnerMutationInput): Promise<{ activationId: string; decisionId: string; deactivatedAt: string }> {
+    return this.withMutableRuleCode(activationId, async (store, activation, artifactDigest) => store.deactivateWithDecision(
+      makeActivationDecision({ activation, artifactDigest, decision, input }), input.idempotencyKey,
+    ));
+  }
+
+  async pauseAllRuleCode(input: OwnerMutationInput): Promise<GlobalRuleCodePause> {
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
+    try {
+      const decision: ActivationDecisionRecord = {
+        decisionId: `decision-${randomUUID()}`, subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause',
+        principal: input.actor.principal, authentication: input.actor.authentication,
+        ...(input.actor.operator ? { operator: input.actor.operator } : {}), reasonCode: input.reasonCode,
+        note: input.note ?? null, evidenceSnapshotId: null, decidedAt: new Date().toISOString(),
+      };
+      return await new SqliteActivationSafetyStore(conn).pauseAllLive(decision, `pause-${randomUUID()}`, input.idempotencyKey);
+    } finally { try { conn.close(); } catch { /* best effort */ } }
+  }
+
+  async releaseRuleCodePause(pauseId: string, expectedVersion: number, input: OwnerMutationInput): Promise<GlobalRuleCodePause> {
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
+    try {
+      const decision: ActivationDecisionRecord = {
+        decisionId: `decision-${randomUUID()}`, subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause_release',
+        principal: input.actor.principal, authentication: input.actor.authentication,
+        ...(input.actor.operator ? { operator: input.actor.operator } : {}), reasonCode: input.reasonCode,
+        note: input.note ?? null, evidenceSnapshotId: null, decidedAt: new Date().toISOString(),
+      };
+      return await new SqliteActivationSafetyStore(conn).releaseGlobalPause(decision, { pauseId, expectedVersion, idempotencyKey: input.idempotencyKey });
+    } finally { try { conn.close(); } catch { /* best effort */ } }
+  }
+
+  async promoteRuleCode(activationId: string, expected: { artifactId: string; artifactDigest: string; controlVersion: number; confirmed: boolean }, input: OwnerMutationInput): Promise<OwnerPromotionResult> {
+    const review = await this.getOwnerReview(activationId);
+    const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
+    try {
+      const store = new SqliteActivationSafetyStore(conn);
+      const service = new RuleCodeOwnerDecisionService({
+        ownerLiveDecisionEnabled: () => isFeatureEnabled(flags, 'rulecode_owner_live_decision'),
+        safetyControlsEnabled: () => isFeatureEnabled(flags, 'rulecode_safety_controls'),
+        evaluateReadiness: async () => review.readiness,
+        commitPromotion: value => store.commitPromotion(value),
+        newDecisionId: () => `decision-${randomUUID()}`,
+        now: () => new Date().toISOString(),
+      });
+      return await service.promote({
+        activationId, expectedArtifactId: expected.artifactId, expectedArtifactDigest: expected.artifactDigest,
+        expectedControlVersion: expected.controlVersion, idempotencyKey: input.idempotencyKey,
+        reasonCode: input.reasonCode, note: input.note, confirmed: expected.confirmed,
+      }, input.actor);
+    } finally { try { conn.close(); } catch { /* best effort */ } }
+  }
+
+  private async withMutableRuleCode<T>(activationId: string, action: (store: SqliteActivationSafetyStore, activation: ActivationStatusRecord, artifactDigest: string) => Promise<T>): Promise<T> {
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
+    try {
+      const activationStore = new SqliteActivationStateStore(conn);
+      const artifactStore = new SqlitePIArtifactStore(conn);
+      const matches = (await activationStore.listCodeToolHookActivations(true)).filter(value => value.activationId === activationId);
+      if (matches.length !== 1) throw new Error(`RuleCode mutation requires exactly one activation: ${activationId}`);
+      const [activation] = matches;
+      if (!activation) throw new Error(`Activation not found: ${activationId}`);
+      const artifact = await artifactStore.getArtifactById(activation.artifactId);
+      if (!artifact) throw new Error(`Artifact not found for activation: ${activation.artifactId}`);
+      const artifactDigest = `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`;
+      return await action(new SqliteActivationSafetyStore(conn), activation, artifactDigest);
     } finally { try { conn.close(); } catch { /* best effort */ } }
   }
 

@@ -242,6 +242,36 @@ describe('Activation disable route', () => {
     });
   });
 
+  describe('Owner RuleCode decisions', () => {
+    it('refuses governance mutation when server has no authenticated Owner identity', async () => {
+      const req = createMockRequest('POST', { subPath: '/act-review/continue-observing', body: { idempotencyKey: 'idem-1', reasonCode: 'observe_more' } });
+      const res = createMockResponse();
+      await handleActivationsRoute(req, res, tempDir, '/act-review/continue-observing', {
+        ownerActor: null,
+        breakGlassActor: { principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' } },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(parseResponseBody<{ error: string; nextAction: string }>(res)).toMatchObject({ error: 'owner_authentication_required', nextAction: expect.any(String) });
+    });
+
+    it('allows local break-glass global pause without fabricating Owner identity', async () => {
+      const conn = new SqliteConnection({ workspaceDir: tempDir, readonly: false });
+      const now = '2026-08-21T06:00:00.000Z'; const db = conn.getDb();
+      db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-pause', 'diagnosis', 'pending', ?, ?)").run(now, now);
+      db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('artifact-pause', 'rule', 'task-pause', '[]', 'validated', '{}', ?, ?)`).run(now, now);
+      db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at) VALUES ('act-pause', 'idem-pause-source', 'artifact-pause', 'code_tool_hook', 'code_tool_hook_live_activate', 'impl://rule-pause', ?, NULL)`).run(now);
+      db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-pause', 'eligible', 1, ?)`).run(now); conn.close();
+      const req = createMockRequest('POST', { subPath: '/emergency-pause', body: { idempotencyKey: 'pause-request-1', reasonCode: 'host_unusable' } });
+      const res = createMockResponse();
+      await handleActivationsRoute(req, res, tempDir, '/emergency-pause', {
+        ownerActor: null,
+        breakGlassActor: { principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' } },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(parseResponseBody<{ data: { status: string; affectedActivationIds: string[] } }>(res).data).toMatchObject({ status: 'paused', affectedActivationIds: ['act-pause'] });
+    });
+  });
+
   // ── Unknown routes ───────────────────────────────────────────────────────
 
   describe('Unknown routes', () => {
