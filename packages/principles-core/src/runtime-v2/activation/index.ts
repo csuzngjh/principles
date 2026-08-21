@@ -57,7 +57,7 @@ export {
 
 export { SqliteActivationStateStore } from './sqlite-activation-state-store.js';
 export { SqliteActivationSafetyStore } from './sqlite-activation-safety-store.js';
-export type { ActivationDecisionRecord, ActivationDecisionSubject, ActivationDecisionKind, ActivationControlState } from './activation-control-types.js';
+export type { ActivationDecisionRecord, ActivationDecisionSubject, ActivationDecisionKind, ActivationControlState, GlobalRuleCodePause } from './activation-control-types.js';
 export { RuleCodeOwnerDecisionService } from './rulecode-owner-decision-service.js';
 export type {
   PromotionEvidenceSnapshot, PromotionFailedCheck, PromotionReadinessResult,

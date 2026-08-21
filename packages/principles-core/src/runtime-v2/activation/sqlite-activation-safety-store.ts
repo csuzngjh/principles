@@ -1,5 +1,5 @@
 import type { SqliteConnection } from '../store/sqlite-connection.js';
-import type { ActivationControlState, ActivationDecisionKind, ActivationDecisionRecord } from './activation-control-types.js';
+import type { ActivationControlState, ActivationDecisionKind, ActivationDecisionRecord, GlobalRuleCodePause } from './activation-control-types.js';
 import type { PromotionCommitInput } from './rulecode-owner-decision-service.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,6 +34,22 @@ function mapControl(row: unknown): ActivationControlState | null {
     version,
     updatedAt: requiredString(row, 'updated_at'),
   };
+}
+
+function mapGlobalPause(row: unknown): GlobalRuleCodePause | null {
+  if (row === undefined) return null;
+  if (!isRecord(row)) throw new Error('Malformed global RuleCode pause row');
+  const status = requiredString(row, 'status');
+  const version = Object.hasOwn(row, 'version') ? row.version : undefined;
+  let affected: unknown;
+  try { affected = JSON.parse(requiredString(row, 'affected_activation_ids')); } catch { throw new Error('Malformed global RuleCode pause row: affected_activation_ids'); }
+  if ((status !== 'paused' && status !== 'released') || typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1
+    || !Array.isArray(affected) || !affected.every(value => typeof value === 'string' && value.length > 0)) {
+    throw new Error('Malformed global RuleCode pause row: status, version, or affected ids');
+  }
+  return { pauseId: requiredString(row, 'pause_id'), status, incidentDecisionId: requiredString(row, 'incident_decision_id'),
+    releaseDecisionId: optionalString(row, 'release_decision_id'), affectedActivationIds: affected,
+    pausedAt: requiredString(row, 'paused_at'), releasedAt: optionalString(row, 'released_at'), version };
 }
 
 const DECISIONS: readonly ActivationDecisionKind[] = [
@@ -97,6 +113,66 @@ export class SqliteActivationSafetyStore {
       FROM activation_control_states WHERE activation_id = ?
     `).get(activationId);
     return mapControl(row);
+  }
+
+  async getActiveGlobalPause(): Promise<GlobalRuleCodePause | null> {
+    const row: unknown = this.connection.getDb().prepare(`
+      SELECT pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version
+      FROM global_rulecode_pauses WHERE status = 'paused'
+    `).get();
+    return mapGlobalPause(row);
+  }
+
+  async pauseAllLive(decision: ActivationDecisionRecord, pauseId: string, idempotencyKey: string): Promise<GlobalRuleCodePause> {
+    const authorized = decision.subject.kind === 'all_live_rulecode' && decision.decision === 'global_emergency_pause'
+      && ((decision.principal.kind === 'break_glass' && decision.authentication.method === 'local_break_glass')
+        || (decision.principal.kind === 'configured_owner' && decision.authentication.method === 'console_token'));
+    if (!authorized) throw new Error('pauseAllLive requires authorized global_emergency_pause decision');
+    const db = this.connection.getDb();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = mapGlobalPause(db.prepare(`SELECT pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version FROM global_rulecode_pauses WHERE status = 'paused'`).get());
+      if (existing) { db.exec('COMMIT'); return existing; }
+      const rows: unknown = db.prepare(`SELECT activation_id FROM activations WHERE channel = 'code_tool_hook' AND action = 'code_tool_hook_live_activate' AND deactivated_at IS NULL ORDER BY activation_id`).all();
+      if (!Array.isArray(rows)) throw new Error('Malformed live activation result');
+      const affected = rows.map(row => isRecord(row) ? requiredString(row, 'activation_id') : (() => { throw new Error('Malformed live activation row'); })());
+      db.prepare(`INSERT INTO activation_decisions (decision_id, idempotency_key, subject_kind, decision, principal_kind, owner_id, policy_version, break_glass_reason, authentication_method, credential_id, operator_kind, operator_id, reason_code, note, decided_at) VALUES (?, ?, 'all_live_rulecode', 'global_emergency_pause', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(decision.decisionId, idempotencyKey, decision.principal.kind,
+          decision.principal.kind === 'configured_owner' ? decision.principal.ownerId : null,
+          decision.principal.kind === 'break_glass' ? decision.principal.reason : null,
+          decision.authentication.method,
+          decision.authentication.method === 'console_token' ? decision.authentication.credentialId : null,
+          decision.operator?.kind ?? null, decision.operator?.operatorId ?? null, decision.reasonCode, decision.note, decision.decidedAt);
+      db.prepare(`INSERT INTO global_rulecode_pauses (pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version) VALUES (?, 'paused', ?, NULL, ?, ?, NULL, 1)`)
+        .run(pauseId, decision.decisionId, JSON.stringify(affected), decision.decidedAt);
+      for (const activationId of affected) {
+        db.prepare(`UPDATE activation_control_states SET enforcement = 'safety_isolated', isolation_decision_id = ?, version = version + 1, updated_at = ? WHERE activation_id = ?`)
+          .run(decision.decisionId, decision.decidedAt, activationId);
+      }
+      const result = mapGlobalPause(db.prepare(`SELECT pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version FROM global_rulecode_pauses WHERE pause_id = ?`).get(pauseId));
+      if (!result) throw new Error('Global pause missing after insert');
+      db.exec('COMMIT'); return result;
+    } catch (error) { try { db.exec('ROLLBACK'); } catch { /* best effort */ } throw error; }
+  }
+
+  async releaseGlobalPause(decision: ActivationDecisionRecord, input: { pauseId: string; expectedVersion: number; idempotencyKey: string }): Promise<GlobalRuleCodePause> {
+    const { pauseId, expectedVersion, idempotencyKey } = input;
+    if (decision.subject.kind !== 'all_live_rulecode' || decision.decision !== 'global_emergency_pause_release'
+      || decision.principal.kind !== 'configured_owner' || decision.authentication.method !== 'console_token') {
+      throw new Error('releaseGlobalPause requires authenticated configured_owner release decision');
+    }
+    const db = this.connection.getDb(); db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`INSERT INTO activation_decisions (decision_id, idempotency_key, subject_kind, decision, principal_kind, owner_id, authentication_method, credential_id, operator_kind, operator_id, reason_code, note, decided_at) VALUES (?, ?, 'all_live_rulecode', 'global_emergency_pause_release', 'configured_owner', ?, 'console_token', ?, ?, ?, ?, ?, ?)`)
+        .run(decision.decisionId, idempotencyKey, decision.principal.ownerId, decision.authentication.credentialId,
+          decision.operator?.kind ?? null, decision.operator?.operatorId ?? null, decision.reasonCode, decision.note, decision.decidedAt);
+      const update = db.prepare(`UPDATE global_rulecode_pauses SET status = 'released', release_decision_id = ?, released_at = ?, version = version + 1 WHERE pause_id = ? AND status = 'paused' AND version = ?`)
+        .run(decision.decisionId, decision.decidedAt, pauseId, expectedVersion);
+      if (update.changes !== 1) throw new Error(`Global pause expected version ${expectedVersion}: ${pauseId}`);
+      const result = mapGlobalPause(db.prepare(`SELECT pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version FROM global_rulecode_pauses WHERE pause_id = ?`).get(pauseId));
+      if (!result) throw new Error('Global pause missing after release');
+      db.exec('COMMIT'); return result;
+    } catch (error) { try { db.exec('ROLLBACK'); } catch { /* best effort */ } throw error; }
   }
 
   async listDecisions(activationId: string): Promise<ActivationDecisionRecord[]> {

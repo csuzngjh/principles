@@ -1149,6 +1149,7 @@ export type {
   ActivationDecisionSubject,
   ActivationDecisionKind,
   ActivationControlState,
+  GlobalRuleCodePause,
   PromotionEvidenceSnapshot,
   PromotionFailedCheck,
   PromotionReadinessResult,

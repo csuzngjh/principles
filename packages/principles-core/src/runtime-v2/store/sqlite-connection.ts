@@ -565,6 +565,18 @@ export class SqliteConnection {
         BEFORE UPDATE ON activation_evidence_snapshots BEGIN SELECT RAISE(ABORT, 'activation evidence snapshots are immutable'); END;
       CREATE TRIGGER IF NOT EXISTS activation_evidence_snapshots_no_delete
         BEFORE DELETE ON activation_evidence_snapshots BEGIN SELECT RAISE(ABORT, 'activation evidence snapshots are immutable'); END;
+      CREATE TABLE IF NOT EXISTS global_rulecode_pauses (
+        pause_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL CHECK (status IN ('paused', 'released')),
+        incident_decision_id TEXT NOT NULL UNIQUE,
+        release_decision_id TEXT UNIQUE,
+        affected_activation_ids TEXT NOT NULL,
+        paused_at TEXT NOT NULL,
+        released_at TEXT,
+        version INTEGER NOT NULL CHECK (version >= 1)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_global_rulecode_one_active_pause
+        ON global_rulecode_pauses(status) WHERE status = 'paused';
     `);
 
     // PRI-286: confirm_first_state table is orphaned (SqliteConfirmFirstStateStore class deleted).

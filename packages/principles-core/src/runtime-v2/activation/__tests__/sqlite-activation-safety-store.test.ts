@@ -213,4 +213,45 @@ describe('SqliteActivationSafetyStore', () => {
       .toEqual({ action: 'code_tool_hook_shadow_activate' });
     connection.close();
   });
+
+  it('atomically pauses every current live RuleCode and persists the affected snapshot', async () => {
+    const connection = new SqliteConnection(makeWorkspace());
+    seedArtifact(connection);
+    await new SqliteActivationStateStore(connection).recordActivation(liveActivation());
+    const store = new SqliteActivationSafetyStore(connection);
+    const decision: ActivationDecisionRecord = {
+      decisionId: 'pause-decision-1', subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause',
+      principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' },
+      reasonCode: 'owner_emergency_stop', note: null, evidenceSnapshotId: null, decidedAt: '2026-08-21T04:00:00.000Z',
+    };
+
+    await expect(store.pauseAllLive(decision, 'pause-1', 'pause-key-1')).resolves.toMatchObject({
+      pauseId: 'pause-1', status: 'paused', affectedActivationIds: ['activation-1'], version: 1,
+    });
+    await expect(store.getControlState('activation-1')).resolves.toMatchObject({ enforcement: 'safety_isolated' });
+    await expect(store.getActiveGlobalPause()).resolves.toMatchObject({ pauseId: 'pause-1', status: 'paused' });
+    connection.close();
+  });
+
+  it('releasing the global latch never restores isolated activations', async () => {
+    const connection = new SqliteConnection(makeWorkspace());
+    seedArtifact(connection);
+    await new SqliteActivationStateStore(connection).recordActivation(liveActivation());
+    const store = new SqliteActivationSafetyStore(connection);
+    await store.pauseAllLive({
+      decisionId: 'pause-decision-1', subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause',
+      principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' },
+      reasonCode: 'owner_emergency_stop', note: null, evidenceSnapshotId: null, decidedAt: '2026-08-21T04:00:00.000Z',
+    }, 'pause-1', 'pause-key-1');
+    const release: ActivationDecisionRecord = {
+      decisionId: 'release-decision-1', subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause_release',
+      principal: { kind: 'configured_owner', ownerId: 'owner-1' }, authentication: { method: 'console_token', credentialId: 'console-1' },
+      reasonCode: 'incident_reviewed', note: 'Release latch only.', evidenceSnapshotId: null, decidedAt: '2026-08-21T04:05:00.000Z',
+    };
+
+    await expect(store.releaseGlobalPause(release, { pauseId: 'pause-1', expectedVersion: 1, idempotencyKey: 'release-key-1' })).resolves.toMatchObject({ status: 'released', version: 2 });
+    await expect(store.getControlState('activation-1')).resolves.toMatchObject({ enforcement: 'safety_isolated' });
+    await expect(store.getActiveGlobalPause()).resolves.toBeNull();
+    connection.close();
+  });
 });

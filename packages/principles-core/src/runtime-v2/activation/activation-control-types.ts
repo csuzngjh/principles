@@ -45,3 +45,14 @@ export interface ActivationControlState {
   version: number;
   updatedAt: string;
 }
+
+export interface GlobalRuleCodePause {
+  pauseId: string;
+  status: 'paused' | 'released';
+  incidentDecisionId: string;
+  releaseDecisionId: string | null;
+  affectedActivationIds: string[];
+  pausedAt: string;
+  releasedAt: string | null;
+  version: number;
+}
