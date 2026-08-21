@@ -419,6 +419,20 @@
         "reflectionQ1": "Does this principle describe behavior I want to see repeatedly?",
         "reflectionQ2": "Do I understand which channel it will activate through?",
         "reflectionQ3": "If it's wrong, do I know how to roll it back?",
+        "receipts": {
+          "title": "Receipt History",
+          "headline": "Your principle is influencing agent behavior",
+          "counts": "{{effectCount}} effect(s) · {{presenceCount}} injection(s)",
+          "empty": "No recent records — this principle has not been triggered at runtime yet.",
+          "note": "\"Effect\" = block / auto-correction / agent self-report; \"injection\" = the principle entered task context (gray). Self-reports are probabilistic agent claims, listed separately from deterministic events.",
+          "unavailableReason": "Receipt history is unavailable right now.",
+          "kind": {
+            "rule_blocked": "Block",
+            "auto_correct_applied": "Auto-correct",
+            "self_reported": "Agent self-report",
+            "prompt_injected": "Context injection"
+          }
+        },
         "trajectory": "View full trajectory when tracing is needed",
         "stageEvidence": "Evidence",
         "stageDiagnosis": "Diagnosis",

@@ -12,10 +12,12 @@ import {
   fetchLifecycleMetrics,
   fetchPrincipleTrajectory,
   fetchPrincipleGovernance,
+  fetchPrincipleReceipts,
   approveApproval,
   rejectApproval,
   editApproval,
 } from "../../api.js";
+import type { PrincipleReceiptsData } from "../../api.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   PrincipleDetail,
@@ -127,6 +129,7 @@ export function PrincipleDetailPage() {
   const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
   const [governance, setGovernance] = useState<OwnerGovernanceView | null>(null);
   const [governanceUnavailable, setGovernanceUnavailable] = useState<{ reason: string; nextAction?: string } | null>(null);
+  const [receipts, setReceipts] = useState<PrincipleReceiptsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -151,13 +154,15 @@ export function PrincipleDetailPage() {
     setApprovalGroup(null); // Clear previous approval group to prevent stale actionability (P1)
     setGovernance(null);
     setGovernanceUnavailable(null);
+    setReceipts(null);
     try {
-      const [pResult, aResult, lResult, tResult, gResult] = await Promise.all([
+      const [pResult, aResult, lResult, tResult, gResult, rResult] = await Promise.all([
         fetchPrincipleDetail(id),
         fetchApprovalsGrouped(),
         fetchLifecycleMetrics(id),
         fetchPrincipleTrajectory(id),
         fetchPrincipleGovernance(id),
+        fetchPrincipleReceipts(id),
       ]);
 
       if (!pResult.success) {
@@ -194,6 +199,13 @@ export function PrincipleDetailPage() {
         setGovernance(gResult.data);
       } else if (!gResult.success && gResult.reason !== 'feature_disabled') {
         setGovernanceUnavailable({ reason: gResult.error, ...(gResult.nextAction === undefined ? {} : { nextAction: gResult.nextAction }) });
+      }
+
+      // PRI-533: receipt history (degraded carries reason + nextAction)
+      if (rResult.success && rResult.data) {
+        setReceipts(rResult.data);
+      } else {
+        setReceipts(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -537,6 +549,48 @@ export function PrincipleDetailPage() {
               <h2 id="governance-summary-title" className="text-[16px] font-semibold text-ink">{t('principles.detail.governance.unavailable')}</h2>
               <p className="mt-1 text-[13px] text-ink-2">{t('principles.detail.governance.unavailableReason')}</p>
               <p className="mt-2 text-[12px] text-ink-3">{t('principles.detail.governance.unavailableNextAction')}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── PRI-533: Receipt history (生效履历) ─────────────────────────── */}
+      {receipts !== null && (
+        <section className="mb-8" aria-labelledby="receipt-history-title">
+          <SectionTitle>{t('principles.detail.receipts.title')}</SectionTitle>
+          {receipts.status === 'ok' ? (
+            <div data-testid="receipt-history" className="rounded-[var(--radius-md)] border border-line p-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 id="receipt-history-title" className="text-[15px] font-semibold text-ink">
+                  {t('principles.detail.receipts.headline', {
+                    defaultValue: '',
+                    effectCount: receipts.effectCount,
+                    lastEffectAt: receipts.lastEffectAt ? new Date(receipts.lastEffectAt).toLocaleDateString() : '',
+                  })}
+                </h2>
+                <span data-testid="receipt-history-counts" className="font-mono text-[11px] text-ink-3">
+                  {t('principles.detail.receipts.counts', { effectCount: receipts.effectCount, presenceCount: receipts.presenceCount })}
+                </span>
+              </div>
+              {receipts.events.length > 0 ? (
+                <ul className="mt-3 space-y-1.5">
+                  {receipts.events.map((event, index) => (
+                    <li key={`${event.createdAt}-${index}`} className={`flex flex-wrap items-baseline gap-2 text-[13px] ${event.level === 'presence' ? 'text-ink-4' : 'text-ink-2'}`}>
+                      <span className="font-mono text-[11px] text-ink-4">{event.createdAt.slice(0, 16).replace('T', ' ')}</span>
+                      <span className="font-mono text-[11px]">{t(`principles.detail.receipts.kind.${event.kind}`, { defaultValue: event.kind })}</span>
+                      {event.digest && <span className="min-w-0 flex-1 truncate" title={event.digest}>{event.digest}</span>}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-[13px] text-ink-3">{t('principles.detail.receipts.empty')}</p>
+              )}
+              <p className="mt-3 text-[11px] leading-relaxed text-ink-4">{t('principles.detail.receipts.note')}</p>
+            </div>
+          ) : (
+            <div data-testid="receipt-history-degraded" className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
+              <p className="text-[13px] text-ink-2">{receipts.reason ?? t('principles.detail.receipts.unavailableReason')}</p>
+              {receipts.nextAction && <p className="mt-1 text-[12px] text-ink-3">{receipts.nextAction}</p>}
             </div>
           )}
         </section>
