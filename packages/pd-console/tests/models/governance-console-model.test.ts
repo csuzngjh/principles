@@ -482,6 +482,63 @@ describe('GovernanceConsoleModel — PRI-556 degraded time window', () => {
     expect(result.degradedSignals![0].reasonCode).toBe('task_retry_wait');
     expect(result.degradedSignals![0].failureSummary?.count).toBe(1);
   });
+
+  it('short ids stay distinguishable when tasks share the same channel suffix (UUID head preferred over tail slice)', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Three distinct tasks whose ids differ ONLY in the UUID token and share
+    // the identical repeated channel suffix — a tail slice would give all
+    // three the same short code ("mpt-prompt"), defeating attribution.
+    const uuids = [
+      'aaaaaaaa-1111-2222-3333-444444444444',
+      'bbbbbbbb-1111-2222-3333-444444444444',
+      'cccccccc-1111-2222-3333-444444444444',
+    ];
+    const values = uuids.map(
+      (uuid) => `('artificer-scribe-philosopher-dreamer-${uuid}-prompt-prompt-prompt', 'artificer', 'failed', '${twoDaysAgo}', '${twoDaysAgo}', 3, 'input_invalid')`,
+    );
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ${values.join(', ')}
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    const failedSignal = result.degradedSignals!.find((s) => s.reasonCode === 'task_failed');
+    expect(failedSignal).toBeDefined();
+    const shortIds = failedSignal!.failureSummary!.details.map((d) => d.taskId);
+    // ERR-088: assert exact values AND set distinctness — a length-only
+    // assertion passes for any truncation scheme, including the broken one.
+    expect(shortIds).toEqual(['aaaaaaaa', 'bbbbbbbb', 'cccccccc']);
+    expect(new Set(shortIds).size).toBe(shortIds.length);
+  });
+
+  it('task ids without a UUID token fall back to the tail slice without throwing', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ('rulehost-manual_1781970379703_kklqs19g-artificer-r1-mqmj8yaa', 'evaluator', 'failed', '${twoDaysAgo}', '${twoDaysAgo}', 3, 'input_invalid')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    const failedSignal = result.degradedSignals!.find((s) => s.reasonCode === 'task_failed');
+    expect(failedSignal).toBeDefined();
+    const detail = failedSignal!.failureSummary!.details[0];
+    // No canonical UUID token in this id shape → tail-slice fallback (last 12 chars).
+    expect(detail.taskId).toBe('-r1-mqmj8yaa');
+  });
 });
 
 // ── Data Computation ─────────────────────────────────────────────────────────

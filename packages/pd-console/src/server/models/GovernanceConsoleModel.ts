@@ -56,7 +56,11 @@ export interface DegradedSignal {
 export interface DegradedFailureDetail {
   /** Task kind, e.g. 'artificer' */
   kind: string;
-  /** Short task id (last 12 chars) — full task id remains visible on detail pages */
+  /**
+   * Short high-entropy task code — first 8 chars of the embedded UUID token
+   * when present, else the last 12 chars. Full task id remains visible on
+   * detail pages.
+   */
   taskId: string;
   /** Bounded last_error excerpt */
   reason: string;
@@ -81,7 +85,23 @@ const DEGRADED_SIGNAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** PRI-556: max per-task detail entries embedded in a degraded signal summary. */
 const DEGRADED_SIGNAL_MAX_DETAILS = 5;
 
+/**
+ * Canonical UUID token inside a task id (`<role>-<chain>-<uuid>-<channel>×N`).
+ * No `g` flag on purpose: stateless `match`, safe to share across calls.
+ */
+const TASK_ID_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/**
+ * PRI-556: short display code for a task id. Prefers the high-entropy UUID
+ * head because most task ids end with the same repeated channel suffix
+ * (e.g. `…-prompt-prompt-prompt`) — a tail slice would collapse distinct
+ * tasks into identical short codes and defeat attribution. Falls back to the
+ * tail slice for ids without a canonical UUID token; never throws on
+ * unexpected id shapes (rc-1).
+ */
 function shortTaskId(taskId: string): string {
+  const uuidMatch = TASK_ID_UUID_RE.exec(taskId);
+  if (uuidMatch) return uuidMatch[0].slice(0, 8);
   return taskId.length <= 12 ? taskId : taskId.slice(-12);
 }
 
