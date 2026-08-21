@@ -316,7 +316,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-009, ERR-024, ERR-033
 - **Source**: PRI-553
 - **Date**: 2026-08-20
-- **Recurrence**: None
+- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must refuse promotion. That left room for the stricter Owner decision authority to disappear while the legacy unchecked mutation remained available. The same review also found that local no-auth Console had been allowed to write `reject-after-shadow`, incorrectly granting governance authority to a break-glass operator. Fixed before implementation by making feature-off refuse promotion across Console and CLI, requiring both paths to use one application service, and restricting unauthenticated authority to inspect/deactivate/global-pause only. Regression requirement: disabled, unavailable, validated-deny, and authenticated-allow must be exercised at every promotion entry point; no-auth tests must prove governance writes are refused.
 
 ---
 

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960">
+  <defs><filter id="s"><feDropShadow dx="0" dy="5" stdDeviation="12" flood-opacity=".08"/></filter></defs>
+  <rect width="1440" height="960" fill="#f5f7fb"/>
+  <rect width="248" height="960" fill="#0d1628"/>
+  <text x="32" y="54" fill="#fff" font-family="Inter,Microsoft YaHei,sans-serif" font-size="20" font-weight="700">Principles Disciple</text><text x="32" y="79" fill="#8290aa" font-family="Inter" font-size="12">OWNER CONTROL PLANE</text>
+  <g font-family="Inter,Microsoft YaHei,sans-serif" font-size="14"><text x="48" y="138" fill="#9aa7ba">治理焦点</text><text x="48" y="190" fill="#9aa7ba">Principles 审批</text><rect x="18" y="208" width="212" height="42" rx="8" fill="#1c2940"/><text x="48" y="234" fill="#fff">规则激活</text><text x="48" y="286" fill="#9aa7ba">证据与审计</text></g>
+  <text x="280" y="48" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">待上线规则  /  RuleCode v2</text>
+  <text x="280" y="84" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="24" font-weight="700">变更网络配置前必须先完成根因诊断</text>
+  <rect x="1114" y="47" width="132" height="34" rx="17" fill="#ecfdf3"/><text x="1137" y="69" fill="#047857" font-family="Inter,Microsoft YaHei,sans-serif" font-size="12" font-weight="700">可以审阅</text>
+  <rect x="1256" y="47" width="116" height="34" rx="17" fill="#f3e8ff"/><text x="1280" y="69" fill="#7e22ce" font-family="Inter,Microsoft YaHei,sans-serif" font-size="12" font-weight="700">高风险</text>
+  <rect x="280" y="116" width="1092" height="86" rx="14" fill="#fff7ed" stroke="#f59e0b"/>
+  <text x="304" y="146" fill="#92400e" font-family="Inter,Microsoft YaHei,sans-serif" font-size="14" font-weight="700">证据尚未达到建议阈值</text>
+  <text x="304" y="174" fill="#92400e" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">已观察 18/24 小时、14/20 次 eligible evaluations、2/3 次匹配。安全门禁全部通过；Owner 可说明理由后上线。</text>
+  <rect x="280" y="226" width="720" height="298" rx="16" fill="#fff" filter="url(#s)"/>
+  <text x="304" y="260" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="17" font-weight="700">预计影响</text>
+  <text x="304" y="292" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">明确作用域</text><text x="448" y="292" fill="#111827" font-family="JetBrains Mono,monospace" font-size="13">bash, write · network/config/**</text>
+  <text x="304" y="324" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">不会影响</text><text x="448" y="324" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">读取、搜索、PD Console、紧急停用与诊断恢复</text>
+  <line x1="304" y1="348" x2="976" y2="348" stroke="#e5e7eb"/>
+  <g font-family="Inter,Microsoft YaHei,sans-serif"><text x="304" y="382" fill="#667085" font-size="12">Eligible</text><text x="304" y="416" fill="#111827" font-size="24" font-weight="700">14</text><text x="452" y="382" fill="#667085" font-size="12">Matched</text><text x="452" y="416" fill="#111827" font-size="24" font-weight="700">2</text><text x="600" y="382" fill="#667085" font-size="12">Would block</text><text x="600" y="416" fill="#b45309" font-size="24" font-weight="700">2</text><text x="748" y="382" fill="#667085" font-size="12">覆盖工具</text><text x="748" y="416" fill="#111827" font-size="24" font-weight="700">1 / 3</text></g>
+  <rect x="304" y="450" width="672" height="48" rx="8" fill="#f8fafc"/><text x="320" y="479" fill="#475467" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">最坏影响：阻止未完成诊断的网络配置写入；不会造成全工具拒绝。</text>
+  <rect x="1024" y="226" width="348" height="298" rx="16" fill="#fff" filter="url(#s)"/>
+  <text x="1048" y="260" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="17" font-weight="700">上线安全门禁</text>
+  <g font-family="Inter,Microsoft YaHei,sans-serif" font-size="13"><text x="1048" y="298" fill="#047857">●  有限作用域</text><text x="1048" y="330" fill="#047857">●  无全局 deny 路径</text><text x="1048" y="362" fill="#047857">●  GoldenTrace 通过</text><text x="1048" y="394" fill="#047857">●  宿主兼容性通过</text><text x="1048" y="426" fill="#047857">●  Host Liveness 通过</text><text x="1048" y="458" fill="#047857">●  组合规则测试通过</text><text x="1048" y="490" fill="#047857">●  紧急控制面可用</text></g>
+  <rect x="280" y="548" width="1092" height="208" rx="16" fill="#fff" filter="url(#s)"/>
+  <text x="304" y="582" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="17" font-weight="700">Shadow 样本</text>
+  <rect x="304" y="606" width="1044" height="54" rx="8" fill="#fff7ed"/><text x="320" y="630" fill="#92400e" font-family="Inter,Microsoft YaHei,sans-serif" font-size="12" font-weight="700">预计阻断</text><text x="416" y="630" fill="#111827" font-family="JetBrains Mono,monospace" font-size="12">bash · network/config/proxy.yaml</text><text x="416" y="648" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="11">原因：缺少诊断证据引用 · 参数已脱敏</text>
+  <rect x="304" y="672" width="1044" height="54" rx="8" fill="#ecfdf3"/><text x="320" y="696" fill="#047857" font-family="Inter,Microsoft YaHei,sans-serif" font-size="12" font-weight="700">预计放行</text><text x="416" y="696" fill="#111827" font-family="JetBrains Mono,monospace" font-size="12">bash · npm test</text><text x="416" y="714" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="11">中性对照：不在声明作用域内</text>
+  <rect x="280" y="788" width="1092" height="132" rx="16" fill="#fff" stroke="#d0d5dd"/>
+  <text x="304" y="820" fill="#111827" font-family="Inter,Microsoft YaHei,sans-serif" font-size="15" font-weight="700">Owner 决策</text>
+  <text x="304" y="848" fill="#667085" font-family="Inter,Microsoft YaHei,sans-serif" font-size="12">上线将绑定当前 RuleCode v2 与以上证据快照；证据不足上线需要记录理由。</text>
+  <rect x="304" y="866" width="132" height="38" rx="8" fill="#fff" stroke="#98a2b3"/><text x="335" y="890" fill="#344054" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">继续观察</text>
+  <rect x="448" y="866" width="154" height="38" rx="8" fill="#fff" stroke="#dc2626"/><text x="477" y="890" fill="#b91c1c" font-family="Inter,Microsoft YaHei,sans-serif" font-size="13">拒绝并停用</text>
+  <rect x="1170" y="858" width="178" height="46" rx="8" fill="#111827"/><text x="1206" y="886" fill="#fff" font-family="Inter,Microsoft YaHei,sans-serif" font-size="14" font-weight="700">说明理由并上线</text>
+</svg>
