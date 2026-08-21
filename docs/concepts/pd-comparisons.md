@@ -1,99 +1,94 @@
 # PD vs Adjacent Categories（对照基线）
 
 > Comparison canonical content. Published at https://principles-website.pages.dev/comparisons (EN) and /zh/comparisons (ZH).
+> Tone rule (owner review 2026-08-21): 不同工具解决不同问题。不做排名、不贬低相邻类别——平行、中性、克制地描述各自位置。
 
-## PD vs AI Memory
-
-```
-Memory:
-"What happened?"
-
-PD:
-"What should change because of what happened?"
-```
-
-Memory systems store and retrieve information — transcripts, preferences, facts. PD governs behavior: it transforms validated behavioral experience into owner-approved principles that change how the agent acts next time. PD deliberately does not own general memory; session memory remains the host's job.
-
-## PD vs Prompt Engineering
+## Framing
 
 ```
-Prompt:
-Explicit instruction before execution.
+Different tools solve different problems.
 
-PD:
-Experience-based improvement after execution.
+Memory:    stores information.
+Prompt:    provides instructions.
+Skills:    provide capabilities.
+PD:        governs behavioral improvement.
 ```
 
-Prompt engineering tells agents what to do upfront. PD learns from what actually happened during real interactions — repeated corrections, behavioral evidence — and converts the validated part into principles. A prompt is an instruction; a PD principle is a governed, reviewable outcome of experience.
+## PD & AI Memory
 
-## PD vs Agent Skills
+> Memory: stores information — *"What happened?"*
+> PD: governs behavior — *"What should change because of what happened?"*
 
-```
-Skills provide capabilities.
+Memory systems store and retrieve information: transcripts, preferences, facts. PD turns validated behavioral experience into owner-approved principles that change how the agent acts next time. The two complement each other; session memory remains the host's job.
 
-PD governs behavior.
-```
+## PD & Prompt Engineering
 
-Skills extend what an agent can do (new tools, new abilities). PD governs how the agent behaves while doing it — closing the gap between the Owner's expectations and the agent's recurring behavior patterns. Skills are additive capability; PD is behavioral alignment under owner authority.
+> Prompt: provides instructions — before execution.
+> PD: governs behavioral improvement — after execution.
 
-## PD vs Autonomous Self-Improvement
+Prompt engineering defines what the agent should do upfront. PD works on the other side of execution: it turns what actually happened during real interactions into reviewed principles. Both shape behavior; they operate at different moments.
 
-```
-Self-improving agents decide changes themselves.
+## PD & Agent Skills
 
-PD keeps the Owner as the authority.
-```
+> Skills: provide capabilities.
+> PD: governs behavioral improvement.
 
-PD does not let agents independently decide values or modify themselves. The system proposes; the Owner reviews and approves. Every activation is reversible and observable. Improvement is experience-based, but governance is never autonomous.
+Skills extend what an agent can do — new tools, new abilities. PD governs how the agent behaves while doing the work, under owner authority. The two compose naturally: skills add capability, PD aligns behavior.
+
+## PD & Autonomous Self-Improvement
+
+> Self-improving agents: decide changes themselves.
+> PD: the Owner decides; the system proposes.
+
+In PD, every principle proposal passes owner review before activation, and every activation is reversible. Improvement is experience-based; governance stays with the Owner.
 
 ## One-line summary
 
-Principles Disciple is an **AI Agent Governance System**: it turns repeated corrections into owner-approved, reviewable, reversible behavior principles — not memory, not prompts, not autonomous self-modification.
+Memory stores, prompts instruct, skills extend. PD governs behavioral improvement — turning repeated corrections into owner-approved, reviewable, reversible principles.
 
 ---
 
 # 中文版
 
-## PD vs AI Memory
+## 定位框架
 
 ```
-Memory：「发生了什么？」
+不同工具解决不同问题。
 
-PD：「因为发生了什么，行为应该改变什么？」
+Memory：存储信息。
+Prompt：提供指令。
+Skills：提供能力。
+PD：治理行为改进。
 ```
 
-Memory 系统存储和检索信息（对话、偏好、事实）；PD 治理行为——把验证过的行为经验转化为经 Owner 审批、能改变 Agent 下次行为的原则。PD 刻意不做通用记忆，会话记忆仍由宿主负责。
+## PD 与 AI Memory
 
-## PD vs Prompt Engineering
+> Memory：存储信息——「发生了什么？」
+> PD：治理行为——「因为发生了什么，行为应该改变什么？」
 
-```
-Prompt：执行前的显式指令。
+Memory 系统存储和检索信息：对话记录、偏好、事实。PD 把验证过的行为经验转化为经 Owner 审批、能改变 Agent 下次行为的原则。两者互补；会话记忆仍由宿主负责。
 
-PD：执行后基于经验的改进。
-```
+## PD 与 Prompt Engineering
 
-Prompt 工程在事前告诉 Agent 该做什么；PD 从真实交互中发生了什么（反复纠正、行为证据）学习，把验证过的部分转化为原则。Prompt 是指令；PD 原则是经验的、受治理的可审查产物。
+> Prompt：提供指令——执行之前。
+> PD：治理行为改进——执行之后。
 
-## PD vs Agent Skills
+Prompt 工程在事前定义 Agent 该做什么；PD 工作在执行的另一侧：把真实交互中实际发生的东西转化为经审查的原则。两者都在塑造行为，只是作用于不同时刻。
 
-```
-Skills 提供能力。
+## PD 与 Agent Skills
 
-PD 治理行为。
-```
+> Skills：提供能力。
+> PD：治理行为改进。
 
-Skills 扩展 Agent 能做什么（新工具、新能力）；PD 治理 Agent 在做的过程中表现如何——弥合 Owner 期望与 Agent 反复出现的行为模式之间的差距。Skills 是能力叠加；PD 是 Owner 权威下的行为对齐。
+Skills 扩展 Agent 能做什么——新工具、新能力。PD 在 Owner 权威下治理 Agent 做事过程中的行为方式。两者天然可组合：Skills 增加能力，PD 对齐行为。
 
-## PD vs 自主自我改进
+## PD 与自主自我改进
 
-```
-自改进 Agent 自行决定变更。
+> 自我改进型 Agent：自行决定变更。
+> PD：Owner 决定，系统提案。
 
-PD 让 Owner 始终保有权威。
-```
-
-PD 不允许 Agent 独立做价值判断或自我修改。系统提案，Owner 审查批准。每次激活可回滚、可观察。改进基于经验，但治理永不自主。
+在 PD 中，每条原则提案都要经过 Owner 审查才能激活，每次激活都可回滚。改进基于经验；治理始终属于 Owner。
 
 ## 一句话总结
 
-Principles Disciple 是一个 **AI Agent 行为治理系统**：把反复纠正转化为经 Owner 审批、可审查、可回滚的行为原则——不是 Memory，不是 Prompt 工具，也不是自主自我修改。
+Memory 存储，Prompt 指令，Skills 扩展。PD 治理行为改进——把反复纠正转化为经 Owner 审批、可审查、可回滚的行为原则。
