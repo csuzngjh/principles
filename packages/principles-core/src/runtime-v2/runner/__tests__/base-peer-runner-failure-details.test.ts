@@ -40,7 +40,7 @@ class TestRunner extends BasePeerRunner<TestContext, TestOutput> {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async buildContext(): Promise<TestContext> { return { contextHash: 'test' }; }
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async invokeRuntime(): Promise<RunHandle> { return { runId: 'run-001', runtimeKind: 'test', startedAt: new Date().toISOString() }; }
+  async invokeRuntime(): Promise<RunHandle> { return { runId: 'run-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() }; }
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async validateOutput(output: unknown): Promise<PeerRunnerValidationResult> {
     if (typeof output !== 'object' || output === null) return { valid: false, errors: ['not an object', 'missing data'], errorCategory: 'output_invalid' };

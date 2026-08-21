@@ -621,7 +621,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
 
-  private async handlePostLeaseError(
+  protected async handlePostLeaseError(
     taskId: string,
     task: TaskRecord,
     error: unknown,
@@ -895,6 +895,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       if (existingDiagnosticJson) {
         const candidate = JSON.parse(existingDiagnosticJson) as unknown;
         if (typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate)) {
+          // runtime-contract-exempt: ERR-001 上方 typeof/Array.isArray 守卫已收窄
           parsed = candidate as Record<string, unknown>;
         }
       }
