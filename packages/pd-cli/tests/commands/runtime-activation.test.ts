@@ -919,6 +919,7 @@ describe('handleRuntimeActivationPromote', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetArtifactById.mockResolvedValue(null);
     mockListCodeToolHookActivations.mockResolvedValue([
       { activationId: 'act-hook-1', artifactId: 'art-002', channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', targetRef: 'rule-001', activatedAt: '2026-06-18T00:00:00.000Z', promotedAt: null, deactivatedAt: null },
     ]);
@@ -968,7 +969,7 @@ describe('handleRuntimeActivationPromote', () => {
     expect(mockPromoteActivation).not.toHaveBeenCalled();
   });
 
-  it('feature-on authenticated CLI refuses when readiness authority is unavailable', async () => {
+  it('feature-on authenticated CLI uses the real readiness reader and reports missing artifact', async () => {
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
     vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
     vi.stubEnv('PD_OWNER_ID', 'owner-1');
@@ -979,8 +980,25 @@ describe('handleRuntimeActivationPromote', () => {
       idempotencyKey: 'promote-1', reasonCode: 'owner_review', note: 'reviewed',
     });
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
-    expect(output.reasonCode).toBe('promotion_readiness_unavailable');
-    expect(output.failedChecks).toEqual([{ checkId: 'promotion_readiness_reader', reasonCode: 'not_implemented' }]);
+    expect(output.reasonCode).toBe('promotion_safety_gate_blocked');
+    expect(output.failedChecks).toEqual([{ checkId: 'lineage_binding', reasonCode: 'artifact_not_found' }]);
+    expect(mockClose).toHaveBeenCalledOnce();
+    expect(mockPromoteActivation).not.toHaveBeenCalled();
+  });
+
+  it('authenticated dry-run opens state read-only and never commits', async () => {
+    const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+    mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
+    vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
+    vi.stubEnv('PD_OWNER_ID', 'owner-1');
+    vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'credential-1');
+    await handleRuntimeActivationPromote({
+      workspace: WS, activationId: 'act-hook-1', dryRun: true, json: true,
+      artifactId: 'art-002', artifactDigest: 'sha256:artifact', controlVersion: 1,
+      idempotencyKey: 'promote-1', reasonCode: 'owner_review', note: 'reviewed',
+    });
+
+    expect(RuntimeStateManager).toHaveBeenCalledWith(expect.objectContaining({ readonly: true }));
     expect(mockPromoteActivation).not.toHaveBeenCalled();
   });
 

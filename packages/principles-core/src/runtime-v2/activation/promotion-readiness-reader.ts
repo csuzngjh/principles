@@ -8,7 +8,7 @@ export interface PromotionReadinessReaderDeps {
   computeArtifactDigest(artifact: PIArtifactSnapshot): string;
   validateProductionArtifact(artifact: PIArtifactSnapshot): Promise<CanActivateResult>;
   collectHostChecks(artifact: PIArtifactSnapshot): Promise<PromotionReadinessCheck[]>;
-  buildEvidenceSnapshot(checks: PromotionReadinessCheck[]): PromotionEvidenceSnapshot;
+  buildEvidenceSnapshot(checks: PromotionReadinessCheck[], artifact?: PIArtifactSnapshot): PromotionEvidenceSnapshot;
   newEvaluationId(): string;
 }
 
@@ -47,7 +47,7 @@ export class PromotionReadinessReader {
       { checkId: 'golden_trace', status: gate.ok ? 'passed' : 'failed', ...(!gate.ok ? { reasonCode: gate.reason } : {}) },
       ...await this.deps.collectHostChecks(artifact),
     );
-    const evidenceSnapshot = this.deps.buildEvidenceSnapshot(checks);
+    const evidenceSnapshot = this.deps.buildEvidenceSnapshot(checks, artifact);
     return evaluateRuleCodePromotionReadiness({ evaluationId, artifactId: artifact.artifactId, artifactDigest, evidenceSnapshot, checks });
   }
 

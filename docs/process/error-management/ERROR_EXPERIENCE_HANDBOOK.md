@@ -599,6 +599,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-218 / PR #681
 - **Date**: 2026-05-23
 - **Recurrence**: 2026-06-27 PR #1079 — `migrate-illegal-expected-decision.ts` docstring claimed "默认 dry-run" but `parseArgs()` defaulted to write mode (no `--write` flag required). Operator running the script with no flags would mutate the DB. Fixed by flipping to `--write` opt-in.
+  - 2026-08-21 RuleCode Owner promotion self-review (no Linear issue): the shared decision service initially had no explicit dry-run result, and the first real readiness wiring opened `RuntimeStateManager` in writable mode even though no promotion commit was intended. Future completion of all readiness checks could therefore have made `--dry-run` ambiguous, while initialization itself could migrate schema or create WAL state. Fixed by adding a first-class `would_promote` service result that never calls the atomic commit port and by constructing the manager with `readonly: true` for dry-run; production CLI tests assert the real constructor option and zero legacy mutation. Lesson: dry-run safety must cover both business mutation and connection/bootstrap side effects.
 
 ---
 

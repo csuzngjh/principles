@@ -42,6 +42,7 @@ export interface OwnerPromotionRequest {
   reasonCode: string;
   note?: string;
   confirmed: boolean;
+  dryRun?: boolean;
 }
 
 export interface PromotionCommitInput {
@@ -55,6 +56,7 @@ export interface PromotionCommitInput {
 
 export type OwnerPromotionResult =
   | { ok: true; decision: 'promoted'; activationId: string; decisionId: string; promotedAt: string }
+  | { ok: true; decision: 'would_promote'; activationId: string; readinessEvaluationId: string; evidenceSnapshotDigest: string }
   | { ok: false; reasonCode: string; summary: string; failedChecks: PromotionFailedCheck[]; nextAction: string };
 
 export interface RuleCodeOwnerDecisionServiceDeps {
@@ -88,7 +90,7 @@ export class RuleCodeOwnerDecisionService {
     if (actor.authentication.method === 'cli_owner_credential' && (!request.note || request.note.trim().length === 0)) {
       return refused({ reasonCode: 'cli_owner_note_required', summary: 'CLI promotion requires an Owner review note.', nextAction: 'Provide a concise --note explaining the live decision.' });
     }
-    if (!request.confirmed) {
+    if (!request.confirmed && request.dryRun !== true) {
       return refused({ reasonCode: 'confirmation_required', summary: 'Live enforcement was not confirmed.', nextAction: 'Refresh the review evidence and explicitly confirm promotion.' });
     }
     if (!request.activationId || !request.expectedArtifactId || !request.expectedArtifactDigest || !request.idempotencyKey || !request.reasonCode) {
@@ -110,6 +112,13 @@ export class RuleCodeOwnerDecisionService {
     }
     if (readiness.status === 'evidence_insufficient' && (!request.note || request.note.trim().length === 0)) {
       return refused({ reasonCode: 'evidence_override_note_required', summary: 'Evidence-insufficient promotion requires an Owner note.', nextAction: 'Explain why promotion is acceptable despite insufficient evidence.' });
+    }
+    if (request.dryRun === true) {
+      return {
+        ok: true, decision: 'would_promote', activationId: request.activationId,
+        readinessEvaluationId: readiness.evaluationId,
+        evidenceSnapshotDigest: readiness.evidenceSnapshot.snapshotDigest,
+      };
     }
 
     const decidedAt = this.deps.now();

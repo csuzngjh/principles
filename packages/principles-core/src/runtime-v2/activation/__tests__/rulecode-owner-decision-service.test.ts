@@ -128,4 +128,16 @@ describe('RuleCodeOwnerDecisionService promotion authority', () => {
       }),
     }));
   });
+
+  it('evaluates a dry-run but never commits a live decision', async () => {
+    const { instance, commitPromotion } = service();
+    await expect(instance.promote({ ...request, confirmed: false, dryRun: true }, actor)).resolves.toEqual({
+      ok: true,
+      decision: 'would_promote',
+      activationId: 'activation-1',
+      readinessEvaluationId: 'readiness-1',
+      evidenceSnapshotDigest: 'sha256:snapshot',
+    });
+    expect(commitPromotion).not.toHaveBeenCalled();
+  });
 });

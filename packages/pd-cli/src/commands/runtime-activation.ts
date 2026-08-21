@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Command } from 'commander';
 import {
   RuntimeStateManager,
@@ -17,6 +18,8 @@ import {
   extractPrincipleId,
   isFeatureEnabled,
   RuleCodeOwnerDecisionService,
+  PromotionReadinessReader,
+  SqliteActivationSafetyStore,
 } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
@@ -391,6 +394,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
     return;
   }
 
+  let stateManager: RuntimeStateManager | undefined;
   try {
     const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
     const flags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
@@ -408,22 +412,55 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
           principal: { kind: 'break_glass' as const, reason: 'local_no_auth_emergency' as const },
           authentication: { method: 'local_break_glass' as const },
         };
-    const unavailableEvidence = {
-      snapshotId: 'unavailable', snapshotDigest: 'unavailable', artifactDigest: opts.artifactDigest ?? 'unavailable',
-      lineageRefs: [], hostRuntimeVersion: 'unavailable', safetyGateResults: [],
-      shadowSummary: { observed: 0, wouldBlock: 0, errors: 0 }, configurationVersion: 'unavailable',
-      redaction: { version: 'unavailable', rawParametersStored: false as const }, createdAt: new Date().toISOString(),
+    const getStateManager = async (): Promise<RuntimeStateManager> => {
+      if (!stateManager) {
+        stateManager = new RuntimeStateManager({ workspaceDir, readonly: opts.dryRun === true });
+        await stateManager.initialize();
+      }
+      return stateManager;
     };
     const service = new RuleCodeOwnerDecisionService({
       ownerLiveDecisionEnabled: () => isFeatureEnabled(flags, 'rulecode_owner_live_decision'),
       safetyControlsEnabled: () => isFeatureEnabled(flags, 'rulecode_safety_controls'),
-      evaluateReadiness: async () => ({
-        status: 'unavailable', evaluationId: 'unavailable', artifactId: opts.artifactId ?? '',
-        artifactDigest: opts.artifactDigest ?? '', evidenceSnapshot: unavailableEvidence,
-        failedChecks: [{ checkId: 'promotion_readiness_reader', reasonCode: 'not_implemented' }],
-      }),
-      commitPromotion: async () => { throw new Error('promotion commit is unreachable without validated readiness'); },
-      newDecisionId: () => 'unavailable',
+      evaluateReadiness: async request => {
+        const manager = await getStateManager();
+        const activationStore = new SqliteActivationStateStore(manager.connection);
+        const writer = new RuleHostWriter({
+          gateDeps: createProductionGateDeps(),
+          featureFlagProbe: flagId => isFeatureEnabled(flags, flagId),
+        });
+        const reader = new PromotionReadinessReader({
+          listCodeToolHookActivations: () => activationStore.listCodeToolHookActivations(false),
+          getArtifactById: artifactId => manager.piArtifactStore.getArtifactById(artifactId),
+          computeArtifactDigest: artifact => `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`,
+          validateProductionArtifact: artifact => writer.canActivate(artifact),
+          collectHostChecks: async () => [],
+          buildEvidenceSnapshot: (checks, artifact) => {
+            const createdAt = new Date().toISOString();
+            const artifactDigest = artifact
+              ? `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`
+              : request.expectedArtifactDigest;
+            const snapshotBody = JSON.stringify({ artifactDigest, checks, createdAt });
+            return {
+              snapshotId: `snapshot-${randomUUID()}`,
+              snapshotDigest: `sha256:${createHash('sha256').update(snapshotBody, 'utf8').digest('hex')}`,
+              artifactDigest,
+              lineageRefs: artifact ? [artifact.sourceTaskId, ...artifact.lineageArtifactIds] : [],
+              hostRuntimeVersion: 'unavailable', safetyGateResults: checks,
+              shadowSummary: { observed: 0, wouldBlock: 0, errors: 0 },
+              configurationVersion: 'pd-config-current',
+              redaction: { version: 'v1', rawParametersStored: false }, createdAt,
+            };
+          },
+          newEvaluationId: () => `readiness-${randomUUID()}`,
+        });
+        return reader.evaluate(request);
+      },
+      commitPromotion: async input => {
+        const manager = await getStateManager();
+        return new SqliteActivationSafetyStore(manager.connection).commitPromotion(input);
+      },
+      newDecisionId: () => `decision-${randomUUID()}`,
       now: () => new Date().toISOString(),
     });
     const result = await service.promote({
@@ -435,9 +472,20 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
       reasonCode: opts.reasonCode?.trim() ?? '',
       note: opts.note,
       confirmed: opts.confirm === true,
+      dryRun: opts.dryRun === true,
     }, actor);
     if (!result.ok) {
       refuse(result.reasonCode, result.nextAction, { summary: result.summary, failedChecks: result.failedChecks });
+      return;
+    }
+    if (result.decision === 'would_promote') {
+      const output: ActivationPromoteResult = {
+        ok: true, decision: 'would_promote', activationId: result.activationId,
+        summary: `Readiness ${result.readinessEvaluationId} passed without mutation.`,
+        nextAction: `Re-run with --confirm using evidence snapshot ${result.evidenceSnapshotDigest}.`,
+      };
+      if (opts.json) console.log(JSON.stringify(output));
+      else console.log(`Would promote: ${result.activationId}`);
       return;
     }
     const output: ActivationPromoteResult = { ok: true, decision: 'promoted', activationId: result.activationId, promotedAt: result.promotedAt };
@@ -448,6 +496,8 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
       `promotion_failed: ${err instanceof Error ? err.message : String(err)}`,
       'Check workspace configuration and database integrity; no promotion was applied.',
     );
+  } finally {
+    await stateManager?.close();
   }
 }
 
