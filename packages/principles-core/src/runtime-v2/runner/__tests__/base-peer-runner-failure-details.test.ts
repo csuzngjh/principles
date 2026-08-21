@@ -119,7 +119,8 @@ describe('P0-2: 失败详情可观测性', () => {
       // updateTask 被调用，写入了 diagnosticJson 含 output_failure_details
       expect(deps.stateManager.updateTask).toHaveBeenCalledTimes(1);
       const {calls} = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
-      const [patchTaskId, patch] = calls[calls.length - 1];
+      const lastCall = calls[calls.length - 1];
+      const [patchTaskId, patch] = lastCall!;
       expect(patchTaskId).toBe('task-001');
       expect(patch.diagnosticJson).toBeDefined();
       const parsed = JSON.parse(patch.diagnosticJson as string);
@@ -160,7 +161,8 @@ describe('P0-2: 失败详情可观测性', () => {
       // updateTask 被调用，持久化 evidencePack 到 output_failure_details
       expect(deps.stateManager.updateTask).toHaveBeenCalledTimes(1);
       const {calls} = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
-      const [patchTaskId, patch] = calls[calls.length - 1];
+      const lastCall = calls[calls.length - 1];
+      const [patchTaskId, patch] = lastCall!;
       expect(patchTaskId).toBe('task-002');
       expect(patch.diagnosticJson).toBeDefined();
       const parsed = JSON.parse(patch.diagnosticJson as string);
