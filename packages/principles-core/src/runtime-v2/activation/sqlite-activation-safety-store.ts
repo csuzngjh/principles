@@ -175,6 +175,43 @@ export class SqliteActivationSafetyStore {
     } catch (error) { try { db.exec('ROLLBACK'); } catch { /* best effort */ } throw error; }
   }
 
+  async deactivateWithDecision(decision: ActivationDecisionRecord, idempotencyKey: string): Promise<{ activationId: string; decisionId: string; deactivatedAt: string }> {
+    if (decision.subject.kind !== 'activation') throw new Error('deactivateWithDecision requires activation subject');
+    const ownerAuthenticated = decision.principal.kind === 'configured_owner'
+      && (decision.authentication.method === 'console_token' || decision.authentication.method === 'cli_owner_credential');
+    const breakGlass = decision.principal.kind === 'break_glass' && decision.authentication.method === 'local_break_glass';
+    const authorized = decision.decision === 'reject_after_shadow' ? ownerAuthenticated
+      : decision.decision === 'emergency_deactivate' && (ownerAuthenticated || breakGlass);
+    if (!authorized) throw new Error('deactivateWithDecision requires authorized rejection or emergency decision');
+
+    const db = this.connection.getDb(); db.exec('BEGIN IMMEDIATE');
+    try {
+      const actionClause = decision.decision === 'reject_after_shadow' ? "AND action = 'code_tool_hook_shadow_activate'" : '';
+      const subject: unknown = db.prepare(`SELECT COUNT(*) AS count FROM activations WHERE activation_id = ? AND artifact_id = ? AND channel = 'code_tool_hook' AND deactivated_at IS NULL ${actionClause}`)
+        .get(decision.subject.activationId, decision.subject.artifactId);
+      if (!isRecord(subject) || subject.count !== 1) throw new Error(`Deactivation requires exactly one matching active activation: ${decision.subject.activationId}`);
+      db.prepare(`INSERT INTO activation_decisions
+        (decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest, decision,
+         principal_kind, owner_id, policy_version, break_glass_reason, authentication_method, credential_id,
+         operator_kind, operator_id, reason_code, note, evidence_snapshot_id, decided_at)
+        VALUES (?, ?, 'activation', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(decision.decisionId, idempotencyKey, decision.subject.activationId, decision.subject.artifactId,
+          decision.subject.artifactDigest, decision.decision, decision.principal.kind,
+          decision.principal.kind === 'configured_owner' ? decision.principal.ownerId : null,
+          decision.principal.kind === 'break_glass' ? decision.principal.reason : null,
+          decision.authentication.method,
+          decision.authentication.method === 'console_token' || decision.authentication.method === 'cli_owner_credential'
+            ? decision.authentication.credentialId : null,
+          decision.operator?.kind ?? null, decision.operator?.operatorId ?? null, decision.reasonCode,
+          decision.note, decision.evidenceSnapshotId, decision.decidedAt);
+      const update = db.prepare(`UPDATE activations SET deactivated_at = ? WHERE activation_id = ? AND artifact_id = ? AND deactivated_at IS NULL ${actionClause}`)
+        .run(decision.decidedAt, decision.subject.activationId, decision.subject.artifactId);
+      if (update.changes !== 1) throw new Error('Activation state changed during atomic deactivation');
+      db.exec('COMMIT');
+      return { activationId: decision.subject.activationId, decisionId: decision.decisionId, deactivatedAt: decision.decidedAt };
+    } catch (error) { try { db.exec('ROLLBACK'); } catch { /* best effort */ } throw error; }
+  }
+
   async listDecisions(activationId: string): Promise<ActivationDecisionRecord[]> {
     const rows: unknown = this.connection.getDb().prepare(`
       SELECT decision_id, activation_id, artifact_id, artifact_digest, decision, principal_kind,

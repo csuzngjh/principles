@@ -254,4 +254,40 @@ describe('SqliteActivationSafetyStore', () => {
     await expect(store.getActiveGlobalPause()).resolves.toBeNull();
     connection.close();
   });
+
+  it('atomically rejects a shadow rule without deleting its evidence', async () => {
+    const connection = new SqliteConnection(makeWorkspace());
+    seedArtifact(connection);
+    await new SqliteActivationStateStore(connection).recordActivation({ ...liveActivation(), action: 'code_tool_hook_shadow_activate' });
+    const store = new SqliteActivationSafetyStore(connection);
+    const decision: ActivationDecisionRecord = {
+      decisionId: 'reject-decision-1', subject: { kind: 'activation', activationId: 'activation-1', artifactId: 'artifact-1', artifactDigest: 'sha256:artifact' },
+      decision: 'reject_after_shadow', principal: { kind: 'configured_owner', ownerId: 'owner-1' },
+      authentication: { method: 'console_token', credentialId: 'console-1' }, reasonCode: 'scope_too_broad',
+      note: 'Would block unrelated tools.', evidenceSnapshotId: null, decidedAt: '2026-08-21T05:00:00.000Z',
+    };
+
+    await expect(store.deactivateWithDecision(decision, 'reject-key-1')).resolves.toMatchObject({ activationId: 'activation-1', decisionId: 'reject-decision-1' });
+    expect(connection.getDb().prepare("SELECT deactivated_at FROM activations WHERE activation_id = 'activation-1'").get())
+      .toEqual({ deactivated_at: '2026-08-21T05:00:00.000Z' });
+    await expect(store.listDecisions('activation-1')).resolves.toEqual([decision]);
+    connection.close();
+  });
+
+  it('allows local break-glass emergency deactivation but not governance rejection', async () => {
+    const connection = new SqliteConnection(makeWorkspace());
+    seedArtifact(connection);
+    await new SqliteActivationStateStore(connection).recordActivation(liveActivation());
+    const store = new SqliteActivationSafetyStore(connection);
+    const emergency: ActivationDecisionRecord = {
+      decisionId: 'emergency-1', subject: { kind: 'activation', activationId: 'activation-1', artifactId: 'artifact-1', artifactDigest: 'sha256:artifact' },
+      decision: 'emergency_deactivate', principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' },
+      authentication: { method: 'local_break_glass' }, reasonCode: 'host_at_risk', note: null,
+      evidenceSnapshotId: null, decidedAt: '2026-08-21T05:10:00.000Z',
+    };
+    await expect(store.deactivateWithDecision(emergency, 'emergency-key-1')).resolves.toMatchObject({ decisionId: 'emergency-1' });
+    await expect(store.deactivateWithDecision({ ...emergency, decisionId: 'bad-1', decision: 'reject_after_shadow' }, 'bad-key'))
+      .rejects.toThrow(/authorized/i);
+    connection.close();
+  });
 });
