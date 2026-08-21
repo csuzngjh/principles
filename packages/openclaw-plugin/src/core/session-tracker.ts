@@ -81,6 +81,10 @@ export interface SessionState {
 
     // Evolution loop feedback attribution
     injectedProbationIds?: string[];
+
+    // PRI-534: per-session receipt summary surfaced by /pd-context status.
+    injectedPrincipleIds?: string[];
+    receiptAutoCorrects?: number;
 }
 
 
@@ -247,6 +251,8 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey
             dailyPainSignals: 0,
             dailyGfiPeak: 0,
             injectedProbationIds: [],
+            injectedPrincipleIds: [],
+            receiptAutoCorrects: 0,
         };
         sessions.set(sessionId, state);
     }
@@ -423,6 +429,24 @@ export function setInjectedProbationIds(sessionId: string, ids: string[], worksp
     touchActivity(state, 'control');
     schedulePersistence(state);
     return state;
+}
+
+/** PRI-534: record the principle ids injected into this session's prompt context. */
+export function setInjectedPrincipleIds(sessionId: string | undefined, ids: readonly string[], workspaceDir?: string): void {
+    if (!sessionId || ids.length === 0) return;
+    const state = getOrCreateSession(sessionId, workspaceDir);
+    state.injectedPrincipleIds = [...ids];
+    touchActivity(state, 'control');
+    schedulePersistence(state);
+}
+
+/** PRI-534: count one applied live auto-correction in this session. */
+export function trackReceiptAutoCorrect(sessionId: string | undefined, workspaceDir?: string): void {
+    if (!sessionId) return;
+    const state = getOrCreateSession(sessionId, workspaceDir);
+    state.receiptAutoCorrects = (state.receiptAutoCorrects ?? 0) + 1;
+    touchActivity(state, 'control');
+    schedulePersistence(state);
 }
 
 export function getInjectedProbationIds(sessionId: string, workspaceDir?: string): string[] {
