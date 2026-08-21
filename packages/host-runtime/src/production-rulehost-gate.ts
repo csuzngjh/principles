@@ -175,6 +175,17 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     const connection = new SqliteConnection({ workspaceDir: event.context.workspaceDir, readonly: true, bootstrapIfMissing: false });
     const candidates: { implId: string; ruleId: string; principleId: string; meta: RuleHostMeta; source: string }[] = [];
     try {
+      const globalPause: unknown = connection.getDb().prepare(`
+        SELECT pause_id FROM global_rulecode_pauses WHERE status = 'paused' LIMIT 1
+      `).get();
+      if (globalPause !== undefined) {
+        return {
+          decision: 'allow',
+          source: event.source,
+          warnings: [boundedWarning('global_rulecode_pause_active', 'review the incident in the Owner Console before releasing the global pause')],
+          metadata: { evaluatedLiveRules: 0 },
+        };
+      }
       const rows: unknown = connection.getDb().prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
                c.enforcement, c.isolation_decision_id,

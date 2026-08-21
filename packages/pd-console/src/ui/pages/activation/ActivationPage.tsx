@@ -53,38 +53,64 @@ function CapabilityBoundaryDeclaration() {
 }
 
 function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; onChanged: () => void }) {
+  const { t } = useTranslation();
   const [review, setReview] = useState<RuleCodeOwnerReviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  const [overrideReason, setOverrideReason] = useState('rare_behavior');
   const load = useCallback(async () => { const result = await fetchRuleCodeOwnerReview(record.activationId); if (result.success) { setReview(result.data); setError(null); } else setError(result.error); }, [record.activationId]);
   useEffect(() => { void load(); }, [load]);
   const decide = async (action: 'continue-observing' | 'reject-after-shadow' | 'emergency-deactivate' | 'promote' | 'recover-to-shadow') => {
     if (!review) return; setBusy(true);
-    const body: Record<string, unknown> = { idempotencyKey: `${action}-${crypto.randomUUID()}`, reasonCode: action, note };
+    const reasonCode = action === 'promote' && review.readiness.status === 'evidence_insufficient'
+      ? overrideReason
+      : action;
+    const body: Record<string, unknown> = { idempotencyKey: `${action}-${crypto.randomUUID()}`, reasonCode, note };
     if (action === 'promote') Object.assign(body, { confirmed: true, artifactId: review.artifact.artifactId, artifactDigest: review.artifact.digest, controlVersion: review.controlState?.version });
     if (action === 'recover-to-shadow') Object.assign(body, { controlVersion: review.controlState?.version });
     const result = await ruleCodeDecision(record.activationId, action, body); setBusy(false);
-    if (result.success) { toast.success('RuleCode decision recorded'); onChanged(); await load(); } else { setError(result.error); if (result.nextAction) toast.info(result.nextAction); }
+    if (result.success) { toast.success(t('pages.activation.ownerDecisionRecorded')); onChanged(); await load(); } else { setError(result.error); if (result.nextAction) toast.info(result.nextAction); }
   };
-  const releasePause = async () => { if (!review?.globalPause) return; setBusy(true); const result = await releaseRuleCodePause(review.globalPause.pauseId, { idempotencyKey: `release-${crypto.randomUUID()}`, reasonCode: 'owner_releases_global_latch', expectedVersion: review.globalPause.version, note }); setBusy(false); if (result.success) { toast.success('Global pause latch released; isolated rules remain stopped'); onChanged(); await load(); } else setError(result.error); };
+  const releasePause = async () => { if (!review?.globalPause) return; setBusy(true); const result = await releaseRuleCodePause(review.globalPause.pauseId, { idempotencyKey: `release-${crypto.randomUUID()}`, reasonCode: 'owner_releases_global_latch', expectedVersion: review.globalPause.version, note }); setBusy(false); if (result.success) { toast.success(t('pages.activation.globalPauseReleased')); onChanged(); await load(); } else setError(result.error); };
   if (error) return <div className="mt-3 border-l-2 border-danger px-3 text-[12px] text-danger">{error}</div>;
-  if (!review) return <div className="mt-3 text-[12px] text-ink-4">Loading safety evidence…</div>;
+  if (!review) return <div className="mt-3 text-[12px] text-ink-4">{t('pages.activation.ownerDecisionLoading')}</div>;
   const summary = review.readiness.evidenceSnapshot.shadowSummary;
-  const value = (number: number | null) => number === null ? '未采集' : String(number);
+  const value = (number: number | null) => number === null ? t('pages.activation.notCollected') : String(number);
+  const affectedTools = Array.isArray(review.artifact.content?.affectedTools) ? review.artifact.content.affectedTools.filter((item): item is string => typeof item === 'string') : [];
+  const renderWindow = (title: string, window: RuleCodeOwnerReviewData['liveMetrics']['last24Hours']) => <div className="rounded border border-line p-2"><div className="font-medium text-ink">{title}</div><div className="mt-1 grid grid-cols-2 gap-1 md:grid-cols-5"><span>{t('pages.activation.eligibleEvaluations')}: {value(window.eligible)}</span><span>{t('pages.activation.matched')}: {value(window.matched)}</span><span>{t('pages.activation.blocked')}: {value(window.blocked)}</span><span>{t('pages.activation.unhealthy')}: {value(window.unhealthy)}</span><span>{t('pages.activation.circuitTrips')}: {window.circuitTrips}</span></div><div className="mt-1 text-ink-4">{t('pages.activation.toolDistribution')}: {window.toolDistribution === null ? t('pages.activation.notCollected') : Object.entries(window.toolDistribution).map(([tool, count]) => `${tool} ${count}`).join(', ') || '—'}</div></div>;
   return <div className="mt-4 rounded-[5px] border border-gov/25 bg-surface/70 p-4" data-testid={`owner-review-${record.activationId}`}>
-    <div className="flex flex-wrap items-center gap-2"><strong className="text-[13px] text-ink">Owner Live Decision</strong><span className="font-mono text-[11px] text-gov">{review.readiness.status}</span>{review.controlState?.enforcement === 'safety_isolated' && <span className="text-danger text-[11px]">Safety Isolation</span>}</div>
-    <div className="mt-2 grid grid-cols-3 gap-2 text-[12px] text-ink-3"><span>Eligible: {value(summary.observed)}</span><span>Would block: {value(summary.wouldBlock)}</span><span>Errors: {value(summary.errors)}</span></div>
-    {review.readiness.failedChecks.length > 0 && <ul className="mt-2 text-[12px] text-danger">{review.readiness.failedChecks.map(check => <li key={check.checkId}>{check.checkId}: {check.reasonCode}</li>)}</ul>}
-    <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">Scope, artifact and implementation</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-ink-3">{JSON.stringify(review.artifact.content, null, 2)}</pre></details>
-    <input value={note} onChange={event => setNote(event.target.value)} placeholder="Owner review note" className="mt-3 w-full rounded border border-line bg-panel px-3 py-2 text-[12px] text-ink" />
-    <div className="mt-3 flex flex-wrap gap-2">
-      {review.globalPause?.status === 'paused' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void releasePause()}>解除全局暂停（不恢复规则）</Button>}
-      {record.action === 'code_tool_hook_shadow_activate' && <><Button disabled={busy || !review.ownerDecisionEnabled} onClick={() => void decide('continue-observing')}>继续观察</Button><Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('reject-after-shadow')}>拒绝并停用</Button><Button disabled={busy || !review.ownerDecisionEnabled || (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient')} onClick={() => void decide('promote')}>确认上线</Button></>}
-      {(record.action === 'code_tool_hook_live_activate' || review.controlState?.enforcement === 'safety_isolated') && <Button disabled={busy} variant="destructive" onClick={() => void decide('emergency-deactivate')}>紧急停用</Button>}
-      {review.controlState?.enforcement === 'safety_isolated' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('recover-to-shadow')}>恢复到新 Shadow</Button>}
+    <div className="flex flex-wrap items-center gap-2"><strong className="text-[13px] text-ink">{t('pages.activation.ownerDecisionTitle')}</strong><span className="font-mono text-[11px] text-gov">{review.readiness.status}</span>{review.controlState?.enforcement === 'safety_isolated' && <span className="text-danger text-[11px]">{t('pages.activation.safetyIsolation')}</span>}</div>
+    <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] text-ink-3 md:grid-cols-4">
+      <span>{t('pages.activation.eligibleEvaluations')}: {value(summary.observed)}</span>
+      <span>{t('pages.activation.matched')}: {value(summary.matched)}</span>
+      <span>{t('pages.activation.wouldBlock')}: {value(summary.wouldBlock)}</span>
+      <span>{t('pages.activation.wouldAllow')}: {value(summary.wouldAllow)}</span>
+      <span>{t('pages.activation.requireApproval')}: {value(summary.requireApproval)}</span>
+      <span>{t('pages.activation.autoCorrect')}: {value(summary.autoCorrect)}</span>
+      <span>{t('pages.activation.neutralControl')}: {value(summary.neutralControl)}</span>
+      <span>{t('pages.activation.evaluationErrors')}: {value(summary.errors)}</span>
     </div>
-    {!review.ownerDecisionEnabled && <div className="mt-2 text-[11px] text-amber">Owner decision rollout is disabled; emergency stop remains available.</div>}
+    <div className="mt-2 text-[11px] text-ink-4">{t('pages.activation.shadowWindow', { first: summary.firstObservedAt ?? t('pages.activation.notCollected'), last: summary.lastObservedAt ?? t('pages.activation.notCollected') })}</div>
+    <div className="mt-2 text-[12px] text-ink-3">{t('pages.activation.runtimeCapability', { version: review.runtimeCapability.hostRuntimeVersion, supported: t(review.runtimeCapability.shadowEvidence ? 'pages.activation.supported' : 'pages.activation.unsupported') })}</div>
+    <div className="mt-2 text-[12px] text-amber">{t('pages.activation.worstImpact', { tools: affectedTools.join(', ') || t('pages.activation.notCollected') })}</div>
+    <div className="mt-3 text-[12px] text-ink-3"><div className="mb-1 font-medium text-ink">{t('pages.activation.hardSafetyChecks')}</div>{review.readiness.evidenceSnapshot.safetyGateResults.map(check => <div key={check.checkId} className={check.status === 'passed' ? 'text-green' : 'text-danger'}>{check.checkId}: {check.status}{check.reasonCode ? ` · ${check.reasonCode}` : ''}</div>)}</div>
+    {review.readiness.failedChecks.length > 0 && <ul className="mt-2 text-[12px] text-danger">{review.readiness.failedChecks.map(check => <li key={check.checkId}>{check.checkId}: {check.reasonCode}</li>)}</ul>}
+    <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.scopeArtifactCode')}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-ink-3">{JSON.stringify(review.artifact.content, null, 2)}</pre></details>
+    <div className="mt-3 grid gap-2 text-[11px] text-ink-3 md:grid-cols-2">{renderWindow(t('pages.activation.live24Hours'), review.liveMetrics.last24Hours)}{renderWindow(t('pages.activation.live7Days'), review.liveMetrics.last7Days)}</div>
+    <div className="mt-2 text-[11px] text-ink-3">{t('pages.activation.behaviorDrift', { approved: value(review.behaviorDrift.approvedBlockRate), live: value(review.behaviorDrift.liveBlockRate), delta: value(review.behaviorDrift.delta) })}</div>
+    {review.liveMetrics.representativeSamples.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.representativeSamples')}</summary>{review.liveMetrics.representativeSamples.map((sample, index) => <div key={`${sample.toolName}-${index}`} className="font-mono text-ink-3">{sample.toolName} · {sample.decision} · {sample.pathCategory}</div>)}</details>}
+    {review.decisions.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.ownerDecisionHistory')}</summary>{review.decisions.map(decision => <div key={decision.decisionId} className="mt-1 border-l border-line pl-2 text-ink-3"><span className="font-mono">{decision.decidedAt}</span> · {decision.decision} · {decision.principalKind}:{decision.actorId} · {decision.authenticationMethod} · {decision.reasonCode}{decision.note ? ` · ${decision.note}` : ''}</div>)}</details>}
+    <div className="mt-2 text-[11px] text-ink-4">{t('pages.activation.circuitConditions')}</div>
+    {review.readiness.status === 'evidence_insufficient' && <label className="mt-3 block text-[12px] text-ink-3">{t('pages.activation.overrideReason')}<select value={overrideReason} onChange={event => setOverrideReason(event.target.value)} className="mt-1 w-full rounded border border-line bg-panel px-3 py-2 text-ink"><option value="rare_behavior">{t('pages.activation.overrideRareBehavior')}</option><option value="controlled_rollout">{t('pages.activation.overrideControlledRollout')}</option><option value="owner_accepts_limited_evidence">{t('pages.activation.overrideOwnerAccepts')}</option></select></label>}
+    <input value={note} onChange={event => setNote(event.target.value)} placeholder={t('pages.activation.ownerReviewNote')} className="mt-3 w-full rounded border border-line bg-panel px-3 py-2 text-[12px] text-ink" />
+    <div className="mt-3 flex flex-wrap gap-2">
+      {review.globalPause?.status === 'paused' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void releasePause()}>{t('pages.activation.releaseGlobalPause')}</Button>}
+      {record.action === 'code_tool_hook_shadow_activate' && <><Button disabled={busy || !review.ownerDecisionEnabled} onClick={() => void decide('continue-observing')}>{t('pages.activation.continueObserving')}</Button><Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('reject-after-shadow')}>{t('pages.activation.rejectAfterShadow')}</Button><Button disabled={busy || !review.ownerDecisionEnabled || (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient') || (review.readiness.status === 'evidence_insufficient' && note.trim().length === 0)} onClick={() => void decide('promote')}>{t('pages.activation.confirmLive')}</Button></>}
+      {(record.action === 'code_tool_hook_live_activate' || review.controlState?.enforcement === 'safety_isolated') && <Button disabled={busy} variant="destructive" onClick={() => void decide('emergency-deactivate')}>{t('pages.activation.emergencyDeactivate')}</Button>}
+      {review.controlState?.enforcement === 'safety_isolated' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('recover-to-shadow')}>{t('pages.activation.recoverToShadow')}</Button>}
+    </div>
+    {!review.ownerDecisionEnabled && <div className="mt-2 text-[11px] text-amber">{t('pages.activation.rolloutDisabled')}</div>}
   </div>;
 }
 
@@ -191,7 +217,7 @@ function ActivationFactCard({
       </div>
 
       {/* Action / target / time */}
-      {record.legacyDecisionUnknown && <div className="mt-3 border-l-2 border-amber px-3 text-[12px] text-amber">历史上线 / 决策人未知。请在 {record.ownerReviewDueAt ? new Date(record.ownerReviewDueAt).toLocaleString() : '7 天内'} 完成复核；系统不会伪造 Owner 身份。</div>}
+      {record.legacyDecisionUnknown && <div className="mt-3 border-l-2 border-amber px-3 text-[12px] text-amber">{t('pages.activation.legacyUnknown', { due: record.ownerReviewDueAt ? new Date(record.ownerReviewDueAt).toLocaleString() : t('pages.activation.sevenDays') })}</div>}
       <div className="text-ink-3 text-[13px] leading-relaxed space-y-1">
         <div>
           <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.actionLabel")}</span>{" "}
@@ -469,9 +495,9 @@ export function ActivationPage() {
 
   const handleEmergencyPause = useCallback(async () => {
     const result = await pauseAllRuleCode({ idempotencyKey: `pause-${crypto.randomUUID()}`, reasonCode: 'owner_emergency_pause' });
-    if (result.success) { toast.success('All live RuleCode enforcement paused'); await loadData(); }
+    if (result.success) { toast.success(t('pages.activation.pauseAllSucceeded')); await loadData(); }
     else { toast.error(result.error); if (result.nextAction) toast.info(result.nextAction); }
-  }, [loadData]);
+  }, [loadData, t]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
@@ -553,7 +579,7 @@ export function ActivationPage() {
 
       {/* Capability boundary declaration (F.5) — always visible */}
       <CapabilityBoundaryDeclaration />
-      {activeActivations.some(record => record.action === 'code_tool_hook_live_activate') && <div className="mt-4 flex justify-end"><Button variant="destructive" onClick={() => void handleEmergencyPause()}>暂停全部 Live RuleCode</Button></div>}
+      {activeActivations.some(record => record.action === 'code_tool_hook_live_activate') && <div className="mt-4 flex justify-end"><Button variant="destructive" onClick={() => void handleEmergencyPause()}>{t('pages.activation.pauseAll')}</Button></div>}
 
       {/* Degraded note (ERR-002) */}
       {degradedNote && (
@@ -575,8 +601,8 @@ export function ActivationPage() {
         </div>
       )}
 
-      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">待上线规则</SectionTitle><p className="mb-3 text-[12px] text-ink-3">Shadow Observation 已形成独立的 Owner Live Decision 队列。</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} />)}</div></section>}
-      {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">安全告警</SectionTitle><p className="mb-3 text-[12px] text-danger">这些规则已隔离并 fail-open；它们不会自动恢复上线。</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} />)}</div></section>}
+      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} />)}</div></section>}
+      {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">{t('pages.activation.safetyAlerts')}</SectionTitle><p className="mb-3 text-[12px] text-danger">{t('pages.activation.safetyAlertsDescription')}</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} />)}</div></section>}
 
       {/* Section: Active activations */}
       <section className="mt-8" aria-labelledby="section-active">

@@ -433,7 +433,7 @@ The maintainer approves two bounded MVP-Core controls:
 ```yaml
 rulecode_owner_live_decision:
   category: core
-  enabled: false
+  enabled: true
   since: 2026-08-21
 
 rulecode_safety_controls:
@@ -442,7 +442,7 @@ rulecode_safety_controls:
   since: 2026-08-21
 ```
 
-`rulecode_owner_live_decision` controls the new shadow evidence reader, decision API, decision writer, and Console review UI. While false, shadow observation may continue but promotion is refused across Console and CLI with `feature_not_enabled`; the system must never fall back to the legacy unchecked CLI promotion path. It becomes true only after the rollout gate in §22.
+`rulecode_owner_live_decision` controls the new shadow evidence reader, decision API, decision writer, and Console review UI. While false, shadow observation may continue but promotion is refused across Console and CLI with `feature_not_enabled`; the system must never fall back to the legacy unchecked CLI promotion path. Its default became true after the 2026-08-21 rollout gate in §22 passed.
 
 `rulecode_safety_controls` controls the durable isolation, circuit breaker, and global pause subsystem. It is enabled as a correctness and recovery control for the existing MVP-Core RuleHost channel. If it cannot operate, promotion is refused. Its emergency disable path is to set the existing `code_tool_hook` capability false and fail open all RuleCode enforcement; disabling safety controls alone while leaving live enforcement active is forbidden.
 
@@ -509,6 +509,8 @@ The repository's referenced `docs/product/emotional-value.md` is currently absen
 7. **Production BDD and rollout:** default-runtime E2E, feature flag consumption, dogfood, rollback drill.
 
 Each slice must ship with a user-visible observation path and a non-PR-revert disable path. The first deploy keeps promotion UI disabled until the incident regression, hard gates, emergency controls, and audit path all pass together.
+
+Rollout acceptance was completed on 2026-08-21: the incident regressions, production Host Liveness composition, authenticated Owner promote/reject audit round trip, no-auth emergency deactivation/global pause, CLI/common-service parity, and durable restart-safe control tests passed together. The registered MVP-Core default is therefore enabled; operators retain the explicit flag-off disable path.
 
 ## 23. Prototype references
 

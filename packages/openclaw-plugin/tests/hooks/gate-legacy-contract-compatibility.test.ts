@@ -92,7 +92,7 @@ function insertRuleArtifact(artifactId: string, ruleId: string, implementationCo
     `task-${artifactId}`,
     `principle-${ruleId}`,
     ruleId,
-    JSON.stringify({ ruleId, implementationCode, ruleHostGateDecision: 'accepted_shadow' }),
+    JSON.stringify({ ruleId, implementationCode, affectedTools: ['write_file'], ruleHostGateDecision: 'accepted_shadow' }),
     now,
     now,
   );

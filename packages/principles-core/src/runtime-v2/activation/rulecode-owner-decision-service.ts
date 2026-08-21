@@ -7,7 +7,18 @@ export interface PromotionEvidenceSnapshot {
   lineageRefs: string[];
   hostRuntimeVersion: string;
   safetyGateResults: { checkId: string; status: 'passed' | 'failed'; reasonCode?: string }[];
-  shadowSummary: { observed: number | null; wouldBlock: number | null; errors: number | null };
+  shadowSummary: {
+    observed: number | null;
+    matched: number | null;
+    wouldBlock: number | null;
+    wouldAllow: number | null;
+    requireApproval: number | null;
+    autoCorrect: number | null;
+    errors: number | null;
+    neutralControl: number | null;
+    firstObservedAt: string | null;
+    lastObservedAt: string | null;
+  };
   configurationVersion: string;
   redaction: { version: string; rawParametersStored: false };
   createdAt: string;
@@ -110,8 +121,14 @@ export class RuleCodeOwnerDecisionService {
       || readiness.evidenceSnapshot.artifactDigest !== readiness.artifactDigest) {
       return refused({ reasonCode: 'promotion_snapshot_stale', summary: 'The activation artifact changed during review.', nextAction: 'Refresh the Owner review and evaluate the current artifact version.' });
     }
-    if (readiness.status === 'evidence_insufficient' && (!request.note || request.note.trim().length === 0)) {
-      return refused({ reasonCode: 'evidence_override_note_required', summary: 'Evidence-insufficient promotion requires an Owner note.', nextAction: 'Explain why promotion is acceptable despite insufficient evidence.' });
+    if (readiness.status === 'evidence_insufficient') {
+      const allowedOverrideReasons = new Set(['rare_behavior', 'controlled_rollout', 'owner_accepts_limited_evidence']);
+      if (!allowedOverrideReasons.has(request.reasonCode)) {
+        return refused({ reasonCode: 'evidence_override_reason_required', summary: 'Evidence-insufficient promotion requires a predefined Owner reason.', nextAction: 'Choose rare_behavior, controlled_rollout, or owner_accepts_limited_evidence.' });
+      }
+      if (!request.note || request.note.trim().length === 0) {
+        return refused({ reasonCode: 'evidence_override_note_required', summary: 'Evidence-insufficient promotion requires an Owner note.', nextAction: 'Explain why promotion is acceptable despite insufficient evidence.' });
+      }
     }
     if (request.dryRun === true) {
       return {

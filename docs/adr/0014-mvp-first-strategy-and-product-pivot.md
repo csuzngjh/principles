@@ -449,7 +449,7 @@ More seriously, a real activated rule mentioned the retired `session.recentThink
 
 | Flag | Category | Initial state | Controls |
 |------|----------|---------------|----------|
-| `rulecode_owner_live_decision` | core | `false` | Shadow evidence reader, common promotion service, immutable decision/evidence writer, and Console review UI. While false, all promotion entry points return `feature_not_enabled`. Enable only after the design SPEC's rollout gate passes. |
+| `rulecode_owner_live_decision` | core | `true` | Shadow evidence reader, common promotion service, immutable decision/evidence writer, and Console review UI. The 2026-08-21 rollout gate passed through authenticated Owner browser E2E, CLI/service parity, immutable audit, host-liveness, and emergency rollback tests. An explicit false override still makes every promotion entry point return `feature_not_enabled`. |
 | `rulecode_safety_controls` | core | `true` | Durable isolation, Safety Circuit Breaker, Global Emergency Pause, and recovery-to-shadow. It cannot be disabled while RuleCode enforcement remains active. |
 
 Both flags must be registered in `.pd/config.yaml`, consumed by the production loader, and covered by tests before the corresponding behavior counts as available. This amendment authorizes implementation; it does not treat an unwired registry entry as a shipped feature.

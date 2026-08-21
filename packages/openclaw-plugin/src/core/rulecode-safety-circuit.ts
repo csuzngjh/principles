@@ -6,6 +6,7 @@ import {
 import type { RuleCodeSafetyCircuitState } from '@principles/core/runtime-v2';
 
 const states = new Map<string, RuleCodeSafetyCircuitState>();
+const approvedTools = new Map<string, Set<string> | null>();
 const PROTECTED_COMMAND = /\bpd\s+(?:status|activation\s+deactivate|activation\s+emergency-pause|review)\b/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
@@ -15,13 +16,44 @@ export function observeRuleCodeSafety(input: { workspaceDir: string; activationI
   const command = typeof input.params.command === 'string' ? input.params.command : typeof input.params.args === 'string' ? input.params.args : '';
   const protectedCapabilityMatched = input.matched && PROTECTED_COMMAND.test(command);
   const key = `${input.workspaceDir}\0${input.activationId}`;
+  let scopeHealthFailure: 'compatibility' | undefined;
+  if (!approvedTools.has(key)) {
+    let scopeConnection: SqliteConnection | null = null;
+    try {
+      scopeConnection = new SqliteConnection({ workspaceDir: input.workspaceDir, readonly: true });
+      const row: unknown = scopeConnection.getDb().prepare(
+        `SELECT p.content_json FROM activations a
+         JOIN pi_artifacts p ON p.artifact_id = a.artifact_id
+         WHERE a.activation_id = ?`,
+      ).get(input.activationId);
+      const content: unknown = isRecord(row) && typeof row.content_json === 'string'
+        ? JSON.parse(row.content_json)
+        : null;
+      const tools = isRecord(content) && Array.isArray(content.affectedTools)
+        ? content.affectedTools.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+      if (tools.length === 0) {
+        approvedTools.set(key, null);
+        scopeHealthFailure = 'compatibility';
+        input.logger?.warn?.('[PD_GATE] Live RuleCode has no valid approved tool scope; isolating fail-open.');
+      } else {
+        approvedTools.set(key, new Set(tools));
+      }
+    } catch (error: unknown) {
+      scopeHealthFailure = 'compatibility';
+      input.logger?.warn?.(`[PD_GATE] RuleCode approved scope is unavailable; isolating fail-open: ${String(error)}`);
+    } finally {
+      scopeConnection?.close();
+    }
+  }
+  const declaredTools = approvedTools.get(key);
   const current = states.get(key) ?? initialRuleCodeSafetyCircuitState();
   const evaluated = evaluateRuleCodeSafetyCircuit(current, {
     toolName: input.toolName,
     decision: input.decision === 'block' || input.decision === 'requireApproval' || input.decision === 'auto_correct' ? input.decision : 'allow',
-    outsideApprovedScope: false,
+    outsideApprovedScope: input.matched && declaredTools instanceof Set && !declaredTools.has(input.toolName),
     protectedCapabilityMatched,
-    healthFailure: input.healthFailure,
+    healthFailure: input.healthFailure ?? scopeHealthFailure,
   });
   states.set(key, evaluated.state);
   if (!evaluated.trip) return false;
@@ -49,4 +81,4 @@ export function observeRuleCodeSafety(input: { workspaceDir: string; activationI
   }
 }
 
-export function resetRuleCodeSafetyCircuitsForTests(): void { states.clear(); }
+export function resetRuleCodeSafetyCircuitsForTests(): void { states.clear(); approvedTools.clear(); }

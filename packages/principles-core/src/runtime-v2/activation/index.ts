@@ -71,6 +71,7 @@ export type { PromotionReadinessReaderDeps } from './promotion-readiness-reader.
 export { evaluateRuleCodeSafetyCircuit, initialRuleCodeSafetyCircuitState } from './rulecode-safety-circuit-breaker.js';
 export type { RuleCodeSafetySample, RuleCodeSafetyCircuitState, RuleCodeSafetyTripReason } from './rulecode-safety-circuit-breaker.js';
 export { collectOpenClawPromotionChecks } from './openclaw-promotion-checks.js';
+export type { HostLivenessContract } from './openclaw-promotion-checks.js';
 export { summarizeRuleCodeShadowEvents } from './rulecode-shadow-summary.js';
 export type { RuleCodeShadowSummary } from './rulecode-shadow-summary.js';
 

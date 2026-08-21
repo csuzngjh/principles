@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { HashRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import i18n from "./i18n/index.js";
 import { ThemeProvider } from "./components/theme-provider.js";
@@ -36,7 +36,7 @@ const IS_DEV = (import.meta as unknown as { env: { DEV: boolean } }).env.DEV;
 
 function AuthRoutes() {
   const [authed, setAuthed] = useState<boolean | null>(null);
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(() => window.location.hash.startsWith("#/splash"));
   // Onboarding redirect needs workspaceId (for onboarding-state lookup) and
   // feature flags (to gate the redirect). Both are fetched after auth.
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string>("default");
@@ -45,6 +45,7 @@ function AuthRoutes() {
   // the onboarding redirect so state isn't saved under a fake "default" key.
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const verifyAuth = useCallback(async () => {
     const valid = await checkAuth();
@@ -119,6 +120,7 @@ function AuthRoutes() {
   // load, which would bypass the onboarding redirect entirely.
   useEffect(() => {
     if (authed !== true || featureFlags === null || showSplash) return;
+    if (!['/', '/login', '/splash'].includes(location.pathname)) return;
 
     const flagEnabled = featureFlags?.new_user_onboarding?.enabled === true;
     // P2-C: if workspace fetch failed, don't force onboarding under "default" key.
@@ -128,7 +130,7 @@ function AuthRoutes() {
     } else {
       navigate('/focus', { replace: true });
     }
-  }, [authed, featureFlags, showSplash, currentWorkspaceId, workspaceReady, navigate]);
+  }, [authed, featureFlags, showSplash, currentWorkspaceId, workspaceReady, location.pathname, navigate]);
 
   const handleAuthSuccess = useCallback(() => {
     setAuthed(true);

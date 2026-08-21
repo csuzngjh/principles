@@ -13,6 +13,7 @@
     "test:integration": "vitest run tests/integration",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "npm run build:ui && npx playwright test",
+    "test:e2e:owner": "npm run build:ui && npx playwright test --config playwright.owner.config.ts",
     "test:e2e:headed": "npm run build:ui && npx playwright test --headed",
     "typecheck": "npx tsc --noEmit",
     "verify:build": "node scripts/verify-build.mjs"
@@ -20,6 +21,7 @@
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@principles/core": "*",
+    "@principles/host-runtime": "*",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-select": "^2.3.7",

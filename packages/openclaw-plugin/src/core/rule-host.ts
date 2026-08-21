@@ -319,6 +319,10 @@ export class RuleHost {
     this.sqliteConnection = sqliteConn;
     {
       const db = sqliteConn.getDb();
+      const pauseRow: unknown = db.prepare(`
+        SELECT pause_id FROM global_rulecode_pauses WHERE status = 'paused' LIMIT 1
+      `).get();
+      const globalPauseActive = pauseRow !== undefined;
       const rows = db.prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
                c.enforcement, c.isolation_decision_id,
@@ -337,7 +341,10 @@ export class RuleHost {
         return { loaded: [], skipped: [] };
       }
 
-      const fingerprintParts: string[] = [supportsContextV2 ? 'context-v2' : 'context-v1'];
+      const fingerprintParts: string[] = [
+        supportsContextV2 ? 'context-v2' : 'context-v1',
+        globalPauseActive ? 'global-pause-active' : 'global-pause-inactive',
+      ];
       for (const row of rows) {
         if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
         const record = row as Record<string, unknown>;
@@ -369,6 +376,13 @@ export class RuleHost {
         const mode: RuleHostActivationMode | undefined = action === 'code_tool_hook_live_activate'
           ? 'live'
           : action === 'code_tool_hook_shadow_activate' ? 'shadow' : undefined;
+        if (mode === 'live' && globalPauseActive) {
+          const reason = 'global_rulecode_pause_active';
+          const nextAction = 'Review the incident in the Owner Console before releasing the global pause';
+          skipped.push({ activationId, ruleId, mode, reason, nextAction });
+          this.logger.warn?.(`[RuleHost] Activation ${activationId}: ${reason}, skipping. nextAction=${nextAction}`);
+          continue;
+        }
         if (r['enforcement'] === 'safety_isolated') {
           const reason = 'activation_safety_isolated';
           const nextAction = 'Recover the activation to shadow after reviewing safety evidence';

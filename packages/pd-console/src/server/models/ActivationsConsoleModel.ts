@@ -13,7 +13,8 @@ import {
   collectOpenClawPromotionChecks,
   summarizeRuleCodeShadowEvents,
 } from '@principles/core/runtime-v2';
-import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
+import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
+import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -95,7 +96,13 @@ export interface RuleCodeOwnerReview {
   decisions: ActivationDecisionRecord[];
   globalPause: GlobalRuleCodePause | null;
   ownerDecisionEnabled: boolean;
+  runtimeCapability: { hostRuntimeVersion: string; shadowEvidence: boolean };
+  liveMetrics: RuleCodeTelemetryMetrics;
+  behaviorDrift: { approvedBlockRate: number | null; liveBlockRate: number | null; delta: number | null };
 }
+
+interface RuleCodeTelemetryWindow { eligible: number | null; matched: number | null; blocked: number | null; unhealthy: number | null; circuitTrips: number; toolDistribution: Record<string, number> | null }
+interface RuleCodeTelemetryMetrics { last24Hours: RuleCodeTelemetryWindow; last7Days: RuleCodeTelemetryWindow; representativeSamples: { toolName: string; decision: string; pathCategory: string }[] }
 
 export interface OwnerMutationInput {
   actor: OwnerPromotionActor;
@@ -137,13 +144,24 @@ function makeActivationDecision(value: { activation: ActivationStatusRecord; art
     subject: { kind: 'activation', activationId: activation.activationId, artifactId: activation.artifactId, artifactDigest },
     decision, principal: input.actor.principal, authentication: input.actor.authentication,
     ...(input.actor.operator ? { operator: input.actor.operator } : {}), reasonCode: input.reasonCode,
-    note: input.note ?? null, evidenceSnapshotId: null, decidedAt: new Date().toISOString(),
+    note: input.note?.trim() || null, evidenceSnapshotId: null, decidedAt: new Date().toISOString(),
   };
 }
 
-function readShadowSummary(workspaceDir: string, activationId: string): { observed: number | null; wouldBlock: number | null; errors: number | null } {
+function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] {
+  return {
+    observed: null, matched: null, wouldBlock: null, wouldAllow: null,
+    requireApproval: null, autoCorrect: null, errors: null, neutralControl: null,
+    firstObservedAt: null, lastObservedAt: null,
+  };
+}
+
+function readRuleCodeTelemetry(workspaceDir: string, activationId: string, decisions: readonly ActivationDecisionRecord[]): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
   const logsDir = path.join(workspaceDir, '.pd', 'logs');
-  if (!fs.existsSync(logsDir)) return { observed: null, wouldBlock: null, errors: null };
+  const countCircuitTrips = (minimumTime: number) => decisions.filter(decision => decision.decision === 'safety_isolate' && Date.parse(decision.decidedAt) >= minimumTime).length;
+  const now = Date.now();
+  const unavailableWindow = (minimumTime: number): RuleCodeTelemetryWindow => ({ eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: null });
+  if (!fs.existsSync(logsDir)) return { shadowSummary: unavailableShadowSummary(), metrics: { last24Hours: unavailableWindow(now - 24 * 60 * 60 * 1000), last7Days: unavailableWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples: [] } };
   const entries: unknown[] = [];
   try {
     for (const file of fs.readdirSync(logsDir).filter(name => /^events_.*\.jsonl$/.test(name)).sort().slice(-7)) {
@@ -151,8 +169,26 @@ function readShadowSummary(workspaceDir: string, activationId: string): { observ
         try { entries.push(JSON.parse(line) as unknown); } catch { /* malformed telemetry is excluded, readiness remains bounded */ }
       }
     }
-  } catch { return { observed: null, wouldBlock: null, errors: null }; }
-  return summarizeRuleCodeShadowEvents(entries, activationId);
+  } catch { return { shadowSummary: unavailableShadowSummary(), metrics: { last24Hours: unavailableWindow(now - 24 * 60 * 60 * 1000), last7Days: unavailableWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples: [] } }; }
+  const summarizeWindow = (minimumTime: number): RuleCodeTelemetryWindow => {
+    let eligible = 0; let matched = 0; let blocked = 0; let unhealthy = 0; const tools: Record<string, number> = {};
+    for (const entry of entries) {
+      if (!isRecord(entry) || typeof entry.ts !== 'string' || Date.parse(entry.ts) < minimumTime || !isRecord(entry.data) || entry.data.activationId !== activationId) continue;
+      if (entry.type === 'rulehost_unhealthy') { unhealthy += 1; continue; }
+      if (entry.type !== 'rulehost_evaluated' || entry.data.activationMode !== 'live') continue;
+      eligible += 1; if (entry.data.matched === true) matched += 1; if (entry.data.decision === 'block') blocked += 1;
+      if (typeof entry.data.toolName === 'string') tools[entry.data.toolName] = (tools[entry.data.toolName] ?? 0) + 1;
+    }
+    return { eligible, matched, blocked, unhealthy, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: tools };
+  };
+  const representativeSamples: RuleCodeTelemetryMetrics['representativeSamples'] = [];
+  for (const entry of entries) {
+    if (representativeSamples.length >= 6) break;
+    if (!isRecord(entry) || entry.type !== 'rulehost_evaluated' || !isRecord(entry.data) || entry.data.activationId !== activationId || typeof entry.data.toolName !== 'string' || typeof entry.data.decision !== 'string') continue;
+    const filePath = typeof entry.data.filePath === 'string' ? entry.data.filePath : '';
+    representativeSamples.push({ toolName: entry.data.toolName, decision: entry.data.decision, pathCategory: path.extname(filePath) || (filePath ? 'workspace_path' : 'no_path') });
+  }
+  return { shadowSummary: summarizeRuleCodeShadowEvents(entries, activationId), metrics: { last24Hours: summarizeWindow(now - 24 * 60 * 60 * 1000), last7Days: summarizeWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples } };
 }
 
 export class ActivationsConsoleModel {
@@ -340,13 +376,16 @@ export class ActivationsConsoleModel {
       const activationStore = new SqliteActivationStateStore(conn);
       const artifactStore = new SqlitePIArtifactStore(conn);
       const safetyStore = new SqliteActivationSafetyStore(conn);
-      const matches = (await activationStore.listCodeToolHookActivations(true)).filter(record => record.activationId === activationId);
+      const codeActivations = await activationStore.listCodeToolHookActivations(true);
+      const matches = codeActivations.filter(record => record.activationId === activationId);
       if (matches.length !== 1) throw new Error(`Owner review requires exactly one RuleCode activation: ${activationId}`);
       const [activation] = matches;
       if (!activation) throw new Error(`Activation not found: ${activationId}`);
       const artifact = await artifactStore.getArtifactById(activation.artifactId);
       if (!artifact) throw new Error(`Artifact not found for activation: ${activation.artifactId}`);
       const digest = `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`;
+      const decisions = await safetyStore.listDecisions(activationId);
+      const telemetry = readRuleCodeTelemetry(this.workspaceDir, activationId, decisions);
       const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
       const writer = new RuleHostWriter({ gateDeps: createProductionGateDeps(), featureFlagProbe: id => isFeatureEnabled(flags, id) });
       const reader = new PromotionReadinessReader({
@@ -354,7 +393,21 @@ export class ActivationsConsoleModel {
         getArtifactById: id => artifactStore.getArtifactById(id),
         computeArtifactDigest: value => `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`,
         validateProductionArtifact: value => writer.canActivate(value),
-        collectHostChecks: async value => collectOpenClawPromotionChecks(value.contentJson, { ownerIdentityConfigured, safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls') }),
+        collectHostChecks: async value => {
+          const liveArtifacts: PIArtifactSnapshot[] = [];
+          for (const active of codeActivations) {
+            if (active.action !== 'code_tool_hook_live_activate' || active.deactivatedAt !== null) continue;
+            const liveArtifact = await artifactStore.getArtifactById(active.artifactId);
+            if (liveArtifact) liveArtifacts.push(liveArtifact);
+          }
+          return collectOpenClawPromotionChecks(value, {
+            ownerIdentityConfigured,
+            safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls'),
+            hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+            existingLiveArtifacts: liveArtifacts,
+            validateProductionArtifact: candidate => writer.canActivate(candidate),
+          });
+        },
         buildEvidenceSnapshot: (checks, value) => {
           const createdAt = new Date().toISOString();
           const artifactDigest = value
@@ -365,7 +418,7 @@ export class ActivationsConsoleModel {
             snapshotDigest: `sha256:${createHash('sha256').update(body, 'utf8').digest('hex')}`,
             artifactDigest, lineageRefs: value ? [value.sourceTaskId, ...value.lineageArtifactIds] : [],
             hostRuntimeVersion: 'openclaw-legacy@1', safetyGateResults: checks,
-            shadowSummary: readShadowSummary(this.workspaceDir, activationId),
+            shadowSummary: telemetry.shadowSummary,
             configurationVersion: 'pd-config-current', redaction: { version: 'v1', rawParametersStored: false }, createdAt,
           };
         },
@@ -373,14 +426,48 @@ export class ActivationsConsoleModel {
       });
       let content: Record<string, unknown> | null = null;
       try { const parsed: unknown = JSON.parse(artifact.contentJson); if (isRecord(parsed)) content = parsed; } catch { /* readiness reports validation failure */ }
+      let approvedBlockRate: number | null = null;
+      let promotion: ActivationDecisionRecord | undefined;
+      for (let index = decisions.length - 1; index >= 0; index -= 1) {
+        const candidate = decisions[index];
+        if (candidate?.decision === 'promote_live' && candidate.evidenceSnapshotId !== null) {
+          promotion = candidate;
+          break;
+        }
+      }
+      if (promotion?.evidenceSnapshotId) {
+        const row: unknown = conn.getDb().prepare('SELECT shadow_summary FROM activation_evidence_snapshots WHERE snapshot_id = ?').get(promotion.evidenceSnapshotId);
+        if (isRecord(row) && typeof row.shadow_summary === 'string') {
+          try {
+            const summary: unknown = JSON.parse(row.shadow_summary);
+            if (isRecord(summary) && typeof summary.observed === 'number' && summary.observed > 0 && typeof summary.wouldBlock === 'number') {
+              approvedBlockRate = summary.wouldBlock / summary.observed;
+            }
+          } catch { /* malformed immutable evidence leaves drift unavailable */ }
+        }
+      }
+      const live24 = telemetry.metrics.last24Hours;
+      const liveBlockRate = live24.eligible !== null && live24.eligible > 0 && live24.blocked !== null
+        ? live24.blocked / live24.eligible
+        : null;
       return {
         activation,
         artifact: { artifactId: artifact.artifactId, digest, sourceTaskId: artifact.sourceTaskId, lineageArtifactIds: [...artifact.lineageArtifactIds], content },
         readiness: await reader.evaluate({ activationId, expectedArtifactId: artifact.artifactId, expectedArtifactDigest: digest }),
         controlState: await safetyStore.getControlState(activationId),
-        decisions: await safetyStore.listDecisions(activationId),
+        decisions,
         globalPause: await safetyStore.getActiveGlobalPause(),
         ownerDecisionEnabled: isFeatureEnabled(flags, 'rulecode_owner_live_decision'),
+        runtimeCapability: {
+          hostRuntimeVersion: OPENCLAW_HOST_LIVENESS_CONTRACT.version,
+          shadowEvidence: OPENCLAW_HOST_LIVENESS_CONTRACT.supportsShadowEvidence,
+        },
+        liveMetrics: telemetry.metrics,
+        behaviorDrift: {
+          approvedBlockRate,
+          liveBlockRate,
+          delta: approvedBlockRate === null || liveBlockRate === null ? null : liveBlockRate - approvedBlockRate,
+        },
       };
     } finally { try { conn.close(); } catch { /* best effort */ } }
   }

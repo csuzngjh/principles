@@ -146,10 +146,6 @@ export class SqliteActivationSafetyStore {
           decision.operator?.kind ?? null, decision.operator?.operatorId ?? null, decision.reasonCode, decision.note, decision.decidedAt);
       db.prepare(`INSERT INTO global_rulecode_pauses (pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version) VALUES (?, 'paused', ?, NULL, ?, ?, NULL, 1)`)
         .run(pauseId, decision.decisionId, JSON.stringify(affected), decision.decidedAt);
-      for (const activationId of affected) {
-        db.prepare(`UPDATE activation_control_states SET enforcement = 'safety_isolated', isolation_decision_id = ?, version = version + 1, updated_at = ? WHERE activation_id = ?`)
-          .run(decision.decisionId, decision.decidedAt, activationId);
-      }
       const result = mapGlobalPause(db.prepare(`SELECT pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version FROM global_rulecode_pauses WHERE pause_id = ?`).get(pauseId));
       if (!result) throw new Error('Global pause missing after insert');
       db.exec('COMMIT'); return result;
@@ -187,8 +183,11 @@ export class SqliteActivationSafetyStore {
 
     const db = this.connection.getDb(); db.exec('BEGIN IMMEDIATE');
     try {
-      const actionClause = decision.decision === 'reject_after_shadow' ? "AND action = 'code_tool_hook_shadow_activate'" : '';
-      const subject: unknown = db.prepare(`SELECT COUNT(*) AS count FROM activations WHERE activation_id = ? AND artifact_id = ? AND channel = 'code_tool_hook' AND deactivated_at IS NULL ${actionClause}`)
+      const rejectAfterShadow = decision.decision === 'reject_after_shadow';
+      const subjectStatement = rejectAfterShadow
+        ? db.prepare(`SELECT COUNT(*) AS count FROM activations WHERE activation_id = ? AND artifact_id = ? AND channel = 'code_tool_hook' AND action = 'code_tool_hook_shadow_activate' AND deactivated_at IS NULL`)
+        : db.prepare(`SELECT COUNT(*) AS count FROM activations WHERE activation_id = ? AND artifact_id = ? AND channel = 'code_tool_hook' AND deactivated_at IS NULL`);
+      const subject: unknown = subjectStatement
         .get(decision.subject.activationId, decision.subject.artifactId);
       if (!isRecord(subject) || subject.count !== 1) throw new Error(`Deactivation requires exactly one matching active activation: ${decision.subject.activationId}`);
       db.prepare(`INSERT INTO activation_decisions
@@ -205,7 +204,10 @@ export class SqliteActivationSafetyStore {
             ? decision.authentication.credentialId : null,
           decision.operator?.kind ?? null, decision.operator?.operatorId ?? null, decision.reasonCode,
           decision.note, decision.evidenceSnapshotId, decision.decidedAt);
-      const update = db.prepare(`UPDATE activations SET deactivated_at = ? WHERE activation_id = ? AND artifact_id = ? AND deactivated_at IS NULL ${actionClause}`)
+      const updateStatement = rejectAfterShadow
+        ? db.prepare(`UPDATE activations SET deactivated_at = ? WHERE activation_id = ? AND artifact_id = ? AND action = 'code_tool_hook_shadow_activate' AND deactivated_at IS NULL`)
+        : db.prepare(`UPDATE activations SET deactivated_at = ? WHERE activation_id = ? AND artifact_id = ? AND deactivated_at IS NULL`);
+      const update = updateStatement
         .run(decision.decidedAt, decision.subject.activationId, decision.subject.artifactId);
       if (update.changes !== 1) throw new Error('Activation state changed during atomic deactivation');
       db.exec('COMMIT');

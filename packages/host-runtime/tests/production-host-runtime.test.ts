@@ -7,6 +7,7 @@ import * as yaml from 'js-yaml';
 import {
   getDefaultPdConfig,
   SqliteActivationStateStore,
+  SqliteActivationSafetyStore,
   SqliteConnection,
   renderPrinciplesToDirectives,
 } from '@principles/core/runtime-v2';
@@ -358,6 +359,26 @@ describe('shared production RuleHost gate kernel', () => {
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
       decision: 'allow',
       warnings: [expect.stringMatching(/activation_safety_isolated: act-shared-gate.*nextAction=.*recover.*shadow/i)],
+      metadata: { evaluatedLiveRules: 0 },
+    });
+  });
+
+  it('fails open while the durable global RuleCode pause latch is active', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, SHARED_GATE_CODE);
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      await new SqliteActivationSafetyStore(connection).pauseAllLive({
+        decisionId: 'pause-decision', subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause',
+        principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' },
+        reasonCode: 'host_runtime_test', note: null, evidenceSnapshotId: null, decidedAt: '2026-08-21T00:00:00.000Z',
+      }, 'pause-1', 'pause-idempotency');
+    } finally { connection.close(); }
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
+      decision: 'allow',
+      warnings: [expect.stringMatching(/global_rulecode_pause_active.*nextAction=/)],
       metadata: { evaluatedLiveRules: 0 },
     });
   });

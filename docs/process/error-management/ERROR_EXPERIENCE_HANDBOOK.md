@@ -187,6 +187,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-098 | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing dirs, never silence errors on critical cleanup | PRI-538; PR #1358 (near-miss: worktree node_modules junctioned into shared repo) |
 | ERR-101 | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree | PRI-553 |
 | ERR-102 | Optional governance projection fails open to legacy approval mutation authority | PRI-553 |
+| ERR-104 | Auth bootstrap redirects overwrite authenticated deep links because splash/onboarding state is not scoped to entry routes | RuleCode Owner Live Decision E2E |
 
 ---
 
@@ -331,6 +332,20 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: `rule-host-writer.test.ts` exercises empty, all-invalid, wildcard, and protected-capability scope through the production writer.
 - **Related ERRs**: ERR-024, ERR-051, ERR-080, ERR-102
 - **Source**: RuleCode Owner Live Decision SPEC (no Linear issue)
+- **Date**: 2026-08-21
+- **Recurrence**: None
+
+---
+
+**[ERR-104]** | Auth bootstrap redirects overwrite authenticated deep links because splash/onboarding state is not scoped to entry routes
+
+- **What happened**: The authenticated RuleCode Owner browser E2E opened `#/activation`, signed in, and then could not find the Owner review card. `AuthRoutes` initialized `showSplash=true` even when the splash route was not mounted, and its onboarding effect later navigated every authenticated route to `/focus` or `/welcome`. A valid deep link to the emergency and Owner decision surface was therefore either left behind the login route or overwritten after authentication.
+- **Why it's wrong**: Authentication and onboarding bootstrap may choose an entry page, but they must not replace an already selected protected route. Treating a global lifecycle boolean as authority over every route made the safety control surface inaccessible through direct navigation even though authentication succeeded.
+- **Correct approach**: Derive splash state from the actual splash route, and scope the onboarding redirect to entry routes (`/`, `/login`, `/splash`). Preserve any other authenticated route verbatim.
+- **How to prevent**: For every authenticated Console feature, run a real-browser test that starts unauthenticated, signs in, then directly opens the protected deep link and asserts a feature-specific element. Do not treat a successful health request or generic shell rendering as proof that the requested route survived bootstrap.
+- **Regression guard**: `packages/pd-console/tests/e2e-owner/rulecode-owner-governance.spec.ts` logs in with the configured Owner token, opens `#/activation`, and completes exact RuleCode promote/reject decisions through the rendered cards.
+- **Related ERRs**: ERR-072, ERR-088, ERR-101
+- **Source**: RuleCode Owner Live Decision browser E2E (no Linear issue)
 - **Date**: 2026-08-21
 - **Recurrence**: None
 
@@ -758,6 +773,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
 - **Recurrence**: Same class as ERR-024 (security mechanism exists but is bypassed). Recurred 2026-08-17 (PRI-543 / PR #1349): `resolveGitUserEmail` in `create-principles-disciple/src/installer.ts` used `execSync(\`git -C "${workspaceDir}" config user.email\`, { shell: 'cmd' })` — CodeQL flagged it as command injection; fixed with `execFileSync('git', ['-C', workspaceDir, 'config', 'user.email'])`. Lesson: the argv-array rule applies even for "internal-looking" paths (installer workspace dirs), and any new `execSync`+`shell:` in a diff is a P1 review blocker.
+  - 2026-08-21 RuleCode Owner Live Decision self-review: `SqliteActivationSafetyStore.deactivateWithDecision` interpolated an internally selected `actionClause` into SELECT and UPDATE DML. The values were fixed constants, but this still bypassed the repository's no-dynamic-DML guard and left an injection-shaped maintenance seam. Replaced it with two fully static prepared statements for reject-after-shadow versus emergency deactivation. Prevention: SQL structure is code, not a parameter; choose between complete static statements and bind only values.
 
 ---
 
@@ -862,7 +878,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 102 |
+| Total lessons | 104 |
 | Last updated | 2026-08-21 |
 | Top category | Schema & Type |
 | Recurring errors | 51 |
@@ -1237,6 +1253,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-07-01 PR #1143: Three signal-keywords components (KeywordListSection, PendingTermsSection, KeywordEditDialog) hardcoded PHASE2_TOOLTIP, table headers (Term/Category/Precision/Weight/Reason/Actions), category labels, and "X terms" count in English while the component already imported useTranslation — 15 i18n keys added in fix commit b566e886
   - 2026-08-20 PRI-553: newly added zh-CN governance strings used bare `Owner` and `Console`, creating mixed-language visible copy. The existing CR10 locale audit caught all five values; fixed with `拥有者` and `控制台`, and the full Console suite verifies recurrence.
   - 2026-08-20 PRI-553 final review: collector degradation codes (`metadata_malformed`, `timestamp_invalid`, `source_unavailable`) and the new `verdict_missing` attention reason had no locale entries, so visible degraded paths fell back to raw machine identifiers. Added both-locale keys and registry coverage assertions.
+  - 2026-08-21 RuleCode Owner Live Decision self-review: the first Console implementation hardcoded Chinese and English labels, action text, toasts, and placeholder copy inside an existing `useTranslation` page. Replaced every new string with paired `en.json` / `zh-CN.json` keys before handoff.
 
 ---
 
@@ -1361,6 +1378,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
+  - 2026-08-21 RuleCode Owner Live Decision full-suite review (no Linear issue): the new `rulecode-safety-circuit.ts` correctly belonged to the OpenClaw plugin I/O boundary, but the implementation updated neither duplicated plugin-core anti-growth allowlist. Core and plugin full suites failed even though targeted safety tests passed. Fixed by classifying the file in both architecture guards with the same I/O rationale. Prevention: every new plugin-core file must update and run both `principles-core` architecture regression and `openclaw-plugin` anti-growth tests.
+  - 2026-08-21 RuleCode Owner Live Decision browser E2E (no Linear issue): the Console mutation boundary persisted an empty optional decision note as `''`, while the shared SQLite read contract accepts only `null` or a non-empty string. Emergency deactivation succeeded, but the next activation-list read failed with `Malformed activation safety row: note`, making the control surface appear broken immediately after containment. Fixed by normalizing blank notes to `null` at the decision-construction boundary and retaining a production browser round-trip that emergency-deactivates the exact live activation, then reads the activation list. Prevention: for every shared durable optional string, test the UI-empty-input → write → read round trip; writer normalization must emit the reader's canonical absent representation.
   - 2026-08-21 RuleCode Owner Live Decision self-review (no Linear issue): the first durable `ActivationDecisionRecord` implementation narrowed the approved structured `principal` and `authentication` identities to string enums. The decision remained immutable but lost `ownerId`, `credentialId`, `policyVersion`, and structured local operator attribution, so a future promotion audit could not prove which configured Owner credential authorized live enforcement. Fixed before promotion wiring by restoring the exact structured identity contract, normalized SQLite columns and CHECK constraints, plus round-trip tests. Prevention: when implementing a SPEC-declared audit schema, compare every nested field against the canonical interface and make the round-trip fixture contain the distinguishing identity values; testing only the discriminator enum is insufficient.
   - 2026-08-15 PRI-526 / PR #1319 review (test-fixture variant): refactoring a test file's shared environment fixture (moving the fake console install from the real `~/.openclaw` to an isolated fake HOME for subprocess tests) without auditing ALL tests in the same file — one sibling test invoked the handler IN-PROCESS, whose `getConsoleDir()` still read the real HOME. Passed on the dev machine only because a real console install happened to exist there (restored earlier in the session); failed on clean CI runners with `console_runtime_not_installed` → unexpected `process.exit(1)`. Fixed by pointing `HOME/USERPROFILE` at the fake home inside that test (save/restore in try/finally), and verified under the clean condition (`HOME=/nonexistent` locally) before pushing.
   - 2026-08-13 PRI-523 C1.2 self-review: the first shared RuleHost kernel correctly moved canonical action construction and RuleCode evaluation into `@principles/host-runtime`, but hardcoded `currentGfi=0`, `recentThinking=false`, and `epTier=0` instead of preserving the OpenClaw-owned enrichment contract.

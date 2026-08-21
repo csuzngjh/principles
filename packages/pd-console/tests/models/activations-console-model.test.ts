@@ -308,7 +308,7 @@ describe('ActivationsConsoleModel — Owner review', () => {
     expect(review.activation.activationId).toBe('act-review');
     expect(review.artifact.artifactId).toBe('artifact-review');
     expect(review.artifact.digest).toMatch(/^sha256:/);
-    expect(review.readiness.evidenceSnapshot.shadowSummary).toEqual({ observed: null, wouldBlock: null, errors: null });
+    expect(review.readiness.evidenceSnapshot.shadowSummary).toEqual({ observed: null, matched: null, wouldBlock: null, wouldAllow: null, requireApproval: null, autoCorrect: null, errors: null, neutralControl: null, firstObservedAt: null, lastObservedAt: null });
     expect(review.readiness.status).not.toBe('ready');
   });
 });

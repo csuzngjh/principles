@@ -24,7 +24,7 @@ const ready: PromotionReadinessResult = {
     lineageRefs: ['task-1', 'run-1'],
     hostRuntimeVersion: 'openclaw@1',
     safetyGateResults: [{ checkId: 'host_liveness', status: 'passed' }],
-    shadowSummary: { observed: 20, wouldBlock: 1, errors: 0 },
+    shadowSummary: { observed: 20, matched: 3, wouldBlock: 1, wouldAllow: 19, requireApproval: 0, autoCorrect: 0, errors: 0, neutralControl: 1, firstObservedAt: '2026-08-20T00:00:00.000Z', lastObservedAt: '2026-08-21T00:00:00.000Z' },
     configurationVersion: 'config-v1',
     redaction: { version: 'redaction-v1', rawParametersStored: false },
     createdAt: '2026-08-21T02:00:00.000Z',
@@ -139,5 +139,26 @@ describe('RuleCodeOwnerDecisionService promotion authority', () => {
       evidenceSnapshotDigest: 'sha256:snapshot',
     });
     expect(commitPromotion).not.toHaveBeenCalled();
+  });
+
+  it('refuses an evidence-insufficient promotion without an approved override reason', async () => {
+    const { instance, commitPromotion } = service({ readiness: { ...ready, status: 'evidence_insufficient' } });
+
+    await expect(instance.promote({ ...request, reasonCode: 'looks_safe' }, actor)).resolves.toMatchObject({
+      ok: false,
+      reasonCode: 'evidence_override_reason_required',
+    });
+    expect(commitPromotion).not.toHaveBeenCalled();
+  });
+
+  it('allows an evidence-insufficient promotion only with a predefined reason and note', async () => {
+    const { instance, commitPromotion } = service({ readiness: { ...ready, status: 'evidence_insufficient' } });
+
+    await expect(instance.promote({
+      ...request,
+      reasonCode: 'controlled_rollout',
+      note: 'Limited rollout with immediate emergency controls verified.',
+    }, actor)).resolves.toMatchObject({ ok: true, decision: 'promoted' });
+    expect(commitPromotion).toHaveBeenCalledOnce();
   });
 });

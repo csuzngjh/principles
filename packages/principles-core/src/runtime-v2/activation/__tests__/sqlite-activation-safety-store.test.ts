@@ -85,7 +85,7 @@ function promotionCommit(): PromotionCommitInput {
       snapshotId: 'snapshot-1', snapshotDigest: 'sha256:snapshot', artifactDigest: 'sha256:artifact',
       lineageRefs: ['task-1', 'run-1'], hostRuntimeVersion: 'openclaw@1',
       safetyGateResults: [{ checkId: 'host_liveness', status: 'passed' }],
-      shadowSummary: { observed: 20, wouldBlock: 1, errors: 0 },
+    shadowSummary: { observed: 20, matched: 3, wouldBlock: 1, wouldAllow: 19, requireApproval: 0, autoCorrect: 0, errors: 0, neutralControl: 1, firstObservedAt: '2026-08-20T00:00:00.000Z', lastObservedAt: '2026-08-21T00:00:00.000Z' },
       configurationVersion: 'config-v1', redaction: { version: 'redaction-v1', rawParametersStored: false },
       createdAt: '2026-08-21T02:59:00.000Z',
     },
@@ -241,16 +241,17 @@ describe('SqliteActivationSafetyStore', () => {
     await expect(store.pauseAllLive(decision, 'pause-1', 'pause-key-1')).resolves.toMatchObject({
       pauseId: 'pause-1', status: 'paused', affectedActivationIds: ['activation-1'], version: 1,
     });
-    await expect(store.getControlState('activation-1')).resolves.toMatchObject({ enforcement: 'safety_isolated' });
+    await expect(store.getControlState('activation-1')).resolves.toMatchObject({ enforcement: 'eligible' });
     await expect(store.getActiveGlobalPause()).resolves.toMatchObject({ pauseId: 'pause-1', status: 'paused' });
     connection.close();
   });
 
-  it('releasing the global latch never restores isolated activations', async () => {
+  it('releasing the global latch preserves per-rule isolation and leaves eligible rules eligible', async () => {
     const connection = new SqliteConnection(makeWorkspace());
     seedArtifact(connection);
     await new SqliteActivationStateStore(connection).recordActivation(liveActivation());
     const store = new SqliteActivationSafetyStore(connection);
+    await store.safetyIsolate(isolateDecision(), 1);
     await store.pauseAllLive({
       decisionId: 'pause-decision-1', subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause',
       principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' },

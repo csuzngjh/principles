@@ -1165,6 +1165,7 @@ export type {
   RuleCodeSafetySample,
   RuleCodeSafetyCircuitState,
   RuleCodeSafetyTripReason,
+  HostLivenessContract,
   WriterInput,
   WriterResult,
   CanActivateResult,

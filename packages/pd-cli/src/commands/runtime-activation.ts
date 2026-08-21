@@ -31,7 +31,8 @@ import type {
   ApprovalDecisionResult,
   ApprovalCompletionResult,
 } from '@principles/core/runtime-v2';
-import type { PIArtifactRecord, ActivationStatusRecord } from '@principles/core/runtime-v2';
+import type { PIArtifactRecord, ActivationStatusRecord, PromotionEvidenceSnapshot } from '@principles/core/runtime-v2';
+import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 
@@ -43,11 +44,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
 }
 
-function readShadowSummary(workspaceDir: string, activationId: string): { observed: number | null; wouldBlock: number | null; errors: number | null } {
-  const logsDir = path.join(workspaceDir, '.pd', 'logs'); if (!fs.existsSync(logsDir)) return { observed: null, wouldBlock: null, errors: null };
+function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] {
+  return {
+    observed: null, matched: null, wouldBlock: null, wouldAllow: null,
+    requireApproval: null, autoCorrect: null, errors: null, neutralControl: null,
+    firstObservedAt: null, lastObservedAt: null,
+  };
+}
+
+function readShadowSummary(workspaceDir: string, activationId: string): PromotionEvidenceSnapshot['shadowSummary'] {
+  const logsDir = path.join(workspaceDir, '.pd', 'logs'); if (!fs.existsSync(logsDir)) return unavailableShadowSummary();
   const entries: unknown[] = [];
   try { for (const file of fs.readdirSync(logsDir).filter(name => /^events_.*\.jsonl$/.test(name)).sort().slice(-7)) for (const line of fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean)) { try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ } } }
-  catch { return { observed: null, wouldBlock: null, errors: null }; }
+  catch { return unavailableShadowSummary(); }
   return summarizeRuleCodeShadowEvents(entries, activationId);
 }
 
@@ -445,7 +454,23 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
           getArtifactById: artifactId => manager.piArtifactStore.getArtifactById(artifactId),
           computeArtifactDigest: artifact => `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`,
           validateProductionArtifact: artifact => writer.canActivate(artifact),
-          collectHostChecks: async artifact => collectOpenClawPromotionChecks(artifact.contentJson, { ownerIdentityConfigured: actor.principal.kind === 'configured_owner' && actor.authentication.method === 'cli_owner_credential', safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls') }),
+          collectHostChecks: async artifact => {
+            const liveArtifacts: PIArtifactSnapshot[] = [];
+            const activations = await activationStore.listCodeToolHookActivations(false);
+            for (const active of activations) {
+              if (active.action !== 'code_tool_hook_live_activate' || active.deactivatedAt !== null) continue;
+              const liveArtifact = await manager.piArtifactStore.getArtifactById(active.artifactId);
+              if (liveArtifact) liveArtifacts.push(liveArtifact);
+            }
+            return collectOpenClawPromotionChecks(artifact, {
+              ownerIdentityConfigured: actor.principal.kind === 'configured_owner'
+                && actor.authentication.method === 'cli_owner_credential',
+              safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls'),
+              hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+              existingLiveArtifacts: liveArtifacts,
+              validateProductionArtifact: value => writer.canActivate(value),
+            });
+          },
           buildEvidenceSnapshot: (checks, artifact) => {
             const createdAt = new Date().toISOString();
             const artifactDigest = artifact

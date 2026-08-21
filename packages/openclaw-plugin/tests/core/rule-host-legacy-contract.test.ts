@@ -26,7 +26,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore, SqliteActivationSafetyStore } from '@principles/core/runtime-v2';
 import type { RuleHostInput } from '@principles/core/runtime-v2';
 import { RuleHost } from '../../src/core/rule-host.js';
 
@@ -136,6 +136,34 @@ afterEach(() => {
 });
 
 describe('RuleHost retired-contract backstop (persisted workspace)', () => {
+  it('global pause suppresses live enforcement without changing per-rule eligibility, and release resumes eligible rules', async () => {
+    insertRuleArtifact(CLEAN_ARTIFACT_ID, CLEAN_RULE_ID, CLEAN_CODE);
+    await insertLiveActivation(CLEAN_ACTIVATION_ID, CLEAN_ARTIFACT_ID, CLEAN_RULE_ID);
+    const safetyStore = new SqliteActivationSafetyStore(sqliteConn);
+    await safetyStore.pauseAllLive({
+      decisionId: 'pause-decision', subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause',
+      principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' },
+      reasonCode: 'e2e_emergency', note: null, evidenceSnapshotId: null, decidedAt: '2026-08-21T00:00:00.000Z',
+    }, 'pause-1', 'pause-idempotency');
+    const ruleHost = makeRuleHost();
+
+    const paused = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
+    expect(paused.liveDecision).toBeUndefined();
+    expect(paused.skippedActivations).toEqual([expect.objectContaining({
+      activationId: CLEAN_ACTIVATION_ID,
+      reason: 'global_rulecode_pause_active',
+    })]);
+    await expect(safetyStore.getControlState(CLEAN_ACTIVATION_ID)).resolves.toMatchObject({ enforcement: 'eligible' });
+
+    await safetyStore.releaseGlobalPause({
+      decisionId: 'release-decision', subject: { kind: 'all_live_rulecode' }, decision: 'global_emergency_pause_release',
+      principal: { kind: 'configured_owner', ownerId: 'owner-1' }, authentication: { method: 'console_token', credentialId: 'console-1' },
+      reasonCode: 'incident_reviewed', note: 'Resume only eligible rules.', evidenceSnapshotId: null, decidedAt: '2026-08-21T00:01:00.000Z',
+    }, { pauseId: 'pause-1', expectedVersion: 1, idempotencyKey: 'release-idempotency' });
+
+    expect(ruleHost.evaluateDetailed(makeInput('/etc/passwd')).liveDecision).toMatchObject({ decision: 'block' });
+  });
+
   it('skips a safety-isolated live rule with an observable recovery action', async () => {
     insertRuleArtifact(CLEAN_ARTIFACT_ID, CLEAN_RULE_ID, CLEAN_CODE);
     await insertLiveActivation(CLEAN_ACTIVATION_ID, CLEAN_ARTIFACT_ID, CLEAN_RULE_ID);

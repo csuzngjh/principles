@@ -80,9 +80,7 @@ export function computeFeatureFlagsFromConfig(effective: EffectivePdConfig): Fea
       // escalation. The old system (feature-flag-contract.ts) used
       // `{ ...def, enabled: false }` to preserve def.category.
       if (defaultFlag.category === 'core' && !userEntry.enabled) {
-        if (id !== 'rulecode_owner_live_decision') {
-          warnings.push(`feature '${id}': core flag explicitly disabled via config (emergency disable)`);
-        }
+        warnings.push(`feature '${id}': core flag explicitly disabled via config (emergency disable)`);
         flags[id] = {
           id,
           category: defaultFlag.category,

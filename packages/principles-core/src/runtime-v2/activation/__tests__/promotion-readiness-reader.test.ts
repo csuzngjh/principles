@@ -23,7 +23,7 @@ describe('PromotionReadinessReader', () => {
       buildEvidenceSnapshot: checks => ({
         snapshotId: 'snap-1', snapshotDigest: 'sha256:snapshot', artifactDigest: 'sha256:artifact',
         lineageRefs: ['task-1', 'parent-1'], hostRuntimeVersion: 'unavailable', safetyGateResults: checks,
-        shadowSummary: { observed: 0, wouldBlock: 0, errors: 0 }, configurationVersion: 'config-v1',
+        shadowSummary: { observed: 0, matched: 0, wouldBlock: 0, wouldAllow: 0, requireApproval: 0, autoCorrect: 0, errors: 0, neutralControl: 0, firstObservedAt: null, lastObservedAt: null }, configurationVersion: 'config-v1',
         redaction: { version: 'v1', rawParametersStored: false }, createdAt: '2026-08-21T00:00:00Z',
       }),
       newEvaluationId: () => 'eval-1',
@@ -44,7 +44,7 @@ describe('PromotionReadinessReader', () => {
       computeArtifactDigest: () => 'sha256:current',
       validateProductionArtifact: async () => { validationCalls += 1; return { ok: true, riskLevel: 'high' }; },
       collectHostChecks: async () => [],
-      buildEvidenceSnapshot: checks => ({ snapshotId: 'snap', snapshotDigest: 'digest', artifactDigest: 'sha256:current', lineageRefs: [], hostRuntimeVersion: 'unavailable', safetyGateResults: checks, shadowSummary: { observed: 0, wouldBlock: 0, errors: 0 }, configurationVersion: 'v1', redaction: { version: 'v1', rawParametersStored: false }, createdAt: 'now' }),
+      buildEvidenceSnapshot: checks => ({ snapshotId: 'snap', snapshotDigest: 'digest', artifactDigest: 'sha256:current', lineageRefs: [], hostRuntimeVersion: 'unavailable', safetyGateResults: checks, shadowSummary: { observed: 0, matched: 0, wouldBlock: 0, wouldAllow: 0, requireApproval: 0, autoCorrect: 0, errors: 0, neutralControl: 0, firstObservedAt: null, lastObservedAt: null }, configurationVersion: 'v1', redaction: { version: 'v1', rawParametersStored: false }, createdAt: 'now' }),
       newEvaluationId: () => 'eval-2',
     });
 

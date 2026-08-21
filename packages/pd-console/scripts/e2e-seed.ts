@@ -16,6 +16,7 @@ import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 
 const workspaceDir = process.argv[2];
+const ownerAuthEnabled = process.env.PD_CONSOLE_E2E_OWNER_AUTH === '1';
 if (!workspaceDir || !fs.existsSync(workspaceDir)) {
   console.error('[e2e-seed] usage: tsx e2e-seed.ts <workspaceDir>');
   process.exit(1);
@@ -123,6 +124,73 @@ insertPiArtifact.run(
   now, now,
 );
 
+const safeRuleCode = 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }';
+function ownerReviewRuleContent(ruleId: string, principleId = 'p-rulecode-owner') {
+  return JSON.stringify({
+    principleId,
+    ruleId,
+    implementationCode: safeRuleCode,
+    goldenTrace: {
+      traceId: `trace-${ruleId}`,
+      sourcePainId: 'pain-e2e-1',
+      cases: [
+        { caseId: 'negative', kind: 'negative', toolName: 'edit_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        { caseId: 'positive', kind: 'positive', toolName: 'edit_file', params: { path: '/workspace/safe.ts' }, expectedDecision: 'allow' },
+      ],
+      createdAt: eightDaysAgo,
+      version: 1,
+    },
+    ruleHostGateDecision: 'accepted_shadow',
+    affectedTools: ['edit_file'],
+  });
+}
+
+insertPiArtifact.run(
+  'artifact-rule-owner-shadow', 'rule', 'task-rule-owner-shadow', 'p-rulecode-owner',
+  '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-owner-shadow'), now, now,
+);
+insertPiArtifact.run(
+  'artifact-rule-owner-live', 'rule', 'task-rule-owner-live', 'p-rulecode-owner',
+  '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-owner-live'), now, now,
+);
+
+const insertRuleActivation = stateDb.prepare(`
+  INSERT INTO activations (
+    activation_id, idempotency_key, artifact_id, channel, action, target_ref,
+    activated_at, promoted_at, deactivated_at
+  ) VALUES (?, ?, ?, 'code_tool_hook', ?, ?, ?, ?, NULL)
+`);
+insertRuleActivation.run(
+  'act-rule-shadow-e2e', 'idem-rule-shadow-e2e', 'artifact-rule-owner-shadow',
+  'code_tool_hook_shadow_activate', 'impl://rule-owner-shadow', eightDaysAgo, null,
+);
+insertRuleActivation.run(
+  'act-rule-live-e2e', 'idem-rule-live-e2e', 'artifact-rule-owner-live',
+  'code_tool_hook_live_activate', 'impl://rule-owner-live', eightDaysAgo, eightDaysAgo,
+);
+stateDb.prepare(`
+  INSERT INTO activation_control_states (activation_id, enforcement, isolation_decision_id, version, updated_at)
+  VALUES (?, 'eligible', NULL, 1, ?)
+`).run('act-rule-shadow-e2e', now);
+stateDb.prepare(`
+  INSERT INTO activation_control_states (activation_id, enforcement, isolation_decision_id, version, updated_at)
+  VALUES (?, 'eligible', NULL, 1, ?)
+`).run('act-rule-live-e2e', now);
+if (ownerAuthEnabled) {
+  insertPiArtifact.run(
+    'artifact-rule-owner-reject', 'rule', 'task-rule-owner-reject', 'p-rulecode-reject',
+    '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-owner-reject', 'p-rulecode-reject'), now, now,
+  );
+  insertRuleActivation.run(
+    'act-rule-reject-e2e', 'idem-rule-reject-e2e', 'artifact-rule-owner-reject',
+    'code_tool_hook_shadow_activate', 'impl://rule-owner-reject', eightDaysAgo, null,
+  );
+  stateDb.prepare(`
+    INSERT INTO activation_control_states (activation_id, enforcement, isolation_decision_id, version, updated_at)
+    VALUES (?, 'eligible', NULL, 1, ?)
+  `).run('act-rule-reject-e2e', now);
+}
+
 // ── 6. 插入 principle_candidates（evidence-chain 候选，需 artifact_id + run_id）
 // F13 (PRI-442): schema 现在强制 CHECK (status != 'consumed' OR consumed_at IS NOT NULL)
 // — consumed 状态的候选必须提供 consumed_at。这里用 created_at 同时间戳。
@@ -227,7 +295,41 @@ insertClickApproval.run(
 );
 
 stateConn.close();
-console.log('[e2e-seed] state.db seeded: 7 approvals (incl. 1 BDD-isolated, 1 bad-trace regression, 3 PRI-517 click-isolated), 8 pi_artifacts, 1 task, 1 run, 1 artifact, 1 candidate');
+console.log('[e2e-seed] state.db seeded with approvals plus shadow/live RuleCode Owner review fixtures');
+
+const logsDir = path.join(stateDir, 'logs');
+fs.mkdirSync(logsDir, { recursive: true });
+const shadowEvents = Array.from({ length: 20 }, (_, index) => ({
+  ts: new Date(Date.now() - (25 * 60 - index * 70) * 60 * 1000).toISOString(),
+  type: 'rulehost_evaluated',
+  category: 'observation',
+  data: {
+    activationId: 'act-rule-shadow-e2e',
+    activationMode: 'shadow',
+    matched: index < 4,
+    decision: index < 2 ? 'block' : 'allow',
+    toolName: 'edit_file',
+    filePath: index < 4 ? '/workspace/config.ts' : '/workspace/readme.md',
+  },
+}));
+const liveEvents = Array.from({ length: 4 }, (_, index) => ({
+  ts: new Date(Date.now() - index * 60 * 60 * 1000).toISOString(),
+  type: 'rulehost_evaluated',
+  category: 'observation',
+  data: {
+    activationId: 'act-rule-live-e2e',
+    activationMode: 'live',
+    matched: index === 0,
+    decision: index === 0 ? 'block' : 'allow',
+    toolName: 'edit_file',
+    filePath: '/workspace/config.ts',
+  },
+}));
+fs.writeFileSync(
+  path.join(logsDir, `events_${now.slice(0, 10)}.jsonl`),
+  [...shadowEvents, ...liveEvents].map(event => JSON.stringify(event)).join('\n'),
+  'utf8',
+);
 
 // ── 8. 初始化 trajectory.db + pain_events ───────────────────────────────────
 const trajectoryDir = path.join(workspaceDir, '.state');
@@ -330,6 +432,8 @@ const minimalConfig = {
   version: 1,
   features: {
     intent_engineering: { category: 'quiet', enabled: false },
+    rulecode_owner_live_decision: { category: 'core', enabled: ownerAuthEnabled },
+    rulecode_safety_controls: { category: 'core', enabled: true },
   },
   runtimeProfiles: {
     'openclaw.default': { type: 'openclaw', source: 'default' },

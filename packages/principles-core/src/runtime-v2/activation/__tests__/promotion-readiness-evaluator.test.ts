@@ -12,7 +12,7 @@ const snapshot: PromotionEvidenceSnapshot = {
   lineageRefs: ['task-1', 'run-1'],
   hostRuntimeVersion: 'openclaw@1',
   safetyGateResults: [],
-  shadowSummary: { observed: 20, wouldBlock: 1, errors: 0 },
+    shadowSummary: { observed: 20, matched: 3, wouldBlock: 1, wouldAllow: 19, requireApproval: 0, autoCorrect: 0, errors: 0, neutralControl: 1, firstObservedAt: '2026-08-20T00:00:00.000Z', lastObservedAt: '2026-08-21T00:00:00.000Z' },
   configurationVersion: 'config-v1',
   redaction: { version: 'v1', rawParametersStored: false },
   createdAt: '2026-08-21T00:00:00.000Z',
@@ -66,5 +66,35 @@ describe('evaluateRuleCodePromotionReadiness', () => {
 
     expect(result.status).toBe('unavailable');
     expect(result.failedChecks).toContainEqual({ checkId: 'evidence_binding', reasonCode: 'artifact_digest_mismatch' });
+  });
+
+  it.each([
+    ['less than 24 hours', { firstObservedAt: '2026-08-20T00:00:00.001Z' }],
+    ['fewer than 20 eligible evaluations', { observed: 19 }],
+    ['fewer than 3 matches', { matched: 2 }],
+    ['no neutral-control sample', { neutralControl: 0 }],
+  ])('keeps promotion evidence-insufficient when %s', (_name, shadowSummary) => {
+    const result = evaluateRuleCodePromotionReadiness({
+      evaluationId: 'eval-insufficient', artifactId: 'artifact-1', artifactDigest: 'sha256:artifact',
+      evidenceSnapshot: { ...snapshot, shadowSummary: { ...snapshot.shadowSummary, ...shadowSummary } },
+      checks: passingChecks(),
+    });
+
+    expect(result.status).toBe('evidence_insufficient');
+    expect(result.failedChecks).toEqual([]);
+  });
+
+  it('turns unresolved unhealthy shadow evidence into a non-overridable hard failure', () => {
+    const result = evaluateRuleCodePromotionReadiness({
+      evaluationId: 'eval-unhealthy', artifactId: 'artifact-1', artifactDigest: 'sha256:artifact',
+      evidenceSnapshot: { ...snapshot, shadowSummary: { ...snapshot.shadowSummary, errors: 1 } },
+      checks: passingChecks(),
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(result.failedChecks).toContainEqual({
+      checkId: 'runtime_shadow_evidence',
+      reasonCode: 'unresolved_shadow_unhealthy_evidence',
+    });
   });
 });
