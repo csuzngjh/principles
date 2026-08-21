@@ -66,6 +66,8 @@ export type {
 } from './rulecode-owner-decision-service.js';
 export { REQUIRED_PROMOTION_CHECK_IDS, evaluateRuleCodePromotionReadiness } from './promotion-readiness-evaluator.js';
 export type { PromotionCheckId, PromotionReadinessCheck, PromotionReadinessEvaluationInput } from './promotion-readiness-evaluator.js';
+export { PromotionReadinessReader } from './promotion-readiness-reader.js';
+export type { PromotionReadinessReaderDeps } from './promotion-readiness-reader.js';
 
 export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 
