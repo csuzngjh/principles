@@ -1,7 +1,7 @@
 {
   "name": "@principles/pd-cli",
   "version": "1.74.1",
-  "description": "PD CLI — Pain recording, sample management, and evolution tasks",
+  "description": "PD CLI — Pain recording, sample management, and governance tasks for Principles Disciple",
   "type": "module",
   "bin": {
     "pd": "dist/index.js"

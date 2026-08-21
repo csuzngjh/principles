@@ -8,8 +8,8 @@
       </h1>
       <p class="hero-lead">
         {{ isZh
-          ? 'PD 把你的纠正沉淀为可审查、可撤回的行为原则，让 Agent 在下一次相似任务中按你的方式行动。'
-          : 'PD turns repeated corrections into reviewable, reversible behavior principles, so the Agent handles the next similar task your way.' }}
+          ? 'Principles Disciple（PD）是一个 AI Agent 行为治理系统：把你的反复纠正沉淀为可审查、可撤回的行为原则，让 Agent 在下一次相似任务中按你的方式行动。'
+          : 'Principles Disciple is an AI Agent Governance System: it turns repeated corrections into reviewable, reversible behavior principles, so the Agent handles the next similar task your way.' }}
       </p>
       <p class="hero-proof">
         {{ isZh ? '每条原则先由你批准，效果可观察，随时可回滚。' : 'You approve every principle first. Its effect stays observable and can be rolled back.' }}
