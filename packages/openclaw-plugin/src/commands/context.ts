@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { getSession } from '../core/session-tracker.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { atomicWriteFileSync, normalizeCommandArgs } from '../utils/io.js';
 import type { ContextInjectionConfig } from '../types.js';
@@ -69,9 +70,10 @@ function formatProjectFocus(value: 'full' | 'summary' | 'off', isZh: boolean): s
 /**
  * Show current context injection status
  */
-function showStatus(workspaceDir: string, isZh: boolean): string {
+function showStatus(workspaceDir: string, isZh: boolean, sessionId?: string): string {
     const config = loadContextInjectionConfig(workspaceDir);
-    
+    const receipt = formatSessionReceipt(sessionId, isZh);
+
     if (isZh) {
         return `
 📊 **上下文注入状态**
@@ -82,6 +84,7 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
 | 思维模型 | ${config.thinkingOs ? '✅ 开启' : '❌ 关闭'} | /pd-context thinking on/off |
 | 项目上下文 | ${formatProjectFocus(config.projectFocus, isZh)} | /pd-context focus full/summary/off |
 
+${receipt}
 💡 输入 \`/pd-context help\` 查看更多选项
 `.trim();
     } else {
@@ -94,9 +97,32 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
 | Thinking OS | ${config.thinkingOs ? '✅ ON' : '❌ OFF'} | /pd-context thinking on/off |
 | Project Context | ${formatProjectFocus(config.projectFocus, isZh)} | /pd-context focus full/summary/off |
 
+${receipt}
 💡 Type \`/pd-context help\` for more options
 `.trim();
     }
+}
+
+/**
+ * PRI-534: per-session receipt summary (injected principles + blocks +
+ * auto-corrections this session). Degrades to a quiet hint when no session
+ * identity is available (e.g., non-chat invocations).
+ */
+function formatSessionReceipt(sessionId: string | undefined, isZh: boolean): string {
+    if (!sessionId) return '';
+    const state = getSession(sessionId);
+    const injected = state?.injectedPrincipleIds ?? [];
+    const blocks = state?.blockedAttempts ?? 0;
+    const autoCorrects = state?.receiptAutoCorrects ?? 0;
+    const preview = injected.slice(0, 3).join(', ') + (injected.length > 3 ? ` …(+${injected.length - 3})` : '');
+    if (isZh) {
+        return `🧾 **本会话回执**：注入原则 ${injected.length} 条${preview ? `（${preview}）` : ''} · 拦截 ${blocks} 次 · 自动纠正 ${autoCorrects} 次
+
+`;
+    }
+    return `🧾 **Session receipt**: ${injected.length} principle(s) injected${preview ? ` (${preview})` : ''} · ${blocks} block(s) · ${autoCorrects} auto-correction(s)
+
+`;
 }
 
 /**
@@ -324,7 +350,7 @@ export function handleContextCommand(ctx: PluginCommandContext): PluginCommandRe
     
     switch (subCommand) {
         case 'status':
-            result = showStatus(workspaceDir, isZh);
+            result = showStatus(workspaceDir, isZh, ctx.sessionId);
             break;
         case 'thinking':
             result = toggleSetting(workspaceDir, 'thinkingOs', value, isZh);

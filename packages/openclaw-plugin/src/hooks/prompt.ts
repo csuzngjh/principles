@@ -16,6 +16,7 @@ import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-rea
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordInjectionPresence, alignActivationIds } from '../core/principle-application-ledger.js';
+import { setInjectedPrincipleIds } from '../core/session-tracker.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
@@ -559,6 +560,16 @@ export async function handleBeforePromptBuild(
       });
     } catch (logErr) {
       logger?.warn?.(`[PD:RuntimeV2] Failed to emit activation observability event: ${String(logErr)}`);
+    }
+
+    // PRI-534: track injected principle ids for the /pd-context session
+    // receipt (independent of the ledger flag — the injection itself happened).
+    try {
+      if (runtimeV2PrincipleIds.size > 0 && sessionId) {
+        setInjectedPrincipleIds(sessionId, [...runtimeV2PrincipleIds], workspaceDir);
+      }
+    } catch (sessionErr) {
+      logger?.warn?.(`[PD:RuntimeV2] Session receipt tracking failed: ${String(sessionErr)}`);
     }
 
     // PRI-531: receipt ledger presence rows — one per injected principle,

@@ -324,6 +324,14 @@ export function generateConfigYamlContent(
       // Task 17: Failed tasks observability — quiet flag, default-on so operators
       // can list failed pipeline tasks out of the box. Disable via .pd/config.yaml.
       failed_tasks_observability: { category: 'quiet', enabled: true },
+      // PRI-535 (SPEC §10): Principle Receipt — owner-visible evidence that
+      // approved principles change agent behavior (block copy attribution,
+      // durable application ledger, agent self-report line). Quiet flags,
+      // default-on at install so the seed customer observes receipts out of
+      // the box. Disable individually via .pd/config.yaml.
+      principle_receipt_block_copy:  { category: 'quiet', enabled: true },
+      principle_receipt_ledger:      { category: 'quiet', enabled: true },
+      principle_receipt_self_report: { category: 'quiet', enabled: true },
       gfi:                { category: 'quiet', enabled: false },
       evolution_worker:   { category: 'quiet', enabled: false },
       empathy_observer:   { category: 'quiet', enabled: false },

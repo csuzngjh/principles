@@ -419,6 +419,20 @@
         "reflectionQ1": "这条原则是否描述了我希望反复出现的行为？",
         "reflectionQ2": "我是否理解它将在哪些通道激活？",
         "reflectionQ3": "如果它错了，我是否知道如何回滚？",
+        "receipts": {
+          "title": "生效履历",
+          "headline": "你的原则正在影响智能体行为",
+          "counts": "生效 {{effectCount}} 次 · 注入 {{presenceCount}} 次",
+          "empty": "最近没有记录——这条原则尚未在运行中被触发。",
+          "note": "「生效」= 拦截/自动纠正/智能体自述遵循；「注入」= 原则进入了任务上下文（灰色）。智能体自述为概率性自报，与确定性事件分列。",
+          "unavailableReason": "暂无法读取生效履历。",
+          "kind": {
+            "rule_blocked": "拦截",
+            "auto_correct_applied": "自动纠正",
+            "self_reported": "智能体自述",
+            "prompt_injected": "注入上下文"
+          }
+        },
         "trajectory": "需要追溯时，查看完整轨迹",
         "stageEvidence": "证据",
         "stageDiagnosis": "诊断",
@@ -587,6 +601,9 @@
       "undoDisable": "停用操作已撤销",
       "viewDebt": "在原则债务中查看",
       "loadError": "无法加载生效数据。你可以尝试刷新页面。",
+      "receiptsLabel": "生效履历",
+      "receiptsValue": "生效 {{effect}} 次 · 注入 {{presence}} 次",
+      "receiptsUnavailable": "生效履历暂不可用：{{reason}}",
       "footer": "本页展示激活事实——哪些原则在生效、通过哪些通道。"
     },
     "approvals": {
