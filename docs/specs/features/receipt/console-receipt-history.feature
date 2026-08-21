@@ -20,3 +20,9 @@ Feature: Principle Receipt — Console 生效履历展示 (PRI-533)
     And 原则 princ-A 有一条 effect 记录
     When 查询原则 princ-unknown 的生效履历
     Then 返回 status=ok 且 effectCount=0 events 为空
+
+  Scenario: 每原则生效计数供 Activations 页计数列消费
+    Given 一个已安装 PD 的工作区，且 .pd/config.yaml 启用 principle_receipt_ledger
+    And 原则 princ-A 有 2 次 effect 记录与 1 次 presence 记录
+    When 查询全部原则的生效计数
+    Then 返回 status=ok 且 princ-A 的生效计数为 effect=2 presence=1

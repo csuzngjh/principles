@@ -601,6 +601,9 @@
       "undoDisable": "Disable action cancelled",
       "viewDebt": "View in Principle Debt",
       "loadError": "Unable to load activation data. You can try refreshing the page.",
+      "receiptsLabel": "Receipts",
+      "receiptsValue": "{{effect}} effect(s) · {{presence}} injection(s)",
+      "receiptsUnavailable": "Receipt history unavailable: {{reason}}",
       "footer": "This page shows activation facts — which principles are in effect and through which channels."
     },
     "approvals": {

@@ -11,11 +11,13 @@ import {
   fetchAllActivations,
   disableActivation,
   fetchLifecycleMetrics,
+  fetchReceiptCounts,
 } from "../../api.js";
 import type {
   ActivationRecord,
   ActivationsData,
   LifecycleMetricsData,
+  ReceiptCountEntryData,
 } from "../../api.js";
 import {
   validateActivationsData,
@@ -48,11 +50,15 @@ function CapabilityBoundaryDeclaration() {
 function ActivationFactCard({
   record,
   lifecycleData,
+  receiptCount,
   onDisable,
   disabling,
 }: {
   record: ActivationRecord;
   lifecycleData: LifecycleMetricsData | null | undefined;
+  /** PRI-533: per-principle receipt counts. undefined = counts unavailable
+   * (row omitted, page-level degraded note shown); null = no records (honest zero). */
+  receiptCount?: ReceiptCountEntryData | null;
   onDisable: (record: ActivationRecord) => void;
   disabling: boolean;
 }) {
@@ -161,6 +167,19 @@ function ActivationFactCard({
             </span>
           )}
         </div>
+        {/* PRI-533: receipt counts row — rendered only when the counts API is
+            reachable (undefined = unavailable → page-level degraded note). */}
+        {receiptCount !== undefined && (
+          <div data-testid={`activation-receipts-${record.activationId}`}>
+            <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.receiptsLabel")}</span>{" "}
+            <span className="text-ink-2 font-mono text-[12px] tabular-nums">
+              {t("pages.activation.receiptsValue", {
+                effect: receiptCount?.effectCount ?? 0,
+                presence: receiptCount?.presenceCount ?? 0,
+              })}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Layer 3: Lifecycle metrics (expandable, only when principle has rules) */}
@@ -268,6 +287,8 @@ export function ActivationPage() {
   const { t } = useTranslation();
   const [activationsData, setActivationsData] = useState<ActivationsData | null>(null);
   const [lifecycleCache, setLifecycleCache] = useState<Record<string, LifecycleMetricsData | null>>({});
+  const [receiptCounts, setReceiptCounts] = useState<Record<string, ReceiptCountEntryData> | null>(null);
+  const [receiptDegraded, setReceiptDegraded] = useState<{ reason: string; nextAction?: string } | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [disablingIds, setDisablingIds] = useState<Set<string>>(new Set());
@@ -277,6 +298,8 @@ export function ActivationPage() {
     setLoadingState("loading");
     setErrorMessage(null);
     setDegradedNote(null);
+    setReceiptCounts(null);
+    setReceiptDegraded(null);
 
     const result = await fetchAllActivations();
 
@@ -296,6 +319,34 @@ export function ActivationPage() {
     setActivationsData(validated);
     if (validated.reason) {
       setDegradedNote(validated.reason);
+    }
+
+    // PRI-533: per-principle receipt counts for the activation cards.
+    // Counts are supplementary evidence — a degraded/failed counts API never
+    // blocks the page; the cards omit the row and the page surfaces the
+    // degraded reason once (ERR-002: no silent fallback).
+    try {
+      const rResult = await fetchReceiptCounts();
+      if (!rResult.success) {
+        setReceiptDegraded({
+          reason: rResult.error,
+          ...(rResult.nextAction === undefined ? {} : { nextAction: rResult.nextAction }),
+        });
+      } else if (rResult.data.status === "ok") {
+        const byId: Record<string, ReceiptCountEntryData> = {};
+        for (const entry of rResult.data.counts) {
+          byId[entry.principleId] = entry;
+        }
+        setReceiptCounts(byId);
+      } else {
+        setReceiptDegraded({
+          reason: rResult.data.reason ?? "unknown",
+          ...(rResult.data.nextAction === undefined ? {} : { nextAction: rResult.data.nextAction }),
+        });
+      }
+    } catch (err) {
+      // EP-03: counts are optional — degrade with reason, never block the page.
+      setReceiptDegraded({ reason: err instanceof Error ? err.message : String(err) });
     }
 
     // Pre-fetch lifecycle metrics for active principles with rules
@@ -456,6 +507,19 @@ export function ActivationPage() {
         </div>
       )}
 
+      {/* PRI-533: receipt counts degraded note (ERR-002 — reason, never silent) */}
+      {receiptDegraded && (
+        <div
+          className="mt-4 text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2"
+          data-testid="receipt-counts-degraded"
+        >
+          {t("pages.activation.receiptsUnavailable", { reason: receiptDegraded.reason })}
+          {receiptDegraded.nextAction && (
+            <span className="mt-1 block font-mono text-[12px]">{receiptDegraded.nextAction}</span>
+          )}
+        </div>
+      )}
+
       {/* Section: Active activations */}
       <section className="mt-8" aria-labelledby="section-active">
         <SectionTitle id="section-active">
@@ -469,6 +533,7 @@ export function ActivationPage() {
                 key={record.activationId}
                 record={record}
                 lifecycleData={lifecycleCache[record.principleId]}
+                receiptCount={receiptCounts !== null ? (Object.hasOwn(receiptCounts, record.principleId) ? receiptCounts[record.principleId] : null) : undefined}
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
               />
@@ -493,6 +558,7 @@ export function ActivationPage() {
                 key={record.activationId}
                 record={record}
                 lifecycleData={lifecycleCache[record.principleId]}
+                receiptCount={receiptCounts !== null ? (Object.hasOwn(receiptCounts, record.principleId) ? receiptCounts[record.principleId] : null) : undefined}
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
               />

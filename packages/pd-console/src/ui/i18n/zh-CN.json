@@ -601,6 +601,9 @@
       "undoDisable": "停用操作已撤销",
       "viewDebt": "在原则债务中查看",
       "loadError": "无法加载生效数据。你可以尝试刷新页面。",
+      "receiptsLabel": "生效履历",
+      "receiptsValue": "生效 {{effect}} 次 · 注入 {{presence}} 次",
+      "receiptsUnavailable": "生效履历暂不可用：{{reason}}",
       "footer": "本页展示激活事实——哪些原则在生效、通过哪些通道。"
     },
     "approvals": {

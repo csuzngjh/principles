@@ -19,6 +19,7 @@ const registry = createStepRegistry();
 let workspaceDir = '';
 let model: ReceiptsConsoleModel;
 let result: Awaited<ReturnType<ReceiptsConsoleModel['getPrincipleReceipts']>> | undefined;
+let countsResult: Awaited<ReturnType<ReceiptsConsoleModel['getReceiptCounts']>> | undefined;
 
 function writeBaseConfig(): void {
   const pdDir = path.join(workspaceDir, '.pd');
@@ -81,17 +82,15 @@ registry.given(/原则 princ-A 有一条 effect 记录/, () => {
   seedRow('princ-A', 'rule_blocked', 'effect', 'digest-x', '2026-08-14T10:00:00.000Z');
 });
 
-registry.when(/查询原则 (\S+) 的生效履历/, (_m: string, principleId: string) => {
-  result = undefined;
-  void model.getPrincipleReceipts(principleId).then(r => { result = r; });
+registry.when(/查询原则 (\S+) 的生效履历/, async (_m: string, principleId: string) => {
+  result = await model.getPrincipleReceipts(principleId);
 });
 
 registry.when(/查询任意原则的生效履历/, async () => {
   result = await model.getPrincipleReceipts('princ-any');
 });
 
-registry.then(/返回 status=ok 且 effectCount=2 presenceCount=1/, async () => {
-  result ??= await model.getPrincipleReceipts('princ-A');
+registry.then(/返回 status=ok 且 effectCount=2 presenceCount=1/, () => {
   expect(result?.status).toBe('ok');
   expect(result?.effectCount).toBe(2);
   expect(result?.presenceCount).toBe(1);
@@ -116,10 +115,22 @@ registry.then(/返回 status=ok 且 effectCount=0 events 为空/, () => {
   expect(result?.events).toEqual([]);
 });
 
+registry.when(/查询全部原则的生效计数/, async () => {
+  countsResult = await model.getReceiptCounts();
+});
+
+registry.then(/返回 status=ok 且 (\S+) 的生效计数为 effect=(\d+) presence=(\d+)/, (_m: string, principleId: string, effect: string, presence: string) => {
+  expect(countsResult?.status).toBe('ok');
+  const entry = (countsResult?.counts ?? []).find(c => c.principleId === principleId);
+  expect(entry?.effectCount).toBe(Number(effect));
+  expect(entry?.presenceCount).toBe(Number(presence));
+});
+
 beforeEach(() => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-console-receipts-bdd-'));
   model = new ReceiptsConsoleModel(workspaceDir);
   result = undefined;
+  countsResult = undefined;
 });
 
 afterEach(() => {
