@@ -22,8 +22,8 @@
 
 ---
 
-> 面向 OpenClaw 编程智能体的 agent-first 认知治理插件。
-> 人类监督，本地存储，由痛觉驱动进化。
+> Principles Disciple（PD）是一个 **AI Agent 行为治理系统**：面向 OpenClaw / Codex 智能体的 agent-first 认知治理插件。
+> Owner 监督，本地存储，把反复纠正沉淀为可审查、可回滚的行为原则。
 
 Principles Disciple 是一个 OpenClaw 插件，用来帮助编程智能体捕获重复的行为问题，并把经过审核的教训转化为可复用的行为原则。
 

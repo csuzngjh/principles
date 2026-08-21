@@ -22,10 +22,10 @@
 
 ---
 
-> Principles Disciple (PD) is a local, agent-first governance and feedback layer for AI agents.
+> Principles Disciple (PD) is an **AI Agent Governance System** — a local, agent-first governance and feedback layer for AI agents.
 > Its first practical domain is agentic development: coding agents, terminal agents, and project-operation agents.
 > It helps owners, operators, and maintainers turn repeated agent failures, risky actions, user corrections, and workflow mismatches
-> into structured pain signals, reviewed principles, decision logs, and owner-controlled guardrails.
+> into structured pain signals, owner-reviewed principles, decision logs, and owner-controlled guardrails.
 
 PD currently ships with two runtime integrations: OpenClaw and Codex (CLI + Desktop, via an installable Codex plugin). The architecture is designed around a runtime adapter layer so that PD can connect with different agent runtimes and task environments without being hard-coded to a single agent tool or task domain.
 
@@ -306,13 +306,13 @@ By transforming owner-relevant behavior evidence into reviewed principles, PD he
 
 ## Reporting Problems
 
-遇到 bug 或有问题反馈？请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 中的反馈通道说明。
+Found a bug or want to give feedback? See the feedback channel guide in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-快速路径：
-- **PD Console**：打开 Report Problem 页面，自动收集诊断数据生成草稿
-- **Failed Tasks 页面**：从失败任务一键创建带 agent 上下文的反馈
-- **GitHub Issue**：直接在 [仓库](https://github.com/csuzngjh/principles/issues/new?template=bug_report.yml) 提交 issue（使用 bug_report 模板）
-- **邮件**：发送到 `csuzngjh@hotmail.com`
+Quick paths:
+- **PD Console**: open the Report Problem page to auto-collect diagnostics and generate a draft
+- **Failed Tasks page**: create agent-context-rich feedback from a failed task in one click
+- **GitHub Issue**: file an issue in the [repository](https://github.com/csuzngjh/principles/issues/new?template=bug_report.yml) (use the bug_report template)
+- **Email**: send to `csuzngjh@hotmail.com`
 
 ## Contributing
 

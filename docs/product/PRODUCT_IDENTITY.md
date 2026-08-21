@@ -10,6 +10,23 @@
 
 `Pain` is PD's current technical name for incoming behavior evidence. It does not mean every tool failure deserves a principle.
 
+## Public Category
+
+The internal definition above and the public category below are two layers of one statement — they must not drift apart:
+
+- **Public category (Category — how PD is classified externally):**
+  *Principles Disciple is an AI Agent Governance System.*
+- **Internal definition (System Type — how it works):**
+  *Owner-governed Agent Behavior Internalization System.*
+
+```
+Category            →  what PD is (external copy, website, README, marketplace)
+System Type         →  what kind of system PD is
+Internal Mechanism  →  how PD works (this document)
+```
+
+All external copy uses the public category sentence. The canonical text for external surfaces is [`docs/concepts/pd-canonical-definition.md`](../concepts/pd-canonical-definition.md); if the two documents ever disagree, this document wins and the canonical definition must be updated.
+
 ## Boundary
 
 PD owns:

@@ -1,7 +1,7 @@
 {
   "name": "@principles/core",
   "version": "1.74.1",
-  "description": "Universal Evolution SDK - framework-agnostic pain signal capture and principle injection",
+  "description": "Pure-logic core of Principles Disciple, an AI Agent Governance System - pain signal capture and principle proposal (no I/O)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
