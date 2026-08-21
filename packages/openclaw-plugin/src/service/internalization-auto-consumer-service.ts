@@ -27,6 +27,7 @@ import {
   InternalizationQueueReadModel,
   MVP_CORE_TASK_KINDS,
   type PDRuntimeAdapter,
+  type RuntimeStateManager,
   type WakeOnceResult,
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
@@ -406,6 +407,15 @@ export async function runConsumerCycle(
     SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_ERROR', String(err));
     logger.error(`[PD:AutoConsumer] Cycle error: ${String(err)}`);
   } finally {
+    // PRI-554: per-cycle expired-lease recovery sweep. Worker process death
+    // mid-lease leaves tasks invisible to findCandidates (pending/retry_wait
+    // only); without this sweep they stay leased forever. Runs before
+    // reconciliation and is gated on `handle` (not `orchestrator`) so it still
+    // executes if the orchestrator constructor threw — enumerate every early
+    // return between resource-open and the finally steps (ERR-024).
+    if (handle) {
+      await safeRunRecoverySweep(workspaceDir, handle.stateManager, logger);
+    }
     // A (最终复核): 每周期固定小预算 — continuous backlog 下 reconciliation
     // 不会被 ready 任务永久饿死 (公平性);游标 restart-durable。
     // 必须在 handle.close() 之前执行 (orchestrator 共享该 stateManager)。
@@ -415,6 +425,37 @@ export async function runConsumerCycle(
     if (handle) {
       await handle.close().catch(() => {});
     }
+  }
+}
+
+/**
+ * PRI-554: safe per-cycle expired-lease recovery sweep.
+ * - sweep 失败不阻塞 consumer cycle (下轮再试); 显式留痕
+ *   INTERNALIZATION_CONSUMER_RECOVER_FAILED (rc-9)。
+ * - 有实际恢复或逐任务错误时记录 recovered/failed 计数, 与
+ *   runReconciliationBudget 同级观测; sweep 自身对每个恢复的任务发遥测事件
+ *   (task_retried / task_failed), 此处不重复。
+ */
+async function safeRunRecoverySweep(
+  workspaceDir: string,
+  stateManager: RuntimeStateManager,
+  logger: PluginLogger,
+): Promise<void> {
+  try {
+    const sweep = await stateManager.runRecoverySweep();
+    if (sweep.recovered > 0 || sweep.errors.length > 0) {
+      SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RECOVERED', JSON.stringify({
+        recovered: sweep.recovered,
+        failed: sweep.errors.length,
+        errors: sweep.errors,
+      }));
+      logger.info(
+        `[PD:AutoConsumer] Recovery sweep: recovered=${sweep.recovered} failed=${sweep.errors.length}`,
+      );
+    }
+  } catch (sweepErr) {
+    SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_RECOVER_FAILED', String(sweepErr));
+    logger.warn(`[PD:AutoConsumer] Recovery sweep failed: ${String(sweepErr)}`);
   }
 }
 

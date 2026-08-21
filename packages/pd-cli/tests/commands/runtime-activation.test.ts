@@ -655,7 +655,8 @@ describe('handleRuntimeActivationList', () => {
     expect(rec.evidenceRefs).toEqual(['ex-1', 'ex-2']);
     expect(rec.evidenceSummary).toContain('2 evidence ref(s)');
     expect(rec.nextAction).toContain('Enable rulecode_context_v2 flag');
-    expect(rec.nextAction).toContain('pd activation deactivate --activation-id act-v2-shadow --confirm');
+    expect(rec.nextAction).toContain('pd activation deactivate --activation-id act-v2-shadow');
+    expect(rec.nextAction).not.toContain('--confirm');
 
     // Restore the mock for subsequent tests.
     mockFeatureFlags.flags.rulecode_context_v2.enabled = true;
@@ -761,7 +762,8 @@ describe('handleRuntimeActivationList', () => {
     expect(rec.status).toBe('active');
     expect(rec.mode).toBe('live');
     expect(rec.promotedAt).toBe('2026-06-19T00:00:00.000Z');
-    expect(rec.nextAction).toBe('pd activation deactivate --activation-id act-v1-live --confirm');
+    expect(rec.nextAction).toBe('pd activation deactivate --activation-id act-v1-live');
+    expect(rec.nextAction).not.toContain('--confirm');
   });
 
   it('PRI-491: text output shows promotedAt timestamp when present', async () => {
@@ -790,7 +792,8 @@ describe('handleRuntimeActivationList', () => {
     const text = consoleLogSpy.mock.calls.map(c => c[0]).join('\n');
     expect(text).toContain('(live)');
     expect(text).toContain('promotedAt: 2026-06-19T00:00:00.000Z');
-    expect(text).toContain('nextAction: pd activation deactivate --activation-id act-v1-live --confirm');
+    expect(text).toContain('nextAction: pd activation deactivate --activation-id act-v1-live');
+    expect(text).not.toContain('--confirm');
   });
 
   it('PRI-491: deactivated activation shows [DEACTIVATED <ts>] regardless of contextVersion (precedence)', async () => {
