@@ -501,6 +501,7 @@ export class SqliteConnection {
     db.exec(`
       CREATE TABLE IF NOT EXISTS activation_decisions (
         decision_id TEXT PRIMARY KEY,
+        idempotency_key TEXT UNIQUE,
         subject_kind TEXT NOT NULL CHECK (subject_kind IN ('activation', 'all_live_rulecode')),
         activation_id TEXT,
         artifact_id TEXT,
@@ -517,6 +518,8 @@ export class SqliteConnection {
         reason_code TEXT NOT NULL,
         note TEXT,
         evidence_snapshot_id TEXT,
+        readiness_evaluation_id TEXT,
+        evidence_snapshot_digest TEXT,
         decided_at TEXT NOT NULL,
         CHECK (
           (subject_kind = 'activation' AND activation_id IS NOT NULL AND artifact_id IS NOT NULL AND artifact_digest IS NOT NULL)
@@ -546,6 +549,22 @@ export class SqliteConnection {
         version INTEGER NOT NULL CHECK (version >= 1),
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS activation_evidence_snapshots (
+        snapshot_id TEXT PRIMARY KEY,
+        snapshot_digest TEXT NOT NULL UNIQUE,
+        artifact_digest TEXT NOT NULL,
+        lineage_refs TEXT NOT NULL,
+        host_runtime_version TEXT NOT NULL,
+        safety_gate_results TEXT NOT NULL,
+        shadow_summary TEXT NOT NULL,
+        configuration_version TEXT NOT NULL,
+        redaction_metadata TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TRIGGER IF NOT EXISTS activation_evidence_snapshots_no_update
+        BEFORE UPDATE ON activation_evidence_snapshots BEGIN SELECT RAISE(ABORT, 'activation evidence snapshots are immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS activation_evidence_snapshots_no_delete
+        BEFORE DELETE ON activation_evidence_snapshots BEGIN SELECT RAISE(ABORT, 'activation evidence snapshots are immutable'); END;
     `);
 
     // PRI-286: confirm_first_state table is orphaned (SqliteConfirmFirstStateStore class deleted).

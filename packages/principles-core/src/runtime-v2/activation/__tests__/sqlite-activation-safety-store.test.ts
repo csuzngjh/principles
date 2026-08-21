@@ -6,6 +6,7 @@ import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqliteActivationSafetyStore } from '../sqlite-activation-safety-store.js';
 import { SqliteActivationStateStore } from '../sqlite-activation-state-store.js';
 import type { ActivationDecisionRecord } from '../activation-control-types.js';
+import type { PromotionCommitInput } from '../rulecode-owner-decision-service.js';
 import type { ActivationStatusRecord } from '../activation-types.js';
 
 const tempDirs: string[] = [];
@@ -63,6 +64,35 @@ function isolateDecision(): ActivationDecisionRecord {
     note: 'Synthetic probe observed broad tool blocking.',
     evidenceSnapshotId: 'evidence-1',
     decidedAt: '2026-08-21T00:03:00.000Z',
+  };
+}
+
+function promotionCommit(): PromotionCommitInput {
+  return {
+    decision: {
+      decisionId: 'decision-promote-1',
+      subject: { kind: 'activation', activationId: 'activation-1', artifactId: 'artifact-1', artifactDigest: 'sha256:artifact' },
+      decision: 'promote_live',
+      principal: { kind: 'configured_owner', ownerId: 'owner-1' },
+      authentication: { method: 'cli_owner_credential', credentialId: 'credential-1' },
+      operator: { kind: 'local_user', operatorId: 'Administrator' },
+      reasonCode: 'owner_accepts_shadow_evidence',
+      note: 'Reviewed the evidence.',
+      evidenceSnapshotId: 'snapshot-1',
+      decidedAt: '2026-08-21T03:00:00.000Z',
+    },
+    evidenceSnapshot: {
+      snapshotId: 'snapshot-1', snapshotDigest: 'sha256:snapshot', artifactDigest: 'sha256:artifact',
+      lineageRefs: ['task-1', 'run-1'], hostRuntimeVersion: 'openclaw@1',
+      safetyGateResults: [{ checkId: 'host_liveness', status: 'passed' }],
+      shadowSummary: { observed: 20, wouldBlock: 1, errors: 0 },
+      configurationVersion: 'config-v1', redaction: { version: 'redaction-v1', rawParametersStored: false },
+      createdAt: '2026-08-21T02:59:00.000Z',
+    },
+    readinessEvaluationId: 'readiness-1',
+    evidenceSnapshotDigest: 'sha256:snapshot',
+    expectedControlVersion: 1,
+    idempotencyKey: 'promote-activation-1-v1',
   };
 }
 
@@ -148,5 +178,39 @@ describe('SqliteActivationSafetyStore', () => {
       version: 2,
     });
     reopened.close();
+  });
+
+  it('atomically persists evidence and Owner decision while promoting shadow to live', async () => {
+    const connection = new SqliteConnection(makeWorkspace());
+    seedArtifact(connection);
+    const shadow = { ...liveActivation(), action: 'code_tool_hook_shadow_activate' };
+    await new SqliteActivationStateStore(connection).recordActivation(shadow);
+
+    await expect(new SqliteActivationSafetyStore(connection).commitPromotion(promotionCommit())).resolves.toEqual({
+      activationId: 'activation-1', decisionId: 'decision-promote-1', promotedAt: '2026-08-21T03:00:00.000Z',
+    });
+
+    const db = connection.getDb();
+    expect(db.prepare("SELECT action, promoted_at FROM activations WHERE activation_id = 'activation-1'").get())
+      .toEqual({ action: 'code_tool_hook_live_activate', promoted_at: '2026-08-21T03:00:00.000Z' });
+    expect(db.prepare("SELECT snapshot_digest, artifact_digest FROM activation_evidence_snapshots WHERE snapshot_id = 'snapshot-1'").get())
+      .toEqual({ snapshot_digest: 'sha256:snapshot', artifact_digest: 'sha256:artifact' });
+    await expect(new SqliteActivationSafetyStore(connection).listDecisions('activation-1')).resolves.toEqual([promotionCommit().decision]);
+    connection.close();
+  });
+
+  it('rolls back evidence and decision when promotion control version is stale', async () => {
+    const connection = new SqliteConnection(makeWorkspace());
+    seedArtifact(connection);
+    await new SqliteActivationStateStore(connection).recordActivation({ ...liveActivation(), action: 'code_tool_hook_shadow_activate' });
+    const input = { ...promotionCommit(), expectedControlVersion: 9 };
+
+    await expect(new SqliteActivationSafetyStore(connection).commitPromotion(input)).rejects.toThrow(/expected control version 9/i);
+    const db = connection.getDb();
+    expect(db.prepare('SELECT COUNT(*) AS count FROM activation_decisions').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM activation_evidence_snapshots').get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT action FROM activations WHERE activation_id = 'activation-1'").get())
+      .toEqual({ action: 'code_tool_hook_shadow_activate' });
+    connection.close();
   });
 });

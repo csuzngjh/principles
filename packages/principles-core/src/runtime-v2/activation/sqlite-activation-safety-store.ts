@@ -1,5 +1,6 @@
 import type { SqliteConnection } from '../store/sqlite-connection.js';
 import type { ActivationControlState, ActivationDecisionKind, ActivationDecisionRecord } from './activation-control-types.js';
+import type { PromotionCommitInput } from './rulecode-owner-decision-service.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -149,6 +150,94 @@ export class SqliteActivationSafetyStore {
       if (!state) throw new Error(`Safety isolation control state missing for activation ${decision.subject.activationId}`);
       db.exec('COMMIT');
       return state;
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* best effort */ }
+      throw error;
+    }
+  }
+
+  async commitPromotion(input: PromotionCommitInput): Promise<{ activationId: string; decisionId: string; promotedAt: string }> {
+    const { decision, evidenceSnapshot } = input;
+    if (decision.decision !== 'promote_live' || decision.subject.kind !== 'activation'
+      || decision.principal.kind !== 'configured_owner'
+      || (decision.authentication.method !== 'console_token' && decision.authentication.method !== 'cli_owner_credential')) {
+      throw new Error('commitPromotion requires an authenticated configured_owner promote_live decision');
+    }
+    if (decision.evidenceSnapshotId !== evidenceSnapshot.snapshotId
+      || input.evidenceSnapshotDigest !== evidenceSnapshot.snapshotDigest
+      || decision.subject.artifactDigest !== evidenceSnapshot.artifactDigest) {
+      throw new Error('Promotion evidence binding mismatch');
+    }
+    if (!Array.isArray(evidenceSnapshot.lineageRefs) || !evidenceSnapshot.lineageRefs.every(value => typeof value === 'string' && value.length > 0)
+      || !Array.isArray(evidenceSnapshot.safetyGateResults)
+      || !evidenceSnapshot.safetyGateResults.every(value => value !== null && typeof value === 'object' && !Array.isArray(value)
+        && typeof value.checkId === 'string' && (value.status === 'passed' || value.status === 'failed'))) {
+      throw new Error('Promotion evidence snapshot is malformed');
+    }
+
+    const db = this.connection.getDb();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const replay: unknown = db.prepare(`
+        SELECT decision_id, activation_id, decided_at FROM activation_decisions WHERE idempotency_key = ?
+      `).get(input.idempotencyKey);
+      if (replay !== undefined) {
+        if (!isRecord(replay)) throw new Error('Malformed promotion idempotency row');
+        const activationId = requiredString(replay, 'activation_id');
+        if (activationId !== decision.subject.activationId) throw new Error('Promotion idempotency key subject mismatch');
+        db.exec('COMMIT');
+        return { activationId, decisionId: requiredString(replay, 'decision_id'), promotedAt: requiredString(replay, 'decided_at') };
+      }
+
+      const subject: unknown = db.prepare(`
+        SELECT COUNT(*) AS count FROM activations
+        WHERE activation_id = ? AND artifact_id = ? AND channel = 'code_tool_hook'
+          AND action = 'code_tool_hook_shadow_activate' AND deactivated_at IS NULL
+      `).get(decision.subject.activationId, decision.subject.artifactId);
+      if (!isRecord(subject) || subject.count !== 1) throw new Error(`Promotion requires exactly one active shadow activation: ${decision.subject.activationId}`);
+      const control: unknown = db.prepare(`
+        SELECT enforcement, version FROM activation_control_states WHERE activation_id = ?
+      `).get(decision.subject.activationId);
+      if (!isRecord(control) || control.enforcement !== 'eligible' || control.version !== input.expectedControlVersion) {
+        throw new Error(`Promotion expected control version ${input.expectedControlVersion} in eligible state for activation ${decision.subject.activationId}`);
+      }
+
+      db.prepare(`
+        INSERT INTO activation_evidence_snapshots
+          (snapshot_id, snapshot_digest, artifact_digest, lineage_refs, host_runtime_version,
+           safety_gate_results, shadow_summary, configuration_version, redaction_metadata, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        evidenceSnapshot.snapshotId, evidenceSnapshot.snapshotDigest, evidenceSnapshot.artifactDigest,
+        JSON.stringify(evidenceSnapshot.lineageRefs), evidenceSnapshot.hostRuntimeVersion,
+        JSON.stringify(evidenceSnapshot.safetyGateResults), JSON.stringify(evidenceSnapshot.shadowSummary),
+        evidenceSnapshot.configurationVersion, JSON.stringify(evidenceSnapshot.redaction), evidenceSnapshot.createdAt,
+      );
+      db.prepare(`
+        INSERT INTO activation_decisions
+          (decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest, decision,
+           principal_kind, owner_id, policy_version, break_glass_reason, authentication_method, credential_id,
+           operator_kind, operator_id, reason_code, note, evidence_snapshot_id, readiness_evaluation_id,
+           evidence_snapshot_digest, decided_at)
+        VALUES (?, ?, 'activation', ?, ?, ?, 'promote_live', 'configured_owner', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        decision.decisionId, input.idempotencyKey, decision.subject.activationId, decision.subject.artifactId,
+        decision.subject.artifactDigest, decision.principal.ownerId, decision.authentication.method,
+        decision.authentication.credentialId, decision.operator?.kind ?? null, decision.operator?.operatorId ?? null,
+        decision.reasonCode, decision.note, decision.evidenceSnapshotId, input.readinessEvaluationId,
+        input.evidenceSnapshotDigest, decision.decidedAt,
+      );
+      const activationResult = db.prepare(`
+        UPDATE activations SET action = 'code_tool_hook_live_activate', promoted_at = ?
+        WHERE activation_id = ? AND artifact_id = ? AND action = 'code_tool_hook_shadow_activate' AND deactivated_at IS NULL
+      `).run(decision.decidedAt, decision.subject.activationId, decision.subject.artifactId);
+      const controlResult = db.prepare(`
+        UPDATE activation_control_states SET version = version + 1, updated_at = ?
+        WHERE activation_id = ? AND enforcement = 'eligible' AND version = ?
+      `).run(decision.decidedAt, decision.subject.activationId, input.expectedControlVersion);
+      if (activationResult.changes !== 1 || controlResult.changes !== 1) throw new Error('Promotion state changed during atomic commit');
+      db.exec('COMMIT');
+      return { activationId: decision.subject.activationId, decisionId: decision.decisionId, promotedAt: decision.decidedAt };
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch { /* best effort */ }
       throw error;

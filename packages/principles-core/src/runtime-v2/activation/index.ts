@@ -58,6 +58,12 @@ export {
 export { SqliteActivationStateStore } from './sqlite-activation-state-store.js';
 export { SqliteActivationSafetyStore } from './sqlite-activation-safety-store.js';
 export type { ActivationDecisionRecord, ActivationDecisionSubject, ActivationDecisionKind, ActivationControlState } from './activation-control-types.js';
+export { RuleCodeOwnerDecisionService } from './rulecode-owner-decision-service.js';
+export type {
+  PromotionEvidenceSnapshot, PromotionFailedCheck, PromotionReadinessResult,
+  OwnerPromotionActor, OwnerPromotionRequest, PromotionCommitInput, OwnerPromotionResult,
+  RuleCodeOwnerDecisionServiceDeps,
+} from './rulecode-owner-decision-service.js';
 
 export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 
