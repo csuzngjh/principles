@@ -59,6 +59,23 @@ export async function handleActivationsRoute(
     return;
   }
 
+  const ownerReviewMatch = /^\/([^/]+)\/owner-review$/.exec(subPath);
+  if (req.method === 'GET' && ownerReviewMatch) {
+    const [, rawId] = ownerReviewMatch;
+    if (!rawId) { sendError(res, 400, 'invalid_id', 'Activation ID is missing'); return; }
+    let activationId: string;
+    try { activationId = decodeURIComponent(rawId); }
+    catch { sendError(res, 400, 'invalid_id', 'Activation ID contains invalid URI encoding'); return; }
+    try {
+      sendSuccess(res, await getModel(workspaceDir).getOwnerReview(activationId));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('requires exactly one') || message.includes('not found')) sendNotFound(res, message);
+      else sendError(res, 500, 'owner_review_error', message, { nextAction: 'Keep the rule in shadow and inspect workspace integrity.' });
+    }
+    return;
+  }
+
   // POST /api/v1/activations/:id/disable
   const disableExec = /^\/([^/]+)\/disable$/.exec(subPath);
   if (req.method === 'POST' && disableExec) {

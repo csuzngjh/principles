@@ -447,7 +447,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               artifactDigest,
               lineageRefs: artifact ? [artifact.sourceTaskId, ...artifact.lineageArtifactIds] : [],
               hostRuntimeVersion: 'unavailable', safetyGateResults: checks,
-              shadowSummary: { observed: 0, wouldBlock: 0, errors: 0 },
+              shadowSummary: { observed: null, wouldBlock: null, errors: null },
               configurationVersion: 'pd-config-current',
               redaction: { version: 'v1', rawParametersStored: false }, createdAt,
             };

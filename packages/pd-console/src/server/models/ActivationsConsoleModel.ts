@@ -4,11 +4,17 @@ import {
   SqlitePIArtifactStore,
   extractPrincipleId,
   extractEvidenceRefs,
+  PromotionReadinessReader,
+  RuleHostWriter,
+  createProductionGateDeps,
+  SqliteActivationSafetyStore,
+  isFeatureEnabled,
 } from '@principles/core/runtime-v2';
-import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot } from '@principles/core/runtime-v2';
+import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 
 /**
  * Type guard for parsed JSON objects (rc-2-no-as-bypass).
@@ -73,6 +79,16 @@ export interface ActivationsResponse {
   reason?: string;
   /** Present when status is 'degraded' — next operator action. */
   nextAction?: string;
+}
+
+export interface RuleCodeOwnerReview {
+  activation: ActivationStatusRecord;
+  artifact: { artifactId: string; digest: string; sourceTaskId: string; lineageArtifactIds: string[]; content: Record<string, unknown> | null };
+  readiness: PromotionReadinessResult;
+  controlState: ActivationControlState | null;
+  decisions: ActivationDecisionRecord[];
+  globalPause: GlobalRuleCodePause | null;
+  ownerDecisionEnabled: boolean;
 }
 
 function isMissingTableError(err: unknown): boolean {
@@ -264,6 +280,57 @@ export class ActivationsConsoleModel {
     } finally {
       try { conn.close(); } catch { /* best-effort */ }
     }
+  }
+
+  async getOwnerReview(activationId: string): Promise<RuleCodeOwnerReview> {
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
+    try {
+      const activationStore = new SqliteActivationStateStore(conn);
+      const artifactStore = new SqlitePIArtifactStore(conn);
+      const safetyStore = new SqliteActivationSafetyStore(conn);
+      const matches = (await activationStore.listCodeToolHookActivations(true)).filter(record => record.activationId === activationId);
+      if (matches.length !== 1) throw new Error(`Owner review requires exactly one RuleCode activation: ${activationId}`);
+      const [activation] = matches;
+      if (!activation) throw new Error(`Activation not found: ${activationId}`);
+      const artifact = await artifactStore.getArtifactById(activation.artifactId);
+      if (!artifact) throw new Error(`Artifact not found for activation: ${activation.artifactId}`);
+      const digest = `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`;
+      const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
+      const writer = new RuleHostWriter({ gateDeps: createProductionGateDeps(), featureFlagProbe: id => isFeatureEnabled(flags, id) });
+      const reader = new PromotionReadinessReader({
+        listCodeToolHookActivations: () => activationStore.listCodeToolHookActivations(true),
+        getArtifactById: id => artifactStore.getArtifactById(id),
+        computeArtifactDigest: value => `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`,
+        validateProductionArtifact: value => writer.canActivate(value),
+        collectHostChecks: async () => [],
+        buildEvidenceSnapshot: (checks, value) => {
+          const createdAt = new Date().toISOString();
+          const artifactDigest = value
+            ? `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}` : digest;
+          const body = JSON.stringify({ artifactDigest, checks, createdAt });
+          return {
+            snapshotId: `snapshot-${randomUUID()}`,
+            snapshotDigest: `sha256:${createHash('sha256').update(body, 'utf8').digest('hex')}`,
+            artifactDigest, lineageRefs: value ? [value.sourceTaskId, ...value.lineageArtifactIds] : [],
+            hostRuntimeVersion: 'unavailable', safetyGateResults: checks,
+            shadowSummary: { observed: null, wouldBlock: null, errors: null },
+            configurationVersion: 'pd-config-current', redaction: { version: 'v1', rawParametersStored: false }, createdAt,
+          };
+        },
+        newEvaluationId: () => `readiness-${randomUUID()}`,
+      });
+      let content: Record<string, unknown> | null = null;
+      try { const parsed: unknown = JSON.parse(artifact.contentJson); if (isRecord(parsed)) content = parsed; } catch { /* readiness reports validation failure */ }
+      return {
+        activation,
+        artifact: { artifactId: artifact.artifactId, digest, sourceTaskId: artifact.sourceTaskId, lineageArtifactIds: [...artifact.lineageArtifactIds], content },
+        readiness: await reader.evaluate({ activationId, expectedArtifactId: artifact.artifactId, expectedArtifactDigest: digest }),
+        controlState: await safetyStore.getControlState(activationId),
+        decisions: await safetyStore.listDecisions(activationId),
+        globalPause: await safetyStore.getActiveGlobalPause(),
+        ownerDecisionEnabled: isFeatureEnabled(flags, 'rulecode_owner_live_decision'),
+      };
+    } finally { try { conn.close(); } catch { /* best effort */ } }
   }
 
   async deactivateActivation(activationId: string): Promise<{ ok: true } | { ok: false; reason: string; nextAction: string }> {

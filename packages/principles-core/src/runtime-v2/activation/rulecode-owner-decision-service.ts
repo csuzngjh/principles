@@ -7,7 +7,7 @@ export interface PromotionEvidenceSnapshot {
   lineageRefs: string[];
   hostRuntimeVersion: string;
   safetyGateResults: { checkId: string; status: 'passed' | 'failed'; reasonCode?: string }[];
-  shadowSummary: { observed: number; wouldBlock: number; errors: number };
+  shadowSummary: { observed: number | null; wouldBlock: number | null; errors: number | null };
   configurationVersion: string;
   redaction: { version: string; rawParametersStored: false };
   createdAt: string;

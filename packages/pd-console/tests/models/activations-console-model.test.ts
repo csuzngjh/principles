@@ -289,6 +289,30 @@ describe('ActivationsConsoleModel — deactivateActivation', () => {
   });
 });
 
+describe('ActivationsConsoleModel — Owner review', () => {
+  it('returns artifact-bound readiness and represents missing shadow telemetry as unavailable', async () => {
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    const now = '2026-08-21T06:00:00.000Z';
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-review', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-review', 'rule', 'task-review', 'rule-review', '["parent-1"]', 'validated', ?, ?, ?)`)
+      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-review', 'idem-review', 'artifact-review', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-review', ?, NULL)`).run(now);
+    db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-review', 'eligible', 1, ?)`).run(now);
+    conn.close();
+
+    const review = await model.getOwnerReview('act-review');
+
+    expect(review.activation.activationId).toBe('act-review');
+    expect(review.artifact.artifactId).toBe('artifact-review');
+    expect(review.artifact.digest).toMatch(/^sha256:/);
+    expect(review.readiness.evidenceSnapshot.shadowSummary).toEqual({ observed: null, wouldBlock: null, errors: null });
+    expect(review.readiness.status).not.toBe('ready');
+  });
+});
+
 // ── PRI-491: Owner Observability (mode / status / contextVersion / evidenceRefs) ──
 
 /**
