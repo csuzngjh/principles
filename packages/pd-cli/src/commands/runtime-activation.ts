@@ -38,6 +38,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 interface ActivationDispatchOptions {
   workspace?: string;
   artifactId?: string;
+
+
   channel?: string;
   dryRun?: boolean;
   confirm?: boolean;
@@ -454,6 +456,54 @@ interface ActivationListOptions {
   json?: boolean;
 }
 
+export interface ActivationNextActionInput {
+  deactivatedAt: string | null;
+  contextVersion: 'v1' | 'v2' | undefined;
+  v2FlagEnabled: boolean;
+  mode: 'shadow' | 'live' | undefined;
+  activationId: string;
+}
+
+export interface ActivationStatusDerivation {
+  status: 'active' | 'deactivated' | 'suspended_by_flag';
+  nextAction: string | undefined;
+}
+
+/**
+ * Derive owner-facing status + nextAction for an activation record.
+ *
+ * Extract as a pure function so the CLI hints (promote/deactivate) can be
+ * regression-tested. Rule: deactivate never takes --confirm (promote does);
+ * keep the two templates distinct to avoid copy-paste regressions.
+ */
+export function deriveActivationStatusAndNextAction(
+  input: ActivationNextActionInput,
+): ActivationStatusDerivation {
+  const { deactivatedAt, contextVersion, v2FlagEnabled, mode, activationId } = input;
+  if (deactivatedAt) {
+    return { status: 'deactivated', nextAction: undefined };
+  }
+  if (contextVersion === 'v2' && !v2FlagEnabled) {
+    return {
+      status: 'suspended_by_flag',
+      nextAction: `Enable rulecode_context_v2 flag or deactivate: pd activation deactivate --activation-id ${activationId}`,
+    };
+  }
+  if (mode === 'shadow') {
+    return {
+      status: 'active',
+      nextAction: `pd activation promote --activation-id ${activationId} --confirm`,
+    };
+  }
+  if (mode === 'live') {
+    return {
+      status: 'active',
+      nextAction: `pd activation deactivate --activation-id ${activationId}`,
+    };
+  }
+  return { status: 'active', nextAction: undefined };
+}
+
 export async function handleRuntimeActivationList(opts: ActivationListOptions): Promise<void> {
   // P2 #5 fix: fail loud on invalid channel instead of silently listing all.
   const VALID_CHANNELS = new Set(['prompt', 'code_tool_hook', undefined]);
@@ -583,24 +633,13 @@ export async function handleRuntimeActivationList(opts: ActivationListOptions): 
         : undefined;
 
       // Derive status: deactivated > suspended_by_flag > active
-      let status: 'active' | 'deactivated' | 'suspended_by_flag';
-      let nextAction: string | undefined;
-      if (r.deactivatedAt) {
-        status = 'deactivated';
-        nextAction = undefined;
-      } else if (contextVersion === 'v2' && !v2FlagEnabled) {
-        status = 'suspended_by_flag';
-        nextAction = `Enable rulecode_context_v2 flag or deactivate: pd activation deactivate --activation-id ${r.activationId} --confirm`;
-      } else {
-        status = 'active';
-        if (mode === 'shadow') {
-          nextAction = `pd activation promote --activation-id ${r.activationId} --confirm`;
-        } else if (mode === 'live') {
-          nextAction = `pd activation deactivate --activation-id ${r.activationId} --confirm`;
-        } else {
-          nextAction = undefined;
-        }
-      }
+      const { status, nextAction } = deriveActivationStatusAndNextAction({
+        deactivatedAt: r.deactivatedAt,
+        contextVersion,
+        v2FlagEnabled,
+        mode,
+        activationId: r.activationId,
+      });
 
       const record: AnnotatedActivation = {
         ...r,
