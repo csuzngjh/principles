@@ -64,6 +64,8 @@ export type {
   OwnerPromotionActor, OwnerPromotionRequest, PromotionCommitInput, OwnerPromotionResult,
   RuleCodeOwnerDecisionServiceDeps,
 } from './rulecode-owner-decision-service.js';
+export { REQUIRED_PROMOTION_CHECK_IDS, evaluateRuleCodePromotionReadiness } from './promotion-readiness-evaluator.js';
+export type { PromotionCheckId, PromotionReadinessCheck, PromotionReadinessEvaluationInput } from './promotion-readiness-evaluator.js';
 
 export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 
