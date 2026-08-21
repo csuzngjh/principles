@@ -250,6 +250,16 @@ describe('computeEffectiveFlags', () => {
     }
   });
 
+  it('keeps the rulecode_owner_live_decision emergency disable observable in this loader path too', () => {
+    const result = computeEffectiveFlags(
+      { rulecode_owner_live_decision: { enabled: false, since: '2026-08-21' } },
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/feature-flags.yaml',
+    );
+    expect(result.flags.rulecode_owner_live_decision?.enabled).toBe(false);
+    expect(result.warnings.some(w => w.includes('core flag explicitly disabled') && w.includes('rulecode_owner_live_decision'))).toBe(true);
+  });
+
   it('gone flags are always disabled regardless of config', () => {
     const goneDefault = DEFAULT_FEATURE_FLAGS.find(f => f.category === 'gone');
     if (!goneDefault) return;

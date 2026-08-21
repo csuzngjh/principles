@@ -304,9 +304,7 @@ export function computeEffectiveFlags(
         flags[def.id] = { ...def };
       } else {
         flags[def.id] = { ...def, enabled: false };
-        if (def.id !== 'rulecode_owner_live_decision') {
-          warnings.push(`flag '${def.id}': core flag explicitly disabled via config (emergency disable)`);
-        }
+        warnings.push(`flag '${def.id}': core flag explicitly disabled via config (emergency disable)`);
       }
       continue;
     }
