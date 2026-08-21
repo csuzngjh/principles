@@ -212,6 +212,30 @@ export class SqliteActivationSafetyStore {
     } catch (error) { try { db.exec('ROLLBACK'); } catch { /* best effort */ } throw error; }
   }
 
+  async recordOwnerDecision(decision: ActivationDecisionRecord, idempotencyKey: string): Promise<{ decisionId: string }> {
+    if (decision.subject.kind !== 'activation' || decision.decision !== 'continue_observing'
+      || decision.principal.kind !== 'configured_owner'
+      || (decision.authentication.method !== 'console_token' && decision.authentication.method !== 'cli_owner_credential')) {
+      throw new Error('recordOwnerDecision requires authenticated configured_owner continue_observing decision');
+    }
+    const db = this.connection.getDb(); db.exec('BEGIN IMMEDIATE');
+    try {
+      const subject: unknown = db.prepare(`SELECT COUNT(*) AS count FROM activations WHERE activation_id = ? AND artifact_id = ? AND channel = 'code_tool_hook' AND action = 'code_tool_hook_shadow_activate' AND deactivated_at IS NULL`)
+        .get(decision.subject.activationId, decision.subject.artifactId);
+      if (!isRecord(subject) || subject.count !== 1) throw new Error(`Continue observing requires exactly one active shadow activation: ${decision.subject.activationId}`);
+      db.prepare(`INSERT INTO activation_decisions
+        (decision_id, idempotency_key, subject_kind, activation_id, artifact_id, artifact_digest, decision,
+         principal_kind, owner_id, authentication_method, credential_id, operator_kind, operator_id,
+         reason_code, note, evidence_snapshot_id, decided_at)
+        VALUES (?, ?, 'activation', ?, ?, ?, 'continue_observing', 'configured_owner', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(decision.decisionId, idempotencyKey, decision.subject.activationId, decision.subject.artifactId,
+          decision.subject.artifactDigest, decision.principal.ownerId, decision.authentication.method,
+          decision.authentication.credentialId, decision.operator?.kind ?? null, decision.operator?.operatorId ?? null,
+          decision.reasonCode, decision.note, decision.evidenceSnapshotId, decision.decidedAt);
+      db.exec('COMMIT'); return { decisionId: decision.decisionId };
+    } catch (error) { try { db.exec('ROLLBACK'); } catch { /* best effort */ } throw error; }
+  }
+
   async listDecisions(activationId: string): Promise<ActivationDecisionRecord[]> {
     const rows: unknown = this.connection.getDb().prepare(`
       SELECT decision_id, activation_id, artifact_id, artifact_digest, decision, principal_kind,

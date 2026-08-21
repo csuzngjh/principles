@@ -290,4 +290,21 @@ describe('SqliteActivationSafetyStore', () => {
       .rejects.toThrow(/authorized/i);
     connection.close();
   });
+
+  it('records continue-observing intent without changing shadow state', async () => {
+    const connection = new SqliteConnection(makeWorkspace());
+    seedArtifact(connection);
+    await new SqliteActivationStateStore(connection).recordActivation({ ...liveActivation(), action: 'code_tool_hook_shadow_activate' });
+    const decision: ActivationDecisionRecord = {
+      decisionId: 'observe-1', subject: { kind: 'activation', activationId: 'activation-1', artifactId: 'artifact-1', artifactDigest: 'sha256:artifact' },
+      decision: 'continue_observing', principal: { kind: 'configured_owner', ownerId: 'owner-1' },
+      authentication: { method: 'console_token', credentialId: 'console-1' }, reasonCode: 'collect_more_evidence',
+      note: 'Observe another day.', evidenceSnapshotId: null, decidedAt: '2026-08-21T05:20:00.000Z',
+    };
+    const store = new SqliteActivationSafetyStore(connection);
+    await expect(store.recordOwnerDecision(decision, 'observe-key-1')).resolves.toEqual({ decisionId: 'observe-1' });
+    expect(connection.getDb().prepare("SELECT action, deactivated_at FROM activations WHERE activation_id = 'activation-1'").get())
+      .toEqual({ action: 'code_tool_hook_shadow_activate', deactivated_at: null });
+    connection.close();
+  });
 });
