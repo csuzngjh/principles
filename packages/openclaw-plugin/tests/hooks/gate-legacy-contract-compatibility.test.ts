@@ -168,19 +168,14 @@ afterEach(() => {
 // ── Compatibility Guard: behavior evidence isolation ───────────────────────
 
 describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLite, real hook)', () => {
-  it('Test A: legacy LIVE recentThinking rule still fails closed through the gate hook', async () => {
+  it('Test A: legacy LIVE recentThinking rule fails open through the gate hook', async () => {
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    const result = runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-a') as PluginHookBeforeToolCallResult;
-
-    expect(result.block).toBe(true);
-    expect(result.blockReason).toContain('legacy_rule_contract_dependency');
-    expect(result.blockReason).toContain('Migrate or deactivate');
-    expect(result.blockReason).toContain('deactivate');
+    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-a')).toBeUndefined();
   });
 
-  it('Test A2: the RuleHost result carries machine-readable diagnostics (kind + code)', async () => {
+  it('Test A2: the RuleHost report carries a structured skipped activation', async () => {
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
@@ -197,11 +192,14 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
       derived: { estimatedLineChanges: 1, bashRisk: 'safe' as const },
     });
 
-    expect(report.liveDecision?.decision).toBe('block');
-    expect(report.liveDecision?.diagnostics?.kind).toBe('compatibility_guard');
-    expect(report.liveDecision?.diagnostics?.code).toBe('legacy_rule_contract_dependency');
-    expect(report.liveDecision?.diagnostics?.activationId).toBe(LEGACY_ACTIVATION_ID);
-    expect(report.liveDecision?.diagnostics?.nextAction).toContain('Migrate or deactivate');
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.skippedActivations).toEqual([
+      expect.objectContaining({
+        activationId: LEGACY_ACTIVATION_ID,
+        reason: expect.stringContaining('legacy_rule_contract_dependency'),
+        nextAction: expect.stringContaining('deactivate'),
+      }),
+    ]);
     ruleHost.dispose();
   });
 
@@ -214,8 +212,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     expect(before?.blockedAttempts).toBe(0);
     expect(before?.currentGfi).toBe(0);
 
-    const result = runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-b-gfi') as PluginHookBeforeToolCallResult;
-    expect(result.block).toBe(true);
+    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-b-gfi')).toBeUndefined();
 
     const after = getSession('sess-b-gfi');
     expect(after?.blockedAttempts).toBe(0);
@@ -229,8 +226,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    const result = runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-c') as PluginHookBeforeToolCallResult;
-    expect(result.block).toBe(true);
+    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-c')).toBeUndefined();
 
     // The pain pipeline is only reachable through recordGateBlockAndReturn,
     // which is never called: no gate_block event, and no pain_detected ever
@@ -251,14 +247,13 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    const result = runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-d') as PluginHookBeforeToolCallResult;
-    expect(result.block).toBe(true);
+    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-d')).toBeUndefined();
 
     // No rule_enforced event (the Principle never ran) — the audit trail is
-    // preserved via rulehost_evaluated + rulehost_blocked instead.
+    // preserved via rulehost_evaluated + rulehost_skipped instead.
     const types = bufferedEvents().map((e) => e.type);
     expect(types).toContain('rulehost_evaluated');
-    expect(types).toContain('rulehost_blocked');
+    expect(types).toContain('rulehost_skipped');
     expect(types).not.toContain('rule_enforced');
 
     // No principle application row of any kind (ledger is ON, so this is real).
@@ -268,19 +263,15 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     expect(count).toBe(0);
   });
 
-  it('Test E: operator guidance names runtime compatibility + remediation, never a confirm loop', async () => {
+  it('Test E: skipped diagnostic names compatibility and remediation', async () => {
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    const result = runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-e') as PluginHookBeforeToolCallResult;
-
-    expect(result.blockReason.toLowerCase()).toContain('runtime compatibility');
-    expect(result.blockReason.toLowerCase()).toContain('migrate');
-    expect(result.blockReason.toLowerCase()).toContain('deactivate');
-    expect(result.blockReason.toLowerCase()).toContain('compatible replacement');
-    expect(result.blockReason.toLowerCase()).not.toContain('ask the owner to confirm');
-    expect(result.blockReason.toLowerCase()).not.toContain('confirm and continue');
-    expect(result.blockReason).not.toContain('Security Gate Blocked');
+    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-e')).toBeUndefined();
+    const skipped = bufferedEvents().find((event) => event.type === 'rulehost_skipped');
+    expect(skipped).toBeDefined();
+    expect(JSON.stringify(skipped)).toContain('legacy_rule_contract_dependency');
+    expect(JSON.stringify(skipped).toLowerCase()).toContain('deactivate');
   });
 });
 

@@ -136,20 +136,15 @@ afterEach(() => {
 });
 
 describe('RuleHost retired-contract backstop (persisted workspace)', () => {
-  it('Case A: a single active LIVE rule reading session.recentThinking fails closed with a block', async () => {
+  it('Case A: a single incompatible LIVE rule is skipped and fails open', async () => {
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
     const ruleHost = makeRuleHost();
     const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
 
-    // P0-1: an owner-approved LIVE rule that cannot run safely must FAIL
-    // CLOSED — never `undefined` (which the caller turns into 'allow').
-    expect(report.liveDecision).toBeDefined();
-    expect(report.liveDecision?.decision).toBe('block');
-    expect(report.liveDecision?.reason).toContain('legacy_rule_contract_dependency');
-    expect(report.liveDecision?.ruleId).toBe(LEGACY_RULE_ID);
-    expect(report.liveDecision?.diagnostics?.nextAction).toContain('Migrate or deactivate');
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.liveDecisionActivationId).toBeUndefined();
     expect(report.shadowDecisions).toHaveLength(0);
 
     // ERR-088: assert the unique skipped structure, not just absence.
@@ -184,7 +179,7 @@ describe('RuleHost retired-contract backstop (persisted workspace)', () => {
     expect(artifact!.content_json).toContain('recentThinking');
   });
 
-  it('Case C/D: legacy LIVE + healthy LIVE rule still fail closes, preserving the healthy decision', async () => {
+  it('Case C/D: incompatible LIVE is skipped while a healthy LIVE block remains authoritative', async () => {
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
     insertRuleArtifact(CLEAN_ARTIFACT_ID, CLEAN_RULE_ID, CLEAN_CODE);
@@ -193,22 +188,16 @@ describe('RuleHost retired-contract backstop (persisted workspace)', () => {
     const ruleHost = makeRuleHost();
     const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
 
-    // The incompatible owner-approved LIVE rule wins: final decision is block
-    // (the healthy rule's block is preserved in diagnostics.underlying so the
-    // diagnostic surface is not lost).
     expect(report.liveDecision?.decision).toBe('block');
-    expect(report.liveDecision?.reason).toContain('legacy_rule_contract_dependency');
-    expect(report.liveDecision?.ruleId).toBe(LEGACY_RULE_ID);
-    expect(report.liveDecision?.diagnostics?.underlying).toMatchObject({
-      decision: 'block',
-      ruleId: CLEAN_RULE_ID,
-    });
+    expect(report.liveDecision?.reason).toBe('CLEAN_BLOCK');
+    expect(report.liveDecision?.ruleId).toBe(CLEAN_RULE_ID);
+    expect(report.liveDecisionActivationId).toBe(CLEAN_ACTIVATION_ID);
     const skippedIds = report.skippedActivations.map(s => s.activationId);
     expect(skippedIds).toContain(LEGACY_ACTIVATION_ID);
     expect(skippedIds).not.toContain(CLEAN_ACTIVATION_ID);
   });
 
-  it('Case C: legacy LIVE + healthy LIVE allow still fails closed (healthy allow cannot bypass)', async () => {
+  it('Case C: incompatible LIVE plus healthy allow remains fail open', async () => {
     const allowCode = `
 function evaluate(input, helpers) {
   return { decision: 'allow', matched: false, reason: 'Not matched' };
@@ -223,11 +212,8 @@ var meta = { name: 'allow-rule', version: '1', ruleId: 'rule-clean-allow', cover
     const ruleHost = makeRuleHost();
     const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
 
-    // A healthy rule that merely allows must not let the incompatible
-    // owner-approved rule be treated as if it does not exist.
-    expect(report.liveDecision?.decision).toBe('block');
-    expect(report.liveDecision?.reason).toContain('legacy_rule_contract_dependency');
-    expect(report.liveDecision?.ruleId).toBe(LEGACY_RULE_ID);
+    expect(report.liveDecision).toBeUndefined();
+    expect(report.liveDecisionActivationId).toBeUndefined();
   });
 
   it('Case B: a legacy SHADOW rule is diagnostic-only and does NOT force a live block', async () => {
@@ -273,7 +259,7 @@ var meta = { name: 'allow-rule', version: '1', ruleId: 'rule-clean-allow', cover
     expect(report.skippedActivations.filter(s => s.reason.includes('legacy_rule_contract_dependency'))).toHaveLength(0);
   });
 
-  it('helper-form usage (helpers.getPlanStatus / helpers.hasPlanFile) also fails closed', async () => {
+  it('helper-form usage is skipped and fails open', async () => {
     const helperCode = `
 function evaluate(input, helpers) {
   if (helpers.getPlanStatus() !== 'READY' || helpers.hasPlanFile()) {
@@ -288,8 +274,7 @@ function evaluate(input, helpers) {
     const ruleHost = makeRuleHost();
     const report = ruleHost.evaluateDetailed(makeInput('/etc/passwd'));
 
-    expect(report.liveDecision?.decision).toBe('block');
-    expect(report.liveDecision?.reason).toContain('legacy_rule_contract_dependency');
+    expect(report.liveDecision).toBeUndefined();
     expect(report.skippedActivations).toHaveLength(1);
     const reason = report.skippedActivations[0]!.reason;
     expect(reason).toContain('getPlanStatus');

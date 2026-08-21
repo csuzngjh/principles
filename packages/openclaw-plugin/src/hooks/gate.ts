@@ -22,7 +22,6 @@ import { estimateLineChanges } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordPrincipleApplication } from '../core/principle-application-ledger.js';
 import { buildProductionRuleContext } from '../core/rule-context-assembler.js';
-import { isCompatibilityGuardBlock } from '../core/rule-host.js';
 import type { HostEventResult } from '@principles/core/host';
 
 export function handleBeforeToolCall(
@@ -124,39 +123,6 @@ export function handleBeforeToolCall(
       });
     } catch (evErr) {
       logger?.warn?.(`[PD_GATE] Failed to record rulehost_evaluated: ${String(evErr)}`);
-    }
-
-    // P1 (2026-08-20): Compatibility Guard isolation.
-    //
-    // A fail-closed block caused by an incompatible persisted RuleCode (the
-    // RuleCode was NEVER executed) is a RUNTIME compatibility guard — not a
-    // Principle enforcement and not Agent behavioral friction. It must NOT
-    // enter the behavioral evidence chain:
-    //   - no rule_enforced          (the Principle never ran)
-    //   - no principle application receipt (kind=rule_blocked)
-    //   - no GFI / Pain / diagnostic path (recordGateBlockAndReturn)
-    // The safety block itself is preserved, and the operator audit trail is
-    // preserved via rulehost_evaluated (already recorded above) plus the
-    // rulehost_blocked event recorded here.
-    if (isCompatibilityGuardBlock(hostResult)) {
-      try {
-        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-        eventLog.recordRuleHostBlocked({
-          toolName: event.toolName,
-          filePath: relPath,
-          reason: hostResult.reason,
-          ruleId: hostResult.ruleId,
-        });
-      } catch (evErr) {
-        logger?.warn?.(`[PD_GATE] Failed to record compatibility guard block: ${String(evErr)}`);
-      }
-
-      const nextAction =
-        typeof hostResult.diagnostics?.nextAction === 'string'
-          ? hostResult.diagnostics.nextAction
-          : 'Migrate or deactivate this legacy RuleCode and approve a compatible replacement.';
-
-      return buildCompatibilityGuardBlock(hostResult.ruleId, hostResult.reason, nextAction);
     }
 
     if (hostResult?.decision === 'block') {
@@ -470,32 +436,6 @@ function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' |
   } catch {
     return 'unknown';
   }
-}
-
-/**
- * P1 (2026-08-20): Lightweight operator-facing result for a Compatibility
- * Guard block.
- *
- * This is intentionally NOT the Security Gate copy used by normal RuleHost
- * blocks: confirming the current tool action cannot resolve a runtime
- * compatibility problem — the legacy RuleCode stays incompatible and would be
- * blocked again, producing an infinite confirm loop. The remediation is
- * migration/deactivation + re-approval, which the nextAction carries.
- */
-function buildCompatibilityGuardBlock(
-  ruleId: string | undefined,
-  reason: string,
-  nextAction: string,
-): PluginHookBeforeToolCallResult {
-  return {
-    block: true,
-    blockReason:
-      `[Principles Disciple] Runtime compatibility guard blocked this action.\n` +
-      `Active rule: ${ruleId ?? 'unknown'}\n` +
-      `Reason: ${reason}\n\n` +
-      `This block cannot be bypassed by confirming the current action.\n` +
-      `${nextAction}`,
-  };
 }
 
 export function buildOpenClawRuleInputEnrichment(
