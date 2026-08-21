@@ -24,6 +24,7 @@ import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
 import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
 import { handleLifecycleRoute, disposeLifecycleModels } from './routes/lifecycle.js';
 import { handleActivationsRoute, disposeActivationsModels } from './routes/activations.js';
+import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
 import { handleGovernanceRoute, disposeGovernanceModels } from './routes/governance.js';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
@@ -295,6 +296,7 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
 async function closeServices(): Promise<void> {
   disposeFeedbackReportModels();
   disposeFailedTasksModels();
+  disposeReceiptsModels();
   disposeApprovalsModels();
   disposeApprovalsGroupedModels();
   disposeHealthModels();
@@ -371,6 +373,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/v1/failed-tasks' || urlPath.startsWith('/api/v1/failed-tasks/')) {
         const subPath = urlPath.slice('/api/v1/failed-tasks'.length);
         asyncHandler(() => handleFailedTasksRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
+        return;
+      }
+
+      // PRI-533: GET /api/v1/receipts/counts, /api/v1/receipts/principles/:id
+      if (urlPath === '/api/v1/receipts' || urlPath.startsWith('/api/v1/receipts/')) {
+        const subPath = urlPath.slice('/api/v1/receipts'.length);
+        asyncHandler(() => handleReceiptsRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 

@@ -279,6 +279,119 @@ async function fetchPrincipleTrajectory(principleId: string): Promise<ApiRespons
   return request<TrajectoryData>(`/api/principles/${encodeURIComponent(principleId)}/trajectory`, undefined, validateTrajectoryData);
 }
 
+// ── Principle Receipts (PRI-533) ──────────────────────────────────────────────
+
+export interface ReceiptEventData {
+  kind: "rule_blocked" | "auto_correct_applied" | "self_reported" | "prompt_injected";
+  level: "effect" | "presence";
+  sessionId: string | null;
+  toolName: string | null;
+  filePath: string | null;
+  digest: string | null;
+  createdAt: string;
+}
+
+export interface PrincipleReceiptsData {
+  status: "ok" | "degraded";
+  reason?: string;
+  nextAction?: string;
+  principleId: string;
+  effectCount: number;
+  presenceCount: number;
+  lastEffectAt: string | null;
+  events: ReceiptEventData[];
+}
+
+export interface ReceiptCountEntryData {
+  principleId: string;
+  effectCount: number;
+  presenceCount: number;
+  lastEffectAt: string | null;
+}
+
+export interface ReceiptCountsData {
+  status: "ok" | "degraded";
+  reason?: string;
+  nextAction?: string;
+  counts: ReceiptCountEntryData[];
+}
+
+const RECEIPT_KINDS = new Set(["rule_blocked", "auto_correct_applied", "self_reported", "prompt_injected"]);
+
+function validateReceiptEvent(value: unknown): ReceiptEventData | null {
+  if (typeof value !== "object" || value === null) return null;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.kind !== "string" || !RECEIPT_KINDS.has(rec.kind)) return null;
+  if (rec.level !== "effect" && rec.level !== "presence") return null;
+  if (typeof rec.createdAt !== "string") return null;
+  const asStr = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  return {
+    kind: rec.kind as ReceiptEventData["kind"],
+    level: rec.level,
+    sessionId: asStr(rec.sessionId),
+    toolName: asStr(rec.toolName),
+    filePath: asStr(rec.filePath),
+    digest: asStr(rec.digest),
+    createdAt: rec.createdAt,
+  };
+}
+
+function validatePrincipleReceipts(data: unknown): PrincipleReceiptsData | null {
+  if (typeof data !== "object" || data === null) return null;
+  const rec = data as Record<string, unknown>;
+  if (typeof rec.principleId !== "string") return null;
+  const events: ReceiptEventData[] = [];
+  if (Array.isArray(rec.events)) {
+    for (const item of rec.events) {
+      const event = validateReceiptEvent(item);
+      if (event) events.push(event);
+    }
+  }
+  return {
+    status: rec.status === "ok" ? "ok" : "degraded",
+    reason: typeof rec.reason === "string" ? rec.reason : undefined,
+    nextAction: typeof rec.nextAction === "string" ? rec.nextAction : undefined,
+    principleId: rec.principleId,
+    effectCount: typeof rec.effectCount === "number" ? rec.effectCount : 0,
+    presenceCount: typeof rec.presenceCount === "number" ? rec.presenceCount : 0,
+    lastEffectAt: typeof rec.lastEffectAt === "string" ? rec.lastEffectAt : null,
+    events,
+  };
+}
+
+function validateReceiptCounts(data: unknown): ReceiptCountsData | null {
+  if (typeof data !== "object" || data === null) return null;
+  const rec = data as Record<string, unknown>;
+  const counts: ReceiptCountEntryData[] = [];
+  if (Array.isArray(rec.counts)) {
+    for (const item of rec.counts) {
+      if (typeof item !== "object" || item === null) continue;
+      const entry = item as Record<string, unknown>;
+      if (typeof entry.principleId !== "string") continue;
+      counts.push({
+        principleId: entry.principleId,
+        effectCount: typeof entry.effectCount === "number" ? entry.effectCount : 0,
+        presenceCount: typeof entry.presenceCount === "number" ? entry.presenceCount : 0,
+        lastEffectAt: typeof entry.lastEffectAt === "string" ? entry.lastEffectAt : null,
+      });
+    }
+  }
+  return {
+    status: rec.status === "ok" ? "ok" : "degraded",
+    reason: typeof rec.reason === "string" ? rec.reason : undefined,
+    nextAction: typeof rec.nextAction === "string" ? rec.nextAction : undefined,
+    counts,
+  };
+}
+
+async function fetchPrincipleReceipts(principleId: string): Promise<ApiResponse<PrincipleReceiptsData>> {
+  return request<PrincipleReceiptsData>(`/api/v1/receipts/principles/${encodeURIComponent(principleId)}`, undefined, validatePrincipleReceipts);
+}
+
+async function fetchReceiptCounts(): Promise<ApiResponse<ReceiptCountsData>> {
+  return request<ReceiptCountsData>("/api/v1/receipts/counts", undefined, validateReceiptCounts);
+}
+
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
 async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecordData>> {
@@ -770,6 +883,8 @@ export {
   fetchPrincipleDetail,
   fetchPrincipleGovernance,
   fetchPrincipleTrajectory,
+  fetchPrincipleReceipts,
+  fetchReceiptCounts,
   archivePrinciple,
   unarchivePrinciple,
   createFeedbackReport,
