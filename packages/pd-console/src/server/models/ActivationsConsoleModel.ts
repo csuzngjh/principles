@@ -212,13 +212,13 @@ export class ActivationsConsoleModel {
           nextAction = undefined;
         } else if (contextVersion === 'v2' && !v2FlagEnabled) {
           status = 'suspended_by_flag';
-          nextAction = `Enable rulecode_context_v2 flag or deactivate: pd activation deactivate --activation-id ${record.activationId} --confirm`;
+          nextAction = `Enable rulecode_context_v2 flag or deactivate: pd activation deactivate --activation-id ${record.activationId}`;
         } else {
           status = 'active';
           if (mode === 'shadow') {
-            nextAction = `pd activation promote --activation-id ${record.activationId} --confirm`;
+            nextAction = 'Keep shadow; promotion requires an authenticated Owner decision, immutable evidence bindings, and a passing Promotion Readiness result.';
           } else if (mode === 'live') {
-            nextAction = `pd activation deactivate --activation-id ${record.activationId} --confirm`;
+            nextAction = `pd activation deactivate --activation-id ${record.activationId}`;
           } else {
             nextAction = undefined;
           }

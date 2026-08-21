@@ -389,7 +389,8 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     expect(rec.evidenceRefs).toEqual(['ex-1', 'ex-2']);
     expect(rec.evidenceSummary).toContain('2 evidence ref(s)');
     expect(rec.nextAction).toContain('Enable rulecode_context_v2 flag');
-    expect(rec.nextAction).toContain('pd activation deactivate --activation-id act-v2-shadow --confirm');
+    expect(rec.nextAction).toContain('pd activation deactivate --activation-id act-v2-shadow');
+    expect(rec.nextAction).not.toContain('--confirm');
     expect(rec.deactivatedAt).toBeNull();
   });
 
@@ -438,7 +439,9 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     expect(rec.mode).toBe('shadow');
     expect(rec.contextVersion).toBe('v1');
     expect(rec.evidenceRefs).toBeUndefined();
-    expect(rec.nextAction).toBe('pd activation promote --activation-id act-v1-shadow --confirm');
+    expect(rec.nextAction).toBe(
+      'Keep shadow; promotion requires an authenticated Owner decision, immutable evidence bindings, and a passing Promotion Readiness result.',
+    );
   });
 
   it('live v1 activation shows status=active and deactivate nextAction', async () => {
@@ -458,7 +461,7 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     const rec = result.activations[0]!;
     expect(rec.status).toBe('active');
     expect(rec.mode).toBe('live');
-    expect(rec.nextAction).toBe('pd activation deactivate --activation-id act-v1-live --confirm');
+    expect(rec.nextAction).toBe('pd activation deactivate --activation-id act-v1-live');
   });
 
   it('deactivated activation shows status=deactivated regardless of contextVersion or flag (precedence)', async () => {
@@ -536,7 +539,9 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     expect(rec.status).toBe('active');
     expect(rec.mode).toBe('shadow');
     expect(rec.contextVersion).toBe('v2');
-    expect(rec.nextAction).toBe('pd activation promote --activation-id act-v2-flag-on --confirm');
+    expect(rec.nextAction).toBe(
+      'Keep shadow; promotion requires an authenticated Owner decision, immutable evidence bindings, and a passing Promotion Readiness result.',
+    );
   });
 
   it('evidenceSummary truncates long evidence refs list', async () => {

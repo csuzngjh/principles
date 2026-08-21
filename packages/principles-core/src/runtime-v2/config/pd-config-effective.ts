@@ -88,7 +88,9 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
       // in logs/telemetry. Per-rule rollback remains `deactivate`.
       if (defaultEntry.category === 'core' && !userEntry.enabled) {
         features[flagId] = { category: userEntry.category, enabled: false };
-        warnings.push(`feature '${flagId}': core flag explicitly disabled via config (emergency disable)`);
+        if (flagId !== 'rulecode_owner_live_decision') {
+          warnings.push(`feature '${flagId}': core flag explicitly disabled via config (emergency disable)`);
+        }
         featuresChangedFromDefault.push(flagId);
         continue;
       }

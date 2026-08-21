@@ -85,6 +85,9 @@ export class RuleCodeOwnerDecisionService {
     if (!authenticatedOwner) {
       return refused({ reasonCode: 'owner_authentication_required', summary: 'Promotion requires the configured Owner credential.', nextAction: 'Authenticate as the configured Owner; local break-glass authority may only stop enforcement.' });
     }
+    if (actor.authentication.method === 'cli_owner_credential' && (!request.note || request.note.trim().length === 0)) {
+      return refused({ reasonCode: 'cli_owner_note_required', summary: 'CLI promotion requires an Owner review note.', nextAction: 'Provide a concise --note explaining the live decision.' });
+    }
     if (!request.confirmed) {
       return refused({ reasonCode: 'confirmation_required', summary: 'Live enforcement was not confirmed.', nextAction: 'Refresh the review evidence and explicitly confirm promotion.' });
     }

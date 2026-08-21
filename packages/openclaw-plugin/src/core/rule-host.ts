@@ -267,7 +267,7 @@ export class RuleHost {
       if (loaded.length === 0) {
         this._emitEmptyLoadWarn(
           'armed but empty — 0 active code_tool_hook activations loaded (RuleHost will not block or require approval)',
-          'If this is unexpected, run `pd activation list --channel code_tool_hook` to inspect activations, or `pd activation promote --activation-id <id> --confirm` to enable a live rule',
+          'If this is unexpected, run `pd activation list --channel code_tool_hook` to inspect activations; keep the rule in shadow until an authenticated Owner decision has immutable evidence bindings and a passing Promotion Readiness result',
         );
       }
       return { loaded, skipped };
@@ -501,7 +501,7 @@ export class RuleHost {
           this.logger.warn?.(
             `[RuleHost] Activation ${activationId}: loaded in shadow (observation-only) mode; ` +
             'it will NOT block or require approval (shadowDecisions only). ' +
-            `nextAction=run \`pd activation promote --activation-id ${activationId} --confirm\` to enable live blocking, ` +
+            'nextAction=keep shadow until an authenticated Owner decision has immutable evidence bindings and a passing Promotion Readiness result, ' +
             'or leave as-is for shadow observation.',
           );
         }

@@ -15,6 +15,8 @@ import {
   isArtifactRevisionOf,
   extractEvidenceRefs,
   extractPrincipleId,
+  isFeatureEnabled,
+  RuleCodeOwnerDecisionService,
 } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
@@ -345,6 +347,12 @@ export interface ActivationPromoteOptions {
   dryRun?: boolean;
   confirm?: boolean;
   json?: boolean;
+  artifactId?: string;
+  artifactDigest?: string;
+  controlVersion?: number;
+  idempotencyKey?: string;
+  reasonCode?: string;
+  note?: string;
 }
 
 export interface ActivationPromoteResult {
@@ -353,13 +361,19 @@ export interface ActivationPromoteResult {
   activationId: string;
   promotedAt?: string;
   reason?: string;
+  reasonCode?: string;
+  summary?: string;
+  failedChecks?: { checkId: string; reasonCode: string }[];
   nextAction?: string;
 }
 
 export async function handleRuntimeActivationPromote(opts: ActivationPromoteOptions): Promise<void> {
   const activationId = opts.activationId?.trim() ?? '';
-  const refuse = (reason: string, nextAction: string): void => {
-    const result: ActivationPromoteResult = { ok: false, decision: 'refused', activationId, reason, nextAction };
+  const refuse = (reason: string, nextAction: string, details?: { summary?: string; failedChecks?: { checkId: string; reasonCode: string }[] }): void => {
+    const result: ActivationPromoteResult = {
+      ok: false, decision: 'refused', activationId, reason, reasonCode: reason, nextAction,
+      summary: details?.summary, failedChecks: details?.failedChecks,
+    };
     if (opts.json) console.log(JSON.stringify(result));
     else {
       console.error(`Promotion refused: ${reason}`);
@@ -377,73 +391,63 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
     return;
   }
 
-  let stateManager: RuntimeStateManager | undefined;
   try {
     const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
-    stateManager = new RuntimeStateManager({ workspaceDir });
-    await stateManager.initialize();
-    const store = new SqliteActivationStateStore(stateManager.connection);
-    const activeHooks = await store.listCodeToolHookActivations(false);
-    // CodeRabbit PR2 Comment 3: dry-run must apply the same eligibility checks
-    // as the real promote path. `promoteActivation` runs a COUNT guard inside a
-    // BEGIN IMMEDIATE transaction and refuses when the count of matching shadow
-    // rows is not exactly 1. The previous dry-run branch used `find()` (returns
-    // the first match) and reported `would_promote` even when duplicates would
-    // make the confirm path throw. Mirror the store's uniqueness check here so
-    // dry-run and confirm agree (cli-5: failure paths must not mutate state;
-    // cli-6: degraded/refused results carry a structured reason + nextAction).
-    const matchingShadows = activeHooks.filter(
-      (record) => record.activationId === activationId && record.action === 'code_tool_hook_shadow_activate',
-    );
-    if (matchingShadows.length === 0) {
-      refuse(
-        'not_found_inactive_or_not_shadow',
-        'Refresh `pd activation list --channel code_tool_hook`; only active shadow activations can be promoted.',
-      );
+    const flags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
+    const ownerId = process.env.PD_OWNER_ID?.trim();
+    const credentialId = process.env.PD_OWNER_CREDENTIAL_ID?.trim();
+    const consoleToken = process.env.PD_CONSOLE_TOKEN?.trim();
+    const operatorId = process.env.USERNAME?.trim() || process.env.USER?.trim();
+    const actor = ownerId && credentialId && consoleToken
+      ? {
+          principal: { kind: 'configured_owner' as const, ownerId },
+          authentication: { method: 'cli_owner_credential' as const, credentialId },
+          ...(operatorId ? { operator: { kind: 'local_user' as const, operatorId } } : {}),
+        }
+      : {
+          principal: { kind: 'break_glass' as const, reason: 'local_no_auth_emergency' as const },
+          authentication: { method: 'local_break_glass' as const },
+        };
+    const unavailableEvidence = {
+      snapshotId: 'unavailable', snapshotDigest: 'unavailable', artifactDigest: opts.artifactDigest ?? 'unavailable',
+      lineageRefs: [], hostRuntimeVersion: 'unavailable', safetyGateResults: [],
+      shadowSummary: { observed: 0, wouldBlock: 0, errors: 0 }, configurationVersion: 'unavailable',
+      redaction: { version: 'unavailable', rawParametersStored: false as const }, createdAt: new Date().toISOString(),
+    };
+    const service = new RuleCodeOwnerDecisionService({
+      ownerLiveDecisionEnabled: () => isFeatureEnabled(flags, 'rulecode_owner_live_decision'),
+      safetyControlsEnabled: () => isFeatureEnabled(flags, 'rulecode_safety_controls'),
+      evaluateReadiness: async () => ({
+        status: 'unavailable', evaluationId: 'unavailable', artifactId: opts.artifactId ?? '',
+        artifactDigest: opts.artifactDigest ?? '', evidenceSnapshot: unavailableEvidence,
+        failedChecks: [{ checkId: 'promotion_readiness_reader', reasonCode: 'not_implemented' }],
+      }),
+      commitPromotion: async () => { throw new Error('promotion commit is unreachable without validated readiness'); },
+      newDecisionId: () => 'unavailable',
+      now: () => new Date().toISOString(),
+    });
+    const result = await service.promote({
+      activationId,
+      expectedArtifactId: opts.artifactId?.trim() ?? '',
+      expectedArtifactDigest: opts.artifactDigest?.trim() ?? '',
+      expectedControlVersion: opts.controlVersion ?? 0,
+      idempotencyKey: opts.idempotencyKey?.trim() ?? '',
+      reasonCode: opts.reasonCode?.trim() ?? '',
+      note: opts.note,
+      confirmed: opts.confirm === true,
+    }, actor);
+    if (!result.ok) {
+      refuse(result.reasonCode, result.nextAction, { summary: result.summary, failedChecks: result.failedChecks });
       return;
     }
-    if (matchingShadows.length > 1) {
-      refuse(
-        'duplicate_shadow_activations',
-        `${matchingShadows.length} shadow activations share activation_id=${activationId}; resolve duplicates before promoting.`,
-      );
-      return;
-    }
-
-    if (opts.confirm !== true) {
-      const result: ActivationPromoteResult = {
-        ok: true,
-        decision: 'would_promote',
-        activationId,
-        nextAction: `Run pd activation promote --activation-id ${activationId} --confirm to enable live blocking.`,
-      };
-      if (opts.json) console.log(JSON.stringify(result));
-      else {
-        console.log(`Would promote: ${activationId}`);
-        console.log(`  nextAction: ${result.nextAction}`);
-      }
-      return;
-    }
-
-    const promotedAt = new Date().toISOString();
-    const promoted = await store.promoteActivation(activationId, promotedAt);
-    if (!promoted) {
-      refuse('promotion_precondition_changed', 'Refresh the activation list; the activation changed before promotion.');
-      return;
-    }
-    const result: ActivationPromoteResult = { ok: true, decision: 'promoted', activationId, promotedAt };
-    if (opts.json) console.log(JSON.stringify(result));
-    else {
-      console.log(`Promoted live: ${activationId}`);
-      console.log(`  promotedAt: ${promotedAt}`);
-    }
+    const output: ActivationPromoteResult = { ok: true, decision: 'promoted', activationId: result.activationId, promotedAt: result.promotedAt };
+    if (opts.json) console.log(JSON.stringify(output));
+    else console.log(`Promoted live: ${result.activationId}`);
   } catch (err: unknown) {
     refuse(
       `promotion_failed: ${err instanceof Error ? err.message : String(err)}`,
       'Check workspace configuration and database integrity; no promotion was applied.',
     );
-  } finally {
-    await stateManager?.close();
   }
 }
 
@@ -472,9 +476,9 @@ export interface ActivationStatusDerivation {
 /**
  * Derive owner-facing status + nextAction for an activation record.
  *
- * Extract as a pure function so the CLI hints (promote/deactivate) can be
- * regression-tested. Rule: deactivate never takes --confirm (promote does);
- * keep the two templates distinct to avoid copy-paste regressions.
+ * Extract as a pure function so the CLI hints can be regression-tested.
+ * Shadow activations point at the Owner decision contract instead of
+ * advertising a raw lifecycle mutation that can bypass review evidence.
  */
 export function deriveActivationStatusAndNextAction(
   input: ActivationNextActionInput,
@@ -492,7 +496,7 @@ export function deriveActivationStatusAndNextAction(
   if (mode === 'shadow') {
     return {
       status: 'active',
-      nextAction: `pd activation promote --activation-id ${activationId} --confirm`,
+      nextAction: 'Keep shadow; promotion requires an authenticated Owner decision, immutable evidence bindings, and a passing Promotion Readiness result.',
     };
   }
   if (mode === 'live') {
@@ -1257,6 +1261,12 @@ export function registerRuntimeActivationPromoteCommand(parent: Command): Comman
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--dry-run', 'Validate eligibility without changing activation state')
     .option('--confirm', 'Confirm promotion to live blocking')
+    .option('--artifact-id <id>', 'Expected artifact ID from Owner review')
+    .option('--artifact-digest <digest>', 'Expected artifact digest from Owner review')
+    .option('--control-version <n>', 'Expected activation control version', (value) => Number.parseInt(value, 10))
+    .option('--idempotency-key <key>', 'Idempotency key for the Owner decision')
+    .option('--reason <code>', 'Owner decision reason code')
+    .option('--note <text>', 'Required CLI Owner review note')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       await handleRuntimeActivationPromote({
@@ -1265,6 +1275,12 @@ export function registerRuntimeActivationPromoteCommand(parent: Command): Comman
         dryRun: opts.dryRun,
         confirm: opts.confirm,
         json: opts.json,
+        artifactId: opts.artifactId,
+        artifactDigest: opts.artifactDigest,
+        controlVersion: opts.controlVersion,
+        idempotencyKey: opts.idempotencyKey,
+        reasonCode: opts.reason,
+        note: opts.note,
       });
     });
 }

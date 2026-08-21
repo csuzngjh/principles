@@ -103,6 +103,14 @@ describe('RuleCodeOwnerDecisionService promotion authority', () => {
     }
   });
 
+  it('requires a note for every CLI Owner promotion before readiness evaluation', async () => {
+    const { instance, commitPromotion } = service();
+    await expect(instance.promote({ ...request, note: '   ' }, actor)).resolves.toMatchObject({
+      ok: false, reasonCode: 'cli_owner_note_required', nextAction: expect.stringContaining('note'),
+    });
+    expect(commitPromotion).not.toHaveBeenCalled();
+  });
+
   it('binds authenticated Owner identity and evidence into the sole atomic commit', async () => {
     const { instance, commitPromotion } = service();
     await expect(instance.promote(request, actor)).resolves.toEqual({

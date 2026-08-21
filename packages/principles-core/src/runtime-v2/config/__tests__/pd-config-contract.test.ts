@@ -449,6 +449,7 @@ describe('Scenario 7: Feature flags from new config contract', () => {
     expect(flags.enabledChannels).toContain('code_tool_hook');
     expect(flags.enabledChannels).toContain('defer_archive');
     expect(isFeatureEnabled(flags, 'rulecode_safety_controls')).toBe(true);
+    expect(isFeatureEnabled(flags, 'rulecode_owner_live_decision')).toBe(false);
   });
 
   it('isFeatureEnabled works for known flags', () => {

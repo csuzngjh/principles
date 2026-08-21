@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockRuleHostWriterConfigs = vi.hoisted(() => [] as Array<{ featureFlagProbe?: (flagId: string) => boolean }>);
 const mockFeatureFlags = vi.hoisted(() => ({
-  flags: { rulecode_context_v2: { id: 'rulecode_context_v2', category: 'quiet' as const, enabled: true, since: '2026-06-27', description: 'test' } },
+  flags: {
+    rulecode_context_v2: { id: 'rulecode_context_v2', category: 'quiet' as const, enabled: true, since: '2026-06-27', description: 'test' },
+    rulecode_owner_live_decision: { id: 'rulecode_owner_live_decision', category: 'core' as const, enabled: false, since: '2026-08-21', description: 'test' },
+    rulecode_safety_controls: { id: 'rulecode_safety_controls', category: 'core' as const, enabled: true, since: '2026-08-21', description: 'test' },
+  },
 }));
 
 const mockGetArtifactById = vi.fn();
@@ -730,7 +734,9 @@ describe('handleRuntimeActivationList', () => {
     expect(rec.mode).toBe('shadow');
     expect(rec.contextVersion).toBe('v1');
     expect(rec.evidenceRefs).toBeUndefined();
-    expect(rec.nextAction).toBe('pd activation promote --activation-id act-v1-shadow --confirm');
+    expect(rec.nextAction).toBe(
+      'Keep shadow; promotion requires an authenticated Owner decision, immutable evidence bindings, and a passing Promotion Readiness result.',
+    );
   });
 
   it('PRI-491: live v1 activation shows status=active and deactivate nextAction (JSON)', async () => {
@@ -919,26 +925,63 @@ describe('handleRuntimeActivationPromote', () => {
     mockPromoteActivation.mockResolvedValue(true);
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = false;
+    vi.stubEnv('PD_CONSOLE_TOKEN', '');
+    vi.stubEnv('PD_OWNER_ID', '');
+    vi.stubEnv('PD_OWNER_CREDENTIAL_ID', '');
   });
 
   afterEach(() => {
     consoleLogSpy.mockRestore();
     consoleErrorSpy.mockRestore();
     process.exitCode = 0;
+    vi.unstubAllEnvs();
   });
 
-  it('defaults to dry-run and does not mutate activation state', async () => {
+  it('feature-off refuses dry-run and does not construct a mutation store', async () => {
+    const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+    vi.mocked(RuntimeStateManager).mockClear();
     await handleRuntimeActivationPromote({ workspace: WS, activationId: 'act-hook-1', json: true });
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
-    expect(output.decision).toBe('would_promote');
+    expect(output.decision).toBe('refused');
+    expect(output.reasonCode).toBe('feature_not_enabled');
+    expect(RuntimeStateManager).not.toHaveBeenCalled();
     expect(mockPromoteActivation).not.toHaveBeenCalled();
   });
 
-  it('promotes an eligible shadow activation when confirmed', async () => {
+  it('feature-off refuses confirmed promotion without legacy mutation', async () => {
     await handleRuntimeActivationPromote({ workspace: WS, activationId: 'act-hook-1', confirm: true, json: true });
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
-    expect(output.decision).toBe('promoted');
-    expect(mockPromoteActivation).toHaveBeenCalledWith('act-hook-1', expect.any(String));
+    expect(output.reasonCode).toBe('feature_not_enabled');
+    expect(mockPromoteActivation).not.toHaveBeenCalled();
+  });
+
+  it('feature-on refuses unauthenticated local promotion without mutation', async () => {
+    mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
+    await handleRuntimeActivationPromote({
+      workspace: WS, activationId: 'act-hook-1', confirm: true, json: true,
+      artifactId: 'art-002', artifactDigest: 'sha256:artifact', controlVersion: 1,
+      idempotencyKey: 'promote-1', reasonCode: 'owner_review', note: 'reviewed',
+    });
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.reasonCode).toBe('owner_authentication_required');
+    expect(mockPromoteActivation).not.toHaveBeenCalled();
+  });
+
+  it('feature-on authenticated CLI refuses when readiness authority is unavailable', async () => {
+    mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
+    vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
+    vi.stubEnv('PD_OWNER_ID', 'owner-1');
+    vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'credential-1');
+    await handleRuntimeActivationPromote({
+      workspace: WS, activationId: 'act-hook-1', confirm: true, json: true,
+      artifactId: 'art-002', artifactDigest: 'sha256:artifact', controlVersion: 1,
+      idempotencyKey: 'promote-1', reasonCode: 'owner_review', note: 'reviewed',
+    });
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.reasonCode).toBe('promotion_readiness_unavailable');
+    expect(output.failedChecks).toEqual([{ checkId: 'promotion_readiness_reader', reasonCode: 'not_implemented' }]);
+    expect(mockPromoteActivation).not.toHaveBeenCalled();
   });
 
   it('rejects mutually exclusive dry-run and confirm without mutation', async () => {

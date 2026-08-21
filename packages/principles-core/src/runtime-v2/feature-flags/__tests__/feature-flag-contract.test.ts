@@ -242,11 +242,12 @@ describe('computeEffectiveFlags', () => {
     }
   });
 
-  it('core flags are enabled by default', () => {
+  it('core flags are enabled by default except the approved rollout-gated Owner decision authority', () => {
     const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
     const coreFlags = Object.values(result.flags).filter(f => f.category === 'core');
     for (const flag of coreFlags) {
-      expect(flag.enabled, `core flag ${flag.id} should default on`).toBe(true);
+      const expected = flag.id === 'rulecode_owner_live_decision' ? false : true;
+      expect(flag.enabled, `core flag ${flag.id} has the wrong approved default`).toBe(expected);
     }
   });
 
@@ -309,6 +310,11 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
   it('contains RuleCode safety controls as an enabled MVP-Core flag', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'rulecode_safety_controls');
     expect(flag).toMatchObject({ category: 'core', enabled: true, since: '2026-08-21' });
+  });
+
+  it('contains Owner live decision authority as default-off MVP-Core', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'rulecode_owner_live_decision');
+    expect(flag).toMatchObject({ category: 'core', enabled: false, since: '2026-08-21' });
   });
 
   it('contains code_rule_capability core flag (PRI-435: promoted to MVP-Core, default on)', () => {
