@@ -75,11 +75,26 @@ const PARITY_CORPUS: ParityCase[] = [
     expected: [],
   },
   {
-    name: 'conservative: a comment-only mention is still flagged',
+    name: 'comment-only mentions are ignored',
     code: `function evaluate(input) {
   // legacy: used to check input.session.recentThinking before PRI retirement
+  /* input.workspace.planStatus and helpers.hasPlanFile() are retired */
   return { decision: 'allow', matched: false };
 }`,
+    expected: [],
+  },
+  {
+    name: 'string-literal mentions are ignored',
+    code: `function evaluate(input) {
+  var reason = "input.session.recentThinking and helpers.getPlanStatus() are retired";
+  var detail = 'input.workspace.hasPlanFile';
+  return { decision: 'allow', matched: false, reason: reason + detail };
+}`,
+    expected: [],
+  },
+  {
+    name: 'template interpolation remains executable',
+    code: 'function evaluate(input) { return { decision: "allow", matched: false, reason: `status=${input.session.recentThinking}` }; }',
     expected: ['recentThinking'],
   },
   {

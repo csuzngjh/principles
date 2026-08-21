@@ -64,13 +64,34 @@ describe('scanLegacyRuleContractDependencies', () => {
     expect(findings).toEqual([]);
   });
 
-  it('is conservative: a comment-only mention is still flagged', () => {
+  it('ignores retired symbols mentioned only in comments', () => {
     const findings = scanLegacyRuleContractDependencies([{
       ...base,
       implementationCode: `function evaluate(input) {
   // legacy: used to check input.session.recentThinking before PRI retirement
+  /* input.workspace.planStatus and helpers.hasPlanFile() are retired */
   return { decision: 'allow', matched: false };
 }`,
+    }]);
+    expect(findings).toEqual([]);
+  });
+
+  it('ignores retired symbols mentioned only in string literals', () => {
+    const findings = scanLegacyRuleContractDependencies([{
+      ...base,
+      implementationCode: `function evaluate(input) {
+  var reason = "input.session.recentThinking and helpers.getPlanStatus() are retired";
+  var detail = 'input.workspace.hasPlanFile';
+  return { decision: 'allow', matched: false, reason: reason + detail };
+}`,
+    }]);
+    expect(findings).toEqual([]);
+  });
+
+  it('still detects retired symbols in template interpolation expressions', () => {
+    const findings = scanLegacyRuleContractDependencies([{
+      ...base,
+      implementationCode: 'function evaluate(input) { return { decision: "allow", matched: false, reason: `status=${input.session.recentThinking}` }; }',
     }]);
     expect(findings.map(f => f.symbol)).toEqual(['recentThinking']);
   });
