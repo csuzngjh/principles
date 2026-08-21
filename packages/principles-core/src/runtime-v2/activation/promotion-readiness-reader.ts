@@ -8,7 +8,7 @@ export interface PromotionReadinessReaderDeps {
   computeArtifactDigest(artifact: PIArtifactSnapshot): string;
   validateProductionArtifact(artifact: PIArtifactSnapshot): Promise<CanActivateResult>;
   collectHostChecks(artifact: PIArtifactSnapshot): Promise<PromotionReadinessCheck[]>;
-  buildEvidenceSnapshot(checks: PromotionReadinessCheck[], artifact?: PIArtifactSnapshot): PromotionEvidenceSnapshot;
+  buildEvidenceSnapshot(checks: PromotionReadinessCheck[], artifact?: PIArtifactSnapshot, evaluationId?: string): PromotionEvidenceSnapshot;
   newEvaluationId(): string;
 }
 
@@ -47,12 +47,12 @@ export class PromotionReadinessReader {
       { checkId: 'golden_trace', status: gate.ok ? 'passed' : 'failed', ...(!gate.ok ? { reasonCode: gate.reason } : {}) },
       ...await this.deps.collectHostChecks(artifact),
     );
-    const evidenceSnapshot = this.deps.buildEvidenceSnapshot(checks, artifact);
+    const evidenceSnapshot = this.deps.buildEvidenceSnapshot(checks, artifact, evaluationId);
     return evaluateRuleCodePromotionReadiness({ evaluationId, artifactId: artifact.artifactId, artifactDigest, evidenceSnapshot, checks });
   }
 
   private blocked(evaluationId: string, request: ReadinessRequest, checks: PromotionReadinessCheck[]): PromotionReadinessResult {
-    const evidenceSnapshot = this.deps.buildEvidenceSnapshot(checks);
+    const evidenceSnapshot = this.deps.buildEvidenceSnapshot(checks, undefined, evaluationId);
     return {
       status: 'blocked', evaluationId, artifactId: request.expectedArtifactId,
       artifactDigest: request.expectedArtifactDigest, evidenceSnapshot,
