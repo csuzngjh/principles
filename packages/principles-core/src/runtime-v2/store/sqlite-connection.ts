@@ -506,9 +506,14 @@ export class SqliteConnection {
         artifact_id TEXT,
         artifact_digest TEXT,
         decision TEXT NOT NULL CHECK (decision IN ('continue_observing', 'promote_live', 'reject_after_shadow', 'emergency_deactivate', 'global_emergency_pause', 'global_emergency_pause_release', 'safety_isolate', 'recover_to_shadow', 'supersede')),
-        principal TEXT NOT NULL CHECK (principal IN ('configured_owner', 'system_safety', 'break_glass')),
-        authentication TEXT NOT NULL CHECK (authentication IN ('console_token', 'cli_owner_credential', 'system', 'local_break_glass')),
-        operator TEXT,
+        principal_kind TEXT NOT NULL CHECK (principal_kind IN ('configured_owner', 'system_safety', 'break_glass')),
+        owner_id TEXT,
+        policy_version TEXT,
+        break_glass_reason TEXT,
+        authentication_method TEXT NOT NULL CHECK (authentication_method IN ('console_token', 'cli_owner_credential', 'system', 'local_break_glass')),
+        credential_id TEXT,
+        operator_kind TEXT CHECK (operator_kind IS NULL OR operator_kind = 'local_user'),
+        operator_id TEXT,
         reason_code TEXT NOT NULL,
         note TEXT,
         evidence_snapshot_id TEXT,
@@ -516,7 +521,17 @@ export class SqliteConnection {
         CHECK (
           (subject_kind = 'activation' AND activation_id IS NOT NULL AND artifact_id IS NOT NULL AND artifact_digest IS NOT NULL)
           OR (subject_kind = 'all_live_rulecode' AND activation_id IS NULL AND artifact_id IS NULL AND artifact_digest IS NULL)
-        )
+        ),
+        CHECK (
+          (principal_kind = 'configured_owner' AND owner_id IS NOT NULL AND policy_version IS NULL AND break_glass_reason IS NULL)
+          OR (principal_kind = 'system_safety' AND owner_id IS NULL AND policy_version IS NOT NULL AND break_glass_reason IS NULL)
+          OR (principal_kind = 'break_glass' AND owner_id IS NULL AND policy_version IS NULL AND break_glass_reason = 'local_no_auth_emergency')
+        ),
+        CHECK (
+          (authentication_method IN ('console_token', 'cli_owner_credential') AND credential_id IS NOT NULL)
+          OR (authentication_method IN ('system', 'local_break_glass') AND credential_id IS NULL)
+        ),
+        CHECK ((operator_kind IS NULL AND operator_id IS NULL) OR (operator_kind = 'local_user' AND operator_id IS NOT NULL))
       );
       CREATE INDEX IF NOT EXISTS idx_activation_decisions_activation
         ON activation_decisions(activation_id, decided_at);

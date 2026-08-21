@@ -22,9 +22,16 @@ export interface ActivationDecisionRecord {
   decisionId: string;
   subject: ActivationDecisionSubject;
   decision: ActivationDecisionKind;
-  principal: 'configured_owner' | 'system_safety' | 'break_glass';
-  authentication: 'console_token' | 'cli_owner_credential' | 'system' | 'local_break_glass';
-  operator?: string;
+  principal:
+    | { kind: 'configured_owner'; ownerId: string }
+    | { kind: 'system_safety'; policyVersion: string }
+    | { kind: 'break_glass'; reason: 'local_no_auth_emergency' };
+  authentication:
+    | { method: 'console_token'; credentialId: string }
+    | { method: 'cli_owner_credential'; credentialId: string }
+    | { method: 'system' }
+    | { method: 'local_break_glass' };
+  operator?: { kind: 'local_user'; operatorId: string };
   reasonCode: string;
   note: string | null;
   evidenceSnapshotId: string | null;

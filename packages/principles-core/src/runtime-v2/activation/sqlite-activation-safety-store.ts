@@ -49,10 +49,25 @@ function mapDecision(row: unknown): ActivationDecisionRecord {
   if (!isRecord(row)) throw new Error('Malformed activation decision row');
   const decision = requiredString(row, 'decision');
   if (!isActivationDecisionKind(decision)) throw new Error('Malformed activation decision row: decision');
-  const principal = requiredString(row, 'principal');
-  const authentication = requiredString(row, 'authentication');
-  if (principal !== 'configured_owner' && principal !== 'system_safety' && principal !== 'break_glass') throw new Error('Malformed activation decision row: principal');
-  if (authentication !== 'console_token' && authentication !== 'cli_owner_credential' && authentication !== 'system' && authentication !== 'local_break_glass') throw new Error('Malformed activation decision row: authentication');
+  const principalKind = requiredString(row, 'principal_kind');
+  const authenticationMethod = requiredString(row, 'authentication_method');
+  const principal = principalKind === 'configured_owner'
+    ? { kind: principalKind, ownerId: requiredString(row, 'owner_id') } as const
+    : principalKind === 'system_safety'
+      ? { kind: principalKind, policyVersion: requiredString(row, 'policy_version') } as const
+      : principalKind === 'break_glass' && requiredString(row, 'break_glass_reason') === 'local_no_auth_emergency'
+        ? { kind: principalKind, reason: 'local_no_auth_emergency' } as const
+        : null;
+  const authentication = authenticationMethod === 'console_token' || authenticationMethod === 'cli_owner_credential'
+    ? { method: authenticationMethod, credentialId: requiredString(row, 'credential_id') } as const
+    : authenticationMethod === 'system' || authenticationMethod === 'local_break_glass'
+      ? { method: authenticationMethod } as const
+      : null;
+  if (!principal) throw new Error('Malformed activation decision row: principal');
+  if (!authentication) throw new Error('Malformed activation decision row: authentication');
+  const operatorKind = optionalString(row, 'operator_kind');
+  const operatorId = optionalString(row, 'operator_id');
+  if ((operatorKind === null) !== (operatorId === null) || (operatorKind !== null && operatorKind !== 'local_user')) throw new Error('Malformed activation decision row: operator');
   return {
     decisionId: requiredString(row, 'decision_id'),
     subject: {
@@ -64,7 +79,7 @@ function mapDecision(row: unknown): ActivationDecisionRecord {
     decision,
     principal,
     authentication,
-    operator: optionalString(row, 'operator') ?? undefined,
+    operator: operatorId === null ? undefined : { kind: 'local_user', operatorId },
     reasonCode: requiredString(row, 'reason_code'),
     note: optionalString(row, 'note'),
     evidenceSnapshotId: optionalString(row, 'evidence_snapshot_id'),
@@ -85,8 +100,9 @@ export class SqliteActivationSafetyStore {
 
   async listDecisions(activationId: string): Promise<ActivationDecisionRecord[]> {
     const rows: unknown = this.connection.getDb().prepare(`
-      SELECT decision_id, activation_id, artifact_id, artifact_digest, decision, principal,
-             authentication, operator, reason_code, note, evidence_snapshot_id, decided_at
+      SELECT decision_id, activation_id, artifact_id, artifact_digest, decision, principal_kind,
+             owner_id, policy_version, break_glass_reason, authentication_method, credential_id,
+             operator_kind, operator_id, reason_code, note, evidence_snapshot_id, decided_at
       FROM activation_decisions WHERE activation_id = ? ORDER BY decided_at, decision_id
     `).all(activationId);
     if (!Array.isArray(rows)) throw new Error('Malformed activation decision result');
@@ -94,7 +110,7 @@ export class SqliteActivationSafetyStore {
   }
 
   async safetyIsolate(decision: ActivationDecisionRecord, expectedVersion: number): Promise<ActivationControlState> {
-    if (decision.decision !== 'safety_isolate' || decision.principal !== 'system_safety' || decision.authentication !== 'system' || decision.subject.kind !== 'activation') {
+    if (decision.decision !== 'safety_isolate' || decision.principal.kind !== 'system_safety' || decision.authentication.method !== 'system' || decision.subject.kind !== 'activation') {
       throw new Error('safetyIsolate requires a system_safety/system safety_isolate activation decision');
     }
     const db = this.connection.getDb();
@@ -109,13 +125,16 @@ export class SqliteActivationSafetyStore {
       }
       db.prepare(`
         INSERT INTO activation_decisions
-          (decision_id, subject_kind, activation_id, artifact_id, artifact_digest, decision, principal,
-           authentication, operator, reason_code, note, evidence_snapshot_id, decided_at)
-        VALUES (?, 'activation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (decision_id, subject_kind, activation_id, artifact_id, artifact_digest, decision, principal_kind,
+           owner_id, policy_version, break_glass_reason, authentication_method, credential_id,
+           operator_kind, operator_id, reason_code, note, evidence_snapshot_id, decided_at)
+        VALUES (?, 'activation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         decision.decisionId, decision.subject.activationId, decision.subject.artifactId,
-        decision.subject.artifactDigest, decision.decision, decision.principal, decision.authentication,
-        decision.operator ?? null, decision.reasonCode, decision.note, decision.evidenceSnapshotId, decision.decidedAt,
+        decision.subject.artifactDigest, decision.decision, decision.principal.kind,
+        null, decision.principal.policyVersion, null, decision.authentication.method, null,
+        decision.operator?.kind ?? null, decision.operator?.operatorId ?? null,
+        decision.reasonCode, decision.note, decision.evidenceSnapshotId, decision.decidedAt,
       );
       const result = db.prepare(`
         UPDATE activation_control_states
