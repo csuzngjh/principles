@@ -1,7 +1,7 @@
 {
   "id": "principles-disciple",
   "name": "Principles Disciple",
-  "description": "Stop correcting the same AI behavior across sessions. Turn repeated Agent corrections into Owner-approved, observable, reversible behavior principles.",
+  "description": "Principles Disciple is an AI Agent Governance System. Stop correcting the same AI behavior across sessions. Turn repeated Agent corrections into Owner-approved, observable, reversible behavior principles.",
   "version": "1.198.1",
   "activation": {
     "onCapabilities": [

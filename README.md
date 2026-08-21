@@ -22,10 +22,10 @@
 
 ---
 
-> Principles Disciple (PD) is a local, agent-first governance and feedback layer for AI agents.
+> Principles Disciple (PD) is an **AI Agent Governance System** — a local, agent-first governance and feedback layer for AI agents.
 > Its first practical domain is agentic development: coding agents, terminal agents, and project-operation agents.
 > It helps owners, operators, and maintainers turn repeated agent failures, risky actions, user corrections, and workflow mismatches
-> into structured pain signals, reviewed principles, decision logs, and owner-controlled guardrails.
+> into structured pain signals, owner-reviewed principles, decision logs, and owner-controlled guardrails.
 
 PD currently ships with two runtime integrations: OpenClaw and Codex (CLI + Desktop, via an installable Codex plugin). The architecture is designed around a runtime adapter layer so that PD can connect with different agent runtimes and task environments without being hard-coded to a single agent tool or task domain.
 
