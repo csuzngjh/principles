@@ -11,6 +11,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 
 // ── Mock the API module ──────────────────────────────────────────────────────
 
@@ -337,8 +339,12 @@ function getOwnString(obj: Record<string, unknown>, key: string): string | undef
 }
 
 function requireJson(path: string): Record<string, unknown> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const raw: unknown = require(path);
+  // fs read instead of require(path): a dynamic require with a variable path
+  // trips the command-injection scanner; readFileSync + JSON.parse is
+  // equivalent for JSON documents. Relative paths anchor to THIS file's
+  // directory, matching the old require() resolution (cwd-independent).
+  const resolved = nodePath.isAbsolute(path) ? path : nodePath.join(__dirname, path);
+  const raw: unknown = JSON.parse(fs.readFileSync(resolved, "utf-8"));
   if (!isRecord(raw)) throw new Error(`Expected JSON object at ${path}`);
   return raw;
 }
@@ -479,10 +485,8 @@ describe("FocusPage: PRI-332 zero state clarity", () => {
   });
 
   it("FocusPage source contains ZeroStateHealthy component", () => {
-    const fs = require("node:fs");
-    const path = require("node:path");
     const src = fs.readFileSync(
-      path.join(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"),
+      nodePath.join(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"),
       "utf-8",
     );
     expect(src).toMatch(/function ZeroStateHealthy/);
@@ -492,10 +496,8 @@ describe("FocusPage: PRI-332 zero state clarity", () => {
   });
 
   it("FocusPage shows degraded signals regardless of governance state", () => {
-    const fs = require("node:fs");
-    const path = require("node:path");
     const src = fs.readFileSync(
-      path.join(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"),
+      nodePath.join(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"),
       "utf-8",
     );
     // Should always show degraded signals when present, not gated by state === 'degraded'
