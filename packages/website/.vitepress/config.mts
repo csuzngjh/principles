@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: "Principles Disciple",
-  description: "Turn repeated AI Agent corrections into reviewable, reversible behavior principles governed by the Owner.",
+  description: "Principles Disciple is an AI Agent Governance System that turns repeated Agent corrections into reviewable, reversible behavior principles governed by the Owner.",
   lastUpdated: true,
   cleanUrls: true,
   ignoreDeadLinks: false,
@@ -19,7 +19,7 @@ export default defineConfig({
     // Open Graph — canonical production URL; update if primary domain changes
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:title', content: 'Principles Disciple' }],
-    ['meta', { property: 'og:description', content: 'Turn repeated corrections into Owner-approved, observable, reversible Agent behavior principles.' }],
+    ['meta', { property: 'og:description', content: 'Principles Disciple is an AI Agent Governance System — turn repeated corrections into Owner-approved, observable, reversible Agent behavior principles.' }],
     ['meta', { property: 'og:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:image', content: 'https://principles-website.pages.dev/images/og-image.png' }],
@@ -42,13 +42,14 @@ export default defineConfig({
     root: {
       label: 'English',
       lang: 'en',
-      description: 'Owner-governed, observable, reversible behavior principles for AI Agents.',
+      description: 'Principles Disciple is an AI Agent Governance System — owner-governed, observable, reversible behavior principles for AI Agents.',
       themeConfig: {
         nav: [
           { text: 'Home', link: '/' },
           { text: 'Install', link: '/install' },
           { text: 'Download', link: '/download' },
           { text: 'Docs', link: '/docs/getting-started' },
+          { text: 'FAQ', link: '/faq' },
           { text: 'Abyss', link: '/abyss/' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
         ],
@@ -85,13 +86,14 @@ export default defineConfig({
       label: '简体中文',
       lang: 'zh-CN',
       link: '/zh/',
-      description: '把反复纠正沉淀为由 Owner 审批、效果可观察、随时可回滚的 Agent 行为原则。',
+      description: 'Principles Disciple（PD）是一个 AI Agent 行为治理系统——把反复纠正沉淀为由 Owner 审批、效果可观察、随时可回滚的 Agent 行为原则。',
       themeConfig: {
         nav: [
           { text: '首页', link: '/zh/' },
           { text: '安装', link: '/zh/install' },
           { text: '下载', link: '/zh/download' },
           { text: '文档', link: '/zh/docs/getting-started' },
+          { text: '常见问题', link: '/zh/faq' },
           { text: '思维深渊', link: '/zh/abyss/' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
         ],
