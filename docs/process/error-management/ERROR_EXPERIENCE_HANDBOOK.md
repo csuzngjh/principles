@@ -56,6 +56,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 | ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
 | ERR-100 | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle | PRI-552 |
+| ERR-105 | Hardcoded light-mode hex colors bypass theme tokens on a dual-theme UI — timeline dots near-invisible in dark mode | PR #1377 (pr-review) |
 
 ---
 
@@ -117,6 +118,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
 | ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
 | ERR-082 | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped | PRI-468 / PR #1063 |
+| ERR-106 | Binary ternary collapsed a 4-state review status into approved/pending — rejected/parked principles displayed as "awaiting Owner review" | PR #1377 (pr-review) |
 
 ---
 
@@ -879,10 +881,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 104 |
-| Last updated | 2026-08-21 |
+| Total lessons | 106 |
+| Last updated | 2026-08-22 |
 | Top category | Schema & Type |
-| Recurring errors | 53 |
+| Recurring errors | 54 |
 
 ---
 
@@ -1255,6 +1257,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-20 PRI-553: newly added zh-CN governance strings used bare `Owner` and `Console`, creating mixed-language visible copy. The existing CR10 locale audit caught all five values; fixed with `拥有者` and `控制台`, and the full Console suite verifies recurrence.
   - 2026-08-20 PRI-553 final review: collector degradation codes (`metadata_malformed`, `timestamp_invalid`, `source_unavailable`) and the new `verdict_missing` attention reason had no locale entries, so visible degraded paths fell back to raw machine identifiers. Added both-locale keys and registry coverage assertions.
   - 2026-08-21 RuleCode Owner Live Decision self-review: the first Console implementation hardcoded Chinese and English labels, action text, toasts, and placeholder copy inside an existing `useTranslation` page. Replaced every new string with paired `en.json` / `zh-CN.json` keys before handoff.
+  - 2026-08-22 PRI-558 / PR #1377: six newly added zh-CN timeline strings used bare `Owner`/`Agent` (one value was entirely English: `Owner Approved`), failing the CR10 locale governance gate and redding `Test pd-console` on CI. Fixed with 拥有者/智能体 in aa6a881b. Same prevention rule, new flavor: keys WERE added to both locales (parity held) but the zh values violated the locale term policy — run `cr10-i18n-governance.test.ts` before pushing any i18n change.
 
 ---
 
@@ -1609,4 +1612,34 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-089 (incomplete branch coverage when fixing — sibling-branch flavor of the same EP-02 group), ERR-025 (tests prove isolated helper behavior, not production path), ERR-088 (non-unique assertion signals — same EP-09 verify-the-right-thing group).
 - **Source**: PR #1341 (self-review, GitHub issue #1337)
 - **Date**: 2026-08-17
+- **Recurrence**: None
+
+---
+
+**[ERR-105]** | Hardcoded light-mode hex colors bypass theme tokens on a dual-theme UI — timeline dots near-invisible in dark mode
+
+- **What happened**: In PR #1377 (PRI-558), the assistant added timeline status dots to `PrinciplesPage.tsx` as raw hex literals (`STATUS_DOT = { pending: "#1e3a5f", approved: "#4d6b52", rejected: "#8b3a3a", parked: "#6b7280" }`) applied via inline `style={{ backgroundColor }}`. These values are exactly pd-console's LIGHT-theme token values (`--color-gov/green/danger` in `globals.css`). pd-console ships a dark theme (`[data-theme="dark"]`) where those variables flip to light tints (`#9db9d8`, `#90b892`, `#d28b8b`), so in dark mode the dots render dark-navy-on-dark and are nearly invisible. The same PR body claimed "reuses existing design tokens only".
+- **Why it's wrong**: The UI color system is a two-layer token contract: CSS variables re-declared per theme, consumed through Tailwind utilities (`bg-gov`) that resolve at runtime. Hardcoded hex bypasses the second layer, so any themed surface drifts when the theme flips; inline styles also escape the Tailwind pipeline entirely.
+- **Generalized failure mode**: When adding visual styling (colors, shadows, radii) to a component in a multi-theme UI, assistants must use theme-token utilities or CSS variables — never raw hex/rgb literals — otherwise one of the themes renders with wrong or low-contrast styling.
+- **Correct approach**: Map each state to literal utility-class strings in a typed Record (`const STATUS_DOT_BG: Record<ReviewStatus, string> = { pending: "bg-gov", ... }`) so Tailwind JIT sees them; verify by grepping built CSS for the class rules (PR #1377 fix commit aa6a881b).
+- **How to prevent**: In review, grep new diffs for `#[0-9a-fA-F]{3,8}` and `rgb(` inside `.tsx` files / `style={{` props of themed packages (pd-console, Companion). Each hit must map to an existing design token or carry an explicit both-themes justification. Also check dark mode once per visual PR (`data-theme="dark"`).
+- **Regression guard**: Static scan for hex/rgb literals in style props under `packages/pd-console/src/ui/`; fix commit aa6a881b is the reference implementation of the token-class map.
+- **Related ERRs**: ERR-075 (same shape — new UI element skips an established consistency layer; strings there, tokens here)
+- **Source**: PR #1377 (pr-review 2026-08-22)
+- **Date**: 2026-08-22
+- **Recurrence**: None
+
+---
+
+**[ERR-106]** | Binary ternary collapsed a 4-state review status into approved/pending — rejected/parked principles displayed as "awaiting Owner review"
+
+- **What happened**: In PR #1377 (PRI-558), the governance decision badge on `PrinciplesPage.tsx` was rendered as `isApproved ? govApproved : govPending`. `ReviewStatus` has four members (pending/approved/rejected/parked), so rejected and parked principles showed "⏳ 等待拥有者审查" directly beneath a status badge reading 已拒绝 — contradictory, false information on a governance page whose entire purpose is showing the Owner true decision state.
+- **Why it's wrong**: A binary ternary silently folds every non-matching enum member into its default branch. For enums with more than two states this fabricates state the data does not contain; TypeScript cannot catch it because both branches are valid strings.
+- **Generalized failure mode**: When deriving display copy or styling from a status enum with N > 2 members, assistants must use an exhaustive `Record<Status, Copy>` map so TypeScript forces one case per member — otherwise unhandled states inherit a default that misrepresents them.
+- **Correct approach**: `const GOV_DECISION: Record<ReviewStatus, { glyph: string; labelKey: string }>` covering all four states, reusing existing per-status i18n keys for rejected/parked (fix commit aa6a881b applied the same pattern to the impact copy via `BLOCK_IMPACT_KEY`).
+- **How to prevent**: Any new conditional over a union-typed status in UI code: if branch count < union member count, require explicit justification in the PR; prefer `Record<Union, …>` maps (missing member = compile error) over ternary chains.
+- **Regression guard**: TS exhaustiveness via `Record<ReviewStatus, …>` (adding a fifth status breaks compile until mapped); pd-console `principle-review.test.ts` suite covers the page contract.
+- **Related ERRs**: ERR-099 (misleading/dead conditional branches family), EP-02 must-check on shared type unions
+- **Source**: PR #1377 (pr-review 2026-08-22)
+- **Date**: 2026-08-22
 - **Recurrence**: None
