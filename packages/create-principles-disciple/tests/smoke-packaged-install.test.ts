@@ -262,18 +262,15 @@ describe('Real packaged install smoke test', () => {
     }
   }, 60_000);
 
-  it('tarball ships exactly the approved 8 skills and no legacy skill payload', () => {
+  it('tarball ships exactly the approved 5 skills and no legacy skill payload', () => {
     // P1-4: the installer package must not carry its own (historical,
     // unread) skill tree, and the bundled plugin must ship exactly the
     // maintainer-approved MVP skill set in both languages.
     const APPROVED_SKILLS = [
-      'pd-auditor',
       'pd-cli-operator',
-      'pd-explorer',
       'pd-implementer',
       'pd-mentor',
       'pd-pain-signal',
-      'pd-planner',
       'pd-runtime-v2',
     ];
     const LEGACY_SKILLS = [
@@ -281,6 +278,8 @@ describe('Real packaged install smoke test', () => {
       'evolve-system', 'evolve-task', 'feedback', 'init-strategy', 'inject-rule',
       'manage-okr', 'pain', 'profile', 'reflection', 'reflection-log', 'report',
       'root-cause', 'triage', 'watch-evolution', 'pd-reporter', 'pd-reviewer',
+      // PRI-548 follow-up: generic SOP role skills retired from the plugin.
+      'pd-auditor', 'pd-explorer', 'pd-planner',
     ];
     const listing = execFileSync('tar', ['-tf', path.basename(tarballPath)], {
       stdio: 'pipe',
