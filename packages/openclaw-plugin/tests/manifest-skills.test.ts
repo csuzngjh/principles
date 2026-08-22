@@ -21,10 +21,16 @@
  * declared for publication here.
  *
  * PRI-547 (ClawHub audit remediation): the shipped skill set is exactly the
- * 8 MVP pd-* skills. The 15 pre-pivot evolution-framework skills were dead
+ * MVP pd-* set. The 15 pre-pivot evolution-framework skills were dead
  * weight in the published artifact and a major source of ClawHub security
  * findings. This test is the permanent gate keeping legacy skills out of
  * the shipped plugin.
+ *
+ * PRI-548 follow-up: the three generic SOP role skills (pd-planner,
+ * pd-explorer, pd-auditor) were retired — they are framework-agnostic
+ * prompt templates with zero programmatic consumers, never auto-invoked
+ * (`disable-model-invocation: true`), and outside the ADR-0014 product
+ * boundary (PD does not own general task execution).
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync } from 'fs';
@@ -35,32 +41,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const packageRoot = resolve(__dirname, '..');
 
-/** The only skills allowed to ship (PRI-547 ClawHub audit remediation). */
+/** The only skills allowed to ship (PRI-547 set minus PRI-548 SOP-role retirement). */
 const EXPECTED_SKILLS = [
-  'pd-auditor',
   'pd-cli-operator',
-  'pd-explorer',
   'pd-implementer',
   'pd-mentor',
   'pd-pain-signal',
-  'pd-planner',
   'pd-runtime-v2',
 ] as const;
 
 /**
  * Model-invocation boundary (PRI-547 AC-02/AC-03): every skill must declare
  * `disable-model-invocation` EXPLICITLY. Only the three narrow PD operational
- * skills stay model-discoverable; the five SOP role skills must not enter the
- * model prompt on their own.
+ * skills stay model-discoverable; the remaining SOP role skills must not enter
+ * the model prompt on their own.
  */
 const EXPECTED_MODEL_INVOCATION_DISABLED: Record<string, boolean> = {
-  'pd-auditor': true,
   'pd-cli-operator': false,
-  'pd-explorer': true,
   'pd-implementer': true,
   'pd-mentor': true,
   'pd-pain-signal': false,
-  'pd-planner': true,
   'pd-runtime-v2': false,
 };
 
