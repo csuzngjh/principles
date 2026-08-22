@@ -717,6 +717,47 @@ function depsMeaningfullyChanged(
   return aKeys.some((k, i) => bKeys[i] !== k || a[k] !== b[k]);
 }
 
+/**
+ * Create the node_modules/@principles/host-runtime resolution links for the
+ * installed console and pd-cli packages, if missing.
+ *
+ * Mirrors installer.ts syncPdCli: junction on Windows (no elevation needed),
+ * relative symlink elsewhere. Fresh installs get these links via npm install
+ * (the bundled package.json rewrites the dep to file:../host-runtime); the
+ * full update deliberately skips npm install, so it must create them itself.
+ * Without the link, the updated console dist — which statically imports
+ * @principles/host-runtime since 2026-08-21 (41cf97ee5) — crashes at startup
+ * with ERR_MODULE_NOT_FOUND on installs created before the installer bundled
+ * host-runtime (PRI-561).
+ *
+ * Returns undefined on success, or an error message (rc-9: observable, never
+ * silent — a missing link means the updated console cannot start).
+ */
+function ensureHostRuntimeResolutionLinks(extDir: string): string | undefined {
+  const hostRuntimeDir = path.join(extDir, 'host-runtime');
+  const linkPaths = [
+    path.join(extDir, 'console', 'node_modules', '@principles', 'host-runtime'),
+    path.join(extDir, 'pd-cli', 'node_modules', '@principles', 'host-runtime'),
+  ];
+  for (const linkPath of linkPaths) {
+    if (fs.existsSync(linkPath)) continue;
+    try {
+      fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+      if (process.platform === 'win32') {
+        fs.symlinkSync(hostRuntimeDir, linkPath, 'junction');
+      } else {
+        // Relative from <ext>/<pkg>/node_modules/@principles/ → <ext>/
+        fs.symlinkSync('../../../host-runtime', linkPath, 'dir');
+      }
+    } catch (error) {
+      return `Failed to create host-runtime resolution link at ${linkPath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+  }
+  return undefined;
+}
+
 async function doInlineFullUpdate(workspaceDir: string): Promise<{
   success: boolean;
   message: string;
@@ -837,6 +878,39 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       const pkgSrc = path.join(pdCliSrc, 'package.json');
       if (fs.existsSync(pkgSrc)) {
         copyFileTo(pkgSrc, path.join(pdCliDest, 'package.json'));
+      }
+    }
+
+    //    e. host-runtime/ → extDir/host-runtime/ (overlay, skip node_modules).
+    //       The bundled console and pd-cli statically import
+    //       @principles/host-runtime, but installs created before the
+    //       installer bundled it (2026-08-14, PR #1315) have neither the
+    //       directory nor the resolution links — a full update that swaps in
+    //       the new console dist leaves it unable to start (PRI-561). Only
+    //       applied when the tarball carries it; pre-2026-08-14 installers
+    //       also bundle a console that does not import it, so skipping is
+    //       consistent for them.
+    const hostRuntimeSrc = path.join(tempDir, 'host-runtime');
+    const hostRuntimeDest = path.join(extDir, 'host-runtime');
+    if (
+      fs.existsSync(hostRuntimeSrc) &&
+      fs.existsSync(path.join(hostRuntimeSrc, 'package.json')) &&
+      fs.existsSync(path.join(hostRuntimeSrc, 'dist'))
+    ) {
+      copyDirRecursive(hostRuntimeSrc, hostRuntimeDest, SKIP_DIRS);
+      const linkError = ensureHostRuntimeResolutionLinks(extDir);
+      if (linkError) {
+        // The plugin/console/core files are already swapped in; the previous
+        // console keeps running (it predates the host-runtime import), but
+        // the update must fail loud instead of reporting a success whose
+        // restart would crash (rc-9 / cli-6: structured reason + next action).
+        return {
+          success: false,
+          message: linkError,
+          reason: 'host_runtime_link_failed',
+          nextAction: 'Re-run the update, or reinstall with: npx create-principles-disciple',
+          requiresRestart: false,
+        };
       }
     }
 

@@ -1651,6 +1651,149 @@ describe('handleUpdateRoute', () => {
       expect(fs.readFileSync(path.join(pluginDir, 'pd-cli', 'dist', 'index.js'), 'utf-8')).toBe('new cli');
     });
 
+    it('copies host-runtime and creates resolution links so the updated console can resolve it (PRI-561)', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              version: '1.120.0',
+              dist: { tarball: 'https://example.com/installer.tgz' },
+            }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            fs.mkdirSync(path.join(dir, 'console', 'dist', 'server'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+            fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'core', 'dist', 'index.js'), 'new core');
+            fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), 'new cli');
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+            // Installer bundles host-runtime since 2026-08-14 (PR #1315)
+            fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+              JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'),
+              'export const OPENCLAW_HOST_LIVENESS_CONTRACT = 1;');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Existing install in the PRE-2026-08-14 state: console/node_modules has
+      // @principles/core but NO host-runtime link, and no extDir/host-runtime
+      // (the installer that created it never bundled one).
+      fs.mkdirSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'core'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'core', 'marker'), 'core');
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; newVersion?: string } }>(res);
+      expect(body.data.success).toBe(true);
+
+      // 1. host-runtime content landed in the extension dir
+      expect(fs.readFileSync(path.join(pluginDir, 'host-runtime', 'dist', 'index.js'), 'utf-8'))
+        .toBe('export const OPENCLAW_HOST_LIVENESS_CONTRACT = 1;');
+
+      // 2. resolution links exist for console and pd-cli (installer syncPdCli parity)
+      expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime'))).toBe(true);
+      expect(fs.existsSync(path.join(pluginDir, 'pd-cli', 'node_modules', '@principles', 'host-runtime'))).toBe(true);
+
+      // 3. Real Node ESM resolution from inside the updated console dist —
+      //    the exact operation that crashed with ERR_MODULE_NOT_FOUND before
+      //    the fix. A probe module imports the package; node either resolves
+      //    it (exit 0) or dies with ERR_MODULE_NOT_FOUND (non-zero exit).
+      const { execFileSync } = await vi.importActual<typeof import('child_process')>('child_process');
+      const probePath = path.join(pluginDir, 'console', 'dist', '__pri561_probe__.mjs');
+      fs.writeFileSync(probePath, "import '@principles/host-runtime';\n");
+      let probeError = '';
+      try {
+        execFileSync(process.execPath, [probePath], { stdio: 'pipe', timeout: 15_000 });
+      } catch (err) {
+        probeError = err instanceof Error ? err.message : String(err);
+      } finally {
+        fs.rmSync(probePath, { force: true });
+      }
+      expect(probeError).toBe('');
+    });
+
+    it('does not overwrite an existing host-runtime resolution link (fresh-install no-op)', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
+            fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
+            fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+              JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'new host-runtime');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Fresh-install state: npm install already created the resolution link
+      // (real dir with a marker stands in for the npm-created link).
+      fs.mkdirSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime', 'marker'), 'npm-created');
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean } }>(res);
+      expect(body.data.success).toBe(true);
+      // The existing link is untouched...
+      expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime', 'marker'))).toBe(true);
+      // ...but host-runtime content is still refreshed from the tarball
+      expect(fs.readFileSync(path.join(pluginDir, 'host-runtime', 'dist', 'index.js'), 'utf-8')).toBe('new host-runtime');
+    });
+
     it('should preserve pd-cli/node_modules during update (no rmSync)', async () => {
       const { execSync: execSyncMock } = await import('child_process');
 
