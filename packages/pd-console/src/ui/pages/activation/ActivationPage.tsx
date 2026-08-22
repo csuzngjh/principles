@@ -30,6 +30,18 @@ import {
   isReversibleChannel,
 } from "./ActivationValidators.js";
 import { enumLabel } from "../../utils/enum-labels.js";
+import { formatDate } from "../../utils/format-date.js";
+
+// Date+time rendering options — mirrors the old default toLocaleString() shape
+// (numeric date, hours/minutes/seconds) while following the UI language.
+const DATETIME_OPTS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+};
 
 // ── Channel label helper ─────────────────────────────────────────────────────
 
@@ -131,7 +143,7 @@ function ActivationFactCard({
   disabling: boolean;
   onChanged: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [showConfirm, setShowConfirm] = useState(false);
   const neverActivated = record.activatedAt === null;
@@ -217,7 +229,7 @@ function ActivationFactCard({
       </div>
 
       {/* Action / target / time */}
-      {record.legacyDecisionUnknown && <div className="mt-3 border-l-2 border-amber px-3 text-[12px] text-amber">{t('pages.activation.legacyUnknown', { due: record.ownerReviewDueAt ? new Date(record.ownerReviewDueAt).toLocaleString() : t('pages.activation.sevenDays') })}</div>}
+      {record.legacyDecisionUnknown && <div className="mt-3 border-l-2 border-amber px-3 text-[12px] text-amber">{t('pages.activation.legacyUnknown', { due: record.ownerReviewDueAt ? formatDate(record.ownerReviewDueAt, i18n.language, DATETIME_OPTS) : t('pages.activation.sevenDays') })}</div>}
       <div className="text-ink-3 text-[13px] leading-relaxed space-y-1">
         <div>
           <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.actionLabel")}</span>{" "}
@@ -233,7 +245,7 @@ function ActivationFactCard({
             <span className="text-amber">{t("pages.activation.neverActivated")}</span>
           ) : (
             <span className="text-ink-2 font-mono text-[12px] tabular-nums">
-              {new Date(record.activatedAt!).toLocaleString()}
+              {formatDate(record.activatedAt!, i18n.language, DATETIME_OPTS)}
             </span>
           )}
         </div>
@@ -290,7 +302,7 @@ function ActivationFactCard({
                         {rm.triggered} {t("pages.activation.triggered")}{" "}
                         {rm.lastTriggeredAt && (
                           <span className="text-ink-4">
-                            ({new Date(rm.lastTriggeredAt).toLocaleString()})
+                            ({formatDate(rm.lastTriggeredAt, i18n.language, DATETIME_OPTS)})
                           </span>
                         )}
                       </div>

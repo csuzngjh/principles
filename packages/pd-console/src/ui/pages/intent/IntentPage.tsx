@@ -8,6 +8,7 @@ import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetch
 import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData, IntentVersionEntry } from "../../api.js";
 import { OnboardingModal, IntentEditor, CreateIntentButton, EditButton } from "./IntentOnboarding.js";
 import { computeVersionDiff } from "@principles/core/runtime-v2/intent-browser";
+import { formatDate } from "../../utils/format-date.js";
 
 // ── Page state ────────────────────────────────────────────────────────────────
 
@@ -229,7 +230,7 @@ interface VersionEntryProps {
 }
 
 function VersionEntry({ version, previousContent, reasonLabel, defaultExpanded = false }: VersionEntryProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   // Compute section-level diff between previous and this version.
@@ -238,16 +239,10 @@ function VersionEntry({ version, previousContent, reasonLabel, defaultExpanded =
   const diff = computeVersionDiff(previousContent, version.contentSnapshot);
 
   // Localize the timestamp for display (avoid showing raw UTC to end users).
-  const localizedTime = (() => {
-    try {
-      return new Date(version.createdAt).toLocaleString(undefined, {
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit',
-      });
-    } catch {
-      return version.createdAt.slice(0, 19).replace('T', ' ');
-    }
-  })();
+  const localizedTime = formatDate(version.createdAt, i18n.language, {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
 
   return (
     <div className="border-b border-line last:border-b-0">

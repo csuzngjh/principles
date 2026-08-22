@@ -18,6 +18,7 @@ import {
   editApproval,
 } from "../../api.js";
 import type { PrincipleReceiptsData } from "../../api.js";
+import { formatDate } from "../../utils/format-date.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   PrincipleDetail,
@@ -119,7 +120,7 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
 
 // ── Component ───────────────────────────────────────────────────────────────
 export function PrincipleDetailPage() {
-  const { t } = useTranslation("pages");
+  const { t, i18n } = useTranslation("pages");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -565,7 +566,7 @@ export function PrincipleDetailPage() {
                   {t('principles.detail.receipts.headline', {
                     defaultValue: '',
                     effectCount: receipts.effectCount,
-                    lastEffectAt: receipts.lastEffectAt ? new Date(receipts.lastEffectAt).toLocaleDateString() : '',
+                    lastEffectAt: receipts.lastEffectAt ? formatDate(receipts.lastEffectAt, i18n.language) : '',
                   })}
                 </h2>
                 <span data-testid="receipt-history-counts" className="font-mono text-[11px] text-ink-3">

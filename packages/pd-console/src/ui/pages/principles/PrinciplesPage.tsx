@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -17,6 +17,7 @@ import type {
   ApprovalsGroupedData,
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
+import { formatDate } from "../../utils/format-date.js";
 
 // ── Status types for the review page ────────────────────────────────────────
 type ReviewStatus = "pending" | "approved" | "rejected" | "parked";
@@ -30,6 +31,8 @@ interface PrincipleCard {
   /** Whether the title was replaced with a bounded fallback. PRI-332 */
   titleUsedFallback: boolean;
   text: string;
+  /** Real behavior-change description (PrincipleListItem.action); empty when none recorded */
+  action: string;
   status: ReviewStatus;
   channels: string[];
   confidence: string;
@@ -76,6 +79,50 @@ const CHANNEL_LABELS: Record<string, string> = {
   defer_archive: "channelDeferArchive",
   code_tool_hook: "channelCodeToolHook",
 };
+
+// ── PRI-558: timeline node fill + status-driven copy (theme tokens, dark-mode safe) ──
+const STATUS_DOT_BG: Record<ReviewStatus, string> = {
+  pending: "bg-gov",
+  approved: "bg-green",
+  rejected: "bg-danger",
+  parked: "bg-ink-3",
+};
+
+// Governance decision row mirrors the true review status — rejected/parked must
+// not read as "awaiting review" (labels reuse the existing status* keys).
+const GOV_DECISION: Record<ReviewStatus, { glyph: string; labelKey: string }> = {
+  approved: { glyph: "✓", labelKey: "principles.govApproved" },
+  pending: { glyph: "⏳", labelKey: "principles.govPending" },
+  rejected: { glyph: "✗", labelKey: "principles.statusRejected" },
+  parked: { glyph: "⏸", labelKey: "principles.statusParked" },
+};
+
+const BLOCK_IMPACT_KEY: Record<ReviewStatus, string> = {
+  approved: "principles.blockImpactActive",
+  pending: "principles.blockImpactPending",
+  rejected: "principles.blockImpactRejected",
+  parked: "principles.blockImpactParked",
+};
+
+// Summary metric tile (one of the three numbers in the metrics bar)
+function Metric({ num, label }: { num: string; label: string }) {
+  return (
+    <div className="flex-1 min-w-[120px] px-4 py-3 border-r border-line last:border-r-0">
+      <div className="font-mono text-[22px] font-semibold text-gov leading-none">{num}</div>
+      <div className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-3 mt-1.5">{label}</div>
+    </div>
+  );
+}
+
+// Evolution block rendered under each principle card
+function EvolutionBlock({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="mt-3 pt-3 border-t border-line/60">
+      <div className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-4 mb-1">{label}</div>
+      <div className="text-ink-3 text-[13px] leading-relaxed">{children}</div>
+    </div>
+  );
+}
 
 // ── Runtime validation helpers (H section) ──────────────────────────────────
 function isString(v: unknown): v is string {
@@ -132,6 +179,8 @@ export function PrinciplesPage() {
   const [approvalGroups, setApprovalGroups] = useState<ApprovalGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // PRI-558: summary powers the metrics bar (already returned by /api/principles)
+  const [summary, setSummary] = useState<PrinciplesListData["summary"] | null>(null);
 
   // Search / filter / sort
   const [search, setSearch] = useState("");
@@ -164,6 +213,8 @@ export function PrinciplesPage() {
       setPrinciples(pData.principles);
       // PRI-330: Store categories for UI display
       setCategories(pData.categories);
+      // PRI-558: expose summary for the metrics bar
+      setSummary(pData.summary);
 
       const aData = aResult.success ? validateApprovalsGrouped(aResult.data) : null;
       setApprovalGroups(aData?.groups ?? []);
@@ -215,6 +266,7 @@ export function PrinciplesPage() {
       originalTitle: rawTitle,
       titleUsedFallback: usedFallback,
       text: p.text,
+      action: p.action,
       status: toReviewStatus(p.status, ag?.status),
       channels: uniqueChannels,
       confidence,
@@ -249,6 +301,12 @@ export function PrinciplesPage() {
     { value: "rejected", label: t("principles.statusRejected") },
     { value: "parked", label: t("principles.statusParked") },
   ];
+
+  // PRI-558: most recent update across loaded principles (drives "Last Updated" metric)
+  const latestUpdatedAt = principles.reduce<string>(
+    (max, p) => (new Date(p.updatedAt).getTime() > new Date(max).getTime() ? p.updatedAt : max),
+    principles[0]?.updatedAt ?? "",
+  );
 
   return (
     <PageShell>
@@ -337,6 +395,15 @@ export function PrinciplesPage() {
         </select>
       </div>
 
+      {/* PRI-558: metrics bar — bound to existing summary + derived latest update */}
+      {!loading && !error && summary && (
+        <div className="flex flex-wrap border border-line rounded-[var(--radius-md)] bg-panel overflow-hidden mb-6">
+          <Metric num={String(summary.total)} label={t("principles.metricDeposited")} />
+          <Metric num={String(summary.active)} label={t("principles.metricActive")} />
+          <Metric num={latestUpdatedAt ? formatDate(latestUpdatedAt, i18n.language) : "—"} label={t("principles.metricLatest")} />
+        </div>
+      )}
+
       {/* Content */}
       {loading && (
         <div
@@ -404,102 +471,153 @@ export function PrinciplesPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div className="grid gap-3 animate-[pdFadeIn_400ms_ease-out]">
-          {filtered.map((card) => (
-            <article
-              key={card.principleId}
-              onClick={() => navigate(`/principles/${card.principleId}`)}
-              className={
-                "bg-panel border border-line rounded-[var(--radius-md)] p-4 cursor-pointer " +
-                "border-l-[3px] " +
-                STATUS_BORDER[card.status] + " " +
-                "transition-[border-color,background,transform] duration-150 " +
-                "hover:border-line-2 hover:bg-surface hover:-translate-y-px " +
-                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-              }
-              tabIndex={0}
-              role="link"
-              aria-label={card.title}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  navigate(`/principles/${card.principleId}`);
+        <div className="relative pl-6 grid gap-3 animate-[pdFadeIn_400ms_ease-out]">
+          {/* timeline rail — centered under the status dots (dot centers sit at x≈13px) */}
+          <span className="absolute left-[12.5px] top-3 bottom-3 w-px bg-line" aria-hidden="true" />
+          {filtered.map((card) => {
+            const ag = approvalByPrinciple.get(card.principleId);
+            const decision = GOV_DECISION[card.status];
+            const decisionRecord =
+              ag?.records?.find((r) => r.status === ag.status) ?? ag?.records?.[0];
+            const decisionDate = decisionRecord?.createdAt;
+            return (
+              <article
+                key={card.principleId}
+                onClick={() => navigate(`/principles/${card.principleId}`)}
+                className={
+                  "relative bg-panel border border-line rounded-[var(--radius-md)] p-4 cursor-pointer " +
+                  "border-l-[3px] " +
+                  STATUS_BORDER[card.status] + " " +
+                  "transition-[border-color,background,transform] duration-150 " +
+                  "hover:border-line-2 hover:bg-surface hover:-translate-y-px " +
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
                 }
-              }}
-            >
-              {/* Tags row */}
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                tabIndex={0}
+                role="link"
+                aria-label={card.title}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigate(`/principles/${card.principleId}`);
+                  }
+                }}
+              >
+                {/* timeline node */}
                 <span
                   className={
-                    "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
-                    STATUS_TEXT[card.status] +
-                    " border-current/20"
+                    "absolute -left-[19px] top-4 h-2.5 w-2.5 rounded-full border-2 border-paper " +
+                    STATUS_DOT_BG[card.status]
                   }
-                >
-                  {t("principles.status" + card.status.charAt(0).toUpperCase() + card.status.slice(1))}
-                </span>
-                {card.channels.map((ch) => (
+                  aria-hidden="true"
+                />
+                {/* Tags row */}
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span
-                    key={ch}
-                    className="font-mono text-[11px] uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3"
+                    className={
+                      "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
+                      STATUS_TEXT[card.status] +
+                      " border-current/20"
+                    }
                   >
-                    {/* Channel label via global enum resolver — never raw i18n key */}
-                    {enumLabel('channel', ch, t)}
+                    {t("principles.status" + card.status.charAt(0).toUpperCase() + card.status.slice(1))}
                   </span>
-                ))}
-                {/* PRI-332: Language hint badge when principle language differs from UI language */}
-                {card.detectedLanguage && card.detectedLanguage !== 'unknown' && (
-                  <span className="font-mono text-[11px] tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
-                    {card.detectedLanguage === 'zh'
-                      ? t("principles.languageHintZh")
-                      : t("principles.languageHintEn")}
+                  {card.channels.map((ch) => (
+                    <span
+                      key={ch}
+                      className="font-mono text-[11px] uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3"
+                    >
+                      {/* Channel label via global enum resolver — never raw i18n key */}
+                      {enumLabel('channel', ch, t)}
+                    </span>
+                  ))}
+                  {/* PRI-332: Language hint badge when principle language differs from UI language */}
+                  {card.detectedLanguage && card.detectedLanguage !== 'unknown' && (
+                    <span className="font-mono text-[11px] tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
+                      {card.detectedLanguage === 'zh'
+                        ? t("principles.languageHintZh")
+                        : t("principles.languageHintEn")}
+                    </span>
+                  )}
+                  <span className="font-mono text-[11px] text-ink-4">
+                    {t("principles.confidence")}: {enumLabel('confidence', card.confidence, t)}
                   </span>
-                )}
-                <span className="font-mono text-[11px] text-ink-4">
-                  {t("principles.confidence")}: {enumLabel('confidence', card.confidence, t)}
-                </span>
-              </div>
-
-              {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
-              {card.readabilityWarningCode && (
-                <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
-                  {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
                 </div>
-              )}
 
-              {/* PRI-332: Language mismatch hint when principle language ≠ current UI language */}
-              {card.detectedLanguage && card.detectedLanguage !== 'unknown' && i18n.language && !i18n.language.startsWith(card.detectedLanguage) && (
-                <div className="mb-2 px-3 py-1.5 bg-surface/60 border-l-2 border-line rounded-[3px] text-ink-4 text-[12px] leading-snug">
-                  {t("principles.languageMismatchHint", { lang: card.detectedLanguage === 'en' ? 'English' : '中文' })}
-                </div>
-              )}
-
-              {/* Title */}
-              <h3 className="font-semibold text-ink mb-1">{card.title}</h3>
-
-              {/* PRI-332: When title used fallback, show original technical text in collapsed details */}
-              {card.titleUsedFallback && card.originalTitle && (
-                <details className="mb-1">
-                  <summary className="text-ink-4 text-[11px] font-mono cursor-pointer hover:underline">
-                    {t("principles.readabilityOriginalLabel")}
-                  </summary>
-                  <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono bg-surface/40 px-2 py-1 rounded-[3px] break-all">
-                    {card.originalTitle}
+                {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
+                {card.readabilityWarningCode && (
+                  <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
+                    {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
                   </div>
-                </details>
-              )}
+                )}
 
-              {/* Text preview */}
-              <p className="text-ink-3 text-[13px] line-clamp-3 leading-relaxed">
-                {card.text}
-              </p>
+                {/* PRI-332: Language mismatch hint when principle language ≠ current UI language */}
+                {card.detectedLanguage && card.detectedLanguage !== 'unknown' && i18n.language && !i18n.language.startsWith(card.detectedLanguage) && (
+                  <div className="mb-2 px-3 py-1.5 bg-surface/60 border-l-2 border-line rounded-[3px] text-ink-4 text-[12px] leading-snug">
+                    {t("principles.languageMismatchHint", { lang: card.detectedLanguage === 'en' ? 'English' : '中文' })}
+                  </div>
+                )}
 
-              {/* Timestamp */}
-              <p className="font-mono text-[11px] text-ink-4 mt-2">
-                {t("principles.updatedAt")}: {new Date(card.updatedAt).toLocaleDateString()}
-              </p>
-            </article>
-          ))}
+                {/* Title */}
+                <h3 className="font-semibold text-ink mb-1">{card.title}</h3>
+
+                {/* PRI-332: When title used fallback, show original technical text in collapsed details */}
+                {card.titleUsedFallback && card.originalTitle && (
+                  <details className="mb-1">
+                    <summary className="text-ink-4 text-[11px] font-mono cursor-pointer hover:underline">
+                      {t("principles.readabilityOriginalLabel")}
+                    </summary>
+                    <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono bg-surface/40 px-2 py-1 rounded-[3px] break-all">
+                      {card.originalTitle}
+                    </div>
+                  </details>
+                )}
+
+                {/* Text preview */}
+                <p className="text-ink-3 text-[13px] line-clamp-3 leading-relaxed">
+                  {card.text}
+                </p>
+
+                {/* Timestamp */}
+                <p className="font-mono text-[11px] text-ink-4 mt-2">
+                  {t("principles.updatedAt")}: {formatDate(card.updatedAt, i18n.language)}
+                </p>
+
+                {/* PRI-558: evolution narrative blocks (real fields or honest fallback) */}
+                <EvolutionBlock label={t("principles.blockBasis")}>
+                  {ag?.candidateDescription ?? t("principles.blockBasisFallback")}
+                </EvolutionBlock>
+                <EvolutionBlock label={t("principles.blockImpact")}>
+                  {t(BLOCK_IMPACT_KEY[card.status])}
+                </EvolutionBlock>
+                <EvolutionBlock label={t("principles.blockBehavior")}>
+                  {card.action ? card.action : t("principles.blockBehaviorFallback")}
+                </EvolutionBlock>
+                <div className="mt-3 pt-3 border-t border-line/60">
+                  <div className="flex items-center justify-between gap-3 bg-gov/5 border border-line rounded-[3px] px-3 py-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-4">
+                        {t("principles.govDecision")}
+                      </span>
+                      <span
+                        className={
+                          "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
+                          STATUS_TEXT[card.status] +
+                          " border-current/20"
+                        }
+                      >
+                        {decision.glyph} {t(decision.labelKey)}
+                      </span>
+                    </div>
+                    {decisionDate && (
+                      <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
+                        {formatDate(decisionDate, i18n.language)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
     </PageShell>

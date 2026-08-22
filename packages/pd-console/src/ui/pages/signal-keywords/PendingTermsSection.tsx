@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, X, CheckCheck, XCircle } from "lucide-react";
 import { type PendingSignalTerm } from "../../api.js";
+import { formatDate } from "../../utils/format-date.js";
 import { Badge } from "../../components/ui/badge.js";
 import {
   Tooltip,
@@ -166,7 +167,7 @@ export function PendingTermsSection({
                   {term.term}
                 </span>
                 <span className="text-[11px] text-ink-4 mt-0.5 block">
-                  {new Date(term.discoveredAt).toLocaleDateString(i18n.language)}
+                  {formatDate(term.discoveredAt, i18n.language)}
                 </span>
               </div>
 
