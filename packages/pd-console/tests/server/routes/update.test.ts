@@ -74,6 +74,38 @@ function parseResponseBody<T>(res: ServerResponse): T {
   return JSON.parse(mockRes._body) as T;
 }
 
+/**
+ * PRI-561 probe: run a REAL Node ESM import of @principles/host-runtime from
+ * inside the given console dist directory — the exact operation that crashed
+ * console startup on pre-fix installs. Returns '' when resolution succeeds,
+ * otherwise the error text including stderr. execFile with an argv array
+ * (no shell); the probe path is validated to stay inside the fixture dir.
+ */
+async function runPri561ResolutionProbe(consoleDistDir: string): Promise<string> {
+  const { execFile } = await vi.importActual<typeof import('child_process')>('child_process');
+  const resolvedBase = path.resolve(consoleDistDir);
+  const probePath = path.join(resolvedBase, '__pri561_probe__.mjs');
+  if (!path.resolve(probePath).startsWith(resolvedBase + path.sep)) {
+    return 'probe path escaped fixture dir';
+  }
+  fs.mkdirSync(resolvedBase, { recursive: true });
+  fs.writeFileSync(probePath, "import '@principles/host-runtime';\n");
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile(process.execPath, [probePath], { timeout: 15_000 }, (error, _stdout, stderr) => {
+        if (error) reject(Object.assign(error, { stderrText: String(stderr) }));
+        else resolve();
+      });
+    });
+    return '';
+  } catch (err) {
+    const e = err as Error & { stderrText?: string };
+    return e.stderrText ? `${e.message}\n${e.stderrText}` : e.message;
+  } finally {
+    fs.rmSync(probePath, { force: true });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Setup: create a temporary workspace with plugin dir and package.json
 // ---------------------------------------------------------------------------
@@ -1721,20 +1753,26 @@ describe('handleUpdateRoute', () => {
 
       // 3. Real Node ESM resolution from inside the updated console dist —
       //    the exact operation that crashed with ERR_MODULE_NOT_FOUND before
-      //    the fix. A probe module imports the package; node either resolves
-      //    it (exit 0) or dies with ERR_MODULE_NOT_FOUND (non-zero exit).
-      const { execFileSync } = await vi.importActual<typeof import('child_process')>('child_process');
-      const probePath = path.join(pluginDir, 'console', 'dist', '__pri561_probe__.mjs');
-      fs.writeFileSync(probePath, "import '@principles/host-runtime';\n");
-      let probeError = '';
-      try {
-        execFileSync(process.execPath, [probePath], { stdio: 'pipe', timeout: 15_000 });
-      } catch (err) {
-        probeError = err instanceof Error ? err.message : String(err);
-      } finally {
-        fs.rmSync(probePath, { force: true });
-      }
+      //    the fix (the negative-control test below proves the probe detects
+      //    that state).
+      const probeError = await runPri561ResolutionProbe(path.join(pluginDir, 'console', 'dist'));
       expect(probeError).toBe('');
+    });
+
+    // Negative control for the PRI-561 probe: the SAME probe on the PRE-fix
+    // layout (no extDir/host-runtime; console/node_modules has core only,
+    // never passing through the updater) must die with ERR_MODULE_NOT_FOUND.
+    // Without this, the positive test could pass vacuously — e.g. if the
+    // probe stopped importing the package or node resolved it from an
+    // unexpected root outside the fixture.
+    it('negative control: the probe fails with ERR_MODULE_NOT_FOUND on the pre-fix layout (PRI-561)', async () => {
+      fs.mkdirSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'core'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'core', 'marker'), 'core');
+      fs.mkdirSync(path.join(pluginDir, 'console', 'dist'), { recursive: true });
+
+      const probeError = await runPri561ResolutionProbe(path.join(pluginDir, 'console', 'dist'));
+      expect(probeError).toContain('ERR_MODULE_NOT_FOUND');
+      expect(probeError).toContain('@principles/host-runtime');
     });
 
     it('does not overwrite an existing host-runtime resolution link (fresh-install no-op)', async () => {
@@ -1792,6 +1830,66 @@ describe('handleUpdateRoute', () => {
       expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime', 'marker'))).toBe(true);
       // ...but host-runtime content is still refreshed from the tarball
       expect(fs.readFileSync(path.join(pluginDir, 'host-runtime', 'dist', 'index.js'), 'utf-8')).toBe('new host-runtime');
+    });
+
+    it('aborts before swapping any package files when resolution links cannot be created (PRI-561 fail path)', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console');
+            fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+              JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'new host-runtime');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Deterministic link failure: pd-cli/node_modules exists as a regular
+      // FILE, so mkdirSync for the pd-cli link's parent throws after the
+      // console link succeeds.
+      fs.mkdirSync(path.join(pluginDir, 'pd-cli'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'pd-cli', 'node_modules'), 'not a directory');
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string; nextAction?: string } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('host_runtime_link_failed');
+      expect(body.data.nextAction).toBeTruthy();
+
+      // The whole point of the fail path: NO package bytes were swapped —
+      // the installed console/plugin stay exactly as they were (rc-9).
+      expect(fs.existsSync(path.join(pluginDir, 'dist', 'bundle.js'))).toBe(false);
+      expect(fs.existsSync(path.join(pluginDir, 'console', 'dist', 'server.js'))).toBe(false);
+      expect(JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf-8') as string).version).toBe('1.0.0');
     });
 
     it('should preserve pd-cli/node_modules during update (no rmSync)', async () => {
