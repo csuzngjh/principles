@@ -100,17 +100,18 @@ for (const [path, config] of Object.entries(expectedCounts)) {
 // skill is an immediate child directory containing SKILL.md (what OpenClaw
 // links into ~/.openclaw/plugin-skills).
 //
-// PRI-547 (ClawHub audit remediation): the shipped set is EXACTLY the 8
-// MVP pd-* skills — neither fewer (broken build) nor more (legacy skills
+// PRI-547 (ClawHub audit remediation): the shipped set is EXACTLY the
+// MVP pd-* set — neither fewer (broken build) nor more (legacy skills
 // re-entering the published artifact).
+//
+// PRI-548 follow-up: generic SOP role skills pd-planner / pd-explorer /
+// pd-auditor retired (zero programmatic consumers, never auto-invoked,
+// outside the ADR-0014 product boundary).
 const EXPECTED_SKILLS = [
-  'pd-auditor',
   'pd-cli-operator',
-  'pd-explorer',
   'pd-implementer',
   'pd-mentor',
   'pd-pain-signal',
-  'pd-planner',
   'pd-runtime-v2',
 ];
 
