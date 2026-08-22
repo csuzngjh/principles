@@ -7,7 +7,7 @@
  *
  * rc-9: every function returns a structured result instead of throwing.
  */
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -93,16 +93,26 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
   let pid: number | undefined = undefined;
   try {
     if (process.platform === 'win32') {
-      const output = execSync(
-        `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess"`,
-        { encoding: 'utf-8', timeout: 5000 },
+      // EP-08: spawn via argv array — no cmd.exe shell in the chain, so even a
+      // hostile config value could never be re-interpreted as shell syntax.
+      // port is already validated as an integer in readOpenClawPort().
+      const output = execFileSync(
+        'powershell',
+        ['-NoProfile', '-Command', `(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess`],
+        { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
       ).trim();
       if (output) {
         const [firstLine] = output.split('\n');
         if (firstLine) pid = parseInt(firstLine.trim(), 10);
       }
     } else {
-      const output = execSync(`lsof -i :${port} -t -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
+      // EP-08: argv form replaces the old shell string (which needed
+      // `2>/dev/null`); stderr is discarded via stdio instead.
+      const output = execFileSync(
+        'lsof',
+        ['-i', `:${port}`, '-t', '-sTCP:LISTEN'],
+        { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
+      ).trim();
       if (output) {
         const [firstLine] = output.split('\n');
         if (firstLine) pid = parseInt(firstLine.trim(), 10);
@@ -124,7 +134,8 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
  */
 function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlResult {
   try {
-    execSync(`openclaw gateway ${subcommand}`, { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
+    // EP-08: argv array + typed subcommand union — no shell interpolation.
+    execFileSync('openclaw', ['gateway', subcommand], { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
