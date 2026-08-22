@@ -37,24 +37,7 @@ import {
   AlertDialogAction,
 } from "../../components/ui/alert-dialog.js";
 import { Loader2, RotateCcw, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
-
-// ── Helper: format ISO date string to locale-aware display ────────────────────
-
-function formatDate(isoString: string, locale: string): string {
-  try {
-    const date = new Date(isoString);
-    if (Number.isNaN(date.getTime())) return isoString;
-    return date.toLocaleDateString(locale, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return isoString;
-  }
-}
+import { formatDate } from "../../utils/format-date.js";
 
 // ── Main page component ──────────────────────────────────────────────────────
 
@@ -86,8 +69,6 @@ export function UpdatePage() {
   const [showRollbackDialog, setShowRollbackDialog] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackResult, setRollbackResult] = useState<{ success: boolean; message: string } | null>(null);
-
-  const locale = i18n.language === "zh-CN" ? "zh-CN" : "en-US";
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -487,7 +468,13 @@ export function UpdatePage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-ink-3 text-[13px]">
-                      {formatDate(entry.timestamp, locale)}
+                      {formatDate(entry.timestamp, i18n.language, {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </span>
                     {entry.backupPath && (
                       <button

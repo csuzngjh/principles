@@ -17,6 +17,7 @@ import type {
   ApprovalsGroupedData,
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
+import { formatDate } from "../../utils/format-date.js";
 
 // ── Status types for the review page ────────────────────────────────────────
 type ReviewStatus = "pending" | "approved" | "rejected" | "parked";
@@ -103,15 +104,7 @@ const BLOCK_IMPACT_KEY: Record<ReviewStatus, string> = {
   parked: "principles.blockImpactParked",
 };
 
-function fmtDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString();
-  } catch {
-    return iso;
-  }
-}
-
-// Growth metric tile (one of the three summary numbers)
+// Summary metric tile (one of the three numbers in the metrics bar)
 function Metric({ num, label }: { num: string; label: string }) {
   return (
     <div className="flex-1 min-w-[120px] px-4 py-3 border-r border-line last:border-r-0">
@@ -121,8 +114,8 @@ function Metric({ num, label }: { num: string; label: string }) {
   );
 }
 
-// Growth block rendered under each principle card
-function GrowthBlock({ label, children }: { label: string; children: ReactNode }) {
+// Evolution block rendered under each principle card
+function EvolutionBlock({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="mt-3 pt-3 border-t border-line/60">
       <div className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-4 mb-1">{label}</div>
@@ -186,7 +179,7 @@ export function PrinciplesPage() {
   const [approvalGroups, setApprovalGroups] = useState<ApprovalGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // PRI-558: summary powers the growth metrics bar (already returned by /api/principles)
+  // PRI-558: summary powers the metrics bar (already returned by /api/principles)
   const [summary, setSummary] = useState<PrinciplesListData["summary"] | null>(null);
 
   // Search / filter / sort
@@ -220,7 +213,7 @@ export function PrinciplesPage() {
       setPrinciples(pData.principles);
       // PRI-330: Store categories for UI display
       setCategories(pData.categories);
-      // PRI-558: expose summary for the growth metrics bar
+      // PRI-558: expose summary for the metrics bar
       setSummary(pData.summary);
 
       const aData = aResult.success ? validateApprovalsGrouped(aResult.data) : null;
@@ -402,12 +395,12 @@ export function PrinciplesPage() {
         </select>
       </div>
 
-      {/* PRI-558: Growth metrics bar — bound to existing summary + derived latest update */}
+      {/* PRI-558: metrics bar — bound to existing summary + derived latest update */}
       {!loading && !error && summary && (
         <div className="flex flex-wrap border border-line rounded-[var(--radius-md)] bg-panel overflow-hidden mb-6">
           <Metric num={String(summary.total)} label={t("principles.metricDeposited")} />
           <Metric num={String(summary.active)} label={t("principles.metricActive")} />
-          <Metric num={latestUpdatedAt ? fmtDate(latestUpdatedAt) : "—"} label={t("principles.metricLatest")} />
+          <Metric num={latestUpdatedAt ? formatDate(latestUpdatedAt, i18n.language) : "—"} label={t("principles.metricLatest")} />
         </div>
       )}
 
@@ -586,19 +579,19 @@ export function PrinciplesPage() {
 
                 {/* Timestamp */}
                 <p className="font-mono text-[11px] text-ink-4 mt-2">
-                  {t("principles.updatedAt")}: {new Date(card.updatedAt).toLocaleDateString()}
+                  {t("principles.updatedAt")}: {formatDate(card.updatedAt, i18n.language)}
                 </p>
 
-                {/* PRI-558: growth narrative blocks (real fields or honest fallback) */}
-                <GrowthBlock label={t("principles.blockBasis")}>
+                {/* PRI-558: evolution narrative blocks (real fields or honest fallback) */}
+                <EvolutionBlock label={t("principles.blockBasis")}>
                   {ag?.candidateDescription ?? t("principles.blockBasisFallback")}
-                </GrowthBlock>
-                <GrowthBlock label={t("principles.blockImpact")}>
+                </EvolutionBlock>
+                <EvolutionBlock label={t("principles.blockImpact")}>
                   {t(BLOCK_IMPACT_KEY[card.status])}
-                </GrowthBlock>
-                <GrowthBlock label={t("principles.blockBehavior")}>
+                </EvolutionBlock>
+                <EvolutionBlock label={t("principles.blockBehavior")}>
                   {card.action ? card.action : t("principles.blockBehaviorFallback")}
-                </GrowthBlock>
+                </EvolutionBlock>
                 <div className="mt-3 pt-3 border-t border-line/60">
                   <div className="flex items-center justify-between gap-3 bg-gov/5 border border-line rounded-[3px] px-3 py-2">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -617,7 +610,7 @@ export function PrinciplesPage() {
                     </div>
                     {decisionDate && (
                       <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
-                        {fmtDate(decisionDate)}
+                        {formatDate(decisionDate, i18n.language)}
                       </span>
                     )}
                   </div>
