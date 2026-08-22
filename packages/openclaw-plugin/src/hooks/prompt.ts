@@ -43,6 +43,8 @@ export interface LegacyPrinciplePromptSelection {
   probation: InjectablePrinciple[];
   content: string;
   selectedIds: ReadonlySet<string>;
+  /** PRI-562 Phase 0: either budget-bounded selection dropped candidates. */
+  wasTruncated: boolean;
 }
 
 export function selectLegacyPrinciplesForPrompt(
@@ -72,6 +74,7 @@ export function selectLegacyPrinciplesForPrompt(
     probation,
     content: active.length > 0 || probation.length > 0 ? formatEvolutionPrinciples(active, probation) : '',
     selectedIds: new Set([...active, ...probation].map((principle) => principle.id)),
+    wasTruncated: activeSelection.wasTruncated || probationSelection.wasTruncated,
   };
 }
 
@@ -460,12 +463,23 @@ export async function handleBeforePromptBuild(
   }
 
 
+  // PRI-562 Phase 0: legacy-block observability, hoisted so the injection
+  // event below can carry it. Populated best-effort inside the try; stays
+  // zero/absent when legacy assembly fails (rc-9: absence is observable via
+  // the block's own warn log).
+  let legacyInjectedIds: string[] = [];
+  let legacyTotalChars = 0;
+  let legacyTruncated = false;
+
   // Evolution principles injection — budget-aware selection (SDK-QUAL-04)
   let evolutionPrinciplesContent = '';
   try {
     const reducer = wctx.evolutionReducer;
     const selection = preparedLegacyPrinciples ?? selectLegacyPrinciplesForPrompt(wctx.workspaceDir, reducer, logger);
     const { probation } = selection;
+    legacyInjectedIds = [...selection.selectedIds];
+    legacyTotalChars = selection.content.length;
+    legacyTruncated = selection.wasTruncated;
 
     if (ctx.sessionId) {
       if (probation.length > 0) {
@@ -484,6 +498,7 @@ export async function handleBeforePromptBuild(
 
   let runtimeV2PrinciplesContent = '';
   const runtimeV2PrincipleIds = new Set<string>();
+  let v2Truncated: boolean | undefined;
   // Hoisted so the owner_approved_behavior_directives section can access them
   let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
   try {
@@ -515,8 +530,10 @@ export async function handleBeforePromptBuild(
     if (sharedActivePrinciplePrompt) {
       runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
       for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
+      v2Truncated = sharedActivePrinciplePrompt.truncated;
     } else if (dedupedV2.length > 0) {
       const { lines, injectedIds, truncated } = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+      v2Truncated = truncated;
       if (truncated) {
         logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${injectedIds.size} principles`);
       }
@@ -531,6 +548,12 @@ export async function handleBeforePromptBuild(
       const eventLog = wctx.eventLog;
       const allSharedPrinciplesExcluded = sharedActivePrinciplePrompt !== undefined
         && sharedActivePrinciplePrompt.allValidatedPrinciplesExcluded;
+      // PRI-562 Phase 0: ids that reached the prompt via BOTH the legacy and
+      // the runtime-v2 blocks of this build. Shared-runtime ids are already
+      // legacy-excluded upstream, so the overlap there is empty by construction.
+      const legacyInjectedIdSet = new Set(legacyInjectedIds);
+      const crossBlockDuplicateIds = [...runtimeV2PrincipleIds]
+        .filter((id) => legacyInjectedIdSet.has(id));
       eventLog.recordRuntimeV2ActivationsInjected({
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
@@ -541,6 +564,11 @@ export async function handleBeforePromptBuild(
         skippedWarnings: v2Result.warnings,
         injectedCharCount: runtimeV2PrinciplesContent.length,
         budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+        legacySelectedCount: legacyInjectedIds.length,
+        legacyTotalChars,
+        legacyTruncated,
+        ...(v2Truncated !== undefined ? { v2Truncated } : {}),
+        crossBlockDuplicateIds,
         ...(runtimeV2PrincipleIds.size === 0
           ? {
               skipReason: sharedActivePrinciplePrompt

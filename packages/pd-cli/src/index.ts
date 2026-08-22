@@ -67,6 +67,7 @@ import { registerMvpCommands } from './commands/mvp-smoke.js';
 import { registerRulecodeCommand } from './commands/rulecode.js';
 import { registerIntentCommand } from './commands/intent.js';
 import { registerErrorsListCommand } from './commands/errors-list.js';
+import { registerPrinciplesCommand } from './commands/principles-stats.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -1005,6 +1006,12 @@ registerIntentCommand(program);
 // worker-status.json errors array. Read-only.
 
 registerErrorsListCommand(program);
+
+// ─── Principles Stats (PRI-562 Phase 0) ─────────────────────────────────────
+// Owner-facing observability: principle injection volume/cost/duplicates/
+// application evidence. Read-only aggregation over event logs + receipt ledger.
+
+registerPrinciplesCommand(program);
 
 const consoleCmd = program
   .command('console')
