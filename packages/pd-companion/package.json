@@ -1,6 +1,6 @@
 {
   "name": "@principles/pd-companion",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "PD Companion — Windows desktop tray app that launches and supervises the PD Console server (PRI-526).",
