@@ -574,6 +574,16 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
   /** Present when no principles were injected */
   skipReason?: string;
   nextAction?: string;
+  /** PRI-562 Phase 0: principles injected via the legacy evolution block in the same build. */
+  legacySelectedCount?: number;
+  /** PRI-562 Phase 0: rendered character length of the legacy evolution block. */
+  legacyTotalChars?: number;
+  /** PRI-562 Phase 0: legacy active/probation selection hit its char budget. */
+  legacyTruncated?: boolean;
+  /** PRI-562 Phase 0: runtime-v2 render hit its char budget this build. */
+  v2Truncated?: boolean;
+  /** PRI-562 Phase 0: principle ids injected via BOTH blocks in the same build. */
+  crossBlockDuplicateIds?: string[];
 }
 
 export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
@@ -588,6 +598,11 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
   budget: Type.Number(),
   skipReason: Type.Optional(Type.String()),
   nextAction: Type.Optional(Type.String()),
+  legacySelectedCount: Type.Optional(Type.Number()),
+  legacyTotalChars: Type.Optional(Type.Number()),
+  legacyTruncated: Type.Optional(Type.Boolean()),
+  v2Truncated: Type.Optional(Type.Boolean()),
+  crossBlockDuplicateIds: Type.Optional(Type.Array(Type.String())),
 });
 export type RuntimeV2PromptActivationsInjectedEventDataStatic = Static<typeof RuntimeV2PromptActivationsInjectedEventDataSchema>;
 

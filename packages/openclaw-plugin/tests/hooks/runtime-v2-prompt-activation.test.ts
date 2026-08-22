@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as principleInjection from '../../src/core/principle-injection.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -55,6 +56,18 @@ vi.mock('../../src/core/event-log.js', () => ({
   },
 }));
 
+/**
+ * PRI-562: mutable legacy-principle fixtures. The workspace-context mock's
+ * evolutionReducer reads these arrays so individual tests can simulate a
+ * principle existing in BOTH the legacy ledger and a v2 activation.
+ */
+const { legacyTestState } = vi.hoisted(() => ({
+  legacyTestState: {
+    active: [] as Array<{ id: string; text: string; priority?: 'P0' | 'P1' | 'P2'; createdAt: string }>,
+    probation: [] as Array<{ id: string; text: string; priority?: 'P0' | 'P1' | 'P2'; createdAt: string }>,
+  },
+}));
+
 vi.mock('../../src/core/workspace-context.js', async () => {
   const { EventLogService } = await import('../../src/core/event-log.js');
   const mockEventLog = EventLogService.get('/mock');
@@ -68,8 +81,8 @@ vi.mock('../../src/core/workspace-context.js', async () => {
         config: { get: vi.fn() },
         eventLog: mockEventLog,
         evolutionReducer: {
-          getActivePrinciples: vi.fn().mockReturnValue([]),
-          getProbationPrinciples: vi.fn().mockReturnValue([]),
+          getActivePrinciples: vi.fn(() => legacyTestState.active),
+          getProbationPrinciples: vi.fn(() => legacyTestState.probation),
         },
       })),
       fromHookContextExplicit: vi.fn().mockImplementation(() => ({
@@ -80,8 +93,8 @@ vi.mock('../../src/core/workspace-context.js', async () => {
         config: { get: vi.fn() },
         eventLog: mockEventLog,
         evolutionReducer: {
-          getActivePrinciples: vi.fn().mockReturnValue([]),
-          getProbationPrinciples: vi.fn().mockReturnValue([]),
+          getActivePrinciples: vi.fn(() => legacyTestState.active),
+          getProbationPrinciples: vi.fn(() => legacyTestState.probation),
         },
       })),
     },
@@ -690,6 +703,57 @@ describe('Runtime V2 prompt activation observability events', () => {
     expect(payload.principleIds).toEqual([]);
     expect(payload.skipReason).toBe('no_validated_activations');
     expect(payload.nextAction).toContain('activations table');
+  });
+
+  it('PRI-562: records cross-block duplication pressure when the legacy block already carries an activated principle', async () => {
+    const artifactId = 'art-v2-obs-dup-001';
+    const principleId = 'princ-v2-obs-dup-001';
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+    legacyTestState.active.push({
+      id: principleId,
+      text: 'legacy duplicate of the same principle',
+      priority: 'P1',
+      createdAt: new Date().toISOString(),
+    });
+
+    try {
+      const { EventLogService } = await import('../../src/core/event-log.js');
+      const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+      const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+      spy.mockClear();
+
+      const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+      // This file mocks selectPrinciplesForInjection to an empty selection for
+      // other scenarios; the legacy-observability assertions below need the
+      // REAL selector, so un-mock it for exactly this invocation.
+      const actual = await vi.importActual<typeof import('../../src/core/principle-injection.js')>(
+        '../../src/core/principle-injection.js',
+      );
+      vi.mocked(principleInjection.selectPrinciplesForInjection).mockImplementationOnce(
+        actual.selectPrinciplesForInjection,
+      );
+      await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+      expect(spy).toHaveBeenCalled();
+      const payload = spy.mock.calls[0][0];
+      // v2 injection is suppressed by dedup; the suppression is recorded as
+      // cross-block duplication PRESSURE instead of a double injection.
+      expect(payload.principleIds).not.toContain(principleId);
+      expect(payload.injectedCount).toBe(0);
+      expect(payload.skipReason).toBe('all_deduped_against_legacy');
+      expect(payload.crossBlockDuplicateIds).toEqual([principleId]);
+      // Legacy observability fields come from the reducer-backed selection.
+      expect(payload.legacySelectedCount).toBe(1);
+      expect(payload.legacyTotalChars).toBeGreaterThan(0);
+      expect(payload.legacyTruncated).toBe(false);
+      // Nothing was rendered from the v2 side this build, so the truncation
+      // flag is intentionally absent (optional field).
+      expect(payload.v2Truncated).toBeUndefined();
+    } finally {
+      legacyTestState.active.length = 0;
+      legacyTestState.probation.length = 0;
+    }
   });
 
   it('confirm-first marker appears in principleIds evidence', async () => {
