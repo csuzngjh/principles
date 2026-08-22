@@ -717,6 +717,47 @@ function depsMeaningfullyChanged(
   return aKeys.some((k, i) => bKeys[i] !== k || a[k] !== b[k]);
 }
 
+/**
+ * Create the node_modules/@principles/host-runtime resolution links for the
+ * installed console and pd-cli packages, if missing.
+ *
+ * Mirrors installer.ts syncPdCli: junction on Windows (no elevation needed),
+ * relative symlink elsewhere. Fresh installs get these links via npm install
+ * (the bundled package.json rewrites the dep to file:../host-runtime); the
+ * full update deliberately skips npm install, so it must create them itself.
+ * Without the link, the updated console dist — which statically imports
+ * @principles/host-runtime since 2026-08-21 (41cf97ee5) — crashes at startup
+ * with ERR_MODULE_NOT_FOUND on installs created before the installer bundled
+ * host-runtime (PRI-561).
+ *
+ * Returns undefined on success, or an error message (rc-9: observable, never
+ * silent — a missing link means the updated console cannot start).
+ */
+function ensureHostRuntimeResolutionLinks(extDir: string): string | undefined {
+  const hostRuntimeDir = path.join(extDir, 'host-runtime');
+  const linkPaths = [
+    path.join(extDir, 'console', 'node_modules', '@principles', 'host-runtime'),
+    path.join(extDir, 'pd-cli', 'node_modules', '@principles', 'host-runtime'),
+  ];
+  for (const linkPath of linkPaths) {
+    if (fs.existsSync(linkPath)) continue;
+    try {
+      fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+      if (process.platform === 'win32') {
+        fs.symlinkSync(hostRuntimeDir, linkPath, 'junction');
+      } else {
+        // Relative from <ext>/<pkg>/node_modules/@principles/ → <ext>/
+        fs.symlinkSync('../../../host-runtime', linkPath, 'dir');
+      }
+    } catch (error) {
+      return `Failed to create host-runtime resolution link at ${linkPath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+  }
+  return undefined;
+}
+
 async function doInlineFullUpdate(workspaceDir: string): Promise<{
   success: boolean;
   message: string;
@@ -797,7 +838,46 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       } catch { /* best-effort comparison */ }
     }
 
-    // 5. Copy files — 4 subdirectory mappings
+    // 5. Copy files — host-runtime FIRST, then the 4 subdirectory mappings.
+    //
+    //    a0. host-runtime/ → extDir/host-runtime/ (overlay, skip node_modules),
+    //        then create resolution links — BEFORE any plugin/console/core/
+    //        pd-cli byte is swapped. A link-creation failure must abort with
+    //        the installed packages untouched (same placement logic as the
+    //        legacy-rule preflight above); swapping first would leave a half-
+    //        updated install whose next console start crashes with
+    //        ERR_MODULE_NOT_FOUND (PRI-561). The bundled console and pd-cli
+    //        statically import @principles/host-runtime, but installs created
+    //        before the installer bundled it (2026-08-14, PR #1315) have
+    //        neither the directory nor the links. Only applied when the
+    //        tarball carries it; pre-2026-08-14 installers also bundle a
+    //        console that does not import it, so skipping is consistent for
+    //        them. On fresh installs this is an overlay refresh + link no-op.
+    const hostRuntimeSrc = path.join(tempDir, 'host-runtime');
+    const hostRuntimeDest = path.join(extDir, 'host-runtime');
+    if (
+      fs.existsSync(hostRuntimeSrc) &&
+      fs.existsSync(path.join(hostRuntimeSrc, 'package.json')) &&
+      fs.existsSync(path.join(hostRuntimeSrc, 'dist'))
+    ) {
+      copyDirRecursive(hostRuntimeSrc, hostRuntimeDest, SKIP_DIRS);
+      const linkError = ensureHostRuntimeResolutionLinks(extDir);
+      if (linkError) {
+        appendUpdateHistory(workspaceDir, {
+          fromVersion,
+          toVersion: 'failed',
+          success: false,
+        });
+        return {
+          success: false,
+          message: linkError,
+          reason: 'host_runtime_link_failed',
+          nextAction: 'Resolve the link error above, then re-run the update. No plugin/console/core/pd-cli files were changed.',
+          requiresRestart: false,
+        };
+      }
+    }
+
     //    a. plugin/* → extDir/* (flattened, skip node_modules)
     const pluginSrc = path.join(tempDir, 'plugin');
     if (fs.existsSync(pluginSrc)) {

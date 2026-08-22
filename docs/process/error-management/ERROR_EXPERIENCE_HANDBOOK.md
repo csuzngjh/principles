@@ -56,6 +56,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 | ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
 | ERR-100 | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle | PRI-552 |
+| ERR-105 | Hardcoded light-mode hex colors bypass theme tokens on a dual-theme UI — timeline dots near-invisible in dark mode | PR #1377 (pr-review) |
 
 ---
 
@@ -117,6 +118,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
 | ERR-076 | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken | PRI-437 / PR #986 |
 | ERR-082 | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped | PRI-468 / PR #1063 |
+| ERR-106 | Binary ternary collapsed a 4-state review status into approved/pending — rejected/parked principles displayed as "awaiting Owner review" | PR #1377 (pr-review) |
 
 ---
 
@@ -879,10 +881,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 104 |
-| Last updated | 2026-08-21 |
+| Total lessons | 106 |
+| Last updated | 2026-08-22 |
 | Top category | Schema & Type |
-| Recurring errors | 53 |
+| Recurring errors | 54 |
 
 ---
 
@@ -894,7 +896,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Add a tarball content contract test that: (1) reads `package.json files` array, (2) asserts required directories are listed, (3) after `npm pack`, asserts the tarball contains expected files. Run this test in CI, not just locally.
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-025, ERR-026. Also 2026-08-21 PR #1371 (RuleCode owner live-decision): the bundled console started statically importing `OPENCLAW_HOST_LIVENESS_CONTRACT` from `@principles/host-runtime`, but `bundle-plugin.mjs`'s dependency-rewrite step rewrote console's `@principles/core` → `file:../core` and never the new `@principles/host-runtime`. The packaged console therefore resolved `@principles/host-runtime` from the npm registry and crashed with an ESM named-export `SyntaxError` on clean install (source-tree tests passed because the monorepo had the package built). Fixed by rewriting console's `@principles/host-runtime` → `file:../host-runtime`, mirroring pd-cli's existing wiring; caught by `smoke-packaged-install.test.ts`. Lesson: when a new `@principles/*` package is consumed by any package `bundle-plugin.mjs` ships (pd-cli, pd-console), extend the console/cli `file:` dependency-rewrite map for it, and confirm the smoke-packaged-install test exercises that import before merging. Also 2026-06-02 PRI-250 (PR #794): Three missing-component issues — (1) `js-yaml`/`semver` in `devDependencies` instead of `dependencies`, npm publish stripped them; (2) console's bundled `agents.js` imports `better-sqlite3` but console `package.json` didn't declare it; (3) `installBundledCore` copies core/ but never runs `npm install`. Also 2026-06-03 PRI-299 (PR #800): pd-cli imported better-sqlite3 without declaring it. 2026-07-01 PR #1146: onboarding spawned a bare npm `pd` shim that fails under Windows `shell:false`; fixed by resolving the installed sibling `pd-cli/dist/index.js` and spawning it with `process.execPath`, with a regression assertion on the delivered layout. 2026-07-03 PRI-505 / PR #1164 review: `bundle-plugin.mjs` `PLUGIN_REQUIRED` array only checked for `dist` directory existence, not the specific `dist/bundle.js` file (while PD_CLI_REQUIRED/CORE_REQUIRED correctly checked `dist/index.js`). If only `tsc` ran (no esbuild), `dist/` exists but `bundle.js` is missing — bundle passes but published plugin is broken. Fix: added `'dist/bundle.js'` to `PLUGIN_REQUIRED`. 2026-08-13 PRI-523: bundled plugin retained an inlined workspace-only dependency, breaking clean install; packaging now strips and pack-tests it. Also 2026-08-14 PRI-524 (PR #1316 review): the new Codex plugin scripts (pd-setup/pd-status/pd-review) re-committed the exact PR #1146 error — spawning the pd .cmd shim with shell:false (EINVAL on modern Windows Node). Fixed the same way: resolve the real pd-cli JS entry under the global npm root and spawn via process.execPath. When a new consumption surface gains scripts that spawn project CLIs, grep the handbook for the CLI name first.
+- **Recurrence**: Same class as ERR-025, ERR-026. Also 2026-08-21 PR #1371 (RuleCode owner live-decision): the bundled console started statically importing `OPENCLAW_HOST_LIVENESS_CONTRACT` from `@principles/host-runtime`, but `bundle-plugin.mjs`'s dependency-rewrite step rewrote console's `@principles/core` → `file:../core` and never the new `@principles/host-runtime`. The packaged console therefore resolved `@principles/host-runtime` from the npm registry and crashed with an ESM named-export `SyntaxError` on clean install (source-tree tests passed because the monorepo had the package built). Fixed by rewriting console's `@principles/host-runtime` → `file:../host-runtime`, mirroring pd-cli's existing wiring; caught by `smoke-packaged-install.test.ts`. Lesson: when a new `@principles/*` package is consumed by any package `bundle-plugin.mjs` ships (pd-cli, pd-console), extend the console/cli `file:` dependency-rewrite map for it, and confirm the smoke-packaged-install test exercises that import before merging. Also 2026-06-02 PRI-250 (PR #794): Three missing-component issues — (1) `js-yaml`/`semver` in `devDependencies` instead of `dependencies`, npm publish stripped them; (2) console's bundled `agents.js` imports `better-sqlite3` but console `package.json` didn't declare it; (3) `installBundledCore` copies core/ but never runs `npm install`. Also 2026-06-03 PRI-299 (PR #800): pd-cli imported better-sqlite3 without declaring it. 2026-07-01 PR #1146: onboarding spawned a bare npm `pd` shim that fails under Windows `shell:false`; fixed by resolving the installed sibling `pd-cli/dist/index.js` and spawning it with `process.execPath`, with a regression assertion on the delivered layout. 2026-07-03 PRI-505 / PR #1164 review: `bundle-plugin.mjs` `PLUGIN_REQUIRED` array only checked for `dist` directory existence, not the specific `dist/bundle.js` file (while PD_CLI_REQUIRED/CORE_REQUIRED correctly checked `dist/index.js`). If only `tsc` ran (no esbuild), `dist/` exists but `bundle.js` is missing — bundle passes but published plugin is broken. Fix: added `'dist/bundle.js'` to `PLUGIN_REQUIRED`. 2026-08-13 PRI-523: bundled plugin retained an inlined workspace-only dependency, breaking clean install; packaging now strips and pack-tests it. Also 2026-08-14 PRI-524 (PR #1316 review): the new Codex plugin scripts (pd-setup/pd-status/pd-review) re-committed the exact PR #1146 error — spawning the pd .cmd shim with shell:false (EINVAL on modern Windows Node). Fixed the same way: resolve the real pd-cli JS entry under the global npm root and spawn via process.execPath. When a new consumption surface gains scripts that spawn project CLIs, grep the handbook for the CLI name first. Also 2026-08-22 PRI-561: the same gap on the UPDATE delivery surface — the console's `/apply-full` inline updater (`doInlineFullUpdate` in pd-console `update.ts`) copied plugin/console/core/pd-cli but never `host-runtime/`, and created no `node_modules/@principles/host-runtime` resolution link (fresh installs get the link via npm install of the `file:../host-runtime` rewrite; the updater deliberately skips npm install). Any install created before 2026-08-14 (installers without bundled host-runtime) that ran a full update after 41cf97ee5 received a console dist statically importing `@principles/host-runtime` with nothing to resolve it → `ERR_MODULE_NOT_FOUND` at console startup. Fixed by adding a host-runtime copy mapping + create-if-missing junction/symlink links (mirroring installer `syncPdCli`), with a real-Node ESM resolution-probe regression test. Lesson: when a shipped package gains a new `@principles/*` dependency, EVERY delivery surface must be extended — `bundle-plugin.mjs` (publish), `installer.ts` (fresh install), AND the console inline updater (`update.ts` `/apply-full`).
 
 ---
 
@@ -1255,6 +1257,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-20 PRI-553: newly added zh-CN governance strings used bare `Owner` and `Console`, creating mixed-language visible copy. The existing CR10 locale audit caught all five values; fixed with `拥有者` and `控制台`, and the full Console suite verifies recurrence.
   - 2026-08-20 PRI-553 final review: collector degradation codes (`metadata_malformed`, `timestamp_invalid`, `source_unavailable`) and the new `verdict_missing` attention reason had no locale entries, so visible degraded paths fell back to raw machine identifiers. Added both-locale keys and registry coverage assertions.
   - 2026-08-21 RuleCode Owner Live Decision self-review: the first Console implementation hardcoded Chinese and English labels, action text, toasts, and placeholder copy inside an existing `useTranslation` page. Replaced every new string with paired `en.json` / `zh-CN.json` keys before handoff.
+  - 2026-08-22 PRI-558 / PR #1377: six newly added zh-CN timeline strings used bare `Owner`/`Agent` (one value was entirely English: `Owner Approved`), failing the CR10 locale governance gate and redding `Test pd-console` on CI. Fixed with 拥有者/智能体 in aa6a881b. Same prevention rule, new flavor: keys WERE added to both locales (parity held) but the zh values violated the locale term policy — run `cr10-i18n-governance.test.ts` before pushing any i18n change.
 
 ---
 
@@ -1609,4 +1612,34 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-089 (incomplete branch coverage when fixing — sibling-branch flavor of the same EP-02 group), ERR-025 (tests prove isolated helper behavior, not production path), ERR-088 (non-unique assertion signals — same EP-09 verify-the-right-thing group).
 - **Source**: PR #1341 (self-review, GitHub issue #1337)
 - **Date**: 2026-08-17
+- **Recurrence**: None
+
+---
+
+**[ERR-105]** | Hardcoded light-mode hex colors bypass theme tokens on a dual-theme UI — timeline dots near-invisible in dark mode
+
+- **What happened**: In PR #1377 (PRI-558), the assistant added timeline status dots to `PrinciplesPage.tsx` as raw hex literals (`STATUS_DOT = { pending: "#1e3a5f", approved: "#4d6b52", rejected: "#8b3a3a", parked: "#6b7280" }`) applied via inline `style={{ backgroundColor }}`. These values are exactly pd-console's LIGHT-theme token values (`--color-gov/green/danger` in `globals.css`). pd-console ships a dark theme (`[data-theme="dark"]`) where those variables flip to light tints (`#9db9d8`, `#90b892`, `#d28b8b`), so in dark mode the dots render dark-navy-on-dark and are nearly invisible. The same PR body claimed "reuses existing design tokens only".
+- **Why it's wrong**: The UI color system is a two-layer token contract: CSS variables re-declared per theme, consumed through Tailwind utilities (`bg-gov`) that resolve at runtime. Hardcoded hex bypasses the second layer, so any themed surface drifts when the theme flips; inline styles also escape the Tailwind pipeline entirely.
+- **Generalized failure mode**: When adding visual styling (colors, shadows, radii) to a component in a multi-theme UI, assistants must use theme-token utilities or CSS variables — never raw hex/rgb literals — otherwise one of the themes renders with wrong or low-contrast styling.
+- **Correct approach**: Map each state to literal utility-class strings in a typed Record (`const STATUS_DOT_BG: Record<ReviewStatus, string> = { pending: "bg-gov", ... }`) so Tailwind JIT sees them; verify by grepping built CSS for the class rules (PR #1377 fix commit aa6a881b).
+- **How to prevent**: In review, grep new diffs for `#[0-9a-fA-F]{3,8}` and `rgb(` inside `.tsx` files / `style={{` props of themed packages (pd-console, Companion). Each hit must map to an existing design token or carry an explicit both-themes justification. Also check dark mode once per visual PR (`data-theme="dark"`).
+- **Regression guard**: Static scan for hex/rgb literals in style props under `packages/pd-console/src/ui/`; fix commit aa6a881b is the reference implementation of the token-class map.
+- **Related ERRs**: ERR-075 (same shape — new UI element skips an established consistency layer; strings there, tokens here)
+- **Source**: PR #1377 (pr-review 2026-08-22)
+- **Date**: 2026-08-22
+- **Recurrence**: None
+
+---
+
+**[ERR-106]** | Binary ternary collapsed a 4-state review status into approved/pending — rejected/parked principles displayed as "awaiting Owner review"
+
+- **What happened**: In PR #1377 (PRI-558), the governance decision badge on `PrinciplesPage.tsx` was rendered as `isApproved ? govApproved : govPending`. `ReviewStatus` has four members (pending/approved/rejected/parked), so rejected and parked principles showed "⏳ 等待拥有者审查" directly beneath a status badge reading 已拒绝 — contradictory, false information on a governance page whose entire purpose is showing the Owner true decision state.
+- **Why it's wrong**: A binary ternary silently folds every non-matching enum member into its default branch. For enums with more than two states this fabricates state the data does not contain; TypeScript cannot catch it because both branches are valid strings.
+- **Generalized failure mode**: When deriving display copy or styling from a status enum with N > 2 members, assistants must use an exhaustive `Record<Status, Copy>` map so TypeScript forces one case per member — otherwise unhandled states inherit a default that misrepresents them.
+- **Correct approach**: `const GOV_DECISION: Record<ReviewStatus, { glyph: string; labelKey: string }>` covering all four states, reusing existing per-status i18n keys for rejected/parked (fix commit aa6a881b applied the same pattern to the impact copy via `BLOCK_IMPACT_KEY`).
+- **How to prevent**: Any new conditional over a union-typed status in UI code: if branch count < union member count, require explicit justification in the PR; prefer `Record<Union, …>` maps (missing member = compile error) over ternary chains.
+- **Regression guard**: TS exhaustiveness via `Record<ReviewStatus, …>` (adding a fifth status breaks compile until mapped); pd-console `principle-review.test.ts` suite covers the page contract.
+- **Related ERRs**: ERR-099 (misleading/dead conditional branches family), EP-02 must-check on shared type unions
+- **Source**: PR #1377 (pr-review 2026-08-22)
+- **Date**: 2026-08-22
 - **Recurrence**: None
