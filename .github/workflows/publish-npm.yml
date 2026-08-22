@@ -31,6 +31,7 @@ on:
       - 'packages/openclaw-plugin/**'
       - 'packages/principles-core/**'
       - 'packages/pd-cli/**'
+      - 'packages/pd-console/**'
       - 'packages/create-principles-disciple/**'
       - 'packages/host-runtime/**'
       - 'packages/codex-adapter/**'
@@ -62,7 +63,12 @@ jobs:
             INPUT="${{ github.event.inputs.package }}"
             case "$INPUT" in
               "principles-disciple")
-                echo 'matrix=[{"pkg_dir":"openclaw-plugin","npm_name":"principles-disciple"}]' >> $GITHUB_OUTPUT
+                # Lockstep (mirrors the push-path rule below): the installer
+                # bundles the plugin, so publishing the plugin alone leaves
+                # /apply-full unable to deliver what /check promises. This
+                # branch used to exit before that rule ran (update-drift
+                # recurrence, PRI-558 follow-up 2026-08-22).
+                echo 'matrix=[{"pkg_dir":"openclaw-plugin","npm_name":"principles-disciple"},{"pkg_dir":"create-principles-disciple","npm_name":"create-principles-disciple"}]' >> $GITHUB_OUTPUT
                 ;;
               "@principles/core")
                 echo 'matrix=[{"pkg_dir":"principles-core","npm_name":"@principles/core"}]' >> $GITHUB_OUTPUT
@@ -167,6 +173,21 @@ jobs:
               if [ "$MATRIX" != "[" ]; then MATRIX+=","; fi
               MATRIX+='{"pkg_dir":"create-principles-disciple","npm_name":"create-principles-disciple"}'
               echo "Plugin change detected — forcing create-principles-disciple publish (keeps update channels in lockstep)."
+            fi
+          fi
+
+          # CRITICAL (console-delivery fix): pd-console has no npm package of
+          # its own — the console UI ships ONLY inside the installer bundle
+          # (console/). A console-only merge must republish the installer,
+          # otherwise /check never moves and users can never receive UI
+          # updates (PRI-558 follow-up 2026-08-22: the Principles timeline
+          # redesign sat unreachable on main for a full day for this reason).
+          if echo "$CHANGED_FILES" | grep -q "^packages/pd-console/"; then
+            if ! echo "$MATRIX" | grep -q '"pkg_dir":"create-principles-disciple"'; then
+              MATRIX="${MATRIX%]}"
+              if [ "$MATRIX" != "[" ]; then MATRIX+=","; fi
+              MATRIX+='{"pkg_dir":"create-principles-disciple","npm_name":"create-principles-disciple"}'
+              echo "pd-console change detected — forcing create-principles-disciple publish (console ships only in the installer)."
             fi
           fi
 
