@@ -152,11 +152,9 @@ function asStringArray(v: unknown): string[] | null {
   return v.filter((e): e is string => typeof e === 'string');
 }
 
-function localDateString(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+/** Event log files are named by UTC date (event-log.ts uses toISOString). */
+function utcDateString(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 /**
@@ -551,11 +549,11 @@ function formatTextOutput(r: PrinciplesStatsResult): string {
   lines.push(`  truncation rate:      ${pct(r.chars.truncationRate)}  (v2:${r.chars.v2TruncatedTurns} legacy:${r.chars.legacyTruncatedTurns} of ${r.chars.turnsReporting} reporting turns)`);
   lines.push('');
   lines.push('Duplicates');
-  lines.push(`  cross-block total:    ${r.duplicates.crossBlockTotal}`);
+  lines.push(`  cross-block dup pressure (v2 ids suppressed, legacy already carries them): ${r.duplicates.crossBlockTotal}`);
   for (const d of r.duplicates.crossBlockTop) {
     lines.push(`    - ${d.principleId}: ${d.count} turn(s)`);
   }
-  lines.push(`  intra-session repeat: ${pct(r.duplicates.intraSessionRepeatShare)}`);
+  lines.push(`  per-turn re-injection share (stability): ${pct(r.duplicates.intraSessionRepeatShare)}`);
   lines.push('');
   lines.push('Application correlation (receipt ledger)');
   lines.push(`  ledger available:     ${r.coverage.ledgerAvailable ? 'yes' : 'no'}`);
@@ -606,11 +604,13 @@ export async function handlePrinciplesStats(opts: PrinciplesStatsOptions): Promi
   try {
     const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
 
-    const today = new Date();
-    const cutoffDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (windowDays - 1));
-    const cutoffDateStr = localDateString(cutoffDate);
-    const todayStr = localDateString(today);
-    const cutoffIso = new Date(today.getTime() - windowDays * 24 * 3600 * 1000).toISOString();
+    const now = new Date();
+    // Event files are UTC-day based; the window is computed on the same basis
+    // so day boundaries align with the file names (a local-date window would
+    // drift by the timezone offset at day edges).
+    const cutoffDateStr = utcDateString(new Date(now.getTime() - (windowDays - 1) * 24 * 3600 * 1000));
+    const todayStr = utcDateString(now);
+    const cutoffIso = new Date(now.getTime() - windowDays * 24 * 3600 * 1000).toISOString();
 
     const warnings: string[] = [];
     const { turns, daysFound } = readInjectionEvents(

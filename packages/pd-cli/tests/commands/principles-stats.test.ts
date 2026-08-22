@@ -25,17 +25,15 @@ import { SqliteConnection } from '@principles/core';
 
 import { handlePrinciplesStats } from '../../src/commands/principles-stats.js';
 
-function localDateString(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+/** Event log files are UTC-day based (event-log.ts uses toISOString). */
+function utcDateString(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 function makeEventLine(type: string, data: Record<string, unknown>): string {
   return JSON.stringify({
     ts: Date.now(),
-    date: localDateString(new Date()),
+    date: utcDateString(new Date()),
     type,
     category: 'injected',
     sessionId: data.sessionId ?? 'unknown',
@@ -69,8 +67,8 @@ function wsDb(root: string): string {
  */
 function makeFixtureWorkspace(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-principles-stats-'));
-  const today = localDateString(new Date());
-  const yesterday = localDateString(new Date(Date.now() - 24 * 3600 * 1000));
+  const today = utcDateString(new Date());
+  const yesterday = utcDateString(new Date(Date.now() - 24 * 3600 * 1000));
 
   const turn1 = makeEventLine('runtime_v2_prompt_activations_injected', {
     sessionId: 's1',
@@ -243,7 +241,7 @@ describe('pd principles stats — handler aggregation', () => {
     const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-principles-stats-nodb-'));
     workspaces.push(ws);
     fs.mkdirSync(wsLogs(ws), { recursive: true });
-    const today = localDateString(new Date());
+    const today = utcDateString(new Date());
     const event = makeEventLine('runtime_v2_prompt_activations_injected', {
       sessionId: 'sx',
       principleIds: ['px'],

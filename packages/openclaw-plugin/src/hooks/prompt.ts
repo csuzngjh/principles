@@ -525,6 +525,17 @@ export async function handleBeforePromptBuild(
       // best-effort dedup
     }
 
+    // PRI-562 Phase 0: cross-block duplication PRESSURE — v2 candidates
+    // suppressed because the legacy evolution block already carries them.
+    // Both injection paths exclude this overlap before injection (the dedup
+    // below on the plugin-local path; promptExcludePrincipleIds inside the
+    // host on the shared path), so these ids are NOT double-injected; they
+    // measure how often both channels would have carried the same principle.
+    // Always [] on the shared host-runtime path, where v2Result arrives empty
+    // and exclusion happens inside the host.
+    const crossBlockDuplicateIds = v2Result.principles
+      .filter((p) => legacyActiveIds.has(p.principleId))
+      .map((p) => p.principleId);
     dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
 
     if (sharedActivePrinciplePrompt) {
@@ -548,12 +559,6 @@ export async function handleBeforePromptBuild(
       const eventLog = wctx.eventLog;
       const allSharedPrinciplesExcluded = sharedActivePrinciplePrompt !== undefined
         && sharedActivePrinciplePrompt.allValidatedPrinciplesExcluded;
-      // PRI-562 Phase 0: ids that reached the prompt via BOTH the legacy and
-      // the runtime-v2 blocks of this build. Shared-runtime ids are already
-      // legacy-excluded upstream, so the overlap there is empty by construction.
-      const legacyInjectedIdSet = new Set(legacyInjectedIds);
-      const crossBlockDuplicateIds = [...runtimeV2PrincipleIds]
-        .filter((id) => legacyInjectedIdSet.has(id));
       eventLog.recordRuntimeV2ActivationsInjected({
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
