@@ -10,7 +10,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import semver from 'semver';
 import {
   sendSuccess,
@@ -549,7 +549,9 @@ async function doApplyUpdate(
     const buffer = Buffer.from(await dlResponse.arrayBuffer());
     const tarballPath = path.join(tempDir, 'package.tgz');
     fs.writeFileSync(tarballPath, buffer);
-    execSync(`tar xzf "${tarballPath}" -C "${tempDir}" --strip-components=1`, { stdio: 'pipe' });
+    // EP-08: spawn tar via argv array — tarball/temp paths stay data, never
+    // shell syntax (Mimosa command-injection finding, 2026-08-22).
+    execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1'], { stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
     // 4. Compute diff and apply.
@@ -817,7 +819,9 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     const buffer = Buffer.from(await dlResponse.arrayBuffer());
     const tarballPath = path.join(tempDir, 'package.tgz');
     fs.writeFileSync(tarballPath, buffer);
-    execSync(`tar xzf "${tarballPath}" -C "${tempDir}" --strip-components=1`, { stdio: 'pipe' });
+    // EP-08: spawn tar via argv array — tarball/temp paths stay data, never
+    // shell syntax (Mimosa command-injection finding, 2026-08-22).
+    execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1'], { stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
     // 4. Detect dependency changes (informational — logged but not blocking;
