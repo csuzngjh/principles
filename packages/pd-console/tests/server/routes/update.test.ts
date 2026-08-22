@@ -7,9 +7,10 @@ import * as os from 'os';
 // Mock fetch globally
 vi.stubGlobal('fetch', vi.fn());
 
-// Mock child_process (execSync: tar extraction + gateway control)
+// Mock child_process (execFileSync: tar extraction). Since the EP-08
+// hardening the route spawns tar via argv arrays — no shell strings anywhere.
 vi.mock('child_process', () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 // Partial mock of fs: copyFileSync is a vi.fn wrapping the real implementation
@@ -325,7 +326,7 @@ describe('handleUpdateRoute', () => {
 
   describe('POST /apply', () => {
     it('should apply update with explicit targetDir', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       // Mock fetch for multi-call: registry info then tarball download
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
@@ -343,11 +344,11 @@ describe('handleUpdateRoute', () => {
       }) as unknown as typeof fetch);
 
       // Mock execSync to simulate tar extraction by creating a file in tempDir
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
           }
@@ -376,7 +377,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('preserves an en skill-language manifest selection across diff updates (PR #1332 companion)', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -390,11 +391,11 @@ describe('handleUpdateRoute', () => {
       }) as unknown as typeof fetch);
 
       // "Extract" a fresh zh-default manifest (as shipped) from the tarball
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
             fs.writeFileSync(path.join(dir, 'openclaw.plugin.json'),
@@ -420,7 +421,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('collapses a legacy dual-root skill manifest to a single zh root on update', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -433,11 +434,11 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
             fs.writeFileSync(path.join(dir, 'openclaw.plugin.json'),
@@ -471,7 +472,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('should apply update without targetDir (server resolves pluginDir)', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -487,11 +488,11 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
           }
@@ -515,7 +516,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('should apply update with createBackup: true', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -531,11 +532,11 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
           }
@@ -746,7 +747,7 @@ describe('handleUpdateRoute', () => {
 
   describe('fromVersion tracking', () => {
     it('should record old version as fromVersion in history', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
       const { handleUpdateHistoryRoute } = await import('../../../src/server/routes/update-history.js');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
@@ -763,11 +764,11 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '3.0.0', name: 'test' }));
           }
@@ -838,7 +839,7 @@ describe('handleUpdateRoute', () => {
 
   describe('Network resilience', () => {
     it('should retry on transient network errors', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       // First call fails, second succeeds (registry), third succeeds (tarball)
       let callCount = 0;
@@ -859,11 +860,11 @@ describe('handleUpdateRoute', () => {
         } as Response;
       });
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
           }
@@ -990,7 +991,7 @@ describe('handleUpdateRoute', () => {
 
   describe('Merge strategy edge cases', () => {
     it('should handle "keep" strategy for workspace files', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1012,11 +1013,11 @@ describe('handleUpdateRoute', () => {
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original content');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'new content');
@@ -1039,7 +1040,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('should handle "overwrite" strategy for workspace files', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1060,11 +1061,11 @@ describe('handleUpdateRoute', () => {
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'overwritten');
@@ -1087,7 +1088,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('should create .update file for "smart" strategy on workspace files', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1108,11 +1109,11 @@ describe('handleUpdateRoute', () => {
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'smart update');
@@ -1179,7 +1180,7 @@ describe('handleUpdateRoute', () => {
   describe('Backup location outside the extensions scan root', () => {
     function mockSuccessfulApply(): Promise<void> {
       return Promise.resolve().then(async () => {
-        const { execSync: execSyncMock } = await import('child_process');
+        const { execFileSync: execSyncMock } = await import('child_process');
 
         vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
           const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1195,7 +1196,7 @@ describe('handleUpdateRoute', () => {
           } as Response);
         }) as unknown as typeof fetch);
 
-        vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
           if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
             const match = cmd.match(/-C\s+"([^"]+)"/);
             if (match && match[1]) {
@@ -1347,7 +1348,7 @@ describe('handleUpdateRoute', () => {
 
   describe('Backup excludes node_modules', () => {
     it('should not copy node_modules into the backup directory', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1363,11 +1364,11 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
           }
@@ -1399,7 +1400,7 @@ describe('handleUpdateRoute', () => {
 
   describe('No deletion of non-tarball directories', () => {
     it('should not delete console/ directory during update', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1415,11 +1416,11 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             // Tarball only has package.json — no console/, no core/, no node_modules/
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
@@ -1491,7 +1492,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('should return reason=file_locked and nextAction when copyFileSync throws EPERM', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1507,11 +1508,11 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
           }
@@ -1620,7 +1621,7 @@ describe('handleUpdateRoute', () => {
 
   describe('POST /apply-full', () => {
     it('should copy plugin, console, core, pd-cli from installer tarball', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1639,11 +1640,11 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
               JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
@@ -1684,7 +1685,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('copies host-runtime and creates resolution links so the updated console can resolve it (PRI-561)', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1700,11 +1701,11 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
               JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
@@ -1776,7 +1777,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('does not overwrite an existing host-runtime resolution link (fresh-install no-op)', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1789,11 +1790,11 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
               JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
@@ -1833,7 +1834,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('aborts before swapping any package files when resolution links cannot be created (PRI-561 fail path)', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1846,11 +1847,11 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
               JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
@@ -1893,7 +1894,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('should preserve pd-cli/node_modules during update (no rmSync)', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1909,11 +1910,11 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
               JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
@@ -1946,7 +1947,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('should preserve console/node_modules during update (no rmSync)', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1959,11 +1960,11 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
               JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
@@ -2000,7 +2001,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('should detect dependency changes and include hint in message', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -2013,11 +2014,11 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             // Deps CHANGED: better-sqlite3 ^14.0.0 (was ^13.0.3)
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
@@ -2048,7 +2049,7 @@ describe('handleUpdateRoute', () => {
     });
 
     it('preserves an en skill-language manifest selection across full updates (PR #1332 companion)', async () => {
-      const { execSync: execSyncMock } = await import('child_process');
+      const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -2061,11 +2062,11 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-          const match = cmd.match(/-C\s+"([^"]+)"/);
-          if (match && match[1]) {
-            const dir = match[1];
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
               JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
