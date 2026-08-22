@@ -79,12 +79,28 @@ const CHANNEL_LABELS: Record<string, string> = {
   code_tool_hook: "channelCodeToolHook",
 };
 
-// ── PRI-558: timeline node colors + small presentational helpers ───────────
-const STATUS_DOT: Record<ReviewStatus, string> = {
-  pending: "#1e3a5f",
-  approved: "#4d6b52",
-  rejected: "#8b3a3a",
-  parked: "#6b7280",
+// ── PRI-558: timeline node fill + status-driven copy (theme tokens, dark-mode safe) ──
+const STATUS_DOT_BG: Record<ReviewStatus, string> = {
+  pending: "bg-gov",
+  approved: "bg-green",
+  rejected: "bg-danger",
+  parked: "bg-ink-3",
+};
+
+// Governance decision row mirrors the true review status — rejected/parked must
+// not read as "awaiting review" (labels reuse the existing status* keys).
+const GOV_DECISION: Record<ReviewStatus, { glyph: string; labelKey: string }> = {
+  approved: { glyph: "✓", labelKey: "principles.govApproved" },
+  pending: { glyph: "⏳", labelKey: "principles.govPending" },
+  rejected: { glyph: "✗", labelKey: "principles.statusRejected" },
+  parked: { glyph: "⏸", labelKey: "principles.statusParked" },
+};
+
+const BLOCK_IMPACT_KEY: Record<ReviewStatus, string> = {
+  approved: "principles.blockImpactActive",
+  pending: "principles.blockImpactPending",
+  rejected: "principles.blockImpactRejected",
+  parked: "principles.blockImpactParked",
 };
 
 function fmtDate(iso: string): string {
@@ -463,11 +479,11 @@ export function PrinciplesPage() {
 
       {!loading && !error && filtered.length > 0 && (
         <div className="relative pl-6 grid gap-3 animate-[pdFadeIn_400ms_ease-out]">
-          {/* timeline rail */}
-          <span className="absolute left-[5px] top-3 bottom-3 w-px bg-line" aria-hidden="true" />
+          {/* timeline rail — centered under the status dots (dot centers sit at x≈13px) */}
+          <span className="absolute left-[12.5px] top-3 bottom-3 w-px bg-line" aria-hidden="true" />
           {filtered.map((card) => {
             const ag = approvalByPrinciple.get(card.principleId);
-            const isApproved = card.status === "approved";
+            const decision = GOV_DECISION[card.status];
             const decisionRecord =
               ag?.records?.find((r) => r.status === ag.status) ?? ag?.records?.[0];
             const decisionDate = decisionRecord?.createdAt;
@@ -495,8 +511,10 @@ export function PrinciplesPage() {
               >
                 {/* timeline node */}
                 <span
-                  className="absolute -left-[19px] top-4 h-2.5 w-2.5 rounded-full border-2 border-paper"
-                  style={{ backgroundColor: STATUS_DOT[card.status] }}
+                  className={
+                    "absolute -left-[19px] top-4 h-2.5 w-2.5 rounded-full border-2 border-paper " +
+                    STATUS_DOT_BG[card.status]
+                  }
                   aria-hidden="true"
                 />
                 {/* Tags row */}
@@ -576,9 +594,7 @@ export function PrinciplesPage() {
                   {ag?.candidateDescription ?? t("principles.blockBasisFallback")}
                 </GrowthBlock>
                 <GrowthBlock label={t("principles.blockImpact")}>
-                  {isApproved
-                    ? t("principles.blockImpactActive")
-                    : t("principles.blockImpactPending")}
+                  {t(BLOCK_IMPACT_KEY[card.status])}
                 </GrowthBlock>
                 <GrowthBlock label={t("principles.blockBehavior")}>
                   {card.action ? card.action : t("principles.blockBehaviorFallback")}
@@ -589,27 +605,15 @@ export function PrinciplesPage() {
                       <span className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-4">
                         {t("principles.govDecision")}
                       </span>
-                      {isApproved ? (
-                        <span
-                          className={
-                            "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
-                            STATUS_TEXT.approved +
-                            " border-current/20"
-                          }
-                        >
-                          ✓ {t("principles.govApproved")}
-                        </span>
-                      ) : (
-                        <span
-                          className={
-                            "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
-                            STATUS_TEXT.pending +
-                            " border-current/20"
-                          }
-                        >
-                          ⏳ {t("principles.govPending")}
-                        </span>
-                      )}
+                      <span
+                        className={
+                          "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
+                          STATUS_TEXT[card.status] +
+                          " border-current/20"
+                        }
+                      >
+                        {decision.glyph} {t(decision.labelKey)}
+                      </span>
                     </div>
                     {decisionDate && (
                       <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
