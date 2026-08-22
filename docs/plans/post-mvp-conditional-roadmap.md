@@ -581,3 +581,34 @@ The following work remains subject to external evidence and is not authorized by
 **Emotional value**: one authoritative Workspace plus observable host parity reduces **失控感 / 不信任感** and creates **掌控感 / 安心感**; a shared correction path reduces repeated cross-host maintenance **疲惫感** without adding Owner-facing noise.
 
 **关联**: ADR-0020 §10; `docs/architecture/DATA_ARCHITECTURE.md`; `docs/architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`
+
+---
+
+## 23. Principle Working Set / 注意力治理层（Working Set Selector）
+
+> **Source**: `docs/superpowers/specs/2026-08-22-principle-working-set-selector-spec.md`（v0.2，2026-08-22 代码核对修订）
+> **Added**: 2026-08-22
+> **Linear**: PRI-562（Phase 0，Todo）/ PRI-563（Phase 1）/ PRI-564（Phase 2）/ PRI-565（Phase 3）——均基于 SPEC v0.1 创建；实施前须按 §0 规则 4 补触发条件 checklist，并对照 SPEC v0.2 修订（见各工单 2026-08-22 评论）
+> **Status**: Hold（Phase 0 观测子集可按 AGENTS.md「evidence collection」例外先行，见 SPEC §6）
+
+**Hold reason**: MVP-First 暂停期内（ADR-0014 §2.5：新子系统默认 quiet/default-off；§6：架构演进暂停）。注入已有字符预算兜底（legacy 4000/1000 + v2 2000 字符），「原则噪声」问题在当前工作区尚未实际发生（2026-08-17 审计：0 条 live rule）。Selector 属新增 LLM 内部 Agent + 注入行为变更，属架构扩张，不在「证据收集」例外内。
+
+**重启条件**（**全部满足**才启动 Phase 1 Shadow）:
+- [ ] Phase 0 观测报告产出并经 Owner 确认：连续 ≥ 2 周、覆盖真实使用的注入统计（平均注入数 / 字符数 / 截断率 / 重复率）
+- [ ] 观测数据显示问题真实存在：截断率 > 0，或单次注入原则数稳定 ≥ 10，或存在跨块重复注入
+- [ ] `principle_receipt_ledger` + `principle_receipt_self_report` 已在观测工作区启用 ≥ 2 周并产出 presence/effect 记录（SPEC §13 依赖链）
+- [ ] ≥ 1 个种子客户使用 PD ≥ 1 个月，或有 Owner 本人 dogfood 的等效证据链
+- [ ] Owner 以带 `mvp-exception` 的权威工单明确批准 Phase 1 范围（参照 Dreamer L2 / Artificer L2 先例，ADR-0014 修正案 2026-06-16/17）
+
+**Phase 2（Working Set 生效）额外条件**:
+- [ ] Phase 1 shadow 数据显示 recall 达标、churn 受控、延迟/成本可接受（SPEC §13）
+- [ ] 双路径 parity 测试（`abstraction_layer_v1` off/on）通过（SPEC §11，openclaw-shared-host-runtime-parity.feature 守护）
+
+**启动后预期收益**:
+- 预算截断从「按优先级和新旧」变为「按当前任务相关性」
+- 减少 prompt 内原则 token 占用与重复，保护 Agent 注意力
+- 为后续 Attribution（§1）提供选择质量数据
+
+**估时**: Phase 0 约 2-3 天（可立即做）；Phase 1 约 1 周；Phase 2 约 1 周（验证后另计）
+
+**关联**: SPEC `2026-08-22-principle-working-set-selector-spec.md`；§1 Attribution Pipeline（共享外部信号条件）；ADR-0014 §2.5
