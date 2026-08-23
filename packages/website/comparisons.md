@@ -1,6 +1,6 @@
 ---
 title: Comparisons | Principles Disciple
-description: Principles Disciple vs AI Memory, Prompt Engineering, Agent Skills, Guardrails, and autonomous self-improvement. Different tools solve different problems — PD is an AI Agent Governance System, applied as an Agent Governance Runtime.
+description: Principles Disciple vs AI Memory, Prompt Engineering, Agent Skills, Guardrails, Rule Engines, and autonomous self-improvement. Different tools solve different problems — PD is an AI Agent Governance System, applied as an Agent Governance Runtime.
 ---
 
 # How PD Relates to Adjacent Categories
@@ -37,6 +37,13 @@ Skills extend what an agent can do — new tools, new abilities. PD governs how 
 
 Guardrails mainly prevent unwanted actions — fences around what must not happen. PD works on the positive side: it turns validated experience into owner-approved principles that describe how the agent *should* behave, with review and reversibility built in. Guardrails answer *"what is forbidden?"*; PD answers *"what should become habit?"*.
 
+## PD & Rule Engines
+
+> Rule engines: predefined conditions trigger predefined actions.
+> PD: experience becomes principles; principles govern future behavior.
+
+A rule engine executes mappings written in advance: when condition X matches, action Y fires. Nothing in that loop learns. PD works upstream of any rule: it turns real behavioral experience into owner-approved principles — and where a bottom line must be enforced, those principles can be hardened into executable rules through review, shadow testing, and explicit approval. Rules are how some principles get enforced; they are not where PD starts.
+
 ## PD & Autonomous Self-Improvement
 
 > Self-improving agents: decide changes themselves.
@@ -46,6 +53,6 @@ In PD, every principle proposal passes owner review before activation, and every
 
 ## One-line summary
 
-Memory stores, prompts instruct, skills extend, guardrails fence. PD governs behavioral improvement — turning repeated corrections into owner-approved, reviewable, reversible principles applied through multiple governance channels.
+Memory stores, prompts instruct, skills extend, guardrails fence, rule engines execute fixed mappings. PD governs behavioral improvement — turning repeated corrections into owner-approved, reviewable, reversible principles applied through multiple governance channels.
 
 See also the [FAQ](/faq).

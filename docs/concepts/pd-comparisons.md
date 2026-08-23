@@ -8,11 +8,12 @@
 ```
 Different tools solve different problems.
 
-Memory:     stores information.
-Prompt:     provides instructions.
-Skills:     provide capabilities.
-Guardrails: prevent unwanted actions.
-PD:         governs behavioral improvement.
+Memory:      stores information.
+Prompt:      provides instructions.
+Skills:      provide capabilities.
+Guardrails:  prevent unwanted actions.
+Rule engines: execute fixed condition→action mappings.
+PD:          governs behavioral improvement.
 ```
 
 ## PD & AI Memory
@@ -43,6 +44,13 @@ Skills extend what an agent can do — new tools, new abilities. PD governs how 
 
 Guardrails mainly prevent unwanted actions — fences around what must not happen. PD works on the positive side: it turns validated experience into owner-approved principles that describe how the agent *should* behave, with review and reversibility built in. Guardrails answer "what is forbidden?"; PD answers "what should become habit?".
 
+## PD & Rule Engines
+
+> Rule engines: predefined conditions trigger predefined actions.
+> PD: experience becomes principles; principles govern future behavior.
+
+A rule engine executes mappings written in advance: when condition X matches, action Y fires. Nothing in that loop learns. PD works upstream of any rule: it turns real behavioral experience into owner-approved principles — and where a bottom line must be enforced, those principles can be hardened into executable rules through review, shadow testing, and explicit approval. Rules are how some principles get enforced; they are not where PD starts.
+
 ## PD & Autonomous Self-Improvement
 
 > Self-improving agents: decide changes themselves.
@@ -52,7 +60,7 @@ In PD, every principle proposal passes owner review before activation, and every
 
 ## One-line summary
 
-Memory stores, prompts instruct, skills extend, guardrails fence. PD governs behavioral improvement — turning repeated corrections into owner-approved, reviewable, reversible principles applied through multiple governance channels.
+Memory stores, prompts instruct, skills extend, guardrails fence, rule engines execute fixed mappings. PD governs behavioral improvement — turning repeated corrections into owner-approved, reviewable, reversible principles applied through multiple governance channels.
 
 ---
 
@@ -67,6 +75,7 @@ Memory：存储信息。
 Prompt：提供指令。
 Skills：提供能力。
 Guardrails：阻止不想要的行为。
+规则引擎：执行固定的条件→动作映射。
 PD：治理行为改进。
 ```
 
@@ -98,6 +107,13 @@ Skills 扩展 Agent 能做什么——新工具、新能力。PD 在 Owner 权�
 
 Guardrails 主要防止不想要的行为——围绕"什么不可以发生"筑起围栏。PD 工作在正向一侧：把验证过的经验转化为经 Owner 审批的原则，描述 Agent *应该*如何行为，且内建审查与可回滚。Guardrails 回答"什么被禁止"；PD 回答"什么应该成为习惯"。
 
+## PD 与规则引擎（Rule Engine）
+
+> 规则引擎：预定义的条件触发预定义的动作。
+> PD：经验成为原则；原则治理未来行为。
+
+规则引擎执行的是事先写好的映射：条件 X 匹配，动作 Y 触发。这个循环里没有任何学习。PD 工作在任何规则的上游：它把真实行为经验转化为经 Owner 审批的原则——而在某条底线必须被强制执行时，这些原则可以经过审查、影子试运行和显式审批，硬化为可执行的规则。规则是部分原则的执行方式，不是 PD 的起点。
+
 ## PD 与自主自我改进
 
 > 自我改进型 Agent：自行决定变更。
@@ -107,4 +123,4 @@ Guardrails 主要防止不想要的行为——围绕"什么不可以发生"筑�
 
 ## 一句话总结
 
-Memory 存储，Prompt 指令，Skills 扩展，Guardrails 设栏。PD 治理行为改进——把反复纠正转化为经 Owner 审批、可审查、可回滚的行为原则，并通过多个治理通道应用。
+Memory 存储，Prompt 指令，Skills 扩展，Guardrails 设栏，规则引擎执行固定映射。PD 治理行为改进——把反复纠正转化为经 Owner 审批、可审查、可回滚的行为原则，并通过多个治理通道应用。

@@ -11,6 +11,12 @@ Principles Disciple is an **AI Agent Governance System** that helps owners turn 
 
 Every principle is owner-approved, reviewable, and reversible, and its effect on future agent behavior stays observable.
 
+## What is a principle in Principles Disciple?
+
+A principle is not a simple rule.
+
+It is a reusable behavioral insight extracted from experience — abstract enough to guide decisions across situations, concrete enough to change the agent's next action. See [What is a Principle?](/docs/principles).
+
 ## Is PD an AI memory system?
 
 No.
@@ -39,6 +45,12 @@ No.
 
 Prompt engineering tells agents what to do before execution. PD learns from actual interactions and validated experience after execution — then converts them into owner-approved principles. See [PD vs Prompt Engineering](/comparisons).
 
+## Does PD automatically generate rules?
+
+No.
+
+PD extracts principles from experience. Specific rules or runtime constraints are only one possible expression of those principles — created selectively, only when the Owner approves promoting a validated bottom line into an executable rule.
+
 ## Which environments does PD support?
 
 PD currently integrates with OpenClaw and Codex hosts. See the [installation guide](/install) for details.
@@ -53,7 +65,7 @@ PD does not modify model weights. It governs agent behavior through owner-approv
 
 No.
 
-Prompt guidance is only one governance channel. Besides cognitive guidance, PD's governance runtime can apply principles at execution time: owner-promoted rules can participate in tool-call decisions, and every application stays observable and reversible.
+Prompt guidance is only one governance channel. The core idea is **principle internalization**: experience becomes owner-approved principles, and those principles are applied through governance mechanisms — including, for a few vital bottom lines, executable runtime rules that the Owner has explicitly promoted.
 
 ## How is PD different from AGENTS.md or CLAUDE.md?
 

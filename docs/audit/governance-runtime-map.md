@@ -134,6 +134,7 @@ Behavior Evidence → Reflection → Principle Proposal → Owner Approval
 
 - PD 修改模型权重 / 训练模型。
 - PD 自动阻止一切不良行为(block 需要 Owner 提升的 live 规则显式决定)。
+- PD 自动从错误生成规则(原则硬化为规则是 Owner 审批后的选择性表达;原则引导判断,规则约束动作)。
 - PD 自主学习、自主做价值决定(审批权威在 Owner)。
 - PD 是 Prompt 生成器或 Memory 系统(见 `docs/concepts/governance-runtime.md` 与 `pd-comparisons.md`)。
 - Principle Receipts 等默认关闭的 quiet 能力(未开 flag 前不得作为现状宣传)。

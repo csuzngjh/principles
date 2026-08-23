@@ -54,15 +54,25 @@ It governs agent behavior through owner-approved principles and runtime mechanis
 
 No.
 
-Prompt guidance is only one governance channel.
-
-Besides cognitive guidance, PD's governance runtime can apply principles at execution time: owner-promoted rules can participate in tool-call decisions, and every application stays observable and reversible.
+Prompt guidance is only one governance channel. The core idea is **principle internalization**: experience becomes owner-approved principles, and those principles are applied through governance mechanisms — including, for a few vital bottom lines, executable runtime rules that the Owner has explicitly promoted.
 
 ## Q9: How is PD different from AGENTS.md or CLAUDE.md?
 
 Those files provide static instructions.
 
 PD creates an evolving governance layer based on actual experience: real behavior produces evidence, evidence becomes owner-approved principles, and principles are applied through the governance runtime — reviewable, reversible, observable at every step.
+
+## Q10: What is a principle in Principles Disciple?
+
+A principle is not a simple rule.
+
+It is a reusable behavioral insight extracted from experience — abstract enough to guide decisions across situations, concrete enough to change the agent's next action.
+
+## Q11: Does PD automatically generate rules?
+
+No.
+
+PD extracts principles from experience. Specific rules or runtime constraints are only one possible expression of those principles — created selectively, only when the Owner approves promoting a validated bottom line into an executable rule. Principles guide judgment; rules constrain specific actions. They are two sides of the same coin, not synonyms.
 
 ---
 
@@ -118,12 +128,22 @@ PD 通过经 Owner 审批的原则与运行时机制治理 Agent 行为——它
 
 不是。
 
-提示词引导只是治理通道之一。
-
-除了认知引导，PD 的治理运行时还能在执行时应用原则：经 Owner 提升的规则可以参与工具调用决策，且每次应用都可观察、可回滚。
+提示词引导只是治理通道之一。核心思想是**原则内化**：经验沉淀为经 Owner 审批的原则，再经由治理机制应用——对少数关键底线，还包括 Owner 显式提升的可执行运行时规则。
 
 ## Q9：PD 和 AGENTS.md / CLAUDE.md 有什么区别？
 
 这些文件提供的是静态指令。
 
 PD 基于真实经验建立不断演进的治理层：真实行为产生证据，证据沉淀为经 Owner 审批的原则，原则经治理运行时应用——每一步可审查、可回滚、可观察。
+
+## Q10：PD 中的「原则」是什么？
+
+原则不是一条简单的规则。
+
+它是从经验中提炼出的可复用行为认知——足够抽象，能跨场景指导决策；又足够具体，能真正改变 Agent 下一次的行为。
+
+## Q11：PD 会自动生成规则吗？
+
+不会。
+
+PD 从经验中提炼原则。具体规则或运行时约束只是这些原则的一种可能表达——且是选择性创建的：只有 Owner 审批把某条经过验证的底线提升为可执行规则时才会发生。原则引导判断，规则约束具体动作；两者是同一枚硬币的两面，不是同义词。
