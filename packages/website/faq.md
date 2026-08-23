@@ -55,6 +55,26 @@ Be precise about two different steps:
 
 So nothing blocks or corrects on its own: generation produces proposals; authority stays with the Owner.
 
+## Is PD another agent runtime or harness?
+
+No.
+
+Claude Code, Codex, OpenClaw and their peers answer *"how does the agent run?"* — they execute tasks, call tools, and orchestrate the loop. PD answers a different question: *how does the agent improve under owner authority?*
+
+PD does not execute tasks or manage tools. It installs as a governance layer on top of the host you already use (OpenClaw and Codex today), applying principles through the host's own extension points — prompt hooks and tool-call hooks. You don't switch agents to use PD; you keep your agent, and its behavior becomes governable.
+
+## Does PD cost extra tokens?
+
+Some — honesty first: reflection runs LLM calls beyond your normal tasks.
+
+Three things keep that cost grounded:
+
+- **Reflection is priced by experience, not by task.** One deep reflection settles into reusable principles and rules that every later session reuses.
+- **Injection is hard-capped.** Active principles enter the context under a strict size budget, and runtime rules enforce bottom lines entirely outside the model — zero context-window usage.
+- **The model is your choice.** PD uses the models your host already has configured, including locally hosted ones (e.g., LM Studio), and each internal role can be bound to a different profile.
+
+And the most expensive thing in agentic work is rarely the token bill — it is a wrong direction discovered late. Avoiding even one such detour can offset more tokens than PD's governance ever adds.
+
 ## Which environments does PD support?
 
 PD currently integrates with OpenClaw and Codex hosts. See the [installation guide](/install) for details.

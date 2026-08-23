@@ -78,6 +78,22 @@ Be precise about two different steps:
 
 Generation produces proposals; authority stays with the Owner.
 
+## Q12: Is PD another agent runtime or harness?
+
+No.
+
+Claude Code, Codex, OpenClaw and their peers answer "how does the agent run?" — they execute tasks, call tools, and orchestrate the loop. PD answers a different question: "how does the agent improve under owner authority?"
+
+PD does not execute tasks or manage tools. It installs as a governance layer on top of the host you already use (OpenClaw and Codex today), applying principles through the host's own extension points. You don't switch agents to use PD; you keep your agent, and its behavior becomes governable.
+
+## Q13: Does PD cost extra tokens?
+
+Some — reflection runs LLM calls beyond your normal tasks.
+
+Three things keep that cost grounded: reflection is priced by experience, not by task (one deep reflection settles into principles every later session reuses); principle injection is hard-capped while runtime rules enforce entirely outside the model (zero context-window usage); and models are your choice, including locally hosted ones such as LM Studio, bindable per internal role.
+
+Avoiding one wrong-direction detour can offset more tokens than PD's governance ever adds.
+
 ---
 
 # 中文版
@@ -155,3 +171,19 @@ PD 基于真实经验建立不断演进的治理层：真实行为产生证据�
 **生效不是。** 候选规则在通过 Owner 审查前保持惰性；激活后先以仅观察（shadow）模式运行；只有 Owner 显式提升后才会真正拦截执行。
 
 生成只产出提案；权威始终在 Owner。
+
+## Q12：PD 是又一个 Agent 运行时（Harness）吗？
+
+不是。
+
+Claude Code、Codex、OpenClaw 这些产品回答的是「Agent 怎么运行」——执行任务、调用工具、编排循环。PD 回答的是另一个问题：「Agent 如何在 Owner 权威下变得更好」。
+
+PD 不执行任务、不管理工具。它以治理层的方式架设在你已有的宿主之上（当前支持 OpenClaw 与 Codex），通过宿主自身的扩展点应用原则。使用 PD 不需要换掉你的 Agent；Agent 还是你的 Agent，只是它的行为从此可治理。
+
+## Q13：PD 会消耗额外的 Token 吗？
+
+会——反思管线会在正常任务之外产生额外的 LLM 调用。
+
+三件事让这笔账算得过来：反思按经验计价，不按任务计价（一次深度反思沉淀的原则会被之后每个会话复用）；原则注入有硬预算上限，而运行时规则完全在模型之外执行（零上下文占用）；模型由你选择，包括本地部署的模型（如 LM Studio），可按内部角色分别绑定。
+
+避免一次方向性返工，省下的 Token 就可能超过 PD 带来的全部开销。

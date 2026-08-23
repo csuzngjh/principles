@@ -51,6 +51,13 @@ Guardrails mainly prevent unwanted actions — fences around what must not happe
 
 A rule engine executes mappings written in advance: when condition X matches, action Y fires. Nothing in that loop learns. PD works upstream of any rule: it turns real behavioral experience into owner-approved principles — and where a bottom line must be enforced, those principles can be hardened into executable rules through review, shadow testing, and explicit approval. Rules are how some principles get enforced; they are not where PD starts.
 
+## PD & Agent Runtimes / Harnesses
+
+> Runtimes & harnesses (Claude Code, Codex, OpenClaw, …): make the agent run.
+> PD: makes the agent's behavior governable — on top of the runner you already have.
+
+Runtimes and harnesses execute tasks, call tools, and orchestrate the loop. PD does none of that: it installs into these hosts as a governance layer and works through their extension points — observing behavior, distilling owner-approved principles, and applying them via prompt hooks and tool-call hooks. Choosing a runtime and choosing governance are two different decisions; PD assumes you have already made the first one.
+
 ## PD & Autonomous Self-Improvement
 
 > Self-improving agents: decide changes themselves.
@@ -113,6 +120,13 @@ Guardrails 主要防止不想要的行为——围绕"什么不可以发生"筑�
 > PD：经验成为原则；原则治理未来行为。
 
 规则引擎执行的是事先写好的映射：条件 X 匹配，动作 Y 触发。这个循环里没有任何学习。PD 工作在任何规则的上游：它把真实行为经验转化为经 Owner 审批的原则——而在某条底线必须被强制执行时，这些原则可以经过审查、影子试运行和显式审批，硬化为可执行的规则。规则是部分原则的执行方式，不是 PD 的起点。
+
+## PD 与 Agent 运行时 / Harness
+
+> 运行时与 Harness（Claude Code、Codex、OpenClaw……）：让 Agent 跑起来。
+> PD：让 Agent 的行为可治理——架设在你已有的运行器之上。
+
+运行时和 Harness 负责任务执行、工具调用与循环编排。PD 这些都不做：它以治理层的形式装进这些宿主，经由宿主的扩展点工作——观察行为、沉淀经 Owner 审批的原则、再通过提示词钩子与工具调用钩子加以应用。选运行时和选治理是两个不同的决定；PD 假定你已经做好了第一个。
 
 ## PD 与自主自我改进
 

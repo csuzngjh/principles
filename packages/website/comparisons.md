@@ -44,6 +44,13 @@ Guardrails mainly prevent unwanted actions — fences around what must not happe
 
 A rule engine executes mappings written in advance: when condition X matches, action Y fires. Nothing in that loop learns. PD works upstream of any rule: it turns real behavioral experience into owner-approved principles — and where a bottom line must be enforced, those principles can be hardened into executable rules through review, shadow testing, and explicit approval. Rules are how some principles get enforced; they are not where PD starts.
 
+## PD & Agent Runtimes / Harnesses
+
+> Runtimes & harnesses (Claude Code, Codex, OpenClaw, …): make the agent run.
+> PD: makes the agent's behavior governable — on top of the runner you already have.
+
+Runtimes and harnesses execute tasks, call tools, and orchestrate the loop. PD does none of that: it installs into these hosts as a governance layer and works through their extension points — observing behavior, distilling owner-approved principles, and applying them via prompt hooks and tool-call hooks. Choosing a runtime and choosing governance are two different decisions; PD assumes you have already made the first one.
+
 ## PD & Autonomous Self-Improvement
 
 > Self-improving agents: decide changes themselves.
