@@ -509,7 +509,10 @@ describe('Tarball content contract', () => {
     expect(filesArr).toContain('plugin');
     expect(filesArr).toContain('pd-cli');
     expect(filesArr).toContain('dist');
-    expect(filesArr).toContain('templates');
+    // PRI-548: the installer's own templates/ tree had zero src consumers
+    // (all template copies read from the embedded pluginDir) and shipped
+    // dead weight in every install. It must stay gone from the package.
+    expect(filesArr).not.toContain('templates');
   });
 });
 
