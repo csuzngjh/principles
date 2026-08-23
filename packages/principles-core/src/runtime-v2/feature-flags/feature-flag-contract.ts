@@ -238,6 +238,16 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // governs the P1-b write points. Default off; flag-off = byte-identical template.
   { id: 'principle_receipt_self_report', category: 'quiet', enabled: false, since: '2026-08-16', description: 'Principle Receipt P1-a — agent self-report 📌 line (injection instruction + capture, PRI-532). Default off; flag-off = directive template unchanged, no capture.' },
   { id: 'principle_governance_projection_v2', category: 'quiet', enabled: false, since: '2026-08-20', description: 'Read-only per-principle Owner governance projection (PRI-549). Default off; flag-off preserves the existing Principle Detail experience.' },
+  // Pain diagnosis persistence (SPEC: PD Pain Diagnosis Persistence Enhancement).
+  // Gates BOTH halves of one feature so the disable path is a single flag:
+  //   1. Stage A prompt gains the Evidence First Attribution block
+  //      (People/Design/Assumption/Tooling chosen strictly from evidence).
+  //   2. PainSignalBridge.onDiagnosisComplete persists the diagnostician's
+  //      root-cause attribution into state.db pain_diagnoses, keyed by the
+  //      canonical pain_id (logical link — pain_events lives in trajectory.db).
+  // Default off; flag-off = no pain_diagnoses writes AND the Stage A prompt
+  // is byte-identical to the pre-feature prompt. Roll back = set enabled: false.
+  { id: 'pain_diagnosis_persistence', category: 'quiet', enabled: false, since: '2026-08-23', description: 'Persist diagnostician root-cause attribution to pain_diagnoses (state.db, keyed by canonical pain_id) + Evidence First attribution rules in the Stage A prompt. Default off; flag-off = no writes, prompt byte-identical.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },

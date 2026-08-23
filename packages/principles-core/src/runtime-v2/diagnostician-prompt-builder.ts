@@ -42,6 +42,12 @@ export interface BuildPromptOptions {
     readonly contentHash: string;
     readonly path: string;
   };
+  /**
+   * Evidence First Attribution (Pain Diagnosis Persistence SPEC §2.2/§6).
+   * Injected only when the `pain_diagnosis_persistence` flag is on; when
+   * absent, the prompt is byte-identical to the pre-feature prompt.
+   */
+  evidenceFirstAttribution?: boolean;
 }
 
 /**
