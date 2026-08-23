@@ -1,6 +1,6 @@
 ---
 title: FAQ | Principles Disciple
-description: What is Principles Disciple? Is it an AI memory system? Does it automatically modify your agent? Answers to the most common questions about the AI Agent Governance System.
+description: What is Principles Disciple? Is it an AI memory system or a prompt tool? Does it train the model or only inject prompts? Answers to the most common questions about the AI Agent Governance System.
 ---
 
 # Frequently Asked Questions
@@ -42,6 +42,24 @@ Prompt engineering tells agents what to do before execution. PD learns from actu
 ## Which environments does PD support?
 
 PD currently integrates with OpenClaw and Codex hosts. See the [installation guide](/install) for details.
+
+## Does PD train the AI model?
+
+No.
+
+PD does not modify model weights. It governs agent behavior through owner-approved principles and runtime mechanisms — a layer around the agent, never inside the model.
+
+## Does PD only inject prompts?
+
+No.
+
+Prompt guidance is only one governance channel. Besides cognitive guidance, PD's governance runtime can apply principles at execution time: owner-promoted rules can participate in tool-call decisions, and every application stays observable and reversible.
+
+## How is PD different from AGENTS.md or CLAUDE.md?
+
+Those files provide static instructions.
+
+PD creates an evolving governance layer based on actual experience: real behavior produces evidence, evidence becomes owner-approved principles, and principles are applied through the governance runtime — reviewable, reversible, observable at every step.
 
 ## Where can I read the full product definition?
 

@@ -8,10 +8,11 @@
 ```
 Different tools solve different problems.
 
-Memory:    stores information.
-Prompt:    provides instructions.
-Skills:    provide capabilities.
-PD:        governs behavioral improvement.
+Memory:     stores information.
+Prompt:     provides instructions.
+Skills:     provide capabilities.
+Guardrails: prevent unwanted actions.
+PD:         governs behavioral improvement.
 ```
 
 ## PD & AI Memory
@@ -26,14 +27,21 @@ Memory systems store and retrieve information: transcripts, preferences, facts. 
 > Prompt: provides instructions — before execution.
 > PD: governs behavioral improvement — after execution.
 
-Prompt engineering defines what the agent should do upfront. PD works on the other side of execution: it turns what actually happened during real interactions into reviewed principles. Both shape behavior; they operate at different moments.
+Prompt engineering provides instructions before execution. PD focuses on transforming experience after execution into reusable governance principles — then applying them through multiple governance channels, not only through text. Both shape behavior; they operate at different moments and at different layers.
 
 ## PD & Agent Skills
 
 > Skills: provide capabilities.
-> PD: governs behavioral improvement.
+> PD: governs how capabilities should be used.
 
 Skills extend what an agent can do — new tools, new abilities. PD governs how the agent behaves while doing the work, under owner authority. The two compose naturally: skills add capability, PD aligns behavior.
+
+## PD & Guardrails
+
+> Guardrails: prevent unwanted actions.
+> PD: helps define desired behavior patterns.
+
+Guardrails mainly prevent unwanted actions — fences around what must not happen. PD works on the positive side: it turns validated experience into owner-approved principles that describe how the agent *should* behave, with review and reversibility built in. Guardrails answer "what is forbidden?"; PD answers "what should become habit?".
 
 ## PD & Autonomous Self-Improvement
 
@@ -44,7 +52,7 @@ In PD, every principle proposal passes owner review before activation, and every
 
 ## One-line summary
 
-Memory stores, prompts instruct, skills extend. PD governs behavioral improvement — turning repeated corrections into owner-approved, reviewable, reversible principles.
+Memory stores, prompts instruct, skills extend, guardrails fence. PD governs behavioral improvement — turning repeated corrections into owner-approved, reviewable, reversible principles applied through multiple governance channels.
 
 ---
 
@@ -58,6 +66,7 @@ Memory stores, prompts instruct, skills extend. PD governs behavioral improvemen
 Memory：存储信息。
 Prompt：提供指令。
 Skills：提供能力。
+Guardrails：阻止不想要的行为。
 PD：治理行为改进。
 ```
 
@@ -73,14 +82,21 @@ Memory 系统存储和检索信息：对话记录、偏好、事实。PD 把验�
 > Prompt：提供指令——执行之前。
 > PD：治理行为改进——执行之后。
 
-Prompt 工程在事前定义 Agent 该做什么；PD 工作在执行的另一侧：把真实交互中实际发生的东西转化为经审查的原则。两者都在塑造行为，只是作用于不同时刻。
+Prompt 工程在执行前提供指令；PD 把执行后的经验转化为可复用的治理原则——并通过多个治理通道应用，而不只是文字。两者都在塑造行为，只是作用于不同时刻、不同层面。
 
 ## PD 与 Agent Skills
 
 > Skills：提供能力。
-> PD：治理行为改进。
+> PD：治理能力应当如何使用。
 
 Skills 扩展 Agent 能做什么——新工具、新能力。PD 在 Owner 权威下治理 Agent 做事过程中的行为方式。两者天然可组合：Skills 增加能力，PD 对齐行为。
+
+## PD 与 Guardrails
+
+> Guardrails：阻止不想要的行为。
+> PD：帮助定义期望的行为模式。
+
+Guardrails 主要防止不想要的行为——围绕"什么不可以发生"筑起围栏。PD 工作在正向一侧：把验证过的经验转化为经 Owner 审批的原则，描述 Agent *应该*如何行为，且内建审查与可回滚。Guardrails 回答"什么被禁止"；PD 回答"什么应该成为习惯"。
 
 ## PD 与自主自我改进
 
@@ -91,4 +107,4 @@ Skills 扩展 Agent 能做什么——新工具、新能力。PD 在 Owner 权�
 
 ## 一句话总结
 
-Memory 存储，Prompt 指令，Skills 扩展。PD 治理行为改进——把反复纠正转化为经 Owner 审批、可审查、可回滚的行为原则。
+Memory 存储，Prompt 指令，Skills 扩展，Guardrails 设栏。PD 治理行为改进——把反复纠正转化为经 Owner 审批、可审查、可回滚的行为原则，并通过多个治理通道应用。

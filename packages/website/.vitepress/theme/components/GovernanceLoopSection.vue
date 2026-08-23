@@ -17,8 +17,8 @@ import { computed } from 'vue'
 import { useIsZh } from '../composables/useIsZh'
 const isZh = useIsZh()
 const steps = computed(() => isZh.value
-  ? ['行为证据', '原则提案', 'Owner 审查', '可逆激活', '后续行为观察']
-  : ['Behavior evidence', 'Principle proposal', 'Owner review', 'Reversible activation', 'Later behavior observation'])
+  ? ['行为证据', '原则提案', 'Owner 审查', '可逆激活', '治理运行时', '后续行为观察']
+  : ['Behavior evidence', 'Principle proposal', 'Owner review', 'Reversible activation', 'Governance runtime', 'Later behavior observation'])
 const trustItems = computed(() => isZh.value ? [
   '不是每个错误都生成原则。', 'PD 不替 Owner 做价值判断。', '原则不会未经审核自动生效。', '证据不足时可以暂存或归档。'
 ] : [
@@ -28,7 +28,7 @@ const trustItems = computed(() => isZh.value ? [
 <style scoped>
 .section-heading { max-width: 780px; margin-bottom: 36px; }
 .section-heading h2 { margin-top: 14px; }
-.loop { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; list-style: none; padding: 0; margin: 0; }
+.loop { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; list-style: none; padding: 0; margin: 0; }
 .loop li { position: relative; display: flex; flex-direction: column; gap: 14px; min-height: 132px; margin: 0; padding: 24px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-main); font-weight: 550; font-size: 15px; }
 .loop li:not(:last-child)::after { content: '→'; position: absolute; right: -16px; top: 50%; transform: translateY(-50%); z-index: 1; color: var(--accent); font-size: 15px; }
 .loop span { color: var(--accent); font: 12px/1 var(--vp-font-family-mono); }

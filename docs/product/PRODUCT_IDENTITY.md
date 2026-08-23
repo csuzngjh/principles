@@ -16,11 +16,14 @@ The internal definition above and the public category below are two layers of on
 
 - **Public category (Category — how PD is classified externally):**
   *Principles Disciple is an AI Agent Governance System.*
+- **Technical positioning (Runtime — how PD operates, one layer below the category):**
+  *Principles Disciple is an Agent Governance Runtime: it captures behavioral evidence, evolves owner-approved principles, and applies them through multiple governance channels.* (Code-evidenced channel map: [`docs/audit/governance-runtime-map.md`](../audit/governance-runtime-map.md); public explanation: [`docs/concepts/governance-runtime.md`](../concepts/governance-runtime.md).)
 - **Internal definition (System Type — how it works):**
   *Owner-governed Agent Behavior Internalization System.*
 
 ```
 Category            →  what PD is (external copy, website, README, marketplace)
+Runtime             →  how PD applies governance (prompt channel + runtime hooks + ledger)
 System Type         →  what kind of system PD is
 Internal Mechanism  →  how PD works (this document)
 ```
