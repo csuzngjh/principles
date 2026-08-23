@@ -344,6 +344,15 @@ export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOpti
 export { appendPruningReview, listPruningReviews } from './pruning-review-log.js';
 export type { PruningReviewDecision, PruningReviewRecord, AppendPruningReviewInput } from './pruning-review-log.js';
 
+// Recovery actions audit log (Governance Recovery Actions v1)
+export { appendRecoveryAction, listRecoveryActions } from './recovery-actions-log.js';
+export type {
+  RecoveryActionRecord,
+  RecoveryActionKind,
+  RecoveryActionResult,
+  AppendRecoveryActionInput,
+} from './recovery-actions-log.js';
+
 // Candidate audit (PRI-28)
 export { auditCandidateLedgerConsistency } from './candidate-audit.js';
 export type { CandidateAuditResult } from './candidate-audit.js';
@@ -1127,6 +1136,11 @@ export type {
 
 export { createRecoverySweepService } from './recovery-sweep-service.js';
 export type { RecoverySweepService, RecoverySweepServiceHandle, FailedTaskRecoveryInfo, FailedTaskRecoveryResult } from './recovery-sweep-service.js';
+
+// Owner authority reset for needs_human_review tasks (shared by CLI retry and
+// Console recovery — Governance Recovery Actions v1)
+export { ownerRetryNeedsHumanReviewTask } from './internalization/owner-retry.js';
+export type { OwnerRetryOutcome } from './internalization/owner-retry.js';
 
 // ── RuntimeStateHandle (PRI-198) ────────────────────────────────────────────
 

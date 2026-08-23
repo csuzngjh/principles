@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -7,7 +8,13 @@ import {
   handleFailedTasksRoute,
   disposeFailedTasksModels,
 } from '../../../src/server/routes/failed-tasks.js';
-import type { SqliteTaskStore } from '@principles/core/runtime-v2';
+import {
+  RuntimeStateManager,
+  createPITaskDiagnosticJson,
+  hydratePITaskRecord,
+  listRecoveryActions,
+} from '@principles/core/runtime-v2';
+import type { SqliteTaskStore, PITaskMetadata } from '@principles/core/runtime-v2';
 
 // ---------------------------------------------------------------------------
 // Test utilities
@@ -445,6 +452,318 @@ describe('handleFailedTasksRoute', () => {
     it('clears the per-workspace store cache without throwing', () => {
       expect(typeof disposeFailedTasksModels).toBe('function');
       expect(() => disposeFailedTasksModels()).not.toThrow();
+    });
+  });
+
+  // ── POST /api/v1/failed-tasks/:id/recover (Governance Recovery Actions v1) ──
+  //
+  // These tests exercise the REAL recovery path: the route opens a writable
+  // RecoverySweepService against the seeded temp workspace (EP-02/EP-09 — no
+  // service mocks; assertions are on real DB rows and the real audit log).
+
+  describe('POST /api/v1/failed-tasks/:id/recover', () => {
+    let stateManager: RuntimeStateManager;
+
+    const RECOVERY_FLAGS = {
+      failed_tasks_observability: { enabled: true },
+      failed_task_recovery_console: { enabled: true },
+    };
+
+    /** POST request double whose body stream emits the given JSON body. */
+    function createMockPostRequest(url: string, body: string): IncomingMessage {
+      const req = new EventEmitter() as unknown as IncomingMessage;
+      req.method = 'POST';
+      req.url = url;
+      setImmediate(() => {
+        if (body.length > 0) {
+          req.emit('data', Buffer.from(body, 'utf8'));
+        }
+        req.emit('end');
+      });
+      return req;
+    }
+
+    async function seedTask(opts: {
+      taskId: string;
+      taskKind?: string;
+      status: 'pending' | 'leased' | 'succeeded' | 'retry_wait' | 'failed' | 'needs_human_review';
+      attemptCount?: number;
+      maxAttempts?: number;
+      meta?: Partial<PITaskMetadata>;
+      diagnosticJson?: string;
+    }): Promise<void> {
+      await stateManager.createTask({
+        taskId: opts.taskId,
+        taskKind: opts.taskKind ?? 'artificer',
+        status: opts.status,
+        attemptCount: opts.attemptCount ?? 1,
+        maxAttempts: opts.maxAttempts ?? 3,
+        diagnosticJson:
+          opts.diagnosticJson ??
+          createPITaskDiagnosticJson({
+            dependencyTaskIds: [],
+            channel: 'prompt',
+            timeoutMs: 300_000,
+            inputArtifactRefs: [],
+            outputArtifactRefs: [],
+            correlationId: 'recover-route-test',
+            ...opts.meta,
+          }),
+      });
+    }
+
+    beforeEach(async () => {
+      // Replace the empty state.db placeholder with a real initialized schema
+      // and a writable manager the tests can seed through.
+      stateManager = new RuntimeStateManager({ workspaceDir });
+      await stateManager.initialize();
+    });
+
+    afterEach(async () => {
+      await stateManager.close();
+    });
+
+    it('403 failed_task_recovery_console_disabled when the recovery flag is off (default)', async () => {
+      const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/some-task/recover',
+        featureFlags: { failed_tasks_observability: { enabled: true }, failed_task_recovery_console: { enabled: false } },
+      });
+
+      expect(res.statusCode).toBe(403);
+      const body = errorEnvelope(res);
+      expect(body.error).toBe('failed_task_recovery_console_disabled');
+      expect(body.message).toContain('failed_task_recovery_console');
+    });
+
+    it('403 (fail-closed) when featureFlags context carries no recovery flag at all', async () => {
+      const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/some-task/recover',
+        featureFlags: { failed_tasks_observability: { enabled: true } },
+      });
+
+      expect(res.statusCode).toBe(403);
+      expect(errorEnvelope(res).error).toBe('failed_task_recovery_console_disabled');
+    });
+
+    it('404 task_not_found for an unknown task id', async () => {
+      const req = createMockPostRequest('/api/v1/failed-tasks/does-not-exist/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/does-not-exist/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(404);
+      const body = errorEnvelope(res);
+      expect(body.error).toBe('task_not_found');
+    });
+
+    it('409 task_not_recoverable for a leased (in-flight) task, row untouched', async () => {
+      await seedTask({ taskId: 'leased-task', status: 'leased' });
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/leased-task/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/leased-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(409);
+      const body = errorEnvelope(res);
+      expect(body.error).toBe('task_not_recoverable');
+      expect(body.message).toContain('leased');
+      const row = await stateManager.getTask('leased-task');
+      expect(row?.status).toBe('leased');
+    });
+
+    it('recovers failed → pending and appends a RecoveryAction audit record', async () => {
+      await seedTask({ taskId: 'failed-task-1', status: 'failed', attemptCount: 1, maxAttempts: 3 });
+
+      const req = createMockPostRequest(
+        '/api/v1/failed-tasks/failed-task-1/recover',
+        JSON.stringify({ reason: 'Owner approved retry after reviewing failure' }),
+      );
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/failed-task-1/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ taskId: string; previousStatus: string; newStatus: string; result: string; nextAction: string }>(res);
+      expect(data.taskId).toBe('failed-task-1');
+      expect(data.previousStatus).toBe('failed');
+      expect(data.newStatus).toBe('pending');
+      expect(data.result).toBe('recovered');
+      expect(data.nextAction).toContain('Recovery accepted');
+
+      const row = await stateManager.getTask('failed-task-1');
+      expect(row?.status).toBe('pending');
+      expect(row?.attemptCount).toBe(0);
+
+      const audit = listRecoveryActions(workspaceDir, { taskId: 'failed-task-1' });
+      expect(audit.length).toBe(1);
+      expect(audit[0]?.action).toBe('recover');
+      expect(audit[0]?.previousStatus).toBe('failed');
+      expect(audit[0]?.result).toBe('recovered');
+      expect(audit[0]?.operator).toBe('console');
+      expect(audit[0]?.reason).toBe('Owner approved retry after reviewing failure');
+    });
+
+    it('409 task_attempts_exhausted (no force from Console v1) leaves the row untouched', async () => {
+      await seedTask({ taskId: 'exhausted-task', status: 'failed', attemptCount: 3, maxAttempts: 3 });
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/exhausted-task/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/exhausted-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(409);
+      const body = errorEnvelope(res) as { success: false; error: string; message: string; nextAction?: string };
+      expect(body.error).toBe('task_attempts_exhausted');
+      expect(body.nextAction).toContain('--force');
+      const row = await stateManager.getTask('exhausted-task');
+      expect(row?.status).toBe('failed');
+      expect(listRecoveryActions(workspaceDir)).toEqual([]);
+    });
+
+    it('recovers needs_human_review → pending, clears completionIntent/runnerDecision, audits requeued', async () => {
+      await seedTask({
+        taskId: 'review-task-1',
+        taskKind: 'rollout_reviewer',
+        status: 'needs_human_review',
+        attemptCount: 2,
+        meta: {
+          runnerDecision: 'needs_revision',
+          completionIntent: {
+            decision: 'needs_revision',
+            sourceRunId: 'run-1',
+            revisionEpoch: 1,
+            status: 'applied',
+            effect: 'needs_human_review',
+          },
+        },
+      });
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/review-task-1/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/review-task-1/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ taskId: string; previousStatus: string; newStatus: string; result: string }>(res);
+      expect(data.previousStatus).toBe('needs_human_review');
+      expect(data.newStatus).toBe('pending');
+      expect(data.result).toBe('requeued');
+
+      const row = await stateManager.getTask('review-task-1');
+      expect(row?.status).toBe('pending');
+      expect(row?.attemptCount).toBe(0);
+      // Owner authority reset: both intent fields must be gone (SPEC §6.2)
+      const meta = row ? hydratePITaskRecord(row) : null;
+      expect(meta?.runnerDecision).toBeUndefined();
+      expect(meta?.completionIntent).toBeUndefined();
+
+      const audit = listRecoveryActions(workspaceDir, { taskId: 'review-task-1' });
+      expect(audit.length).toBe(1);
+      expect(audit[0]?.result).toBe('requeued');
+      expect(audit[0]?.previousStatus).toBe('needs_human_review');
+    });
+
+    it('409 metadata_invalid (fail closed) leaves a corrupt-metadata needs_human_review row untouched', async () => {
+      await seedTask({
+        taskId: 'corrupt-meta-task',
+        status: 'needs_human_review',
+        diagnosticJson: JSON.stringify({ note: 'not pi metadata' }),
+      });
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/corrupt-meta-task/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/corrupt-meta-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(409);
+      const body = errorEnvelope(res) as { success: false; error: string; nextAction?: string };
+      expect(body.error).toBe('metadata_invalid');
+      expect(body.nextAction).toContain('integrity');
+      const row = await stateManager.getTask('corrupt-meta-task');
+      expect(row?.status).toBe('needs_human_review');
+      expect(listRecoveryActions(workspaceDir)).toEqual([]);
+    });
+
+    it('400 bad_request when reason is not a string', async () => {
+      const req = createMockPostRequest(
+        '/api/v1/failed-tasks/some-task/recover',
+        JSON.stringify({ reason: 42 }),
+      );
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/some-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(errorEnvelope(res).message).toContain('reason');
+    });
+
+    it('400 bad_request for a non-JSON body', async () => {
+      const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', 'not json');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/some-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('accepts an empty body (reason is optional)', async () => {
+      await seedTask({ taskId: 'failed-empty-body', status: 'failed' });
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/failed-empty-body/recover', '');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/failed-empty-body/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const audit = listRecoveryActions(workspaceDir, { taskId: 'failed-empty-body' });
+      expect(audit.length).toBe(1);
+      expect(audit[0]?.reason).toBeNull();
+    });
+
+    it('405 for GET on the recover subpath', async () => {
+      const req = createMockRequest('GET', '/api/v1/failed-tasks/some-task/recover');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/some-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(405);
     });
   });
 });

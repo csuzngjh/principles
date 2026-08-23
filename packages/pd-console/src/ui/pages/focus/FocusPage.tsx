@@ -861,7 +861,11 @@ export function FocusPage() {
   const ruleCodeAlerts = ruleCodeItems.filter(item => item.enforcement === 'safety_isolated');
 
   // Map codes to i18n text
-  const stateReason = getStateReasonText(stateReasonCode, t, pendingCount);
+  // Governance Recovery Actions v1: tasks_need_human_review interpolates the
+  // needs_human_review task count, not the approvals count.
+  const humanReviewCount = queueData?.pendingHumanReviewCount ?? 0;
+  const stateReasonCount = stateReasonCode === "tasks_need_human_review" ? humanReviewCount : pendingCount;
+  const stateReason = getStateReasonText(stateReasonCode, t, stateReasonCount);
   const nextAction = getNextActionText(nextActionCode, t);
 
   return (

@@ -753,11 +753,13 @@ const VALID_GOVERNANCE_STATES = new Set(['none', 'in_progress', 'owner_review_re
 
 const VALID_STATE_REASON_CODES = new Set([
   'state_db_missing', 'no_pipeline_activity', 'pending_approvals',
+  'tasks_need_human_review',
   'pipeline_active', 'consumed_candidates', 'degraded_state',
 ]);
 
 const VALID_NEXT_ACTION_CODES = new Set([
   'run_config_doctor', 'wait_for_pipeline', 'review_approvals',
+  'review_failed_tasks',
   'check_degraded_signals', 'check_pipeline_status',
 ]);
 
@@ -793,6 +795,8 @@ function validateDegradedSignal(v: unknown): DegradedSignalData | null {
 export interface GovernanceQueueData {
   pendingReviewCount: number;
   behaviorDeviationCount: number;
+  /** Governance Recovery Actions v1: needs_human_review internalization tasks (owner-attention items) */
+  pendingHumanReviewCount?: number;
   stagnationSignals: StagnationSignalData[];
   governanceState: 'none' | 'in_progress' | 'owner_review_ready' | 'degraded';
   stateReasonCode: string;
@@ -805,6 +809,36 @@ export interface GovernanceQueueData {
   gateBlocksToday?: number;
   note?: string;
   generatedAt?: string;
+}
+
+// ── Recovery result (Governance Recovery Actions v1) ─────────────────────────
+
+export interface RecoveryResultData {
+  taskId: string;
+  previousStatus: string;
+  newStatus: string;
+  /** 'recovered' (failed→pending) | 'requeued' (needs_human_review→pending) */
+  result: string;
+  nextAction?: string;
+}
+
+export function validateRecoveryResult(v: unknown): RecoveryResultData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'taskId') || !isString(v.taskId)) return null;
+  if (!Object.hasOwn(v, 'previousStatus') || !isString(v.previousStatus)) return null;
+  if (!Object.hasOwn(v, 'newStatus') || !isString(v.newStatus)) return null;
+  if (!Object.hasOwn(v, 'result') || !isString(v.result)) return null;
+  const result: RecoveryResultData = {
+    taskId: v.taskId,
+    previousStatus: v.previousStatus,
+    newStatus: v.newStatus,
+    result: v.result,
+  };
+  if (Object.hasOwn(v, 'nextAction')) {
+    if (!isString(v.nextAction)) return null;
+    result.nextAction = v.nextAction;
+  }
+  return result;
 }
 
 export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null {
@@ -860,6 +894,11 @@ export function validateGovernanceQueue(v: unknown): GovernanceQueueData | null 
   if (Object.hasOwn(v, 'evidenceInProgressCount')) {
     if (!isNumber(v.evidenceInProgressCount)) return null;
     result.evidenceInProgressCount = v.evidenceInProgressCount;
+  }
+  // Governance Recovery Actions v1: needs_human_review task count
+  if (Object.hasOwn(v, 'pendingHumanReviewCount')) {
+    if (!isNumber(v.pendingHumanReviewCount)) return null;
+    result.pendingHumanReviewCount = v.pendingHumanReviewCount;
   }
   // Wave 4: gate blocks today (seconds-level auto-blocks)
   if (Object.hasOwn(v, 'gateBlocksToday')) {

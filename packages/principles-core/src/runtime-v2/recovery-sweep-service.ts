@@ -3,6 +3,8 @@ import type { RuntimeStateHandle } from './runtime-state-handle.js';
 import type { RecoveryResult } from './store/lifecycle/recovery-sweep.js';
 import { PDRuntimeError } from './error-categories.js';
 import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
+import { ownerRetryNeedsHumanReviewTask } from './internalization/owner-retry.js';
+import type { OwnerRetryOutcome } from './internalization/owner-retry.js';
 
 export interface FailedTaskRecoveryInfo {
   taskId: string;
@@ -27,6 +29,13 @@ export interface RecoverySweepService {
   recoverTask(taskId: string): Promise<RecoveryResult | null>;
   detectFailedTasks(): Promise<FailedTaskRecoveryInfo[]>;
   recoverFailedTask(taskId: string, force?: boolean): Promise<FailedTaskRecoveryResult | null>;
+  /**
+   * Governance Recovery Actions v1: Owner authority reset for a
+   * needs_human_review task (→ pending, clears runnerDecision +
+   * completionIntent atomically). Same sequence as
+   * `pd runtime internalization retry --confirm` (shared implementation).
+   */
+  recoverNeedsHumanReviewTask(taskId: string): Promise<OwnerRetryOutcome>;
   close(): Promise<void>;
 }
 
@@ -95,6 +104,10 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
       maxAttempts: updated.maxAttempts,
       forceApplied: isExhausted && force,
     };
+  }
+
+  async recoverNeedsHumanReviewTask(taskId: string): Promise<OwnerRetryOutcome> {
+    return ownerRetryNeedsHumanReviewTask(this.stateManager, taskId);
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
