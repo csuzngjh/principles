@@ -3,6 +3,7 @@
     <div class="section-heading">
       <p class="pd-eyebrow">{{ isZh ? '治理回路' : 'Governance loop' }}</p>
       <h2 id="loop-title">{{ isZh ? '系统提供证据和建议，Owner 保留判断。' : 'The system brings evidence and proposals. The Owner keeps judgment.' }}</h2>
+      <p class="loop-intro"><strong>{{ isZh ? '从经验到原则' : 'From Experience to Principles' }}</strong> — {{ isZh ? 'PD 不是简单地存储指令。它把反复出现的经验转化为能指导未来行为的原则。' : 'PD does not simply store instructions. It transforms repeated experiences into principles that guide future behavior.' }}</p>
     </div>
     <ol class="loop" :aria-label="isZh ? 'PD 行为治理回路' : 'PD behavior governance loop'">
       <li v-for="(step, index) in steps" :key="step"><span>0{{ index + 1 }}</span>{{ step }}</li>
@@ -17,8 +18,8 @@ import { computed } from 'vue'
 import { useIsZh } from '../composables/useIsZh'
 const isZh = useIsZh()
 const steps = computed(() => isZh.value
-  ? ['行为证据', '原则提案', 'Owner 审查', '可逆激活', '后续行为观察']
-  : ['Behavior evidence', 'Principle proposal', 'Owner review', 'Reversible activation', 'Later behavior observation'])
+  ? ['行为证据', '原则提案', 'Owner 审查', '可逆激活', '治理运行时', '后续行为观察']
+  : ['Behavior evidence', 'Principle proposal', 'Owner review', 'Reversible activation', 'Governance runtime', 'Later behavior observation'])
 const trustItems = computed(() => isZh.value ? [
   '不是每个错误都生成原则。', 'PD 不替 Owner 做价值判断。', '原则不会未经审核自动生效。', '证据不足时可以暂存或归档。'
 ] : [
@@ -28,7 +29,9 @@ const trustItems = computed(() => isZh.value ? [
 <style scoped>
 .section-heading { max-width: 780px; margin-bottom: 36px; }
 .section-heading h2 { margin-top: 14px; }
-.loop { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; list-style: none; padding: 0; margin: 0; }
+.loop-intro { margin: 18px 0 0; color: var(--text-secondary); font-size: 16px; line-height: 1.65; }
+.loop-intro strong { color: var(--text-main); }
+.loop { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; list-style: none; padding: 0; margin: 0; }
 .loop li { position: relative; display: flex; flex-direction: column; gap: 14px; min-height: 132px; margin: 0; padding: 24px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-main); font-weight: 550; font-size: 15px; }
 .loop li:not(:last-child)::after { content: '→'; position: absolute; right: -16px; top: 50%; transform: translateY(-50%); z-index: 1; color: var(--accent); font-size: 15px; }
 .loop span { color: var(--accent); font: 12px/1 var(--vp-font-family-mono); }

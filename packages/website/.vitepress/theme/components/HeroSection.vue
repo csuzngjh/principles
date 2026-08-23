@@ -6,10 +6,11 @@
         <template v-if="isZh"><span>别再反复纠正</span><span>同一个 Agent。</span></template>
         <template v-else><span>Stop correcting the</span><span>same Agent behavior.</span></template>
       </h1>
+      <p class="hero-category">{{ isZh ? 'AI Agent 行为治理运行时' : 'AI Agent Governance Runtime' }}</p>
       <p class="hero-lead">
         {{ isZh
-          ? 'Principles Disciple（PD）是一个 AI Agent 行为治理系统：把你的反复纠正沉淀为可审查、可撤回的行为原则，让 Agent 在下一次相似任务中按你的方式行动。'
-          : 'Principles Disciple is an AI Agent Governance System: it turns repeated corrections into reviewable, reversible behavior principles, so the Agent handles the next similar task your way.' }}
+          ? 'Principles Disciple（PD）是一个 AI Agent 行为治理系统：把你的反复纠正沉淀为经你审批的行为原则，并通过多个治理通道应用——从提示词引导到运行时治理——让 Agent 在下一次相似任务中按你的方式行动。'
+          : 'Principles Disciple is an AI Agent Governance System: it turns repeated corrections into owner-approved behavioral principles and applies them through multiple governance channels — from prompt guidance to runtime governance — so the Agent handles the next similar task your way.' }}
       </p>
       <p class="hero-proof">
         {{ isZh ? '每条原则先由你批准，效果可观察，随时可回滚。' : 'You approve every principle first. Its effect stays observable and can be rolled back.' }}
@@ -52,6 +53,7 @@ const isZh = useIsZh()
 .hero-section { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); align-items: center; gap: 72px; padding-top: 104px; }
 .hero-copy h1 { max-width: 700px; margin: 18px 0 22px; }
 .hero-copy h1 span { display: block; }
+.hero-category { margin: 0 0 14px; color: var(--accent); font-weight: 600; font-size: 15px; letter-spacing: .04em; }
 .hero-lead { max-width: 670px; font-size: clamp(18px, 2vw, 22px) !important; line-height: 1.65 !important; color: var(--text-main) !important; }
 .hero-proof { margin-top: 18px; max-width: 620px; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }

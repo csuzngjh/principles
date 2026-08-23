@@ -58,6 +58,8 @@ export default defineConfig({
             {
               text: 'Guide & Reference',
               items: [
+                { text: 'What is a Principle?', link: '/docs/principles' },
+                { text: 'From Experience to Principle', link: '/docs/principle-internalization' },
                 { text: 'Getting Started', link: '/docs/getting-started' },
                 { text: 'User Guide', link: '/docs/user-guide' },
                 { text: 'Slash Commands', link: '/docs/slash-commands' },
@@ -102,6 +104,8 @@ export default defineConfig({
             {
               text: '使用指南与参考手册',
               items: [
+                { text: '什么是原则 (What is a Principle)', link: '/zh/docs/principles' },
+                { text: '从经验到原则 (From Experience to Principle)', link: '/zh/docs/principle-internalization' },
                 { text: '快速开始 (Getting Started)', link: '/zh/docs/getting-started' },
                 { text: '用户指南 (User Guide)', link: '/zh/docs/user-guide' },
                 { text: '斜杠命令参考 (Slash Commands)', link: '/zh/docs/slash-commands' },
