@@ -127,6 +127,7 @@ Behavior Evidence → Reflection → Principle Proposal → Owner Approval
 
 - PD 通过多个治理通道影响 Agent:提示词指令注入是其中之一。
 - Active principles 可以参与执行决策:live 规则可以在工具调用点 block、要求审批、或改写参数(OpenClaw 与 Codex 均有硬通道)。
+- 系统会**无人值守地起草**候选原则与候选规则实现(`internalization_full_chain` core 默认开,审批队列自动填充)。
 - 每条原则经 Owner 审批、可回滚、效果可观察(`pd trace`)。
 - 硬治理 shadow 起步,Owner 显式 promote 才 live;PD 全通道 fail-open。
 
@@ -134,7 +135,7 @@ Behavior Evidence → Reflection → Principle Proposal → Owner Approval
 
 - PD 修改模型权重 / 训练模型。
 - PD 自动阻止一切不良行为(block 需要 Owner 提升的 live 规则显式决定)。
-- PD 自动从错误生成规则(原则硬化为规则是 Owner 审批后的选择性表达;原则引导判断,规则约束动作)。
+- PD 自动生成**即生效**的规则 / 把 PD 定位为规则生成器(候选是惰性草稿:规则通道必经审批队列 `activation-dispatcher.ts:261`,且不在可自动提升通道表 `activation-types.ts:16`;shadow→live 仅能 `promoteActivation`)。"不自动生效"与"不自动生成"是两个概念——前者成立,后者不成立(系统确实自动起草)。
 - PD 自主学习、自主做价值决定(审批权威在 Owner)。
 - PD 是 Prompt 生成器或 Memory 系统(见 `docs/concepts/governance-runtime.md` 与 `pd-comparisons.md`)。
 - Principle Receipts 等默认关闭的 quiet 能力(未开 flag 前不得作为现状宣传)。

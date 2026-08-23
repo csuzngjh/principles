@@ -47,9 +47,13 @@ Prompt engineering tells agents what to do before execution. PD learns from actu
 
 ## Does PD automatically generate rules?
 
-No.
+Be precise about two different steps:
 
-PD extracts principles from experience. Specific rules or runtime constraints are only one possible expression of those principles — created selectively, only when the Owner approves promoting a validated bottom line into an executable rule.
+**Drafting is automated.** From real behavior evidence, PD's internalization pipeline drafts candidate principles and candidate rule implementations unattended, and replays them against historical cases.
+
+**Taking effect is not.** A candidate rule stays inert until it passes owner review; an approved rule starts in observation-only (shadow) mode; and it only ever enforces after the Owner explicitly promotes it.
+
+So nothing blocks or corrects on its own: generation produces proposals; authority stays with the Owner.
 
 ## Which environments does PD support?
 

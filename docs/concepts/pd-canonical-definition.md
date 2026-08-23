@@ -132,7 +132,7 @@ Every step is reviewable; every activation is reversible; every effect stays obs
 
 ### Principles and rules
 
-Principles guide judgment; rules constrain specific actions. They are not synonyms but two sides of the same coin: where repeated experience proves a bottom line must never be forgotten, the Owner can approve hardening a principle into an executable rule at the runtime layer (shadow-tested first, always reversible). PD is not a rule generator — hardening is selective and owner-approved.
+Principles guide judgment; rules constrain specific actions. They are not synonyms but two sides of the same coin: where repeated experience proves a bottom line must never be forgotten, the Owner can approve hardening a principle into an executable rule at the runtime layer (shadow-tested first, always reversible). Rule candidates may be drafted automatically; they take effect only through owner review, shadow testing, and explicit promotion. Drafting is automated; authority is not.
 
 ## Terminology Baseline
 
@@ -227,4 +227,4 @@ PD 的核心不是添加指令，
 
 ### 原则与规则
 
-原则引导判断；规则约束具体动作。两者不是同义词，而是同一枚硬币的两面：当反复的经验证明某条底线绝不能被遗忘时，Owner 可以审批把一条原则硬化为运行时层的可执行规则（先影子试运行，始终可回滚）。PD 不是规则生成器——硬化是选择性的、经 Owner 审批的。
+原则引导判断；规则约束具体动作。两者不是同义词，而是同一枚硬币的两面：当反复的经验证明某条底线绝不能被遗忘时，Owner 可以审批把一条原则硬化为运行时层的可执行规则（先影子试运行，始终可回滚）。规则的候选可以由系统自动起草，但只有经 Owner 审查、影子试运行并显式提升后才生效。起草是自动的，权威不是。

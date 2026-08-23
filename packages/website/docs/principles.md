@@ -36,7 +36,7 @@ Saying "a principle is a better rule" misses the point:
 
 A principle like *"understand the current state before acting"* applies across projects, tools, and scenarios — it needs interpretation. A rule like *"pushing without pulling the remote branch is blocked"* is specific, mechanical, and leaves little room for interpretation.
 
-They work together. Where repeated experience proves a bottom line must never be forgotten, the Owner can promote a principle into an executable rule that runs at the runtime layer — shadow-tested first, activated only by explicit approval, and always reversible. Hardening is selective; PD is not a rule generator.
+They work together. Where repeated experience proves a bottom line must never be forgotten, the Owner can promote a principle into an executable rule that runs at the runtime layer — shadow-tested first, activated only by explicit approval, and always reversible. Candidate rules may be drafted automatically, but hardening never happens on its own: generation produces proposals; the decision — and the go-live — stays with the Owner.
 
 ## Principle vs Memory
 

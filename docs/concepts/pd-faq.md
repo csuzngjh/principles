@@ -70,9 +70,13 @@ It is a reusable behavioral insight extracted from experience — abstract enoug
 
 ## Q11: Does PD automatically generate rules?
 
-No.
+Be precise about two different steps:
 
-PD extracts principles from experience. Specific rules or runtime constraints are only one possible expression of those principles — created selectively, only when the Owner approves promoting a validated bottom line into an executable rule. Principles guide judgment; rules constrain specific actions. They are two sides of the same coin, not synonyms.
+**Drafting is automated.** From real behavior evidence, PD's internalization pipeline drafts candidate principles and candidate rule implementations unattended, and replays them against historical cases.
+
+**Taking effect is not.** A candidate rule stays inert until it passes owner review; an approved rule starts in observation-only (shadow) mode; and it only ever enforces after the Owner explicitly promotes it.
+
+Generation produces proposals; authority stays with the Owner.
 
 ---
 
@@ -144,6 +148,10 @@ PD 基于真实经验建立不断演进的治理层：真实行为产生证据�
 
 ## Q11：PD 会自动生成规则吗？
 
-不会。
+要区分两个不同的步骤：
 
-PD 从经验中提炼原则。具体规则或运行时约束只是这些原则的一种可能表达——且是选择性创建的：只有 Owner 审批把某条经过验证的底线提升为可执行规则时才会发生。原则引导判断，规则约束具体动作；两者是同一枚硬币的两面，不是同义词。
+**起草是自动的。** PD 的内化管线会从真实行为证据出发，无人值守地起草候选原则与候选规则实现，并用历史案例回放验证。
+
+**生效不是。** 候选规则在通过 Owner 审查前保持惰性；激活后先以仅观察（shadow）模式运行；只有 Owner 显式提升后才会真正拦截执行。
+
+生成只产出提案；权威始终在 Owner。
