@@ -238,6 +238,8 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'pain_evidence_admission_default') continue;
       // Task 7: failed_tasks_observability defaults on (quiet flag, default-on)
       if (flag.id === 'failed_tasks_observability') continue;
+      // Governance Recovery v1 (2026-08-24 owner decision): default-on
+      if (flag.id === 'failed_task_recovery_console') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
