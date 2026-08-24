@@ -126,3 +126,22 @@ principle approvals (approve/reject/edit)        → no owner gate (console-auth
    the pd-console collector; core derivation stays pure and evidence-driven.
 4. `feature_disabled` error code for the new endpoint (D5); `governance_experience_v1` quiet, default OFF,
    registered in `DEFAULT_FEATURE_FLAGS` + `initServices` ctx + config summary (frontend discovers via existing mechanism).
+
+## 6. Review round 1 adjustments (PR #1409, commit ad306880)
+
+The two-axis review (Standards + Spec) tightened four interpretation points; the implementation now matches:
+
+- **R1 (§7.3)** Within ONE principle, recovery outranks decision (`classifyView` reordered). The workspace-level
+  `primaryAttention` still leads with `owner_decision_required` per SPEC Phase 4 UI priority ("1. Owner decision,
+  2. Recovery") — both behaviors are test-locked.
+- **R2 (§8.4)** Processing requires active execution evidence: only `running` / `retry_scheduled` count.
+  `queued` (never-started pending frontier) is NOT processing — a pending-only workspace reports idle/all_clear.
+- **R3 (§8.1/§9)** Evidence linkage: frontier evidence requires an established task↔artifact relationship
+  (`taskIdsWithArtifact`); RuleCode decision evidence requires artifact-exists AND owner-principle-in-ledger.
+  Unlinked shadow activations degrade to data-quality (`activation` unlinked source) instead of inflating
+  needs_decision. The blocked marker carries frontier evidence refs (never a bare count). Ledger-down +
+  orphan-tasks-only → degraded, never blocked.
+- **R4 (P2 deferred → PRI-589)** `NotificationProvider` and `DebtPage` still consume the queue endpoint when the
+  flag is on (adjacent subsystems, outside this delivery's acceptance criteria). Follow-up: PRI-589 (product
+  decision needed on badge semantics before migrating; naive migration would rebuild the workspace snapshot every
+  30s poll).
