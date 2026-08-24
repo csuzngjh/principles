@@ -63,11 +63,17 @@ describe('production after-tool pain/evidence kernel', () => {
     }));
     const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
     const tool = db.prepare('SELECT session_id, tool_name, outcome, exit_code, error_message, params_json FROM tool_calls').get();
-    const pain = db.prepare('SELECT session_id, source, score, reason, origin, canonical_pain_id FROM pain_events').get();
+    const pain = db.prepare('SELECT session_id, source, score, reason, origin, confidence, canonical_pain_id FROM pain_events').get();
     db.close();
     expect(tool).toEqual(expect.objectContaining({ session_id: 'session-523', tool_name: 'write_file', outcome: 'failure', exit_code: 1, error_message: 'EACCES permission denied' }));
+    // Raw observation only (SPEC §8): the pain row records WHAT happened;
+    // attribution belongs to the Diagnostician. No attribution confidence is
+    // asserted at detection time (confidence stays null), and origin remains
+    // the declared who-reported enum value 'system_infer'.
     expect(pain).toEqual(expect.objectContaining({ session_id: 'session-523', source: 'tool_failure', score: 90, origin: 'system_infer' }));
-    expect(String(Object.getOwnPropertyDescriptor(pain as object, 'reason')?.value)).toContain('write_file');
+    expect(Object.getOwnPropertyDescriptor(pain as object, 'confidence')?.value).toBeNull();
+    expect(String(Object.getOwnPropertyDescriptor(pain as object, 'reason')?.value)).toBe('tool=write_file; error=EACCES permission denied; path=/etc/passwd');
+    expect(String(Object.getOwnPropertyDescriptor(pain as object, 'reason')?.value)).not.toContain('diagnosticGate=');
     expect(String(Object.getOwnPropertyDescriptor(pain as object, 'canonical_pain_id')?.value)).toMatch(/^pain_host_/);
     expect(JSON.parse(String(Object.getOwnPropertyDescriptor(tool as object, 'params_json')?.value))).toEqual({ content: 'blocked content', file_path: '<path:passwd>' });
   });

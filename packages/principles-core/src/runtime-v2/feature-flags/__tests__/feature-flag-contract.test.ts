@@ -502,27 +502,27 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(flag.description).toContain('Failed tasks observability');
   });
 
-  it('Governance Recovery v1: failed_task_recovery_console is registered as quiet, default-off', () => {
+  it('Governance Recovery v1: failed_task_recovery_console is registered as quiet, default-on (owner decision 2026-08-24)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'failed_task_recovery_console');
     expect(flag).toBeDefined();
     if (!flag) throw new Error('failed_task_recovery_console flag not found');
     expect(flag.category).toBe('quiet');
-    // Default off keeps the Console read-only (SPEC §9); enable via
-    // .pd/config.yaml features.failed_task_recovery_console.enabled: true.
-    expect(flag.enabled).toBe(false);
+    // Default on per owner decision (2026-08-24); disable via
+    // .pd/config.yaml features.failed_task_recovery_console.enabled: false.
+    expect(flag.enabled).toBe(true);
     expect(flag.since).toBe('2026-08-23');
     expect(flag.description).toContain('recovery');
   });
 
-  it('Governance Recovery v1: failed_task_recovery_console can be enabled via config', () => {
+  it('Governance Recovery v1: failed_task_recovery_console can be disabled via config', () => {
     const userFlags = {
-      failed_task_recovery_console: { enabled: true },
+      failed_task_recovery_console: { enabled: false },
     };
     const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
     const flag = result.flags.failed_task_recovery_console;
     expect(flag).toBeDefined();
     if (flag) {
-      expect(flag.enabled).toBe(true);
+      expect(flag.enabled).toBe(false);
     }
     // unknown-flag warning must not fire for a registered flag
     expect(result.warnings.some(w => w.includes('failed_task_recovery_console') && w.includes('unknown'))).toBe(false);

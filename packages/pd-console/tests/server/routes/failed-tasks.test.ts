@@ -523,7 +523,7 @@ describe('handleFailedTasksRoute', () => {
       await stateManager.close();
     });
 
-    it('403 failed_task_recovery_console_disabled when the recovery flag is off (default)', async () => {
+    it('403 failed_task_recovery_console_disabled when the recovery flag is explicitly disabled', async () => {
       const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {

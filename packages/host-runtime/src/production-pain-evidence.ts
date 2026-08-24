@@ -277,9 +277,16 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
         db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(event.context.sessionId, toolName, outcome.failure ? 'failure' : 'success', outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, createdAt);
         if (admitted) {
-          const reason = `Tool ${toolName} failed on ${relativePath}; diagnosticGate=${trigger.reason}`;
+          // Raw observation only (Pain Diagnosis Persistence SPEC §8): the
+          // pain row must record WHAT happened, not WHY. Attribution
+          // (People/Design/Assumption/Tooling) belongs to the Diagnostician.
+          // confidence stays null — no attribution confidence exists at
+          // detection time. origin remains 'system_infer' because origin is a
+          // declared enum (event-types.ts: who reported the pain), not an
+          // attribution claim.
+          const reason = `tool=${toolName}; error=${outcome.error ?? `exit=${outcome.exitCode}`}; path=${relativePath}`;
           db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-            .run(event.context.sessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', 1, enrichment.evidence?.map((entry) => `${entry.sourceRef}: ${entry.note}`).join('\n') ?? null, painId, null, createdAt);
+            .run(event.context.sessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, enrichment.evidence?.map((entry) => `${entry.sourceRef}: ${entry.note}`).join('\n') ?? null, painId, null, createdAt);
         }
       })();
       if (admitted && !duplicate) {

@@ -282,7 +282,7 @@ export type FailedTasksContext = {
  * short-circuits cleanly — rc-9: error responses include reason + next action):
  *   - `failed_tasks_observability.enabled === false` → 403 for the whole route
  *   - `failed_task_recovery_console.enabled !== true` → 403 for POST recover
- *     (fail-closed mutation gate; default off keeps the Console read-only)
+ *     (fail-closed mutation gate; default on, explicit disable keeps the Console read-only)
  */
 export async function handleFailedTasksRoute(
   req: IncomingMessage,
@@ -394,14 +394,15 @@ export async function handleFailedTasksRoute(
     // and the trailing '/recover')
     const taskId = recoverMatch[1] ?? '';
 
-    // Fail-closed gate: this is a mutation endpoint — recovery requires the
-    // flag to be EXPLICITLY enabled (default off → read-only Console).
+    // Fail-closed gate: this is a mutation endpoint — recovery is enabled by
+    // default (2026-08-24 owner decision) and 403 only when explicitly disabled
+    // via config (features.failed_task_recovery_console.enabled: false).
     if (ctx.featureFlags?.failed_task_recovery_console?.enabled !== true) {
       sendError(
         res,
         403,
         'failed_task_recovery_console_disabled',
-        'failed_task_recovery_console feature flag is disabled. Enable it in .pd/config.yaml (features.failed_task_recovery_console.enabled: true) to allow recovery from Console.',
+        'failed_task_recovery_console feature flag is disabled. Enable it via .pd/config.yaml (features.failed_task_recovery_console.enabled: true) to allow recovery from Console.',
       );
       return;
     }
