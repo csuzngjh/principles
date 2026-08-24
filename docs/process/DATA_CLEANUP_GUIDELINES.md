@@ -18,7 +18,6 @@
 | `activation_decisions` 表 | `.pd/state.db` | Owner 决策快照（含 global pause） |
 | `activation_evidence_snapshots` 表 | `.pd/state.db` | promotion evidence snapshot |
 | `pi_artifacts` 表 | `.pd/state.db` | rulecode/原则工件本体——激活的实现载体 |
-| `governance_actions.jsonl` | `.state/` | PRI-566 治理动作审计日志 |
 | `recovery_actions.jsonl` | `.state/` | 治理恢复动作审计日志 |
 
 需要"清除"这些资产时，唯一的正道是 PD 自己的生命周期操作：
