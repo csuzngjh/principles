@@ -872,6 +872,10 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     };
   }
 
+  // 1. Stop gateway (releases native module locks held by the gateway process)
+  const gatewayStatus = layout.hosts.includes('openclaw')
+    ? await checkOpenClawGateway()
+    : { isRunning: false };
   let gatewayWasStopped = false;
 
   // Capture installed facts before staging any candidate release.
