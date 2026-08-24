@@ -95,7 +95,7 @@ export function handleBeforeToolCall(
     // made enforcement statistics read as if rules were active when none were.
     const liveDecisionFallback = hostResult?.decision ?? (report.liveRulesLoaded > 0 ? 'allow' : 'no_rules_armed');
 
-    const circuitTripped = observeRuleCodeSafety({ workspaceDir: wctx.workspaceDir, activationId: report.liveDecisionActivationId, toolName: event.toolName, params: event.params ?? {}, decision: hostResult?.decision ?? 'allow', matched: hostResult?.matched ?? false, logger });
+    const circuitTripped = observeRuleCodeSafety({ workspaceDir: wctx.workspaceDir, activationId: report.liveDecisionActivationId, toolName: event.toolName, params: event.params ?? {}, decision: liveDecisionFallback === 'no_rules_armed' ? 'allow' : liveDecisionFallback, matched: hostResult?.matched ?? false, logger });
     if (circuitTripped) {
       logger.warn?.(`[PD_GATE] RuleCode ${report.liveDecisionActivationId ?? 'unknown'} safety-isolated; allowing current host call.`);
       return;
