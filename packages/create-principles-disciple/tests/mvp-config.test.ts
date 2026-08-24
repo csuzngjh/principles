@@ -1187,33 +1187,20 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     const hostInstallersIndex = content.indexOf('await runHostInstallers(');
-    const cleanupIndex = content.indexOf('cleanupBackup(backupDir)');
+    const cleanupIndex = content.indexOf('cleanupBackup(backupDir, runtimeBackupDir)');
     expect(cleanupIndex).toBeGreaterThan(hostInstallersIndex);
   });
 
-  // Regression (CodeRabbit #3758794660, rc-9): HostInstaller failures MUST
-  // propagate to the aggregate InstallResult.success. Previously failures
-  // were only logged, leaving success:true even when a host adapter failed.
-  it('propagates host installer failures to aggregate success (rc-9)', () => {
+  // Regression (CodeRabbit #3758794660 + PRI-583 review, rc-9): a host
+  // failure must enter the atomic rollback catch before backups are deleted.
+  it('rolls back before cleanup when a host installer fails (rc-9)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    // The return statement must include `!hasHostFailures` in the success field
-    const returnBlock = content.substring(
-      content.indexOf('return {'),
-      content.indexOf('} catch (error)'),
-    );
-    // Find the success line in the return block
-    expect(returnBlock).toContain('!hasHostFailures');
-    // hostFailures must be populated from hr.success === false
     expect(content).toContain('hostFailures.push');
-    // hostFailures must be appended to nextActions
-    expect(content).toContain('nextActions.push(...hostFailures)');
-  });
-
-  it('spinner shows warning when host failures occur', () => {
-    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
-    const content = fs.readFileSync(installerPath, 'utf-8');
-    expect(content).toContain("spinner.warn('Install complete with host warnings')");
+    const failureThrow = content.indexOf('throw new Error(`Host installation failed:');
+    const cleanup = content.indexOf('cleanupBackup(backupDir, runtimeBackupDir)', failureThrow);
+    expect(failureThrow).toBeGreaterThan(0);
+    expect(cleanup).toBeGreaterThan(failureThrow);
   });
 
   it('catch block kills console child process', () => {
@@ -2067,9 +2054,18 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
     expect(pdCliDestIdx).toBeGreaterThan(0);
   });
 
-  it('bundle-plugin.mjs rewrites principles-disciple dependency in console to its installed parent package root', () => {
+  it('bundle-plugin.mjs rewrites principles-disciple dependency in console to canonical plugin sibling', () => {
     expect(content).toContain(
-      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:..')",
+      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:../plugin')",
+    );
+  });
+
+  it('bundle-plugin.mjs wires install-layout into both shipped consumers', () => {
+    expect(content).toContain(
+      "rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/install-layout', 'file:../install-layout')",
+    );
+    expect(content).toContain(
+      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/install-layout', 'file:../install-layout')",
     );
   });
 
@@ -2104,7 +2100,7 @@ describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug
     const pdLinkTargetIdx = content.indexOf('pdLinkTarget');
     expect(pdLinkTargetIdx).toBeGreaterThan(0);
     const targetSection = content.substring(pdLinkTargetIdx, pdLinkTargetIdx + 200);
-    expect(targetSection).toContain('getPluginExtDir()');
+    expect(targetSection).toContain('installedPluginDir()');
   });
 
   it('syncPdCli creates symlink on Windows using junction', () => {
@@ -2144,7 +2140,7 @@ describe('PRI-566: principles-disciple resolution in installed console', () => {
     const end = content.indexOf('function getInstalledCoreDir', start);
     const section = content.substring(start, end);
     expect(section).toContain("path.join(consoleDest, 'node_modules', 'principles-disciple')");
-    expect(section).toContain('getPluginExtDir()');
+    expect(section).toContain('installedPluginDir()');
     expect(section).toContain('symlinkSync');
   });
 });
