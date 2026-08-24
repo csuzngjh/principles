@@ -142,9 +142,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'diagnostician_split_pipeline', category: 'quiet', enabled: true, since: '2026-06-11', description: '3-stage split diagnostician pipeline (RootCause→Distiller→Router)' },
   // ADR-0019: Diagnostician LLM rate-limit graceful degradation. On persistent rate-limit,
   // mark task failed with `rate_limit` errorCategory + emit `diag_llm_rate_limit_degraded`
-  // telemetry (observable degradation, rc-9). Default off; flag-off = current hard-fail
-  // behavior (rate_limit errors flow through retryOrFail → max_attempts_exceeded).
-  { id: 'diagnostician_llm_degradation', category: 'quiet', enabled: false, since: '2026-07-03', description: 'Diagnostician LLM rate-limit graceful degradation — on persistent rate-limit, emit diag_llm_rate_limit_degraded telemetry + rate_limit errorCategory instead of max_attempts_exceeded (ADR-0019). Default off; flag-off = hard fail (legacy behavior).' },
+  // telemetry (observable degradation, rc-9). Graduated to default-on (PRI-571,
+  // 2026-08-24) after validation; flag-off = legacy hard-fail behavior (rate_limit
+  // errors flow through retryOrFail → max_attempts_exceeded).
+  { id: 'diagnostician_llm_degradation', category: 'quiet', enabled: true, since: '2026-07-03', description: 'Diagnostician LLM rate-limit graceful degradation — on persistent rate-limit, emit diag_llm_rate_limit_degraded telemetry + rate_limit errorCategory instead of max_attempts_exceeded (ADR-0019). Default ON (graduated PRI-571, 2026-08-24); flag-off = hard fail (legacy behavior).' },
   // PRI-419: L2 multi-turn agent loop for the dreamer runner. Scoped single-runner exception
   // per ADR-0014 amendment (mirrors the 2026-06-10 diagnostician-split owner exception).
   // Default off; flips dreamer from one-shot completeSimple to a multi-turn agentLoop with
@@ -223,13 +224,14 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // the block message keeps the existing generic English template (byte
   // identical); when on, blockReason carries principle attribution (title
   // fallback chain, approval date, optional painReasonSummary source line).
-  // Quiet + default off per ADR-0014 §2.5. Roll back = set enabled: false in
-  // .pd/config.yaml (generic template returns).
-  { id: 'principle_receipt_block_copy', category: 'quiet', enabled: false, since: '2026-08-15', description: 'Principle Receipt P0 — enriched RuleHost block copy with principle attribution (title/approval date/source summary, PRI-530). Default off; flag-off = generic block template unchanged.' },
+  // Quiet; graduated to default-on (PRI-571, 2026-08-24) after live validation.
+  // Roll back = set enabled: false in .pd/config.yaml (generic template returns).
+  { id: 'principle_receipt_block_copy', category: 'quiet', enabled: true, since: '2026-08-15', description: 'Principle Receipt P0 — enriched RuleHost block copy with principle attribution (title/approval date/source summary, PRI-530). Default ON (graduated PRI-571, 2026-08-24); flag-off = generic block template unchanged.' },
   // PRI-531: Principle Receipt ledger — durable application history. When off,
   // no rows are written and console receipt surfaces show a degraded state with
-  // reason + nextAction. Quiet + default off per ADR-0014 §2.5.
-  { id: 'principle_receipt_ledger', category: 'quiet', enabled: false, since: '2026-08-15', description: 'Principle Receipt ledger — durable principle_applications history (effect/presence two-level semantics, PRI-531). Default off; flag-off = no ledger writes.' },
+  // reason + nextAction. Quiet; graduated to default-on (PRI-571, 2026-08-24)
+  // so the Owner sees principle application evidence out of the box.
+  { id: 'principle_receipt_ledger', category: 'quiet', enabled: true, since: '2026-08-15', description: 'Principle Receipt ledger — durable principle_applications history (effect/presence two-level semantics, PRI-531). Default ON (graduated PRI-571, 2026-08-24); flag-off = no ledger writes.' },
   // PRI-532: Principle Receipt P1-a — agent self-report line. When on, the
   // directive block gains a footer instructing the agent to append one 📌 line
   // when a directive actually changes its behavior, and llm_output /
@@ -237,7 +239,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // principle×session). Governs P1-a's own ledger writes; principle_receipt_ledger
   // governs the P1-b write points. Default off; flag-off = byte-identical template.
   { id: 'principle_receipt_self_report', category: 'quiet', enabled: false, since: '2026-08-16', description: 'Principle Receipt P1-a — agent self-report 📌 line (injection instruction + capture, PRI-532). Default off; flag-off = directive template unchanged, no capture.' },
-  { id: 'principle_governance_projection_v2', category: 'quiet', enabled: false, since: '2026-08-20', description: 'Read-only per-principle Owner governance projection (PRI-549). Default off; flag-off preserves the existing Principle Detail experience.' },
+  { id: 'principle_governance_projection_v2', category: 'quiet', enabled: true, since: '2026-08-20', description: 'Read-only per-principle Owner governance projection (PRI-549). Default ON (graduated PRI-571, 2026-08-24); flag-off preserves the pre-projection Principle Detail experience.' },
   // Governance Recovery Actions v1 — Console-side recovery for failed /
   // needs_human_review internalization tasks (POST /api/v1/failed-tasks/:id/recover
   // + Recovery button on the Failed Tasks page). Reuses RecoverySweepService and

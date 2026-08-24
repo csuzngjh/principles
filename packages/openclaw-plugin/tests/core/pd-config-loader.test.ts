@@ -315,25 +315,25 @@ describe('Feature flag loading from .pd/config.yaml', () => {
     } finally { rmTmpDir(tmp); }
   });
 
-  it('keeps principle_governance_projection_v2 disabled through the production loader by default', () => {
+  it('serves principle_governance_projection_v2 enabled through the production loader by default (PRI-571 graduation)', () => {
     const tmp = mkTmpDir();
     try {
       expect(loadFeatureFlagFromConfig(tmp, 'principle_governance_projection_v2')).toEqual({
-        enabled: false,
+        enabled: true,
         source: 'defaults',
       });
     } finally { rmTmpDir(tmp); }
   });
 
-  it('allows controlled dogfood enablement of principle_governance_projection_v2', () => {
+  it('honors explicit principle_governance_projection_v2=false as the pre-projection rollback', () => {
     const tmp = mkTmpDir();
     const parsed = yaml.load(makeValidConfigWithObserverDisabled()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
-    features.principle_governance_projection_v2 = { category: 'quiet', enabled: true, since: '2026-08-20' };
+    features.principle_governance_projection_v2 = { category: 'quiet', enabled: false, since: '2026-08-20' };
     writeConfig(tmp, yaml.dump(parsed));
     try {
       expect(loadFeatureFlagFromConfig(tmp, 'principle_governance_projection_v2')).toEqual({
-        enabled: true,
+        enabled: false,
         source: 'user_config',
       });
     } finally { rmTmpDir(tmp); }

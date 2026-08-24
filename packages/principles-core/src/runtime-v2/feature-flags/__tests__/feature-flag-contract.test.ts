@@ -7,6 +7,16 @@ import {
   VALID_CATEGORIES,
 } from '../feature-flag-contract.js';
 
+// PRI-571 Feature Graduation (2026-08-24): validated governance capabilities
+// promoted to the default experience. Each stays category 'quiet' so the
+// rollback path remains an explicit config override in .pd/config.yaml.
+const PRI_571_DEFAULT_ON_FLAGS: readonly string[] = [
+  'principle_receipt_ledger',
+  'principle_receipt_block_copy',
+  'diagnostician_llm_degradation',
+  'principle_governance_projection_v2',
+];
+
 describe('validateFeatureFlagRaw', () => {
   it('accepts valid flag with all fields', () => {
     const raw = {
@@ -240,7 +250,31 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'failed_tasks_observability') continue;
       // Governance Recovery v1 (2026-08-24 owner decision): default-on
       if (flag.id === 'failed_task_recovery_console') continue;
+      // PRI-571 graduation (2026-08-24): validated capabilities promoted to
+      // the default experience; see PRI-571_DEFAULT_ON_FLAGS below.
+      if (PRI_571_DEFAULT_ON_FLAGS.includes(flag.id)) continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
+    }
+  });
+
+  it('PRI-571: graduates validated governance capabilities to default-on while staying quiet (rollback = config override)', () => {
+    const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    for (const id of PRI_571_DEFAULT_ON_FLAGS) {
+      const flag = result.flags[id];
+      expect(flag, `flag ${id} must stay registered`).toBeDefined();
+      expect(flag?.enabled, `graduated flag ${id} should default on`).toBe(true);
+      expect(flag?.category, `graduated flag ${id} stays quiet — rollback path is a config override`).toBe('quiet');
+    }
+  });
+
+  it('PRI-571: each graduated capability can still be disabled via explicit config override', () => {
+    for (const id of PRI_571_DEFAULT_ON_FLAGS) {
+      const result = computeEffectiveFlags(
+        { [id]: { enabled: false, since: '2026-08-24' } },
+        DEFAULT_FEATURE_FLAGS,
+        '/test/.pd/feature-flags.yaml',
+      );
+      expect(result.flags[id]?.enabled, `graduated flag ${id} must remain disableable via config`).toBe(false);
     }
   });
 
@@ -693,7 +727,7 @@ describe('PRI-523 shared host runtime rollout flag', () => {
 });
 
 describe('PRI-550 principle governance projection rollout flag', () => {
-  it('registers the projection as quiet and default-off', () => {
+  it('registers the projection as quiet and default-on after PRI-571 graduation', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(
       candidate => candidate.id === 'principle_governance_projection_v2',
     );
@@ -701,14 +735,14 @@ describe('PRI-550 principle governance projection rollout flag', () => {
     expect(flag).toMatchObject({
       id: 'principle_governance_projection_v2',
       category: 'quiet',
-      enabled: false,
+      enabled: true,
       since: '2026-08-20',
     });
   });
 
-  it('keeps the projection disabled when workspace config omits it', () => {
+  it('serves the projection enabled when workspace config omits it (PRI-571 graduation)', () => {
     const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
 
-    expect(result.flags.principle_governance_projection_v2?.enabled).toBe(false);
+    expect(result.flags.principle_governance_projection_v2?.enabled).toBe(true);
   });
 });
