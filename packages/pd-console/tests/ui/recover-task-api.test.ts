@@ -1,6 +1,18 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 describe('recoverFailedTask (Governance Recovery Actions v1)', () => {
+  beforeEach(() => {
+    const store = new Map<string, string>();
+    vi.stubGlobal(
+      'sessionStorage',
+      {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => store.set(key, value),
+        removeItem: (key: string) => store.delete(key),
+      } as Storage,
+    );
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
