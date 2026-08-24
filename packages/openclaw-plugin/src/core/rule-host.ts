@@ -106,6 +106,8 @@ export interface RuleHostEvaluationReport {
    * making enforcement statistics read as if rules were active when none were).
    */
   readonly liveRulesLoaded: number;
+  /** Distinguishes an empty live set from a failed evaluation. */
+  readonly evaluationStatus: 'ok' | 'failed';
 }
 
 /**
@@ -241,13 +243,13 @@ export class RuleHost {
           }
         }
       }
-      return { liveDecision, liveDecisionActivationId, shadowDecisions, skippedActivations: skipped, liveRulesLoaded: liveImpls.length };
+      return { liveDecision, liveDecisionActivationId, shadowDecisions, skippedActivations: skipped, liveRulesLoaded: liveImpls.length, evaluationStatus: 'ok' };
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)
       this.logger.warn?.(
         `[RuleHost] Host evaluation failed, degrading conservatively: ${String(hostError)}`
       );
-      return { liveDecision: undefined, shadowDecisions: [], skippedActivations: [], liveRulesLoaded: 0 };
+      return { liveDecision: undefined, shadowDecisions: [], skippedActivations: [], liveRulesLoaded: 0, evaluationStatus: 'failed' };
     }
   }
 

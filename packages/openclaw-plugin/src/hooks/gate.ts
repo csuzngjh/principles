@@ -88,14 +88,20 @@ export function handleBeforeToolCall(
 
     const report = typeof ruleHost.evaluateDetailed === 'function'
       ? ruleHost.evaluateDetailed(hostInput)
-      : { liveDecision: ruleHost.evaluate(hostInput), shadowDecisions: [], skippedActivations: [], liveRulesLoaded: 0 };
+      : { liveDecision: ruleHost.evaluate(hostInput), shadowDecisions: [], skippedActivations: [], liveRulesLoaded: 0, evaluationStatus: 'ok' as const };
     const hostResult = report.liveDecision;
     // PRI-567: "no live rules armed" must be distinguishable from "a live rule
     // evaluated and allowed". Previously both logged decision='allow', which
     // made enforcement statistics read as if rules were active when none were.
-    const liveDecisionFallback = hostResult?.decision ?? (report.liveRulesLoaded > 0 ? 'allow' : 'no_rules_armed');
+    const liveDecisionFallback = hostResult?.decision
+      ?? (report.evaluationStatus === 'failed'
+        ? 'evaluation_failed'
+        : report.liveRulesLoaded > 0 ? 'allow' : 'no_rules_armed');
 
-    const circuitTripped = observeRuleCodeSafety({ workspaceDir: wctx.workspaceDir, activationId: report.liveDecisionActivationId, toolName: event.toolName, params: event.params ?? {}, decision: liveDecisionFallback === 'no_rules_armed' ? 'allow' : liveDecisionFallback, matched: hostResult?.matched ?? false, logger });
+    const safetyDecision = liveDecisionFallback === 'no_rules_armed' || liveDecisionFallback === 'evaluation_failed'
+      ? 'allow'
+      : liveDecisionFallback;
+    const circuitTripped = observeRuleCodeSafety({ workspaceDir: wctx.workspaceDir, activationId: report.liveDecisionActivationId, toolName: event.toolName, params: event.params ?? {}, decision: safetyDecision, matched: hostResult?.matched ?? false, logger });
     if (circuitTripped) {
       logger.warn?.(`[PD_GATE] RuleCode ${report.liveDecisionActivationId ?? 'unknown'} safety-isolated; allowing current host call.`);
       return;

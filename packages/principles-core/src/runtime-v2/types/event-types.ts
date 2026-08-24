@@ -433,7 +433,7 @@ export interface RuleHostEvaluatedEventData {
    * allowed. Previously this case logged decision='allow', making enforcement
    * statistics read as if rules were active when none were.
    */
-  decision: 'allow' | 'block' | 'requireApproval' | 'auto_correct' | 'no_rules_armed';
+  decision: 'allow' | 'block' | 'requireApproval' | 'auto_correct' | 'no_rules_armed' | 'evaluation_failed';
   ruleId?: string;
   activationId?: string;
   activationMode?: 'shadow' | 'live';
@@ -449,6 +449,7 @@ export const RuleHostEvaluatedEventDataSchema = Type.Object({
     Type.Literal('requireApproval'),
     Type.Literal('auto_correct'),
     Type.Literal('no_rules_armed'),
+    Type.Literal('evaluation_failed'),
   ]),
   ruleId: Type.Optional(Type.String()),
   activationId: Type.Optional(Type.String()),

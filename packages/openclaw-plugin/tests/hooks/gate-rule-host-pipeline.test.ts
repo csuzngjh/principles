@@ -46,6 +46,7 @@ vi.mock('../../src/core/event-log.js', () => ({
 }));
 
 let _mockEvaluate = vi.fn().mockReturnValue(undefined);
+let _mockEvaluateDetailed: ReturnType<typeof vi.fn> | undefined;
 vi.mock('../../src/core/rule-host.js', () => ({
   RuleHost: vi.fn(function(this: any, _stateDir: string, _logger: any) {
     this.evaluate = _mockEvaluate;
@@ -70,7 +71,11 @@ vi.mock('../../src/core/workspace-context.js', () => ({
     fromHookContext: vi.fn((ctx: { workspaceDir?: string }) => ({
       workspaceDir: ctx.workspaceDir,
       stateDir: (ctx.workspaceDir ?? '') + '/.state',
-      getRuleHost: () => ({ evaluate: _mockEvaluate, dispose: vi.fn() }),
+      getRuleHost: () => ({
+        evaluate: _mockEvaluate,
+        ...(_mockEvaluateDetailed ? { evaluateDetailed: _mockEvaluateDetailed } : {}),
+        dispose: vi.fn(),
+      }),
       eventLog: mockEventLogInstance,
       trajectory: { recordGateBlock: vi.fn(), getRuleHostContextRows: vi.fn(() => ({ rows: [], truncated: false })) },
       config: { get: vi.fn().mockReturnValue(undefined) },
@@ -83,6 +88,7 @@ describe('Gate Rule Host Only Pipeline', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _mockEvaluate = vi.fn().mockReturnValue(undefined);
+    _mockEvaluateDetailed = undefined;
   });
 
   describe('Rule Host blocks', () => {
@@ -169,6 +175,25 @@ describe('Gate Rule Host Only Pipeline', () => {
   });
 
   describe('Rule Host degradation', () => {
+    it('records evaluation_failed instead of no_rules_armed when detailed evaluation degrades', () => {
+      _mockEvaluateDetailed = vi.fn().mockReturnValue({
+        liveDecision: undefined,
+        shadowDecisions: [],
+        skippedActivations: [],
+        liveRulesLoaded: 0,
+        evaluationStatus: 'failed',
+      });
+
+      handleBeforeToolCall(
+        { toolName: 'bash', params: { command: 'ls -la' } } as any,
+        { workspaceDir, sessionId } as any,
+      );
+
+      expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'evaluation_failed' }),
+      );
+    });
+
     it('should allow operation when Rule Host throws (conservative degradation)', () => {
       _mockEvaluate = vi.fn().mockImplementation(() => {
         throw new Error('Host internal error');
