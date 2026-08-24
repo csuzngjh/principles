@@ -275,6 +275,7 @@ Include in the PR body or completion report:
 
 - `docs/process/error-management/ERROR_PATTERN_INDEX.md` — Compact error pattern index (READ FIRST)
 - `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` — Detailed error incident log
+- `docs/process/DATA_CLEANUP_GUIDELINES.md` — 数据清理守则（READ BEFORE any cleanup：治理资产保护清单 + 流程硬约束，PRI-568）
 - `docs/architecture/ARCHITECTURE.md` — Full system architecture
 - `docs/adr/` — Architecture Decision Records
 - `CLAUDE.md` — Full project guidance (also applies to you)
