@@ -227,6 +227,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     - 2026-06-28 PRI-483 PR #1098: _buildRuleContextIfEnabled ignored ok:false — added guard + warn
     - 2026-06-19 PRI-408/PR#972, PRI-431/PR#975: approval/catch paths missing reason+nextAction
     - Earlier PR#699-#966: catch→skip / malformed yaml→[] / false success — every fallback now emits reason+nextAction
+  - 2026-08-24 PRI-577 / PR #1407: dual-directory telemetry counted a source before successful enumeration and returned no structured reason when neither source was readable. Fixed by counting only successfully enumerated directories and surfacing `shadow_telemetry_source_unavailable`; regression covers an existing path that is not a readable directory.
 
 ---
 
@@ -886,7 +887,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 107 |
 | Last updated | 2026-08-24 |
 | Top category | Schema & Type |
-| Recurring errors | 54 |
+| Recurring errors | 56 |
 
 ---
 
@@ -1384,6 +1385,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
+  - 2026-08-24 PRI-583 / PR #1406 (install-layout/delivery flavor): a new shared `@principles/install-layout` contract was wired into selected source consumers but not the clean-CI build order, npm publication workflow, Console updater, host-set manifest merge, or host-scoped uninstall lifecycle. Local residual `dist` files masked missing dependency builds. Fixed by auditing every producer/consumer/delivery/cleanup path, adding dependency-first CI/publish wiring, and exercising clean packaged installation plus host-union/uninstall regressions. Related published-artifact aspect: ERR-040.
   - 2026-08-21 RuleCode Owner Live Decision full-suite review (no Linear issue): the new `rulecode-safety-circuit.ts` correctly belonged to the OpenClaw plugin I/O boundary, but the implementation updated neither duplicated plugin-core anti-growth allowlist. Core and plugin full suites failed even though targeted safety tests passed. Fixed by classifying the file in both architecture guards with the same I/O rationale. Prevention: every new plugin-core file must update and run both `principles-core` architecture regression and `openclaw-plugin` anti-growth tests.
   - 2026-08-21 RuleCode Owner Live Decision browser E2E (no Linear issue): the Console mutation boundary persisted an empty optional decision note as `''`, while the shared SQLite read contract accepts only `null` or a non-empty string. Emergency deactivation succeeded, but the next activation-list read failed with `Malformed activation safety row: note`, making the control surface appear broken immediately after containment. Fixed by normalizing blank notes to `null` at the decision-construction boundary and retaining a production browser round-trip that emergency-deactivates the exact live activation, then reads the activation list. Prevention: for every shared durable optional string, test the UI-empty-input → write → read round trip; writer normalization must emit the reader's canonical absent representation.
   - 2026-08-21 RuleCode Owner Live Decision self-review (no Linear issue): the first durable `ActivationDecisionRecord` implementation narrowed the approved structured `principal` and `authentication` identities to string enums. The decision remained immutable but lost `ownerId`, `credentialId`, `policyVersion`, and structured local operator attribution, so a future promotion audit could not prove which configured Owner credential authorized live enforcement. Fixed before promotion wiring by restoring the exact structured identity contract, normalized SQLite columns and CHECK constraints, plus round-trip tests. Prevention: when implementing a SPEC-declared audit schema, compare every nested field against the canonical interface and make the round-trip fixture contain the distinguishing identity values; testing only the discriminator enum is insufficient.
