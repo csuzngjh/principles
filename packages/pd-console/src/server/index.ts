@@ -263,10 +263,14 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   const feedbackChannelEnabled = pdFlags.flags.feedback_channel?.enabled ?? false;
   const failedTasksObservabilityEnabled = pdFlags.flags.failed_tasks_observability?.enabled ?? true;
   const governanceProjectionEnabled = pdFlags.flags.principle_governance_projection_v2?.enabled ?? false;
+  // Governance Recovery Actions v1: fail-closed — recovery stays disabled unless
+  // explicitly enabled (default off keeps the Console read-only).
+  const failedTaskRecoveryEnabled = pdFlags.flags.failed_task_recovery_console?.enabled ?? false;
   const feedbackFlags: Record<string, { enabled: boolean }> = {
     feedback_channel: { enabled: feedbackChannelEnabled },
     failed_tasks_observability: { enabled: failedTasksObservabilityEnabled },
     principle_governance_projection_v2: { enabled: governanceProjectionEnabled },
+    failed_task_recovery_console: { enabled: failedTaskRecoveryEnabled },
   };
   if (!configResult.ok) {
     console.warn('[pd-console] PD config loading failed (using defaults for feedback channel):', configResult.errors.map(e => e.reason).join('; '));

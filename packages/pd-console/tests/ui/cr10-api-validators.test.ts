@@ -31,6 +31,7 @@ import {
   validateDefaultRuntimeUpdate,
   validateConfigReadiness,
   validateGovernanceQueue,
+  validateRecoveryResult,
   validateActivations,
   validateDisableActivation,
   validateLifecycleMetrics,
@@ -455,6 +456,61 @@ describe('validateGovernanceQueue', () => {
     expect(result!.degradedSignals).toBeUndefined();
     expect(result!.note).toBeUndefined();
     expect(result!.generatedAt).toBeUndefined();
+  });
+
+  // Governance Recovery Actions v1 (ERR-083 audit): the Focus card and the
+  // failed-tasks page both consume these new fields/codes.
+  it('accepts pendingHumanReviewCount and the needs-human-review reason/next-action codes', () => {
+    const result = validateGovernanceQueue({
+      ...validQueue,
+      pendingHumanReviewCount: 3,
+      stateReasonCode: 'tasks_need_human_review',
+      nextActionCode: 'review_failed_tasks',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.pendingHumanReviewCount).toBe(3);
+  });
+
+  it('rejects a non-number pendingHumanReviewCount', () => {
+    expect(validateGovernanceQueue({ ...validQueue, pendingHumanReviewCount: 'two' })).toBeNull();
+  });
+});
+
+// ── validateRecoveryResult (Governance Recovery Actions v1) ──────────────────
+
+describe('validateRecoveryResult', () => {
+  it('accepts a complete recovery result', () => {
+    const result = validateRecoveryResult({
+      taskId: 'task-1', previousStatus: 'failed', newStatus: 'pending', result: 'recovered',
+    });
+    expect(result).toEqual({
+      taskId: 'task-1', previousStatus: 'failed', newStatus: 'pending', result: 'recovered',
+    });
+  });
+
+  it('accepts an optional nextAction', () => {
+    const result = validateRecoveryResult({
+      taskId: 'task-1', previousStatus: 'needs_human_review', newStatus: 'pending',
+      result: 'requeued', nextAction: 'Recovery accepted.',
+    });
+    expect(result?.nextAction).toBe('Recovery accepted.');
+  });
+
+  it.each([
+    ['non-object', 42],
+    ['missing taskId', { previousStatus: 'failed', newStatus: 'pending', result: 'recovered' }],
+    ['non-string taskId', { taskId: 1, previousStatus: 'failed', newStatus: 'pending', result: 'recovered' }],
+    ['missing previousStatus', { taskId: 't', newStatus: 'pending', result: 'recovered' }],
+    ['missing newStatus', { taskId: 't', previousStatus: 'failed', result: 'recovered' }],
+    ['missing result', { taskId: 't', previousStatus: 'failed', newStatus: 'pending' }],
+  ])('rejects %s', (_label, v) => {
+    expect(validateRecoveryResult(v)).toBeNull();
+  });
+
+  it('rejects a non-string nextAction', () => {
+    expect(validateRecoveryResult({
+      taskId: 't', previousStatus: 'failed', newStatus: 'pending', result: 'recovered', nextAction: 5,
+    })).toBeNull();
   });
 });
 

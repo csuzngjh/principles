@@ -122,6 +122,7 @@ export type StateReasonCode =
   | 'state_db_missing'
   | 'no_pipeline_activity'
   | 'pending_approvals'
+  | 'tasks_need_human_review'
   | 'pipeline_active'
   | 'consumed_candidates'
   | 'degraded_state';
@@ -130,12 +131,21 @@ export type NextActionCode =
   | 'run_config_doctor'
   | 'wait_for_pipeline'
   | 'review_approvals'
+  | 'review_failed_tasks'
   | 'check_degraded_signals'
   | 'check_pipeline_status';
 
 export interface GovernanceQueueResponse {
   /** Number of pending approvals awaiting owner review */
   pendingReviewCount: number;
+  /**
+   * Governance Recovery Actions v1 (Phase 0 signal fix): number of
+   * internalization tasks in needs_human_review status (all peer-runner
+   * kinds, incl. rollout_reviewer). These are owner-attention items — they
+   * wait for an explicit recovery decision, so unlike degraded signals they
+   * carry no time window. Set only when > 0 (mirrors evidenceInProgressCount).
+   */
+  pendingHumanReviewCount?: number;
   /** Number of high/critical risk pending approvals */
   behaviorDeviationCount: number;
   /** Stagnation signals for approvals older than 7 days */
@@ -258,18 +268,31 @@ export class GovernanceConsoleModel {
       // 2. Check internalization pipeline activity (tasks)
       // PRI-556: pipeline activity still counts ALL tasks (drives in_progress),
       // but only in-window failures/retries produce degraded signals.
+      // Governance Recovery Actions v1 (Phase 0 signal fix): the kind list now
+      // includes rollout_reviewer (previously invisible even for degraded
+      // signals), and needs_human_review tasks surface as owner-attention
+      // items via pendingHumanReviewCount — previously NO stage's
+      // needs_human_review entered this queue.
       let hasInternalizationTasks = false;
       const retryWaitDetails: DegradedFailureDetail[] = [];
       const failedDetails: DegradedFailureDetail[] = [];
+      let pendingHumanReviewCount = 0;
       try {
         const tasks = db.prepare(
-          `SELECT task_id, task_kind, status, last_error, updated_at FROM tasks WHERE task_kind IN ('dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator')`
+          `SELECT task_id, task_kind, status, last_error, updated_at FROM tasks WHERE task_kind IN ('dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer')`
         ).all() as { task_id: string; task_kind: string; status: string; last_error: string | null; updated_at: string }[];
 
         hasInternalizationTasks = tasks.length > 0;
         const actionableCutoff = Date.now() - DEGRADED_SIGNAL_WINDOW_MS;
 
         for (const task of tasks) {
+          if (task.status === 'needs_human_review') {
+            // Owner-attention item — NO time window: it waits for an explicit
+            // recovery decision (unlike terminal `failed` rows, which PRI-556
+            // windowed to avoid permanent signal pollution).
+            pendingHumanReviewCount += 1;
+            continue;
+          }
           if (task.status !== 'retry_wait' && task.status !== 'failed') continue;
           // updated_at is untrusted row data — malformed timestamps fall
           // outside the window rather than poisoning the signal (rc-1).
@@ -345,7 +368,9 @@ export class GovernanceConsoleModel {
       }
 
       // ── Determine governance state ──────────────────────────────────────
-      const hasOwnerReadyItems = pendingReviewCount > 0;
+      // needs_human_review tasks are owner-attention items alongside pending
+      // approvals (Governance Recovery Actions v1 Phase 0): both flip the
+      // queue into owner_review_ready.
       const hasPipelineActivity = hasInternalizationTasks || hasConsumedCandidates || hasPendingCandidates;
       const hasDegradation = degradedSignals.length > 0;
 
@@ -356,12 +381,18 @@ export class GovernanceConsoleModel {
       let nextAction: string;
       let inProgressSummary: string | undefined;
 
-      if (hasOwnerReadyItems) {
+      if (pendingReviewCount > 0) {
         governanceState = 'owner_review_ready';
         stateReasonCode = 'pending_approvals';
         nextActionCode = 'review_approvals';
         stateReason = `${pendingReviewCount} principle(s) pending your review and decision.`;
         nextAction = 'Review pending principles and approve, reject, or park.';
+      } else if (pendingHumanReviewCount > 0) {
+        governanceState = 'owner_review_ready';
+        stateReasonCode = 'tasks_need_human_review';
+        nextActionCode = 'review_failed_tasks';
+        stateReason = `${pendingHumanReviewCount} internalization task(s) are waiting for your review decision (needs_human_review).`;
+        nextAction = 'Open Failed Tasks to inspect and recover needs_human_review tasks.';
       } else if (hasDegradation) {
         governanceState = 'degraded';
         stateReasonCode = 'degraded_state';
@@ -482,6 +513,10 @@ export class GovernanceConsoleModel {
 
       if (evidenceInProgressCount > 0) {
         response.evidenceInProgressCount = evidenceInProgressCount;
+      }
+
+      if (pendingHumanReviewCount > 0) {
+        response.pendingHumanReviewCount = pendingHumanReviewCount;
       }
 
       if (gateBlocksToday > 0) {

@@ -30,6 +30,7 @@ import {
   validateFeatureFlagUpdate,
   validateOutputLanguage,
   validateGovernanceQueue,
+  validateRecoveryResult,
   validateActivations,
   validateDisableActivation,
   validateLifecycleMetrics,
@@ -75,6 +76,7 @@ import type {
   FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
+  RecoveryResultData,
   ActivationsData,
   DisableActivationData,
   LifecycleMetricsData,
@@ -653,6 +655,19 @@ async function fetchGovernanceQueue(): Promise<ApiResponse<GovernanceQueueData>>
   return request<GovernanceQueueData>('/api/v1/governance/queue', undefined, validateGovernanceQueue);
 }
 
+// Governance Recovery Actions v1: Owner-triggered recovery of a failed /
+// needs_human_review internalization task (failed→pending | needs_human_review→pending).
+async function recoverFailedTask(taskId: string, reason?: string): Promise<ApiResponse<RecoveryResultData>> {
+  const body: Record<string, string> = {};
+  if (reason !== undefined && reason.length > 0) {
+    body.reason = reason;
+  }
+  return request<RecoveryResultData>('/api/v1/failed-tasks/' + encodeURIComponent(taskId) + '/recover', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }, validateRecoveryResult);
+}
+
 async function fetchApprovalsGrouped(): Promise<ApiResponse<ApprovalsGroupedData>> {
   return request<ApprovalsGroupedData>('/api/v1/approvals/grouped', undefined, validateApprovalsGrouped);
 }
@@ -930,6 +945,7 @@ export {
   removeWorkspace,
   syncWorkspace,
   fetchGovernanceQueue,
+  recoverFailedTask,
   fetchApprovalsGrouped,
   fetchAllActivations,
   disableActivation,
@@ -979,6 +995,7 @@ export type {
   FeatureFlagUpdateData,
   OutputLanguageData,
   GovernanceQueueData,
+  RecoveryResultData,
   ActivationsData,
   DisableActivationData,
   RuleCodeOwnerReviewData,

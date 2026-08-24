@@ -10,6 +10,13 @@
  * Each row exposes a "Create Feedback Draft" button that deep-links into the
  * Report Problem page with the task/pain context pre-filled.
  *
+ * Governance Recovery Actions v1: when the `failed_task_recovery_console`
+ * feature flag is enabled, each row also exposes a "Resume Evolution" button.
+ * Recovery is an Owner governance action (never auto-triggered on load): it
+ * always goes through an explicit confirmation dialog before POSTing
+ * /api/v1/failed-tasks/:id/recover. The success state means "Recovery
+ * Accepted" — the task is pending again; execution is asynchronous.
+ *
  * Runtime Contract (rc-*):
  * - rc-1: API response is treated as `unknown` and validated before use
  * - rc-2: no `as` type assertions — runtime type guards only
@@ -19,13 +26,25 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card.js";
 import { Button } from "../../components/ui/button.js";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "../../components/ui/alert-dialog.js";
 import { ShinyText } from "../../components/ui/shiny-text.js";
 import { formatDate } from "../../utils/format.js";
+import { recoverFailedTask, fetchConfigSummary } from "../../api.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -165,6 +184,31 @@ export function FailedTasksPage() {
   const navigate = useNavigate();
   const [state, setState] = useState<PageState>({ status: "loading" });
 
+  // Governance Recovery Actions v1 — flag-gated recovery UI (fail-closed:
+  // absent/false → no recovery entry, Console stays read-only).
+  const [recoveryEnabled, setRecoveryEnabled] = useState(false);
+  const [recoverTarget, setRecoverTarget] = useState<FailedTask | null>(null);
+  const [recoverLoading, setRecoverLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchConfigSummary()
+      .then((result) => {
+        if (cancelled) return;
+        // Fail-closed: only an explicitly enabled flag shows the action
+        if (result.success && result.data) {
+          const flag = result.data.features.find((f) => f.id === "failed_task_recovery_console");
+          setRecoveryEnabled(flag?.enabled === true);
+        }
+      })
+      .catch(() => {
+        // rc-9: flag probe failure keeps recovery hidden (fail-closed)
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const loadData = useCallback(async () => {
     setState({ status: "loading" });
     try {
@@ -241,6 +285,31 @@ export function FailedTasksPage() {
     navigate(`/report-problem?${params.toString()}`);
   };
 
+  // Owner-confirmed recovery (SPEC §6.3: explicit confirmation only — this
+  // handler runs exclusively from the dialog's action button, never on load).
+  const handleRecoverConfirmed = async () => {
+    if (!recoverTarget || recoverLoading) return;
+    setRecoverLoading(true);
+    try {
+      const result = await recoverFailedTask(recoverTarget.taskId);
+      if (result.success) {
+        toast.success(t("pages.failedTasks.recoverSuccess"));
+        setRecoverTarget(null);
+        await loadData();
+      } else {
+        // rc-9: server-provided reason + next action accompany the failure
+        const detail = result.nextAction
+          ? `${result.error} — ${result.nextAction}`
+          : result.error;
+        toast.error(`${t("pages.failedTasks.recoverFailed")}: ${detail}`);
+      }
+    } catch (err) {
+      toast.error(`${t("pages.failedTasks.recoverFailed")}: ${err instanceof Error ? err.message : "Network error"}`);
+    } finally {
+      setRecoverLoading(false);
+    }
+  };
+
   return (
     <PageShell>
       {/* Page header */}
@@ -299,10 +368,62 @@ export function FailedTasksPage() {
           <LoadedContent
             data={state.data}
             onCreateDraft={handleCreateDraft}
+            onRecover={recoveryEnabled ? (task) => setRecoverTarget(task) : undefined}
             t={t}
           />
         </div>
       )}
+
+      {/* Recovery confirmation dialog (SPEC §8) — opens only from the row's
+          explicit button click; nothing here triggers on page load. */}
+      <AlertDialog
+        open={recoverTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !recoverLoading) {
+            setRecoverTarget(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("pages.failedTasks.recoverConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-[13px] leading-relaxed">
+                <div>
+                  <span className="font-medium">{t("pages.failedTasks.recoverConfirmStatus")}:</span>{" "}
+                  <span className="font-mono">{recoverTarget?.status ?? "—"}</span>
+                </div>
+                <div>
+                  <span className="font-medium">{t("pages.failedTasks.recoverConfirmActionLabel")}:</span>{" "}
+                  {t("pages.failedTasks.recoverConfirmActionDesc")}
+                </div>
+                <div>
+                  <span className="font-medium">{t("pages.failedTasks.recoverConfirmImpactLabel")}:</span>{" "}
+                  {t("pages.failedTasks.recoverConfirmImpactDesc")}
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={recoverLoading}>
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={recoverLoading}
+              onClick={(event) => {
+                // Prevent Radix from auto-closing before the async POST
+                // resolves; handleRecoverConfirmed closes on success.
+                event.preventDefault();
+                void handleRecoverConfirmed();
+              }}
+            >
+              {recoverLoading
+                ? t("common.loading")
+                : t("pages.failedTasks.recoverConfirmButton")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageShell>
   );
 }
@@ -312,10 +433,12 @@ export function FailedTasksPage() {
 interface LoadedContentProps {
   data: FailedTasksData;
   onCreateDraft: (task: FailedTask) => void;
+  /** Present only when failed_task_recovery_console is enabled (undefined = hidden) */
+  onRecover?: (task: FailedTask) => void;
   t: (key: string) => string;
 }
 
-function LoadedContent({ data, onCreateDraft, t }: LoadedContentProps) {
+function LoadedContent({ data, onCreateDraft, onRecover, t }: LoadedContentProps) {
   const hasTasks = data.tasks.length > 0;
 
   // Empty state — surface nextAction from the API (rc-9: no silent fallback)
@@ -354,7 +477,7 @@ function LoadedContent({ data, onCreateDraft, t }: LoadedContentProps) {
                 </div>
               </CardHeader>
               <CardContent>
-                <TaskTable tasks={tasks} onCreateDraft={onCreateDraft} t={t} />
+                <TaskTable tasks={tasks} onCreateDraft={onCreateDraft} onRecover={onRecover} t={t} />
               </CardContent>
             </Card>
           );
@@ -381,10 +504,12 @@ function LoadedContent({ data, onCreateDraft, t }: LoadedContentProps) {
 interface TaskTableProps {
   tasks: FailedTask[];
   onCreateDraft: (task: FailedTask) => void;
+  /** Present only when failed_task_recovery_console is enabled (undefined = hidden) */
+  onRecover?: (task: FailedTask) => void;
   t: (key: string) => string;
 }
 
-function TaskTable({ tasks, onCreateDraft, t }: TaskTableProps) {
+function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
   return (
     <div className="space-y-2">
       {/* Column headers */}
@@ -418,6 +543,16 @@ function TaskTable({ tasks, onCreateDraft, t }: TaskTableProps) {
           <span className="font-mono text-ink-3 text-[12px]">
             {task.lastAttemptAt ? formatDate(task.lastAttemptAt) : "—"}
           </span>
+          {onRecover && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => onRecover(task)}
+              className="whitespace-nowrap"
+            >
+              {t("pages.failedTasks.recover")}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
