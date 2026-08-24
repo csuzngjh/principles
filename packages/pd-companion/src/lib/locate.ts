@@ -7,11 +7,35 @@
  */
 
 import * as path from 'path';
+import {
+  getInstallLayoutPaths,
+  resolveInstallLayout,
+  type InstallLayoutMode,
+} from '@principles/install-layout';
 
 /** Absolute path of the installed PD extension dir, or undefined if no home. */
 export function resolveExtensionDir(homeDir: string | undefined): string | undefined {
   if (homeDir === undefined || homeDir.trim() === '') return undefined;
   return path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple');
+}
+
+export function resolveInstalledRuntime(
+  options: {
+    homeDir: string | undefined;
+    manifest: unknown;
+    canonicalRuntimeExists: boolean;
+    legacyExtensionExists: boolean;
+  },
+): { root: string; mode: InstallLayoutMode } | undefined {
+  const { homeDir, manifest, canonicalRuntimeExists, legacyExtensionExists } = options;
+  if (homeDir === undefined || homeDir.trim() === '') return undefined;
+  const paths = getInstallLayoutPaths(homeDir);
+  const result = resolveInstallLayout({ homeDir, manifest, canonicalRuntimeExists, legacyExtensionExists });
+  if (result.mode === 'missing') return undefined;
+  return {
+    root: result.mode === 'canonical' ? paths.runtimeDir : paths.openClawExtensionDir,
+    mode: result.mode,
+  };
 }
 
 /** pd-cli entry inside the extension dir (mirrors installer's autoLaunchConsole). */

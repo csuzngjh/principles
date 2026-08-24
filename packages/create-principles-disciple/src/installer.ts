@@ -17,7 +17,12 @@ import {
   getConfigYamlPath,
   readEnabledChannelsFromConfigYaml,
   getOpenClawDir,
+  getPdDir,
+  getPdRuntimeDir,
+  getInstallManifestPath,
+  getPdRuntimeBackupsDir,
   getPluginExtDir,
+  getInstalledPluginDir,
   getPdBackupsDir,
   getInstalledPdCliDir,
   getInstalledBinDir,
@@ -103,6 +108,20 @@ const CONSOLE_AUTOLAUNCH_POLL_INTERVAL_MS = 500;
 
 // 允许的原生模块白名单
 const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
+
+// Shared components use ~/.pd/runtime. The plugin package is host-neutral for
+// Codex-only installs; OpenClaw/all still receive their adapter copy under
+// ~/.openclaw/extensions for host discovery.
+let activePluginDir: string | undefined;
+function installedPluginDir(): string {
+  return activePluginDir ?? getPluginExtDir();
+}
+
+function writeInstallManifest(host: HostTarget): void {
+  mkdirSync(getPdDir(), { recursive: true });
+  const hosts = host === 'all' ? ['codex', 'openclaw'] : [host];
+  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts }, null, 2) + '\n', 'utf8');
+}
 
 function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyncOptions {
   return {
@@ -230,6 +249,7 @@ function updateProgress(spinner: Ora | null, currentStep: number, message: strin
 interface BackupResult {
   type: 'no_existing' | 'backed_up';
   backupDir: string | null;
+  runtimeBackupDir?: string | null;
 }
 
 /**
@@ -280,31 +300,45 @@ export function migrateLegacyPdBackups(): void {
  */
 export function backupExistingInstall(): BackupResult {
   const extDir = getPluginExtDir();
-  if (!existsSync(extDir)) return { type: 'no_existing', backupDir: null };
+  const runtimeDir = getPdRuntimeDir();
+  const hasExt = existsSync(extDir);
+  const hasRuntime = existsSync(runtimeDir);
+  if (!hasExt && !hasRuntime) return { type: 'no_existing', backupDir: null };
 
   // The backup must live OUTSIDE the extensions dir (see getPdBackupsDir):
   // OpenClaw plugin discovery scans every extensions/ child directory and
   // would discover the backup as a second principles-disciple plugin.
-  const backupsDir = getPdBackupsDir();
-  const backupDir = path.join(backupsDir, `principles-disciple.backup.${Date.now()}`);
+  const backupsDir = hasExt ? getPdBackupsDir() : getPdRuntimeBackupsDir();
+  const timestamp = Date.now();
+  const backupDir = hasExt ? path.join(backupsDir, `principles-disciple.backup.${timestamp}`) : null;
+  const runtimeBackupDir = hasRuntime ? path.join(getPdRuntimeBackupsDir(), `runtime.backup.${timestamp}`) : null;
   try {
     mkdirSync(backupsDir, { recursive: true });
-    renameSync(extDir, backupDir);
-    logger.info(`Backed up existing install to ${backupDir}`);
-    return { type: 'backed_up', backupDir };
+    if (backupDir) renameSync(extDir, backupDir);
+    if (runtimeBackupDir) {
+      mkdirSync(getPdRuntimeBackupsDir(), { recursive: true });
+      renameSync(runtimeDir, runtimeBackupDir);
+    }
+    logger.info(`Backed up existing install to ${backupDir ?? runtimeBackupDir}`);
+    return { type: 'backed_up', backupDir, runtimeBackupDir };
   } catch (e) {
     throw new Error(`Could not backup existing install at ${extDir}: ${e instanceof Error ? e.message : String(e)}. Aborting to prevent data loss — resolve the lock or rename manually and re-run.`, { cause: e });
   }
 }
 
-function restoreBackup(backupDir: string | null): { restored: boolean; error?: string } {
-  if (!backupDir || !existsSync(backupDir)) return { restored: true };
+function restoreBackup(backupDir: string | null, runtimeBackupDir: string | null): { restored: boolean; error?: string } {
+  if ((!backupDir || !existsSync(backupDir)) && (!runtimeBackupDir || !existsSync(runtimeBackupDir))) return { restored: true };
   const extDir = getPluginExtDir();
+  const runtimeDir = getPdRuntimeDir();
   try {
-    if (existsSync(extDir)) {
+    if (backupDir && existsSync(extDir)) {
       rmSync(extDir, { recursive: true, force: true });
     }
-    renameSync(backupDir, extDir);
+    if (backupDir && existsSync(backupDir)) renameSync(backupDir, extDir);
+    if (runtimeBackupDir && existsSync(runtimeBackupDir)) {
+      if (existsSync(runtimeDir)) rmSync(runtimeDir, { recursive: true, force: true });
+      renameSync(runtimeBackupDir, runtimeDir);
+    }
     logger.info('Restored previous install from backup');
     return { restored: true };
   } catch (e) {
@@ -314,12 +348,14 @@ function restoreBackup(backupDir: string | null): { restored: boolean; error?: s
   }
 }
 
-function cleanupBackup(backupDir: string | null): void {
-  if (!backupDir || !existsSync(backupDir)) return;
-  try {
-    rmSync(backupDir, { recursive: true, force: true });
-  } catch {
-    // non-fatal
+function cleanupBackup(backupDir: string | null, runtimeBackupDir: string | null): void {
+  for (const backup of [backupDir, runtimeBackupDir]) {
+    if (!backup || !existsSync(backup)) continue;
+    try {
+      rmSync(backup, { recursive: true, force: true });
+    } catch {
+      // non-fatal
+    }
   }
 }
 
@@ -673,7 +709,7 @@ export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
 }
 
 export async function installPluginToStaging(pluginDir: string, language: SkillLanguage): Promise<void> {
-  const extDir = getPluginExtDir();
+  const extDir = installedPluginDir();
   const builtPluginDir = path.join(pluginDir, 'plugin');
 
   await fse.ensureDir(extDir);
@@ -696,7 +732,7 @@ export async function installPluginToStaging(pluginDir: string, language: SkillL
 // directly — the HostInstaller interface keeps install/uninstall host-agnostic.
 
 async function installPluginDependencies(): Promise<void> {
-  const extDir = getPluginExtDir();
+  const extDir = installedPluginDir();
   const packageJsonPath = path.join(extDir, 'package.json');
   const nodeModulesPath = path.join(extDir, 'node_modules');
 
@@ -875,7 +911,7 @@ function syncPdCli(pluginDir: string): boolean {
   // Without this, `node dist/index.js --version` fails because static imports
   // from @principles/core/runtime-v2 cannot be resolved.
   const coreLinkDir = path.join(installedPdCliDir, 'node_modules', '@principles');
-  const coreLinkTarget = path.join(getPluginExtDir(), 'core');
+  const coreLinkTarget = path.join(getPdRuntimeDir(), 'core');
   mkdirSync(coreLinkDir, { recursive: true });
   const coreLinkPath = path.join(coreLinkDir, 'core');
   if (!existsSync(coreLinkPath)) {
@@ -895,7 +931,7 @@ function syncPdCli(pluginDir: string): boolean {
   // host-runtime's own better-sqlite3 / js-yaml / @principles/core dependencies
   // resolve through the plugin's <ext>/node_modules/ (shared via Node's upward
   // module resolution), so no separate npm install is needed.
-  const hostRuntimeLinkTarget = path.join(getPluginExtDir(), 'host-runtime');
+  const hostRuntimeLinkTarget = path.join(getPdRuntimeDir(), 'host-runtime');
   const hostRuntimeLinkPath = path.join(coreLinkDir, 'host-runtime');
   if (!existsSync(hostRuntimeLinkPath)) {
     if (isWindows()) {
@@ -914,7 +950,7 @@ function syncPdCli(pluginDir: string): boolean {
   // Without this, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
   // because runtime-init.ts statically imports initTrajectorySchema/initWorkflowSchema.
   const pdLinkDir = path.join(installedPdCliDir, 'node_modules');
-  const pdLinkTarget = getPluginExtDir();
+  const pdLinkTarget = installedPluginDir();
   mkdirSync(pdLinkDir, { recursive: true });
   const pdLinkPath = path.join(pdLinkDir, 'principles-disciple');
   if (!existsSync(pdLinkPath)) {
@@ -1015,19 +1051,19 @@ function installConsole(consoleDir: string): void {
   mkdirSync(path.dirname(pluginLinkPath), { recursive: true });
   if (!existsSync(pluginLinkPath)) {
     if (isWindows()) {
-      symlinkSync(getPluginExtDir(), pluginLinkPath, 'junction');
+      symlinkSync(installedPluginDir(), pluginLinkPath, 'junction');
     } else {
-      symlinkSync('../../', pluginLinkPath, 'dir');
+      symlinkSync(path.relative(path.dirname(pluginLinkPath), installedPluginDir()), pluginLinkPath, 'dir');
     }
   }
 }
 
 function getInstalledCoreDir(): string {
-  return path.join(getPluginExtDir(), 'core');
+  return path.join(getPdRuntimeDir(), 'core');
 }
 
 function getInstalledHostRuntimeDir(): string {
-  return path.join(getPluginExtDir(), 'host-runtime');
+  return path.join(getPdRuntimeDir(), 'host-runtime');
 }
 
 function installBundledCore(pluginDir: string): void {
@@ -1588,6 +1624,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   // because jsonMode always implies non-interactive.
   const quiet = mode.quiet === true;
   const nonInteractive = mode.nonInteractive ?? quiet;
+  activePluginDir = options.host === 'codex' ? getInstalledPluginDir() : getPluginExtDir();
   // Gateway lock pre-flight: a running gateway holds native-module file handles
   // that make the backup rename fail with EPERM. Decide stop/abort/proceed
   // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).
@@ -1626,6 +1663,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
   const spinner = quiet ? null : ora('Installing...').start();
   let backupDir: string | null = null;
+  let runtimeBackupDir: string | null = null;
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;
@@ -1661,8 +1699,9 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
     if (spinner) updateProgress(spinner, stepIndex, 'Backing up existing install...');
     migrateLegacyPdBackups();
-    const { backupDir: backupDirFromResult } = backupExistingInstall();
+    const { backupDir: backupDirFromResult, runtimeBackupDir: runtimeBackupDirFromResult } = backupExistingInstall();
     backupDir = backupDirFromResult;
+    runtimeBackupDir = runtimeBackupDirFromResult ?? null;
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/core...');
@@ -1835,7 +1874,11 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       }
     }
 
-    cleanupBackup(backupDir);
+    if (hostFailures.length === 0) {
+      writeInstallManifest(options.host);
+    }
+
+    cleanupBackup(backupDir, runtimeBackupDir);
     if (spinner) {
       if (hostFailures.length > 0) {
         spinner.warn('Install complete with host warnings');
@@ -1896,7 +1939,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
     killConsoleChild();
 
-    const restoreResult = restoreBackup(backupDir);
+    const restoreResult = restoreBackup(backupDir, runtimeBackupDir);
 
     const errorMsg = error instanceof Error ? error.message : String(error);
     // ERR-046 / rc-9: never claim a restore that didn't happen. When backupDir
@@ -1907,15 +1950,16 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     const isLockError = /EPERM|EBUSY|EACCES|operation not permitted/i.test(errorMsg);
     const extDir = getPluginExtDir();
     // EP-11: all operator-visible failure/rollback text goes through t().
-    const rollbackSuffix = !backupDir
+    const hasBackup = Boolean(backupDir || runtimeBackupDir);
+    const rollbackSuffix = !hasBackup
       ? t('rollback_no_changes')
       : restoreResult.restored
         ? t('rollback_restored')
         : t('rollback_failed')
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
-          .replace('{backupDir}', backupDir);
-    const nextAction = !backupDir
+          .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '');
+    const nextAction = !hasBackup
       ? (isLockError
         ? t('next_no_changes_lock')
         : t('next_no_changes_other'))
@@ -1923,9 +1967,9 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
         ? t('next_restored')
         : t('next_restore_failed')
           .replace('{extDir}', extDir)
-          .replace('{backupDir}', backupDir)
+          .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '')
           .replace('{errorMsg}', errorMsg);
-    const reason = !backupDir
+    const reason = !hasBackup
       ? (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)
       : restoreResult.restored
         ? errorMsg

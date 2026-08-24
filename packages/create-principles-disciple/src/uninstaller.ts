@@ -15,14 +15,15 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
-import { getGlobalShimPaths, getInstalledBinDir, isWindows } from './mvp-config.js';
+import { getGlobalShimPaths, getInstalledBinDir, getPdRuntimeDir, getInstallManifestPath, isWindows } from './mvp-config.js';
+import { parseInstallManifest } from '@principles/install-layout';
 import { setLanguage, t, getLanguage } from './i18n.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostUninstallContext, HostUninstallResult } from '@principles/core/host';
@@ -346,6 +347,41 @@ export async function uninstall(
       } catch (err) {
         // rc-9: never silently swallow — surface the failure.
         logger.warn(`Host "${installer.hostId}" cleanup threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Shared runtime is removed only after the final host is uninstalled.
+    // A malformed/missing manifest is treated conservatively: keep runtime so
+    // an existing installation remains recoverable (rc-3/rc-9).
+    let removeSharedRuntime = options.host === 'all';
+    if (options.host !== 'all') {
+      try {
+        const parsed = parseInstallManifest(JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown);
+        const hosts = parsed.manifest?.hosts ?? [];
+        removeSharedRuntime = options.host === 'codex'
+          ? !hosts.includes('openclaw')
+          : !hosts.includes('codex');
+      } catch {
+        removeSharedRuntime = false;
+      }
+    }
+    if (removeSharedRuntime && existsSync(getPdRuntimeDir())) {
+      try {
+        await removeWithRetry(getPdRuntimeDir(), 'dir');
+        result.removedDirs.push(getPdRuntimeDir());
+      } catch (err) {
+        deleteErrors.push({ name: 'PD shared runtime', error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (!removeSharedRuntime && options.host !== 'all') {
+      try {
+        const parsed = parseInstallManifest(JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown);
+        if (parsed.manifest) {
+          const hosts = parsed.manifest.hosts.filter((host) => host !== options.host);
+          writeFileSync(getInstallManifestPath(), JSON.stringify({ ...parsed.manifest, hosts }, null, 2) + '\n', 'utf8');
+        }
+      } catch {
+        // Preserve the previous manifest when it cannot be validated.
       }
     }
 

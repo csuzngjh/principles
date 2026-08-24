@@ -1187,7 +1187,7 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     const hostInstallersIndex = content.indexOf('await runHostInstallers(');
-    const cleanupIndex = content.indexOf('cleanupBackup(backupDir)');
+    const cleanupIndex = content.indexOf('cleanupBackup(backupDir, runtimeBackupDir)');
     expect(cleanupIndex).toBeGreaterThan(hostInstallersIndex);
   });
 
@@ -2104,7 +2104,7 @@ describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug
     const pdLinkTargetIdx = content.indexOf('pdLinkTarget');
     expect(pdLinkTargetIdx).toBeGreaterThan(0);
     const targetSection = content.substring(pdLinkTargetIdx, pdLinkTargetIdx + 200);
-    expect(targetSection).toContain('getPluginExtDir()');
+    expect(targetSection).toContain('installedPluginDir()');
   });
 
   it('syncPdCli creates symlink on Windows using junction', () => {
@@ -2144,7 +2144,7 @@ describe('PRI-566: principles-disciple resolution in installed console', () => {
     const end = content.indexOf('function getInstalledCoreDir', start);
     const section = content.substring(start, end);
     expect(section).toContain("path.join(consoleDest, 'node_modules', 'principles-disciple')");
-    expect(section).toContain('getPluginExtDir()');
+    expect(section).toContain('installedPluginDir()');
     expect(section).toContain('symlinkSync');
   });
 });
