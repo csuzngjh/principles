@@ -174,4 +174,31 @@ describe('PRI-530/PRI-531 gate-hook integration (real handleBeforeToolCall path)
       .get() as { n: number }).n;
     expect(count).toBe(0);
   });
+
+  it('PRI-573: block without ruleId/principleId skips the effect row with an observable rc-9 warn', () => {
+    writeConfig({ blockCopy: false, ledger: true });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'block',
+      matched: true,
+      reason: 'attribution-less block',
+      // no ruleId, no principleId — RuleHostResult leaves both optional
+    });
+
+    const warn = vi.fn();
+    const result = handleBeforeToolCall(
+      { toolName: 'bash', params: { command: 'rm -rf build/' } },
+      { workspaceDir, sessionId: 'sess-integ', logger: { warn, error: vi.fn(), info: vi.fn() } },
+    ) as PluginHookBeforeToolCallResult;
+
+    // The block itself still stands (ledger never gates enforcement)…
+    expect(result.block).toBe(true);
+    // …but the skipped effect row must be observable, not silent (rc-9).
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Receipt ledger row skipped (rule_blocked)'),
+    );
+    const count = (conn.getDb()
+      .prepare('SELECT COUNT(*) AS n FROM principle_applications')
+      .get() as { n: number }).n;
+    expect(count).toBe(0);
+  });
 });
