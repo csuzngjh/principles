@@ -765,5 +765,108 @@ describe('handleFailedTasksRoute', () => {
 
       expect(res.statusCode).toBe(405);
     });
+
+    it('400 bad_request when reason exceeds 2000 characters', async () => {
+      const req = createMockPostRequest('/api/v1/failed-tasks/x/recover', JSON.stringify({ reason: 'x'.repeat(2001) }));
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/x/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(errorEnvelope(res).message).toContain('reason must be at most 2000 characters');
+    });
+
+    it('405 for a POST with no task id (recover regex requires an id segment)', async () => {
+      // The recover matcher /^\/([^/]+)\/recover$/ requires a task id; an
+      // empty-id request falls through to the detail route → 405.
+      const req = createMockPostRequest('/api/v1/failed-tasks//recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(405);
+    });
+
+    it('404 not_found when the workspace has no state.db', async () => {
+      const emptyWorkspace = path.join(tmpDir, 'empty-workspace');
+      fs.mkdirSync(path.join(emptyWorkspace, '.pd'), { recursive: true });
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir: emptyWorkspace,
+        subPath: '/some-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(errorEnvelope(res).error).toBe('not_found');
+    });
+
+    it('400 bad_request when the request body stream errors', async () => {
+      const req = new EventEmitter() as unknown as IncomingMessage;
+      req.method = 'POST';
+      req.url = '/api/v1/failed-tasks/x/recover';
+      setImmediate(() => req.emit('error', new Error('stream broke')));
+
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/x/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(errorEnvelope(res).message).toContain('stream broke');
+    });
+
+    it('500 failed_task_recovery_error when the recovery service fails unexpectedly', async () => {
+      const corruptWorkspace = path.join(tmpDir, 'corrupt-workspace');
+      fs.mkdirSync(path.join(corruptWorkspace, '.pd'), { recursive: true });
+      // state.db exists but is not a valid SQLite database → open/query throws
+      fs.writeFileSync(path.join(corruptWorkspace, '.pd', 'state.db'), 'this is not a sqlite database');
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/x/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir: corruptWorkspace,
+        subPath: '/x/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(errorEnvelope(res).error).toBe('failed_task_recovery_error');
+    });
+
+    it('reports success even when the audit append fails (best-effort, rc-9)', async () => {
+      await seedTask({ taskId: 'failed-audit-err', status: 'failed' });
+      // `.state` exists as a FILE → appendRecoveryAction fails (ENOTDIR)
+      fs.writeFileSync(path.join(workspaceDir, '.state'), 'blocking-file');
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const req = createMockPostRequest('/api/v1/failed-tasks/failed-audit-err/recover', '{}');
+        const res = createMockResponse();
+        await handleFailedTasksRoute(req, res, {
+          workspaceDir,
+          subPath: '/failed-audit-err/recover',
+          featureFlags: RECOVERY_FLAGS,
+        });
+
+        expect(res.statusCode).toBe(200);
+        const body = okEnvelope<{ taskId: string; result: string }>(res);
+        expect(body.taskId).toBe('failed-audit-err');
+        expect(body.result).toBe('recovered');
+        expect(warnSpy).toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
   });
 });
