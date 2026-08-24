@@ -12,6 +12,7 @@ import {
   RuleCodeOwnerDecisionService,
   collectOpenClawPromotionChecks,
   summarizeRuleCodeShadowEvents,
+  appendGovernanceAction,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
 import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
@@ -534,11 +535,29 @@ export class ActivationsConsoleModel {
         newDecisionId: () => `decision-${randomUUID()}`,
         now: () => new Date().toISOString(),
       });
-      return await service.promote({
+      const result = await service.promote({
         activationId, expectedArtifactId: expected.artifactId, expectedArtifactDigest: expected.artifactDigest,
         expectedControlVersion: expected.controlVersion, idempotencyKey: input.idempotencyKey,
         reasonCode: input.reasonCode, note: input.note, confirmed: expected.confirmed,
       }, input.actor);
+
+      // PRI-566: audit the Owner Live Decision after the store commit landed.
+      if (result.ok && result.decision === 'promoted') {
+        try {
+          appendGovernanceAction(this.workspaceDir, {
+            action: 'promote',
+            activationId,
+            operator: 'console',
+            reason: input.note ?? input.reasonCode ?? null,
+          });
+        } catch (auditErr) {
+          // Best-effort — never silent (rc-9): surface on server stderr without
+          // failing an already-committed promotion.
+          console.error(`[governance-audit] Failed to append promote audit record: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+        }
+      }
+
+      return result;
     } finally { try { conn.close(); } catch { /* best effort */ } }
   }
 
@@ -578,6 +597,18 @@ export class ActivationsConsoleModel {
         if (!deactivated) {
           return { ok: false, reason: `Activation '${activationId}' not found or already inactive`, nextAction: 'Refresh the activation list and verify the activation ID is correct.' };
         }
+
+        // PRI-566: audit the governance mutation after it has committed (rc-9).
+        try {
+          appendGovernanceAction(this.workspaceDir, {
+            action: 'deactivate',
+            activationId,
+            operator: 'console',
+          });
+        } catch (auditErr) {
+          console.error(`[governance-audit] Failed to append deactivate audit record: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+        }
+
         return { ok: true };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

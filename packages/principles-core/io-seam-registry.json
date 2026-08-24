@@ -64,11 +64,12 @@
     },
     {
       "name": "remediation-review",
-      "description": "Internalization integrity remediation (reads state.db, writes corrective task records) and append-only owner-action audit logs (pruning reviews at .state/pruning_reviews.jsonl; governance recovery actions at .state/recovery_actions.jsonl). Both own file/DB writes that core runners, CLI commands, and console recovery endpoints trigger directly.",
+      "description": "Internalization integrity remediation (reads state.db, writes corrective task records) and append-only owner-action audit logs (pruning reviews at .state/pruning_reviews.jsonl; governance recovery actions at .state/recovery_actions.jsonl; rulecode lifecycle actions at .state/governance_actions.jsonl per PRI-566). All own file/DB writes that core runners, CLI commands, and console recovery endpoints trigger directly.",
       "files": [
         "runtime-v2/internalization-integrity-remediation.ts",
         "runtime-v2/pruning-review-log.ts",
-        "runtime-v2/recovery-actions-log.ts"
+        "runtime-v2/recovery-actions-log.ts",
+        "runtime-v2/governance-actions-log.ts"
       ]
     },
     {

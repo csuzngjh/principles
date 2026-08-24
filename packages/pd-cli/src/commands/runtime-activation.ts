@@ -23,6 +23,7 @@ import {
   SqliteActivationSafetyStore,
   collectOpenClawPromotionChecks,
   summarizeRuleCodeShadowEvents,
+  appendGovernanceAction,
 } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
@@ -276,6 +277,7 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
 interface ActivationDeactivateOptions {
   workspace?: string;
   activationId?: string;
+  reason?: string;
   json?: boolean;
 }
 
@@ -316,6 +318,23 @@ export async function handleRuntimeActivationDeactivate(opts: ActivationDeactiva
     // Idempotent deactivate: returns false if already deactivated or not found.
     // Both cases are safe to call repeatedly (Contract E: rollback must be idempotent).
     const success = await activationStateStore.deactivateActivation(opts.activationId, deactivatedAt);
+
+    // PRI-566: audit the governance mutation after it has committed. The store
+    // update is the fact; this record is its trace (rc-9: never silent).
+    if (success) {
+      try {
+        appendGovernanceAction(workspaceDir, {
+          action: 'deactivate',
+          activationId: opts.activationId,
+          operator: 'cli',
+          reason: opts.reason ?? null,
+        });
+      } catch (auditErr: unknown) {
+        // Best-effort by design — but never silent: warn on stderr without
+        // breaking --json stdout contract (EP-04 cli-1) or the exit code.
+        console.error(`[governance-audit] Failed to append deactivate audit record: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+      }
+    }
 
     const result: DeactivateResult = success
       ? { ok: true, activationId: opts.activationId, deactivatedAt }
@@ -525,6 +544,22 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
       return;
     }
     const output: ActivationPromoteResult = { ok: true, decision: 'promoted', activationId: result.activationId, promotedAt: result.promotedAt };
+
+    // PRI-566: audit the Owner Live Decision after commitPromotion has landed.
+    if (result.decision === 'promoted') {
+      try {
+        appendGovernanceAction(workspaceDir, {
+          action: 'promote',
+          activationId: result.activationId,
+          operator: 'cli',
+          reason: opts.note ?? null,
+        });
+      } catch (auditErr: unknown) {
+        // Best-effort — never silent, never breaking --json stdout (EP-04 cli-1).
+        console.error(`[governance-audit] Failed to append promote audit record: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+      }
+    }
+
     if (opts.json) console.log(JSON.stringify(output));
     else console.log(`Promoted live: ${result.activationId}`);
   } catch (err: unknown) {
@@ -1380,12 +1415,14 @@ export function registerRuntimeActivationDeactivateCommand(parent: Command): Com
     .command('deactivate')
     .description('Deactivate an activation by activation ID')
     .requiredOption('--activation-id <id>', 'Activation ID to deactivate')
+    .option('--reason <text>', 'Optional owner reason recorded in the governance audit log (PRI-566)')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       await handleRuntimeActivationDeactivate({
         activationId: opts.activationId,
         workspace: opts.workspace,
+        reason: opts.reason,
         json: opts.json,
       });
     });

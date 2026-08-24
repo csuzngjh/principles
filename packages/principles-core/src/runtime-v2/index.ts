@@ -354,6 +354,15 @@ export type {
   AppendRecoveryActionInput,
 } from './recovery-actions-log.js';
 
+// Rulecode lifecycle governance audit log (PRI-566)
+export { appendGovernanceAction, listGovernanceActions } from './governance-actions-log.js';
+export type {
+  GovernanceActionRecord,
+  GovernanceActionKind,
+  GovernanceOperator,
+  AppendGovernanceActionInput,
+} from './governance-actions-log.js';
+
 // Candidate audit (PRI-28)
 export { auditCandidateLedgerConsistency } from './candidate-audit.js';
 export type { CandidateAuditResult } from './candidate-audit.js';
