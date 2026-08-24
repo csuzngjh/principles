@@ -13,7 +13,7 @@
  * - ERR-001/005: No `as` bypasses on untrusted data
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -312,6 +312,82 @@ describe('ActivationsConsoleModel — deactivateActivation', () => {
 });
 
 describe('ActivationsConsoleModel — governance action event coverage', () => {
+  it('audits an Owner promotion through the production commit callback', async () => {
+    const events: Parameters<GovernanceAuditWriter>[1][] = [];
+    const isolatedModel = new ActivationsConsoleModel(workspaceDir, (_stateDir, data) => { events.push(data); });
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    const now = '2026-08-24T08:00:00.000Z';
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-promote', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-promote', 'rule', 'task-promote', 'rule-promote', '[]', 'validated', ?, ?, ?)`)
+      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-promote', 'idem-promote', 'artifact-promote', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-promote', ?, NULL)`).run(now);
+    db.prepare("INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-promote', 'eligible', 1, ?)").run(now);
+    conn.close();
+
+    const review = await isolatedModel.getOwnerReview('act-promote', true);
+    vi.spyOn(isolatedModel, 'getOwnerReview').mockResolvedValue({
+      ...review,
+      readiness: { ...review.readiness, status: 'ready', failedChecks: [] },
+    });
+    const result = await isolatedModel.promoteRuleCode('act-promote', {
+      artifactId: review.artifact.artifactId,
+      artifactDigest: review.artifact.digest,
+      controlVersion: review.controlState?.version ?? 1,
+      confirmed: true,
+    }, {
+      actor: {
+        principal: { kind: 'configured_owner', ownerId: 'owner-1' },
+        authentication: { method: 'console_token', credentialId: 'credential-1' },
+      },
+      idempotencyKey: 'decision-promote',
+      reasonCode: 'owner_accepts_limited_evidence',
+      note: 'Reviewed limited evidence.',
+    });
+
+    if (!result.ok) throw new Error(JSON.stringify(result));
+    expect(result).toMatchObject({ ok: true, decision: 'promoted', activationId: 'act-promote' });
+    expect(events).toEqual([{
+      action: 'promote', activationId: 'act-promote', actor: 'owner',
+      reasonCode: 'owner_accepts_limited_evidence', outcome: 'authorized',
+    }]);
+    isolatedModel.dispose();
+  });
+
+  it('audits an Owner emergency deactivation before changing the activation', async () => {
+    const events: Parameters<GovernanceAuditWriter>[1][] = [];
+    const isolatedModel = new ActivationsConsoleModel(workspaceDir, (_stateDir, data) => { events.push(data); });
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    const now = '2026-08-24T08:00:00.000Z';
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-emergency', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-emergency', 'rule', 'task-emergency', 'rule-emergency', '[]', 'validated', ?, ?, ?)`)
+      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-emergency', 'idem-emergency', 'artifact-emergency', 'code_tool_hook', 'code_tool_hook_live_activate', 'impl://rule-emergency', ?, NULL)`).run(now);
+    db.prepare("INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-emergency', 'eligible', 1, ?)").run(now);
+    conn.close();
+
+    const result = await isolatedModel.deactivateRuleCode('act-emergency', 'emergency_deactivate', {
+      actor: {
+        principal: { kind: 'configured_owner', ownerId: 'owner-1' },
+        authentication: { method: 'console_token', credentialId: 'credential-1' },
+      },
+      idempotencyKey: 'decision-emergency',
+      reasonCode: 'incident_containment',
+    });
+
+    expect(result.activationId).toBe('act-emergency');
+    expect(events).toEqual([{
+      action: 'deactivate', activationId: 'act-emergency', actor: 'owner',
+      reasonCode: 'incident_containment', outcome: 'authorized',
+    }]);
+    isolatedModel.dispose();
+  });
+
   it('audits global pause with owner and reasonCode before mutating control state', async () => {
     const events: Parameters<GovernanceAuditWriter>[1][] = [];
     const auditWriter: GovernanceAuditWriter = (_stateDir, data) => { events.push(data); };
