@@ -74,6 +74,14 @@ insertPiArtifact.run(
   'artifact-prompt-bdd', 'principle', 'task-diag-bdd', 'p-002',
   '[]', 'validated', JSON.stringify({ principleId: 'p-002', title: 'BDD 审批隔离原则' }), now, now,
 );
+// PRI-586: isolated artifact+approval pair for governance-experience.spec.ts
+// (nothing else consumes it, so the spec is deterministic in a full serial run).
+// pi_artifacts has UNIQUE(source_task_id, artifact_kind), so it needs its own
+// source task id.
+insertPiArtifact.run(
+  'artifact-experience-1', 'principle', 'task-diag-exp', 'p-002',
+  '[]', 'validated', JSON.stringify({ principleId: 'p-002', title: '治理体验快照验证原则' }), now, now,
+);
 insertPiArtifact.run(
   'artifact-hook-1', 'principle', 'task-diag-2', 'p-001',
   '[]', 'validated', JSON.stringify({ principleId: 'p-001', title: '错误后必须分析根因' }), now, now,
@@ -225,6 +233,17 @@ stateDb.prepare(`
 `).run(
   'apr-prompt-1', 'artifact-prompt-1', 'prompt', 'low', 'pending', 0.85,
   eightDaysAgo, '将"配置变更需确认"原则注入 prompt', 'Owner 审批：新增 prompt 指令',
+);
+// PRI-586: isolated approval for governance-experience.spec.ts (prompt channel,
+// valid artifact — approving it activates cleanly like apr-prompt-1).
+stateDb.prepare(`
+  INSERT INTO approvals (
+    approval_id, artifact_id, channel, risk_level, status, confidence,
+    requested_at, summary, trigger_reason
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`).run(
+  'apr-experience-1', 'artifact-experience-1', 'prompt', 'low', 'pending', 0.85,
+  eightDaysAgo, '治理体验快照用户流程验证', 'Owner 审批：治理体验专用记录',
 );
 stateDb.prepare(`
   INSERT INTO approvals (
@@ -430,10 +449,19 @@ console.log('[e2e-seed] principle_training_state.json written: 1 principle (p-00
 const configPath = path.join(stateDir, 'config.yaml');
 const minimalConfig = {
   version: 1,
+  workspace: {
+    // PRI-587: environment classification exercised by governance-experience.spec.ts
+    default: workspaceDir,
+    environment: 'test',
+  },
   features: {
     intent_engineering: { category: 'quiet', enabled: false },
     rulecode_owner_live_decision: { category: 'core', enabled: ownerAuthEnabled },
     rulecode_safety_controls: { category: 'core', enabled: true },
+    // PRI-584~587: governance experience snapshot ON for e2e — existing specs
+    // assert API contracts and approve buttons (both preserved in experience
+    // mode), so the whole suite now also covers the new Focus path.
+    governance_experience_v1: { category: 'quiet', enabled: true },
   },
   runtimeProfiles: {
     'openclaw.default': { type: 'openclaw', source: 'default' },

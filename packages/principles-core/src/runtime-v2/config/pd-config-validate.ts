@@ -24,6 +24,8 @@ import {
   type UiConfig,
   type DiagnosticsMode,
   type WorkspaceConfig,
+  type WorkspaceEnvironment,
+  WORKSPACE_ENVIRONMENTS,
   type ProfileConfig,
   type ContextInjectionConfig,
   type ProjectFocusMode,
@@ -434,6 +436,10 @@ function isAbsolutePath(p: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\') || p.startsWith('/');
 }
 
+function isWorkspaceEnvironment(value: string): value is WorkspaceEnvironment {
+  return value === 'production' || value === 'development' || value === 'demo' || value === 'test';
+}
+
 function validateWorkspaceConfig(
   raw: unknown,
   path: string,
@@ -460,8 +466,20 @@ function validateWorkspaceConfig(
     errors.push(err(`${path}.default`, `workspace.default must be an absolute path, got "${defaultRaw}"`, 'Use an absolute path like "D:\\.openclaw\\workspace" or "/home/user/.openclaw/workspace"'));
   }
 
+  // PRI-587: optional workspace environment classification. Absent is legal
+  // (means unknown); a present value must be one of the legal enum members.
+  const environmentRaw = readOwn(raw, 'environment');
+  let environment: WorkspaceConfig['environment'];
+  if (environmentRaw !== undefined) {
+    if (isString(environmentRaw) && isWorkspaceEnvironment(environmentRaw)) {
+      environment = environmentRaw;
+    } else {
+      errors.push(err(`${path}.environment`, `workspace.environment must be one of ${WORKSPACE_ENVIRONMENTS.join('|')}, got ${safePreview(environmentRaw)}`, `Set workspace.environment to one of ${WORKSPACE_ENVIRONMENTS.join(', ')}, or remove the key to leave the environment unknown`));
+    }
+  }
+
   // Reject unknown keys in workspace section
-  const knownWorkspaceKeys = new Set(['default']);
+  const knownWorkspaceKeys = new Set(['default', 'environment']);
   for (const key of Object.keys(raw)) {
     if (DANGEROUS_KEYS.has(key)) continue;
     if (!knownWorkspaceKeys.has(key)) {
@@ -475,7 +493,7 @@ function validateWorkspaceConfig(
 
   return {
     ok: true,
-    value: { default: defaultRaw as string },
+    value: { default: defaultRaw as string, ...(environment !== undefined ? { environment } : {}) },
   };
 }
 

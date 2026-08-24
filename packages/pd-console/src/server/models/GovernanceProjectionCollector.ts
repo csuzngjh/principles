@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import {
   GovernanceFactsSchema,
@@ -21,7 +22,7 @@ import type {
   TimelineEvent,
 } from '@principles/core/runtime-v2';
 
-const GOVERNANCE_TASK_KINDS = new Set([
+export const GOVERNANCE_TASK_KINDS = new Set([
   'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer',
 ]);
 const GOVERNANCE_TASK_STATUSES = new Set([
@@ -66,7 +67,7 @@ export class GovernanceProjectionCollectionError extends Error {
   }
 }
 
-interface ValidTaskRow {
+export interface ValidTaskRow {
   taskId: string;
   taskKind: TaskFact['taskKind'];
   status: TaskFact['status'];
@@ -90,6 +91,19 @@ interface ValidArtifactRow {
   lineageArtifactIds: string[];
 }
 
+/**
+ * Raw rows for the four tables the projection reads. Populated once per
+ * workspace by `readTables` and grouped per principle in memory by
+ * `buildFacts` — the batch experience collector (PRI-585) reuses the same
+ * rows so a workspace snapshot costs 4 queries total, not 4 per principle.
+ */
+export interface GovernanceProjectionTables {
+  artifactRows: unknown[];
+  taskRows: unknown[];
+  approvalRows: unknown[];
+  activationRows: unknown[];
+}
+
 export class GovernanceProjectionCollector {
   constructor(private readonly workspaceDir: string) {}
 
@@ -102,24 +116,67 @@ export class GovernanceProjectionCollector {
     const principle = this.readPrinciple(principleId, collectionIssues);
     const dbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(dbPath)) {
-      collectionIssues.push(issue({ source: 'lineage', reasonCode: 'source_unavailable', nextActionCode: 'initialize_runtime_state' }));
-      return GovernanceProjectionCollector.finish({ principleId, asOf, principle, collectionIssues });
+      return GovernanceProjectionCollector.factsForUnavailableSource({ principleId, asOf, principle, collectionIssues });
     }
 
-    const connection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
-      const db = connection.getDb();
-      const artifactIds: string[] = [];
-      const rootTaskIds: string[] = [];
-      const sourceRefs: SourceRef[] = [{ type: 'principle', id: principleId }];
-      const artifactRows = db.prepare(`
-        SELECT artifact_id, source_task_id, source_principle_id, lineage_artifact_ids, updated_at
-        FROM pi_artifacts ORDER BY artifact_id ASC
-      `).all();
+      const tables = GovernanceProjectionCollector.readTables(this.workspaceDir);
+      return GovernanceProjectionCollector.buildFacts({ principleId, asOf, principle, tables, collectionIssues });
+    } catch (error: unknown) {
+      if (error instanceof GovernanceProjectionCollectionError) throw error;
+      throw new GovernanceProjectionCollectionError('governance_projection_error', 'inspect_runtime_state');
+    }
+  }
 
-      const validArtifacts = new Map<string, ValidArtifactRow>();
+  /** Degraded facts shape used when state.db is unavailable (shared by single + batch collectors). */
+  static factsForUnavailableSource(input: {
+    principleId: string;
+    asOf: string;
+    principle: GovernanceFacts['principle'];
+    collectionIssues: DataQualityIssue[];
+  }): GovernanceFacts {
+    const { principleId, asOf, principle, collectionIssues } = input;
+    collectionIssues.push(issue({ source: 'lineage', reasonCode: 'source_unavailable', nextActionCode: 'initialize_runtime_state' }));
+    return GovernanceProjectionCollector.finish({ principleId, asOf, principle, collectionIssues });
+  }
 
-      for (const row of artifactRows) {
+  /** Reads the four projection tables once. Closes its own connection unless one is injected (caller then owns closing). */
+  static readTables(workspaceDir: string, injected?: { getDb(): Database.Database }): GovernanceProjectionTables {
+    const own = injected === undefined ? new SqliteConnection({ workspaceDir, readonly: true }) : null;
+    try {
+      const db = (injected ?? own)?.getDb();
+      if (db === undefined) throw new Error('readTables: no database handle');
+      return {
+        artifactRows: db.prepare(`
+          SELECT artifact_id, source_task_id, source_principle_id, lineage_artifact_ids, updated_at
+          FROM pi_artifacts ORDER BY artifact_id ASC
+        `).all(),
+        taskRows: db.prepare('SELECT * FROM tasks ORDER BY task_id ASC').all(),
+        approvalRows: db.prepare('SELECT * FROM approvals ORDER BY approval_id ASC').all(),
+        activationRows: db.prepare('SELECT * FROM activations ORDER BY activated_at ASC, activation_id ASC').all(),
+      };
+    } finally {
+      own?.close();
+    }
+  }
+
+  /** Groups pre-fetched raw rows into GovernanceFacts for ONE principle. Pure in-memory. */
+  static buildFacts(input: {
+    principleId: string;
+    asOf: string;
+    principle: GovernanceFacts['principle'];
+    tables: GovernanceProjectionTables;
+    collectionIssues: DataQualityIssue[];
+  }): GovernanceFacts {
+    const { principleId, asOf, principle, tables, collectionIssues } = input;
+    const artifactIds: string[] = [];
+    const rootTaskIds: string[] = [];
+    const sourceRefs: SourceRef[] = [{ type: 'principle', id: principleId }];
+    const { artifactRows } = tables;
+
+    const validArtifacts = new Map<string, ValidArtifactRow>();
+
+    for (const row of artifactRows) {
         if (!isRecord(row)) {
           collectionIssues.push(issue({ source: 'artifact', reasonCode: 'metadata_malformed', nextActionCode: 'repair_artifact_metadata' }));
           continue;
@@ -174,7 +231,7 @@ export class GovernanceProjectionCollector {
 
       const validTasks = new Map<string, ValidTaskRow>();
       const taskRowIssues: DataQualityIssue[] = [];
-      const taskRows = db.prepare('SELECT * FROM tasks ORDER BY task_id ASC').all();
+      const { taskRows } = tables;
       for (const row of taskRows) {
         const parsed = GovernanceProjectionCollector.parseTaskRow(row, taskRowIssues);
         if (parsed !== null) validTasks.set(parsed.taskId, parsed);
@@ -305,7 +362,7 @@ export class GovernanceProjectionCollector {
 
       const approvals: ApprovalFact[] = [];
       const activations: ActivationFact[] = [];
-      for (const row of db.prepare('SELECT * FROM approvals ORDER BY approval_id ASC').all()) {
+      for (const row of tables.approvalRows) {
         if (!isRecord(row)) continue;
         const artifactId = readOwnString(row, 'artifact_id');
         if (artifactId === undefined || !strongArtifactIds.has(artifactId)) continue;
@@ -339,7 +396,7 @@ export class GovernanceProjectionCollector {
         }
       }
 
-      for (const row of db.prepare('SELECT * FROM activations ORDER BY activated_at ASC, activation_id ASC').all()) {
+      for (const row of tables.activationRows) {
         if (!isRecord(row)) continue;
         const artifactId = readOwnString(row, 'artifact_id');
         if (artifactId === undefined || !strongArtifactIds.has(artifactId)) continue;
@@ -383,22 +440,26 @@ export class GovernanceProjectionCollector {
         taskIds: tasks.map(task => task.taskId).filter((taskId): taskId is string => taskId !== undefined).sort(), tasks, revisionIdentities, sourceRefs,
         runnerVerdicts, derivedRelations, approvals, activations, timelineEvents,
       });
-    } catch (error: unknown) {
-      if (error instanceof GovernanceProjectionCollectionError) throw error;
-      throw new GovernanceProjectionCollectionError('governance_projection_error', 'inspect_runtime_state');
-    } finally {
-      connection.close();
-    }
   }
 
   private readPrinciple(principleId: string, issues: DataQualityIssue[]): GovernanceFacts['principle'] {
-    const ledgerPath = path.join(this.workspaceDir, '.state', 'principle_training_state.json');
-    let parsed: unknown;
+    return GovernanceProjectionCollector.principleFactFromLedger(
+      GovernanceProjectionCollector.parsePrincipleLedgerFile(this.workspaceDir), principleId, issues,
+    );
+  }
+
+  /** Reads and JSON-parses the principle ledger file (shared by single + batch collectors). */
+  static parsePrincipleLedgerFile(workspaceDir: string): unknown {
+    const ledgerPath = path.join(workspaceDir, '.state', 'principle_training_state.json');
     try {
-      parsed = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+      return JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
     } catch {
       throw new GovernanceProjectionCollectionError('principle_not_found', 'check_principle_ledger');
     }
+  }
+
+  /** Validates one principle entry from an already-parsed ledger (shared by single + batch collectors). */
+  static principleFactFromLedger(parsed: unknown, principleId: string, issues: DataQualityIssue[]): GovernanceFacts['principle'] {
     if (!isRecord(parsed)) throw new GovernanceProjectionCollectionError('principle_not_found', 'check_principle_ledger');
     const tree = Object.hasOwn(parsed, '_tree') ? parsed._tree : parsed.tree;
     if (!isRecord(tree) || !isRecord(tree.principles) || !Object.hasOwn(tree.principles, principleId)) {
@@ -435,7 +496,7 @@ export class GovernanceProjectionCollector {
     }
   }
 
-  private static parseTaskRow(row: unknown, issues: DataQualityIssue[]): ValidTaskRow | null {
+  static parseTaskRow(row: unknown, issues: DataQualityIssue[]): ValidTaskRow | null {
     if (!isRecord(row)) {
       issues.push(issue({ source: 'task', reasonCode: 'metadata_malformed', nextActionCode: 'repair_task_metadata' }));
       return null;

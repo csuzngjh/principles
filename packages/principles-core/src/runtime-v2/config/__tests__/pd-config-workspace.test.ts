@@ -175,3 +175,49 @@ describe('validatePdConfig workspace field', () => {
     expect(defaults.workspace).toBeUndefined();
   });
 });
+
+// ── PRI-587: workspace.environment ───────────────────────────────────────────
+
+describe('validatePdConfig workspace.environment (PRI-587)', () => {
+  // Missing environment is legal: value flows through with only `default`
+  it('accepts workspace without environment key (legal unknown)', () => {
+    const result = validatePdConfig(makeValidConfig({ default: '/home/user/workspace' }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.workspace).toEqual({ default: '/home/user/workspace' });
+    }
+  });
+
+  // Valid enum values are accepted and preserved through effective config
+  for (const environment of ['production', 'development', 'demo', 'test'] as const) {
+    it(`accepts valid environment '${environment}' and preserves it in effective config`, () => {
+      const result = validatePdConfig(makeValidConfig({ default: '/home/user/workspace', environment }));
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.workspace).toEqual({ default: '/home/user/workspace', environment });
+        const effective = computeEffectivePdConfig(result.value);
+        expect(effective.config.workspace).toEqual({ default: '/home/user/workspace', environment });
+      }
+    });
+  }
+
+  // Invalid values fail loud via the unified validator — the experience layer never bypasses it
+  it('rejects invalid environment value with path-qualified error + next action', () => {
+    const result = validatePdConfig(makeValidConfig({ default: '/home/user/workspace', environment: 'staging' }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const envError = result.errors.find(e => e.path === 'workspace.environment');
+      expect(envError).toBeDefined();
+      expect(envError?.reason).toContain('staging');
+      expect(envError?.nextAction).toContain('production');
+    }
+  });
+
+  it('rejects non-string environment value', () => {
+    const result = validatePdConfig(makeValidConfig({ default: '/home/user/workspace', environment: 3 }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some(e => e.path === 'workspace.environment')).toBe(true);
+    }
+  });
+});

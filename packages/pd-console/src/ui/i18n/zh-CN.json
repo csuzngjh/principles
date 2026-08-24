@@ -136,6 +136,77 @@
         "degraded": "降级"
       },
       "nextActionLabel": "建议操作：",
+      "experience": {
+        "attention": {
+          "setupRequired": "需要初始设置",
+          "ownerDecisionRequired": "等待拥有者决策",
+          "recoveryRequired": "需要恢复处理",
+          "degraded": "数据降级",
+          "backgroundProcessing": "后台处理中",
+          "allClear": "一切正常"
+        },
+        "reason": {
+          "ownerIdentityMissing": "尚未配置拥有者身份。RuleCode 治理决策入口被阻塞，需要设置 PD_OWNER_ID 与 PD_OWNER_CREDENTIAL_ID 并启用控制台令牌认证。",
+          "approvalPending": "有原则审批正在等待你的决策。",
+          "rulecodeOwnerDecision": "有 RuleCode 影子激活正在等待你的晋升决策。",
+          "noPendingDecision": "当前没有等待决策的原则审批。",
+          "ownerDecisionAvailable": "治理决策入口由已配置的拥有者持有。",
+          "breakGlassEntry": "由于未配置拥有者身份，紧急暂停当前通过本地破窗路径生效。",
+          "recoveryRequired": "部分治理工作已停滞，需要先恢复才能继续。",
+          "sourceUnavailable": "必需的治理数据源不可用，进行中的工作无法推进。",
+          "configInvalid": "工作区配置文件无效，环境分类未知。",
+          "processing": "治理工作正在后台运行，当前无需决策。",
+          "workspaceClear": "所有治理工作已就绪，没有需要你关注的事项。",
+          "workspaceEmpty": "暂无治理记录。管线运行后 PD 会填充此视图。"
+        },
+        "next": {
+          "configureOwner": "配置 PD_OWNER_ID 与 PD_OWNER_CREDENTIAL_ID，并启用控制台令牌认证。",
+          "reviewApprovals": "在下方处理待决策事项。",
+          "inspectRecovery": "打开失败任务页面并恢复停滞的工作。",
+          "inspectSources": "检查 state.db 与原则账本，然后重启控制台。",
+          "fixConfig": "修复 .pd/config.yaml 中的无效配置。",
+          "monitor": "暂无需操作——下一个决策出现时 PD 会在这里提示。",
+          "none": "当前无需操作。"
+        },
+        "activity": {
+          "needsDecision": "{{count}} 项决策待处理",
+          "needsRecovery": "{{count}} 项需要恢复",
+          "blocked": "数据源不可用，进展被阻塞",
+          "processing": "后台处理中（{{count}}）"
+        },
+        "readiness": {
+          "identity": {
+            "configured": "拥有者身份：已配置",
+            "missing": "拥有者身份：未配置"
+          },
+          "principleApproval": "原则审批：操作员入口",
+          "rulecode": {
+            "ready": "RuleCode 决策：拥有者入口",
+            "blocked": "RuleCode 决策：已阻塞（缺少拥有者身份）"
+          },
+          "pause": {
+            "owner": "紧急暂停：拥有者入口",
+            "breakGlass": "紧急暂停：破窗入口"
+          }
+        },
+        "trust": {
+          "environment": {
+            "production": "环境：生产",
+            "development": "环境：开发",
+            "demo": "环境：演示",
+            "test": "环境：测试",
+            "unknown": "环境：未知"
+          },
+          "lineage": {
+            "strong": "溯源置信度：强",
+            "weak": "溯源置信度：弱",
+            "unknown": "溯源置信度：未知"
+          }
+        },
+        "dataQuality": {
+          "degraded": "数据质量降级——例如 {{reasonCode}}（{{count}} 次）。部分解释可能不完整。"
+        }
+      },
       "inProgressTitle": "治理链路进行中",
       "inProgressDetail": "当内化管线完成并生成可审查的原则候选后，PD 会在这里展示。",
       "degradedTitle": "系统信号",

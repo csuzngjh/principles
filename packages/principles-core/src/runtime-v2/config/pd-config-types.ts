@@ -142,7 +142,16 @@ export interface PrinciplesConfig {
 export interface WorkspaceConfig {
   /** Absolute path to the default PD workspace directory. */
   default: string;
+  /**
+   * Environment classification of this workspace (PRI-587).
+   * Absent is legal and means "unknown" — no default is assumed.
+   */
+  environment?: WorkspaceEnvironment;
 }
+
+/** Legal workspace environment values (PRI-587; mirrors WorkspaceEnvironmentSchema in governance-experience-contract.ts). */
+export const WORKSPACE_ENVIRONMENTS = ['production', 'development', 'demo', 'test'] as const;
+export type WorkspaceEnvironment = (typeof WORKSPACE_ENVIRONMENTS)[number];
 
 // ── Profile Config (PRI-304 / PRI-466) ───────────────────────────────────────
 
