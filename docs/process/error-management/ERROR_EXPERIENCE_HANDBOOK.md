@@ -57,6 +57,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
 | ERR-100 | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle | PRI-552 |
 | ERR-105 | Hardcoded light-mode hex colors bypass theme tokens on a dual-theme UI — timeline dots near-invisible in dark mode | PR #1377 (pr-review) |
+| ERR-107 | Exception registry used to legitimize new I/O inside a pure core package | PRI-566 / PR #1392 |
 
 ---
 
@@ -882,8 +883,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 106 |
-| Last updated | 2026-08-22 |
+| Total lessons | 107 |
+| Last updated | 2026-08-24 |
 | Top category | Schema & Type |
 | Recurring errors | 54 |
 
@@ -1643,4 +1644,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-099 (misleading/dead conditional branches family), EP-02 must-check on shared type unions
 - **Source**: PR #1377 (pr-review 2026-08-22)
 - **Date**: 2026-08-22
+- **Recurrence**: None
+
+---
+
+**[ERR-107]** | Exception registry used to legitimize new I/O inside a pure core package
+
+- **What happened**: PR #1392 added a filesystem-backed governance audit writer under `principles-core/src`, then registered the file in `io-seam-registry.json` so the architecture tests accepted it.
+- **Why it's wrong**: The repository contract makes `principles-core` pure logic and directs new I/O to `openclaw-plugin`. The seam registry inventories explicitly approved exceptions; changing the registry does not grant approval. The implementation also created a second audit log instead of the issue-required canonical `events_*.jsonl` stream.
+- **Generalized failure mode**: When a repository has both a strict architecture boundary and an exception registry, assistants must treat registry additions as architecture changes requiring explicit approval, not as a way to make a violating implementation pass static checks; otherwise the guard becomes self-authorizing.
+- **Correct approach**: Keep event data types and validation pure in core, put persistence in the designated I/O package, reuse the canonical event log, and require explicit maintainer approval for any genuine new seam.
+- **How to prevent**: Review every diff to an architecture exception registry. If the new entry lacks an explicit maintainer-approval reference, reject it and move the I/O behind the established boundary.
+- **Regression guard**: Architecture checks should reject newly added core I/O seam entries unless the registry entry carries a validated approval reference; ordinary new `fs`/`path`/network imports in core remain forbidden.
+- **Related ERRs**: ERR-032 (active architecture contract contradicted), ERR-100 (runtime boundary crossed through an unsafe dependency graph)
+- **Source**: PRI-566 / PR #1392
+- **Date**: 2026-08-24
 - **Recurrence**: None
