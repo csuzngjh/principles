@@ -2067,9 +2067,9 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
     expect(pdCliDestIdx).toBeGreaterThan(0);
   });
 
-  it('bundle-plugin.mjs rewrites principles-disciple dependency in console to file:../plugin', () => {
+  it('bundle-plugin.mjs rewrites principles-disciple dependency in console to its installed parent package root', () => {
     expect(content).toContain(
-      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:../plugin')",
+      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:..')",
     );
   });
 
