@@ -241,8 +241,36 @@ export function getOpenClawDir(): string {
   return path.join(getHomeDir(), '.openclaw');
 }
 
+/** Host-neutral PD installation root. Shared runtime must not live under a
+ * host's discovery directory (ADR-0020 / ERR-097). */
+export function getPdDir(): string {
+  return path.join(getHomeDir(), '.pd');
+}
+
+export function getPdRuntimeDir(): string {
+  return path.join(getPdDir(), 'runtime');
+}
+
+export function getInstallManifestPath(): string {
+  return path.join(getPdDir(), 'install.json');
+}
+
+export function getPdRuntimeBackupsDir(): string {
+  return path.join(getPdDir(), 'backups');
+}
+
 export function getPluginExtDir(): string {
   return path.join(getOpenClawDir(), 'extensions', 'principles-disciple');
+}
+
+/** Common plugin package used by pd-cli/console. OpenClaw gets an adapter copy
+ * under getPluginExtDir(); Codex-only installs use this host-neutral copy. */
+export function getInstalledPluginDir(): string {
+  return path.join(getPdRuntimeDir(), 'plugin');
+}
+
+export function getInstalledLayoutPackageDir(): string {
+  return path.join(getPdRuntimeDir(), 'install-layout');
 }
 
 /**
@@ -257,15 +285,15 @@ export function getPdBackupsDir(): string {
 }
 
 export function getInstalledPdCliDir(): string {
-  return path.join(getPluginExtDir(), 'pd-cli');
+  return path.join(getPdRuntimeDir(), 'pd-cli');
 }
 
 export function getInstalledBinDir(): string {
-  return path.join(getPluginExtDir(), 'bin');
+  return path.join(getPdRuntimeDir(), 'bin');
 }
 
 export function getInstalledConsoleDir(): string {
-  return path.join(getPluginExtDir(), 'console');
+  return path.join(getPdRuntimeDir(), 'console');
 }
 
 export function isWindows(): boolean {

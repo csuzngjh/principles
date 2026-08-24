@@ -177,6 +177,9 @@ jobs:
       - name: Build host runtime dependency
         run: npm run build --workspace=@principles/host-runtime
 
+      - name: Build install layout dependency
+        run: npm run build --workspace=@principles/install-layout
+
       - name: Build plugin dependency
         run: npm run build --workspace=principles-disciple
 
@@ -204,6 +207,9 @@ jobs:
       # the pure lib layer only — the electron binary is not needed on Linux.
       - name: Install dependencies
         run: npm ci --ignore-scripts
+
+      - name: Build install layout dependency
+        run: npm run build --workspace=@principles/install-layout
 
       - name: Build and test
         working-directory: packages/pd-companion
@@ -272,6 +278,7 @@ jobs:
         run: |
           npm run build --workspace=@principles/core
           npm run build --workspace=@principles/host-runtime
+          npm run build --workspace=@principles/install-layout
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli

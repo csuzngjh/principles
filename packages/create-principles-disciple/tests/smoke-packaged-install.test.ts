@@ -8,6 +8,7 @@ import * as http from 'http';
 const INSTALLER_DIR = path.resolve(__dirname, '..');
 const TMPDIR = fs.realpathSync(os.tmpdir());
 let tarballPath: string;
+let installLayoutTarballPath: string;
 let tempHomeDir: string;
 let tempWorkspaceDir: string;
 
@@ -21,7 +22,7 @@ function npmExecSync(args: string[], options: Record<string, unknown> = {}): Buf
 }
 
 function npmInstallSync(tarball: string, cwd: string, env?: Record<string, string>): void {
-  execSync(`npm install "${tarball}"`, {
+  execSync(`npm install "${installLayoutTarballPath}" "${tarball}"`, {
     cwd,
     shell: true,
     stdio: 'pipe',
@@ -39,10 +40,20 @@ function cleanupDir(dir: string): void {
 }
 
 function getInstalledConsoleDir(homeDir: string): string {
-  return path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple', 'console');
+  return path.join(homeDir, '.pd', 'runtime', 'console');
 }
 
 beforeAll(() => {
+  const installLayoutDir = path.resolve(INSTALLER_DIR, '..', 'install-layout');
+  const installLayoutPackOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
+    cwd: installLayoutDir,
+    stdio: 'pipe',
+    timeout: 120_000,
+  }).toString().trim();
+  const installLayoutTarballName = installLayoutPackOutput.split('\n').map(line => line.trim()).filter(Boolean).at(-1);
+  if (!installLayoutTarballName?.endsWith('.tgz')) throw new Error('install-layout npm pack did not produce a tarball');
+  installLayoutTarballPath = path.resolve(TMPDIR, installLayoutTarballName);
+
   const packOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
     cwd: INSTALLER_DIR,
     stdio: 'pipe',
@@ -88,9 +99,12 @@ afterAll(() => {
   if (tarballPath) {
     try { fs.unlinkSync(tarballPath); } catch { /* ignore */ }
   }
+  if (installLayoutTarballPath) {
+    try { fs.unlinkSync(installLayoutTarballPath); } catch { /* ignore */ }
+  }
   if (tempHomeDir) cleanupDir(tempHomeDir);
   if (tempWorkspaceDir) cleanupDir(tempWorkspaceDir);
-}, 30_000);
+}, 120_000);
 
 describe('Real packaged install smoke test', () => {
   it('tarball contains core/ directory', () => {
@@ -102,6 +116,7 @@ describe('Real packaged install smoke test', () => {
       timeout: 30_000,
     }).toString();
     expect(tarOutput).toContain('core/');
+    expect(tarOutput).toContain('install-layout/dist/index.js');
   }, 60_000);
 
   it('install to clean temp HOME succeeds', () => {

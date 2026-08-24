@@ -19,6 +19,8 @@ const CORE_SRC = join(ROOT_DIR, 'packages', 'principles-core');
 const CORE_DEST = join(__dirname, '..', 'core');
 const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
 const HOST_RUNTIME_DEST = join(__dirname, '..', 'host-runtime');
+const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
+const INSTALL_LAYOUT_DEST = join(__dirname, '..', 'install-layout');
 
 const PLUGIN_REQUIRED = [
   'dist',
@@ -58,6 +60,12 @@ const CORE_REQUIRED = [
 ];
 
 const HOST_RUNTIME_REQUIRED = [
+  'dist',
+  'dist/index.js',
+  'package.json',
+];
+
+const INSTALL_LAYOUT_REQUIRED = [
   'dist',
   'dist/index.js',
   'package.json',
@@ -231,7 +239,20 @@ for (const item of HOST_RUNTIME_REQUIRED) {
 
 console.log(`   Host Runtime: ${HOST_RUNTIME_DEST}`);
 
-console.log('\n🔧 Rewriting bundled dependencies (@principles/core, @principles/host-runtime, principles-disciple)...');
+if (existsSync(INSTALL_LAYOUT_DEST)) {
+  console.log('  Removing old install-layout/ directory...');
+  rmSync(INSTALL_LAYOUT_DEST, { recursive: true, force: true });
+}
+mkdirSync(INSTALL_LAYOUT_DEST, { recursive: true });
+for (const item of INSTALL_LAYOUT_REQUIRED) {
+  const src = join(INSTALL_LAYOUT_SRC, item);
+  const dest = join(INSTALL_LAYOUT_DEST, item);
+  console.log(`  Copying install-layout/${item}...`);
+  cpSync(src, dest, { recursive: true });
+}
+console.log(`   Install Layout: ${INSTALL_LAYOUT_DEST}`);
+
+console.log('\n🔧 Rewriting bundled dependencies (@principles/core, @principles/host-runtime, @principles/install-layout, principles-disciple)...');
 
 function rewriteBundledDependency(pkgPath, label, depName, replacement) {
   // Avoid TOCTOU: skip the existsSync check and handle ENOENT from readFileSync
@@ -292,6 +313,8 @@ rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principl
 // directory. Without this rewrite + symlink, `pd --version` crashes with
 // ERR_MODULE_NOT_FOUND because pd-cli cannot resolve @principles/host-runtime.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/host-runtime', 'file:../host-runtime');
+rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/install-layout', 'file:../install-layout');
+rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/install-layout', 'file:../install-layout');
 // host-runtime itself depends on @principles/core. Rewrite to a local file
 // reference so the bundled host-runtime package can resolve core without a
 // separate npm install. The installer creates the corresponding symlink.
@@ -303,7 +326,7 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@princi
 // host-runtime; otherwise the installer resolves @principles/host-runtime from the
 // npm registry and crashes with an ESM named-export SyntaxError.
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/host-runtime', 'file:../host-runtime');
-rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:..');
+rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:../plugin');
 // pd-cli also depends on principles-disciple (the plugin package). Rewrite to a local
 // file reference so the bundled package is self-contained. The installer's syncPdCli()
 // creates a node_modules/principles-disciple symlink to the installed plugin directory.

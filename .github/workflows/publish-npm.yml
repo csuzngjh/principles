@@ -14,6 +14,7 @@ on:
           - '@principles/pd-cli'
           - create-principles-disciple
           - '@principles/host-runtime'
+          - '@principles/install-layout'
           - '@principles/codex-adapter'
       version_bump:
         description: 'Version bump type'
@@ -34,6 +35,7 @@ on:
       - 'packages/pd-console/**'
       - 'packages/create-principles-disciple/**'
       - 'packages/host-runtime/**'
+      - 'packages/install-layout/**'
       - 'packages/codex-adapter/**'
   schedule:
     # Every Friday 04:00 UTC = Beijing 12:00 — weekly release.
@@ -81,6 +83,9 @@ jobs:
                 ;;
               "@principles/host-runtime")
                 echo 'matrix=[{"pkg_dir":"host-runtime","npm_name":"@principles/host-runtime"}]' >> $GITHUB_OUTPUT
+                ;;
+              "@principles/install-layout")
+                echo 'matrix=[{"pkg_dir":"install-layout","npm_name":"@principles/install-layout"}]' >> $GITHUB_OUTPUT
                 ;;
               "@principles/codex-adapter")
                 echo 'matrix=[{"pkg_dir":"codex-adapter","npm_name":"@principles/codex-adapter"}]' >> $GITHUB_OUTPUT
@@ -149,6 +154,7 @@ jobs:
           # A consumer running `npm install -g @principles/codex-adapter` (or
           # pd-cli) fails dependency resolution if a declared dep is missing.
           check_and_add "host-runtime" "@principles/host-runtime"
+          check_and_add "install-layout" "@principles/install-layout"
           check_and_add "codex-adapter" "@principles/codex-adapter"
           check_and_add "openclaw-plugin" "principles-disciple"
           check_and_add "pd-cli" "@principles/pd-cli"
@@ -267,6 +273,9 @@ jobs:
       - name: Build host runtime
         run: npm run build --workspace=@principles/host-runtime
 
+      - name: Build install layout
+        run: npm run build --workspace=@principles/install-layout
+
       - name: Build target package
         run: |
           PKG_DIR="${{ matrix.pkg_dir }}"
@@ -288,6 +297,8 @@ jobs:
             cd packages/create-principles-disciple && npm run build
           elif [ "$PKG_DIR" = "host-runtime" ]; then
             npm run build --workspace=@principles/host-runtime
+          elif [ "$PKG_DIR" = "install-layout" ]; then
+            npm run build --workspace=@principles/install-layout
           elif [ "$PKG_DIR" = "codex-adapter" ]; then
             npm run build --workspace=@principles/codex-adapter
           fi
@@ -299,7 +310,7 @@ jobs:
         # `npm install -g` for every consumer. The retry loop tolerates
         # registry propagation lag from a sibling matrix entry that published
         # moments earlier (matrix is sequential, dependency-first).
-        if: matrix.pkg_dir == 'codex-adapter' || matrix.pkg_dir == 'pd-cli'
+        if: matrix.pkg_dir == 'codex-adapter' || matrix.pkg_dir == 'pd-cli' || matrix.pkg_dir == 'create-principles-disciple'
         run: |
           check_published() {
             local PKG="$1"
@@ -317,6 +328,9 @@ jobs:
           check_published "@principles/host-runtime"
           if [ "${{ matrix.pkg_dir }}" = "pd-cli" ]; then
             check_published "@principles/codex-adapter"
+          fi
+          if [ "${{ matrix.pkg_dir }}" = "pd-cli" ] || [ "${{ matrix.pkg_dir }}" = "create-principles-disciple" ]; then
+            check_published "@principles/install-layout"
           fi
 
       - name: Verify package dry-run

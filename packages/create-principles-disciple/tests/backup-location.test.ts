@@ -70,6 +70,15 @@ describe('backupExistingInstall', () => {
   it('returns no_existing when the plugin dir is absent', () => {
     expect(backupExistingInstall()).toEqual({ type: 'no_existing', backupDir: null });
   });
+
+  it('does not move an OpenClaw plugin during a Codex-only install', () => {
+    const extDir = path.join(extensionsRoot(), 'principles-disciple');
+    fs.mkdirSync(extDir, { recursive: true });
+    fs.writeFileSync(path.join(extDir, 'marker.txt'), 'openclaw-install');
+
+    expect(backupExistingInstall('codex')).toEqual({ type: 'no_existing', backupDir: null });
+    expect(fs.readFileSync(path.join(extDir, 'marker.txt'), 'utf8')).toBe('openclaw-install');
+  });
 });
 
 describe('migrateLegacyPdBackups', () => {
