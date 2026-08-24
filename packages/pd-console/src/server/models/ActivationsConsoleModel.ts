@@ -12,7 +12,6 @@ import {
   RuleCodeOwnerDecisionService,
   collectOpenClawPromotionChecks,
   summarizeRuleCodeShadowEvents,
-  appendGovernanceAction,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
 import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
@@ -20,6 +19,11 @@ import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-st
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import {
+  authorizeGovernanceAction,
+  writeGovernanceAction,
+  type GovernanceAuditWriter,
+} from 'principles-disciple/governance-audit';
 
 /**
  * Type guard for parsed JSON objects (rc-2-no-as-bypass).
@@ -194,9 +198,11 @@ function readRuleCodeTelemetry(workspaceDir: string, activationId: string, decis
 
 export class ActivationsConsoleModel {
   private readonly workspaceDir: string;
+  private readonly governanceAuditWriter: GovernanceAuditWriter;
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, governanceAuditWriter: GovernanceAuditWriter = writeGovernanceAction) {
     this.workspaceDir = workspaceDir;
+    this.governanceAuditWriter = governanceAuditWriter;
   }
 
   async getActivations(): Promise<ActivationsResponse> {
@@ -482,9 +488,21 @@ export class ActivationsConsoleModel {
 
   async deactivateRuleCode(activationId: string, decision: 'reject_after_shadow' | 'emergency_deactivate', input: OwnerMutationInput): Promise<{ activationId: string; decisionId: string; deactivatedAt: string }> {
     if (decision === 'reject_after_shadow') this.requireOwnerDecisionFeature();
-    return this.withMutableRuleCode(activationId, async (store, activation, artifactDigest) => store.deactivateWithDecision(
-      makeActivationDecision({ activation, artifactDigest, decision, input }), input.idempotencyKey,
-    ));
+    return this.withMutableRuleCode(activationId, async (store, activation, artifactDigest) =>
+      authorizeGovernanceAction(
+        path.join(this.workspaceDir, '.pd'),
+        {
+          action: 'deactivate',
+          activationId,
+          actor: 'owner',
+          reasonCode: input.reasonCode,
+          outcome: 'authorized',
+        },
+        () => store.deactivateWithDecision(
+          makeActivationDecision({ activation, artifactDigest, decision, input }), input.idempotencyKey,
+        ),
+        this.governanceAuditWriter,
+      ));
   }
 
   async recoverRuleCodeToShadow(activationId: string, expectedControlVersion: number, input: OwnerMutationInput): Promise<{ sourceActivationId: string; shadowActivationId: string; decisionId: string }> {
@@ -504,7 +522,18 @@ export class ActivationsConsoleModel {
         ...(input.actor.operator ? { operator: input.actor.operator } : {}), reasonCode: input.reasonCode,
         note: input.note ?? null, evidenceSnapshotId: null, decidedAt: new Date().toISOString(),
       };
-      return await new SqliteActivationSafetyStore(conn).pauseAllLive(decision, `pause-${randomUUID()}`, input.idempotencyKey);
+      return await authorizeGovernanceAction(
+        path.join(this.workspaceDir, '.pd'),
+        {
+          action: 'global_pause',
+          subject: 'all_live_rulecode',
+          actor: 'owner',
+          reasonCode: input.reasonCode,
+          outcome: 'authorized',
+        },
+        () => new SqliteActivationSafetyStore(conn).pauseAllLive(decision, `pause-${randomUUID()}`, input.idempotencyKey),
+        this.governanceAuditWriter,
+      );
     } finally { try { conn.close(); } catch { /* best effort */ } }
   }
 
@@ -531,7 +560,18 @@ export class ActivationsConsoleModel {
         ownerLiveDecisionEnabled: () => isFeatureEnabled(flags, 'rulecode_owner_live_decision'),
         safetyControlsEnabled: () => isFeatureEnabled(flags, 'rulecode_safety_controls'),
         evaluateReadiness: async () => review.readiness,
-        commitPromotion: value => store.commitPromotion(value),
+        commitPromotion: value => authorizeGovernanceAction(
+          path.join(this.workspaceDir, '.pd'),
+          {
+            action: 'promote',
+            activationId,
+            actor: 'owner',
+            reasonCode: input.reasonCode,
+            outcome: 'authorized',
+          },
+          () => store.commitPromotion(value),
+          this.governanceAuditWriter,
+        ),
         newDecisionId: () => `decision-${randomUUID()}`,
         now: () => new Date().toISOString(),
       });
@@ -540,22 +580,6 @@ export class ActivationsConsoleModel {
         expectedControlVersion: expected.controlVersion, idempotencyKey: input.idempotencyKey,
         reasonCode: input.reasonCode, note: input.note, confirmed: expected.confirmed,
       }, input.actor);
-
-      // PRI-566: audit the Owner Live Decision after the store commit landed.
-      if (result.ok && result.decision === 'promoted') {
-        try {
-          appendGovernanceAction(this.workspaceDir, {
-            action: 'promote',
-            activationId,
-            operator: 'console',
-            reason: input.note ?? input.reasonCode ?? null,
-          });
-        } catch (auditErr) {
-          // Best-effort — never silent (rc-9): surface on server stderr without
-          // failing an already-committed promotion.
-          console.error(`[governance-audit] Failed to append promote audit record: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
-        }
-      }
 
       return result;
     } finally { try { conn.close(); } catch { /* best effort */ } }
@@ -593,20 +617,20 @@ export class ActivationsConsoleModel {
       const activationStore = new SqliteActivationStateStore(conn);
 
       try {
-        const deactivated = await activationStore.deactivateActivation(activationId, new Date().toISOString());
-        if (!deactivated) {
-          return { ok: false, reason: `Activation '${activationId}' not found or already inactive`, nextAction: 'Refresh the activation list and verify the activation ID is correct.' };
-        }
-
-        // PRI-566: audit the governance mutation after it has committed (rc-9).
-        try {
-          appendGovernanceAction(this.workspaceDir, {
+        const deactivated = await authorizeGovernanceAction(
+          path.join(this.workspaceDir, '.pd'),
+          {
             action: 'deactivate',
             activationId,
-            operator: 'console',
-          });
-        } catch (auditErr) {
-          console.error(`[governance-audit] Failed to append deactivate audit record: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+            actor: 'session',
+            reasonCode: 'console_disable_confirmed',
+            outcome: 'authorized',
+          },
+          () => activationStore.deactivateActivation(activationId, new Date().toISOString()),
+          this.governanceAuditWriter,
+        );
+        if (!deactivated) {
+          return { ok: false, reason: `Activation '${activationId}' not found or already inactive`, nextAction: 'Refresh the activation list and verify the activation ID is correct.' };
         }
 
         return { ok: true };

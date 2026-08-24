@@ -9,6 +9,7 @@ export type EventType =
   | 'tool_call'
   | 'pain_signal'
   | 'rule_promotion'
+  | 'governance_action'
   | 'hook_execution'
   | 'gate_block'
   | 'gate_bypass'
@@ -38,6 +39,7 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
   Type.Literal('pain_signal'),
   Type.Literal('rule_promotion'),
+  Type.Literal('governance_action'),
   Type.Literal('hook_execution'),
   Type.Literal('gate_block'),
   Type.Literal('gate_bypass'),
@@ -227,6 +229,33 @@ export const RulePromotionEventDataSchema = Type.Object({
   avgSimilarity: Type.Number(),
 });
 export type RulePromotionEventDataStatic = Static<typeof RulePromotionEventDataSchema>;
+
+export interface GovernanceActionEventData {
+  action: 'deactivate' | 'promote' | 'global_pause';
+  activationId?: string;
+  subject?: 'all_live_rulecode';
+  actor: 'owner' | 'cli' | 'session';
+  reasonCode: string;
+  outcome: 'authorized';
+}
+
+export const GovernanceActionEventDataSchema = Type.Object({
+  action: Type.Union([
+    Type.Literal('deactivate'),
+    Type.Literal('promote'),
+    Type.Literal('global_pause'),
+  ]),
+  activationId: Type.Optional(Type.String({ minLength: 1 })),
+  subject: Type.Optional(Type.Literal('all_live_rulecode')),
+  actor: Type.Union([
+    Type.Literal('owner'),
+    Type.Literal('cli'),
+    Type.Literal('session'),
+  ]),
+  reasonCode: Type.String({ minLength: 1, maxLength: 200 }),
+  outcome: Type.Literal('authorized'),
+});
+export type GovernanceActionEventDataStatic = Static<typeof GovernanceActionEventDataSchema>;
 
 export interface HookExecutionEventData {
   hook: string;

@@ -1751,6 +1751,7 @@ describe('handleUpdateRoute', () => {
       // 2. resolution links exist for console and pd-cli (installer syncPdCli parity)
       expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime'))).toBe(true);
       expect(fs.existsSync(path.join(pluginDir, 'pd-cli', 'node_modules', '@principles', 'host-runtime'))).toBe(true);
+      expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', 'principles-disciple'))).toBe(true);
 
       // 3. Real Node ESM resolution from inside the updated console dist —
       //    the exact operation that crashed with ERR_MODULE_NOT_FOUND before

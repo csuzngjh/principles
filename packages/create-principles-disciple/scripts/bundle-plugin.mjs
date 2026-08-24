@@ -303,6 +303,7 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@princi
 // host-runtime; otherwise the installer resolves @principles/host-runtime from the
 // npm registry and crashes with an ESM named-export SyntaxError.
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/host-runtime', 'file:../host-runtime');
+rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:../plugin');
 // pd-cli also depends on principles-disciple (the plugin package). Rewrite to a local
 // file reference so the bundled package is self-contained. The installer's syncPdCli()
 // creates a node_modules/principles-disciple symlink to the installed plugin directory.

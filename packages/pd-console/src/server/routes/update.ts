@@ -757,6 +757,21 @@ function ensureHostRuntimeResolutionLinks(extDir: string): string | undefined {
       }`;
     }
   }
+  const pluginLinkPath = path.join(extDir, 'console', 'node_modules', 'principles-disciple');
+  if (!fs.existsSync(pluginLinkPath)) {
+    try {
+      fs.mkdirSync(path.dirname(pluginLinkPath), { recursive: true });
+      if (process.platform === 'win32') {
+        fs.symlinkSync(extDir, pluginLinkPath, 'junction');
+      } else {
+        fs.symlinkSync('../../', pluginLinkPath, 'dir');
+      }
+    } catch (error) {
+      return `Failed to create principles-disciple resolution link at ${pluginLinkPath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+  }
   return undefined;
 }
 

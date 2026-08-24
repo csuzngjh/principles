@@ -1,32 +1,19 @@
-/**
- * PRI-566: governance audit integration tests for the deactivate/promote CLI
- * handlers.
- *
- * Uses a REAL temp workspace (no '/fake/workspace') so the real
- * `appendGovernanceAction` implementation writes real files we can assert on.
- *
- * Covers:
- *   - successful deactivate appends a 'deactivate' record (operator=cli)
- *   - --reason is carried into the audit record
- *   - --json stdout stays exactly one parseable object (EP-04 cli-1) even
- *     while the audit write happens
- *   - NEGATIVE CONTROLS:
- *       · not-found / already-deactivated path writes NO audit record
- *       · no events_*.jsonl file is created by the audit writer (it must
- *         never touch the runtime event stream — ERR-024 dormant-wiring guard)
- */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as path from 'node:path';
-import * as os from 'node:os';
 
-const mockClose = vi.fn().mockResolvedValue(undefined);
-const mockDeactivate = vi.fn().mockResolvedValue(true);
-
-let tmpWorkspace: string;
+const { mockClose, mockDeactivate, mockWriteGovernanceAction } = vi.hoisted(() => ({
+  mockClose: vi.fn().mockResolvedValue(undefined),
+  mockDeactivate: vi.fn().mockResolvedValue(true),
+  mockWriteGovernanceAction: vi.fn(),
+}));
 
 vi.mock('../../src/resolve-workspace.js', () => ({
-  resolveWorkspaceDir: vi.fn(),
+  resolveWorkspaceDir: vi.fn(() => '/workspace'),
+}));
+
+vi.mock('principles-disciple/governance-audit', () => ({
+  writeGovernanceAction: mockWriteGovernanceAction,
+  authorizeGovernanceAction: vi.fn(async (_stateDir, _data, mutation) => mutation()),
 }));
 
 vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
@@ -37,145 +24,72 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
       return {
         initialize: vi.fn().mockResolvedValue(undefined),
         close: mockClose,
-        connection: {
-          getDb: () => ({
-            prepare: () => ({
-              get: () => undefined,
-              all: () => [],
-            }),
-          }),
-        },
+        connection: {},
       };
     }),
     SqliteActivationStateStore: vi.fn().mockImplementation(function () {
-      return {
-        deactivateActivation: mockDeactivate,
-        listPromptActivations: vi.fn().mockResolvedValue([]),
-        listCodeToolHookActivations: vi.fn().mockResolvedValue([]),
-        listAllActivations: vi.fn().mockResolvedValue([]),
-      };
+      return { deactivateActivation: mockDeactivate };
     }),
   };
 });
 
 import { handleRuntimeActivationDeactivate } from '../../src/commands/runtime-activation.js';
-import { resolveWorkspaceDir } from '../../src/resolve-workspace.js';
-
-function auditLogPath(): string {
-  return path.join(tmpWorkspace, '.state', 'governance_actions.jsonl');
-}
 
 beforeEach(() => {
-  tmpWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pri566-audit-'));
-  vi.mocked(resolveWorkspaceDir).mockReturnValue(tmpWorkspace);
-});
-
-afterEach(() => {
-  fs.rmSync(tmpWorkspace, { recursive: true, force: true });
   vi.clearAllMocks();
+  mockDeactivate.mockResolvedValue(true);
   process.exitCode = 0;
 });
 
-describe('deactivate handler × governance audit log (PRI-566)', () => {
-  let logSpy: ReturnType<typeof vi.spyOn>;
+afterEach(() => {
+  process.exitCode = 0;
+});
 
-  beforeEach(() => {
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  });
+describe('deactivate governance audit ordering (PRI-566)', () => {
+  it('durably authorizes the canonical audit event before mutating activation state', async () => {
+    const callOrder: string[] = [];
+    mockWriteGovernanceAction.mockImplementation(() => { callOrder.push('audit'); });
+    mockDeactivate.mockImplementation(async () => { callOrder.push('mutation'); return true; });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-  afterEach(() => {
+    await handleRuntimeActivationDeactivate({
+      workspace: '/workspace',
+      activationId: 'act-566',
+      reasonCode: 'owner_requested_rollback',
+      json: true,
+    });
+
+    expect(callOrder).toEqual(['audit', 'mutation']);
+    expect(mockWriteGovernanceAction).toHaveBeenCalledWith(path.join(path.resolve('/workspace'), '.pd'), {
+      action: 'deactivate',
+      activationId: 'act-566',
+      actor: 'cli',
+      reasonCode: 'owner_requested_rollback',
+      outcome: 'authorized',
+    });
+    expect(JSON.parse(String(logSpy.mock.calls[0]?.[0]))).toMatchObject({ ok: true, activationId: 'act-566' });
     logSpy.mockRestore();
   });
 
-  it('successful deactivate appends an operator=cli record', async () => {
+  it('refuses without mutation when the audit event cannot be persisted', async () => {
+    mockWriteGovernanceAction.mockImplementation(() => { throw new Error('disk full'); });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
     await handleRuntimeActivationDeactivate({
-      workspace: tmpWorkspace,
-      activationId: 'act-audit-1',
+      workspace: '/workspace',
+      activationId: 'act-566',
+      reasonCode: 'owner_requested_rollback',
       json: true,
     });
 
-    expect(fs.existsSync(auditLogPath())).toBe(true);
-    const lines = fs.readFileSync(auditLogPath(), 'utf-8').trim().split('\n');
-    expect(lines).toHaveLength(1);
-    const rec = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
-    expect(rec['action']).toBe('deactivate');
-    expect(rec['activationId']).toBe('act-audit-1');
-    expect(rec['operator']).toBe('cli');
-  });
-
-  it('audit record carries activationId and operator=cli with correct shape', async () => {
-    await handleRuntimeActivationDeactivate({
-      workspace: tmpWorkspace,
-      activationId: 'act-audit-2',
-      json: true,
-    });
-
-    const lines = fs.readFileSync(auditLogPath(), 'utf-8').trim().split('\n');
-    expect(lines).toHaveLength(1);
-    const rec = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
-    expect(rec['action']).toBe('deactivate');
-    expect(rec['activationId']).toBe('act-audit-2');
-    expect(rec['operator']).toBe('cli');
-    expect(rec['reason']).toBeNull();
-    expect(typeof rec['actionId']).toBe('string');
-    expect(typeof rec['createdAt']).toBe('string');
-  });
-
-  it('--reason flows into the audit record', async () => {
-    await handleRuntimeActivationDeactivate({
-      workspace: tmpWorkspace,
-      activationId: 'act-audit-3',
-      reason: 'owner requested rollback',
-      json: true,
-    });
-
-    const rec = JSON.parse(fs.readFileSync(auditLogPath(), 'utf-8').trim()) as Record<string, unknown>;
-    expect(rec['reason']).toBe('owner requested rollback');
-  });
-
-  it('--json stdout remains exactly one parseable JSON object (cli-1)', async () => {
-    await handleRuntimeActivationDeactivate({
-      workspace: tmpWorkspace,
-      activationId: 'act-audit-4',
-      json: true,
-    });
-
+    expect(mockDeactivate).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
     expect(logSpy).toHaveBeenCalledTimes(1);
-    const parsed = JSON.parse(logSpy.mock.calls[0]?.[0] as string);
-    expect(parsed).toMatchObject({ ok: true, activationId: 'act-audit-4' });
-  });
-});
-
-describe('negative controls (PRI-566)', () => {
-  it('not-found path writes NO audit record', async () => {
-    mockDeactivate.mockResolvedValueOnce(false);
-
-    const errSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await handleRuntimeActivationDeactivate({
-      workspace: tmpWorkspace,
-      activationId: 'act-gone',
-      json: true,
+    expect(JSON.parse(String(logSpy.mock.calls[0]?.[0]))).toMatchObject({
+      ok: false,
+      reason: 'governance_audit_failed: disk full',
+      nextAction: expect.stringMatching(/retry/i),
     });
-    errSpy.mockRestore();
-
-    expect(mockDeactivate).toHaveBeenCalled();
-    expect(fs.existsSync(auditLogPath())).toBe(false);
-  });
-
-  it('audit writer never touches events_*.jsonl (dormant-wiring guard, ERR-024)', async () => {
-    await handleRuntimeActivationDeactivate({
-      workspace: tmpWorkspace,
-      activationId: 'act-audit-5',
-      json: true,
-    });
-
-    const logsDir = path.join(tmpWorkspace, '.state', 'logs');
-    if (fs.existsSync(logsDir)) {
-      const files = fs.readdirSync(logsDir).filter((f) => f.startsWith('events_'));
-      expect(files).toEqual([]);
-    }
-    // and the only .state artifact is our audit log
-    const stateFiles = fs.readdirSync(path.join(tmpWorkspace, '.state')).filter((f) => !f.endsWith('-shm') && !f.endsWith('-wal'));
-    expect(stateFiles.filter((f) => f !== 'governance_actions.jsonl' && f !== 'logs')).toEqual([]);
+    logSpy.mockRestore();
   });
 });

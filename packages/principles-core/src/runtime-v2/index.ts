@@ -48,7 +48,7 @@ export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-typ
 // Runtime summary types schemas
 export { RuntimeTruthSchema, AnalyticsTruthSchema, TrendMetricsSchema } from './types/runtime-summary-types.js';
 // Event types schemas
-export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimeV2PromptActivationsInjectedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
+export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, GovernanceActionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimeV2PromptActivationsInjectedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
 // Event payload discriminated union schemas
 export { DiscriminatedEventLogEntrySchema } from './types/event-payload.js';
 
@@ -353,15 +353,6 @@ export type {
   RecoveryActionResult,
   AppendRecoveryActionInput,
 } from './recovery-actions-log.js';
-
-// Rulecode lifecycle governance audit log (PRI-566)
-export { appendGovernanceAction, listGovernanceActions } from './governance-actions-log.js';
-export type {
-  GovernanceActionRecord,
-  GovernanceActionKind,
-  GovernanceOperator,
-  AppendGovernanceActionInput,
-} from './governance-actions-log.js';
 
 // Candidate audit (PRI-28)
 export { auditCandidateLedgerConsistency } from './candidate-audit.js';
@@ -1551,6 +1542,7 @@ export type {
   ToolCallEventData,
   PainSignalEventData,
   RulePromotionEventData,
+  GovernanceActionEventData,
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,
@@ -1591,6 +1583,7 @@ export {
   isToolCallEventEntry,
   isPainSignalEventEntry,
   isRulePromotionEventEntry,
+  isGovernanceActionEventEntry,
   isHookExecutionEventEntry,
   isGateBlockEventEntry,
   isGateBypassEventEntry,

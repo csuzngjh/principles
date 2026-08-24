@@ -20,6 +20,7 @@ import * as os from 'os';
 import { ActivationsConsoleModel } from '../../src/server/models/ActivationsConsoleModel.js';
 import { updateFeatureFlag } from '../../src/server/config/pd-config-store.js';
 import { SqliteConnection } from '@principles/core/runtime-v2';
+import type { GovernanceAuditWriter } from 'principles-disciple/governance-audit';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
 
@@ -277,6 +278,27 @@ describe('ActivationsConsoleModel — deactivateActivation', () => {
     expect(deactivated?.activatedAt).not.toBeNull();
   });
 
+  it('keeps the activation active when canonical audit persistence fails', async () => {
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const now = new Date().toISOString();
+    conn.getDb().prepare(`
+      INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-audit-fail', 'idem-audit-fail', 'artifact-001', 'prompt', 'inject', 'test.md', ?, NULL)
+    `).run(now);
+    conn.close();
+    const failingWriter: GovernanceAuditWriter = () => { throw new Error('disk full'); };
+    const isolatedModel = new ActivationsConsoleModel(workspaceDir, failingWriter);
+
+    const result = await isolatedModel.deactivateActivation('act-audit-fail');
+
+    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('disk full') });
+    const verify = new SqliteConnection({ workspaceDir, readonly: true });
+    const row = verify.getDb().prepare('SELECT deactivated_at FROM activations WHERE activation_id = ?').get('act-audit-fail') as { deactivated_at: string | null };
+    expect(row.deactivated_at).toBeNull();
+    verify.close();
+    isolatedModel.dispose();
+  });
+
   it('returns error for non-existent activation ID', async () => {
     const conn = new SqliteConnection({ workspaceDir, readonly: false });
     conn.getDb();
@@ -286,6 +308,33 @@ describe('ActivationsConsoleModel — deactivateActivation', () => {
     
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('not found or already inactive');
+  });
+});
+
+describe('ActivationsConsoleModel — governance action event coverage', () => {
+  it('audits global pause with owner and reasonCode before mutating control state', async () => {
+    const events: Parameters<GovernanceAuditWriter>[1][] = [];
+    const auditWriter: GovernanceAuditWriter = (_stateDir, data) => { events.push(data); };
+    const isolatedModel = new ActivationsConsoleModel(workspaceDir, auditWriter);
+
+    const result = await isolatedModel.pauseAllRuleCode({
+      actor: {
+        principal: { kind: 'configured_owner', ownerId: 'owner-1' },
+        authentication: { method: 'console_token', credentialId: 'credential-1' },
+      },
+      idempotencyKey: 'pause-566',
+      reasonCode: 'incident_containment',
+    });
+
+    expect(result.status).toBe('paused');
+    expect(events).toEqual([{
+      action: 'global_pause',
+      subject: 'all_live_rulecode',
+      actor: 'owner',
+      reasonCode: 'incident_containment',
+      outcome: 'authorized',
+    }]);
+    isolatedModel.dispose();
   });
 });
 
