@@ -36,15 +36,15 @@ function openStateDb(): SqliteConnection {
   return connection;
 }
 
-function insertTask(db: ReturnType<SqliteConnection['getDb']>, taskId: string, opts: { status?: string; kind?: string; deps?: string[] } = {}): void {
+function insertTask(db: ReturnType<SqliteConnection['getDb']>, taskId: string, opts: { status?: string; kind?: string; deps?: string[]; leaseExpiresAt?: string } = {}): void {
   const diagnosticJson = createPITaskDiagnosticJson({
     dependencyTaskIds: opts.deps ?? [], channel: 'prompt', timeoutMs: 30_000,
     inputArtifactRefs: [], outputArtifactRefs: [],
   });
   db.prepare(`INSERT INTO tasks
-    (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(taskId, opts.kind ?? 'artificer', opts.status ?? 'pending', '2026-08-20T08:30:00.000Z', '2026-08-20T08:45:00.000Z', 1, 3, diagnosticJson);
+    (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_expires_at, diagnostic_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(taskId, opts.kind ?? 'artificer', opts.status ?? 'pending', '2026-08-20T08:30:00.000Z', '2026-08-20T08:45:00.000Z', 1, 3, opts.leaseExpiresAt ?? null, diagnosticJson);
 }
 
 function insertArtifact(db: ReturnType<SqliteConnection['getDb']>, artifactId: string, taskId: string, principleId: string): void {
@@ -78,8 +78,8 @@ function seedRichWorkspace(): void {
   const connection = openStateDb();
   try {
     const db = connection.getDb();
-  // principle-1: pending frontier task → processing
-  insertTask(db, 'task-1', { status: 'pending' });
+  // principle-1: leased task with a live lease → processing (active execution)
+  insertTask(db, 'task-1', { status: 'leased', leaseExpiresAt: '2099-01-01T00:00:00.000Z' });
   insertArtifact(db, 'artifact-1', 'task-1', 'principle-1');
   // principle-2: succeeded task + pending approval → needs_decision (+ active activation)
   insertTask(db, 'task-2', { status: 'succeeded' });
@@ -96,6 +96,9 @@ function seedRichWorkspace(): void {
   insertApproval(db, 'approval-orphan', 'artifact-missing-404', 'pending');
   // rulecode shadow activation awaiting owner decision
   insertActivation(db, 'act-shadow', 'artifact-2', 'code_tool_hook_shadow_activate', false);
+  // rulecode shadow activation whose artifact does not exist (unlinked) — must
+  // degrade to data quality, never inflate needs_decision (SPEC §9)
+  insertActivation(db, 'act-shadow-orphan', 'artifact-missing-404', 'code_tool_hook_shadow_activate', false);
   // a malformed (wrong metadata shape, valid JSON — the column has a JSON check) task row
   db.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run('task-malformed', 'artificer', 'pending', '2026-08-20T08:30:00.000Z', '2026-08-20T08:45:00.000Z', 1, 3, '{"unrelated":"shape"}');
@@ -157,6 +160,8 @@ describe('PRI-585 GovernanceExperienceCollector — projection equivalence (SPEC
     expect(unlinkedSources).toContain('artifact');
     // task-ghost + task-malformed are claimed by no principle
     expect(unlinkedSources).toContain('task');
+    // the orphan shadow activation degrades to data quality, not a decision
+    expect(unlinkedSources).toContain('activation');
     const broken = snapshot.dataQuality.issueGroups.find(group => group.reasonCode === 'principle_ledger_entry_invalid');
     expect(broken?.count).toBe(1);
     // unlinked records never become decision/recovery/processing items
@@ -210,17 +215,32 @@ describe('PRI-585 query budget (SPEC §16.1) — no Principles × Source Scan', 
     expect(unavailable).toBe(true);
   });
 
-  it('ledger unreadable + active tasks in state.db → blocked with frontier evidence (SPEC §8.1)', () => {
+  it('ledger unreadable + active tasks with established task↔artifact linkage → blocked (SPEC §8.1)', () => {
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, '.state', 'principle_training_state.json'), '{not-json');
     const connection = openStateDb();
     const db = connection.getDb();
     insertTask(db, 'task-1', { status: 'pending' });
+    // Frontier evidence requires the task↔artifact relationship; an artifact
+    // row exists but the ledger is unreadable, so its owner cannot be verified.
+    insertArtifact(db, 'artifact-1', 'task-1', 'principle-1');
     connection.close();
     const snapshot = new GovernanceExperienceCollector(workspaceDir).collectSnapshot({ ownerConfig: OWNER_CONFIG, asOf: AS_OF });
     expect(snapshot.activity.categories.map(category => category.category)).toEqual(['blocked']);
     expect(snapshot.activity.primaryAttention).toBe('recovery_required');
     expect(snapshot.summary.reasonCode).toBe('governance.exp.reason.source_unavailable');
+  });
+
+  it('ledger unreadable + tasks WITHOUT artifact linkage → degraded, never blocked (no relationship evidence)', () => {
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'principle_training_state.json'), '{not-json');
+    const connection = openStateDb();
+    const db = connection.getDb();
+    insertTask(db, 'task-orphan', { status: 'pending' });
+    connection.close();
+    const snapshot = new GovernanceExperienceCollector(workspaceDir).collectSnapshot({ ownerConfig: OWNER_CONFIG, asOf: AS_OF });
+    expect(snapshot.activity.categories.map(category => category.category)).toEqual([]);
+    expect(snapshot.activity.primaryAttention).toBe('degraded');
   });
 });
 

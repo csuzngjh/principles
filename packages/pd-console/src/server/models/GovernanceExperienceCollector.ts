@@ -30,6 +30,8 @@ import type {
 } from '@principles/core/runtime-v2';
 import {
   GovernanceProjectionCollector,
+  isRecord,
+  readOwnString,
   type GovernanceProjectionTables,
   type ValidTaskRow,
 } from './GovernanceProjectionCollector.js';
@@ -37,16 +39,6 @@ import { loadPdConfig } from '../config/pd-config-store.js';
 
 const EMPTY_TABLES: GovernanceProjectionTables = { artifactRows: [], taskRows: [], approvalRows: [], activationRows: [] };
 const UNLINKED_SAMPLE_LIMIT = 10;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readOwnString(record: Record<string, unknown>, key: string): string | undefined {
-  if (!Object.hasOwn(record, key)) return undefined;
-  const value = record[key];
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
 
 /**
  * Stable, path-safe workspace hash for snapshotId (SPEC §13): never exposes the
@@ -158,7 +150,7 @@ export class GovernanceExperienceCollector {
       }
     }
 
-    // ── Frontier evidence + unlinked records (from the same batched rows) ────
+    // ── Linkage indexes + evidence + unlinked records (same batched rows) ────
     const parsedTasks: ValidTaskRow[] = [];
     const parseIssues: DataQualityIssue[] = []; // malformed rows are attributed per-principle by buildFacts; not double-counted here
     if (stateDbAvailable) {
@@ -167,31 +159,58 @@ export class GovernanceExperienceCollector {
         if (parsed !== null) parsedTasks.push(parsed);
       }
     }
-    const activeTasks = stateDbAvailable ? parsedTasks.filter(task => task.status !== 'succeeded') : [];
-    // RuleCode owner decisions awaiting action: non-deactivated shadow
-    // activations, counted from the same batched rows (SPEC §8.3 source).
+    // SPEC §9: unlinked records never enter activity classification. Evidence
+    // counts require an established relationship: a task must have produced an
+    // artifact row (task↔artifact), a RuleCode decision's artifact must exist
+    // AND belong to a principle present in the ledger (artifact↔principle).
+    const artifactIds = new Set<string>();
+    const taskIdsWithArtifact = new Set<string>();
+    const artifactOwnerKnown = new Map<string, boolean>();
+    if (stateDbAvailable) {
+      for (const row of tables.artifactRows) {
+        if (!isRecord(row)) continue;
+        const artifactId = readOwnString(row, 'artifact_id');
+        if (artifactId === undefined) continue;
+        artifactIds.add(artifactId);
+        const sourceTaskId = readOwnString(row, 'source_task_id');
+        if (sourceTaskId !== undefined) taskIdsWithArtifact.add(sourceTaskId);
+        const sourcePrincipleId = readOwnString(row, 'source_principle_id');
+        artifactOwnerKnown.set(
+          artifactId,
+          sourcePrincipleId !== undefined && ledger.available && ledger.presentPrincipleIds.has(sourcePrincipleId),
+        );
+      }
+    }
+    const activeTasks = stateDbAvailable
+      ? parsedTasks.filter(task => task.status !== 'succeeded' && taskIdsWithArtifact.has(task.taskId))
+      : [];
+    // RuleCode owner decisions awaiting action (SPEC §8.3 source): non-deactivated
+    // shadow activations with verified linkage; unlinked ones degrade to data
+    // quality instead of inflating the decision count.
     const rulecodePendingRefs: SourceRef[] = [];
     let rulecodePendingCount = 0;
+    const unlinkedRulecodeRefs: SourceRef[] = [];
+    let unlinkedRulecodeCount = 0;
     if (stateDbAvailable) {
       for (const row of tables.activationRows) {
         if (!isRecord(row)) continue;
         const action = readOwnString(row, 'action');
         const deactivatedAt = readOwnString(row, 'deactivated_at');
         if (action !== 'code_tool_hook_shadow_activate' || deactivatedAt !== undefined) continue;
-        rulecodePendingCount += 1;
+        const artifactId = readOwnString(row, 'artifact_id');
         const activationId = readOwnString(row, 'activation_id');
-        if (activationId !== undefined && rulecodePendingRefs.length < UNLINKED_SAMPLE_LIMIT) {
-          rulecodePendingRefs.push({ type: 'activation', id: activationId });
+        const ref = activationId === undefined ? undefined : { type: 'activation' as const, id: activationId };
+        if (artifactId !== undefined && artifactOwnerKnown.get(artifactId) === true) {
+          rulecodePendingCount += 1;
+          if (ref !== undefined && rulecodePendingRefs.length < UNLINKED_SAMPLE_LIMIT) rulecodePendingRefs.push(ref);
+        } else {
+          unlinkedRulecodeCount += 1;
+          if (ref !== undefined && unlinkedRulecodeRefs.length < UNLINKED_SAMPLE_LIMIT) unlinkedRulecodeRefs.push(ref);
         }
       }
     }
-    const artifactIds = new Set<string>();
-    if (stateDbAvailable) {
-      for (const row of tables.artifactRows) {
-        if (!isRecord(row)) continue;
-        const artifactId = readOwnString(row, 'artifact_id');
-        if (artifactId !== undefined) artifactIds.add(artifactId);
-      }
+    if (unlinkedRulecodeCount > 0) {
+      dataQualityInputs.push({ source: 'activation', reasonCode: 'unlinked_record', count: unlinkedRulecodeCount, sampleRefs: unlinkedRulecodeRefs });
     }
     if (stateDbAvailable) {
       const unlinkedApprovalRefs: SourceRef[] = [];
@@ -295,13 +314,13 @@ export class GovernanceExperienceCollector {
       scan.reasonCode = 'ledger_tree_malformed';
       return scan;
     }
-    const tree = Object.hasOwn(parsed, '_tree') ? parsed._tree : parsed.tree;
-    if (!isRecord(tree) || !isRecord(tree.principles)) {
+    const principlesTree = GovernanceProjectionCollector.principleTreeFromLedger(parsed);
+    if (principlesTree === null) {
       scan.available = false;
       scan.reasonCode = 'ledger_tree_malformed';
       return scan;
     }
-    for (const principleId of Object.keys(tree.principles).sort()) {
+    for (const principleId of Object.keys(principlesTree).sort()) {
       scan.presentPrincipleIds.add(principleId);
       const issues: DataQualityIssue[] = [];
       try {

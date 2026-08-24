@@ -25,18 +25,18 @@ import type {
 export const GOVERNANCE_TASK_KINDS = new Set([
   'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer',
 ]);
-const GOVERNANCE_TASK_STATUSES = new Set([
+export const GOVERNANCE_TASK_STATUSES = new Set([
   'pending', 'leased', 'succeeded', 'retry_wait', 'failed', 'needs_human_review',
 ]);
 const PRINCIPLE_STATES = new Set(['candidate', 'active', 'archived', 'deprecated', 'probation']);
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const MAX_LINEAGE_NODES = 500;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function readOwnString(record: Record<string, unknown>, key: string): string | undefined {
+export function readOwnString(record: Record<string, unknown>, key: string): string | undefined {
   if (!Object.hasOwn(record, key)) return undefined;
   const value = record[key];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
@@ -458,14 +458,22 @@ export class GovernanceProjectionCollector {
     }
   }
 
+  /** Extracts the principles record from a parsed ledger; null when the tree is absent/malformed. */
+  static principleTreeFromLedger(parsed: unknown): Record<string, unknown> | null {
+    if (!isRecord(parsed)) return null;
+    const tree = Object.hasOwn(parsed, '_tree') ? parsed._tree : parsed.tree;
+    if (!isRecord(tree) || !isRecord(tree.principles)) return null;
+    return tree.principles;
+  }
+
   /** Validates one principle entry from an already-parsed ledger (shared by single + batch collectors). */
   static principleFactFromLedger(parsed: unknown, principleId: string, issues: DataQualityIssue[]): GovernanceFacts['principle'] {
     if (!isRecord(parsed)) throw new GovernanceProjectionCollectionError('principle_not_found', 'check_principle_ledger');
-    const tree = Object.hasOwn(parsed, '_tree') ? parsed._tree : parsed.tree;
-    if (!isRecord(tree) || !isRecord(tree.principles) || !Object.hasOwn(tree.principles, principleId)) {
+    const principles = GovernanceProjectionCollector.principleTreeFromLedger(parsed);
+    if (principles === null || !Object.hasOwn(principles, principleId)) {
       throw new GovernanceProjectionCollectionError('principle_not_found', 'check_principle_id');
     }
-    const raw = tree.principles[principleId];
+    const raw = principles[principleId];
     if (!isRecord(raw)) throw new GovernanceProjectionCollectionError('principle_not_found', 'repair_principle_ledger');
     const state = readOwnString(raw, 'status');
     const updatedAt = readOwnString(raw, 'updatedAt');

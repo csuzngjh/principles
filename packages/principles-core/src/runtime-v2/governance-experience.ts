@@ -9,17 +9,28 @@ import type { OwnerGovernanceView, SourceRef } from './governance-projection-con
 /** Bounded list contract (SPEC §15): at most 10 items per category / issue group list. */
 export const GOVERNANCE_EXPERIENCE_ITEMS_LIMIT = 10;
 export const GOVERNANCE_EXPERIENCE_ISSUE_GROUPS_LIMIT = 10;
-const PROCESSING_AUTOMATION_STATES = new Set(['running', 'retry_scheduled', 'queued']);
+/**
+ * Active execution evidence (SPEC §8.4): `running` (leased with a live lease or
+ * pending completion intent) and `retry_scheduled` (a prior execution exists,
+ * retry pending). `queued` (never-started pending frontier) is deliberately
+ * EXCLUDED — pending artifact/work is not processing.
+ */
+const PROCESSING_AUTOMATION_STATES = new Set(['running', 'retry_scheduled']);
 /** Category priority (SPEC §7.3): blocked > needs_recovery > needs_decision > processing. */
 const CATEGORY_ORDER: readonly GovernanceActivityCategory[] = ['blocked', 'needs_recovery', 'needs_decision', 'processing'];
 const UNLINKED_NEXT_ACTION = 'inspect_workspace_data';
 
 function classifyView(view: OwnerGovernanceView): GovernanceActivityCategory | 'idle' {
-  if (view.attention.primary === 'owner_required') return 'needs_decision';
+  // Per-principle category is mutually exclusive with SPEC §7.3 priority:
+  // recovery outranks decision (a principle with a failed task AND a pending
+  // approval is classified needs_recovery; the workspace-level
+  // primaryAttention headline still surfaces the decision first per SPEC
+  // Phase 4 UI priority "1. Owner decision 2. Recovery").
   const hasRecovery = view.attention.primary === 'recovery_required'
     || view.attention.items.some(item => item.kind === 'recovery')
     || view.automation.state === 'stalled';
   if (hasRecovery) return 'needs_recovery';
+  if (view.attention.primary === 'owner_required') return 'needs_decision';
   if (PROCESSING_AUTOMATION_STATES.has(view.automation.state)) return 'processing';
   return 'idle';
 }
@@ -89,6 +100,10 @@ function buildReadiness(inputs: GovernanceExperienceInputs, decisionCount: numbe
   };
 }
 
+function pushUniqueRef(refs: SourceRef[], ref: SourceRef, max: number): void {
+  if (refs.length < max && !refs.some(existing => existing.type === ref.type && existing.id === ref.id)) refs.push(ref);
+}
+
 function groupIssues(
   inputs: GovernanceExperienceInputs,
 ): { degraded: boolean; issueGroups: GovernanceDataQualityIssueGroup[]; hasMore: boolean } {
@@ -103,7 +118,7 @@ function groupIssues(
       return;
     }
     existing.count += 1;
-    if (ref !== undefined && existing.refs.length < 3 && !existing.refs.some(r => r.type === ref.type && r.id === ref.id)) existing.refs.push(ref);
+    if (ref !== undefined) pushUniqueRef(existing.refs, ref, 3);
   };
   // Unlinked record families map onto the projection's data-quality sources;
   // 'principle' (ledger entries without a principle) surfaces as 'ledger'.
@@ -118,9 +133,7 @@ function groupIssues(
       groups.set(key, { source, reasonCode: input.reasonCode, nextActionCode: UNLINKED_NEXT_ACTION, count: input.count, refs: [...input.sampleRefs].slice(0, 3) });
     } else {
       existing.count += input.count;
-      for (const ref of input.sampleRefs) {
-        if (existing.refs.length < 3 && !existing.refs.some(r => r.type === ref.type && r.id === ref.id)) existing.refs.push(ref);
-      }
+      for (const ref of input.sampleRefs) pushUniqueRef(existing.refs, ref, 3);
     }
   }
   for (const viewInput of inputs.governanceViews) {
@@ -170,18 +183,22 @@ export function deriveGovernanceExperienceSnapshot(input: unknown): GovernanceEx
   const unavailableSources = inputs.sourceAvailability.filter(source => !source.available);
   // blocked needs current-frontier evidence AND blocking evidence together
   // (SPEC §8.1). With state_db itself down there is no frontier evidence and
-  // the snapshot reports `degraded` instead of guessing.
+  // the snapshot reports `degraded` instead of guessing. "Progress cannot be
+  // established" is inherent to the condition: an unavailable required source
+  // is exactly what prevents views/progress from being built — the marker
+  // carries the frontier evidence refs, never a bare count.
   const frontierActive = inputs.frontierEvidence !== undefined && inputs.frontierEvidence.activeTaskCount > 0;
   const blocked = unavailableSources.length > 0 && frontierActive;
-  if (blocked) buckets.set('blocked', []);
+  if (blocked && inputs.frontierEvidence !== undefined) {
+    buckets.set('blocked', [{
+      category: 'blocked',
+      reasonCode: 'governance.exp.reason.source_unavailable',
+      sourceRefs: inputs.frontierEvidence.sampleRefs.slice(0, GOVERNANCE_EXPERIENCE_ITEMS_LIMIT),
+    }]);
+  }
 
   const categories: GovernanceActivityCategorySummary[] = [];
   for (const category of CATEGORY_ORDER) {
-    if (category === 'blocked' && blocked) {
-      categories.push({ category: 'blocked', count: 1, items: [], hasMore: false });
-      continue;
-    }
-    if (category === 'blocked') continue;
     const items = buckets.get(category) ?? [];
     if (items.length === 0) continue;
     categories.push({

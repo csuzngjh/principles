@@ -205,6 +205,9 @@
         },
         "dataQuality": {
           "degraded": "数据质量降级——例如 {{reasonCode}}（{{count}} 次）。部分解释可能不完整。"
+        },
+        "error": {
+          "snapshotUnavailable": "治理体验快照加载失败。"
         }
       },
       "inProgressTitle": "治理链路进行中",

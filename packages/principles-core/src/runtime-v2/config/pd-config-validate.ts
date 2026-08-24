@@ -437,7 +437,7 @@ function isAbsolutePath(p: string): boolean {
 }
 
 function isWorkspaceEnvironment(value: string): value is WorkspaceEnvironment {
-  return value === 'production' || value === 'development' || value === 'demo' || value === 'test';
+  return WORKSPACE_ENVIRONMENTS.some(environment => environment === value);
 }
 
 function validateWorkspaceConfig(
@@ -491,9 +491,15 @@ function validateWorkspaceConfig(
     return { ok: false, errors };
   }
 
+  // No `as` bypass (rc-2): narrow through the guard instead. Unreachable when
+  // errors is empty — kept as a loud invariant rather than a cast.
+  if (!isString(defaultRaw) || defaultRaw.length === 0) {
+    return { ok: false, errors: [err(`${path}.default`, 'workspace.default validation invariant failed', 'Re-validate the workspace section; this error indicates a validator bug — please report it')] };
+  }
+
   return {
     ok: true,
-    value: { default: defaultRaw as string, ...(environment !== undefined ? { environment } : {}) },
+    value: { default: defaultRaw, ...(environment !== undefined ? { environment } : {}) },
   };
 }
 

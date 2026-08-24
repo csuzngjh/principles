@@ -205,6 +205,9 @@
         },
         "dataQuality": {
           "degraded": "Data quality degraded — e.g. {{reasonCode}} ({{count}} occurrence(s)). Some explanations may be incomplete."
+        },
+        "error": {
+          "snapshotUnavailable": "The governance experience snapshot could not be loaded."
         }
       },
       "inProgressTitle": "Governance in progress",

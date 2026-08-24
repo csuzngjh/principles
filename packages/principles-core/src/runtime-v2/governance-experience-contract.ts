@@ -74,6 +74,7 @@ export const UnlinkedRecordGroupSchema = Type.Object({
     Type.Literal('task'),
     Type.Literal('artifact'),
     Type.Literal('principle'),
+    Type.Literal('activation'),
   ]),
   reasonCode: NonEmptyStringSchema,
   count: Type.Integer({ minimum: 0 }),

@@ -84,6 +84,24 @@ describe('PRI-584 deriveGovernanceExperienceSnapshot — activity classification
       .toBe('governance.exp.reason.approval_pending');
   });
 
+  it('a pending-only frontier task is NOT processing (SPEC §8.4: pending ≠ active execution)', () => {
+    const view = viewFor(facts('principle-1', { tasks: [task('principle-1', 'task-1', { status: 'pending' })] }));
+    const snapshot = deriveGovernanceExperienceSnapshot(inputs([view], {
+      ownerConfigSnapshot: { authenticationMode: 'authenticated', ownerIdentityConfiguration: 'configured' },
+    }));
+    expect(categoriesOf(snapshot)).toEqual([]);
+    expect(snapshot.activity.primaryAttention).toBe('all_clear');
+  });
+
+  it('retry_scheduled counts as processing (a prior execution exists)', () => {
+    const view = viewFor(facts('principle-1', { tasks: [task('principle-1', 'task-1', { status: 'retry_wait' })] }));
+    const snapshot = deriveGovernanceExperienceSnapshot(inputs([view], {
+      ownerConfigSnapshot: { authenticationMode: 'authenticated', ownerIdentityConfiguration: 'configured' },
+    }));
+    expect(categoriesOf(snapshot)).toEqual(['processing']);
+    expect(snapshot.activity.primaryAttention).toBe('background_processing');
+  });
+
   it('needs_human_review => needs_recovery (NOT needs_decision)', () => {
     const view = viewFor(facts('principle-1', { tasks: [task('principle-1', 'task-1', { status: 'needs_human_review' })] }));
     const snapshot = deriveGovernanceExperienceSnapshot(inputs([view]));
@@ -112,10 +130,16 @@ describe('PRI-584 deriveGovernanceExperienceSnapshot — activity classification
       .toBe('governance.exp.reason.no_pending_decision');
   });
 
-  it('decision outranks recovery when both exist (SPEC §7.3 priority)', () => {
-    const decisionView = viewFor(facts('principle-1', { approvals: [pendingApproval('principle-1', 'approval-1')] }));
-    const recoveryView = viewFor(facts('principle-2', { tasks: [task('principle-2', 'task-2', { status: 'failed' })] }));
-    const snapshot = deriveGovernanceExperienceSnapshot(inputs([recoveryView, decisionView]));
+  it('within ONE principle, recovery outranks decision (SPEC §7.3); workspace attention still leads with the decision', () => {
+    const mixedView = viewFor(facts('principle-1', {
+      tasks: [task('principle-1', 'task-1', { status: 'failed' })],
+      approvals: [pendingApproval('principle-1', 'approval-1')],
+    }));
+    const mixedSnapshot = deriveGovernanceExperienceSnapshot(inputs([mixedView]));
+    expect(categoriesOf(mixedSnapshot)).toEqual(['needs_recovery']);
+    // Across principles, the workspace headline surfaces the owner decision first (SPEC Phase 4 UI priority).
+    const decisionView = viewFor(facts('principle-2', { approvals: [pendingApproval('principle-2', 'approval-2')] }));
+    const snapshot = deriveGovernanceExperienceSnapshot(inputs([mixedView, decisionView]));
     expect(snapshot.activity.primaryAttention).toBe('owner_decision_required');
     expect(categoriesOf(snapshot)).toEqual(['needs_recovery', 'needs_decision']);
   });
@@ -129,7 +153,13 @@ describe('PRI-584 deriveGovernanceExperienceSnapshot — activity classification
       frontierEvidence: { sourceId: 'state_db', activeTaskCount: 3, sampleRefs: [{ type: 'task', id: 'task-1' }] },
     }));
     expect(categoriesOf(snapshot)).toEqual(['blocked']);
-    expect(snapshot.activity.categories[0]).toMatchObject({ category: 'blocked', count: 1, items: [], hasMore: false });
+    expect(snapshot.activity.categories[0]?.count).toBe(1);
+    // The blocked marker carries the frontier evidence refs, never a bare count.
+    expect(snapshot.activity.categories[0]?.items[0]).toMatchObject({
+      category: 'blocked',
+      reasonCode: 'governance.exp.reason.source_unavailable',
+      sourceRefs: [{ type: 'task', id: 'task-1' }],
+    });
     expect(snapshot.activity.primaryAttention).toBe('recovery_required');
     expect(snapshot.summary.reasonCode).toBe('governance.exp.reason.source_unavailable');
     expect(snapshot.summary.nextActionCode).toBe('governance.exp.next.inspect_sources');

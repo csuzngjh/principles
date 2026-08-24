@@ -30,6 +30,7 @@ import type {
   GovernanceExperienceNextActionCode,
   GovernancePrimaryAttention,
   WorkspaceEnvironment,
+  GovernanceActivityCategorySummary,
 } from "@principles/core/runtime-v2";
 
 type DecisionResult =
@@ -809,11 +810,16 @@ const EXPERIENCE_ENVIRONMENT: Record<WorkspaceEnvironment | "unknown", string> =
 function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSnapshot }) {
   const { t } = useTranslation();
   const attention = EXPERIENCE_ATTENTION[snapshot.summary.primaryAttention];
-  const decision = snapshot.activity.categories.find((category) => category.category === "needs_decision");
-  const recovery = snapshot.activity.categories.find((category) => category.category === "needs_recovery");
-  const blocked = snapshot.activity.categories.find((category) => category.category === "blocked");
-  const processing = snapshot.activity.categories.find((category) => category.category === "processing");
-  const rulecodeAction = snapshot.readiness.governanceActions.find((action) => action.kind === "rulecode_owner_decision");
+  const categoryOf = (category: GovernanceActivityCategorySummary["category"]) =>
+    snapshot.activity.categories.find(entry => entry.category === category);
+  const decision = categoryOf("needs_decision");
+  const recovery = categoryOf("needs_recovery");
+  const blocked = categoryOf("blocked");
+  const processing = categoryOf("processing");
+  const actionOf = (kind: GovernanceExperienceSnapshot["readiness"]["governanceActions"][number]["kind"]) =>
+    snapshot.readiness.governanceActions.find(action => action.kind === kind);
+  const rulecodeAction = actionOf("rulecode_owner_decision");
+  const pauseAction = actionOf("emergency_pause");
   const firstIssue = snapshot.dataQuality.issueGroups[0];
   return (
     <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]" data-testid="experience-summary">
@@ -849,7 +855,7 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
         {" · "}
         {t("pages.focus.experience.readiness.principleApproval")}
         {t(`pages.focus.experience.readiness.rulecode.${rulecodeAction?.status === "blocked" ? "blocked" : "ready"}`)}
-        {t(`pages.focus.experience.readiness.pause.${snapshot.readiness.governanceActions.find((action) => action.kind === "emergency_pause")?.observedAuthority === "break_glass" ? "breakGlass" : "owner"}`)}
+        {t(`pages.focus.experience.readiness.pause.${pauseAction?.observedAuthority === "break_glass" ? "breakGlass" : "owner"}`)}
       </div>
       <div className="mt-1 text-[12px] text-ink-4" data-testid="experience-trust">
         {t(EXPERIENCE_ENVIRONMENT[snapshot.trustContext.environmentContext.environment])}
@@ -906,7 +912,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     if (experienceMode) {
       if (experienceResult === null || !experienceResult.success) {
         setLoadingState("error");
-        setErrorMessage(experienceResult === null ? "Experience snapshot request failed" : experienceResult.error);
+        setErrorMessage(experienceResult === null ? t("pages.focus.experience.error.snapshotUnavailable") : experienceResult.error);
         return;
       }
       setExperienceData(experienceResult.data);
@@ -915,7 +921,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       // Queue data is already validated by the API layer (validateGovernanceQueue)
       if (queueResult === null || !queueResult.success) {
         setLoadingState("error");
-        setErrorMessage(queueResult === null ? "Governance queue request failed" : queueResult.error);
+        setErrorMessage(queueResult === null ? t("pages.focus.loadError") : queueResult.error);
         return;
       }
       setQueueData(queueResult.data);
@@ -945,7 +951,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     }
 
     setLoadingState("loaded");
-  }, [experienceMode]);
+  }, [experienceMode, t]);
 
   useEffect(() => {
     loadData();
