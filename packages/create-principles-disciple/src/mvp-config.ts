@@ -326,12 +326,11 @@ export function generateConfigYamlContent(
       failed_tasks_observability: { category: 'quiet', enabled: true },
       // PRI-535 (SPEC §10): Principle Receipt — owner-visible evidence that
       // approved principles change agent behavior (block copy attribution,
-      // durable application ledger, agent self-report line). Quiet flags,
-      // default-on at install so the seed customer observes receipts out of
-      // the box. Disable individually via .pd/config.yaml.
+      // durable application ledger). Deterministic receipt capabilities are
+      // default-on; experimental agent self-report stays default-off.
       principle_receipt_block_copy:  { category: 'quiet', enabled: true },
       principle_receipt_ledger:      { category: 'quiet', enabled: true },
-      principle_receipt_self_report: { category: 'quiet', enabled: true },
+      principle_receipt_self_report: { category: 'quiet', enabled: false },
       gfi:                { category: 'quiet', enabled: false },
       evolution_worker:   { category: 'quiet', enabled: false },
       empathy_observer:   { category: 'quiet', enabled: false },

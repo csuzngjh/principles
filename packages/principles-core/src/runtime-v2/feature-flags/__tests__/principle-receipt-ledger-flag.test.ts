@@ -28,8 +28,8 @@ describe('principle_receipt_ledger flag registration (PRI-531)', () => {
     expect(findFlag().category).toBe('quiet');
   });
 
-  it('defaults to enabled=false (default off)', () => {
-    expect(findFlag().enabled).toBe(false);
+  it('defaults to enabled=true (graduated to default-on, PRI-571)', () => {
+    expect(findFlag().enabled).toBe(true);
   });
 
   it('has since field matching YYYY-MM-DD', () => {
@@ -40,18 +40,18 @@ describe('principle_receipt_ledger flag registration (PRI-531)', () => {
     expect(findFlag().description).toBeTruthy();
   });
 
-  it('is disabled by default when computing feature flags from a null config', () => {
+  it('is enabled by default when computing feature flags from a null config (PRI-571 graduation)', () => {
     const effective = computeEffectivePdConfig(null);
     const result = computeFeatureFlagsFromConfig(effective);
-    expect(result.flags[FLAG_ID]?.enabled).toBe(false);
+    expect(result.flags[FLAG_ID]?.enabled).toBe(true);
     expect(result.flags[FLAG_ID]?.category).toBe('quiet');
   });
 
-  it('can be enabled via PD config override (config.features.principle_receipt_ledger.enabled = true)', () => {
+  it('can be disabled via PD config override (config.features.principle_receipt_ledger.enabled = false)', () => {
     const rawConfig = getDefaultPdConfig();
-    rawConfig.features[FLAG_ID] = { category: 'quiet', enabled: true };
+    rawConfig.features[FLAG_ID] = { category: 'quiet', enabled: false };
     const effective = computeEffectivePdConfig(rawConfig);
     const result = computeFeatureFlagsFromConfig(effective);
-    expect(result.flags[FLAG_ID]?.enabled).toBe(true);
+    expect(result.flags[FLAG_ID]?.enabled).toBe(false);
   });
 });
