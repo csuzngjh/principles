@@ -36,10 +36,12 @@ import { SqliteCommitStore } from './commit/sqlite-commit-store.js';
 import { SqliteCandidateStore } from './candidate/sqlite-candidate-store.js';
 import { SqliteArtifactStore } from './artifact/sqlite-artifact-store.js';
 import { SqlitePIArtifactStore } from './artifact/sqlite-pi-artifact-store.js';
+import { SqlitePainDiagnosisStore } from './pain-diagnosis/sqlite-pain-diagnosis-store.js';
 import type { CommitStore } from './commit/commit-store.js';
 import type { CandidateStore } from './candidate/candidate-store.js';
 import type { ArtifactStore } from './artifact/artifact-store.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
+import type { PainDiagnosisRecord, PainDiagnosisStore, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
 import type { CommitRecord } from './commit/commit-store.js';
 import type { CandidateRecord } from './candidate/candidate-store.js';
 import type { ArtifactRecord, ArtifactWithCandidates } from './artifact/artifact-store.js';
@@ -50,6 +52,7 @@ import { updatePrinciple } from '../../principle-tree-ledger.js';
 export type { CommitRecord } from './commit/commit-store.js';
 export type { CandidateRecord } from './candidate/candidate-store.js';
 export type { ArtifactRecord, ArtifactWithCandidates } from './artifact/artifact-store.js';
+export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
@@ -74,6 +77,7 @@ export class RuntimeStateManager {
   private _candidateStore!: CandidateStore;
   private _artifactStore!: ArtifactStore;
   private _piArtifactStore!: PIArtifactStore;
+  private _painDiagnosisStore!: PainDiagnosisStore;
   private leaseManager!: LeaseManager;
   private retryPolicy!: RetryPolicy;
   private recoverySweep!: RecoverySweep;
@@ -100,6 +104,7 @@ export class RuntimeStateManager {
     this._candidateStore = new SqliteCandidateStore(this._connection);
     this._artifactStore = new SqliteArtifactStore(this._connection);
     this._piArtifactStore = new SqlitePIArtifactStore(this._connection);
+    this._painDiagnosisStore = new SqlitePainDiagnosisStore(this._connection);
 
     if (!this.options.readonly) {
       this.retryPolicy = new DefaultRetryPolicy(this.options.retryPolicyConfig);
@@ -502,6 +507,24 @@ export class RuntimeStateManager {
   async getArtifact(artifactId: string): Promise<ArtifactRecord | null> {
     this.assertInitialized();
     return this._artifactStore.getArtifact(artifactId);
+  }
+
+  // ── Pain diagnosis persistence (Pain Diagnosis Persistence SPEC §4-§7) ────
+
+  /**
+   * Persist the diagnostician's root-cause attribution for a pain. Called by
+   * PainSignalBridge.onDiagnosisComplete when pain_diagnosis_persistence is on.
+   * Idempotent per (taskId, diagnosisId).
+   */
+  async recordPainDiagnosis(input: PainDiagnosisWriteInput): Promise<PainDiagnosisRecord> {
+    this.assertInitialized();
+    return this._painDiagnosisStore.recordPainDiagnosis(input);
+  }
+
+  /** All persisted diagnoses for a pain (multiple rows = re-diagnosis / mixed attribution). */
+  async getDiagnosesByPainId(painId: string): Promise<PainDiagnosisRecord[]> {
+    this.assertInitialized();
+    return this._painDiagnosisStore.getDiagnosesByPainId(painId);
   }
 
   async getArtifactWithCandidates(artifactId: string): Promise<ArtifactWithCandidates | null> {

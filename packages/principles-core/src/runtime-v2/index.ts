@@ -218,6 +218,7 @@ export type { TelemetryEvent } from '../telemetry-event.js';
 // Runtime integration layer
 export { RuntimeStateManager } from './store/runtime-state-manager.js';
 export type { RuntimeStateManagerOptions } from './store/runtime-state-manager.js';
+export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './store/runtime-state-manager.js';
 
 // Runner (M4)
 export { RunnerPhase } from './runner/runner-phase.js';

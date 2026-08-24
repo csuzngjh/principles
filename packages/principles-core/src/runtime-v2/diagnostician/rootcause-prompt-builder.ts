@@ -92,6 +92,38 @@ Owner decides value.
 }
 
 /**
+ * Build the Evidence First Attribution block (Pain Diagnosis Persistence SPEC §2.2/§6).
+ *
+ * When `evidenceFirstAttribution` is true, returns the attribution-rule text
+ * that constrains PHASE 3 classification to be evidence-driven: People only
+ * when the cited evidence shows agent-avoidable behavior, never as a default.
+ *
+ * When false/undefined, returns '' (empty string) so the assembled prompt is
+ * byte-identical to the pre-feature prompt (EP-03: no silent fallback).
+ *
+ * This is a pure function — no I/O, no side effects, never throws.
+ */
+function buildEvidenceFirstAttributionBlock(evidenceFirstAttribution?: boolean): string {
+  if (!evidenceFirstAttribution) {
+    return '';
+  }
+
+  return `
+Evidence First Attribution (applies to PHASE 3):
+A failure event is NOT automatically an agent error. Attribute strictly from the evidence you cited in PHASE 1-2.
+- Prefer People ONLY when the evidence shows agent-avoidable behavior: changed code or behavior without investigating
+  first, skipped verification or testing of the change, ignored an already-active principle that covered this case,
+  performed a high-risk action without checking it, or repeated the same class of error after earlier evidence.
+- Prefer Design when the evidence primarily shows a system or architecture defect (missing gate, unsafe default, process gap).
+- Prefer Tooling when the evidence primarily shows a tool or environment limitation or misconfiguration.
+- Prefer Assumption when the evidence primarily shows a wrong assumption (environment, version, dependency behavior).
+Never classify as People without evidence of an avoidable agent action; never avoid People when the evidence shows one.
+When both agent behavior and system or tooling factors contributed, classify the dominant evidenced cause and name the
+secondary factor in ambiguityNotes.
+`;
+}
+
+/**
  * Options for RootCausePromptBuilder constructor and buildRootCauseInstruction.
  *
  * Uses an opts-object pattern to satisfy @typescript-eslint/max-params.
@@ -115,6 +147,16 @@ export interface RootCausePromptBuilderOptions {
    * byte-identical to the pre-PRI-468 prompt (EP-03: no silent fallback).
    */
   intentGrounding?: boolean;
+  /**
+   * Evidence First Attribution (Pain Diagnosis Persistence SPEC §2.2/§6,
+   * gated by the `pain_diagnosis_persistence` flag; default: false).
+   *
+   * When true, inserts attribution rules that constrain PHASE 3 classification
+   * to be evidence-driven (People only on agent-avoidable-behavior evidence,
+   * never as a default). When false/undefined, the prompt is byte-identical
+   * to the pre-feature prompt (EP-03: no silent fallback).
+   */
+  evidenceFirstAttribution?: boolean;
 }
 
 // ── Instruction builder ──────────────────────────────────────────────────────
@@ -137,7 +179,7 @@ export function buildRootCauseProtocolInstruction(
 ): string {
   const adapter = opts.adapter ?? new DefaultSchemaPromptAdapter();
   const schema = opts.schema ?? DiagRootCauseOutputV1Schema;
-  const { outputLanguage, coreGrounding, intentGrounding } = opts;
+  const { outputLanguage, coreGrounding, intentGrounding, evidenceFirstAttribution } = opts;
 
   const example = adapter.generateExample(schema);
   const constraints = adapter.generateConstraints(schema);
@@ -156,8 +198,13 @@ export function buildRootCauseProtocolInstruction(
     fallback: '\n',
   });
 
+  // Pain Diagnosis Persistence: Evidence First Attribution rules appended
+  // after the PHASE 3 category list. When off, '' keeps the prompt
+  // byte-identical to the pre-feature prompt (EP-03: no silent fallback).
+  const evidenceFirstBlock = buildEvidenceFirstAttributionBlock(evidenceFirstAttribution);
+
   // PRI-468: When intentGrounding is true, insert PHASE 3.6.
-  // When false or undefined, output is byte-identical to the pre-PRI-468
+  // When false/undefined, output is byte-identical to the pre-PRI-468
   // prompt (EP-03: no silent fallback). The fallback is '' (empty string)
   // so that `${phase35Block}${phase36Block}CRITICAL:` produces the same
   // string as `${phase35Block}CRITICAL:` when intentGrounding is off.
@@ -190,7 +237,7 @@ Classify into ONE: People | Design | Assumption | Tooling
 - Design: architecture defects, missing gates, process gaps
 - Assumption: wrong assumptions about env/versions/deps
 - Tooling: tool misconfiguration, API changes
-${phase35Block}${phase36Block}CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
+${evidenceFirstBlock}${phase35Block}${phase36Block}CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
 ${example}
@@ -248,6 +295,7 @@ export class RootCausePromptBuilder {
       outputLanguage: opts.outputLanguage,
       coreGrounding: opts.coreGrounding,
       intentGrounding: opts.intentGrounding,
+      evidenceFirstAttribution: opts.evidenceFirstAttribution,
     });
   }
 
@@ -268,7 +316,7 @@ export class RootCausePromptBuilder {
     opts: BuildPromptOptions = {},
   ): PromptBuildResult {
     const limits = opts.limits ?? DEFAULT_PROMPT_BUILDER_LIMITS;
-    const { outputLanguage, coreGrounding, intentGrounding, intentDoc } = opts;
+    const { outputLanguage, coreGrounding, intentGrounding, intentDoc, evidenceFirstAttribution } = opts;
 
     const truncationWarnings: string[] = [];
 
@@ -302,6 +350,7 @@ export class RootCausePromptBuilder {
       outputLanguage,
       coreGrounding,
       intentGrounding,
+      evidenceFirstAttribution,
     });
 
     // DPB-04: Explicit top-level fields at the prompt level

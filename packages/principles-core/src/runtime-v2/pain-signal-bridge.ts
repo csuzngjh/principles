@@ -7,6 +7,7 @@ import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { evaluateCandidateAdmissions } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
+import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
 import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
 
@@ -81,6 +82,14 @@ export interface PainSignalBridgeOptions {
   autoIntakeEnabled?: boolean;
   /** Workspace directory — written into diagnosticJson so the diagnostician can locate files. */
   workspaceDir?: string;
+  /**
+   * Pain Diagnosis Persistence: persist the diagnostician's root-cause
+   * attribution into state.db pain_diagnoses (keyed by the canonical pain_id)
+   * on diagnosis completion. Gated by the `pain_diagnosis_persistence`
+   * feature flag — the factory resolves it from effectiveConfig; default
+   * false keeps the pre-feature behavior (no writes).
+   */
+  diagnosisPersistenceEnabled?: boolean;
   eventEmitter?: {
     emitTelemetry: (event: { eventType: string; traceId: string; timestamp: string; payload: Record<string, unknown> }) => void;
   };
@@ -141,6 +150,7 @@ export class PainSignalBridge {
   private readonly ledgerAdapter: LedgerAdapter;
   private readonly owner: string;
   private readonly autoIntakeEnabled: boolean;
+  private readonly diagnosisPersistenceEnabled: boolean;
   private readonly workspaceDir: string | undefined;
   private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
 
@@ -151,6 +161,7 @@ export class PainSignalBridge {
     this.ledgerAdapter = opts.ledgerAdapter;
     this.owner = opts.owner ?? 'pain-signal-bridge';
     this.autoIntakeEnabled = opts.autoIntakeEnabled ?? true;
+    this.diagnosisPersistenceEnabled = opts.diagnosisPersistenceEnabled ?? false;
     this.workspaceDir = opts.workspaceDir;
     this.eventEmitter = opts.eventEmitter;
   }
@@ -279,6 +290,61 @@ export class PainSignalBridge {
   }
 
   /**
+   * Pain Diagnosis Persistence: link the diagnostician's root-cause attribution
+   * to the canonical pain_id in state.db pain_diagnoses. Runs BEFORE admission
+   * so the attribution is durably recorded even when every candidate is later
+   * rejected — the pain's diagnosis history must not depend on admission
+   * outcome. Persistence is auxiliary to the admission→intake flow: failures
+   * degrade observably via telemetry and never break the main pipeline
+   * (rc-9-no-silent-fallback).
+   */
+  private async persistPainDiagnosis(opts: {
+    painId: string;
+    taskId: string;
+    diagnosticianOutput: DiagnosticianOutputV1;
+    artifactId: string | null;
+  }): Promise<void> {
+    const { painId, taskId, diagnosticianOutput, artifactId } = opts;
+    const category = parseRootCauseCategory(diagnosticianOutput.rootCause);
+    if (!category) {
+      this.eventEmitter?.emitTelemetry({
+        eventType: 'pain_diagnosis_persist_skipped',
+        traceId: painId,
+        timestamp: new Date().toISOString(),
+        payload: {
+          reason: 'unparseable_root_cause_prefix',
+          nextAction: 'Inspect the diagnostician output — rootCause must start with "People: "/"Design: "/"Assumption: "/"Tooling: ".',
+          rootCausePreview: diagnosticianOutput.rootCause.slice(0, 80),
+        },
+      });
+      return;
+    }
+    try {
+      await this.stateManager.recordPainDiagnosis({
+        painId,
+        taskId,
+        diagnosisId: diagnosticianOutput.diagnosisId,
+        category,
+        rootCause: diagnosticianOutput.rootCause,
+        evidence: diagnosticianOutput.evidence,
+        confidence: typeof diagnosticianOutput.confidence === 'number' ? diagnosticianOutput.confidence : null,
+        artifactId,
+      });
+    } catch (error) {
+      this.eventEmitter?.emitTelemetry({
+        eventType: 'pain_diagnosis_persist_failed',
+        traceId: painId,
+        timestamp: new Date().toISOString(),
+        payload: {
+          reason: error instanceof Error ? error.message : String(error),
+          nextAction: 'Inspect state.db pain_diagnoses and re-run the diagnosis if the attribution history is required.',
+          taskId,
+        },
+      });
+    }
+  }
+
+  /**
    * PRI-372 (T-G): Post-diagnosis processing extracted from onPainDetected().
    * Handles admission → intake → seedDreamer after a successful diagnosis.
    * Also called by DiagRouterRunner's onDiagnosisComplete callback.
@@ -293,6 +359,15 @@ export class PainSignalBridge {
     const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0 } = opts;
     const candidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
     const ledgerEntryIds: string[] = [];
+
+    if (this.diagnosisPersistenceEnabled && diagnosticianOutput) {
+      await this.persistPainDiagnosis({
+        painId,
+        taskId,
+        diagnosticianOutput,
+        artifactId: candidates[0]?.artifactId ?? null,
+      });
+    }
 
     const admissionResults = diagnosticianOutput
       ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount })
