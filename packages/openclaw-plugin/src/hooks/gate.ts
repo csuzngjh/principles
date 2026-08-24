@@ -182,6 +182,11 @@ export function handleBeforeToolCall(
             if (!written) {
               logger?.warn?.('[PD_GATE] Receipt ledger write failed (rule_blocked) — history degraded, block unaffected (rc-9)');
             }
+          } else {
+            // PRI-573: RuleHostResult.ruleId/principleId are both optional — a
+            // block without attribution would otherwise skip the effect row
+            // silently. The skip itself must be observable (rc-9).
+            logger?.warn?.('[PD_GATE] Receipt ledger row skipped (rule_blocked): decision carries no principleId/ruleId — effect evidence not captured (rc-9)');
           }
         }
       } catch (ledgerErr) {
