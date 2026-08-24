@@ -119,6 +119,15 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
 };
 
 // ── Component ───────────────────────────────────────────────────────────────
+export function getReceiptPresentation(effectCount: number): {
+  headlineKey: 'principles.detail.receipts.headline' | 'principles.detail.receipts.headlinePresence';
+  showZeroEffectExplanation: boolean;
+} {
+  return effectCount > 0
+    ? { headlineKey: 'principles.detail.receipts.headline', showZeroEffectExplanation: false }
+    : { headlineKey: 'principles.detail.receipts.headlinePresence', showZeroEffectExplanation: true };
+}
+
 export function PrincipleDetailPage() {
   const { t, i18n } = useTranslation("pages");
   const { id } = useParams<{ id: string }>();
@@ -452,6 +461,9 @@ export function PrincipleDetailPage() {
 
   const isPending = approvalGroup?.status === "pending" || principle.status === "candidate" || principle.status === "probation";
   const hasRules = principle.rules.length > 0;
+  const receiptPresentation = receipts?.status === 'ok'
+    ? getReceiptPresentation(receipts.effectCount)
+    : null;
 
   return (
     <PageShell>
@@ -566,8 +578,8 @@ export function PrincipleDetailPage() {
                     only justified by deterministic/self-reported effect records;
                     with effectCount=0 the claim degrades to context presence. */}
                 <h2 id="receipt-history-title" className="text-[15px] font-semibold text-ink">
-                  {receipts.effectCount > 0
-                    ? t('principles.detail.receipts.headline', {
+                  {receiptPresentation?.headlineKey === 'principles.detail.receipts.headline'
+                    ? t(receiptPresentation.headlineKey, {
                         defaultValue: '',
                         effectCount: receipts.effectCount,
                         lastEffectAt: receipts.lastEffectAt ? formatDate(receipts.lastEffectAt, i18n.language) : '',
@@ -578,7 +590,7 @@ export function PrincipleDetailPage() {
                   {t('principles.detail.receipts.counts', { effectCount: receipts.effectCount, presenceCount: receipts.presenceCount })}
                 </span>
               </div>
-              {receipts.effectCount === 0 && (
+              {receiptPresentation?.showZeroEffectExplanation && (
                 <p data-testid="receipt-history-zero-effect" className="mt-2 text-[12px] leading-relaxed text-ink-3">
                   {t('principles.detail.receipts.zeroEffect')}
                 </p>

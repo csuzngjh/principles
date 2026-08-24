@@ -12,17 +12,25 @@ const en = parseJsonRecord(fs.readFileSync(path.resolve('src/ui/i18n/en.json'), 
 const zh = parseJsonRecord(fs.readFileSync(path.resolve('src/ui/i18n/zh-CN.json'), 'utf8'));
 
 describe('PRI-572 receipt presence/effect semantic separation', () => {
-  it('claims behavior influence only when effectCount > 0; otherwise degrades to a presence claim', () => {
-    // The effect headline must be ternary-gated on real effect records,
-    // with the presence-only headline as the zero branch.
-    expect(page).toContain('receipts.effectCount > 0');
-    expect(page).toMatch(/\? t\('principles\.detail\.receipts\.headline'/);
-    expect(page).toMatch(/: t\('principles\.detail\.receipts\.headlinePresence'\)/);
+  it('selects the owner-visible receipt presentation from effect evidence', async () => {
+    const pageModule: Record<string, unknown> = await import('../../src/ui/pages/principles/PrincipleDetailPage.js');
+    const getReceiptPresentation = pageModule['getReceiptPresentation'];
+    expect(typeof getReceiptPresentation).toBe('function');
+    if (typeof getReceiptPresentation !== 'function') return;
+
+    expect(getReceiptPresentation(0)).toEqual({
+      headlineKey: 'principles.detail.receipts.headlinePresence',
+      showZeroEffectExplanation: true,
+    });
+    expect(getReceiptPresentation(2)).toEqual({
+      headlineKey: 'principles.detail.receipts.headline',
+      showZeroEffectExplanation: false,
+    });
   });
 
   it('explains the zero-effect state instead of leaving an unexplained counter', () => {
     expect(page).toContain('data-testid="receipt-history-zero-effect"');
-    expect(page).toContain('receipts.effectCount === 0');
+    expect(page).toContain('receiptPresentation?.showZeroEffectExplanation');
     expect(page).toContain('principles.detail.receipts.zeroEffect');
   });
 

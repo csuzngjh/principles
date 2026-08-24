@@ -13,14 +13,6 @@ import { DEFAULT_FEATURE_FLAGS } from '../feature-flag-contract.js';
 const REGISTRY_IDS = new Set(DEFAULT_FEATURE_FLAGS.map(f => f.id));
 const REGISTRY_BY_ID = new Map(DEFAULT_FEATURE_FLAGS.map(f => [f.id, f]));
 
-/** Flags whose installer-enabled value intentionally differs from the registry default. */
-const DOCUMENTED_ENABLED_DEVIATIONS: Record<string, string> = {
-  // PRI-535 (SPEC §10): seed customers must observe receipts out of the box,
-  // so the installer pre-enables the self-report line even though the
-  // registry default is off (experimental capability).
-  principle_receipt_self_report: 'PRI-535 install-time enable',
-};
-
 function findInstallerSource(): string {
   let dir = process.cwd();
   const relative = path.join('packages', 'create-principles-disciple', 'src', 'mvp-config.ts');
@@ -77,20 +69,11 @@ describe('PRI-574 installer config template ↔ runtime flag registry parity', (
     expect(mismatches, `category drift detected: ${mismatches.join('; ')}`).toEqual([]);
   });
 
-  it('every installer-enabled deviation from the registry default is explicitly documented', () => {
-    const undocumented = entries
+  it('keeps installer enabled values aligned with runtime defaults', () => {
+    const mismatches = entries
       .filter(e => REGISTRY_IDS.has(e.id))
       .filter(e => e.enabled !== REGISTRY_BY_ID.get(e.id)?.enabled)
-      .map(e => e.id)
-      .filter(id => !Object.hasOwn(DOCUMENTED_ENABLED_DEVIATIONS, id));
-    expect(undocumented, `undocumented enabled-value drift: ${undocumented.join(', ')}`).toEqual([]);
-
-    // The documented deviations stay accurate: each must still actually deviate.
-    const staleDeviations = Object.keys(DOCUMENTED_ENABLED_DEVIATIONS)
-      .filter(id => {
-        const entry = entries.find(e => e.id === id);
-        return entry && entry.enabled === REGISTRY_BY_ID.get(id)?.enabled;
-      });
-    expect(staleDeviations, `documented deviations no longer deviate (remove them): ${staleDeviations.join(', ')}`).toEqual([]);
+      .map(e => `${e.id}: installer=${e.enabled} registry=${REGISTRY_BY_ID.get(e.id)?.enabled}`);
+    expect(mismatches, `enabled-value drift detected: ${mismatches.join('; ')}`).toEqual([]);
   });
 });

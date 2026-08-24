@@ -30,7 +30,7 @@ feature-flag-contract.ts (registry)
 | **principle_receipt_block_copy** | **ON（毕业）** | openclaw-plugin gate-block-helper.ts:242 | ✅ 已毕业 |
 | **diagnostician_llm_degradation** | **ON（毕业）** | principles-core base-peer-runner.ts:939、diag-*-runner、pd-cli diagnose/pain-retry | ✅ 已毕业 |
 | **principle_governance_projection_v2** | **ON（毕业）** | pd-console server/routes/principles.ts governance 端点 | ✅ 已毕业 |
-| principle_receipt_self_report | OFF | prompt 注入 📝 行 + llm_output/before_message_write 捕获（PRI-532）；installer 模板按 PRI-535 装机即开 | ✅ 实验性，保持默认关 |
+| principle_receipt_self_report | OFF | prompt 注入 📝 行 + llm_output/before_message_write 捕获（PRI-532）；installer 与 registry 均保持关闭 | ✅ 实验性，保持默认关 |
 | correction_observer / signal_collector / l2_dreamer / intent_engineering / rulecode_context_v2 / artificer_output_retry / artifact_summary_redundancy / context_manifest_budget / progressive_evaluator / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi / evolution_worker / empathy_observer | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
 | nocturnal / idle_trigger | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝） | ✅ 正常退役 |
 
@@ -64,8 +64,7 @@ flag（quiet/off，gate 服务启动）与 `internalAgents.empathyObserver.enabl
 新增 `packages/principles-core/src/runtime-v2/feature-flags/__tests__/installer-config-parity.test.ts`：
 - installer 模板写入的每个 flag 必须存在于 registry（防孤儿条目）；
 - category 必须与 registry 一致；
-- enabled 与 registry 默认不一致时必须在 DOCUMENTED_ENABLED_DEVIATIONS 里登记理由
-  （当前唯一登记项：principle_receipt_self_report，PRI-535 装机即开），且登记项若不再偏离会失败。
+- enabled 必须与 registry 默认值一致，防止真实新用户配置绕过实验性能力的默认关闭契约。
 双向 silent drift 从此被 CI 阻断。
 
 ## 4. 防漂移检查清单（现有机制盘点）
