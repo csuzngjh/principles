@@ -103,7 +103,7 @@
     "typebox": "^1.2.2"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.1.2",
     "fast-check": "4.9.0",
