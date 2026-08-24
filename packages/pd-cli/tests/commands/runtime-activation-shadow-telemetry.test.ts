@@ -77,6 +77,23 @@ describe('PRI-577 shadow telemetry dual-directory reading', () => {
     expect(summary.lastObservedAt).toBe('2026-08-22T10:00:00.000Z');
   });
 
+  it('deduplicates same-named files across directories by candidate priority (migration safety)', () => {
+    // Simulates the future migration window: legacy files copied to .pd/logs
+    // while .state/logs still holds the originals. Same filename in both dirs
+    // must count once — from the higher-priority (.pd/logs) copy.
+    writeEventsFile('.state/logs', '2026-08-21', [
+      makeEventLine(),
+      makeEventLine({}, { toolName: 'exec', filePath: 'x', matched: false, decision: 'allow' }),
+    ]);
+    writeEventsFile('.pd/logs', '2026-08-21', [makeEventLine()]);
+    // Non-colliding legacy file still counts
+    writeEventsFile('.state/logs', '2026-08-20', [makeEventLine({ ts: '2026-08-20T09:00:00.000Z' })]);
+
+    const summary = readShadowSummaryForActivation(workspaceDir, ACTIVATION_ID);
+    expect(summary.observed).toBe(2); // 1 (pd copy) + 1 (non-colliding state file)
+    expect(summary.firstObservedAt).toBe('2026-08-20T09:00:00.000Z');
+  });
+
   it('reports zero (not unavailable) when a log dir exists but has no matching events', () => {
     writeEventsFile('.state/logs', '2026-08-21', [
       JSON.stringify({ ts: '2026-08-21T00:00:00.000Z', type: 'other_event', category: 'x', data: {} }),

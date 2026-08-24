@@ -73,6 +73,21 @@ describe('PRI-577 console shadow telemetry dual-directory reading', () => {
     expect(collected.sourceDirsFound).toBe(2);
   });
 
+  it('deduplicates same-named files across directories by candidate priority (migration safety)', () => {
+    // Migration window: same filename present in both dirs — the higher
+    // priority (.pd/logs) copy wins, legacy copy is not double-counted.
+    writeEventsFile('.state/logs', '2026-08-21', [
+      makeEventLine(),
+      makeEventLine({}, { toolName: 'edit', filePath: 'y', matched: false, decision: 'allow' }),
+    ]);
+    writeEventsFile('.pd/logs', '2026-08-21', [makeEventLine()]);
+    writeEventsFile('.state/logs', '2026-08-20', [makeEventLine({ ts: '2026-08-20T09:00:00.000Z' })]);
+
+    const collected = collectRuleCodeEventEntries(workspaceDir);
+    expect(collected.entries.length).toBe(2); // 1 (pd copy) + 1 (non-colliding state file)
+    expect(collected.sourceDirsFound).toBe(2);
+  });
+
   it('reports zero source dirs when neither directory exists', () => {
     const collected = collectRuleCodeEventEntries(workspaceDir);
     expect(collected.entries.length).toBe(0);

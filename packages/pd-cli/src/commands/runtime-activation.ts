@@ -76,10 +76,16 @@ export interface CollectedRuleCodeEventEntries {
  * Malformed lines are excluded individually; an unreadable existing directory
  * contributes nothing but still counts toward sourceDirsFound so callers can
  * distinguish "channel alive, no data" from "no channel" (ERR-002).
+ *
+ * Same-named files across candidate directories are deduplicated by priority:
+ * the first candidate that contains a given filename wins (`.pd/logs` beats
+ * `.state/logs`). This keeps counts stable when the writer eventually migrates
+ * and legacy files are copied to the new directory during the transition.
  */
 export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRuleCodeEventEntries {
   const entries: unknown[] = [];
   let sourceDirsFound = 0;
+  const seenFileNames = new Set<string>();
   for (const candidate of RULECODE_EVENT_LOG_CANDIDATE_DIRS) {
     const logsDir = path.join(workspaceDir, ...candidate.split('/'));
     if (!fs.existsSync(logsDir)) continue;
@@ -90,6 +96,8 @@ export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRule
         .sort()
         .slice(-7);
       for (const file of files) {
+        if (seenFileNames.has(file)) continue;
+        seenFileNames.add(file);
         const lines = fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean);
         for (const line of lines) {
           try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ }
