@@ -53,11 +53,65 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
   };
 }
 
-function readShadowSummary(workspaceDir: string, activationId: string): PromotionEvidenceSnapshot['shadowSummary'] {
-  const logsDir = path.join(workspaceDir, '.pd', 'logs'); if (!fs.existsSync(logsDir)) return unavailableShadowSummary();
+/**
+ * PRI-577: RuleCode event telemetry candidate directories, in priority order.
+ *
+ * Runtime V2 convention is `.pd/logs`, but the v1 EventLog writer
+ * (openclaw-plugin `src/core/event-log.ts`) still emits `events_*.jsonl` under
+ * `.state/logs`. No production code ever created `.pd/logs`, so scanning only
+ * that path made every shadow metric report "unavailable" while 2500+ real
+ * evaluations sat unread in `.state/logs`. Readers scan both candidates until
+ * the writer migrates (ERR-031: both readers derive from this same list).
+ */
+export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs', '.state/logs'];
+
+export interface CollectedRuleCodeEventEntries {
+  entries: unknown[];
+  /** Number of candidate directories that actually exist on disk. */
+  sourceDirsFound: number;
+}
+
+/**
+ * Collect rulehost telemetry entries from all candidate log directories.
+ * Malformed lines are excluded individually. A directory counts as a source
+ * only after it can be enumerated, so an unreadable path cannot be mistaken
+ * for a healthy channel with zero events (ERR-002).
+ *
+ * Exact lines copied between candidate directories are deduplicated by
+ * priority. Different events in same-named daily files are retained.
+ */
+export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRuleCodeEventEntries {
   const entries: unknown[] = [];
-  try { for (const file of fs.readdirSync(logsDir).filter(name => /^events_.*\.jsonl$/.test(name)).sort().slice(-7)) for (const line of fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean)) { try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ } } }
-  catch { return unavailableShadowSummary(); }
+  let sourceDirsFound = 0;
+  const higherPriorityLines = new Set<string>();
+  for (const candidate of RULECODE_EVENT_LOG_CANDIDATE_DIRS) {
+    const logsDir = path.join(workspaceDir, ...candidate.split('/'));
+    if (!fs.existsSync(logsDir)) continue;
+    try {
+      const files = fs.readdirSync(logsDir)
+        .filter(name => /^events_.*\.jsonl$/.test(name))
+        .sort()
+        .slice(-7);
+      sourceDirsFound += 1;
+      const currentSourceLines: string[] = [];
+      for (const file of files) {
+        const lines = fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean);
+        for (const line of lines) {
+          currentSourceLines.push(line);
+          if (higherPriorityLines.has(line)) continue;
+          try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ }
+        }
+      }
+      for (const line of currentSourceLines) higherPriorityLines.add(line);
+    } catch { /* unreadable directory contributes no entries */ }
+  }
+  return { entries, sourceDirsFound };
+}
+
+/** Exported for PRI-577 regression tests and reuse by promote evidence assembly. */
+export function readShadowSummaryForActivation(workspaceDir: string, activationId: string): PromotionEvidenceSnapshot['shadowSummary'] {
+  const { entries, sourceDirsFound } = collectRuleCodeEventEntries(workspaceDir);
+  if (sourceDirsFound === 0) return unavailableShadowSummary();
   return summarizeRuleCodeShadowEvents(entries, activationId);
 }
 
@@ -510,7 +564,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               artifactDigest,
               lineageRefs: artifact ? [artifact.sourceTaskId, ...artifact.lineageArtifactIds] : [],
               hostRuntimeVersion: 'openclaw-legacy@1', safetyGateResults: checks,
-              shadowSummary: readShadowSummary(workspaceDir, activationId),
+              shadowSummary: readShadowSummaryForActivation(workspaceDir, activationId),
               configurationVersion: 'pd-config-current',
               redaction: { version: 'v1', rawParametersStored: false }, createdAt,
             };

@@ -38,6 +38,9 @@ export function evaluateRuleCodePromotionReadiness(input: PromotionReadinessEval
   }
 
   const {shadowSummary} = input.evidenceSnapshot;
+  if (shadowSummary.observed === null) {
+    unavailable.push({ checkId: 'runtime_shadow_evidence', reasonCode: 'shadow_telemetry_source_unavailable' });
+  }
   const safetyGateResults = REQUIRED_PROMOTION_CHECK_IDS.flatMap(checkId => {
     const check = byId.get(checkId);
     if (!check) return [];
