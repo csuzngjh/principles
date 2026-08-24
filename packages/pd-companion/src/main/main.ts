@@ -17,10 +17,11 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildConsoleOpenArgs,
-  resolveExtensionDir,
+  resolveInstalledRuntime,
   resolvePdCliEntry,
   resolvePluginPackageJson,
 } from '../lib/locate.js';
+import { getInstallLayoutPaths } from '@principles/install-layout';
 import { tryParseConsoleOpenOutput, parsePluginVersion, LaunchResultError } from '../lib/launch-result.js';
 import { ConsoleSupervisor } from '../lib/supervisor.js';
 import { buildDegradedPageHtml, describeDegraded } from '../lib/degraded.js';
@@ -53,6 +54,7 @@ let state: CompanionState = defaultCompanionState();
 let stateFilePath = '';
 let logFilePath = '';
 let extDir: string | undefined;
+let installedPluginDir: string | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let updateTimer: ReturnType<typeof setInterval> | undefined;
 let quitting = false;
@@ -205,9 +207,9 @@ function stopServer(): void {
 }
 
 function readInstalledVersion(): string | undefined {
-  if (extDir === undefined) return undefined;
+  if (installedPluginDir === undefined) return undefined;
   try {
-    return parsePluginVersion(fs.readFileSync(resolvePluginPackageJson(extDir), 'utf8'));
+    return parsePluginVersion(fs.readFileSync(resolvePluginPackageJson(installedPluginDir), 'utf8'));
   } catch {
     return undefined;
   }
@@ -215,7 +217,21 @@ function readInstalledVersion(): string | undefined {
 
 function startSupervision(): void {
   const home = app.getPath('home');
-  extDir = resolveExtensionDir(home);
+  const paths = getInstallLayoutPaths(home);
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
+  } catch {
+    manifest = undefined;
+  }
+  const runtime = resolveInstalledRuntime({
+    homeDir: home,
+    manifest,
+    canonicalRuntimeExists: fs.existsSync(paths.runtimeDir),
+    legacyExtensionExists: fs.existsSync(paths.openClawExtensionDir),
+  });
+  extDir = runtime?.root;
+  installedPluginDir = runtime?.pluginRoot;
   if (extDir === undefined || !fs.existsSync(resolvePdCliEntry(extDir))) {
     supervisor.start();
     supervisor.onLaunchFailure({ reason: 'console_runtime_not_installed' });
