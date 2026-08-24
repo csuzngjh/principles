@@ -562,17 +562,27 @@ export function PrincipleDetailPage() {
           {receipts.status === 'ok' ? (
             <div data-testid="receipt-history" className="rounded-[var(--radius-md)] border border-line p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
+                {/* PRI-572: presence ≠ effect. The behavior-influence headline is
+                    only justified by deterministic/self-reported effect records;
+                    with effectCount=0 the claim degrades to context presence. */}
                 <h2 id="receipt-history-title" className="text-[15px] font-semibold text-ink">
-                  {t('principles.detail.receipts.headline', {
-                    defaultValue: '',
-                    effectCount: receipts.effectCount,
-                    lastEffectAt: receipts.lastEffectAt ? formatDate(receipts.lastEffectAt, i18n.language) : '',
-                  })}
+                  {receipts.effectCount > 0
+                    ? t('principles.detail.receipts.headline', {
+                        defaultValue: '',
+                        effectCount: receipts.effectCount,
+                        lastEffectAt: receipts.lastEffectAt ? formatDate(receipts.lastEffectAt, i18n.language) : '',
+                      })
+                    : t('principles.detail.receipts.headlinePresence')}
                 </h2>
                 <span data-testid="receipt-history-counts" className="font-mono text-[11px] text-ink-3">
                   {t('principles.detail.receipts.counts', { effectCount: receipts.effectCount, presenceCount: receipts.presenceCount })}
                 </span>
               </div>
+              {receipts.effectCount === 0 && (
+                <p data-testid="receipt-history-zero-effect" className="mt-2 text-[12px] leading-relaxed text-ink-3">
+                  {t('principles.detail.receipts.zeroEffect')}
+                </p>
+              )}
               {receipts.events.length > 0 ? (
                 <ul className="mt-3 space-y-1.5">
                   {receipts.events.map((event, index) => (
