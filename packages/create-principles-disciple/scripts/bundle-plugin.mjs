@@ -314,6 +314,7 @@ rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principl
 // ERR_MODULE_NOT_FOUND because pd-cli cannot resolve @principles/host-runtime.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/host-runtime', 'file:../host-runtime');
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/install-layout', 'file:../install-layout');
+rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/install-layout', 'file:../install-layout');
 // host-runtime itself depends on @principles/core. Rewrite to a local file
 // reference so the bundled host-runtime package can resolve core without a
 // separate npm install. The installer creates the corresponding symlink.

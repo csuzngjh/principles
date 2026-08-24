@@ -35,6 +35,7 @@ import {
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
+import { parseInstallManifest } from '@principles/install-layout';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
@@ -113,15 +114,43 @@ const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
 // Shared components use ~/.pd/runtime. The plugin package is host-neutral for
 // Codex-only installs; OpenClaw/all still receive their adapter copy under
 // ~/.openclaw/extensions for host discovery.
-let activePluginDir: string | undefined;
+let activeHostTarget: HostTarget = 'openclaw';
+function installsOpenClaw(host: HostTarget): boolean {
+  return host === 'openclaw' || host === 'all';
+}
+
 function installedPluginDir(): string {
-  return activePluginDir ?? getPluginExtDir();
+  return getInstalledPluginDir();
+}
+
+function pluginInstallDirs(): string[] {
+  return installsOpenClaw(activeHostTarget)
+    ? [getInstalledPluginDir(), getPluginExtDir()]
+    : [getInstalledPluginDir()];
+}
+
+export function mergeInstallManifestHosts(current: unknown, host: HostTarget): ('codex' | 'openclaw')[] {
+  const hosts = new Set<'codex' | 'openclaw'>();
+  const parsed = parseInstallManifest(current);
+  if (current !== undefined && !parsed.manifest) {
+    throw new Error(parsed.error ?? 'install_manifest_malformed');
+  }
+  for (const existingHost of parsed.manifest?.hosts ?? []) hosts.add(existingHost);
+  if (host === 'all' || host === 'codex') hosts.add('codex');
+  if (host === 'all' || host === 'openclaw') hosts.add('openclaw');
+  return [...hosts];
 }
 
 function writeInstallManifest(host: HostTarget): void {
   mkdirSync(getPdDir(), { recursive: true });
-  const hosts = host === 'all' ? ['codex', 'openclaw'] : [host];
-  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts }, null, 2) + '\n', 'utf8');
+  let current: unknown;
+  try {
+    current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
+  } catch (error) {
+    if (existsSync(getInstallManifestPath())) throw error;
+  }
+  const hosts = mergeInstallManifestHosts(current, host);
+  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: [...hosts] }, null, 2) + '\n', 'utf8');
 }
 
 function installBundledLayoutPackage(pluginDir: string): void {
@@ -309,10 +338,10 @@ export function migrateLegacyPdBackups(): void {
 /**
  * Exported for real-filesystem tests (tests/backup-location.test.ts).
  */
-export function backupExistingInstall(): BackupResult {
+export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResult {
   const extDir = getPluginExtDir();
   const runtimeDir = getPdRuntimeDir();
-  const hasExt = existsSync(extDir);
+  const hasExt = installsOpenClaw(host) && existsSync(extDir);
   const hasRuntime = existsSync(runtimeDir);
   if (!hasExt && !hasRuntime) return { type: 'no_existing', backupDir: null };
 
@@ -720,29 +749,28 @@ export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
 }
 
 export async function installPluginToStaging(pluginDir: string, language: SkillLanguage): Promise<void> {
-  const extDir = installedPluginDir();
   const builtPluginDir = path.join(pluginDir, 'plugin');
+  for (const targetDir of pluginInstallDirs()) {
+    await fse.ensureDir(targetDir);
+    await fse.copy(builtPluginDir, targetDir, { overwrite: true });
 
-  await fse.ensureDir(extDir);
-  await fse.copy(builtPluginDir, extDir, { overwrite: true });
+    // The published plugin declares its bundled core as file:./core. Keep that
+    // package-local contract while storing the actual core once in the shared
+    // host-neutral runtime directory.
+    const pluginCoreLink = path.join(targetDir, 'core');
+    if (!existsSync(pluginCoreLink)) {
+      const coreDir = path.join(getPdRuntimeDir(), 'core');
+      if (isWindows()) symlinkSync(coreDir, pluginCoreLink, 'junction');
+      else symlinkSync(path.relative(targetDir, coreDir), pluginCoreLink, 'dir');
+    }
 
-  // The published plugin declares its bundled core as file:./core. Keep that
-  // package-local contract while storing the actual core once in the shared
-  // host-neutral runtime directory.
-  const pluginCoreLink = path.join(extDir, 'core');
-  if (!existsSync(pluginCoreLink)) {
-    const coreDir = path.join(getPdRuntimeDir(), 'core');
-    if (isWindows()) symlinkSync(coreDir, pluginCoreLink, 'junction');
-    else symlinkSync(path.relative(extDir, coreDir), pluginCoreLink, 'dir');
-  }
-
-  // Skill-language selection: OpenClaw publishes skills by name with no
-  // locale mechanism, so the installed manifest must declare exactly one
-  // language root. The shipped manifest declares zh (product default);
-  // --lang en installs rewrite it to the en root here.
-  const selection = applySkillLanguageSelection(extDir, language);
-  if (!selection.applied) {
-    logger.warn(`Skill language "${language}" not applied (${selection.note ?? 'unknown'}) — published skills stay at the manifest default`);
+    // OpenClaw publishes skills by name with no locale mechanism. Applying the
+    // same selected language to both copies also keeps the canonical package
+    // ready if another host is attached later.
+    const selection = applySkillLanguageSelection(targetDir, language);
+    if (!selection.applied) {
+      logger.warn(`Skill language "${language}" not applied at ${targetDir} (${selection.note ?? 'unknown'}) — published skills stay at the manifest default`);
+    }
   }
 }
 
@@ -753,43 +781,44 @@ export async function installPluginToStaging(pluginDir: string, language: SkillL
 // directly — the HostInstaller interface keeps install/uninstall host-agnostic.
 
 async function installPluginDependencies(): Promise<void> {
-  const extDir = installedPluginDir();
-  const packageJsonPath = path.join(extDir, 'package.json');
-  const nodeModulesPath = path.join(extDir, 'node_modules');
+  for (const extDir of pluginInstallDirs()) {
+    const packageJsonPath = path.join(extDir, 'package.json');
+    const nodeModulesPath = path.join(extDir, 'node_modules');
 
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('Plugin package.json not found after copy — install is corrupted');
-  }
+    if (!existsSync(packageJsonPath)) {
+      throw new Error(`Plugin package.json not found after copy at ${extDir} — install is corrupted`);
+    }
 
-  const packageJsonRaw: unknown = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-  if (typeof packageJsonRaw !== 'object' || packageJsonRaw === null || Array.isArray(packageJsonRaw)) {
-    throw new Error('Plugin package.json is malformed');
-  }
-  const pkg = packageJsonRaw as Record<string, unknown>;
-  const deps = (typeof pkg.dependencies === 'object' && pkg.dependencies !== null && !Array.isArray(pkg.dependencies))
-    ? Object.keys(pkg.dependencies)
-    : [];
-  const devDeps = (typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null && !Array.isArray(pkg.devDependencies))
-    ? Object.keys(pkg.devDependencies)
-    : [];
-  const allDeps = [...deps, ...devDeps];
+    const packageJsonRaw: unknown = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+    if (!isRecord(packageJsonRaw)) {
+      throw new Error('Plugin package.json is malformed');
+    }
+    const pkg = packageJsonRaw;
+    const deps = (typeof pkg.dependencies === 'object' && pkg.dependencies !== null && !Array.isArray(pkg.dependencies))
+      ? Object.keys(pkg.dependencies)
+      : [];
+    const devDeps = (typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null && !Array.isArray(pkg.devDependencies))
+      ? Object.keys(pkg.devDependencies)
+      : [];
+    const allDeps = [...deps, ...devDeps];
 
-  let needsInstall = !existsSync(nodeModulesPath);
-  if (!needsInstall) {
-    for (const dep of allDeps) {
-      if (!existsSync(path.join(extDir, 'node_modules', dep))) {
-        needsInstall = true;
-        break;
+    let needsInstall = !existsSync(nodeModulesPath);
+    if (!needsInstall) {
+      for (const dep of allDeps) {
+        if (!existsSync(path.join(extDir, 'node_modules', dep))) {
+          needsInstall = true;
+          break;
+        }
       }
     }
-  }
 
-  if (needsInstall) {
-    await runNpmInstall(extDir, 'Plugin');
-  }
+    if (needsInstall) {
+      await runNpmInstall(extDir, 'Plugin');
+    }
 
-  await rebuildNativeModules(extDir, 'Plugin');
-  verifyNativeModules(extDir, 'Plugin');
+    await rebuildNativeModules(extDir, 'Plugin');
+    verifyNativeModules(extDir, 'Plugin');
+  }
 }
 
 function getNpmGlobalBinDir(): string | null {
@@ -1667,12 +1696,14 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   // because jsonMode always implies non-interactive.
   const quiet = mode.quiet === true;
   const nonInteractive = mode.nonInteractive ?? quiet;
-  activePluginDir = options.host === 'codex' ? getInstalledPluginDir() : getPluginExtDir();
+  activeHostTarget = options.host;
   // Gateway lock pre-flight: a running gateway holds native-module file handles
   // that make the backup rename fail with EPERM. Decide stop/abort/proceed
   // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).
   let restartedGateway = false;
-  const gatewayStatus = await checkOpenClawGateway();
+  const gatewayStatus = installsOpenClaw(options.host)
+    ? await checkOpenClawGateway()
+    : { isRunning: false };
   if (gatewayStatus.isRunning) {
     const action = await resolveGatewayAction(gatewayStatus, {
       stopGateway: options.stopGateway,
@@ -1741,8 +1772,8 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Backing up existing install...');
-    migrateLegacyPdBackups();
-    const { backupDir: backupDirFromResult, runtimeBackupDir: runtimeBackupDirFromResult } = backupExistingInstall();
+    if (installsOpenClaw(options.host)) migrateLegacyPdBackups();
+    const { backupDir: backupDirFromResult, runtimeBackupDir: runtimeBackupDirFromResult } = backupExistingInstall(options.host);
     backupDir = backupDirFromResult;
     runtimeBackupDir = runtimeBackupDirFromResult ?? null;
     stepIndex++;

@@ -13,6 +13,8 @@ describe('install layout', () => {
     expect(result.mode).toBe('canonical');
     expect(result.manifest?.hosts).toEqual(['codex']);
     expect(paths.openClawExtensionDir).toContain('.openclaw');
+    expect(paths.pluginDir).toContain('plugin');
+    expect(paths.installLayoutDir).toContain('install-layout');
     expect(getConsoleServerEntry(result.paths, 'canonical')).toContain('.pd');
   });
 

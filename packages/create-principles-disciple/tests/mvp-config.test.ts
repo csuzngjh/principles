@@ -1198,10 +1198,9 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     // The return statement must include `!hasHostFailures` in the success field
-    const returnBlock = content.substring(
-      content.indexOf('return {'),
-      content.indexOf('} catch (error)'),
-    );
+    const installStart = content.indexOf('export async function install(');
+    const returnStart = content.indexOf('return {', installStart);
+    const returnBlock = content.substring(returnStart, content.indexOf('} catch (error)', returnStart));
     // Find the success line in the return block
     expect(returnBlock).toContain('!hasHostFailures');
     // hostFailures must be populated from hr.success === false
@@ -2067,9 +2066,18 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
     expect(pdCliDestIdx).toBeGreaterThan(0);
   });
 
-  it('bundle-plugin.mjs rewrites principles-disciple dependency in console to its installed parent package root', () => {
+  it('bundle-plugin.mjs rewrites principles-disciple dependency in console to canonical plugin sibling', () => {
     expect(content).toContain(
-      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:..')",
+      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:../plugin')",
+    );
+  });
+
+  it('bundle-plugin.mjs wires install-layout into both shipped consumers', () => {
+    expect(content).toContain(
+      "rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/install-layout', 'file:../install-layout')",
+    );
+    expect(content).toContain(
+      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/install-layout', 'file:../install-layout')",
     );
   });
 

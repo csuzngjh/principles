@@ -17,6 +17,8 @@ export interface InstallLayoutPaths {
   pdDir: string;
   manifest: string;
   runtimeDir: string;
+  pluginDir: string;
+  installLayoutDir: string;
   coreDir: string;
   hostRuntimeDir: string;
   pdCliDir: string;
@@ -75,6 +77,8 @@ export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {
     pdDir,
     manifest: path.join(pdDir, 'install.json'),
     runtimeDir,
+    pluginDir: path.join(runtimeDir, 'plugin'),
+    installLayoutDir: path.join(runtimeDir, 'install-layout'),
     coreDir: path.join(runtimeDir, 'core'),
     hostRuntimeDir: path.join(runtimeDir, 'host-runtime'),
     pdCliDir: path.join(runtimeDir, 'pd-cli'),

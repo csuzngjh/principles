@@ -41,6 +41,7 @@ describe('resolveInstalledRuntime', () => {
     });
     expect(resolved?.mode).toBe('canonical');
     expect(resolved?.root).toContain(path.join('.pd', 'runtime'));
+    expect(resolved?.pluginRoot).toContain(path.join('.pd', 'runtime', 'plugin'));
   });
 
   it('keeps legacy OpenClaw installs discoverable', () => {
@@ -52,6 +53,7 @@ describe('resolveInstalledRuntime', () => {
     });
     expect(resolved?.mode).toBe('legacy');
     expect(resolved?.root).toContain(path.join('.openclaw', 'extensions'));
+    expect(resolved?.pluginRoot).toBe(resolved?.root);
   });
 });
 

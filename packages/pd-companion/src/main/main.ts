@@ -54,6 +54,7 @@ let state: CompanionState = defaultCompanionState();
 let stateFilePath = '';
 let logFilePath = '';
 let extDir: string | undefined;
+let installedPluginDir: string | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let updateTimer: ReturnType<typeof setInterval> | undefined;
 let quitting = false;
@@ -206,9 +207,9 @@ function stopServer(): void {
 }
 
 function readInstalledVersion(): string | undefined {
-  if (extDir === undefined) return undefined;
+  if (installedPluginDir === undefined) return undefined;
   try {
-    return parsePluginVersion(fs.readFileSync(resolvePluginPackageJson(extDir), 'utf8'));
+    return parsePluginVersion(fs.readFileSync(resolvePluginPackageJson(installedPluginDir), 'utf8'));
   } catch {
     return undefined;
   }
@@ -230,6 +231,7 @@ function startSupervision(): void {
     legacyExtensionExists: fs.existsSync(paths.openClawExtensionDir),
   });
   extDir = runtime?.root;
+  installedPluginDir = runtime?.pluginRoot;
   if (extDir === undefined || !fs.existsSync(resolvePdCliEntry(extDir))) {
     supervisor.start();
     supervisor.onLaunchFailure({ reason: 'console_runtime_not_installed' });

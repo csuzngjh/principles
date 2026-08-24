@@ -26,7 +26,7 @@ export function resolveInstalledRuntime(
     canonicalRuntimeExists: boolean;
     legacyExtensionExists: boolean;
   },
-): { root: string; mode: InstallLayoutMode } | undefined {
+): { root: string; pluginRoot: string; mode: InstallLayoutMode } | undefined {
   const { homeDir, manifest, canonicalRuntimeExists, legacyExtensionExists } = options;
   if (homeDir === undefined || homeDir.trim() === '') return undefined;
   const paths = getInstallLayoutPaths(homeDir);
@@ -34,6 +34,7 @@ export function resolveInstalledRuntime(
   if (result.mode === 'missing') return undefined;
   return {
     root: result.mode === 'canonical' ? paths.runtimeDir : paths.openClawExtensionDir,
+    pluginRoot: result.mode === 'canonical' ? paths.pluginDir : paths.openClawExtensionDir,
     mode: result.mode,
   };
 }
