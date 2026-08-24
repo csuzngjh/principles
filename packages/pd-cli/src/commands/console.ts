@@ -3,6 +3,13 @@ import * as fs from 'fs';
 import { spawn, type ChildProcess } from 'child_process';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import {
+  getConsoleServerEntry,
+  getConsoleWebIndex,
+  getInstallLayoutPaths,
+  resolveInstallLayout,
+  type InstallLayoutMode,
+} from '@principles/install-layout';
+import {
   planConsoleLaunch,
   openBrowser,
   isLoopbackHost,
@@ -36,11 +43,25 @@ interface ConsoleOptions {
   json?: boolean;
 }
 
-function getConsoleDir(): string | null {
+function getConsoleDir(): { dir: string; mode: InstallLayoutMode } | null {
   const homeDir = process.env.HOME || process.env.USERPROFILE;
   if (!homeDir) return null;
-  const consoleDir = path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple', 'console');
-  return fs.existsSync(consoleDir) ? consoleDir : null;
+  const paths = getInstallLayoutPaths(homeDir);
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
+  } catch {
+    manifest = undefined;
+  }
+  const resolved = resolveInstallLayout({
+    homeDir,
+    manifest,
+    canonicalRuntimeExists: fs.existsSync(paths.runtimeDir),
+    legacyExtensionExists: fs.existsSync(paths.openClawExtensionDir),
+  });
+  if (resolved.mode === 'missing') return null;
+  const dir = resolved.mode === 'canonical' ? paths.consoleDir : path.join(paths.openClawExtensionDir, 'console');
+  return { dir, mode: resolved.mode };
 }
 
 export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
@@ -48,8 +69,8 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
     ? path.resolve(opts.workspace)
     : resolveWorkspaceDir();
 
-  const consoleDir = getConsoleDir();
-  if (!consoleDir) {
+  const consoleLocation = getConsoleDir();
+  if (!consoleLocation) {
     const msg = 'pd-console is not installed. Run: npx create-principles-disciple to install.';
     if (opts.json) {
       console.log(JSON.stringify({ success: false, reason: msg, nextAction: 'npx create-principles-disciple' }));
@@ -60,7 +81,8 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
     return;
   }
 
-  const serverEntry = path.join(consoleDir, 'dist', 'server.js');
+  const paths = getInstallLayoutPaths(process.env.HOME || process.env.USERPROFILE || '.');
+  const serverEntry = getConsoleServerEntry(paths, consoleLocation.mode);
   if (!fs.existsSync(serverEntry)) {
     const msg = `Console server entry not found at ${serverEntry}. Re-run installer.`;
     if (opts.json) {
@@ -74,7 +96,7 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
 
   // EP-06 regression guard (PR #1169): verify web UI bundle exists before launch.
   // Without dist/web/index.html the server returns 404 "Run npm run build:ui first".
-  const webIndex = path.join(consoleDir, 'dist', 'web', 'index.html');
+  const webIndex = getConsoleWebIndex(paths, consoleLocation.mode);
   if (!fs.existsSync(webIndex)) {
     const msg = `Console web UI not found at ${webIndex}. The console bundle is corrupted. Re-run installer.`;
     if (opts.json) {
@@ -274,8 +296,8 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   }
 
   // 3) Check that the console runtime is installed (ERR-040: fail loud if missing)
-  const consoleDir = getConsoleDir();
-  if (!consoleDir) {
+  const consoleLocation = getConsoleDir();
+  if (!consoleLocation) {
     const result: ConsoleLaunchResult = {
       status: 'failed',
       url: '',
@@ -296,7 +318,8 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     process.exit(1);
     return;
   }
-  const serverEntry = path.join(consoleDir, 'dist', 'server.js');
+  const paths = getInstallLayoutPaths(process.env.HOME || process.env.USERPROFILE || '.');
+  const serverEntry = getConsoleServerEntry(paths, consoleLocation.mode);
   if (!fs.existsSync(serverEntry)) {
     const result: ConsoleLaunchResult = {
       status: 'failed',
@@ -322,7 +345,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   // EP-06 regression guard (PR #1169): verify web UI bundle exists before launch.
   // Without dist/web/index.html the server returns 404 "Run npm run build:ui first"
   // — a fatal first-impression bug for new users.
-  const webIndex = path.join(consoleDir, 'dist', 'web', 'index.html');
+  const webIndex = getConsoleWebIndex(paths, consoleLocation.mode);
   if (!fs.existsSync(webIndex)) {
     const result: ConsoleLaunchResult = {
       status: 'failed',

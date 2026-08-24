@@ -350,3 +350,16 @@ Runtime-contract rules `rc-1` through `rc-9` apply to the future codec/runtime i
 - [PRI-523](https://linear.app/principles-disciple/issue/PRI-523) — authoritative MVP exception and acceptance contract
 - [`CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md`](../architecture/CHATGPT_PLUGIN_MARKETPLACE_SPEC.draft.md) — distribution draft, still gated for public submission
 - [`post-mvp-conditional-roadmap.md`](../plans/post-mvp-conditional-roadmap.md) — exception/hold split
+
+### 10.9 Host-neutral installed runtime (PRI-583)
+
+The shared installed components are host-neutral and live under `~/.pd/runtime`.
+The installer records the selected hosts and layout version in `~/.pd/install.json`.
+Codex-only installation must not create `~/.openclaw`; an OpenClaw installation
+may retain only its host adapter under `~/.openclaw/extensions/principles-disciple`.
+
+Discovery is dual-read during rollout: a valid canonical manifest is preferred,
+then the legacy OpenClaw extension layout is read with a structured migration
+instruction. Companion and `pd console` never move files implicitly; migration
+and rollback are explicit installer operations. This keeps the common runtime
+single-sourced while preserving existing OpenClaw installs.

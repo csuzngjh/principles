@@ -20,7 +20,7 @@ const COPY: Record<DegradedReasonKey, DegradedInfo> = {
   },
   pd_not_installed: {
     title: '未找到已安装的 PD',
-    description: '在 ~/.openclaw/extensions/principles-disciple 未找到 PD 控制台运行时。',
+    description: '在 ~/.pd/runtime 未找到 PD 控制台运行时（旧版安装也会从 ~/.openclaw/extensions/principles-disciple 兼容查找）。',
     nextAction: '先运行 npx create-principles-disciple 完成安装，再从托盘菜单重启控制台服务。',
   },
   workspace_missing: {
