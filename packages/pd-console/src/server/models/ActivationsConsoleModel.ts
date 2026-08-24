@@ -161,20 +161,61 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
   };
 }
 
+/**
+ * PRI-577: RuleCode event telemetry candidate directories, in priority order.
+ *
+ * Runtime V2 convention is `.pd/logs`, but the v1 EventLog writer
+ * (openclaw-plugin `src/core/event-log.ts`) still emits `events_*.jsonl` under
+ * `.state/logs`. No production code ever created `.pd/logs`, so scanning only
+ * that path made every activation's shadow metrics report "unavailable" in the
+ * console while real evaluations accumulated unread in `.state/logs`. Readers
+ * scan both candidates until the writer migrates (ERR-031: both readers derive
+ * from this same list).
+ */
+export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs', '.state/logs'];
+
+export interface CollectedRuleCodeEventEntries {
+  entries: unknown[];
+  /** Number of candidate directories that actually exist on disk. */
+  sourceDirsFound: number;
+}
+
+/**
+ * Collect rulehost telemetry entries from all candidate log directories.
+ * Malformed lines are excluded individually; an unreadable existing directory
+ * contributes nothing but still counts toward sourceDirsFound so callers can
+ * distinguish "channel alive, no data" from "no channel" (ERR-002).
+ */
+export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRuleCodeEventEntries {
+  const entries: unknown[] = [];
+  let sourceDirsFound = 0;
+  for (const candidate of RULECODE_EVENT_LOG_CANDIDATE_DIRS) {
+    const logsDir = path.join(workspaceDir, ...candidate.split('/'));
+    if (!fs.existsSync(logsDir)) continue;
+    sourceDirsFound += 1;
+    try {
+      const files = fs.readdirSync(logsDir)
+        .filter(name => /^events_.*\.jsonl$/.test(name))
+        .sort()
+        .slice(-7);
+      for (const file of files) {
+        const lines = fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean);
+        for (const line of lines) {
+          try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ }
+        }
+      }
+    } catch { /* unreadable directory contributes no entries */ }
+  }
+  return { entries, sourceDirsFound };
+}
+
 function readRuleCodeTelemetry(workspaceDir: string, activationId: string, decisions: readonly ActivationDecisionRecord[]): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
-  const logsDir = path.join(workspaceDir, '.pd', 'logs');
   const countCircuitTrips = (minimumTime: number) => decisions.filter(decision => decision.decision === 'safety_isolate' && Date.parse(decision.decidedAt) >= minimumTime).length;
   const now = Date.now();
   const unavailableWindow = (minimumTime: number): RuleCodeTelemetryWindow => ({ eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: null });
-  if (!fs.existsSync(logsDir)) return { shadowSummary: unavailableShadowSummary(), metrics: { last24Hours: unavailableWindow(now - 24 * 60 * 60 * 1000), last7Days: unavailableWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples: [] } };
-  const entries: unknown[] = [];
-  try {
-    for (const file of fs.readdirSync(logsDir).filter(name => /^events_.*\.jsonl$/.test(name)).sort().slice(-7)) {
-      for (const line of fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean)) {
-        try { entries.push(JSON.parse(line) as unknown); } catch { /* malformed telemetry is excluded, readiness remains bounded */ }
-      }
-    }
-  } catch { return { shadowSummary: unavailableShadowSummary(), metrics: { last24Hours: unavailableWindow(now - 24 * 60 * 60 * 1000), last7Days: unavailableWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples: [] } }; }
+  const collected = collectRuleCodeEventEntries(workspaceDir);
+  if (collected.sourceDirsFound === 0) return { shadowSummary: unavailableShadowSummary(), metrics: { last24Hours: unavailableWindow(now - 24 * 60 * 60 * 1000), last7Days: unavailableWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples: [] } };
+  const { entries } = collected;
   const summarizeWindow = (minimumTime: number): RuleCodeTelemetryWindow => {
     let eligible = 0; let matched = 0; let blocked = 0; let unhealthy = 0; const tools: Record<string, number> = {};
     for (const entry of entries) {
