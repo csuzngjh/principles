@@ -23,6 +23,7 @@ import {
   getPdRuntimeBackupsDir,
   getPluginExtDir,
   getInstalledPluginDir,
+  getInstalledLayoutPackageDir,
   getPdBackupsDir,
   getInstalledPdCliDir,
   getInstalledBinDir,
@@ -121,6 +122,16 @@ function writeInstallManifest(host: HostTarget): void {
   mkdirSync(getPdDir(), { recursive: true });
   const hosts = host === 'all' ? ['codex', 'openclaw'] : [host];
   writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts }, null, 2) + '\n', 'utf8');
+}
+
+function installBundledLayoutPackage(pluginDir: string): void {
+  const source = path.join(pluginDir, 'install-layout');
+  const destination = getInstalledLayoutPackageDir();
+  if (!existsSync(path.join(source, 'package.json')) || !existsSync(path.join(source, 'dist'))) {
+    throw new Error('Bundled @principles/install-layout is incomplete. Re-run the installer with a current package.');
+  }
+  rmSync(destination, { recursive: true, force: true });
+  cpSync(source, destination, { recursive: true });
 }
 
 function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyncOptions {
@@ -715,6 +726,16 @@ export async function installPluginToStaging(pluginDir: string, language: SkillL
   await fse.ensureDir(extDir);
   await fse.copy(builtPluginDir, extDir, { overwrite: true });
 
+  // The published plugin declares its bundled core as file:./core. Keep that
+  // package-local contract while storing the actual core once in the shared
+  // host-neutral runtime directory.
+  const pluginCoreLink = path.join(extDir, 'core');
+  if (!existsSync(pluginCoreLink)) {
+    const coreDir = path.join(getPdRuntimeDir(), 'core');
+    if (isWindows()) symlinkSync(coreDir, pluginCoreLink, 'junction');
+    else symlinkSync(path.relative(extDir, coreDir), pluginCoreLink, 'dir');
+  }
+
   // Skill-language selection: OpenClaw publishes skills by name with no
   // locale mechanism, so the installed manifest must declare exactly one
   // language root. The shipped manifest declares zh (product default);
@@ -1120,6 +1141,28 @@ async function installCoreDependencies(): Promise<void> {
   await runNpmInstall(coreDir, 'Core');
   await rebuildNativeModules(coreDir, 'Core');
   verifyNativeModules(coreDir, 'Core');
+}
+
+async function installHostRuntimeDependencies(): Promise<void> {
+  const hostRuntimeDir = getInstalledHostRuntimeDir();
+  const packageJsonPath = path.join(hostRuntimeDir, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    throw new Error('Host runtime package.json not found after copy — install is corrupted');
+  }
+  await runNpmInstall(hostRuntimeDir, 'Host runtime');
+  await rebuildNativeModules(hostRuntimeDir, 'Host runtime');
+  verifyNativeModules(hostRuntimeDir, 'Host runtime');
+}
+
+async function installPdCliDependencies(): Promise<void> {
+  const pdCliDir = getInstalledPdCliDir();
+  const packageJsonPath = path.join(pdCliDir, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    throw new Error('PD CLI package.json not found after copy — install is corrupted');
+  }
+  await runNpmInstall(pdCliDir, 'PD CLI');
+  await rebuildNativeModules(pdCliDir, 'PD CLI');
+  verifyNativeModules(pdCliDir, 'PD CLI');
 }
 
 async function installConsoleDependencies(): Promise<void> {
@@ -1712,8 +1755,14 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     installBundledHostRuntime(pluginDir);
     stepIndex++;
 
+    installBundledLayoutPackage(pluginDir);
+
     if (spinner) updateProgress(spinner, stepIndex, 'Installing core dependencies...');
     await installCoreDependencies();
+    stepIndex++;
+
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing host runtime dependencies...');
+    await installHostRuntimeDependencies();
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
@@ -1731,6 +1780,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing pd CLI...');
     syncPdCli(pluginDir);
+    await installPdCliDependencies();
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for pd-cli...');

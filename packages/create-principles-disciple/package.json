@@ -13,6 +13,7 @@
     "console",
     "core",
     "host-runtime",
+    "install-layout",
     "README.md",
     "LICENSE"
   ],

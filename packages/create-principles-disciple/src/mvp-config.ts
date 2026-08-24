@@ -269,6 +269,10 @@ export function getInstalledPluginDir(): string {
   return path.join(getPdRuntimeDir(), 'plugin');
 }
 
+export function getInstalledLayoutPackageDir(): string {
+  return path.join(getPdRuntimeDir(), 'install-layout');
+}
+
 /**
  * PD 备份根目录（~/.openclaw/pd-backups）—— 必须位于 extensions/ 之外。
  * OpenClaw 插件发现会扫描 extensions/ 下每个子目录；备份目录内含

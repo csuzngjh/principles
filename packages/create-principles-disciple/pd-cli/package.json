@@ -16,7 +16,7 @@
     "@principles/core": "file:../core",
     "@principles/codex-adapter": "^0.1.0",
     "@principles/host-runtime": "file:../host-runtime",
-    "@principles/install-layout": "0.1.0",
+    "@principles/install-layout": "file:../install-layout",
     "principles-disciple": "file:../plugin",
     "better-sqlite3": "^13.0.3",
     "commander": "^12.0.0",
