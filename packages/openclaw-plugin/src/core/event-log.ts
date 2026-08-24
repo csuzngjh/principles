@@ -11,6 +11,7 @@ import type {
   ToolCallEventData,
   PainSignalEventData,
   RulePromotionEventData,
+  GovernanceActionEventData,
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,
@@ -120,6 +121,13 @@ export class EventLog {
 
   recordRulePromotion(data: RulePromotionEventData): void {
     this.record('rule_promotion', 'promoted', undefined, data);
+  }
+
+  recordGovernanceAction(data: GovernanceActionEventData, opts?: { flushImmediately?: boolean }): void {
+    this.record('governance_action', 'approved', undefined, data);
+    if (opts?.flushImmediately) {
+      this.flushEvents();
+    }
   }
   
   recordHookExecution(data: HookExecutionEventData, opts?: { flushImmediately?: boolean }): void {
