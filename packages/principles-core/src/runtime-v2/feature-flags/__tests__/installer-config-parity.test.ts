@@ -47,11 +47,12 @@ function parseInstallerFeatures(source: string): InstallerFlagEntry[] {
   const entryPattern = /(^|\n)\s{6}'?([a-z0-9_.]+)'?:\s*\{\s*category:\s*'([a-z_]+)',\s*enabled:\s*(true|false),?\s*\}/g;
   const entries: InstallerFlagEntry[] = [];
   for (const match of source.matchAll(entryPattern)) {
-    entries.push({
-      id: match[2],
-      category: match[3],
-      enabled: match[4] === 'true',
-    });
+    // match[0] = whole match, match[1] = (^|\n) — skip both before the fields.
+    const [, , id, category, enabledRaw] = match;
+    if (!id || !category || !enabledRaw) {
+      throw new Error(`malformed installer feature entry matched at index ${match.index}`);
+    }
+    entries.push({ id, category, enabled: enabledRaw === 'true' });
   }
   if (entries.length === 0) {
     throw new Error('parsed zero installer feature entries — mvp-config.ts template shape changed; update this parser');
@@ -81,7 +82,7 @@ describe('PRI-574 installer config template ↔ runtime flag registry parity', (
       .filter(e => REGISTRY_IDS.has(e.id))
       .filter(e => e.enabled !== REGISTRY_BY_ID.get(e.id)?.enabled)
       .map(e => e.id)
-      .filter(id => !(id in DOCUMENTED_ENABLED_DEVIATIONS));
+      .filter(id => !Object.hasOwn(DOCUMENTED_ENABLED_DEVIATIONS, id));
     expect(undocumented, `undocumented enabled-value drift: ${undocumented.join(', ')}`).toEqual([]);
 
     // The documented deviations stay accurate: each must still actually deviate.
