@@ -149,9 +149,10 @@ describe('pd pain record async mode (PRI-369)', () => {
   });
 
   // 2. submitted status outputs [SUBMITTED] in text mode
-  it('outputs [SUBMITTED] in text mode', async () => {
+  it('outputs [SUBMITTED] in text mode with no-consumer warning (PRI-570)', async () => {
     mockIsFeatureEnabledReturn = true;
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
 
     await handlePainRecord({ reason: 'test pain' });
@@ -159,10 +160,16 @@ describe('pd pain record async mode (PRI-369)', () => {
     const allOutput = logSpy.mock.calls.map(c => c.join(' ')).join(' ');
     expect(allOutput).toContain('[SUBMITTED]');
     expect(allOutput).toContain('submitted');
-    expect(allOutput).toContain('Next action: pd diagnose run --task-id');
+    // PRI-570: the async path has NO automatic consumer — the warning must be
+    // explicit (rc-9), on stderr so it never pollutes piped stdout.
+    const errOutput = errSpy.mock.calls.map(c => c.join(' ')).join(' ');
+    expect(errOutput).toContain('no automatic consumer for diagnostician tasks');
+    expect(errOutput).toContain('pd diagnose run --task-id');
+    expect(errOutput).toContain('--wait');
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
+    errSpy.mockRestore();
     exitSpy.mockRestore();
   });
 

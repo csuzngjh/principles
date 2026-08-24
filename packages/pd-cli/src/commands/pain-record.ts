@@ -198,6 +198,13 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       if (!out.reason) {
         out.reason = out.message;
       }
+      // PRI-570: async submission has NO automatic consumer — the
+      // internalization auto-consumer's runner kinds (dreamer..rollout_reviewer)
+      // do not include 'diagnostician', so a submitted task stays pending until
+      // the owner runs the diagnose command. Never let that stay implicit (rc-9).
+      out.warning = 'Async mode: no background consumer picks up diagnostician tasks. '
+        + `Run ${out.nextAction} or the pain signal will remain pending indefinitely. `
+        + 'Use --wait to diagnose synchronously instead.';
     }
     console.log(JSON.stringify(out, null, 2));
     if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried' && result.status !== 'submitted') {
@@ -225,8 +232,11 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       console.log(`   Pain ID: ${result.painId}`);
       console.log(`   Task ID: ${result.taskId}`);
       console.log(`   Status: submitted`);
-      console.log(`   Next action: pd diagnose run --task-id ${result.taskId} --workspace "${workspaceDir}"`);
-      if (result.latencyMs !== undefined) console.log(`   Submit latency: ${result.latencyMs}ms`);
+      // PRI-570: no background consumer picks up diagnostician tasks — say so
+      // explicitly instead of implying async diagnosis happens on its own (rc-9).
+      console.error('   WARNING: async mode has no automatic consumer for diagnostician tasks.');
+      console.error(`   Run: pd diagnose run --task-id ${result.taskId} --workspace "${workspaceDir}" --runtime pi-ai`);
+      console.error('   Or re-record with --wait to diagnose synchronously. Without this, the task stays pending indefinitely.');
     } else if (result.status === 'skipped') {
       console.log(`[SKIP] Task already in progress: ${result.message ?? 'unknown'}`);
       console.log(`   Pain ID: ${result.painId}`);

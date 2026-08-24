@@ -104,8 +104,11 @@ describe('ReceiptsConsoleModel — degraded paths (rc-9)', () => {
   });
 
   it('degrades with reason + nextAction when the ledger flag is disabled', async () => {
-    // state.db exists but the flag stays off (fresh-install default)
+    // PRI-571 graduation: the ledger now defaults ON, so the degraded path is
+    // reached via an explicit config disable (the documented rollback).
     writeBaseConfig();
+    const disable = updateFeatureFlag(workspaceDir, 'principle_receipt_ledger', false);
+    expect(disable.ok).toBe(true);
     ensureStateDb();
     const result = await model.getPrincipleReceipts('princ-1');
     expect(result.status).toBe('degraded');

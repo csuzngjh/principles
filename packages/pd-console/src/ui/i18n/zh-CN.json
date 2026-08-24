@@ -446,9 +446,11 @@
         "receipts": {
           "title": "生效履历",
           "headline": "你的原则正在影响智能体行为",
-          "counts": "生效 {{effectCount}} 次 · 注入 {{presenceCount}} 次",
+          "headlinePresence": "原则已进入智能体决策上下文——尚无行为生效记录",
+          "counts": "行为生效 {{effectCount}} 次 · 参与上下文 {{presenceCount}} 次",
+          "zeroEffect": "为什么「行为生效」是 0？生效需要证据：一次拦截、一次自动纠正，或智能体自述遵循。目前这条原则只进入过任务上下文（Presence）——参与决策 ≠ 已改变行为。随着运行积累出第一条证据，「行为生效」会从这里开始计数。",
           "empty": "最近没有记录——这条原则尚未在运行中被触发。",
-          "note": "「生效」= 拦截/自动纠正/智能体自述遵循；「注入」= 原则进入了任务上下文（灰色）。智能体自述为概率性自报，与确定性事件分列。",
+          "note": "两级语义：Effect（行为生效）= 拦截 / 自动纠正 / 智能体自述遵循；Presence（参与上下文）= 原则进入任务上下文（灰色行）。参与决策 ≠ 已改变行为。智能体自述为概率性自报，与确定性事件分列。",
           "unavailableReason": "暂无法读取生效履历。",
           "kind": {
             "rule_blocked": "拦截",
@@ -626,7 +628,7 @@
       "viewDebt": "在原则债务中查看",
       "loadError": "无法加载生效数据。你可以尝试刷新页面。",
       "receiptsLabel": "生效履历",
-      "receiptsValue": "生效 {{effect}} 次 · 注入 {{presence}} 次",
+      "receiptsValue": "行为生效 {{effect}} 次 · 参与上下文 {{presence}} 次",
       "receiptsUnavailable": "生效履历暂不可用：{{reason}}",
       "ownerDecisionTitle": "拥有者上线决策",
       "ownerDecisionRecorded": "RuleCode 决策已记录",
