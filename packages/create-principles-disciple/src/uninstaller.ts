@@ -15,14 +15,15 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
-import { getGlobalShimPaths, getInstalledBinDir, isWindows } from './mvp-config.js';
+import { getGlobalShimPaths, getInstalledBinDir, getPdRuntimeDir, getInstallManifestPath, isWindows } from './mvp-config.js';
+import { parseInstallManifest } from '@principles/install-layout';
 import { setLanguage, t, getLanguage } from './i18n.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostUninstallContext, HostUninstallResult } from '@principles/core/host';
@@ -37,6 +38,41 @@ export interface UninstallResult {
   error?: string;
 }
 
+interface SharedRuntimeUninstallPlan {
+  removeSharedRuntime: boolean;
+  remainingHosts: ('codex' | 'openclaw')[];
+  manifestHasTarget: boolean;
+  warning?: string;
+}
+
+export function planSharedRuntimeUninstall(host: HostTarget): SharedRuntimeUninstallPlan {
+  if (host === 'all') {
+    return { removeSharedRuntime: true, remainingHosts: [], manifestHasTarget: true };
+  }
+  try {
+    const raw: unknown = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8'));
+    const parsed = parseInstallManifest(raw);
+    if (!parsed.manifest) {
+      return {
+        removeSharedRuntime: false,
+        remainingHosts: [],
+        manifestHasTarget: false,
+        warning: `${parsed.error ?? 'install_manifest_malformed'}; shared runtime preserved. Re-run uninstall --host all after repairing ~/.pd/install.json.`,
+      };
+    }
+    const manifestHasTarget = parsed.manifest.hosts.includes(host);
+    const remainingHosts = parsed.manifest.hosts.filter(candidate => candidate !== host);
+    return { removeSharedRuntime: remainingHosts.length === 0, remainingHosts, manifestHasTarget };
+  } catch (error) {
+    return {
+      removeSharedRuntime: false,
+      remainingHosts: [],
+      manifestHasTarget: false,
+      warning: `install_manifest_unreadable: ${error instanceof Error ? error.message : String(error)}; shared runtime preserved. Re-run uninstall --host all after repairing ~/.pd/install.json.`,
+    };
+  }
+}
+
 async function detectAndSetLanguage(lang?: string): Promise<void> {
   setLanguage(lang === 'en' ? 'en' : 'zh');
 }
@@ -49,7 +85,7 @@ async function detectAndSetLanguage(lang?: string): Promise<void> {
  * status` shows the full picture regardless of which host was selected
  * during install.
  */
-export function checkInstallStatus(): {
+export function checkInstallStatus(host: HostTarget = 'all'): {
   isInstalled: boolean;
   paths: {
     exists: boolean;
@@ -81,7 +117,11 @@ export function checkInstallStatus(): {
     { path: path.join(pdCodexDir, 'pd-hook-entry.cjs'), name: lang === 'zh' ? 'Codex 钩子入口' : 'Codex hook entry script', type: 'file' as const },
   ];
 
-  const allPaths = [...openclawPaths, ...codexPaths];
+  const allPaths = host === 'openclaw'
+    ? openclawPaths
+    : host === 'codex'
+      ? codexPaths
+      : [...openclawPaths, ...codexPaths];
 
   const checkedPaths = allPaths.map(p => ({
     exists: existsSync(p.path),
@@ -218,6 +258,7 @@ export async function uninstall(
   } = {}
 ): Promise<UninstallResult> {
   await detectAndSetLanguage(options.lang);
+  const hostTarget: HostTarget = options.host ?? 'all';
 
   const result: UninstallResult = {
     success: false,
@@ -229,7 +270,9 @@ export async function uninstall(
   };
 
   try {
-    const gatewayStatus = await checkOpenClawGateway();
+    const gatewayStatus = hostTarget === 'codex'
+      ? { isRunning: false, port: undefined, pid: undefined }
+      : await checkOpenClawGateway();
     if (gatewayStatus.isRunning) {
       const portInfo = gatewayStatus.port ? ` (port ${gatewayStatus.port})` : '';
       const pidInfo = gatewayStatus.pid ? `, PID ${gatewayStatus.pid}` : '';
@@ -241,9 +284,11 @@ export async function uninstall(
     }
 
     // 1. Check install status
-    const status = checkInstallStatus();
+    const status = checkInstallStatus(hostTarget);
+    const runtimePlan = planSharedRuntimeUninstall(hostTarget);
+    if (runtimePlan.warning) logger.warn(runtimePlan.warning);
 
-    if (!status.isInstalled) {
+    if (!status.isInstalled && !runtimePlan.manifestHasTarget) {
       logger.warn(t('no_install_detected'));
       result.success = true;
       return result;
@@ -318,16 +363,20 @@ export async function uninstall(
       }
     }
 
-    // 6. Clean up global pd shim
-    console.log('\n');
-    logger.info(t('cleaning_global_commands'));
-    const { removed, skipped } = await removeGlobalPdShim();
-    result.removedGlobalShims = removed;
-    result.skippedGlobalShims = skipped;
+    // 6. The pd shim belongs to the shared runtime. Keep it while another host
+    // remains attached; otherwise a host-scoped uninstall breaks that host.
+    if (runtimePlan.removeSharedRuntime) {
+      console.log('\n');
+      logger.info(t('cleaning_global_commands'));
+      const { removed, skipped } = await removeGlobalPdShim();
+      result.removedGlobalShims = removed;
+      result.skippedGlobalShims = skipped;
+    } else {
+      logger.info('Keeping the shared pd command because another host still uses the runtime.');
+    }
 
     // 6.5. ADR-0020 §2.3: Clean up host-side configs via HostInstallers.
     // Replaces the old cleanupOpenClawConfig() with multi-host delegation.
-    const hostTarget: HostTarget = options.host ?? 'all';
     const hostInstallers = getHostInstallers(hostTarget);
     for (const installer of hostInstallers) {
       try {
@@ -347,6 +396,32 @@ export async function uninstall(
         // rc-9: never silently swallow — surface the failure.
         logger.warn(`Host "${installer.hostId}" cleanup threw: ${err instanceof Error ? err.message : String(err)}`);
       }
+    }
+
+    // Shared runtime is removed only after the final host is uninstalled.
+    let sharedRuntimeRemovalFailed = false;
+    if (runtimePlan.removeSharedRuntime && existsSync(getPdRuntimeDir())) {
+      try {
+        await removeWithRetry(getPdRuntimeDir(), 'dir');
+        result.removedDirs.push(getPdRuntimeDir());
+      } catch (err) {
+        sharedRuntimeRemovalFailed = true;
+        deleteErrors.push({ name: 'PD shared runtime', error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (runtimePlan.removeSharedRuntime && !sharedRuntimeRemovalFailed && existsSync(getInstallManifestPath())) {
+      try {
+        await removeWithRetry(getInstallManifestPath(), 'file');
+        result.removedFiles.push(getInstallManifestPath());
+      } catch (err) {
+        deleteErrors.push({ name: 'PD install manifest', error: err instanceof Error ? err.message : String(err) });
+      }
+    } else if (!runtimePlan.removeSharedRuntime && runtimePlan.remainingHosts.length > 0) {
+      writeFileSync(getInstallManifestPath(), JSON.stringify({
+        layoutVersion: 1,
+        mode: 'canonical',
+        hosts: runtimePlan.remainingHosts,
+      }, null, 2) + '\n', 'utf8');
     }
 
     // 7. Record preserved paths

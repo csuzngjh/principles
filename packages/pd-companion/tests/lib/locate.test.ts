@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
   buildConsoleOpenArgs,
   resolveExtensionDir,
+  resolveInstalledRuntime,
   resolvePdCliEntry,
   resolvePluginPackageJson,
   resolveSystemNodeCommand,
@@ -27,6 +28,32 @@ describe('resolvePdCliEntry / resolvePluginPackageJson', () => {
   it('points at pd-cli/dist/index.js and extension package.json', () => {
     expect(resolvePdCliEntry('/ext')).toBe(path.join('/ext', 'pd-cli', 'dist', 'index.js'));
     expect(resolvePluginPackageJson('/ext')).toBe(path.join('/ext', 'package.json'));
+  });
+});
+
+describe('resolveInstalledRuntime', () => {
+  it('prefers the canonical runtime for a Codex-only install', () => {
+    const resolved = resolveInstalledRuntime({
+      homeDir: 'C:\\Users\\alice',
+      manifest: { layoutVersion: 1, mode: 'canonical', hosts: ['codex'] },
+      canonicalRuntimeExists: true,
+      legacyExtensionExists: false,
+    });
+    expect(resolved?.mode).toBe('canonical');
+    expect(resolved?.root).toContain(path.join('.pd', 'runtime'));
+    expect(resolved?.pluginRoot).toContain(path.join('.pd', 'runtime', 'plugin'));
+  });
+
+  it('keeps legacy OpenClaw installs discoverable', () => {
+    const resolved = resolveInstalledRuntime({
+      homeDir: 'C:\\Users\\alice',
+      manifest: undefined,
+      canonicalRuntimeExists: false,
+      legacyExtensionExists: true,
+    });
+    expect(resolved?.mode).toBe('legacy');
+    expect(resolved?.root).toContain(path.join('.openclaw', 'extensions'));
+    expect(resolved?.pluginRoot).toBe(resolved?.root);
   });
 });
 

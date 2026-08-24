@@ -31,6 +31,7 @@ import {
   resolvePdBackupsRoot,
 } from '../utils/pd-backups.js';
 import { ActivationCompatibilityReadModel } from '@principles/core/runtime-v2';
+import { getInstallLayoutPaths, resolveInstallLayout, type InstallHost } from '@principles/install-layout';
 
 /**
  * Legacy rule contract preflight (2026-08-19): refuse to swap the runtime
@@ -97,8 +98,57 @@ function resolveExtensionsDir(): string {
   return path.join(resolveOpenclawHome(), 'extensions');
 }
 
+interface UpdateLayout {
+  pluginDir: string;
+  consoleDir: string;
+  coreDir: string;
+  hostRuntimeDir: string;
+  pdCliDir: string;
+  installLayoutDir: string;
+  hosts: InstallHost[];
+}
+
+function resolveUpdateLayout(): UpdateLayout | undefined {
+  const homeDir = os.homedir();
+  const paths = getInstallLayoutPaths(homeDir);
+  const legacyPluginDir = path.join(resolveExtensionsDir(), 'principles-disciple');
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
+  } catch {
+    manifest = undefined;
+  }
+  const resolution = resolveInstallLayout({
+    homeDir,
+    manifest,
+    canonicalRuntimeExists: fs.existsSync(paths.runtimeDir),
+    legacyExtensionExists: fs.existsSync(legacyPluginDir),
+  });
+  if (resolution.mode === 'missing') return undefined;
+  if (resolution.mode === 'canonical') {
+    return {
+      pluginDir: paths.pluginDir,
+      consoleDir: paths.consoleDir,
+      coreDir: paths.coreDir,
+      hostRuntimeDir: paths.hostRuntimeDir,
+      pdCliDir: paths.pdCliDir,
+      installLayoutDir: paths.installLayoutDir,
+      hosts: resolution.manifest?.hosts ?? [],
+    };
+  }
+  return {
+    pluginDir: legacyPluginDir,
+    consoleDir: path.join(legacyPluginDir, 'console'),
+    coreDir: path.join(legacyPluginDir, 'core'),
+    hostRuntimeDir: path.join(legacyPluginDir, 'host-runtime'),
+    pdCliDir: path.join(legacyPluginDir, 'pd-cli'),
+    installLayoutDir: path.join(legacyPluginDir, 'install-layout'),
+    hosts: ['openclaw'],
+  };
+}
+
 function resolvePluginDir(_workspaceDir: string): string {
-  return path.join(resolveExtensionsDir(), 'principles-disciple');
+  return resolveUpdateLayout()?.pluginDir ?? path.join(resolveExtensionsDir(), 'principles-disciple');
 }
 
 function readCurrentVersion(pluginDir: string): string | undefined {
@@ -735,24 +785,26 @@ function depsMeaningfullyChanged(
  * Returns undefined on success, or an error message (rc-9: observable, never
  * silent — a missing link means the updated console cannot start).
  */
-function ensureHostRuntimeResolutionLinks(extDir: string): string | undefined {
-  const hostRuntimeDir = path.join(extDir, 'host-runtime');
+function ensureRuntimeResolutionLinks(layout: UpdateLayout): string | undefined {
   const links = [
-    { linkPath: path.join(extDir, 'console', 'node_modules', '@principles', 'host-runtime'), target: hostRuntimeDir, unixTarget: '../../../host-runtime' },
-    { linkPath: path.join(extDir, 'pd-cli', 'node_modules', '@principles', 'host-runtime'), target: hostRuntimeDir, unixTarget: '../../../host-runtime' },
-    { linkPath: path.join(extDir, 'console', 'node_modules', 'principles-disciple'), target: extDir, unixTarget: '../../' },
+    { linkPath: path.join(layout.consoleDir, 'node_modules', '@principles', 'host-runtime'), target: layout.hostRuntimeDir },
+    { linkPath: path.join(layout.pdCliDir, 'node_modules', '@principles', 'host-runtime'), target: layout.hostRuntimeDir },
+    { linkPath: path.join(layout.consoleDir, 'node_modules', '@principles', 'install-layout'), target: layout.installLayoutDir },
+    { linkPath: path.join(layout.pdCliDir, 'node_modules', '@principles', 'install-layout'), target: layout.installLayoutDir },
+    { linkPath: path.join(layout.consoleDir, 'node_modules', 'principles-disciple'), target: layout.pluginDir },
   ];
-  for (const { linkPath, target, unixTarget } of links) {
+  for (const { linkPath, target } of links) {
+    if (!fs.existsSync(target)) continue;
     if (fs.existsSync(linkPath)) continue;
     try {
       fs.mkdirSync(path.dirname(linkPath), { recursive: true });
       if (process.platform === 'win32') {
         fs.symlinkSync(target, linkPath, 'junction');
       } else {
-        fs.symlinkSync(unixTarget, linkPath, 'dir');
+        fs.symlinkSync(path.relative(path.dirname(linkPath), target), linkPath, 'dir');
       }
     } catch (error) {
-      return `Failed to create host-runtime resolution link at ${linkPath}: ${
+      return `Failed to create runtime resolution link at ${linkPath}: ${
         error instanceof Error ? error.message : String(error)
       }`;
     }
@@ -768,7 +820,17 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
   newVersion?: string;
   requiresRestart: boolean;
 }> {
-  const extDir = resolvePluginDir(workspaceDir);
+  const layout = resolveUpdateLayout();
+  if (!layout) {
+    return {
+      success: false,
+      message: 'PD install runtime could not be resolved.',
+      reason: 'install_runtime_missing',
+      nextAction: 'Run npx create-principles-disciple to install or repair PD, then retry the update.',
+      requiresRestart: false,
+    };
+  }
+  const extDir = layout.pluginDir;
 
   // Legacy-contract preflight BEFORE stopping the gateway or touching files:
   // refuse while an active rule still uses a removed RuleHost contract
@@ -785,7 +847,9 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
   }
 
   // 1. Stop gateway (releases native module locks held by the gateway process)
-  const gatewayStatus = await checkOpenClawGateway();
+  const gatewayStatus = layout.hosts.includes('openclaw')
+    ? await checkOpenClawGateway()
+    : { isRunning: false };
   let gatewayWasStopped = false;
   if (gatewayStatus.isRunning) {
     const stopRes = stopOpenClawGateway();
@@ -858,14 +922,18 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     //        console that does not import it, so skipping is consistent for
     //        them. On fresh installs this is an overlay refresh + link no-op.
     const hostRuntimeSrc = path.join(tempDir, 'host-runtime');
-    const hostRuntimeDest = path.join(extDir, 'host-runtime');
+    const hostRuntimeDest = layout.hostRuntimeDir;
     if (
       fs.existsSync(hostRuntimeSrc) &&
       fs.existsSync(path.join(hostRuntimeSrc, 'package.json')) &&
       fs.existsSync(path.join(hostRuntimeSrc, 'dist'))
     ) {
       copyDirRecursive(hostRuntimeSrc, hostRuntimeDest, SKIP_DIRS);
-      const linkError = ensureHostRuntimeResolutionLinks(extDir);
+      const installLayoutSrc = path.join(tempDir, 'install-layout');
+      if (fs.existsSync(path.join(installLayoutSrc, 'package.json')) && fs.existsSync(path.join(installLayoutSrc, 'dist'))) {
+        copyDirRecursive(installLayoutSrc, layout.installLayoutDir, SKIP_DIRS);
+      }
+      const linkError = ensureRuntimeResolutionLinks(layout);
       if (linkError) {
         appendUpdateHistory(workspaceDir, {
           fromVersion,
@@ -895,14 +963,14 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     //       console/node_modules/ may contain locked native modules like
     //       better-sqlite3 that the running console process holds via dlopen)
     const consoleSrc = path.join(tempDir, 'console');
-    const consoleDest = path.join(extDir, 'console');
+    const consoleDest = layout.consoleDir;
     if (fs.existsSync(consoleSrc)) {
       copyDirRecursive(consoleSrc, consoleDest, SKIP_DIRS);
     }
 
     //    c. core/ → extDir/core/ (overwrite, skip node_modules for safety)
     const coreSrc = path.join(tempDir, 'core');
-    const coreDest = path.join(extDir, 'core');
+    const coreDest = layout.coreDir;
     if (fs.existsSync(coreSrc)) {
       copyDirRecursive(coreSrc, coreDest, SKIP_DIRS);
     }
@@ -910,7 +978,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     //    d. pd-cli/dist + package.json → extDir/pd-cli/ (overwrite only,
     //       do NOT rmSync — preserves node_modules symlinks created at install)
     const pdCliSrc = path.join(tempDir, 'pd-cli');
-    const pdCliDest = path.join(extDir, 'pd-cli');
+    const pdCliDest = layout.pdCliDir;
     if (fs.existsSync(pdCliSrc)) {
       const distSrc = path.join(pdCliSrc, 'dist');
       const distDest = path.join(pdCliDest, 'dist');

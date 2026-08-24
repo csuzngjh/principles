@@ -12,6 +12,7 @@
     "dist": "electron-builder --win nsis"
   },
   "devDependencies": {
+    "@principles/install-layout": "0.1.0",
     "electron": "39.8.10",
     "electron-builder": "^26.0.12",
     "typescript": "^7.0.2",
