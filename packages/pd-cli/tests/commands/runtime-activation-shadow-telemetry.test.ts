@@ -77,21 +77,17 @@ describe('PRI-577 shadow telemetry dual-directory reading', () => {
     expect(summary.lastObservedAt).toBe('2026-08-22T10:00:00.000Z');
   });
 
-  it('deduplicates same-named files across directories by candidate priority (migration safety)', () => {
-    // Simulates the future migration window: legacy files copied to .pd/logs
-    // while .state/logs still holds the originals. Same filename in both dirs
-    // must count once — from the higher-priority (.pd/logs) copy.
+  it('keeps distinct events from same-named daily files and deduplicates exact copied lines', () => {
+    const copied = makeEventLine();
     writeEventsFile('.state/logs', '2026-08-21', [
-      makeEventLine(),
+      copied,
       makeEventLine({}, { toolName: 'exec', filePath: 'x', matched: false, decision: 'allow' }),
     ]);
-    writeEventsFile('.pd/logs', '2026-08-21', [makeEventLine()]);
-    // Non-colliding legacy file still counts
-    writeEventsFile('.state/logs', '2026-08-20', [makeEventLine({ ts: '2026-08-20T09:00:00.000Z' })]);
+    writeEventsFile('.pd/logs', '2026-08-21', [copied]);
 
     const summary = readShadowSummaryForActivation(workspaceDir, ACTIVATION_ID);
-    expect(summary.observed).toBe(2); // 1 (pd copy) + 1 (non-colliding state file)
-    expect(summary.firstObservedAt).toBe('2026-08-20T09:00:00.000Z');
+    expect(summary.observed).toBe(2);
+    expect(summary.wouldAllow).toBe(1);
   });
 
   it('reports zero (not unavailable) when a log dir exists but has no matching events', () => {
@@ -112,6 +108,13 @@ describe('PRI-577 shadow telemetry dual-directory reading', () => {
       requireApproval: null, autoCorrect: null, errors: null, neutralControl: null,
       firstObservedAt: null, lastObservedAt: null,
     });
+  });
+
+  it('does not report an unreadable candidate path as a healthy zero-event channel', () => {
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'logs'), 'not a directory');
+    const summary = readShadowSummaryForActivation(workspaceDir, ACTIVATION_ID);
+    expect(summary.observed).toBeNull();
   });
 
   it('excludes malformed telemetry lines instead of failing the whole scan', () => {

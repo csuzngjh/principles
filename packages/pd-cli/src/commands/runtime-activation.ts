@@ -73,36 +73,36 @@ export interface CollectedRuleCodeEventEntries {
 
 /**
  * Collect rulehost telemetry entries from all candidate log directories.
- * Malformed lines are excluded individually; an unreadable existing directory
- * contributes nothing but still counts toward sourceDirsFound so callers can
- * distinguish "channel alive, no data" from "no channel" (ERR-002).
+ * Malformed lines are excluded individually. A directory counts as a source
+ * only after it can be enumerated, so an unreadable path cannot be mistaken
+ * for a healthy channel with zero events (ERR-002).
  *
- * Same-named files across candidate directories are deduplicated by priority:
- * the first candidate that contains a given filename wins (`.pd/logs` beats
- * `.state/logs`). This keeps counts stable when the writer eventually migrates
- * and legacy files are copied to the new directory during the transition.
+ * Exact lines copied between candidate directories are deduplicated by
+ * priority. Different events in same-named daily files are retained.
  */
 export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRuleCodeEventEntries {
   const entries: unknown[] = [];
   let sourceDirsFound = 0;
-  const seenFileNames = new Set<string>();
+  const higherPriorityLines = new Set<string>();
   for (const candidate of RULECODE_EVENT_LOG_CANDIDATE_DIRS) {
     const logsDir = path.join(workspaceDir, ...candidate.split('/'));
     if (!fs.existsSync(logsDir)) continue;
-    sourceDirsFound += 1;
     try {
       const files = fs.readdirSync(logsDir)
         .filter(name => /^events_.*\.jsonl$/.test(name))
         .sort()
         .slice(-7);
+      sourceDirsFound += 1;
+      const currentSourceLines: string[] = [];
       for (const file of files) {
-        if (seenFileNames.has(file)) continue;
-        seenFileNames.add(file);
         const lines = fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean);
         for (const line of lines) {
+          currentSourceLines.push(line);
+          if (higherPriorityLines.has(line)) continue;
           try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ }
         }
       }
+      for (const line of currentSourceLines) higherPriorityLines.add(line);
     } catch { /* unreadable directory contributes no entries */ }
   }
   return { entries, sourceDirsFound };

@@ -73,18 +73,16 @@ describe('PRI-577 console shadow telemetry dual-directory reading', () => {
     expect(collected.sourceDirsFound).toBe(2);
   });
 
-  it('deduplicates same-named files across directories by candidate priority (migration safety)', () => {
-    // Migration window: same filename present in both dirs — the higher
-    // priority (.pd/logs) copy wins, legacy copy is not double-counted.
+  it('keeps distinct events from same-named daily files and deduplicates exact copied lines', () => {
+    const copied = makeEventLine();
     writeEventsFile('.state/logs', '2026-08-21', [
-      makeEventLine(),
+      copied,
       makeEventLine({}, { toolName: 'edit', filePath: 'y', matched: false, decision: 'allow' }),
     ]);
-    writeEventsFile('.pd/logs', '2026-08-21', [makeEventLine()]);
-    writeEventsFile('.state/logs', '2026-08-20', [makeEventLine({ ts: '2026-08-20T09:00:00.000Z' })]);
+    writeEventsFile('.pd/logs', '2026-08-21', [copied]);
 
     const collected = collectRuleCodeEventEntries(workspaceDir);
-    expect(collected.entries.length).toBe(2); // 1 (pd copy) + 1 (non-colliding state file)
+    expect(collected.entries.length).toBe(2);
     expect(collected.sourceDirsFound).toBe(2);
   });
 
@@ -92,6 +90,14 @@ describe('PRI-577 console shadow telemetry dual-directory reading', () => {
     const collected = collectRuleCodeEventEntries(workspaceDir);
     expect(collected.entries.length).toBe(0);
     expect(collected.sourceDirsFound).toBe(0);
+  });
+
+  it('does not count an unreadable candidate path as a healthy source', () => {
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'logs'), 'not a directory');
+    const collected = collectRuleCodeEventEntries(workspaceDir);
+    expect(collected.sourceDirsFound).toBe(0);
+    expect(collected.entries).toEqual([]);
   });
 
   it('excludes malformed telemetry lines instead of failing the scan', () => {
