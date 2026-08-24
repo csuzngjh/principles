@@ -13,6 +13,10 @@
     "./rulehost-evidence": {
       "types": "./dist/rulehost-evidence.d.ts",
       "default": "./dist/rulehost-evidence.js"
+    },
+    "./governance-audit": {
+      "types": "./dist/governance-audit.d.ts",
+      "default": "./dist/governance-audit.js"
     }
   },
   "repository": {
@@ -77,9 +81,9 @@
     "@types/node": "^26.1.2",
     "@types/ws": "^8.5.13",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
-    "@typescript-eslint/parser": "^8.58.0",
+    "@typescript-eslint/parser": "^8.67.0",
     "@vitest/coverage-v8": "^4.1.9",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "eslint": "^10.8.1",
     "jsdom": "^30.0.1",
     "typescript": "^7.0.2",

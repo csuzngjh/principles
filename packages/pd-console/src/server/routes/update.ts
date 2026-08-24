@@ -737,19 +737,19 @@ function depsMeaningfullyChanged(
  */
 function ensureHostRuntimeResolutionLinks(extDir: string): string | undefined {
   const hostRuntimeDir = path.join(extDir, 'host-runtime');
-  const linkPaths = [
-    path.join(extDir, 'console', 'node_modules', '@principles', 'host-runtime'),
-    path.join(extDir, 'pd-cli', 'node_modules', '@principles', 'host-runtime'),
+  const links = [
+    { linkPath: path.join(extDir, 'console', 'node_modules', '@principles', 'host-runtime'), target: hostRuntimeDir, unixTarget: '../../../host-runtime' },
+    { linkPath: path.join(extDir, 'pd-cli', 'node_modules', '@principles', 'host-runtime'), target: hostRuntimeDir, unixTarget: '../../../host-runtime' },
+    { linkPath: path.join(extDir, 'console', 'node_modules', 'principles-disciple'), target: extDir, unixTarget: '../../' },
   ];
-  for (const linkPath of linkPaths) {
+  for (const { linkPath, target, unixTarget } of links) {
     if (fs.existsSync(linkPath)) continue;
     try {
       fs.mkdirSync(path.dirname(linkPath), { recursive: true });
       if (process.platform === 'win32') {
-        fs.symlinkSync(hostRuntimeDir, linkPath, 'junction');
+        fs.symlinkSync(target, linkPath, 'junction');
       } else {
-        // Relative from <ext>/<pkg>/node_modules/@principles/ → <ext>/
-        fs.symlinkSync('../../../host-runtime', linkPath, 'dir');
+        fs.symlinkSync(unixTarget, linkPath, 'dir');
       }
     } catch (error) {
       return `Failed to create host-runtime resolution link at ${linkPath}: ${

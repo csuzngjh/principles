@@ -33,6 +33,7 @@ import type {
 } from '@principles/core/runtime-v2';
 import type { PIArtifactRecord, ActivationStatusRecord, PromotionEvidenceSnapshot } from '@principles/core/runtime-v2';
 import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
+import { authorizeGovernanceAction, writeGovernanceAction } from 'principles-disciple/governance-audit';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 
@@ -276,6 +277,7 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
 interface ActivationDeactivateOptions {
   workspace?: string;
   activationId?: string;
+  reasonCode?: string;
   json?: boolean;
 }
 
@@ -312,6 +314,31 @@ export async function handleRuntimeActivationDeactivate(opts: ActivationDeactiva
     await stateManager.initialize();
     const activationStateStore = new SqliteActivationStateStore(stateManager.connection);
     const deactivatedAt = new Date().toISOString();
+
+    try {
+      writeGovernanceAction(path.join(workspaceDir, '.pd'), {
+        action: 'deactivate',
+        activationId: opts.activationId,
+        actor: 'cli',
+        reasonCode: opts.reasonCode?.trim() || 'cli_deactivate_requested',
+        outcome: 'authorized',
+      });
+    } catch (auditErr: unknown) {
+      const message = auditErr instanceof Error ? auditErr.message : String(auditErr);
+      const result: DeactivateResult = {
+        ok: false,
+        activationId: opts.activationId,
+        reason: `governance_audit_failed: ${message}`,
+        nextAction: 'Restore access to .pd/logs and retry; the activation was not changed.',
+      };
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.error(`Error: ${result.reason}`);
+        console.error(`Next action: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
 
     // Idempotent deactivate: returns false if already deactivated or not found.
     // Both cases are safe to call repeatedly (Contract E: rollback must be idempotent).
@@ -494,7 +521,17 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
       },
       commitPromotion: async input => {
         const manager = await getStateManager();
-        return new SqliteActivationSafetyStore(manager.connection).commitPromotion(input);
+        return authorizeGovernanceAction(
+          path.join(workspaceDir, '.pd'),
+          {
+            action: 'promote',
+            activationId,
+            actor: 'cli',
+            reasonCode: opts.reasonCode?.trim() ?? '',
+            outcome: 'authorized',
+          },
+          () => new SqliteActivationSafetyStore(manager.connection).commitPromotion(input),
+        );
       },
       newDecisionId: () => `decision-${randomUUID()}`,
       now: () => new Date().toISOString(),
@@ -1380,12 +1417,14 @@ export function registerRuntimeActivationDeactivateCommand(parent: Command): Com
     .command('deactivate')
     .description('Deactivate an activation by activation ID')
     .requiredOption('--activation-id <id>', 'Activation ID to deactivate')
+    .option('--reason-code <code>', 'Structured governance reason code (default: cli_deactivate_requested)')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       await handleRuntimeActivationDeactivate({
         activationId: opts.activationId,
         workspace: opts.workspace,
+        reasonCode: opts.reasonCode,
         json: opts.json,
       });
     });
