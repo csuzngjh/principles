@@ -166,10 +166,14 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     let coreGrounding = false;
     // PRI-468: Read intent_engineering flag from effective config.
     let intentGrounding = false;
+    // Pain Diagnosis Persistence: Evidence First Attribution rules in the
+    // Stage A prompt. Flag off (default) keeps the prompt byte-identical.
+    let evidenceFirstAttribution = false;
     if (this.effectiveConfig) {
       const featureFlags = computeFeatureFlagsFromConfig(this.effectiveConfig);
       coreGrounding = isFeatureEnabled(featureFlags, 'diagnostician_core_grounding');
       intentGrounding = isFeatureEnabled(featureFlags, 'intent_engineering');
+      evidenceFirstAttribution = isFeatureEnabled(featureFlags, 'pain_diagnosis_persistence');
     }
 
     // PRI-468: When intent_engineering is on AND a reader is configured,
@@ -212,6 +216,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       coreGrounding,
       intentGrounding,
       intentDoc,
+      evidenceFirstAttribution,
     });
 
     return this.runtimeAdapter.startRun({

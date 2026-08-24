@@ -238,6 +238,8 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'pain_evidence_admission_default') continue;
       // Task 7: failed_tasks_observability defaults on (quiet flag, default-on)
       if (flag.id === 'failed_tasks_observability') continue;
+      // Governance Recovery v1 (2026-08-24 owner decision): default-on
+      if (flag.id === 'failed_task_recovery_console') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -500,6 +502,32 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(flag.enabled).toBe(true);
     expect(flag.since).toBe('2026-07-04');
     expect(flag.description).toContain('Failed tasks observability');
+  });
+
+  it('Governance Recovery v1: failed_task_recovery_console is registered as quiet, default-on (owner decision 2026-08-24)', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'failed_task_recovery_console');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('failed_task_recovery_console flag not found');
+    expect(flag.category).toBe('quiet');
+    // Default on per owner decision (2026-08-24); disable via
+    // .pd/config.yaml features.failed_task_recovery_console.enabled: false.
+    expect(flag.enabled).toBe(true);
+    expect(flag.since).toBe('2026-08-23');
+    expect(flag.description).toContain('recovery');
+  });
+
+  it('Governance Recovery v1: failed_task_recovery_console can be disabled via config', () => {
+    const userFlags = {
+      failed_task_recovery_console: { enabled: false },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
+    const flag = result.flags.failed_task_recovery_console;
+    expect(flag).toBeDefined();
+    if (flag) {
+      expect(flag.enabled).toBe(false);
+    }
+    // unknown-flag warning must not fire for a registered flag
+    expect(result.warnings.some(w => w.includes('failed_task_recovery_console') && w.includes('unknown'))).toBe(false);
   });
 
   it('Task 7: failed_tasks_observability can be explicitly disabled via config', () => {

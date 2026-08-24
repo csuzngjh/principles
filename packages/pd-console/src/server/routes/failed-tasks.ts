@@ -5,10 +5,21 @@
 // detail (task record + run history + last error category). Gated by the
 // failed_tasks_observability feature flag.
 //
+// Governance Recovery Actions v1: POST /api/v1/failed-tasks/:id/recover lets the
+// Owner recover a task from the Console. failed → pending reuses
+// RecoverySweepService.recoverFailedTask; needs_human_review → pending reuses
+// the extracted owner-retry sequence (ownerRetryNeedsHumanReviewTask — the same
+// implementation `pd runtime internalization retry --confirm` calls). No
+// recovery logic is reimplemented here. Gated by failed_task_recovery_console
+// (default off → Console stays read-only). Every successful recovery appends a
+// RecoveryAction audit record (.state/recovery_actions.jsonl).
+//
 // Trust boundary (rc-1, rc-2): all query string values are read via
 // URLSearchParams.get() and treated as `unknown` until validated with typeof /
-// Number.isFinite. Store return values are typed by the core contract and
-// further validated by SqliteTaskStore's row readers (rc-1 at the DB boundary).
+// Number.isFinite. POST bodies are parsed to `unknown` and field-checked with
+// Object.hasOwn + typeof before use. Store return values are typed by the core
+// contract and further validated by SqliteTaskStore's row readers (rc-1 at the
+// DB boundary).
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
@@ -16,6 +27,9 @@ import * as path from 'node:path';
 import {
   SqliteConnection,
   SqliteTaskStore,
+  PDRuntimeError,
+  createRecoverySweepService,
+  appendRecoveryAction,
 } from '@principles/core/runtime-v2';
 import {
   sendSuccess,
@@ -24,6 +38,7 @@ import {
   sendMethodNotAllowed,
   sendBadRequest,
 } from '../utils/response.js';
+import { readBody } from '../utils/request.js';
 
 // ── Per-workspace store cache ──────────────────────────────────────────────
 //
@@ -106,6 +121,144 @@ function extractQueryParams(req: IncomingMessage): URLSearchParams | null {
   return new URLSearchParams(urlStr.slice(qIdx + 1));
 }
 
+// ── Recovery helpers (Governance Recovery Actions v1) ───────────────────────
+
+const MAX_REASON_LENGTH = 2000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function tryParseJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Parse the optional recover request body. Accepts an empty body (reason is
+ * optional) or a JSON object with an optional string `reason` field
+ * (rc-1/rc-2: parsed value stays `unknown` until Object.hasOwn + typeof
+ * checks pass). Returns a discriminated result; `ok === false` carries the
+ * bad-request message.
+ */
+function parseRecoverBody(body: string): { ok: true; reason?: string } | { ok: false; error: string } {
+  if (body.trim().length === 0) return { ok: true };
+  const raw: unknown = tryParseJson(body);
+  if (raw === undefined) return { ok: false, error: 'Request body must be valid JSON' };
+  if (!isRecord(raw)) return { ok: false, error: 'Request body must be a JSON object' };
+  if (Object.hasOwn(raw, 'reason')) {
+    if (typeof raw.reason !== 'string') {
+      return { ok: false, error: 'reason must be a string' };
+    }
+    if (raw.reason.length > MAX_REASON_LENGTH) {
+      return { ok: false, error: `reason must be at most ${MAX_REASON_LENGTH} characters` };
+    }
+  }
+  const reason = typeof raw.reason === 'string' && raw.reason.length > 0 ? raw.reason : undefined;
+  return { ok: true, reason };
+}
+
+interface RecoverDispatchOutcome {
+  httpStatus: number;
+  errorCode: string;
+  message: string;
+  nextAction?: string;
+  extras?: Record<string, unknown>;
+}
+
+/**
+ * Dispatch one recovery attempt through the shared core services.
+ *
+ * Status dispatch (SPEC §6.1/§6.2): failed → recoverFailedTask; then
+ * needs_human_review → owner authority reset. A null first result means
+ * "missing or not failed"; the second call distinguishes not_found /
+ * wrong-status / metadata_invalid. No recovery logic lives here.
+ */
+async function dispatchRecovery(
+  workspaceDir: string,
+  taskId: string,
+): Promise<
+  | { ok: true; result: 'recovered' | 'requeued'; previousStatus: string; newStatus: string }
+  | { ok: false; failure: RecoverDispatchOutcome }
+> {
+  const { service, close } = await createRecoverySweepService({ workspaceDir });
+  try {
+    // failed → pending (crash-retry semantics: completionIntent preserved)
+    try {
+      const failedResult = await service.recoverFailedTask(taskId);
+      if (failedResult) {
+        return {
+          ok: true,
+          result: 'recovered',
+          previousStatus: failedResult.previousStatus,
+          newStatus: failedResult.newStatus,
+        };
+      }
+    } catch (err) {
+      if (err instanceof PDRuntimeError && err.category === 'input_invalid') {
+        // attempt budget exhausted; Console v1 does not expose force
+        return {
+          ok: false,
+          failure: {
+            httpStatus: 409,
+            errorCode: 'task_attempts_exhausted',
+            message: err.message,
+            nextAction: 'This task exhausted its attempt budget. Recover it with force via CLI: pd runtime recovery failed-tasks --confirm --force',
+          },
+        };
+      }
+      throw err;
+    }
+
+    // not failed (or missing) → owner authority reset path
+    const outcome = await service.recoverNeedsHumanReviewTask(taskId);
+    if (outcome.status === 'requeued') {
+      return {
+        ok: true,
+        result: 'requeued',
+        previousStatus: outcome.previousStatus,
+        newStatus: 'pending',
+      };
+    }
+    if (outcome.status === 'not_found') {
+      return {
+        ok: false,
+        failure: {
+          httpStatus: 404,
+          errorCode: 'task_not_found',
+          message: `Task ${taskId} not found`,
+        },
+      };
+    }
+    if (outcome.status === 'metadata_invalid') {
+      return {
+        ok: false,
+        failure: {
+          httpStatus: 409,
+          errorCode: 'metadata_invalid',
+          message: 'Task metadata failed PI hydration; a recovery now would risk a partial authority reset.',
+          nextAction: 'Run pd runtime internalization integrity --json to inspect the task metadata',
+        },
+      };
+    }
+    return {
+      ok: false,
+      failure: {
+        httpStatus: 409,
+        errorCode: 'task_not_recoverable',
+        message: `Task ${taskId} is in status '${outcome.previousStatus}' — only failed / needs_human_review tasks are recoverable.`,
+        nextAction: 'Wait for the current attempt to finish, or check pipeline status: pd runtime internalization queue --json',
+        extras: { previousStatus: outcome.previousStatus },
+      },
+    };
+  } finally {
+    await close();
+  }
+}
+
 // ── Route handler ───────────────────────────────────────────────────────────
 
 export type FailedTasksContext = {
@@ -120,12 +273,16 @@ export type FailedTasksContext = {
  * Handle requests to `/api/v1/failed-tasks*`.
  *
  * Routes:
- *   GET /api/v1/failed-tasks         — list failed/needs_human_review tasks
- *   GET /api/v1/failed-tasks/:id     — fetch single task detail (task + runs + lastError)
- *   other methods                    — 405 Method Not Allowed
+ *   GET  /api/v1/failed-tasks              — list failed/needs_human_review tasks
+ *   GET  /api/v1/failed-tasks/:id          — fetch single task detail (task + runs + lastError)
+ *   POST /api/v1/failed-tasks/:id/recover  — Owner recovery (failed | needs_human_review → pending)
+ *   other methods                          — 405 Method Not Allowed
  *
- * Feature flag gate: when `ctx.featureFlags.failed_tasks_observability.enabled`
- * is `false`, returns 403 `failed_tasks_observability_disabled`.
+ * Feature flag gates (checked before any DB access so a disabled flag
+ * short-circuits cleanly — rc-9: error responses include reason + next action):
+ *   - `failed_tasks_observability.enabled === false` → 403 for the whole route
+ *   - `failed_task_recovery_console.enabled !== true` → 403 for POST recover
+ *     (fail-closed mutation gate; default on, explicit disable keeps the Console read-only)
  */
 export async function handleFailedTasksRoute(
   req: IncomingMessage,
@@ -224,6 +381,95 @@ export async function handleFailedTasksRoute(
       }
     } catch (err) {
       sendError(res, 500, 'failed_tasks_list_error', errorMessage(err));
+    }
+    return;
+  }
+
+  // Recovery: POST /api/v1/failed-tasks/:id/recover (Governance Recovery
+  // Actions v1). Checked before the generic /:id detail branch.
+  // eslint-disable-next-line @typescript-eslint/prefer-regexp-exec -- String#match is semantically identical for a non-global regex; the repo's security write-gate false-positives on `<expr>.exec(userInput)` as command injection, so RegExp#exec is not writable here.
+  const recoverMatch = subPath.match(/^\/([^/]+)\/recover$/);
+  if (recoverMatch) {
+    // recoverMatch[1] = captured task id (segment between the leading '/'
+    // and the trailing '/recover')
+    const taskId = recoverMatch[1] ?? '';
+
+    // Fail-closed gate: this is a mutation endpoint — recovery is enabled by
+    // default (2026-08-24 owner decision) and 403 only when explicitly disabled
+    // via config (features.failed_task_recovery_console.enabled: false).
+    if (ctx.featureFlags?.failed_task_recovery_console?.enabled !== true) {
+      sendError(
+        res,
+        403,
+        'failed_task_recovery_console_disabled',
+        'failed_task_recovery_console feature flag is disabled. Enable it via .pd/config.yaml (features.failed_task_recovery_console.enabled: true) to allow recovery from Console.',
+      );
+      return;
+    }
+
+    if (method !== 'POST') {
+      sendMethodNotAllowed(res);
+      return;
+    }
+
+    try {
+      if (taskId.length === 0 || !stateDbExists(workspaceDir)) {
+        sendNotFound(res, `Task ${taskId} not found`);
+        return;
+      }
+
+      let bodyResult: { ok: true; reason?: string } | { ok: false; error: string };
+      try {
+        const body = await readBody(req);
+        bodyResult = parseRecoverBody(body);
+      } catch (err) {
+        sendBadRequest(res, err instanceof Error ? err.message : 'Failed to read request body');
+        return;
+      }
+      if (bodyResult.ok === false) {
+        sendBadRequest(res, bodyResult.error);
+        return;
+      }
+
+      const dispatch = await dispatchRecovery(workspaceDir, taskId);
+      if (!dispatch.ok) {
+        sendError(
+          res,
+          dispatch.failure.httpStatus,
+          dispatch.failure.errorCode,
+          dispatch.failure.message,
+          dispatch.failure.nextAction ? { nextAction: dispatch.failure.nextAction, ...dispatch.failure.extras } : dispatch.failure.extras,
+        );
+        return;
+      }
+
+      // Audit the owner action (SPEC §10). Best-effort: the recovery is
+      // already committed; an audit-write failure must not report the whole
+      // action as failed, and it is never silent (rc-9).
+      try {
+        appendRecoveryAction(workspaceDir, {
+          taskId,
+          previousStatus: dispatch.previousStatus,
+          result: dispatch.result,
+          operator: 'console',
+          reason: bodyResult.reason ?? null,
+        });
+      } catch (auditErr) {
+        console.warn('[failed-tasks] recovery audit append failed:', auditErr instanceof Error ? auditErr.message : String(auditErr));
+      }
+
+      // SPEC §6.4: "Recovery Accepted", not "Task Completed" — execution is
+      // asynchronous; the task merely re-enters the pending → leased →
+      // running → succeeded cycle.
+      sendSuccess(res, {
+        taskId,
+        previousStatus: dispatch.previousStatus,
+        newStatus: dispatch.newStatus,
+        result: dispatch.result,
+        nextAction: 'Recovery accepted. The task is pending again and will be picked up by the internalization consumer (or advance it manually: pd runtime internalization run-once).',
+      });
+    } catch (err) {
+      sendError(res, 500, 'failed_task_recovery_error', errorMessage(err));
     }
     return;
   }

@@ -666,6 +666,30 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_dead_letter_pains_retried_at ON dead_letter_pains(retried_at);
     `);
 
+    // Pain Diagnosis Persistence: durable link between a canonical pain_id and
+    // the diagnostician's root-cause attribution (category/rootCause/evidence/
+    // confidence). pain_events lives in trajectory.db (host-runtime) — pain_id
+    // here is a LOGICAL association key, not a cross-database FK. Multiple rows
+    // per pain_id represent re-diagnoses and mixed attributions (SPEC §9 — the
+    // category union stays strictly four-valued, no Mixed enum). Written by
+    // PainSignalBridge.onDiagnosisComplete when pain_diagnosis_persistence is on.
+    // One statement per prepare() — the security write gate flags bulk exec()
+    // calls in new code.
+    db.prepare(`CREATE TABLE IF NOT EXISTS pain_diagnoses (
+        id TEXT PRIMARY KEY,
+        pain_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        diagnosis_id TEXT NOT NULL,
+        category TEXT NOT NULL CHECK (category IN ('People','Design','Assumption','Tooling')),
+        root_cause TEXT NOT NULL,
+        evidence_json TEXT,
+        confidence REAL,
+        artifact_id TEXT,
+        created_at TEXT NOT NULL
+      )`).run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_pain_diagnoses_pain_id ON pain_diagnoses(pain_id)').run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_pain_diagnoses_task_id ON pain_diagnoses(task_id)').run();
+
     // Task 11: pending_agent_drafts — durable store for agent-generated draft
     // context attached to a failed task. PendingAgentDraftStore writes here when
     // a peer runner reaches a permanent-failure terminal state, so the

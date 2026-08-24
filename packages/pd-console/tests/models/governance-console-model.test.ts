@@ -632,6 +632,124 @@ describe('GovernanceConsoleModel — data computation', () => {
   });
 });
 
+// ── Governance Recovery Actions v1 Phase 0: needs_human_review signal fix ─────
+
+describe('GovernanceConsoleModel — needs_human_review owner-attention signal (recovery v1)', () => {
+  it('rollout_reviewer needs_human_review task enters the queue (AC-6)', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count)
+      VALUES ('task-rollout-1', 'rollout_reviewer', 'needs_human_review', '${now}', '${now}', 2)
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    // Previously: no stage's needs_human_review task reached this queue, and
+    // rollout_reviewer was missing from the kind list entirely (both fixed).
+    expect(result.pendingHumanReviewCount).toBe(1);
+    expect(result.pendingReviewCount).toBe(0);
+    expect(result.governanceState).toBe('owner_review_ready');
+    expect(result.stateReasonCode).toBe('tasks_need_human_review');
+    expect(result.nextActionCode).toBe('review_failed_tasks');
+    expect(result.stateReason).toContain('1');
+  });
+
+  it('counts needs_human_review across all peer-runner kinds without a time window', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count)
+      VALUES
+        ('task-eval-1', 'evaluator', 'needs_human_review', '${now}', '${now}', 1),
+        ('task-dreamer-1', 'dreamer', 'needs_human_review', '${thirtyDaysAgo}', '${thirtyDaysAgo}', 1),
+        ('task-rollout-1', 'rollout_reviewer', 'needs_human_review', '${thirtyDaysAgo}', '${thirtyDaysAgo}', 2)
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    // Owner-attention items persist until the owner acts — no PRI-556 window
+    expect(result.pendingHumanReviewCount).toBe(3);
+    expect(result.governanceState).toBe('owner_review_ready');
+    expect(result.stateReasonCode).toBe('tasks_need_human_review');
+  });
+
+  it('pending approvals still take priority over needs_human_review tasks', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count)
+      VALUES ('task-rollout-1', 'rollout_reviewer', 'needs_human_review', '${now}', '${now}', 2)
+    `);
+    db.exec(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at)
+      VALUES ('apr-1', 'artifact-1', 'prompt', 'low', 'pending', '${now}')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.pendingReviewCount).toBe(1);
+    expect(result.pendingHumanReviewCount).toBe(1);
+    expect(result.stateReasonCode).toBe('pending_approvals');
+    expect(result.governanceState).toBe('owner_review_ready');
+  });
+
+  it('rollout_reviewer failed task now produces a degraded signal (kind list fix)', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, last_error)
+      VALUES ('task-rollout-2', 'rollout_reviewer', 'failed', '${now}', '${now}', 1, 'rollout_dispatch_refused')
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.governanceState).toBe('degraded');
+    expect(result.degradedSignals).toBeDefined();
+    const signal = result.degradedSignals?.find(s => s.reasonCode === 'task_failed');
+    expect(signal).toBeDefined();
+    expect(signal?.failureSummary?.details[0]?.kind).toBe('rollout_reviewer');
+  });
+
+  it('non-peer-runner kinds (e.g. diagnostician) do not enter the needs_human_review count', async () => {
+    const conn = createTestDb();
+    const db = conn.getDb();
+    const now = new Date().toISOString();
+
+    db.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count)
+      VALUES ('task-diag-1', 'diagnostician', 'needs_human_review', '${now}', '${now}', 1)
+    `);
+
+    conn.close();
+
+    const result = await model.getGovernanceQueue();
+
+    expect(result.pendingHumanReviewCount).toBeUndefined();
+    // diagnostician is not a peer-runner kind: it neither enters the
+    // human-review count nor counts as internalization pipeline activity
+    // (pre-existing semantics of the kind-scoped activity query)
+    expect(result.governanceState).toBe('none');
+  });
+});
+
 // ── Disposal ─────────────────────────────────────────────────────────────────
 
 describe('GovernanceConsoleModel — disposal', () => {

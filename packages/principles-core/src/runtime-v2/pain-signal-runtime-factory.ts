@@ -37,6 +37,7 @@ import { PiAiRuntimeAdapter } from './adapter/pi-ai-runtime-adapter.js';
 import { getProviders } from '@mariozechner/pi-ai';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import { storeEmitter } from './store/event-emitter.js';
+import type { TelemetryEvent } from '../telemetry-event.js';
 import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
 import type { RuntimeKind, PDRuntimeAdapter } from './runtime-protocol.js';
 import type { LedgerAdapter } from './candidate-intake.js';
@@ -396,6 +397,41 @@ export class DisabledDiagnosticianRunner implements DiagnosticianRunnerLike {
   }
 }
 
+// Pain Diagnosis Persistence: the bridge emits ad-hoc event names that are not
+// in the closed TelemetryEventType union, so only the two persistence
+// degradation events are mapped onto the registered degradation_triggered
+// channel. The bridge's OTHER event names (candidate_admission_decision,
+// candidate_dreamer_task_seeded, candidate_dreamer_task_seed_failed,
+// candidate_not_internalizable) were dormant on main — no emitter was wired
+// there — and must STAY dormant here: forwarding them as degradation_triggered
+// would mislabel routine admission decisions as degradations and change
+// flag-off behavior (PR contract: flag off = zero effective surface).
+const BRIDGE_DEGRADATION_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'pain_diagnosis_persist_skipped',
+  'pain_diagnosis_persist_failed',
+]);
+
+/**
+ * Map a PainSignalBridge telemetry event onto a storable TelemetryEvent.
+ * Returns null for bridge events that were not emitted in production before
+ * the persistence feature (they keep their pre-main dormant status).
+ */
+export function mapBridgeTelemetryToStoreEvent(event: {
+  eventType: string;
+  traceId: string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+}): TelemetryEvent | null {
+  if (!BRIDGE_DEGRADATION_EVENT_TYPES.has(event.eventType)) return null;
+  return {
+    eventType: 'degradation_triggered',
+    traceId: event.traceId,
+    timestamp: event.timestamp,
+    sessionId: '',
+    payload: { component: 'PainSignalBridge', originalEventType: event.eventType, ...event.payload },
+  };
+}
+
 /**
  * Create (or return cached) PainSignalBridge for a workspace.
  *
@@ -428,10 +464,14 @@ export async function createPainSignalBridge(
   // This prevents cache collision when same workspaceDir+runtimeKind+openclawMode
   // is called with different effectiveConfig (e.g., split on vs off).
   let useSplitPipeline = true;
+  // Pain Diagnosis Persistence: resolve the flag before the cache key for the
+  // same collision reason (same workspace, flag toggled between calls).
+  let diagnosisPersistenceEnabled = false;
   if (opts.effectiveConfig) {
     const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
     const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
     const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
+    diagnosisPersistenceEnabled = isFeatureEnabled(featureFlags, 'pain_diagnosis_persistence');
 
     if (splitPipeline && !asyncCli) {
       const isExplicitSplit = opts.effectiveConfig.featuresChangedFromDefault?.includes('diagnostician_split_pipeline') ?? false;
@@ -447,7 +487,7 @@ export async function createPainSignalBridge(
     useSplitPipeline = splitPipeline;
   }
 
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${useSplitPipeline ? 'split' : 'disabled'}`;
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${useSplitPipeline ? 'split' : 'disabled'}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
@@ -548,6 +588,16 @@ export async function createPainSignalBridge(
     ledgerAdapter: opts.ledgerAdapter,
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
     workspaceDir: opts.workspaceDir,
+    diagnosisPersistenceEnabled,
+    // rc-9: the persistence path must degrade observably in production. Only
+    // the persistence degradation events are forwarded (see
+    // mapBridgeTelemetryToStoreEvent); other bridge events stay dormant as on main.
+    eventEmitter: {
+      emitTelemetry: (event) => {
+        const mapped = mapBridgeTelemetryToStoreEvent(event);
+        if (mapped) storeEmitter.emitTelemetry(mapped);
+      },
+    },
   });
 
   bridgeCache.set(cacheKey, bridge);
@@ -562,7 +612,9 @@ export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: s
   const effectiveKind = runtimeKind ?? 'pi-ai';
   for (const mode of ['local', 'gateway', '']) {
     for (const pipeline of ['split', 'disabled']) {
-      bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pipeline}`);
+      for (const pdp of ['pdp', 'nopdp']) {
+        bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pipeline}:${pdp}`);
+      }
     }
   }
 }

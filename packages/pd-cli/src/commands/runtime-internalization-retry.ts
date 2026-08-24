@@ -22,8 +22,7 @@
  */
 
 import * as path from 'path';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from '@principles/core/runtime-v2';
+import { RuntimeStateManager, ownerRetryNeedsHumanReviewTask } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 export interface InternalizationRetryOptions {
@@ -111,15 +110,41 @@ export async function handleRuntimeInternalizationRetry(opts: InternalizationRet
     // Owner retry = authority reset: runnerDecision 与 completionIntent 同时
     // 清空 (保留 revisionCount / revisionCauseId / rolloutRevisionPayload /
     // repairPayload / lineage — revision budget 证据不动)。
-    const piTask = hydratePITaskRecord(task);
-    if (!piTask) {
+    // 落库序列提取在 core ownerRetryNeedsHumanReviewTask (Governance Recovery
+    // Actions v1): Console 恢复端点与 CLI 走同一段逻辑,禁止复制。
+    const outcome = await ownerRetryNeedsHumanReviewTask(stateManager, opts.taskId);
+
+    if (outcome.status === 'not_found') {
+      const out: InternalizationRetryOutput = {
+        status: 'failed',
+        taskId: opts.taskId,
+        reason: 'task_not_found',
+        nextAction: 'Verify the task id and workspace',
+      };
+      emit(out, opts.json);
+      process.exitCode = 1;
+      return;
+    }
+    if (outcome.status === 'skipped') {
+      const out: InternalizationRetryOutput = {
+        status: 'skipped',
+        taskId: opts.taskId,
+        taskKind: outcome.taskKind,
+        previousStatus: outcome.previousStatus,
+        reason: 'only_needs_human_review_tasks_are_retryable',
+        nextAction: 'This task is not in the owner attention queue; use run-once / enqueue-successors instead',
+      };
+      emit(out, opts.json);
+      return;
+    }
+    if (outcome.status === 'metadata_invalid') {
       // fail closed: 只改 status 会把(可能损坏的)旧 authority 记录原样留在
       // metadata 里,下一次 run 由它接管 —— 产生 partial retry。
       const out: InternalizationRetryOutput = {
         status: 'failed',
         taskId: opts.taskId,
-        taskKind: task.taskKind,
-        previousStatus: task.status,
+        taskKind: outcome.taskKind,
+        previousStatus: 'needs_human_review',
         reason: 'metadata_invalid',
         nextAction: 'Task metadata failed PI hydration; a retry now would risk a partial authority reset. Inspect: pd runtime internalization integrity --json',
       };
@@ -127,23 +152,12 @@ export async function handleRuntimeInternalizationRetry(opts: InternalizationRet
       process.exitCode = 1;
       return;
     }
-    // 原子单写: 同一 patch 同时落 status=pending / attemptCount=0 / 清空后的
-    // diagnosticJson。updateTask 抛错时 DB 行保持原样(单条 UPDATE),无 partial reset。
-    const merged = mergePITaskMetadata(piTask, {
-      runnerDecision: undefined,
-      completionIntent: undefined,
-    });
-    await stateManager.updateTask(opts.taskId, {
-      status: 'pending',
-      attemptCount: 0,
-      diagnosticJson: createPITaskDiagnosticJson(merged),
-    });
 
     const out: InternalizationRetryOutput = {
       status: 'requeued',
       taskId: opts.taskId,
-      taskKind: task.taskKind,
-      previousStatus: task.status,
+      taskKind: outcome.taskKind,
+      previousStatus: outcome.previousStatus,
       nextAction: 'Task requeued; it will be picked up by the auto-consumer cycle, or advance manually: pd runtime internalization run-once',
     };
     emit(out, opts.json);
