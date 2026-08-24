@@ -99,6 +99,13 @@ export interface RuleHostEvaluationReport {
    * reason + nextAction so the owner can act without reading SQLite rows.
    */
   readonly skippedActivations: readonly SkippedActivation[];
+  /**
+   * PRI-567 — Number of live-mode implementations loaded for this evaluation.
+   * Lets the gate distinguish "live rule evaluated → allow" from
+   * "no live rules armed at all" (which previously both logged decision='allow',
+   * making enforcement statistics read as if rules were active when none were).
+   */
+  readonly liveRulesLoaded: number;
 }
 
 /**
@@ -234,13 +241,13 @@ export class RuleHost {
           }
         }
       }
-      return { liveDecision, liveDecisionActivationId, shadowDecisions, skippedActivations: skipped };
+      return { liveDecision, liveDecisionActivationId, shadowDecisions, skippedActivations: skipped, liveRulesLoaded: liveImpls.length };
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)
       this.logger.warn?.(
         `[RuleHost] Host evaluation failed, degrading conservatively: ${String(hostError)}`
       );
-      return { liveDecision: undefined, shadowDecisions: [], skippedActivations: [] };
+      return { liveDecision: undefined, shadowDecisions: [], skippedActivations: [], liveRulesLoaded: 0 };
     }
   }
 

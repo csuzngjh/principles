@@ -428,7 +428,12 @@ export interface RuleHostEvaluatedEventData {
   toolName: string;
   filePath: string;
   matched: boolean;
-  decision: 'allow' | 'block' | 'requireApproval' | 'auto_correct';
+  /**
+   * PRI-567: 'no_rules_armed' — the live set was empty, so nothing enforced or
+   * allowed. Previously this case logged decision='allow', making enforcement
+   * statistics read as if rules were active when none were.
+   */
+  decision: 'allow' | 'block' | 'requireApproval' | 'auto_correct' | 'no_rules_armed';
   ruleId?: string;
   activationId?: string;
   activationMode?: 'shadow' | 'live';
@@ -443,6 +448,7 @@ export const RuleHostEvaluatedEventDataSchema = Type.Object({
     Type.Literal('block'),
     Type.Literal('requireApproval'),
     Type.Literal('auto_correct'),
+    Type.Literal('no_rules_armed'),
   ]),
   ruleId: Type.Optional(Type.String()),
   activationId: Type.Optional(Type.String()),

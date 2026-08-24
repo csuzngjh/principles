@@ -160,7 +160,9 @@ describe('Gate Rule Host Only Pipeline', () => {
         expect.objectContaining({
           toolName: 'edit',
           matched: false,
-          decision: 'allow',
+          // PRI-567: no live rules armed (evaluateDetailed absent → liveRulesLoaded 0)
+          // is no longer indistinguishable from a real 'allow'.
+          decision: 'no_rules_armed',
         })
       );
     });

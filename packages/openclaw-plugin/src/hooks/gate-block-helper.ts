@@ -105,11 +105,14 @@ export function recordGateBlockAndReturn(
 
   // 4. Record to trajectory (secondary persistence with retry)
   try {
-    wctx.trajectory?.recordGateBlock?.(trajectoryPayload);
+    // PRI-569: call directly — WorkspaceContext.trajectory is a lazily
+    // initializing getter that never returns undefined, so the former `?.`
+    // chains were dead defenses that could only mask real initialization
+    // errors (rc-9: degradation must be observable, never silent).
+    wctx.trajectory.recordGateBlock(trajectoryPayload);
   } catch (error: unknown) {
     logWarn(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
 
-     
     scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logWarn, logError);
   }
 
@@ -354,7 +357,8 @@ function scheduleTrajectoryGateBlockRetry(
 
   setTimeout(() => {
     try {
-      wctx.trajectory?.recordGateBlock?.(payload);
+      // PRI-569: direct call — see the primary persistence site above.
+      wctx.trajectory.recordGateBlock(payload);
       logWarn(`[PD_GATE] Trajectory gate block persisted on retry ${attempt}`);
     } catch (error: unknown) {
       logWarn(`[PD_GATE] Retrying trajectory gate block persistence (attempt ${attempt + 1}): ${String(error)}`);
