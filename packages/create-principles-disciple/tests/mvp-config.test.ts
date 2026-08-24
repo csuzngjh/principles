@@ -1643,7 +1643,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     }
   });
 
-  it('only MVP core channels, code_rule_capability, feedback_channel, failed_tasks_observability, and the three principle_receipt flags are enabled by default', () => {
+  it('keeps experimental receipt self-report disabled in a fresh install', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
     const enabledFlags: string[] = [];
@@ -1653,17 +1653,18 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
         if (flag.enabled === true) enabledFlags.push(key);
       }
     }
-    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'failed_tasks_observability', 'feedback_channel', 'host.codex', 'principle_receipt_block_copy', 'principle_receipt_ledger', 'principle_receipt_self_report', 'prompt']);
+    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'failed_tasks_observability', 'feedback_channel', 'host.codex', 'principle_receipt_block_copy', 'principle_receipt_ledger', 'prompt']);
   });
 
-  it('PRI-535: the three principle_receipt flags are quiet category (not escalated to core by the installer)', () => {
+  it('keeps principle receipt flags quiet and only graduates deterministic receipt capabilities', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
-    for (const key of ['principle_receipt_block_copy', 'principle_receipt_ledger', 'principle_receipt_self_report']) {
+    for (const key of ['principle_receipt_block_copy', 'principle_receipt_ledger']) {
       const flag = features[key] as Record<string, unknown>;
       expect(flag?.category).toBe('quiet');
       expect(flag?.enabled).toBe(true);
     }
+    expect(features.principle_receipt_self_report).toEqual({ category: 'quiet', enabled: false });
   });
 
   it('written to temp workspace is loadable', () => {
