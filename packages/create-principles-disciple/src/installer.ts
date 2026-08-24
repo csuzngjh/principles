@@ -141,16 +141,19 @@ export function mergeInstallManifestHosts(current: unknown, host: HostTarget): (
   return [...hosts];
 }
 
-function writeInstallManifest(host: HostTarget): void {
-  mkdirSync(getPdDir(), { recursive: true });
+function resolveInstallManifestHosts(host: HostTarget): ('codex' | 'openclaw')[] {
   let current: unknown;
   try {
     current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
   } catch (error) {
     if (existsSync(getInstallManifestPath())) throw error;
   }
-  const hosts = mergeInstallManifestHosts(current, host);
-  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: [...hosts] }, null, 2) + '\n', 'utf8');
+  return mergeInstallManifestHosts(current, host);
+}
+
+function writeInstallManifest(hosts: ('codex' | 'openclaw')[]): void {
+  mkdirSync(getPdDir(), { recursive: true });
+  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts }, null, 2) + '\n', 'utf8');
 }
 
 function installBundledLayoutPackage(pluginDir: string): void {
@@ -1738,6 +1741,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   const spinner = quiet ? null : ora('Installing...').start();
   let backupDir: string | null = null;
   let runtimeBackupDir: string | null = null;
+  let installManifestHosts: ('codex' | 'openclaw')[];
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;
@@ -1772,6 +1776,10 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Backing up existing install...');
+    // Validate the existing host-ownership record before mutating runtime or
+    // host config. A malformed manifest must not be discovered only after the
+    // old installation has already been replaced (rc-3/rc-9).
+    installManifestHosts = resolveInstallManifestHosts(options.host);
     if (installsOpenClaw(options.host)) migrateLegacyPdBackups();
     const { backupDir: backupDirFromResult, runtimeBackupDir: runtimeBackupDirFromResult } = backupExistingInstall(options.host);
     backupDir = backupDirFromResult;
@@ -1955,17 +1963,14 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       }
     }
 
-    if (hostFailures.length === 0) {
-      writeInstallManifest(options.host);
+    if (hostFailures.length > 0) {
+      throw new Error(`Host installation failed: ${hostFailures.join(' | ')}`);
     }
+    writeInstallManifest(installManifestHosts);
 
     cleanupBackup(backupDir, runtimeBackupDir);
     if (spinner) {
-      if (hostFailures.length > 0) {
-        spinner.warn('Install complete with host warnings');
-      } else {
-        spinner.succeed('Install complete!');
-      }
+      spinner.succeed('Install complete!');
     }
 
     killConsoleChild();
@@ -1981,7 +1986,6 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     // A host installer failure means the install is not fully successful,
     // even if all component verifications passed. The operator should see
     // success=false and be guided to fix the failed host.
-    const hasHostFailures = hostFailures.length > 0;
     const nextActions: string[] = [];
     if (components.cli === 'verified') {
       nextActions.push(`pd runtime canary --workspace "${options.workspaceDir}" --json`);
@@ -2000,11 +2004,8 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     if (launchResult.fallbackAction) {
       nextActions.push(launchResult.fallbackAction);
     }
-    // Append host-failure remediation actions so the operator knows what to fix.
-    nextActions.push(...hostFailures);
-
     return {
-      success: isComplete && !hasHostFailures,
+      success: isComplete,
       workspaceDir: options.workspaceDir,
       configYamlPath,
       templatesCount: templatesCount + principlesCount,
