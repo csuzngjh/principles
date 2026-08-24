@@ -68,6 +68,27 @@ describe('evaluateRuleCodePromotionReadiness', () => {
     expect(result.failedChecks).toContainEqual({ checkId: 'evidence_binding', reasonCode: 'artifact_digest_mismatch' });
   });
 
+  it('reports an observable reason when the shadow telemetry source is unavailable', () => {
+    const result = evaluateRuleCodePromotionReadiness({
+      evaluationId: 'eval-no-telemetry', artifactId: 'artifact-1', artifactDigest: 'sha256:artifact',
+      evidenceSnapshot: {
+        ...snapshot,
+        shadowSummary: {
+          observed: null, matched: null, wouldBlock: null, wouldAllow: null,
+          requireApproval: null, autoCorrect: null, errors: null, neutralControl: null,
+          firstObservedAt: null, lastObservedAt: null,
+        },
+      },
+      checks: passingChecks(),
+    });
+
+    expect(result.status).toBe('unavailable');
+    expect(result.failedChecks).toContainEqual({
+      checkId: 'runtime_shadow_evidence',
+      reasonCode: 'shadow_telemetry_source_unavailable',
+    });
+  });
+
   it.each([
     ['less than 24 hours', { firstObservedAt: '2026-08-20T00:00:00.001Z' }],
     ['fewer than 20 eligible evaluations', { observed: 19 }],
