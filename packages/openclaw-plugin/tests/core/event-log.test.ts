@@ -19,6 +19,28 @@ describe('EventLog', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it('writes an authorized governance action to the canonical daily event stream', () => {
+    eventLog.recordGovernanceAction({
+      action: 'deactivate',
+      activationId: 'act-566',
+      actor: 'cli',
+      reasonCode: 'owner_requested_rollback',
+      outcome: 'authorized',
+    }, { flushImmediately: true });
+
+    const eventsPath = path.join(tempDir, 'logs', `events_${new Date().toISOString().slice(0, 10)}.jsonl`);
+    const entry = JSON.parse(fs.readFileSync(eventsPath, 'utf8').trim()) as Record<string, unknown>;
+    expect(entry['type']).toBe('governance_action');
+    expect(entry['category']).toBe('approved');
+    expect(entry['data']).toEqual({
+      action: 'deactivate',
+      activationId: 'act-566',
+      actor: 'cli',
+      reasonCode: 'owner_requested_rollback',
+      outcome: 'authorized',
+    });
+  });
+
   describe('DailyStats', () => {
     it('should aggregate tool call statistics correctly', () => {
       // Record multiple tool calls
@@ -561,4 +583,3 @@ describe('EventLog', () => {
     });
   });
 });
-

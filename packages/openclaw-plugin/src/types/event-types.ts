@@ -5,6 +5,7 @@ export type {
   ToolCallEventData,
   PainSignalEventData,
   RulePromotionEventData,
+  GovernanceActionEventData,
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,

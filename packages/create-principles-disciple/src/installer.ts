@@ -1010,6 +1010,16 @@ function installConsole(consoleDir: string): void {
 
   rmSync(consoleDest, { recursive: true, force: true });
   cpSync(consoleSrc, consoleDest, { recursive: true });
+
+  const pluginLinkPath = path.join(consoleDest, 'node_modules', 'principles-disciple');
+  mkdirSync(path.dirname(pluginLinkPath), { recursive: true });
+  if (!existsSync(pluginLinkPath)) {
+    if (isWindows()) {
+      symlinkSync(getPluginExtDir(), pluginLinkPath, 'junction');
+    } else {
+      symlinkSync('../../', pluginLinkPath, 'dir');
+    }
+  }
 }
 
 function getInstalledCoreDir(): string {

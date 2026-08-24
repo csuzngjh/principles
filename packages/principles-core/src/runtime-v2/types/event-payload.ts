@@ -8,6 +8,7 @@ import type {
   ToolCallEventData,
   PainSignalEventData,
   RulePromotionEventData,
+  GovernanceActionEventData,
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,
@@ -15,12 +16,13 @@ import type {
   EmpathyRollbackEventData,
   EventCategory,
 } from './event-types.js';
-import { EventCategorySchema } from './event-types.js';
+import { EventCategorySchema, GovernanceActionEventDataSchema } from './event-types.js';
 
 export type EventLogEntry =
   | { ts: string; date: string; type: 'tool_call'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: ToolCallEventData }
   | { ts: string; date: string; type: 'pain_signal'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: PainSignalEventData }
   | { ts: string; date: string; type: 'rule_promotion'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: RulePromotionEventData }
+  | { ts: string; date: string; type: 'governance_action'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: GovernanceActionEventData }
   | { ts: string; date: string; type: 'hook_execution'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: HookExecutionEventData }
   | { ts: string; date: string; type: 'gate_block'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: GateBlockEventData }
   | { ts: string; date: string; type: 'gate_bypass'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: GateBypassEventData }
@@ -41,6 +43,10 @@ export function isPainSignalEventEntry(entry: EventLogEntry): entry is Extract<E
 
 export function isRulePromotionEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'rule_promotion' }> {
   return entry.type === 'rule_promotion';
+}
+
+export function isGovernanceActionEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'governance_action' }> {
+  return entry.type === 'governance_action';
 }
 
 export function isHookExecutionEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'hook_execution' }> {
@@ -91,6 +97,15 @@ export const DiscriminatedEventLogEntrySchema = Type.Union([
     sessionId: Type.Optional(Type.String()),
     workspaceDir: Type.Optional(Type.String()),
     data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('governance_action'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: GovernanceActionEventDataSchema,
   }),
   Type.Object({
     ts: Type.String(),

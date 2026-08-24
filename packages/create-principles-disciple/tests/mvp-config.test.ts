@@ -2067,6 +2067,12 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
     expect(pdCliDestIdx).toBeGreaterThan(0);
   });
 
+  it('bundle-plugin.mjs rewrites principles-disciple dependency in console to its installed parent package root', () => {
+    expect(content).toContain(
+      "rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:..')",
+    );
+  });
+
   it('bundle-plugin.mjs still rewrites @principles/core for all three packages', () => {
     // Regression guard: the core rewrite must still work after generalizing the function
     expect(content).toContain("'@principles/core', 'file:./core'");
@@ -2126,6 +2132,20 @@ describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug
     expect(content).toContain('coreLinkDir');
     expect(content).toContain('coreLinkTarget');
     expect(content).toContain("'../../../core'");
+  });
+});
+
+describe('PRI-566: principles-disciple resolution in installed console', () => {
+  const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+  const content = fs.readFileSync(installerPath, 'utf-8');
+
+  it('installConsole creates node_modules/principles-disciple pointing at the plugin root', () => {
+    const start = content.indexOf('function installConsole');
+    const end = content.indexOf('function getInstalledCoreDir', start);
+    const section = content.substring(start, end);
+    expect(section).toContain("path.join(consoleDest, 'node_modules', 'principles-disciple')");
+    expect(section).toContain('getPluginExtDir()');
+    expect(section).toContain('symlinkSync');
   });
 });
 
