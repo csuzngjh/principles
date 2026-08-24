@@ -37,6 +37,7 @@ import { PiAiRuntimeAdapter } from './adapter/pi-ai-runtime-adapter.js';
 import { getProviders } from '@mariozechner/pi-ai';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import { storeEmitter } from './store/event-emitter.js';
+import type { TelemetryEvent } from '../telemetry-event.js';
 import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
 import type { RuntimeKind, PDRuntimeAdapter } from './runtime-protocol.js';
 import type { LedgerAdapter } from './candidate-intake.js';
@@ -396,6 +397,41 @@ export class DisabledDiagnosticianRunner implements DiagnosticianRunnerLike {
   }
 }
 
+// Pain Diagnosis Persistence: the bridge emits ad-hoc event names that are not
+// in the closed TelemetryEventType union, so only the two persistence
+// degradation events are mapped onto the registered degradation_triggered
+// channel. The bridge's OTHER event names (candidate_admission_decision,
+// candidate_dreamer_task_seeded, candidate_dreamer_task_seed_failed,
+// candidate_not_internalizable) were dormant on main — no emitter was wired
+// there — and must STAY dormant here: forwarding them as degradation_triggered
+// would mislabel routine admission decisions as degradations and change
+// flag-off behavior (PR contract: flag off = zero effective surface).
+const BRIDGE_DEGRADATION_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'pain_diagnosis_persist_skipped',
+  'pain_diagnosis_persist_failed',
+]);
+
+/**
+ * Map a PainSignalBridge telemetry event onto a storable TelemetryEvent.
+ * Returns null for bridge events that were not emitted in production before
+ * the persistence feature (they keep their pre-main dormant status).
+ */
+export function mapBridgeTelemetryToStoreEvent(event: {
+  eventType: string;
+  traceId: string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+}): TelemetryEvent | null {
+  if (!BRIDGE_DEGRADATION_EVENT_TYPES.has(event.eventType)) return null;
+  return {
+    eventType: 'degradation_triggered',
+    traceId: event.traceId,
+    timestamp: event.timestamp,
+    sessionId: '',
+    payload: { component: 'PainSignalBridge', originalEventType: event.eventType, ...event.payload },
+  };
+}
+
 /**
  * Create (or return cached) PainSignalBridge for a workspace.
  *
@@ -553,21 +589,13 @@ export async function createPainSignalBridge(
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
     workspaceDir: opts.workspaceDir,
     diagnosisPersistenceEnabled,
-    // The bridge emits ad-hoc event names (pain_diagnosis_persist_skipped/
-    // failed) that are not in the closed TelemetryEventType union, so they
-    // cannot be forwarded verbatim to StoreEventEmitter — validation would
-    // convert them to fallback events. Map them onto the registered
-    // degradation_triggered channel, preserving the specifics in the payload
-    // (rc-9: the persistence path must degrade observably in production).
+    // rc-9: the persistence path must degrade observably in production. Only
+    // the persistence degradation events are forwarded (see
+    // mapBridgeTelemetryToStoreEvent); other bridge events stay dormant as on main.
     eventEmitter: {
       emitTelemetry: (event) => {
-        storeEmitter.emitTelemetry({
-          eventType: 'degradation_triggered',
-          traceId: event.traceId,
-          timestamp: event.timestamp,
-          sessionId: '',
-          payload: { component: 'PainSignalBridge', originalEventType: event.eventType, ...event.payload },
-        });
+        const mapped = mapBridgeTelemetryToStoreEvent(event);
+        if (mapped) storeEmitter.emitTelemetry(mapped);
       },
     },
   });

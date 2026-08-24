@@ -27,6 +27,7 @@ import { SqliteConnection } from '../store/sqlite-connection.js';
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
 import { buildRootCauseProtocolInstruction } from '../diagnostician/rootcause-prompt-builder.js';
+import { mapBridgeTelemetryToStoreEvent } from '../pain-signal-runtime-factory.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -296,5 +297,47 @@ describe('pain diagnosis persistence (SPEC v1.1 §12 regression)', () => {
     const db2 = second.getDb();
     expect(db2.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pain_diagnoses'").get()).toBeDefined();
     second.close();
+  });
+});
+
+// ── Factory telemetry wiring ─────────────────────────────────────────────────
+
+describe('pain diagnosis persistence — factory telemetry forwarding', () => {
+  // The production factory (createPainSignalBridge) is the ONLY place the
+  // bridge gets an eventEmitter. Before this feature, no emitter was wired,
+  // so the bridge's pre-existing event sites (candidate_admission_decision,
+  // candidate_dreamer_task_seeded, …) were dormant. Wiring the emitter must
+  // not wake them up as degradation_triggered — routine admission decisions
+  // are not degradations, and flag-off behavior must stay identical to main.
+  it('maps persistence degradation events onto degradation_triggered with originalEventType preserved', () => {
+    const mapped = mapBridgeTelemetryToStoreEvent({
+      eventType: 'pain_diagnosis_persist_failed',
+      traceId: 'pain-1',
+      timestamp: '2026-08-24T00:00:00.000Z',
+      payload: { reason: 'boom', nextAction: 'inspect' },
+    });
+    expect(mapped).toEqual({
+      eventType: 'degradation_triggered',
+      traceId: 'pain-1',
+      timestamp: '2026-08-24T00:00:00.000Z',
+      sessionId: '',
+      payload: { component: 'PainSignalBridge', originalEventType: 'pain_diagnosis_persist_failed', reason: 'boom', nextAction: 'inspect' },
+    });
+  });
+
+  it('keeps pre-existing bridge events dormant — admission decisions are NOT degradation_triggered (negative control)', () => {
+    for (const eventType of [
+      'candidate_admission_decision',
+      'candidate_dreamer_task_seeded',
+      'candidate_dreamer_task_seed_failed',
+      'candidate_not_internalizable',
+    ]) {
+      expect(mapBridgeTelemetryToStoreEvent({
+        eventType,
+        traceId: 'cand-1',
+        timestamp: '2026-08-24T00:00:00.000Z',
+        payload: { decision: 'accepted' },
+      })).toBeNull();
+    }
   });
 });
