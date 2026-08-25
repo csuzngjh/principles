@@ -1,247 +1,326 @@
 # Commercial-Grade PD Update System Design
 
-> Date: 2026-08-25
-> Status: Approved design
-> Scope: PD release identity, installation layout, update execution, rollback, observability, and development isolation
+**Version:** 0.2
+
+**Date:** 2026-08-25
+
+**Status:** Approved direction; revised after adversarial self-review; awaiting Owner review
+**Supersedes:** v0.1 in commit `fd8f83ec`
 
 ## 1. Outcome
 
-PD will replace its in-place, multi-directory overlay updater with an immutable-release, dual-slot update system. An update is prepared and verified outside the active runtime, activated through one atomic pointer change, observed after startup, and automatically rolled back when the new release is unhealthy.
+PD must expose one trustworthy product version and perform updates as recoverable transactions. Companion, Console, CLI, plugin, and installer must never report incompatible meanings for “current version” or write into one another's installation trees.
 
-The design gives the Owner one trustworthy product version while preserving internal component versions for diagnostics. It fixes the observed failure where a development deployment silently changed the installed plugin from `1.218.0` to the source-tree placeholder `1.76.1`, temporarily broke CLI dependency resolution, and was later presented as an ordinary `1.76.1 -> 1.221.2` update.
+The system succeeds when an interrupted or failed update leaves either the last confirmed release or the new confirmed release active. A half-installed hybrid must never become active.
 
-## 2. Product and MVP Alignment
+This is an MVP reliability repair, not a general deployment platform. It directly reduces the Owner's loss of control and distrust caused by unexplained downgrades, mixed versions, and repeated reinstalls.
 
-This work does not add a new behavior-governance subsystem or activation channel. It repairs the existing installation and update foundation required to deliver the MVP safely.
+## 2. Scope and MVP Gate
 
-### MVP questions
+### 2.1 Why this cannot be skipped
 
-1. **`mvp-q-1-what-if-skip`**: If skipped, development installs can overwrite production, component mixtures can remain after partial updates, and a displayed version cannot prove which bytes are running. These failures have already occurred and are likely to recur within 30 days.
-2. **`mvp-q-2-how-observed`**: Companion and Console show the active product version, immutable release ID, component consistency, update phase, verification result, and rollback outcome. `pd version --json` exposes the same canonical state.
-3. **`mvp-q-3-how-disabled`**: The new updater is registered as a quiet, default-off subsystem during migration. Disabling it leaves the active slot untouched and routes the Owner to the official installer. Activation preserves the previous confirmed slot for immediate rollback. No disable path requires a PR revert.
-4. **`mvp-q-4-emotional-value`**: The feature reduces loss of control and distrust by making every installed release identifiable, verified, observable, and reversible. It creates reassurance, control, and clarity without exposing ordinary users to component-version noise.
+Without this work, reinstalling a development checkout can overwrite a newer installed release, update history can mislabel installs as rollbacks, and `pd --version` can disagree with Console. These failures undermine the product's basic credibility and will recur within 30 days.
 
-## 3. Decision and Alternatives
+### 2.2 How the Owner observes success
 
-### Selected: immutable releases with dual-slot activation
+- Console shows the active product release, channel, installation source, health, and last transaction.
+- `pd --version` prints the canonical product version.
+- `pd version --json` returns component, bootstrap, release, source, and health details.
+- Update history distinguishes update, reinstall, migration, rollback, refusal, and recovery.
 
-Each release is installed into an inactive version directory. The updater verifies that directory before changing a small active pointer. The last confirmed release remains intact until the new release is confirmed healthy.
+### 2.3 How it is disabled
 
-This approach is selected because it prevents mixed-component installations, gives rollback a complete target, supports crash recovery, and separates update execution from the runtime being replaced.
+The Console entry is registered as MVP-Quiet and can be hidden through `.pd/config.yaml`. Automatic checks and the selected channel live in the installation-level file `~/.pd/install.json`.
 
-### Rejected: continue hardening in-place overlay updates
+Signature verification, path ownership, downgrade prevention, and transaction recovery are safety invariants. Workspace feature flags cannot disable them.
 
-This minimizes initial code change but cannot make a sequence of independent copies atomic. It also preserves stale files by construction and leaves dependency reconciliation coupled to a live runtime.
+### 2.4 Emotional value
 
-### Rejected: remove in-app updates and require reinstall
+The design converts “I do not know what is installed” into clarity, “an update may break my environment” into control, and “I must reinstall again” into confidence that PD can recover by itself.
 
-This reduces updater complexity but gives up the Owner experience expected from desktop software and does not solve release identity, development isolation, or reproducible publication.
+## 3. Chosen Architecture
 
-## 4. Canonical Release Identity
+Use signed immutable releases, a stable install-owned bootstrap, a deep `ReleaseManager` module, self-contained platform assets, and dual-slot activation with automatic recovery.
 
-PD has one Owner-facing `productVersion`. Internal packages retain their own versions but do not independently answer whether PD is current.
+Do not retain the current overlay model. In-place `npm install`, copying a development checkout over an installation, and treating plugin package versions as product versions remain prohibited.
 
-Every published release contains an immutable, runtime-validated `release-manifest.json` with:
+This design avoids a permanent updater daemon in the first implementation. Companion, Console, or the installer invokes the short-lived bootstrap process when an update operation is required.
 
-- product version and immutable release ID;
-- source Git SHA and build timestamp;
-- release channel;
-- installer version;
-- layout and journal schema versions;
-- supported host, Node.js, config, and database compatibility ranges;
-- each required component's name, internal version, entry point, size, and SHA-256 digest;
-- complete archive digest and registry integrity metadata.
+## 4. Canonical Identity and Trust Chain
 
-The release ID is derived from the product version and release content identity. Published bytes are immutable: any component-byte change requires a new product version and release ID. The build fails if the manifest, archive, package metadata, Git tag, or release channel disagree.
+### 4.1 Identity types
 
-`pd --version` remains compatible but reports the product version. `pd version --json` returns the canonical manifest plus the observed active layout and health. Component versions are diagnostic fields, not competing product versions.
+The product has one public `productVersion`, such as `1.221.2`. Component package versions are diagnostic details and may differ only when the release manifest explicitly declares the combination compatible.
 
-## 5. Installation Layout
+Every build also has an immutable `releaseId`, derived from product version, source commit, platform asset identity, and release metadata digest. A release ID never changes after publication.
 
-The canonical layout is PD-owned and host-neutral:
+### 4.2 Metadata layers
+
+The metadata model separates mutable channel selection from immutable release identity:
+
+```text
+Signed Channel Metadata
+    -> Immutable Signed Release Metadata
+        -> Self-contained OS / CPU / Node-ABI Asset
+            -> In-archive Component Manifest
+```
+
+Signed Channel Metadata maps `stable` or `candidate` to a release metadata digest. Promotion changes only this signed pointer; it never rebuilds or mutates the release.
+
+Signed Release Metadata records product version, release ID, source commit, asset digests, supported platforms, minimum bootstrap version, compatibility constraints, and publication sequence.
+
+The in-archive manifest records component files and digests. It does not contain the digest of its own archive. The detached Release Metadata owns the whole-asset digest, eliminating circular hashing.
+
+### 4.3 Trust rules
+
+Use a standard TUF-compatible signed-metadata model rather than inventing a cryptographic protocol. The implementation must support trusted-root rotation, expiry, monotonic metadata versions, and rollback and freeze-attack protection.
+
+Channel Metadata references the exact Release Metadata digest. Release Metadata references the exact asset digest. Activation is forbidden unless the complete chain validates against the installation's trusted root.
+
+Informational build time is signed metadata, not an input that changes content identity. Reproducible builds use a fixed `SOURCE_DATE_EPOCH` and must produce byte-identical assets from the same source and toolchain.
+
+## 5. Installation Ownership and Layout
+
+Production installation state lives outside source worktrees:
 
 ```text
 ~/.pd/
+  bootstrap/
   install.json
+  trust/
+  channels/
+  releases/<release-id>/
+  staging/<transaction-id>/
+  transactions/<transaction-id>.json
   active.json
-  update-journal.jsonl
-  update.lock
-  releases/
-    <release-id>/
-      release-manifest.json
-      plugin/
-      console/
-      core/
-      pd-cli/
-      host-runtime/
-      install-layout/
-  staging/
-    <operation-id>/
-  hosts/
-    openclaw/
-    codex/
+  previous.json
+  logs/
 ```
 
-Host-managed paths contain only stable adapters or links to the active PD runtime. Backups, staging content, update journals, and inactive releases never enter OpenClaw discovery roots.
+`bootstrap/` and trust roots are installer-owned. A product release cannot overwrite the bootstrap that is currently coordinating its activation.
 
-The active release is selected by an atomically replaced `active.json` pointer. Host adapters resolve the active release at process start. Platform-specific pointer replacement is hidden behind the install-layout boundary and tested on Windows, Linux, and macOS.
+`releases/` and `staging/` must be on the same volume so final directory moves can be atomic. The stable host shim resolves `active.json` once at process start and loads all runtime components from that single release directory.
 
-## 6. Update Coordinator
+The default retention policy keeps the current confirmed release and one previous confirmed release. Preflight requires space for current, previous, new, and staging data before any download begins.
 
-An independent Update Coordinator owns the update lifecycle. Companion and Console request operations from it but do not perform file replacement themselves. The coordinator must remain runnable when the active Console or CLI is broken.
+## 6. Bootstrap and Deep Module Interface
 
-The durable state machine is:
+### 6.1 Bootstrap contract
+
+The official installer places a small stable bootstrap at `~/.pd/bootstrap`. Companion, Console, and installer invoke it through one strict JSON process protocol.
+
+Each release declares `minBootstrapVersion`. If the installed bootstrap is too old, update is refused before mutation and the Owner receives an official-installer next action.
+
+Bootstrap replacement is a separate installer transaction. A product release cannot silently self-upgrade the bootstrap or trusted root.
+
+### 6.2 ReleaseManager
+
+The source of truth lives in `packages/create-principles-disciple/src/update/`, avoiding another shallow package. Its external API is intentionally small:
+
+```ts
+interface ReleaseManager {
+  inspect(): Promise<InstallStatus>;
+  check(channel: ReleaseChannel): Promise<UpdateCheck>;
+  apply(releaseId: string): Promise<UpdateResult>;
+  rollback(): Promise<RollbackResult>;
+}
+```
+
+Recovery is automatic at the start of every invocation and is not a public operation. The module hides metadata validation, download, extraction, staging, probes, platform activation, journaling, host control, rollback, and cleanup.
+
+All JSON-mode responses are exactly one parseable object on stdout. Refusals and failures include a stable reason code and an Owner-visible next action. Diagnostic logs go to files or stderr, never mixed into JSON stdout.
+
+## 7. Self-Contained Release Assets
+
+The release pipeline produces assets per supported OS, CPU architecture, and Node ABI. Each asset contains bundled JavaScript dependencies and prebuilt native dependencies required by that target.
+
+The Owner's machine performs no dependency resolution, `npm install`, lifecycle script, compilation, or network fetch beyond downloading signed PD assets and metadata.
+
+The updater only validates, downloads, verifies, extracts, probes, and activates. Unsupported platform or ABI combinations fail before mutation with an installer or compatibility next action.
+
+## 8. Transaction and Atomic Activation
+
+An update follows a persisted state machine:
 
 ```text
-planned -> downloaded -> staged -> verified -> activated -> confirmed
-       \-> failed                         \-> rolled_back
+planned -> downloaded -> verified -> staged -> probed
+        -> activated -> host_verified -> confirmed
+        -> rolled_back | refused | failed
 ```
 
-For each operation the coordinator:
+Every transition is appended to the transaction journal before the next side effect. On every invocation, `ReleaseManager` reconciles unfinished transactions before accepting a new operation.
 
-1. Resolves and records the observed active release.
-2. Acquires an installation-root lock.
-3. Fetches a specific release manifest and pins its release ID, URL, and integrity values.
-4. Downloads with bounded retries and verifies registry integrity and archive SHA-256.
-5. Rejects unsafe archive entries, excessive sizes, missing components, or manifest mismatches.
-6. Extracts only into the operation's staging directory.
-7. Installs dependencies inside the staged release from the locked release graph.
-8. Runs structural, module-resolution, CLI, Console, host-adapter, config, and database compatibility probes.
-9. Moves the verified directory into `releases/<release-id>` and atomically switches `active.json`.
-10. Restarts affected hosts and begins a bounded health observation window.
-11. Confirms the release when healthy or atomically restores the previous pointer when unhealthy.
+Activation writes a new active record to a temporary file, flushes file contents, atomically replaces `active.json`, flushes the containing directory where supported, and rereads the record before host restart.
 
-Every early return writes a structured reason and next action. No path reports success until post-switch health is confirmed.
+The active record contains a monotonically increasing generation, release ID, Release Metadata digest, previous release ID, and transaction ID. Platform adapters implement Windows and POSIX replacement semantics and document durability limitations.
 
-## 7. Data and Configuration Compatibility
+Atomicity means readers see either the old or new record. Durability means the selected record survives a crash. Both are tested separately; the design does not claim that rename alone guarantees durable storage.
 
-The first implementation supports additive, backward-readable migrations only. A release must declare the database and config versions it can read and write.
+If `active.json` is corrupt, recovery selects the last journal-confirmed generation and validates its release digest. It never guesses based only on directory names or modification times.
 
-Before activation, the staged runtime performs read-only compatibility checks against the real workspace. If activation requires an irreversible or backward-incompatible migration, automatic update is refused with an Owner-visible explanation and manual migration path.
+## 9. Preflight, Probes, and Host Coordination
 
-Where an additive migration is required, it runs through the existing migration authority with a database backup and transaction. The previous runtime must remain capable of reading the migrated state throughout the rollback window. A release cannot be marked rollback-safe unless this is proven by tests.
+Preflight verifies trust metadata, downgrade policy, bootstrap compatibility, platform support, free space, path ownership, release conflicts, and data compatibility before installation state is mutated.
 
-## 8. Failure Recovery
+Staged probes verify archive containment, manifest digests, module resolution, entrypoint loading, configuration parsing, and a deterministic startup handshake without touching active user data.
 
-The journal is append-only and records operation ID, actor, source channel, installation root, prior and target release IDs, current phase, timestamps, verification results, failure reason, next action, activation result, and rollback result.
+The transaction records which hosts were running before activation. Only those hosts must restart and complete the handshake. Hosts that were already stopped are not treated as failures.
 
-On startup, the coordinator recovers interrupted operations deterministically:
+There is one global active release per installation. If any previously running host cannot start the same release, all affected hosts return to the prior release to avoid split-brain component combinations.
 
-- incomplete download or staging: keep the active release and safely discard the isolated operation directory;
-- verified but not activated: keep the active release and allow retry;
-- activated but not confirmed: restore the previous confirmed pointer before starting hosts;
-- rollback interrupted: complete restoration from the journal's recorded release IDs;
-- journal malformed or authority ambiguous: fail closed and keep the last valid active pointer.
+Network unavailability, empty business data, and unrelated external-service failure do not trigger automatic rollback. Only deterministic failures attributable to the new release qualify.
 
-At least the current and previous confirmed releases are retained. Cleanup is bounded, journal-driven, and never recursively targets unresolved paths or host discovery roots.
+At most one automatic rollback is allowed per transaction. A second failure opens a circuit breaker, leaves the last confirmed release active, and requires an explicit Owner action.
 
-## 9. Development Isolation
+## 10. Data and Configuration Compatibility
 
-Development deployment uses an explicitly configured development home and cannot default to the user's production home.
+Code rollback and data compatibility are separate release properties. A release is automatically eligible only when its schema changes are backward-readable by the retained previous release.
 
-The development sync command must:
+Ordinary releases use expand-migrate-contract. The update first adds compatible structures, migrates lazily or idempotently, and postpones destructive contraction until no retained release depends on the old representation.
 
-- require a dev installation marker in the target home;
-- reject a target containing a stable-channel active release;
-- refuse downgrade before the first mutation;
-- require separate explicit production-target, overwrite, and downgrade grants for exceptional manual recovery;
-- record an external-install journal event when it changes an installation;
-- never delete the active production directory in place.
+Compatibility is proven by tests that open new data with the previous supported release. A database backup is diagnostic protection, not an automatic rollback mechanism, because restoring it could delete Owner data created after activation.
 
-Companion watches the canonical active release. If files, manifests, or the active pointer change outside the coordinator, it records `external_modification_detected`, stops claiming the installation is healthy, and gives one recovery action.
+Destructive or contract migrations require a separate explicit maintenance workflow with export, confirmation, recovery instructions, and a declared point after which code rollback is unavailable. They cannot pass through ordinary automatic update.
 
-## 10. Owner Experience
+Configuration readers must tolerate fields written by the new and previous release within the supported window. Required incompatible configuration changes refuse activation before host restart.
 
-The default update view shows only:
+## 11. Development Isolation and External Modification
 
-- current product version and channel;
-- installation health and component consistency;
-- available update and risk/compatibility summary;
-- current update phase;
-- last successful update or rollback;
-- whether Owner action is required and the single next action.
+Development commands operate only inside the selected checkout unless an explicit guarded production-install command is used. Repository package versions cannot determine or overwrite the active installed product release.
 
-Component versions, hashes, paths, and journal details are available in an expandable diagnostics section. External modification or downgrade is displayed as such, not as a normal update.
+Any command targeting `~/.pd` prints the resolved target, current release, intended release, source, and operation type. Non-interactive mutation requires an explicit confirmation flag and still enforces trust and downgrade rules.
 
-The UI never equates registry latest with installed health. “Up to date” means the active release ID equals the stable channel target and all required components match the active manifest.
+Health diagnostics distinguish three cases: harmless residual files outside the signed manifest, a manifest mismatch inside an inactive release, and corruption of the active release.
 
-## 11. Release Pipeline
+Before marking a release unhealthy, diagnostics recalculate the relevant digest. Active corruption blocks restart into that release and recovers to a journal-confirmed valid generation when available.
 
-All components for one release are built from one commit in one release workflow. The pipeline:
+## 12. Owner Experience and History Semantics
 
-1. Builds core, host runtime, install layout, plugin, CLI, Console, and installer in dependency order.
-2. Creates the release manifest from final artifacts, not source package versions.
-3. Packs the exact release archive and computes integrity values.
-4. Installs that archive into a clean, isolated home and runs production-entry smoke tests.
-5. Runs upgrade, downgrade refusal, rollback, interruption recovery, and legacy-layout migration tests.
-6. Publishes to a candidate channel.
-7. Promotes the exact candidate digest to stable without rebuilding.
-8. Updates the stable pointer only after all publication targets refer to the same release ID.
+Console's primary version is always the canonical product version. Component and bootstrap versions appear under diagnostics, not as competing “current versions.”
 
-The workflow never republishes different bytes under an existing product version. A partial npm or GitHub publication leaves the previous stable pointer unchanged and reports the failed channel.
+`pd --version` preserves a short stable text contract. `pd version --json` exposes `productVersion`, `releaseId`, `components`, `bootstrapVersion`, `channel`, `source`, `generation`, `health`, and last transaction.
 
-## 12. Verification Strategy
+History events use explicit kinds: `update`, `reinstall`, `channel_promotion`, `legacy_migration`, `rollback`, `refusal`, and `recovery`. Direction is derived from canonical release identity and metadata sequence, not package.json values found in a checkout.
 
-Required test layers are:
+Every failed or refused event states what happened, whether the previous release remains active, and the safest next action. Raw stack traces are available in diagnostics but are not the primary Owner message.
 
-- pure tests for manifest validation, version decisions, state transitions, journal recovery, path containment, and cleanup selection;
-- package integration tests for staged dependency resolution and all required entry points;
-- fault-injection tests at every download, extract, verify, move, switch, restart, confirm, and rollback boundary;
-- production-tarball tests with pre-fix negative controls;
-- legacy-to-canonical migration tests;
-- OpenClaw-only, Codex-only, and dual-host lifecycle tests;
-- Windows, Linux, and macOS CI coverage for pointer activation and filesystem behavior;
-- Companion and Console BDD tests for healthy, updating, externally modified, failed, and rolled-back states;
-- a release-candidate soak on the Owner environment before stable promotion.
+## 13. Release and Promotion Pipeline
 
-Critical acceptance cases include same-version/different-digest rejection, stable-to-dev downgrade refusal with zero mutation, concurrent update exclusion, corrupted archive rejection, disk exhaustion, file locks, process death after every durable phase, unhealthy post-activation rollback, stale-file absence, and exact JSON output for operator commands.
+The pipeline performs these gated steps:
 
-## 13. Delivery and Rollout
+1. Verify source cleanliness, version declaration, and tag-to-commit identity.
+2. Build self-contained platform assets in pinned toolchains.
+3. Rebuild and compare bytes for reproducibility.
+4. Generate component manifests and detached Release Metadata.
+5. Sign metadata and publish assets by immutable digest.
+6. Install into clean machines and run upgrade and rollback matrices.
+7. Promote by updating signed Channel Metadata only.
 
-The migration is delivered behind a registered quiet/default-off feature flag. The phases are:
+The pipeline rejects mismatched component identities, non-reproducible assets, missing compatibility evidence, expired metadata, unsupported bootstrap requirements, and any attempt to replace an immutable release.
 
-1. Establish immutable release identity and artifact contract without changing installation behavior.
-2. Add the coordinator, journal, staging verification, and recovery in shadow/dry-run mode.
-3. Add dual-slot layout and exercise migration with synthetic homes and candidate releases.
-4. Enable the new path for the Owner environment while retaining the official installer fallback.
-5. Confirm a successful update and rollback drill, then promote the flag according to the existing MVP-Core approval rule.
-6. Disable write access in the legacy overlay updater and retain only migration guidance.
-7. Remove legacy updater code only after the supported migration window and evidence show no active legacy installations.
+Release publication and channel promotion are separate permissions. Compromising a promotion credential must not permit rewriting an already published asset.
 
-## 14. Error-Pattern Controls
+## 14. Verification Strategy
 
-- **ERR-041 — incomplete delivery reported as success**: success requires every required component, production entry point, and post-activation health check to pass.
-- **ERR-042 — output reports requested rather than actual disk state**: all responses are reconstructed from the active manifest, observed component digests, and durable journal after writes.
-- **ERR-083 — shared contract change misses consumers**: install-layout, installer, Console, CLI, Companion, host adapters, publication workflows, mocks, and clean-CI build order migrate together through explicit compatibility tests.
-- **ERR-090 — package entry point differs across builds**: the release contract probes every declared entry point from the final packed archive.
-- **ERR-097 — PD violates host-managed path semantics**: releases, staging, backups, and journals stay under `~/.pd`; host paths contain only contractually supported adapters or links.
+### 14.1 Contract tests
 
-Runtime-contract review applies to registry JSON, manifests, journals, archives, config, and database metadata. All remain `unknown` until validated; required fields fail loud; serialization is bounded; degradation includes reason and next action.
+- One canonical version across CLI, Console, Companion, and manifest.
+- Strict JSON stdout and stable reason codes.
+- Previous-release compatibility with newly written data.
+- Real command-parser tests for confirmation and negated flags.
 
-## 15. Emotional Value Review
+### 14.2 Security tests
 
-The design primarily serves reassurance, control, and clarity. It reduces loss of control, fatigue, distrust, and update-related information overload.
+- Reject bad signatures, expired metadata, older metadata sequence, digest mismatch, path traversal, symlink escape, and unsupported target identity.
+- Verify trusted-root rotation and freeze/rollback protection.
+- Prove workspace flags cannot bypass installation safety invariants.
 
-The Owner can verify which immutable release is running, whether its components are consistent, what changed it, whether an update succeeded, and how rollback occurred. The normal view suppresses internal version noise while diagnostics remain available. The Owner retains the final update and rollback authority, and automatic rollback only restores a previously confirmed release rather than making an autonomous product-value decision.
+### 14.3 Transaction tests
 
-## 16. Non-Goals
+Inject process termination or power-loss simulation after every state transition and active-record write step. On restart, the result must be old confirmed, new confirmed, or an explicit safe refusal—never a hybrid.
 
-- General application deployment orchestration outside PD.
-- A generic package manager or host updater.
-- Automatic irreversible database migrations.
-- Additional activation channels, memory systems, schedulers, or task execution.
-- Silent downgrade, silent repair, or silent fallback.
-- Long-term retention of every historical release.
+Test Windows and POSIX adapters independently. Verify pointer atomicity, journal recovery, corrupt-pointer recovery, single automatic rollback, circuit breaker behavior, and multi-host rollback without split brain.
 
-## 17. Success Criteria
+### 14.4 Release tests
 
-The design is complete when:
+Use clean-machine fixtures for every supported platform and ABI. Verify no package manager or build tool is required, assets are reproducible, and retained-release disk requirements are calculated before download.
 
-- one product version and release ID uniquely identify all installed bytes;
-- development commands cannot mutate stable installations by default;
-- every failed pre-activation update leaves the active release byte-for-byte unchanged;
-- every failed post-activation health check restores the prior confirmed release;
-- restart recovery reaches a deterministic valid state from every durable phase;
-- Companion, Console, and CLI report the same canonical release and health;
-- clean packaged E2E, cross-platform activation, fault injection, rollback drill, and required merge gates pass without skipped tests;
-- the Owner can understand the current state and next action without interpreting component package versions.
+BDD scenarios cover check, apply, reinstall, refusal, interrupted recovery, rollback, legacy migration, version display, and history classification. Observable outcomes cannot be weakened to make implementation pass.
+
+## 15. Delivery Sequence
+
+### Phase 0 — Immediate development guard
+
+Block accidental writes from a checkout into `~/.pd`. Correct version display and history classification where they can be fixed without changing installation layout.
+
+### Phase 1 — Immutable signed identity
+
+Define canonical version, Release Metadata, Channel Metadata, trust-root handling, signature verification, expiry, and monotonic sequence rules.
+
+### Phase 2 — Self-contained assets
+
+Produce and verify per-target assets. Remove user-machine dependency installation from the supported update path.
+
+### Phase 3 — Bootstrap and ReleaseManager shadow mode
+
+Install the stable bootstrap and deep module. Run inspect, check, verification, and probes without activation. Compare decisions with the existing updater and collect diagnostics.
+
+### Phase 4 — Dual-slot activation and recovery
+
+Enable journaled staging, atomic generations, host coordination, automatic recovery, one rollback, and the circuit breaker behind a quiet Console surface flag.
+
+### Phase 5 — Official legacy migration
+
+Use one official installer transaction to migrate an existing overlay installation into bootstrap plus dual-slot layout. The legacy updater is not trusted to transform itself in place.
+
+### Phase 6 — Product cutover
+
+Route Companion and Console through the same bootstrap protocol, disable overlay writes, expose the stable UI, and retain only read-only legacy diagnostics for a bounded period.
+
+Each phase has a separate go/no-go gate. Failure disables its surface or restores the prior confirmed release without weakening signature, ownership, or downgrade protections.
+
+## 16. Error-Pattern Controls
+
+This design explicitly addresses the following recurring classes:
+
+- **ERR-041:** one release identity and one build output prevent runtime/build-source drift.
+- **ERR-042:** bootstrap ownership and host-neutral paths prevent installation-tree coupling.
+- **ERR-083:** version, source, release, and transaction are separate facts; no heuristic history labels.
+- **ERR-090:** path and platform behavior are tested through Windows and POSIX adapters.
+- **ERR-097:** generated metadata is validated through the same production loader used at runtime.
+
+Untrusted metadata remains `unknown` until runtime validation. Required fields fail loudly, array elements are validated, own-property checks are used, serialization is bounded, and every fallback emits a structured reason.
+
+## 17. Non-Goals
+
+- General software deployment orchestration.
+- Multiple simultaneous active PD releases in one installation.
+- Silent database downgrade or destructive migration rollback.
+- Background daemon management in the first implementation.
+- Allowing workspace configuration to weaken installation trust.
+- Refactoring unrelated PD runtime or governance subsystems.
+
+## 18. Acceptance Criteria
+
+The revised design is implemented only when all of the following are demonstrably true:
+
+1. Every public surface reports the same canonical product release.
+2. A source checkout cannot silently mutate a production installation.
+3. Assets are signed, immutable, self-contained, and reproducible.
+4. An interruption at every transaction boundary recovers without a hybrid release.
+5. A failed deterministic health check restores the previous confirmed release at most once.
+6. Ordinary updates preserve code rollback through proven backward-readable data changes.
+7. Unsupported bootstrap, platform, disk, trust, or data states refuse before activation.
+8. Promotion changes signed channel metadata without rebuilding the release.
+9. The official installer can migrate a supported legacy installation into the new layout.
+10. Console and CLI explain the current state and next action without requiring technical interpretation.
+
+## 19. Remaining Decisions Before Implementation Planning
+
+The architecture is fixed, but the implementation plan must resolve three evidence-based choices without changing these contracts:
+
+1. Select the TUF-compatible metadata library after a maintenance, platform, and auditability spike.
+2. Prove the exact Windows file-replacement and directory-flush adapter on supported filesystems.
+3. Inventory native dependencies and define the supported OS, CPU, and Node-ABI release matrix.
+
+If any spike disproves a contract above, return to Owner review before implementation. Do not silently weaken the trust chain, atomicity guarantee, or rollback promise.
