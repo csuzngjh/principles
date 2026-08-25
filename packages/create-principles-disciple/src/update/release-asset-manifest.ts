@@ -45,6 +45,7 @@ function readPayloadFiles(assetDir: string): ReleaseAssetManifestFile[] {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const absolutePath = path.join(directory, entry.name);
       const relativePath = path.relative(assetDir, absolutePath).split(path.sep).join('/');
+      if (relativePath === '_release') continue;
       if (entry.isSymbolicLink()) {
         throw new ReleaseAssetManifestError('asset_path_unsafe', `Release asset must not contain symlinks: ${relativePath}`);
       }
@@ -67,20 +68,31 @@ function readPayloadFiles(assetDir: string): ReleaseAssetManifestFile[] {
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-function validateManifest(manifest: ReleaseAssetManifest): void {
-  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.files)) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function parseReleaseAssetManifest(value: unknown): ReleaseAssetManifest {
+  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.files)) {
     throw new ReleaseAssetManifestError('asset_manifest_invalid', 'Release asset manifest has an unsupported schema.');
   }
+  const files: ReleaseAssetManifestFile[] = [];
   const seenPaths = new Set<string>();
-  for (const file of manifest.files) {
-    if (!isSafeRelativePath(file.path) || seenPaths.has(file.path)) {
+  for (const file of value.files) {
+    if (!isRecord(file)) {
+      throw new ReleaseAssetManifestError('asset_manifest_invalid', 'Release asset manifest contains an invalid file record.');
+    }
+    const { path: filePath, sha256, size } = file;
+    if (typeof filePath !== 'string' || !isSafeRelativePath(filePath) || seenPaths.has(filePath)) {
       throw new ReleaseAssetManifestError('asset_manifest_invalid', 'Release asset manifest contains an unsafe or duplicate path.');
     }
-    if (!Number.isSafeInteger(file.size) || file.size < 0 || !/^[a-f0-9]{64}$/i.test(file.sha256)) {
-      throw new ReleaseAssetManifestError('asset_manifest_invalid', `Release asset manifest has invalid integrity data for ${file.path}.`);
+    if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0 || typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(sha256)) {
+      throw new ReleaseAssetManifestError('asset_manifest_invalid', `Release asset manifest has invalid integrity data for ${filePath}.`);
     }
-    seenPaths.add(file.path);
+    seenPaths.add(filePath);
+    files.push({ path: filePath, size, sha256: sha256.toLowerCase() });
   }
+  return { schemaVersion: 1, files };
 }
 
 export function createReleaseAssetManifest(assetDir: string): ReleaseAssetManifest {
@@ -88,9 +100,9 @@ export function createReleaseAssetManifest(assetDir: string): ReleaseAssetManife
 }
 
 export function verifyReleaseAssetManifest(assetDir: string, manifest: ReleaseAssetManifest): void {
-  validateManifest(manifest);
+  const validatedManifest = parseReleaseAssetManifest(manifest);
   const actualFiles = readPayloadFiles(assetDir);
-  const expectedByPath = new Map(manifest.files.map((file) => [file.path, file]));
+  const expectedByPath = new Map(validatedManifest.files.map((file) => [file.path, file]));
   if (actualFiles.length !== expectedByPath.size) {
     throw new ReleaseAssetManifestError('asset_file_unexpected', 'Release asset file set does not match its manifest.');
   }
