@@ -526,6 +526,24 @@
           "empty": "最近没有记录——这条原则尚未在运行中被触发。",
           "note": "两级语义：Effect（行为生效）= 拦截 / 自动纠正 / 智能体自述遵循；Presence（参与上下文）= 原则进入任务上下文（灰色行）。参与决策 ≠ 已改变行为。智能体自述为概率性自报，与确定性事件分列。",
           "unavailableReason": "暂无法读取生效履历。",
+          "coverage": {
+            "label": "证据覆盖",
+            "statusAvailable": "可用",
+            "statusDisabled": "生效履历采集已关闭",
+            "statusUnavailable": "生效履历数据不可用",
+            "observedSince": "观察起点 {{date}}",
+            "observedSinceEmpty": "当前无保留记录",
+            "asOf": "截至 {{date}}",
+            "retention": "保留 {{days}} 天",
+            "limitation": "无法保证历史完整性——数字代表当前保留的证据，不是完整历史。",
+            "validationPartial": "部分记录无法展示。",
+            "validationMalformed": "生效履历数据需要修复——数字可能不可靠。",
+            "reasonCodes": {
+              "receiptRowsDropped": "部分记录在校验时被跳过",
+              "ledgerLevelInvalid": "存在层级异常的记录",
+              "ledgerCountsUnreadable": "计数无法读取"
+            }
+          },
           "kind": {
             "rule_blocked": "拦截",
             "auto_correct_applied": "自动纠正",

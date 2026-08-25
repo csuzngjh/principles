@@ -45,11 +45,6 @@ function writeBaseConfig(): void {
   ].join('\n') + '\n', 'utf8');
 }
 
-function enableLedgerFlag(): void {
-  writeBaseConfig();
-  expect(updateFeatureFlag(workspaceDir, 'principle_receipt_ledger', true).ok).toBe(true);
-}
-
 function seedRow(principleId: string, kind: string, level: string, digest: string | null, createdAt: string): void {
   const conn = new SqliteConnection(workspaceDir);
   conn.getDb().prepare(`
@@ -60,13 +55,16 @@ function seedRow(principleId: string, kind: string, level: string, digest: strin
 }
 
 registry.given(/一个已安装 PD 的工作区，且 \.pd\/config\.yaml (启用|未启用) principle_receipt_ledger/, (_m: string, state: string) => {
-  if (state === '启用') {
-    enableLedgerFlag();
-  } else {
-    writeBaseConfig();
-    const conn = new SqliteConnection(workspaceDir);
-    conn.close();
-  }
+  writeBaseConfig();
+  // PRI-571 graduation: the ledger defaults ON, so "未启用" means an explicit
+  // config disable (the documented rollback). The workspace still has state.
+  expect(updateFeatureFlag(workspaceDir, 'principle_receipt_ledger', state === '启用').ok).toBe(true);
+  const conn = new SqliteConnection(workspaceDir);
+  // Force the lazy open so state.db actually exists — a workspace with the
+  // flag disabled still has state; without this the scenario trips the
+  // unavailable branch instead of the branch under test.
+  conn.getDb().prepare('SELECT 1').get();
+  conn.close();
 });
 
 registry.given(/原则 princ-A 有 (\d+) 次 effect 记录与 (\d+) 次 presence 记录/, (_m: string, effects: string, presence: string) => {
@@ -80,6 +78,45 @@ registry.given(/原则 princ-A 有 (\d+) 次 effect 记录与 (\d+) 次 presence
 
 registry.given(/原则 princ-A 有一条 effect 记录/, () => {
   seedRow('princ-A', 'rule_blocked', 'effect', 'digest-x', '2026-08-14T10:00:00.000Z');
+});
+
+registry.given(/工作区的 principle_applications 表已删除/, () => {
+  const conn = new SqliteConnection(workspaceDir);
+  conn.getDb().prepare('DROP TABLE principle_applications').run();
+  conn.close();
+});
+
+registry.given(/原则 princ-B 有一条 level 异常的脏记录/, () => {
+  // Schema drift / tampering simulation — bypasses the writer-side CHECK.
+  const conn = new SqliteConnection(workspaceDir);
+  const db = conn.getDb();
+  db.pragma('ignore_check_constraints = 1');
+  db.prepare(`
+    INSERT INTO principle_applications (principle_id, channel, level, kind, session_id, digest, created_at)
+    VALUES ('princ-B', 'prompt', 'weird-level', 'rule_blocked', NULL, NULL, '2026-08-16T07:00:00.000Z')
+  `).run();
+  db.pragma('ignore_check_constraints = 0');
+  conn.close();
+});
+
+registry.given(/原则 princ-B 有一条 kind 异常的脏记录/, () => {
+  // Schema drift / tampering simulation — bypasses the writer-side CHECK.
+  // Level stays valid (so counts stay arithmetically correct) but the unknown
+  // kind is dropped from the detail timeline; both endpoints must agree on
+  // the partial verdict (endpoint parity contract).
+  const conn = new SqliteConnection(workspaceDir);
+  const db = conn.getDb();
+  db.pragma('ignore_check_constraints = 1');
+  db.prepare(`
+    INSERT INTO principle_applications (principle_id, channel, level, kind, session_id, digest, created_at)
+    VALUES ('princ-B', 'prompt', 'effect', 'weird-kind', NULL, NULL, '2026-08-16T07:00:00.000Z')
+  `).run();
+  db.pragma('ignore_check_constraints = 0');
+  conn.close();
+});
+
+registry.given(/\.pd\/config\.yaml 关闭 principle_receipt_self_report/, () => {
+  expect(updateFeatureFlag(workspaceDir, 'principle_receipt_self_report', false).ok).toBe(true);
 });
 
 registry.when(/查询原则 (\S+) 的生效履历/, async (_m: string, principleId: string) => {
@@ -124,6 +161,49 @@ registry.then(/返回 status=ok 且 (\S+) 的生效计数为 effect=(\d+) presen
   const entry = (countsResult?.counts ?? []).find(c => c.principleId === principleId);
   expect(entry?.effectCount).toBe(Number(effect));
   expect(entry?.presenceCount).toBe(Number(presence));
+});
+
+// ── PRI-590: coverage disclosure steps ────────────────────────────────────────
+
+registry.then(/返回 coverage sourceStatus=(\S+) validationStatus=(\S+)/, (_m: string, source: string, validation: string) => {
+  expect(result?.coverage.sourceStatus).toBe(source);
+  expect(result?.coverage.validationStatus).toBe(validation);
+});
+
+registry.then(/observedFrom 等于最早记录时间且 retentionPolicyDays=90/, () => {
+  // Seeded rows: effects 2026-08-14/15, presence 2026-08-13.
+  expect(result?.coverage.observedFrom).toBe('2026-08-13T09:00:00.000Z');
+  expect(result?.coverage.retentionPolicyDays).toBe(90);
+});
+
+registry.then(/observedFrom 为空/, () => {
+  expect(result?.coverage.observedFrom).toBeNull();
+});
+
+registry.then(/返回 coverage sourceStatus=(\S+) 且 reasonCode 非空/, (_m: string, source: string) => {
+  expect(result?.coverage.sourceStatus).toBe(source);
+  expect(result?.coverage.reasonCode).toBeTruthy();
+});
+
+registry.then(/生效计数的 coverage sourceStatus=(\S+) 且 reasonCode 非空/, (_m: string, source: string) => {
+  expect(countsResult?.coverage.sourceStatus).toBe(source);
+  expect(countsResult?.coverage.reasonCode).toBeTruthy();
+});
+
+registry.then(/生效计数的 coverage validationStatus=malformed/, () => {
+  expect(countsResult?.coverage.validationStatus).toBe('malformed');
+});
+
+registry.then(/生效计数的 coverage validationStatus=partial/, () => {
+  expect(countsResult?.coverage.validationStatus).toBe('partial');
+});
+
+registry.then(/生效计数的 coverage reasonCode 为 ledger_level_invalid/, () => {
+  expect(countsResult?.coverage.reasonCode).toBe('ledger_level_invalid');
+});
+
+registry.then(/生效计数的 coverage reasonCode 为 receipt_rows_dropped/, () => {
+  expect(countsResult?.coverage.reasonCode).toBe('receipt_rows_dropped');
 });
 
 beforeEach(() => {
