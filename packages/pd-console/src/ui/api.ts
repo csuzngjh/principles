@@ -307,6 +307,7 @@ export interface PrincipleReceiptsData {
   presenceCount: number;
   lastEffectAt: string | null;
   events: ReceiptEventData[];
+  coverage: ReceiptEvidenceCoverageData;
 }
 
 export interface ReceiptCountEntryData {
@@ -321,6 +322,44 @@ export interface ReceiptCountsData {
   reason?: string;
   nextAction?: string;
   counts: ReceiptCountEntryData[];
+  coverage: ReceiptEvidenceCoverageData;
+}
+
+// ── Receipt evidence coverage disclosure (PRI-590) ────────────────────────────
+
+export type ReceiptSourceStatusData = "available" | "disabled" | "unavailable";
+export type ReceiptValidationStatusData = "valid" | "partial" | "malformed";
+
+export interface ReceiptEvidenceCoverageData {
+  sourceStatus: ReceiptSourceStatusData;
+  validationStatus: ReceiptValidationStatusData;
+  observedFrom: string | null;
+  asOf: string;
+  retentionPolicyDays: number;
+  reasonCode?: string;
+  nextActionCode?: string;
+}
+
+const RECEIPT_SOURCE_STATUSES = new Set(["available", "disabled", "unavailable"]);
+const RECEIPT_VALIDATION_STATUSES = new Set(["valid", "partial", "malformed"]);
+
+function validateReceiptCoverage(value: unknown): ReceiptEvidenceCoverageData | null {
+  if (typeof value !== "object" || value === null) return null;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.sourceStatus !== "string" || !RECEIPT_SOURCE_STATUSES.has(rec.sourceStatus)) return null;
+  if (typeof rec.validationStatus !== "string" || !RECEIPT_VALIDATION_STATUSES.has(rec.validationStatus)) return null;
+  if (rec.observedFrom !== null && typeof rec.observedFrom !== "string") return null;
+  if (typeof rec.asOf !== "string") return null;
+  if (typeof rec.retentionPolicyDays !== "number") return null;
+  return {
+    sourceStatus: rec.sourceStatus as ReceiptSourceStatusData,
+    validationStatus: rec.validationStatus as ReceiptValidationStatusData,
+    observedFrom: rec.observedFrom,
+    asOf: rec.asOf,
+    retentionPolicyDays: rec.retentionPolicyDays,
+    ...(typeof rec.reasonCode === "string" ? { reasonCode: rec.reasonCode } : {}),
+    ...(typeof rec.nextActionCode === "string" ? { nextActionCode: rec.nextActionCode } : {}),
+  };
 }
 
 const RECEIPT_KINDS = new Set(["rule_blocked", "auto_correct_applied", "self_reported", "prompt_injected"]);
@@ -347,6 +386,10 @@ function validatePrincipleReceipts(data: unknown): PrincipleReceiptsData | null 
   if (typeof data !== "object" || data === null) return null;
   const rec = data as Record<string, unknown>;
   if (typeof rec.principleId !== "string") return null;
+  // PRI-590: coverage is a required field of the receipt contract — a missing
+  // or malformed block means server/client contract skew; reject loudly.
+  const coverage = validateReceiptCoverage(rec.coverage);
+  if (coverage === null) return null;
   const events: ReceiptEventData[] = [];
   if (Array.isArray(rec.events)) {
     for (const item of rec.events) {
@@ -363,12 +406,15 @@ function validatePrincipleReceipts(data: unknown): PrincipleReceiptsData | null 
     presenceCount: typeof rec.presenceCount === "number" ? rec.presenceCount : 0,
     lastEffectAt: typeof rec.lastEffectAt === "string" ? rec.lastEffectAt : null,
     events,
+    coverage,
   };
 }
 
 function validateReceiptCounts(data: unknown): ReceiptCountsData | null {
   if (typeof data !== "object" || data === null) return null;
   const rec = data as Record<string, unknown>;
+  const coverage = validateReceiptCoverage(rec.coverage);
+  if (coverage === null) return null;
   const counts: ReceiptCountEntryData[] = [];
   if (Array.isArray(rec.counts)) {
     for (const item of rec.counts) {
@@ -388,6 +434,7 @@ function validateReceiptCounts(data: unknown): ReceiptCountsData | null {
     reason: typeof rec.reason === "string" ? rec.reason : undefined,
     nextAction: typeof rec.nextAction === "string" ? rec.nextAction : undefined,
     counts,
+    coverage,
   };
 }
 

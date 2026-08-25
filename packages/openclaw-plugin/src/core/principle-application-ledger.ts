@@ -12,7 +12,7 @@
  * Never throws: ledger failures degrade to false + caller-side warn (rc-9) —
  * the hook decision (block/allow/inject) is NEVER affected by ledger writes.
  */
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS } from '@principles/core/runtime-v2';
 import Database from 'better-sqlite3';
 import * as nodePath from 'node:path';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
@@ -37,7 +37,9 @@ export interface PrincipleApplicationInput {
   digest?: string;
 }
 
-const RETENTION_DAYS = 90;
+// PRI-590: single source of truth for the retention policy — the read-side
+// coverage disclosure (ReceiptsConsoleModel) imports the same constant.
+const RETENTION_DAYS = RECEIPT_RETENTION_POLICY_DAYS;
 /** Retention sweep at most once per hour per process — injection/block volumes are low. */
 const RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
