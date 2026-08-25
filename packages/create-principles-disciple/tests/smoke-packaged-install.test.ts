@@ -162,6 +162,9 @@ describe('Real packaged install smoke test', () => {
           // incompatible with local core changes (e.g., removed exports).
           PD_SKIP_NPM_UPGRADE: '1',
           PD_SKIP_GLOBAL_SHIM: '1',
+          // This smoke covers the legacy npm-package layout. The supported
+          // release-asset path is self-contained and never enables this gate.
+          PD_ALLOW_LEGACY_NPM_INSTALL: '1',
         },
         timeout: 180_000,
       });

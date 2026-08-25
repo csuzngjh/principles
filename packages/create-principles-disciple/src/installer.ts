@@ -252,6 +252,114 @@ export function verifyNativeModules(cwd: string, componentName: string): void {
   }
 }
 
+const SELF_CONTAINED_DEPENDENCY_NEXT_ACTION = 'Install a complete platform release asset for this Node.js ABI and re-run the installer.';
+const SELF_CONTAINED_NATIVE_NEXT_ACTION = 'Install the platform release asset matching this operating system, architecture, and Node.js ABI.';
+
+export class SelfContainedDependencyError extends Error {
+  public readonly reason: string;
+  public readonly nextAction: string;
+  public readonly component: string;
+  public readonly dependency?: string;
+
+  constructor(options: {
+    reason: string;
+    nextAction: string;
+    message: string;
+    component: string;
+    dependency?: string;
+    cause?: unknown;
+  }) {
+    super(options.message, { cause: options.cause });
+    this.name = 'SelfContainedDependencyError';
+    this.reason = options.reason;
+    this.nextAction = options.nextAction;
+    this.component = options.component;
+    this.dependency = options.dependency;
+  }
+}
+
+function legacyNpmInstallEnabled(): boolean {
+  const value = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+  return value === '1' || value === 'true';
+}
+
+/**
+ * Supported release assets are self-contained: installation validates the
+ * copied component and never resolves dependencies or runs lifecycle scripts.
+ * The old npm path remains opt-in for development/legacy recovery only.
+ */
+export async function prepareBundledComponentDependencies(
+  cwd: string,
+  componentName: string,
+): Promise<void> {
+  const packageJsonPath = path.join(cwd, 'package.json');
+  let packageJsonRaw: unknown;
+  try {
+    packageJsonRaw = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+  } catch (error) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_package_manifest_invalid',
+      nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: `${componentName} package.json is missing or malformed after copy.`,
+      component: componentName,
+      cause: error,
+    });
+  }
+  if (!isRecord(packageJsonRaw)) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_package_manifest_invalid',
+      nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: `${componentName} package.json must contain an object.`,
+      component: componentName,
+    });
+  }
+
+  const { dependencies } = packageJsonRaw;
+  if (dependencies !== undefined && !isRecord(dependencies)) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_package_manifest_invalid',
+      nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: `${componentName} package.json dependencies must contain an object.`,
+      component: componentName,
+    });
+  }
+  for (const dependency of Object.keys(dependencies ?? {})) {
+    if (!existsSync(path.join(cwd, 'node_modules', dependency))) {
+      throw new SelfContainedDependencyError({
+        reason: 'self_contained_runtime_dependency_missing',
+        nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+        message: `${componentName} self-contained release asset is missing declared runtime dependency ${dependency}.`,
+        component: componentName,
+        dependency,
+      });
+    }
+  }
+
+  try {
+    verifyNativeModules(cwd, componentName);
+  } catch (error) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_native_module_unloadable',
+      nextAction: SELF_CONTAINED_NATIVE_NEXT_ACTION,
+      message: `${componentName} bundled better-sqlite3 cannot be loaded by this Node.js runtime.`,
+      component: componentName,
+      dependency: 'better-sqlite3',
+      cause: error,
+    });
+  }
+}
+
+async function prepareComponentDependencies(cwd: string, componentName: string): Promise<void> {
+  if (!legacyNpmInstallEnabled()) {
+    await prepareBundledComponentDependencies(cwd, componentName);
+    return;
+  }
+
+  await runNpmInstall(cwd, componentName);
+  await rebuildNativeModules(cwd, componentName);
+  verifyNativeModules(cwd, componentName);
+}
+
 /**
  * 验证路径是否在工作区目录内，防止路径遍历攻击
  */
@@ -274,17 +382,18 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Checking workspace rule compatibility', weight: 1 },
   { name: 'Backing up existing install', weight: 3 },
   { name: 'Installing bundled @principles/core', weight: 8 },
+  { name: 'Validating bundled core dependencies', weight: 5 },
   { name: 'Installing bundled @principles/host-runtime', weight: 3 },
-  { name: 'Installing core dependencies', weight: 10 },
+  { name: 'Validating bundled host runtime dependencies', weight: 5 },
   { name: 'Installing plugin', weight: 10 },
   { name: 'Preparing core library for plugin', weight: 3 },
-  { name: 'Installing plugin dependencies', weight: 20 },
+  { name: 'Validating bundled plugin dependencies', weight: 10 },
   { name: 'Installing pd CLI', weight: 8 },
   { name: 'Preparing core library for pd-cli', weight: 3 },
   { name: 'Verifying pd CLI', weight: 3 },
   { name: 'Installing pd-console', weight: 8 },
   { name: 'Preparing core library for console', weight: 3 },
-  { name: 'Installing console dependencies', weight: 10 },
+  { name: 'Validating bundled console dependencies', weight: 5 },
   { name: 'Verifying pd-console', weight: 3 },
   { name: 'Copying templates', weight: 3 },
   { name: 'Generating config.yaml', weight: 2 },
@@ -805,42 +914,7 @@ export async function installPluginToStaging(pluginDir: string, language: SkillL
 
 async function installPluginDependencies(): Promise<void> {
   for (const extDir of pluginInstallDirs()) {
-    const packageJsonPath = path.join(extDir, 'package.json');
-    const nodeModulesPath = path.join(extDir, 'node_modules');
-
-    if (!existsSync(packageJsonPath)) {
-      throw new Error(`Plugin package.json not found after copy at ${extDir} — install is corrupted`);
-    }
-
-    const packageJsonRaw: unknown = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-    if (!isRecord(packageJsonRaw)) {
-      throw new Error('Plugin package.json is malformed');
-    }
-    const pkg = packageJsonRaw;
-    const deps = (typeof pkg.dependencies === 'object' && pkg.dependencies !== null && !Array.isArray(pkg.dependencies))
-      ? Object.keys(pkg.dependencies)
-      : [];
-    const devDeps = (typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null && !Array.isArray(pkg.devDependencies))
-      ? Object.keys(pkg.devDependencies)
-      : [];
-    const allDeps = [...deps, ...devDeps];
-
-    let needsInstall = !existsSync(nodeModulesPath);
-    if (!needsInstall) {
-      for (const dep of allDeps) {
-        if (!existsSync(path.join(extDir, 'node_modules', dep))) {
-          needsInstall = true;
-          break;
-        }
-      }
-    }
-
-    if (needsInstall) {
-      await runNpmInstall(extDir, 'Plugin');
-    }
-
-    await rebuildNativeModules(extDir, 'Plugin');
-    verifyNativeModules(extDir, 'Plugin');
+    await prepareComponentDependencies(extDir, 'Plugin');
   }
 }
 
@@ -855,6 +929,10 @@ function getNpmGlobalBinDir(): string | null {
 }
 
 function installGlobalPdShim(): boolean {
+  if (!legacyNpmInstallEnabled()) {
+    logger.info('Skipping npm global shim discovery for the self-contained release asset.');
+    return false;
+  }
   // Allow skipping global shim installation in smoke tests to avoid
   // polluting the host's npm global bin dir. The bundled pd-cli is
   // still installed locally (getInstalledBinDir); only the global
@@ -893,6 +971,10 @@ function installGlobalPdShim(): boolean {
 }
 
 function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+  if (!legacyNpmInstallEnabled()) {
+    logger.info('Skipping npm pd-cli upgrade for the self-contained release asset.');
+    return;
+  }
   // Allow skipping the npm upgrade in smoke tests / offline environments.
   // The bundled pd-cli is built from the current repo state and is the
   // authoritative version for testing. Upgrading to an npm-published version
@@ -970,6 +1052,10 @@ function syncPdCli(pluginDir: string): boolean {
   mkdirSync(installedPdCliDir, { recursive: true });
   cpSync(distDir, path.join(installedPdCliDir, 'dist'), { recursive: true });
   copyFileSync(path.join(pdCliSourceDir, 'package.json'), path.join(installedPdCliDir, 'package.json'));
+  const bundledNodeModules = path.join(pdCliSourceDir, 'node_modules');
+  if (existsSync(bundledNodeModules)) {
+    cpSync(bundledNodeModules, path.join(installedPdCliDir, 'node_modules'), { recursive: true });
+  }
 
   // Create node_modules/@principles/core symlink so pd-cli can resolve
   // its @principles/core dependency (rewritten to "file:../core" by bundle-plugin.mjs).
@@ -1178,49 +1264,22 @@ function ensureCoreDependency(_targetDir: string): void {
 
 async function installCoreDependencies(): Promise<void> {
   const coreDir = getInstalledCoreDir();
-  const packageJsonPath = path.join(coreDir, 'package.json');
-
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('Core package.json not found after copy — install is corrupted');
-  }
-
-  await runNpmInstall(coreDir, 'Core');
-  await rebuildNativeModules(coreDir, 'Core');
-  verifyNativeModules(coreDir, 'Core');
+  await prepareComponentDependencies(coreDir, 'Core');
 }
 
 async function installHostRuntimeDependencies(): Promise<void> {
   const hostRuntimeDir = getInstalledHostRuntimeDir();
-  const packageJsonPath = path.join(hostRuntimeDir, 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('Host runtime package.json not found after copy — install is corrupted');
-  }
-  await runNpmInstall(hostRuntimeDir, 'Host runtime');
-  await rebuildNativeModules(hostRuntimeDir, 'Host runtime');
-  verifyNativeModules(hostRuntimeDir, 'Host runtime');
+  await prepareComponentDependencies(hostRuntimeDir, 'Host runtime');
 }
 
 async function installPdCliDependencies(): Promise<void> {
   const pdCliDir = getInstalledPdCliDir();
-  const packageJsonPath = path.join(pdCliDir, 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('PD CLI package.json not found after copy — install is corrupted');
-  }
-  await runNpmInstall(pdCliDir, 'PD CLI');
-  await rebuildNativeModules(pdCliDir, 'PD CLI');
-  verifyNativeModules(pdCliDir, 'PD CLI');
+  await prepareComponentDependencies(pdCliDir, 'PD CLI');
 }
 
 async function installConsoleDependencies(): Promise<void> {
   const consoleDest = getInstalledConsoleDir();
-  const packageJsonPath = path.join(consoleDest, 'package.json');
-
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('Console package.json not found after copy — install is corrupted');
-  }
-
-  await runNpmInstall(consoleDest, 'Console');
-  await rebuildNativeModules(consoleDest, 'Console');
+  await prepareComponentDependencies(consoleDest, 'Console');
 }
 
 const CONSOLE_PORT_MAX_RETRIES = 3;
@@ -1804,19 +1863,19 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     installBundledCore(pluginDir);
     stepIndex++;
 
+    if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled core dependencies...');
+    await installCoreDependencies();
+    stepIndex++;
+
     if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/host-runtime...');
     installBundledHostRuntime(pluginDir);
     stepIndex++;
 
-    installBundledLayoutPackage(pluginDir);
-
-    if (spinner) updateProgress(spinner, stepIndex, 'Installing core dependencies...');
-    await installCoreDependencies();
-    stepIndex++;
-
-    if (spinner) updateProgress(spinner, stepIndex, 'Installing host runtime dependencies...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled host runtime dependencies...');
     await installHostRuntimeDependencies();
     stepIndex++;
+
+    installBundledLayoutPackage(pluginDir);
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
     await installPluginToStaging(pluginDir, options.language);
@@ -1826,7 +1885,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     ensureCoreDependency(getPluginExtDir());
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin dependencies...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled plugin dependencies...');
     await installPluginDependencies();
     components.plugin = 'verified';
     stepIndex++;
@@ -1862,7 +1921,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     ensureCoreDependency(getInstalledConsoleDir());
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Installing console dependencies...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled console dependencies...');
     await installConsoleDependencies();
     stepIndex++;
 
@@ -2055,7 +2114,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '');
-    const nextAction = !hasBackup
+    const rollbackNextAction = !hasBackup
       ? (isLockError
         ? t('next_no_changes_lock')
         : t('next_no_changes_other'))
@@ -2065,11 +2124,17 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '')
           .replace('{errorMsg}', errorMsg);
-    const reason = !hasBackup
+    const rollbackReason = !hasBackup
       ? (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)
       : restoreResult.restored
         ? errorMsg
         : `install_failed_rollback_failed: ${errorMsg}`;
+    const nextAction = error instanceof SelfContainedDependencyError
+      ? restoreResult.restored || !hasBackup
+        ? error.nextAction
+        : `${error.nextAction} ${rollbackNextAction}`
+      : rollbackNextAction;
+    const reason = error instanceof SelfContainedDependencyError ? error.reason : rollbackReason;
 
     return {
       success: false,
