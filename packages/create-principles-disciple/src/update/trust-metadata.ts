@@ -149,3 +149,76 @@ export async function resolveTrustedReleaseTarget(
     targetPath: target.path,
   };
 }
+
+function destinationDirOf(destinationPath: string): string {
+  const lastSeparator = Math.max(destinationPath.lastIndexOf('/'), destinationPath.lastIndexOf('\\'));
+  return lastSeparator === -1 ? '.' : destinationPath.slice(0, lastSeparator);
+}
+
+export interface DownloadTrustedReleasePayloadOptions {
+  metadataDir: string;
+  metadataBaseUrl: string;
+  targetPath: string;
+  destinationPath: string;
+  fetcher?: Fetcher;
+}
+
+/**
+ * Downloads a trusted target to an exact destination path. The TUF client
+ * verifies length + digest DURING the download; a mismatch aborts and the
+ * partial file never reaches the destination. The destination is replaced
+ * atomically only after verification (temp file + rename in the same
+ * directory).
+ */
+export async function downloadTrustedReleasePayload(
+  options: DownloadTrustedReleasePayloadOptions,
+): Promise<void> {
+  for (const field of ['metadataDir', 'metadataBaseUrl', 'targetPath', 'destinationPath'] as const) {
+    if (typeof options[field] !== 'string' || options[field].trim().length === 0) {
+      throw new ReleaseTrustError({
+        code: 'invalid_request',
+        message: `Trusted payload download requires ${field}.`,
+        nextAction: 'Correct the download request before retrying.',
+      });
+    }
+  }
+  let downloaded: string | undefined;
+  try {
+    const updater = new Updater({
+      metadataDir: options.metadataDir,
+      metadataBaseUrl: options.metadataBaseUrl,
+      targetBaseUrl: `${options.metadataBaseUrl.replace(/\/+$/, '')}/targets`,
+      fetcher: options.fetcher,
+    });
+    await updater.refresh();
+    const target = await updater.getTargetInfo(options.targetPath);
+    if (!target) {
+      throw new Error(`target not found: ${options.targetPath}`);
+    }
+    const destinationDirectory = destinationDirOf(options.destinationPath);
+    const { mkdirSync, renameSync, existsSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    mkdirSync(destinationDirectory, { recursive: true });
+    const stagingPath = join(destinationDirectory, `.pd-payload-download-${process.pid}-${Date.now()}`);
+    downloaded = await updater.downloadTarget(target, stagingPath);
+    if (!existsSync(downloaded)) {
+      throw new Error(`verified download did not materialize: ${downloaded}`);
+    }
+    renameSync(downloaded, options.destinationPath);
+    downloaded = undefined;
+    void dirname;
+  } catch (error) {
+    const causeMessage = error instanceof Error ? error.message : String(error);
+    throw new ReleaseTrustError({
+      code: 'metadata_refresh_failed',
+      message: `The trusted release payload could not be downloaded and verified (${options.targetPath}): ${causeMessage}`,
+      nextAction: 'Do not use this payload. Check the signed release repository and retry.',
+      cause: error,
+    });
+  } finally {
+    if (downloaded !== undefined) {
+      const { rmSync } = await import('node:fs');
+      rmSync(downloaded, { force: true });
+    }
+  }
+}

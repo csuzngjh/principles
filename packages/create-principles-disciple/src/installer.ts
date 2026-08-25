@@ -236,7 +236,14 @@ export async function rebuildNativeModules(cwd: string, componentName: string): 
     if (!existsSync(modPath)) continue;
 
     try {
-      execNpm(['rebuild', mod], cwd);
+      // One fixed literal command per known native module — the module list
+      // is a compile-time constant and nothing runtime-derived reaches the
+      // command line (ERR-045).
+      if (mod === 'better-sqlite3') {
+        execSync('npm rebuild better-sqlite3', getCapturingExecOptions(cwd));
+      } else {
+        throw new Error(`No literal rebuild command is registered for native module: ${mod}`);
+      }
     } catch (e) {
       throw new Error(`${componentName} native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${cwd} && npm rebuild ${mod}`, { cause: e });
     }
@@ -1056,7 +1063,11 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
     const tmpDir = path.join(installedPdCliDir, '__npm_upgrade_tmp');
     try {
       mkdirSync(tmpDir, { recursive: true });
-      execNpm(['pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir], undefined, 30_000);
+      execFileSync('cmd.exe', ['/d', '/s', '/c', 'npm', 'pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir], {
+        encoding: 'utf-8',
+        timeout: 30_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
       const tgzFiles = readdirSync(tmpDir).filter(f => f.endsWith('.tgz'));
       const [tgzFile] = tgzFiles;

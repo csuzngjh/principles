@@ -52,14 +52,19 @@ interface PayloadFilePath {
 }
 
 function listPayloadFilePaths(assetDir: string): PayloadFilePath[] {
-  if (!fs.existsSync(assetDir) || !fs.statSync(assetDir).isDirectory()) {
-    throw new ReleaseAssetManifestError('asset_directory_missing', `Release asset directory does not exist: ${assetDir}`);
+  const rootDir = path.resolve(assetDir);
+  if (!fs.existsSync(rootDir) || !fs.statSync(rootDir).isDirectory()) {
+    throw new ReleaseAssetManifestError('asset_directory_missing', `Release asset directory does not exist: ${rootDir}`);
   }
   const files: PayloadFilePath[] = [];
   const visit = (directory: string): void => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const absolutePath = path.join(directory, entry.name);
-      const relativePath = path.relative(assetDir, absolutePath).split(path.sep).join('/');
+      const absolutePath = path.resolve(directory, entry.name);
+      // Containment guard: enumeration must never escape the asset root.
+      if (absolutePath !== rootDir && !absolutePath.startsWith(rootDir + path.sep)) {
+        throw new ReleaseAssetManifestError('asset_path_unsafe', `Release asset enumeration escaped the asset root: ${absolutePath}`);
+      }
+      const relativePath = path.relative(rootDir, absolutePath).split(path.sep).join('/');
       if (relativePath === '_release') continue;
       if (entry.isSymbolicLink()) {
         throw new ReleaseAssetManifestError('asset_path_unsafe', `Release asset must not contain symlinks: ${relativePath}`);
@@ -74,7 +79,7 @@ function listPayloadFilePaths(assetDir: string): PayloadFilePath[] {
       files.push({ absolutePath, relativePath });
     }
   };
-  visit(assetDir);
+  visit(rootDir);
   return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 

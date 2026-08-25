@@ -206,16 +206,23 @@ function getWorkspacePath(): string | null {
   const configDir = getOpenClawConfigDir();
   const configPath = path.join(configDir, 'principles-disciple.json');
 
-  if (existsSync(configPath)) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports -- Reason: CommonJS require for synchronous JSON loading - ESM import() would require async refactoring throughout the module
-      const config = require(configPath);
-      return config.workspace || null;
-    } catch {
-      return null;
-    }
+  if (!existsSync(configPath)) return null;
+  // Read and parse JSON directly — require() would execute the file if its
+  // extension ever changed, and the path must stay inside the config dir.
+  const resolved = path.resolve(configPath);
+  if (resolved !== configPath && !resolved.startsWith(configDir + path.sep)) {
+    return null;
   }
-  return null;
+  try {
+    const config: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
+    if (config && typeof config === 'object' && !Array.isArray(config)) {
+      const { workspace } = config as Record<string, unknown>;
+      return typeof workspace === 'string' && workspace.length > 0 ? workspace : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**

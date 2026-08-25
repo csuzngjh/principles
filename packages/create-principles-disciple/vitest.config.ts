@@ -8,6 +8,7 @@ export default defineConfig({
     // fixtures (observed: before/after node_modules snapshots and packaged
     // console dist racing). Serializing files keeps every assertion intact.
     fileParallelism: false,
+    include: ['tests/**/*.test.ts', 'tests/bdd/**/*.steps.ts'],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',

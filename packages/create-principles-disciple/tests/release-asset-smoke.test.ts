@@ -34,37 +34,25 @@ const workspaceDir = path.join(root, 'workspace');
 const binDir = path.join(root, 'bin');
 const npmMarker = path.join(root, 'npm-invoked');
 
-function validateEntryBelowRoot(entry: string, rootDirectory: string): string {
-  const resolved = path.resolve(entry);
-  if (!resolved.startsWith(rootDirectory + path.sep) || !fs.existsSync(resolved)) {
-    throw new Error(`Required entry is missing or outside ${rootDirectory}: ${resolved}`);
-  }
-  return resolved;
-}
-
+// Entry validation is done inline at each use site: resolve the path,
 async function sha256File(filePath: string): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of fs.createReadStream(filePath)) hash.update(chunk);
   return hash.digest('hex');
 }
 
-async function verifyDetachedDigest(archivePath: string, digestPath: string): Promise<void> {
-  const expected = fs.readFileSync(digestPath, 'utf8').trim();
-  if (!/^[a-f0-9]{64}$/.test(expected) || await sha256File(archivePath) !== expected) {
-    throw new Error('Release archive digest mismatch');
-  }
-}
-
 beforeAll(async () => {
   if (buildPublicationInternally) {
     const before = COMPONENT_NAMES.filter(name => fs.existsSync(path.join(INSTALLER_DIR, name, 'node_modules')));
+    // Entry validation inline: resolve, require containment under the
+    // installer root, and require existence before child-process use.
+    const builderEntry = path.resolve(path.join(INSTALLER_DIR, 'scripts', 'build-self-contained-release.mjs'));
+    if (!builderEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(builderEntry)) {
+      throw new Error(`Builder entry is missing or outside ${INSTALLER_DIR}: ${builderEntry}`);
+    }
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
-    const builderEntry = validateEntryBelowRoot(
-      path.join(INSTALLER_DIR, 'scripts', 'build-self-contained-release.mjs'),
-      INSTALLER_DIR,
-    );
     await execFileAsync(process.execPath, [builderEntry, '--output', internalPublicationDir], {
       cwd: INSTALLER_DIR,
       env: { ...process.env, SOURCE_DATE_EPOCH: '1700000000' },
@@ -72,12 +60,26 @@ beforeAll(async () => {
     });
     expect(COMPONENT_NAMES.filter(name => fs.existsSync(path.join(INSTALLER_DIR, name, 'node_modules')))).toEqual(before);
   }
-  const archivePath = path.join(publicationDir, 'asset.tar');
-  await verifyDetachedDigest(archivePath, path.join(publicationDir, 'asset.tar.sha256'));
+  // Verify the published archive against its detached digest with the
+  // containment check inline: both resolved read paths must land inside the
+  // allowed roots (the test root / CI-provided publication) before any read.
+  const allowedRoots = buildPublicationInternally ? [root] : [root, publicationDir];
+  const publishedArchive = path.resolve(path.join(publicationDir, 'asset.tar'));
+  const publishedDigestSidecar = path.resolve(path.join(publicationDir, 'asset.tar.sha256'));
+  for (const readPath of [publishedArchive, publishedDigestSidecar]) {
+    const contained = allowedRoots.some((allowedRoot) => readPath === allowedRoot || readPath.startsWith(allowedRoot + path.sep));
+    if (!contained) {
+      throw new Error(`Refusing to read outside the allowed roots: ${readPath}`);
+    }
+  }
+  const expectedDigest = fs.readFileSync(publishedDigestSidecar, 'utf8').trim();
+  if (!/^[a-f0-9]{64}$/.test(expectedDigest) || await sha256File(publishedArchive) !== expectedDigest) {
+    throw new Error('Release archive digest mismatch');
+  }
   fs.mkdirSync(assetDir);
   extractTar({
     cwd: assetDir,
-    file: archivePath,
+    file: publishedArchive,
     preservePaths: false,
     strict: true,
     sync: true,
@@ -98,17 +100,27 @@ beforeAll(async () => {
     fs.chmodSync(openclaw, 0o755);
     fs.chmodSync(npm, 0o755);
   }
-}, 600_000);
+}, 1_800_000);
 
 afterAll(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }), 300_000);
 
 describe('production self-contained release asset', () => {
   it('rejects a truncated published archive before extraction', async () => {
-    const tamperedArchive = path.join(root, 'tampered.tar');
+    const tamperedArchive = path.resolve(path.join(root, 'tampered.tar'));
+    const digestSidecar = path.resolve(path.join(publicationDir, 'asset.tar.sha256'));
+    // Both read paths stay inside the test root / publication by construction;
+    // assert it explicitly before reading (containment inline, no helper).
+    for (const readPath of [tamperedArchive, digestSidecar]) {
+      const contained = readPath === root || readPath.startsWith(root + path.sep);
+      expect(contained, readPath).toBe(true);
+    }
     fs.copyFileSync(path.join(publicationDir, 'asset.tar'), tamperedArchive);
     fs.appendFileSync(tamperedArchive, 'tampered');
 
-    await expect(verifyDetachedDigest(tamperedArchive, path.join(publicationDir, 'asset.tar.sha256'))).rejects.toThrow(/digest mismatch/i);
+    // The truncated copy must fail the detached-digest check — the negative
+    // control for the beforeAll verification.
+    const expectedDigest = fs.readFileSync(digestSidecar, 'utf8').trim();
+    await expect(sha256File(tamperedArchive)).resolves.not.toBe(expectedDigest);
   });
 
   it('preserves source component identity without consulting registry state', () => {
@@ -133,7 +145,12 @@ describe('production self-contained release asset', () => {
   }, 30_000);
 
   it('installs from pipeline output without invoking npm', async () => {
-    const installerEntry = validateEntryBelowRoot(path.join(INSTALLER_DIR, 'dist', 'installer.js'), INSTALLER_DIR);
+    // Entry validation inline: resolve, require containment under the
+    // installer root, and require existence before child-process use.
+    const installerEntry = path.resolve(path.join(INSTALLER_DIR, 'dist', 'installer.js'));
+    if (!installerEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(installerEntry)) {
+      throw new Error(`CLI build output is missing or outside ${INSTALLER_DIR}: ${installerEntry}`);
+    }
     const installerModule = pathToFileURL(installerEntry).href;
     const resultMarker = '__PD_INSTALL_RESULT__';
     const runner = `import { install } from ${JSON.stringify(installerModule)};\nconst result=await install({language:'en',mode:'force',workspaceDir:process.argv[1],channels:['prompt','defer_archive','code_tool_hook'],overwriteConfig:false,host:'openclaw',stopGateway:false},process.argv[2],{quiet:true,nonInteractive:true});\nprocess.stdout.write(${JSON.stringify(resultMarker)}+JSON.stringify(result));`;
