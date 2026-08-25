@@ -10,7 +10,7 @@
  */
 
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { recordGateBlockAndReturn } from './gate-block-helper.js';
+import { persistGateBlock, recordGateBlockAndReturn } from './gate-block-helper.js';
 import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
@@ -571,5 +571,19 @@ export function handleSharedRuleHostResult(
     }
   } catch (error: unknown) {
     logger.warn?.(`[PD_GATE] Failed to record shared RuleHost result: ${String(error)}`);
+  }
+  if (result.decision === 'deny') {
+    // PRI-569: parity with the legacy hook path — a denied call must land in
+    // trajectory.db gate_blocks (Wave-4 "blocks today") and session GFI
+    // tracking, not only in EventLog JSONL. persistGateBlock never throws.
+    persistGateBlock(wctx, {
+      filePath: action.normalizedPath,
+      reason: result.reason ?? 'RuleHost denied the tool call',
+      toolName: event.toolName,
+      sessionId: ctx.sessionId,
+      blockSource: 'rule-host-shared',
+      ruleId,
+      principleId,
+    }, (msg) => logger.warn?.(msg), (msg) => logger.error?.(msg));
   }
 }
