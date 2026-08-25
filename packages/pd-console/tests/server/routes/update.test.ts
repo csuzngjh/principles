@@ -340,6 +340,10 @@ describe('handleUpdateRoute', () => {
       expect(body.success).toBe(true);
       expect(body.data).toMatchObject({ success: false, reason: 'installer_bundle_stale' });
       expect(fs.copyFileSync).not.toHaveBeenCalled();
+      const history = JSON.parse(fs.readFileSync(path.join(workspaceDir, '.pd', 'update-history.json'), 'utf-8')) as unknown[];
+      expect(history).toEqual([
+        expect.objectContaining({ kind: 'refusal', reason: 'installer_bundle_stale' }),
+      ]);
     });
 
     it('refuses an explicit workspace target before backup, download, or file mutation', async () => {

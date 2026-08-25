@@ -584,6 +584,14 @@ async function doApplyUpdate(
       semver.valid(toVersion) !== null &&
       semver.gt(toVersion, fromVersion);
     if (!advancesInstalled) {
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion,
+        success: false,
+        kind: 'refusal',
+        reason: 'installer_bundle_stale',
+        nextAction: 'Wait for a newer installer release, then retry the update.',
+      });
       return {
         success: false,
         message: 'Installed version would not advance — the update source is stale or malformed.',
@@ -677,6 +685,7 @@ async function doApplyUpdate(
       fromVersion,
       toVersion,
       success: true,
+      kind: 'update',
       backupPath,
     });
 
@@ -738,6 +747,7 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
       fromVersion: 'rolled-back',
       toVersion: readCurrentVersion(targetDir) ?? 'unknown',
       success: true,
+      kind: 'rollback',
       backupPath: backupDir,
     });
 
@@ -885,6 +895,14 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
         semver.valid(bundledPluginVersion) !== null &&
         semver.gt(bundledPluginVersion, fromVersion);
       if (!advancesInstalled) {
+        appendUpdateHistory(workspaceDir, {
+          fromVersion,
+          toVersion: bundledPluginVersion,
+          success: false,
+          kind: 'refusal',
+          reason: 'installer_bundle_stale',
+          nextAction: 'Wait for a newer installer release, then retry the update.',
+        });
         return {
           success: false,
           message: 'Installed version would not advance — the update source is stale or malformed.',
@@ -922,6 +940,14 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       semver.gt(stagedVersion, fromVersion) &&
       (bundledPluginVersion === undefined || bundledPluginVersion === stagedVersion);
     if (!progressed) {
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: stagedVersion ?? 'unknown',
+        success: false,
+        kind: 'refusal',
+        reason: 'installer_bundle_stale',
+        nextAction: 'Wait for a newer installer release, then retry the update.',
+      });
       return {
         success: false,
         message: 'Installed version would not advance — the update source is stale or malformed.',
@@ -995,6 +1021,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
           fromVersion,
           toVersion: 'failed',
           success: false,
+          kind: 'failure',
         });
         return {
           success: false,
@@ -1071,6 +1098,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
         fromVersion,
         toVersion: newVersion,
         success: false,
+        kind: 'failure',
       });
       return {
         success: false,
@@ -1087,6 +1115,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       fromVersion,
       toVersion: newVersion,
       success: true,
+      kind: 'update',
     });
 
     return {
@@ -1111,6 +1140,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       fromVersion,
       toVersion: 'failed',
       success: false,
+      kind: 'failure',
     });
 
     if (isLockError) {

@@ -163,7 +163,13 @@ describe('Update History API route', () => {
 
     it('filters out entries missing required fields (type safety)', async () => {
       const entries = [
-        { fromVersion: '1.0.0', toVersion: '1.1.0', success: true },
+        {
+          id: 'legacy-update-1',
+          timestamp: '2026-07-01T00:00:00.000Z',
+          fromVersion: '1.0.0',
+          toVersion: '1.1.0',
+          success: true,
+        },
         { fromVersion: '1.1.0', success: true },
         { fromVersion: '1.2.0', toVersion: '1.3.0', success: 'maybe' },
         'not-an-object',
@@ -182,6 +188,34 @@ describe('Update History API route', () => {
       expect(data[0]?.fromVersion).toBe('1.0.0');
       expect(data[0]?.toVersion).toBe('1.1.0');
       expect(data[0]?.success).toBe(true);
+      expect(data[0]).toMatchObject({ kind: 'legacy_migration' });
+    });
+
+    it('filters entries with an unknown kind or malformed refusal details', async () => {
+      const entries = [
+        {
+          id: 'update-1', timestamp: '2026-08-25T00:00:00.000Z',
+          fromVersion: '1.0.0', toVersion: '1.1.0', success: true, kind: 'update',
+        },
+        {
+          id: 'unknown-kind', timestamp: '2026-08-25T00:00:00.000Z',
+          fromVersion: '1.1.0', toVersion: '1.2.0', success: false, kind: 'invented',
+        },
+        {
+          id: 'bad-reason', timestamp: '2026-08-25T00:00:00.000Z',
+          fromVersion: '1.1.0', toVersion: '1.2.0', success: false, kind: 'refusal', reason: 42,
+        },
+      ];
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify(entries), 'utf8');
+
+      const req = createMockRequest('GET', '/api/update/history');
+      const res = createMockResponse();
+      await handleUpdateHistoryRoute(req, res, tempDir, '');
+
+      const { body } = parseBody(res);
+      expect((body as { data: unknown[] }).data).toEqual([
+        expect.objectContaining({ id: 'update-1', kind: 'update' }),
+      ]);
     });
 
     it('returns 405 for non-GET methods', async () => {
@@ -203,6 +237,7 @@ describe('Update History API route', () => {
         fromVersion: '1.0.0',
         toVersion: '1.1.0',
         success: true,
+        kind: 'update',
       });
 
       const historyPath = path.join(freshDir, '.pd', 'update-history.json');
@@ -228,6 +263,7 @@ describe('Update History API route', () => {
         fromVersion: '1.0.0',
         toVersion: '1.1.0',
         success: false,
+        kind: 'failure',
         backupPath: '/tmp/backup',
       });
 
@@ -255,6 +291,7 @@ describe('Update History API route', () => {
         fromVersion: '60.0.0',
         toVersion: '61.0.0',
         success: true,
+        kind: 'update',
       });
 
       const raw = fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8');
@@ -269,6 +306,7 @@ describe('Update History API route', () => {
         fromVersion: '2.0.0',
         toVersion: '2.1.0',
         success: false,
+        kind: 'failure',
       });
 
       const historyPath = path.join(pdDir, 'update-history.json');
@@ -277,8 +315,8 @@ describe('Update History API route', () => {
     });
 
     it('generates IDs and timestamps in expected format for each entry', () => {
-      appendUpdateHistory(tempDir, { fromVersion: '1.0.0', toVersion: '1.1.0', success: true });
-      appendUpdateHistory(tempDir, { fromVersion: '1.1.0', toVersion: '1.2.0', success: true });
+      appendUpdateHistory(tempDir, { fromVersion: '1.0.0', toVersion: '1.1.0', success: true, kind: 'update' });
+      appendUpdateHistory(tempDir, { fromVersion: '1.1.0', toVersion: '1.2.0', success: true, kind: 'update' });
 
       const historyPath = path.join(pdDir, 'update-history.json');
       const parsed = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
