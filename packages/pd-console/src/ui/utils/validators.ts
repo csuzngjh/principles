@@ -8,7 +8,7 @@
  * - Uses `Object.hasOwn()` for untrusted object keys (Rule 5)
  * - Graceful degradation includes a reason (Rule 9)
  */
-import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
+import type { GovernanceExperienceSnapshot, OwnerGovernanceView } from '@principles/core/runtime-v2';
 
 // ── Primitive guards ──────────────────────────────────────────────────────────
 
@@ -152,6 +152,102 @@ function isOwnerGovernanceView(value: unknown): value is OwnerGovernanceView {
 
 export function validateOwnerGovernanceView(value: unknown): OwnerGovernanceView | null {
   return isOwnerGovernanceView(value) ? value : null;
+}
+
+// ── PRI-586: Governance Experience Snapshot v1.5.1 (browser-local validator) ──
+// Mirrors the authoritative TypeBox contract in principles-core
+// (governance-experience-contract.ts). Type-only import above keeps the client
+// bundle free of the Node-oriented core barrel (ERR-100).
+
+const governancePrimaryAttentions = new Set(['setup_required', 'owner_decision_required', 'recovery_required', 'degraded', 'background_processing', 'all_clear']);
+const governanceExperienceReasonCodes = new Set([
+  'governance.exp.reason.owner_identity_missing', 'governance.exp.reason.approval_pending',
+  'governance.exp.reason.rulecode_owner_decision', 'governance.exp.reason.no_pending_decision',
+  'governance.exp.reason.owner_decision_available', 'governance.exp.reason.break_glass_entry',
+  'governance.exp.reason.recovery_required', 'governance.exp.reason.source_unavailable',
+  'governance.exp.reason.config_invalid', 'governance.exp.reason.processing',
+  'governance.exp.reason.workspace_clear', 'governance.exp.reason.workspace_empty',
+]);
+const governanceExperienceNextActionCodes = new Set([
+  'governance.exp.next.configure_owner', 'governance.exp.next.review_approvals',
+  'governance.exp.next.inspect_recovery', 'governance.exp.next.inspect_sources',
+  'governance.exp.next.fix_config', 'governance.exp.next.monitor', 'governance.exp.next.none',
+]);
+const governanceObservedAuthorities = new Set(['operator_legacy', 'configured_owner', 'break_glass']);
+const governanceActionKinds = new Set(['principle_approval', 'rulecode_owner_decision', 'emergency_pause']);
+const governanceActivityCategories = new Set(['blocked', 'needs_recovery', 'needs_decision', 'processing']);
+const governanceEnvironmentValues = new Set(['production', 'development', 'demo', 'test', 'unknown']);
+const governanceEnvironmentSources = new Set(['workspace_config', 'missing']);
+const governanceIssueGroupSources = new Set(['ledger', 'artifact', 'task', 'approval', 'activation', 'trajectory', 'lineage', 'workspace']);
+
+function isGovernanceActivityItem(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['category', 'reasonCode', 'sourceRefs'])
+    && isStringEnum(value.category, governanceActivityCategories)
+    && typeof value.reasonCode === 'string' && value.reasonCode.length > 0
+    && isGovernanceSourceRefs(value.sourceRefs)
+    && (!Object.hasOwn(value, 'principleId') || (typeof value.principleId === 'string' && value.principleId.length > 0));
+}
+
+function isGovernanceActionReadiness(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['kind', 'observedAuthority', 'status', 'reasonCode', 'nextActionCode'])
+    && isStringEnum(value.kind, governanceActionKinds)
+    && isStringEnum(value.observedAuthority, governanceObservedAuthorities)
+    && isStringEnum(value.status, new Set(['entry_conditions_met', 'blocked']))
+    && isStringEnum(value.reasonCode, governanceExperienceReasonCodes)
+    && isStringEnum(value.nextActionCode, governanceExperienceNextActionCodes);
+}
+
+function isEnvironmentContext(value: unknown): boolean {
+  return isObject(value) && hasOwnFields(value, ['environment', 'source'])
+    && isStringEnum(value.environment, governanceEnvironmentValues)
+    && isStringEnum(value.source, governanceEnvironmentSources)
+    && (!Object.hasOwn(value, 'configIssue') || (typeof value.configIssue === 'string' && value.configIssue.length > 0));
+}
+
+function isGovernanceExperienceSnapshot(value: unknown): value is GovernanceExperienceSnapshot {
+  if (!isObject(value) || !hasOwnFields(value, ['schemaVersion', 'snapshotId', 'asOf', 'summary', 'readiness', 'activity', 'trustContext', 'dataQuality'])) return false;
+  if (value.schemaVersion !== '1' || typeof value.snapshotId !== 'string' || value.snapshotId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
+  const { summary, readiness, activity, trustContext, dataQuality } = value;
+  if (!isObject(summary) || !hasOwnFields(summary, ['primaryAttention', 'headlineCode', 'reasonCode', 'nextActionCode'])
+    || !isStringEnum(summary.primaryAttention, governancePrimaryAttentions)
+    || typeof summary.headlineCode !== 'string' || summary.headlineCode.length === 0
+    || !isStringEnum(summary.reasonCode, governanceExperienceReasonCodes)
+    || !isStringEnum(summary.nextActionCode, governanceExperienceNextActionCodes)) return false;
+  if (!isObject(readiness) || !hasOwnFields(readiness, ['authenticationMode', 'ownerIdentityConfiguration', 'governanceActions'])
+    || !isStringEnum(readiness.authenticationMode, new Set(['authenticated', 'no_auth']))
+    || !isStringEnum(readiness.ownerIdentityConfiguration, new Set(['configured', 'missing']))
+    || !Array.isArray(readiness.governanceActions) || readiness.governanceActions.length !== 3
+    || !readiness.governanceActions.every(isGovernanceActionReadiness)) return false;
+  if (!isObject(activity) || !hasOwnFields(activity, ['primaryAttention', 'categories'])
+    || !isStringEnum(activity.primaryAttention, governancePrimaryAttentions)
+    || !Array.isArray(activity.categories)
+    || !activity.categories.every((category: unknown) => isObject(category)
+      && hasOwnFields(category, ['category', 'count', 'items', 'hasMore'])
+      && isStringEnum(category.category, governanceActivityCategories)
+      && typeof category.count === 'number' && Number.isInteger(category.count) && category.count >= 0
+      && Array.isArray(category.items) && category.items.length <= 10 && category.items.every(isGovernanceActivityItem)
+      && typeof category.hasMore === 'boolean')) return false;
+  if (!isObject(trustContext) || !hasOwnFields(trustContext, ['environmentContext', 'lineageTransparency'])
+    || !isEnvironmentContext(trustContext.environmentContext)
+    || !isObject(trustContext.lineageTransparency)
+    || !hasOwnFields(trustContext.lineageTransparency, ['confidence', 'strongViewCount', 'weakViewCount', 'unknownViewCount'])
+    || !isStringEnum(trustContext.lineageTransparency.confidence, lineageConfidences)
+    || [trustContext.lineageTransparency.strongViewCount, trustContext.lineageTransparency.weakViewCount, trustContext.lineageTransparency.unknownViewCount]
+      .some(count => typeof count !== 'number' || !Number.isInteger(count) || count < 0)) return false;
+  return isObject(dataQuality) && hasOwnFields(dataQuality, ['degraded', 'issueGroups', 'hasMore'])
+    && typeof dataQuality.degraded === 'boolean' && typeof dataQuality.hasMore === 'boolean'
+    && Array.isArray(dataQuality.issueGroups) && dataQuality.issueGroups.length <= 10
+    && dataQuality.issueGroups.every((group: unknown) => isObject(group)
+      && hasOwnFields(group, ['source', 'reasonCode', 'nextActionCode', 'count', 'sampleRefs'])
+      && isStringEnum(group.source, governanceIssueGroupSources)
+      && typeof group.reasonCode === 'string' && group.reasonCode.length > 0
+      && typeof group.nextActionCode === 'string' && group.nextActionCode.length > 0
+      && typeof group.count === 'number' && Number.isInteger(group.count) && group.count >= 1
+      && isGovernanceSourceRefs(group.sampleRefs));
+}
+
+export function validateGovernanceExperienceSnapshot(value: unknown): GovernanceExperienceSnapshot | null {
+  return isGovernanceExperienceSnapshot(value) ? value : null;
 }
 
 // ── Error response validator (best-effort) ────────────────────────────────────

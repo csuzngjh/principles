@@ -258,6 +258,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Default off; flag-off = no pain_diagnoses writes AND the Stage A prompt
   // is byte-identical to the pre-feature prompt. Roll back = set enabled: false.
   { id: 'pain_diagnosis_persistence', category: 'quiet', enabled: false, since: '2026-08-23', description: 'Persist diagnostician root-cause attribution to pain_diagnoses (state.db, keyed by canonical pain_id) + Evidence First attribution rules in the Stage A prompt. Default off; flag-off = no writes, prompt byte-identical.' },
+  // Governance Experience Snapshot v1.5.1 (PRI-584~587). Read-only workspace
+  // governance experience: batch collector reuses the existing projection
+  // (deriveOwnerGovernanceView) once per workspace; GET /api/v1/governance/experience
+  // serves one snapshot; Console Focus consumes it when enabled. Explains only —
+  // never authorizes (ERR-102). Default off; flag-off = endpoint 403 before any
+  // DB access and Console keeps the legacy Focus experience unchanged.
+  { id: 'governance_experience_v1', category: 'quiet', enabled: false, since: '2026-08-24', description: 'Governance Experience Snapshot v1.5.1 — read-only workspace governance experience (batch projection + GET /api/v1/governance/experience + Console Focus integration). Default off; flag-off = endpoint 403 (no DB access) and legacy Focus behavior preserved.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },

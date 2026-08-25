@@ -23,6 +23,15 @@ import type {
   DegradedSignal,
   ActivationRecord,
 } from "../../api.js";
+import { fetchGovernanceExperience } from "../../api.js";
+import type {
+  GovernanceExperienceSnapshot,
+  GovernanceExperienceReasonCode,
+  GovernanceExperienceNextActionCode,
+  GovernancePrimaryAttention,
+  WorkspaceEnvironment,
+  GovernanceActivityCategorySummary,
+} from "@principles/core/runtime-v2";
 
 type DecisionResult =
   | { success: true }
@@ -751,13 +760,139 @@ function DegradedSummary({ signals }: { signals: DegradedSignal[] }) {
   );
 }
 
+// ── PRI-586: Governance Experience Snapshot display ─────────────────────────
+// Exhaustive Record maps over the snapshot enums (ERR-106: no binary ternaries
+// folding union members into a default branch). Exported for the i18n parity
+// test; keys must exist in BOTH en.json and zh-CN.json (cr10).
+
+export const EXPERIENCE_ATTENTION: Record<GovernancePrimaryAttention, { labelKey: string; badgeClass: string }> = {
+  setup_required: { labelKey: "pages.focus.experience.attention.setupRequired", badgeClass: "bg-amber/10 text-amber border border-amber/20" },
+  owner_decision_required: { labelKey: "pages.focus.experience.attention.ownerDecisionRequired", badgeClass: "bg-gov/10 text-gov border border-gov/20" },
+  recovery_required: { labelKey: "pages.focus.experience.attention.recoveryRequired", badgeClass: "bg-amber/10 text-amber border border-amber/20" },
+  degraded: { labelKey: "pages.focus.experience.attention.degraded", badgeClass: "bg-amber/10 text-amber border border-amber/20" },
+  background_processing: { labelKey: "pages.focus.experience.attention.backgroundProcessing", badgeClass: "bg-green/10 text-green border border-green/20" },
+  all_clear: { labelKey: "pages.focus.experience.attention.allClear", badgeClass: "text-ink-4 border border-line bg-surface/80" },
+};
+
+export const EXPERIENCE_REASON: Record<GovernanceExperienceReasonCode, string> = {
+  "governance.exp.reason.owner_identity_missing": "pages.focus.experience.reason.ownerIdentityMissing",
+  "governance.exp.reason.approval_pending": "pages.focus.experience.reason.approvalPending",
+  "governance.exp.reason.rulecode_owner_decision": "pages.focus.experience.reason.rulecodeOwnerDecision",
+  "governance.exp.reason.no_pending_decision": "pages.focus.experience.reason.noPendingDecision",
+  "governance.exp.reason.owner_decision_available": "pages.focus.experience.reason.ownerDecisionAvailable",
+  "governance.exp.reason.break_glass_entry": "pages.focus.experience.reason.breakGlassEntry",
+  "governance.exp.reason.recovery_required": "pages.focus.experience.reason.recoveryRequired",
+  "governance.exp.reason.source_unavailable": "pages.focus.experience.reason.sourceUnavailable",
+  "governance.exp.reason.config_invalid": "pages.focus.experience.reason.configInvalid",
+  "governance.exp.reason.processing": "pages.focus.experience.reason.processing",
+  "governance.exp.reason.workspace_clear": "pages.focus.experience.reason.workspaceClear",
+  "governance.exp.reason.workspace_empty": "pages.focus.experience.reason.workspaceEmpty",
+};
+
+export const EXPERIENCE_NEXT_ACTION: Record<GovernanceExperienceNextActionCode, string> = {
+  "governance.exp.next.configure_owner": "pages.focus.experience.next.configureOwner",
+  "governance.exp.next.review_approvals": "pages.focus.experience.next.reviewApprovals",
+  "governance.exp.next.inspect_recovery": "pages.focus.experience.next.inspectRecovery",
+  "governance.exp.next.inspect_sources": "pages.focus.experience.next.inspectSources",
+  "governance.exp.next.fix_config": "pages.focus.experience.next.fixConfig",
+  "governance.exp.next.monitor": "pages.focus.experience.next.monitor",
+  "governance.exp.next.none": "pages.focus.experience.next.none",
+};
+
+const EXPERIENCE_ENVIRONMENT: Record<WorkspaceEnvironment | "unknown", string> = {
+  production: "pages.focus.experience.trust.environment.production",
+  development: "pages.focus.experience.trust.environment.development",
+  demo: "pages.focus.experience.trust.environment.demo",
+  test: "pages.focus.experience.trust.environment.test",
+  unknown: "pages.focus.experience.trust.environment.unknown",
+};
+
+function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSnapshot }) {
+  const { t } = useTranslation();
+  const attention = EXPERIENCE_ATTENTION[snapshot.summary.primaryAttention];
+  const categoryOf = (category: GovernanceActivityCategorySummary["category"]) =>
+    snapshot.activity.categories.find(entry => entry.category === category);
+  const decision = categoryOf("needs_decision");
+  const recovery = categoryOf("needs_recovery");
+  const blocked = categoryOf("blocked");
+  const processing = categoryOf("processing");
+  const actionOf = (kind: GovernanceExperienceSnapshot["readiness"]["governanceActions"][number]["kind"]) =>
+    snapshot.readiness.governanceActions.find(action => action.kind === kind);
+  const rulecodeAction = actionOf("rulecode_owner_decision");
+  const pauseAction = actionOf("emergency_pause");
+  const firstIssue = snapshot.dataQuality.issueGroups[0];
+  return (
+    <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]" data-testid="experience-summary">
+      <div className="flex items-center gap-2 mb-1">
+        <span className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${attention.badgeClass}`} role="status">
+          {t(attention.labelKey)}
+        </span>
+      </div>
+      <div className="text-ink-2 text-[13px] leading-relaxed mt-1" data-testid="experience-reason">
+        {t(EXPERIENCE_REASON[snapshot.summary.reasonCode])}
+      </div>
+      <div className="text-ink-4 text-[13px] leading-relaxed mt-1">
+        <span className="font-medium">{t("pages.focus.nextActionLabel")}</span>{" "}
+        {t(EXPERIENCE_NEXT_ACTION[snapshot.summary.nextActionCode])}
+      </div>
+      {(decision !== undefined || recovery !== undefined || blocked !== undefined || processing !== undefined) && (
+        <div className="text-[13px] text-ink-3 mt-2 leading-relaxed" data-testid="experience-activity">
+          {decision !== undefined && (
+            <span className="mr-4">{t("pages.focus.experience.activity.needsDecision", { count: decision.count })}</span>
+          )}
+          {recovery !== undefined && (
+            <span className="mr-4">{t("pages.focus.experience.activity.needsRecovery", { count: recovery.count })}</span>
+          )}
+          {blocked !== undefined && <span className="mr-4">{t("pages.focus.experience.activity.blocked")}</span>}
+          {/* Processing counts are deliberately folded — "Background processing", never a raw "Processing 405" headline. */}
+          {processing !== undefined && (
+            <span>{t("pages.focus.experience.activity.processing", { count: processing.count })}</span>
+          )}
+        </div>
+      )}
+      <div className="mt-2 text-[12px] text-ink-4 leading-relaxed" data-testid="experience-readiness">
+        {t(`pages.focus.experience.readiness.identity.${snapshot.readiness.ownerIdentityConfiguration}`)}
+        {" · "}
+        {t("pages.focus.experience.readiness.principleApproval")}
+        {t(`pages.focus.experience.readiness.rulecode.${rulecodeAction?.status === "blocked" ? "blocked" : "ready"}`)}
+        {t(`pages.focus.experience.readiness.pause.${pauseAction?.observedAuthority === "break_glass" ? "breakGlass" : "owner"}`)}
+      </div>
+      <div className="mt-1 text-[12px] text-ink-4" data-testid="experience-trust">
+        {t(EXPERIENCE_ENVIRONMENT[snapshot.trustContext.environmentContext.environment])}
+        {" · "}
+        {t(`pages.focus.experience.trust.lineage.${snapshot.trustContext.lineageTransparency.confidence}`)}
+      </div>
+      {snapshot.dataQuality.degraded && (
+        <div className="mt-2 text-[12px] text-amber leading-relaxed" data-testid="experience-data-quality">
+          {t("pages.focus.experience.dataQuality.degraded", { count: firstIssue?.count ?? 0, reasonCode: firstIssue?.reasonCode ?? "" })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page component ──────────────────────────────────────────────────────
 
 type LoadingState = "loading" | "loaded" | "error";
 
-export function FocusPage() {
+export interface FocusPageProps {
+  /** Feature flags from /api/v1/config/summary — gates the experience snapshot path. */
+  featureFlags?: Record<string, { enabled: boolean } | undefined>;
+}
+
+export function FocusPage({ featureFlags }: FocusPageProps) {
   const { t } = useTranslation();
+  // PRI-586: when governance_experience_v1 is enabled the governance summary
+  // comes ONLY from the experience snapshot — the legacy queue endpoint is not
+  // consulted (SPEC §14.2 no old-queue + snapshot merge). Approvals and
+  // activations remain the MUTATION surface (action cards), not a status source.
+  const experienceMode = featureFlags?.governance_experience_v1?.enabled === true;
+  // Flags still loading (undefined): fire NEITHER governance status endpoint —
+  // otherwise a transient legacy queue request goes out before the flag turns
+  // experience mode on (wasted call + legacy-panel flash). Hold in `loading`.
+  const flagsResolved = featureFlags !== undefined;
   const [queueData, setQueueData] = useState<GovernanceQueueData | null>(null);
+  const [experienceData, setExperienceData] = useState<GovernanceExperienceSnapshot | null>(null);
   const [groupedData, setGroupedData] = useState<ApprovalsGroupedData | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -771,19 +906,31 @@ export function FocusPage() {
     setGroupedErrorReason(null);
     setRuleCodeErrorReason(null);
 
-    const [queueResult, groupedResult, activationsResult] = await Promise.all([
-      fetchGovernanceQueue(),
+    const [experienceResult, queueResult, groupedResult, activationsResult] = await Promise.all([
+      experienceMode ? fetchGovernanceExperience() : Promise.resolve(null),
+      experienceMode ? Promise.resolve(null) : fetchGovernanceQueue(),
       fetchApprovalsGrouped(),
       fetchAllActivations(),
     ]);
 
-    // Queue data is already validated by the API layer (validateGovernanceQueue)
-    if (!queueResult.success) {
-      setLoadingState("error");
-      setErrorMessage(queueResult.error);
-      return;
+    if (experienceMode) {
+      if (experienceResult === null || !experienceResult.success) {
+        setLoadingState("error");
+        setErrorMessage(experienceResult === null ? t("pages.focus.experience.error.snapshotUnavailable") : experienceResult.error);
+        return;
+      }
+      setExperienceData(experienceResult.data);
+      setQueueData(null);
+    } else {
+      // Queue data is already validated by the API layer (validateGovernanceQueue)
+      if (queueResult === null || !queueResult.success) {
+        setLoadingState("error");
+        setErrorMessage(queueResult === null ? t("pages.focus.loadError") : queueResult.error);
+        return;
+      }
+      setQueueData(queueResult.data);
+      setExperienceData(null);
     }
-    setQueueData(queueResult.data);
 
     // Validate grouped data (ERR-002: degradation with reason)
     if (!groupedResult.success) {
@@ -808,11 +955,12 @@ export function FocusPage() {
     }
 
     setLoadingState("loaded");
-  }, []);
+  }, [experienceMode, t]);
 
   useEffect(() => {
+    if (!flagsResolved) return;
     loadData();
-  }, [loadData]);
+  }, [flagsResolved, loadData]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
@@ -888,7 +1036,11 @@ export function FocusPage() {
         {t("pages.focus.subtitle")}
       </p>
 
-      {/* Governance State Summary */}
+      {/* Governance summary — single source: experience snapshot when the flag
+          is on (PRI-586), legacy queue panel otherwise. Never both. */}
+      {experienceMode && experienceData !== null ? (
+        <ExperienceSummaryCard snapshot={experienceData} />
+      ) : !experienceMode ? (
       <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
         <div className="flex items-center gap-2 mb-1">
           {/* State badge */}
@@ -915,7 +1067,12 @@ export function FocusPage() {
           {nextAction}
         </div>
       </div>
+      ) : null}
 
+      {/* Queue-derived widgets render only in legacy mode — in experience mode
+          their inputs would be stale zeros, which would misinform (SPEC §14.2). */}
+      {!experienceMode && (
+        <>
       {/* Prose summary — one line, tabular nums */}
       <ProseSummary
         pendingCount={pendingCount}
@@ -923,9 +1080,6 @@ export function FocusPage() {
         stagnationCount={stagnationCount}
         evidenceCount={evidenceCount}
       />
-
-      {/* Daily thought — pause before judgment */}
-      <DailyThoughtCard />
 
       {/* Wave 4: Feedback stratification — three timescale layers */}
       <FeedbackStratification
@@ -935,7 +1089,7 @@ export function FocusPage() {
       />
 
       {/* State-specific guides — PRI-332: distinguish healthy empty from degraded */}
-      {governanceState === "none" && pendingCount === 0 && deviationCount === 0 && stagnationCount === 0 && (
+      {!experienceMode && governanceState === "none" && pendingCount === 0 && deviationCount === 0 && stagnationCount === 0 && (
         stateReasonCode === "state_db_missing" ? (
           <ZeroStateDbMissing />
         ) : (
@@ -956,6 +1110,20 @@ export function FocusPage() {
           Don't hide degraded sources behind state-specific guides (ERR-002). */}
       {degradedSignals && degradedSignals.length > 0 && (
         <DegradedSummary signals={degradedSignals} />
+      )}
+        </>
+      )}
+
+      {/* Daily thought — pause before judgment (reflection content, not governance status).
+          Intentionally retained in BOTH modes: this PR migrates only the governance STATUS
+          source; whether reflection stays on Focus after graduation is PRI-589
+          (Focus Information Architecture Cleanup). */}
+      <DailyThoughtCard />
+
+      {experienceMode && experienceData !== null && experienceData.summary.primaryAttention === "all_clear" && pendingGroups.length === 0 && (
+        <div className="mt-4">
+          <OnboardingGuide />
+        </div>
       )}
 
       {/* Layer 2: Why — three sections with evidence summaries */}
@@ -1014,7 +1182,8 @@ export function FocusPage() {
         )}
       </section>
 
-      {/* Section 2: Behavior Deviations / Evidence */}
+      {/* Section 2: Behavior Deviations / Evidence (queue-derived; legacy mode only) */}
+      {!experienceMode && (
       <section className="mt-8" aria-labelledby="section-deviation">
         <SectionTitle id="section-deviation">
           {evidenceCount > 0
@@ -1052,8 +1221,10 @@ export function FocusPage() {
           </div>
         )}
       </section>
+      )}
 
-      {/* Section 3: System Signals (stagnation) */}
+      {/* Section 3: System Signals (stagnation) — queue-derived; legacy mode only */}
+      {!experienceMode && (
       <section className="mt-8" aria-labelledby="section-signals">
         <SectionTitle id="section-signals">
           {t("pages.focus.sectionSignals")}
@@ -1071,6 +1242,7 @@ export function FocusPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* Footer — one line (US-1.7) */}
       <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">

@@ -53,10 +53,11 @@ import {
   validateIntentRawContent,
   validateIntentVersions,
   validateOwnerGovernanceView,
+  validateGovernanceExperienceSnapshot,
   validateRuleCodeOwnerReview,
   validateRuleCodeMutation,
 } from "./utils/validators.js";
-import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
+import type { GovernanceExperienceSnapshot, OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   FeedbackReportData,
   FeedbackDraftSummaryData,
@@ -655,6 +656,13 @@ async function fetchGovernanceQueue(): Promise<ApiResponse<GovernanceQueueData>>
   return request<GovernanceQueueData>('/api/v1/governance/queue', undefined, validateGovernanceQueue);
 }
 
+// PRI-586: read-only governance experience snapshot. Only called when the
+// governance_experience_v1 flag is enabled — flag-off the endpoint 403s and
+// the Console keeps the legacy Focus experience (ERR-102: disabled ≠ unavailable).
+async function fetchGovernanceExperience(): Promise<ApiResponse<GovernanceExperienceSnapshot>> {
+  return request<GovernanceExperienceSnapshot>('/api/v1/governance/experience', undefined, validateGovernanceExperienceSnapshot);
+}
+
 // Governance Recovery Actions v1: Owner-triggered recovery of a failed /
 // needs_human_review internalization task (failed→pending | needs_human_review→pending).
 async function recoverFailedTask(taskId: string, reason?: string): Promise<ApiResponse<RecoveryResultData>> {
@@ -945,6 +953,7 @@ export {
   removeWorkspace,
   syncWorkspace,
   fetchGovernanceQueue,
+  fetchGovernanceExperience,
   recoverFailedTask,
   fetchApprovalsGrouped,
   fetchAllActivations,

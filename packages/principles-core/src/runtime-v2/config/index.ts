@@ -19,6 +19,7 @@ export type {
   DiagnosticsMode,
   UiConfig,
   WorkspaceConfig,
+  WorkspaceEnvironment,
   PrinciplesConfig,
   PdConfig,
   PdConfigValidationError,
@@ -51,6 +52,8 @@ export {
   VALID_DIAGNOSTICS_MODES,
   VALID_PROJECT_FOCUS_MODES,
   DANGEROUS_KEYS,
+  // PRI-587 Workspace environment enum
+  WORKSPACE_ENVIRONMENTS,
   // PRI-304 Enums
   PROFILE_AUDIT_LEVELS,
   PROFILE_EVOLUTION_MODES,

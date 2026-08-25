@@ -166,7 +166,7 @@ function AuthRoutes() {
                   <Routes>
                     <Route path="/" element={<Navigate to="/focus" replace />} />
                     <Route path="/welcome" element={<WelcomePage workspaceId={currentWorkspaceId} />} />
-                    <Route path="/focus" element={<FocusPage />} />
+                    <Route path="/focus" element={<FocusPage featureFlags={featureFlags ?? undefined} />} />
                     <Route path="/pain" element={<PainPage />} />
                     <Route path="/principles" element={<PrinciplesPage />} />
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />

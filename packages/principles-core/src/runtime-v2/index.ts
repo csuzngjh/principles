@@ -23,6 +23,24 @@ export { PDErrorCategorySchema } from './error-categories.js';
 export { GovernanceChannelSchema, LineageConfidenceSchema, SourceRefSchema, RevisionIdentitySchema, PrincipleFactSchema, TaskFactSchema, RunnerVerdictFactSchema, ApprovalFactSchema, ActivationFactSchema, DerivedRelationFactSchema, TimelineEventSchema, DataQualityIssueSchema, LineageContextSchema, GovernanceFactsSchema, PrincipleStateSchema, ProcessViewSchema, AutomationViewSchema, AttentionItemSchema, AttentionViewSchema, ActivationSummarySchema, OwnerGovernanceSummarySchema, DataQualitySchema, OwnerGovernanceViewSchema } from './governance-projection-contract.js';
 export type { GovernanceChannel, LineageConfidence, SourceRef, RevisionIdentity, PrincipleFact, TaskFact, RunnerVerdictFact, ApprovalFact, ActivationFact, DerivedRelationFact, TimelineEvent, DataQualityIssue, LineageContext, GovernanceFacts, PrincipleState, ProcessView, AutomationView, AttentionItem, AttentionView, ActivationSummary, OwnerGovernanceSummary, DataQuality, OwnerGovernanceView } from './governance-projection-contract.js';
 export { GOVERNANCE_HEADLINE_CODES, deriveOwnerGovernanceView } from './governance-projection.js';
+export {
+  GovernancePrimaryAttentionSchema, GovernanceExperienceReasonCodeSchema, GovernanceExperienceNextActionCodeSchema,
+  WorkspaceEnvironmentSchema, EnvironmentContextInputSchema, SourceAvailabilityInputSchema, UnlinkedRecordGroupSchema,
+  OwnerConfigSnapshotSchema, GovernanceViewInputSchema, FrontierEvidenceSchema, GovernanceExperienceInputsSchema,
+  GovernanceActionKindSchema, GovernanceObservedAuthoritySchema, GovernanceActionReadinessSchema, OwnerGovernanceReadinessSchema,
+  GovernanceActivityCategorySchema, GovernanceActivityItemSchema, GovernanceActivityCategorySummarySchema, GovernanceActivitySnapshotSchema,
+  GovernanceLineageTransparencySchema, GovernanceTrustContextSchema, GovernanceDataQualityIssueGroupSchema, GovernanceDataQualitySchema,
+  GovernanceExperienceSummarySchema, GovernanceExperienceSnapshotSchema,
+} from './governance-experience-contract.js';
+export type {
+  WorkspaceEnvironment, EnvironmentContextInput, SourceAvailabilityInput, UnlinkedRecordGroup, OwnerConfigSnapshot,
+  GovernanceViewInput, FrontierEvidence, GovernanceExperienceInputs, GovernanceActionKind, GovernanceObservedAuthority,
+  GovernanceActionReadiness, OwnerGovernanceReadiness, GovernancePrimaryAttention, GovernanceActivityCategory,
+  GovernanceActivityItem, GovernanceActivityCategorySummary, GovernanceActivitySnapshot, GovernanceLineageTransparency,
+  GovernanceTrustContext, GovernanceDataQualityIssueGroup, GovernanceDataQuality, GovernanceExperienceReasonCode,
+  GovernanceExperienceNextActionCode, GovernanceExperienceSummary, GovernanceExperienceSnapshot,
+} from './governance-experience-contract.js';
+export { GOVERNANCE_EXPERIENCE_ITEMS_LIMIT, GOVERNANCE_EXPERIENCE_ISSUE_GROUPS_LIMIT, deriveGovernanceExperienceSnapshot } from './governance-experience.js';
 export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetryPolicySchema, AgentSpecSchema } from './agent-spec.js';
 export { SchemaVersionRefSchema, RuntimeV2SchemaVersionSchema } from './schema-version.js';
 export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';

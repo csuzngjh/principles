@@ -26,7 +26,7 @@ import { handleLifecycleRoute, disposeLifecycleModels } from './routes/lifecycle
 import { handleActivationsRoute, disposeActivationsModels } from './routes/activations.js';
 import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
-import { handleGovernanceRoute, disposeGovernanceModels } from './routes/governance.js';
+import { handleGovernanceRoute, handleGovernanceExperienceRoute, resolveOwnerConfigSnapshot, disposeGovernanceModels } from './routes/governance.js';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
 import { handleIntentRoute, disposeIntentModels } from './routes/intent.js';
 import { handleIntentDecisionsRoute, disposeIntentDecisionModels } from './routes/intent-decisions.js';
@@ -266,11 +266,15 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   // Governance Recovery Actions v1: fail-closed — recovery stays disabled unless
   // explicitly enabled (default off keeps the Console read-only).
   const failedTaskRecoveryEnabled = pdFlags.flags.failed_task_recovery_console?.enabled ?? false;
+  // Governance Experience Snapshot v1.5.1 (PRI-584~587): default off; flag-off
+  // keeps the legacy Focus experience and 403s the endpoint before any DB access.
+  const governanceExperienceEnabled = pdFlags.flags.governance_experience_v1?.enabled ?? false;
   const feedbackFlags: Record<string, { enabled: boolean }> = {
     feedback_channel: { enabled: feedbackChannelEnabled },
     failed_tasks_observability: { enabled: failedTasksObservabilityEnabled },
     principle_governance_projection_v2: { enabled: governanceProjectionEnabled },
     failed_task_recovery_console: { enabled: failedTaskRecoveryEnabled },
+    governance_experience_v1: { enabled: governanceExperienceEnabled },
   };
   if (!configResult.ok) {
     console.warn('[pd-console] PD config loading failed (using defaults for feedback channel):', configResult.errors.map(e => e.reason).join('; '));
@@ -468,6 +472,16 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         asyncHandler(() => handleActivationsRoute(req, res, services.workspaceDir, subPath, {
           ownerActor,
           breakGlassActor: { principal: { kind: 'break_glass', reason: 'local_no_auth_emergency' }, authentication: { method: 'local_break_glass' } },
+        }))(req, res);
+        return;
+      }
+
+      // PRI-585: GET /api/v1/governance/experience (flag-gated read-only snapshot)
+      if (urlPath === '/api/v1/governance/experience') {
+        asyncHandler(() => handleGovernanceExperienceRoute(req, res, {
+          workspaceDir: services.workspaceDir,
+          featureFlags: services.feedbackFlags,
+          ownerConfig: resolveOwnerConfigSnapshot(services.authConfig),
         }))(req, res);
         return;
       }

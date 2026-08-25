@@ -550,6 +550,31 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(flag.description).toContain('recovery');
   });
 
+  it('PRI-584~587: governance_experience_v1 is registered as quiet, default-off', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'governance_experience_v1');
+    expect(flag).toBeDefined();
+    if (!flag) throw new Error('governance_experience_v1 flag not found');
+    expect(flag.category).toBe('quiet');
+    // Default off: read-only experience snapshot; flag-off = endpoint 403 before
+    // any DB access and legacy Console Focus behavior preserved.
+    expect(flag.enabled).toBe(false);
+    expect(flag.since).toBe('2026-08-24');
+    expect(flag.description).toContain('read-only');
+  });
+
+  it('PRI-584~587: governance_experience_v1 can be enabled via config (rollout path)', () => {
+    const userFlags = {
+      governance_experience_v1: { enabled: true },
+    };
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/config.yaml');
+    const flag = result.flags.governance_experience_v1;
+    expect(flag).toBeDefined();
+    if (flag) {
+      expect(flag.enabled).toBe(true);
+    }
+    expect(result.warnings.some(w => w.includes('governance_experience_v1') && w.includes('unknown'))).toBe(false);
+  });
+
   it('Governance Recovery v1: failed_task_recovery_console can be disabled via config', () => {
     const userFlags = {
       failed_task_recovery_console: { enabled: false },
