@@ -325,6 +325,23 @@ describe('handleUpdateRoute', () => {
   // ── POST /apply ─────────────────────────────────────────────────────
 
   describe('POST /apply', () => {
+    it('refuses a non-advancing package version before backup or file mutation', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ version: '1.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+      } as Response);
+
+      const req = createMockRequest('POST', { mergeStrategy: 'smart', createBackup: true });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; reason?: string } }>(res);
+      expect(body.success).toBe(true);
+      expect(body.data).toMatchObject({ success: false, reason: 'installer_bundle_stale' });
+      expect(fs.copyFileSync).not.toHaveBeenCalled();
+    });
+
     it('refuses an explicit workspace target before backup, download, or file mutation', async () => {
       const checkoutDir = path.join(workspaceDir, 'checkout-copy');
       fs.mkdirSync(checkoutDir, { recursive: true });
@@ -1633,6 +1650,33 @@ describe('handleUpdateRoute', () => {
   // ── Full update (/apply-full) — inline tarball download + file copy ──
 
   describe('POST /apply-full', () => {
+    it.each(['1.0.0', '0.9.9'])('refuses a non-advancing stamped release before download (%s)', async (bundledPluginVersion) => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          version: '2.0.0',
+          pd: { bundledPluginVersion },
+          dist: { tarball: 'https://example.com/pkg.tgz' },
+        }),
+      } as Response);
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; reason?: string; requiresRestart: boolean } }>(res);
+      expect(body.success).toBe(true);
+      expect(body.data).toMatchObject({
+        success: false,
+        reason: 'installer_bundle_stale',
+        requiresRestart: false,
+      });
+      expect(execSyncMock).not.toHaveBeenCalled();
+      expect(fs.copyFileSync).not.toHaveBeenCalled();
+    });
+
     it('should copy plugin, console, core, pd-cli from installer tarball', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
 
