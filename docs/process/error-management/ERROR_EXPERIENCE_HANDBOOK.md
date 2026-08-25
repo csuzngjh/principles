@@ -885,10 +885,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 108 |
+| Total lessons | 107 |
 | Last updated | 2026-08-25 |
 | Top category | Schema & Type |
-| Recurring errors | 56 |
+| Recurring errors | 57 |
 
 ---
 
@@ -1064,7 +1064,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When registering `--no-<flag>` Commander options, immediately write a parser-level test that verifies the option value is correctly parsed with AND without the flag. The test should assert `opts.<positiveForm> === false` when the flag is present and `opts.<positiveForm> === true` when absent. Review trigger: any PR that uses Commander's `--no-` prefix must include a parser test.
 - **Source**: PR #844
 - **Date**: 2026-06-07
-- **Recurrence**: None
+- **Recurrence**: Yes.
+  - 2026-08-25 Phase 0 update safeguards self-review: the unstamped legacy-installer path staged and inspected a tarball, then returned `installer_bundle_stale` before production mutation. Because that return was inside the outer `try`, it bypassed the `catch` cleanup and left the temporary staging directory behind. Fixed by removing the staging directory before the refusal return and adding a real route test that records the tar extraction directory, asserts the stale result, and proves the directory no longer exists. Lesson: every early refusal after temporary-resource creation must either clean that resource locally or use a `finally`; test the refusal path with an observable resource-lifecycle assertion.
 
 ---
 

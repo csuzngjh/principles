@@ -940,6 +940,9 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       semver.gt(stagedVersion, fromVersion) &&
       (bundledPluginVersion === undefined || bundledPluginVersion === stagedVersion);
     if (!progressed) {
+      if (tempDir && fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
       appendUpdateHistory(workspaceDir, {
         fromVersion,
         toVersion: stagedVersion ?? 'unknown',

@@ -1681,6 +1681,37 @@ describe('handleUpdateRoute', () => {
       expect(fs.copyFileSync).not.toHaveBeenCalled();
     });
 
+    it('cleans staged files when an unstamped legacy installer is not advancing', async () => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      let stagingDir: string | undefined;
+      vi.mocked(fetch).mockImplementationOnce(async () => ({
+        ok: true,
+        json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+      } as Response)).mockImplementationOnce(async () => ({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      } as Response));
+      vi.mocked(execSyncMock).mockImplementation(((command: string, args?: readonly string[]) => {
+        if (command !== 'tar' || !args) return;
+        const targetIndex = args.indexOf('-C');
+        const target = targetIndex >= 0 ? args[targetIndex + 1] : undefined;
+        if (target === undefined) return;
+        stagingDir = target;
+        fs.mkdirSync(path.join(target, 'plugin'), { recursive: true });
+        fs.writeFileSync(path.join(target, 'plugin', 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      }) as unknown as typeof execSyncMock);
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+      expect(body.data).toMatchObject({ success: false, reason: 'installer_bundle_stale' });
+      expect(stagingDir).toBeDefined();
+      expect(fs.existsSync(stagingDir!)).toBe(false);
+      expect(fs.copyFileSync).not.toHaveBeenCalled();
+    });
+
     it('should copy plugin, console, core, pd-cli from installer tarball', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
 
