@@ -536,8 +536,13 @@
             "asOf": "截至 {{date}}",
             "retention": "保留 {{days}} 天",
             "limitation": "无法保证历史完整性——数字代表当前保留的证据，不是完整历史。",
-            "validationPartial": "部分记录无法展示（{{reasonCode}}）。",
-            "validationMalformed": "生效履历数据需要修复——数字可能不可靠（{{reasonCode}}）。"
+            "validationPartial": "部分记录无法展示。",
+            "validationMalformed": "生效履历数据需要修复——数字可能不可靠。",
+            "reasonCodes": {
+              "receiptRowsDropped": "部分记录在校验时被跳过",
+              "ledgerLevelInvalid": "存在层级异常的记录",
+              "ledgerCountsUnreadable": "计数无法读取"
+            }
           },
           "kind": {
             "rule_blocked": "拦截",

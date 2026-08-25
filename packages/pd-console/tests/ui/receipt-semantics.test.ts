@@ -110,9 +110,25 @@ describe('PRI-590 receipt evidence coverage disclosure', () => {
       expect(c('asOf')).toContain('{{date}}');
       expect(c('retention')).toContain('{{days}}');
       expect(c('limitation').length).toBeGreaterThan(0);
-      expect(c('validationPartial')).toContain('{{reasonCode}}');
-      expect(c('validationMalformed')).toContain('{{reasonCode}}');
+      // Review round 2: owner-facing copy must not interpolate the raw
+      // snake_case reasonCode — verdict lines are self-contained sentences.
+      expect(c('validationPartial')).not.toContain('{{reasonCode}}');
+      expect(c('validationMalformed')).not.toContain('{{reasonCode}}');
     }
+  });
+
+  it('localizes known reasonCodes in both locales (no technical codes leaked to owners)', () => {
+    for (const locale of [en, zh]) {
+      const rc = (key: string) =>
+        getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'coverage', 'reasonCodes', key]);
+      expect(rc('receiptRowsDropped').length).toBeGreaterThan(0);
+      expect(rc('ledgerLevelInvalid').length).toBeGreaterThan(0);
+      expect(rc('ledgerCountsUnreadable').length).toBeGreaterThan(0);
+    }
+    // The component resolves reasonCodes through a Map lookup (no prototype
+    // chain for API-payload keys) with a raw-code fallback — never interpolated
+    // into a sentence.
+    expect(coverageComponent).toContain('REASON_CODE_LABEL_KEYS.get(');
   });
 
   it('never renders event-level internals in the coverage disclosure', () => {

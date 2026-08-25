@@ -37,9 +37,17 @@ export type ReceiptSourceStatus = 'available' | 'disabled' | 'unavailable';
  * available. When sourceStatus is disabled/unavailable no assessment is
  * performed and the field stays 'valid'.
  *
+ * CONSUMER RULE: never read validationStatus alone. When sourceStatus is not
+ * 'available', validationStatus carries no meaning ("valid" there means
+ * "not assessed", NOT "data verified") — gate every consumer on sourceStatus
+ * first.
+ *
  * - valid    — data structure normal
  * - partial  — some rows were dropped from presentation (kind/created_at
- *              anomalies); counts remain accurate for known levels
+ *              anomalies); counts remain accurate for known levels.
+ *              Endpoint scope note: BOTH endpoints flag unknown-kind rows
+ *              (counts via invalid_kind_count, detail via timeline drop) so a
+ *              dirty table yields the same verdict on either surface.
  * - malformed— level space or aggregates broken; counts are untrustworthy
  *              ("receipt data requires recovery")
  */
@@ -48,9 +56,9 @@ export type ReceiptValidationStatus = 'valid' | 'partial' | 'malformed';
 export interface ReceiptEvidenceCoverage {
   sourceStatus: ReceiptSourceStatus;
   validationStatus: ReceiptValidationStatus;
-  /** Earliest retained evidence in the queried scope; null = nothing retained (true zero). NOT a claim of full history. */
+  /** Earliest retained evidence in the queried scope; null = nothing retained (true zero). NOT a claim of full history. Per-principle on the detail endpoint, table-wide on the counts endpoint (the retention sweep is table-wide). */
   observedFrom: string | null;
-  /** ISO timestamp of the read that produced this coverage. */
+  /** ISO timestamp captured when the response carrying this coverage was assembled — effectively the read time (millisecond precision). */
   asOf: string;
   retentionPolicyDays: number;
   reasonCode?: string;

@@ -36,6 +36,19 @@ const VALIDATION_NOTE_KEYS: Record<ReceiptValidationStatusData, string | null> =
   malformed: "pages.principles.detail.receipts.coverage.validationMalformed",
 };
 
+/**
+ * reasonCode → localized phrase. Owner-facing copy must not leak snake_case
+ * technical codes (review round 2). A Map (not a plain object) because the
+ * lookup key comes from the API payload — no prototype-chain exposure
+ * (EP-01/ERR-013). Unknown codes fall back to the raw code — fail-visible
+ * rather than blank, so the debug clue survives.
+ */
+const REASON_CODE_LABEL_KEYS: ReadonlyMap<string, string> = new Map([
+  ["receipt_rows_dropped", "pages.principles.detail.receipts.coverage.reasonCodes.receiptRowsDropped"],
+  ["ledger_level_invalid", "pages.principles.detail.receipts.coverage.reasonCodes.ledgerLevelInvalid"],
+  ["ledger_counts_unreadable", "pages.principles.detail.receipts.coverage.reasonCodes.ledgerCountsUnreadable"],
+]);
+
 /** Localized label key for a source status — shared by the degraded notes. */
 export function getReceiptSourceStatusLabelKey(status: ReceiptSourceStatusData): string {
   return SOURCE_STATUS_LABEL_KEYS[status];
@@ -44,6 +57,13 @@ export function getReceiptSourceStatusLabelKey(status: ReceiptSourceStatusData):
 export function ReceiptCoverageDisclosure({ coverage }: { coverage: ReceiptEvidenceCoverageData }) {
   const { t, i18n } = useTranslation();
   const validationNoteKey = VALIDATION_NOTE_KEYS[coverage.validationStatus];
+  // Known codes render as a localized phrase; unknown codes fall back to the
+  // raw code in parentheses (fail-visible debug clue, never a blank verdict).
+  let reasonSuffix: string | null = null;
+  if (coverage.reasonCode !== undefined) {
+    const labelKey = REASON_CODE_LABEL_KEYS.get(coverage.reasonCode);
+    reasonSuffix = labelKey !== undefined ? ` — ${t(labelKey)}` : ` (${coverage.reasonCode})`;
+  }
   return (
     <div data-testid="receipt-coverage">
       <div className="flex flex-wrap items-center gap-2">
@@ -72,7 +92,8 @@ export function ReceiptCoverageDisclosure({ coverage }: { coverage: ReceiptEvide
       </p>
       {validationNoteKey !== null && (
         <p data-testid="receipt-coverage-validation" className="mt-1 text-[11px] leading-relaxed text-amber">
-          {t(validationNoteKey, { reasonCode: coverage.reasonCode ?? "" })}
+          {t(validationNoteKey)}
+          {reasonSuffix}
         </p>
       )}
     </div>

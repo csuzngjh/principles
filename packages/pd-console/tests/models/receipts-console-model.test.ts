@@ -305,6 +305,17 @@ describe('ReceiptsConsoleModel — evidence coverage (PRI-590)', () => {
     expect(detail.effectCount).toBe(2);
     expect(detail.events).toHaveLength(1);
     expect(detail.coverage.observedFrom).toBe('2026-08-14T10:00:00.000Z');
+
+    // Endpoint parity (review round 2): the counts endpoint must reach the
+    // SAME partial verdict for the same dirty table — unknown-kind rows are
+    // flagged via invalid_kind_count, so neither surface says "valid" while
+    // the other says "partial".
+    const counts = await model.getReceiptCounts();
+    expect(counts.coverage.sourceStatus).toBe('available');
+    expect(counts.coverage.validationStatus).toBe('partial');
+    expect(counts.coverage.reasonCode).toBe('receipt_rows_dropped');
+    // Counts themselves remain accurate for known levels.
+    expect(counts.counts.find(c => c.principleId === 'princ-A')).toMatchObject({ effectCount: 2 });
   });
 
   it('case 6 — malformed: out-of-level rows make counts untrustworthy (never a trustworthy zero)', async () => {
@@ -363,14 +374,71 @@ describe('ReceiptsConsoleModel — evidence coverage (PRI-590)', () => {
     ]);
     const prepareSpy = vi.spyOn(Database.prototype, 'prepare');
     try {
-      const counts = await model.getReceiptCounts();
-      expect(counts.status).toBe('ok');
-      expect(counts.counts).toHaveLength(3);
-      // 1 aggregate GROUP BY + 1 global MIN scalar — independent of how many
-      // principles hold receipts (spec PRI-594: no N+1 queries).
-      expect(prepareSpy.mock.calls.length).toBe(2);
+      const small = await model.getReceiptCounts();
+      expect(small.status).toBe('ok');
+      expect(small.counts).toHaveLength(3);
+      const callsForSmall = prepareSpy.mock.calls.length;
+
+      // Double the data volume, re-measure. The invariant under test is "the
+      // statement count does not grow with principle count" (spec PRI-594) —
+      // NOT an exact constant tied to SqliteConnection internals (review
+      // round 2: a toBe(2) assertion breaks whenever the connection layer
+      // adds an internal pragma/prep statement).
+      seedLedger([
+        { principleId: 'princ-D', kind: 'rule_blocked', level: 'effect', createdAt: '2026-08-17T10:00:00.000Z' },
+        { principleId: 'princ-E', kind: 'prompt_injected', level: 'presence', createdAt: '2026-08-18T10:00:00.000Z' },
+        { principleId: 'princ-F', kind: 'rule_blocked', level: 'presence', createdAt: '2026-08-19T10:00:00.000Z' },
+      ]);
+      prepareSpy.mockClear();
+      const large = await model.getReceiptCounts();
+      expect(large.status).toBe('ok');
+      expect(large.counts).toHaveLength(6);
+      expect(prepareSpy.mock.calls.length).toBe(callsForSmall);
     } finally {
       prepareSpy.mockRestore();
     }
+  });
+
+  it('case 8 — schema drift: NULL-principle rows are disclosed as partial on counts, valid rows still counted', async () => {
+    enableLedgerFlag();
+    // Rebuild the table WITHOUT the writer's NOT NULL/CHECK constraints — the
+    // drifted schema can hold orphan rows that the production writer could
+    // never produce (codecov gap from review round 1: this partial branch had
+    // no test coverage). Seed AFTER the rebuild: DROP clears prior rows.
+    const conn = new SqliteConnection(workspaceDir);
+    const db = conn.getDb();
+    db.exec('DROP TABLE principle_applications');
+    db.exec(`CREATE TABLE principle_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      principle_id TEXT,
+      activation_id TEXT,
+      rule_id TEXT,
+      channel TEXT,
+      level TEXT,
+      kind TEXT,
+      session_id TEXT,
+      tool_name TEXT,
+      file_path TEXT,
+      digest TEXT,
+      created_at TEXT
+    )`);
+    db.prepare(
+      `INSERT INTO principle_applications (principle_id, channel, level, kind, created_at)
+       VALUES (NULL, 'prompt', 'effect', 'rule_blocked', '2026-08-10T00:00:00.000Z')`,
+    ).run();
+    conn.close();
+    seedLedger([
+      { principleId: 'princ-A', kind: 'rule_blocked', level: 'effect', createdAt: '2026-08-14T10:00:00.000Z' },
+    ]);
+
+    const counts = await model.getReceiptCounts();
+    expect(counts.status).toBe('ok');
+    // The skipped-orphan path is disclosed as partial, never silently dropped.
+    expect(counts.coverage.validationStatus).toBe('partial');
+    expect(counts.coverage.reasonCode).toBe('receipt_rows_dropped');
+    // The valid row survives in the entries; the orphan is not listed.
+    expect(counts.counts).toHaveLength(1);
+    expect(counts.counts[0]?.principleId).toBe('princ-A');
+    expect(counts.counts[0]?.effectCount).toBe(1);
   });
 });

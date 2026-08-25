@@ -536,8 +536,13 @@
             "asOf": "as of {{date}}",
             "retention": "retention {{days}} days",
             "limitation": "Historical completeness cannot be guaranteed — counts show currently retained evidence, not full history.",
-            "validationPartial": "Some records could not be displayed ({{reasonCode}}).",
-            "validationMalformed": "Receipt data requires recovery — counts may be unreliable ({{reasonCode}})."
+            "validationPartial": "Some records could not be displayed.",
+            "validationMalformed": "Receipt data requires recovery — counts may be unreliable.",
+            "reasonCodes": {
+              "receiptRowsDropped": "some rows were skipped during validation",
+              "ledgerLevelInvalid": "records with an invalid level exist",
+              "ledgerCountsUnreadable": "counts could not be read"
+            }
           },
           "kind": {
             "rule_blocked": "Block",

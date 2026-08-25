@@ -191,18 +191,17 @@ export class ReceiptsConsoleModel {
       let lastEffectAt: string | null = null;
       let observedFrom: string | null = null;
       let levelAnomaly = false;
-      let countsUnreadable = false;
       for (const row of Array.isArray(counts) ? counts : []) {
         const rec = row as { level?: unknown; n?: unknown; last_at?: unknown; first_at?: unknown };
+        // ISO8601-UTC lexicographic comparison: safe only while created_at stays
+        // zero-padded UTC from toISOString() — pin this precondition here.
         const firstAt = asNullableString(rec.first_at);
         if (firstAt !== null && (observedFrom === null || firstAt < observedFrom)) observedFrom = firstAt;
         if (rec.level === 'effect') {
-          if (typeof rec.n === 'number') effectCount = rec.n;
-          else countsUnreadable = true;
+          effectCount = typeof rec.n === 'number' ? rec.n : 0;
           lastEffectAt = asNullableString(rec.last_at);
         } else if (rec.level === 'presence') {
-          if (typeof rec.n === 'number') presenceCount = rec.n;
-          else countsUnreadable = true;
+          presenceCount = typeof rec.n === 'number' ? rec.n : 0;
         } else {
           // Rows exist outside the effect/presence level space (schema drift /
           // tampering) — the two counts above silently miss them, so the
@@ -210,7 +209,9 @@ export class ReceiptsConsoleModel {
           levelAnomaly = true;
         }
       }
-      const malformedReasonCode = levelAnomaly ? 'ledger_level_invalid' : countsUnreadable ? 'ledger_counts_unreadable' : undefined;
+      // COUNT(*) in a GROUP BY output is always a number — no unreadable-counts
+      // branch exists on this endpoint (ERR-099: no unreachable conditionals).
+      const malformedReasonCode = levelAnomaly ? 'ledger_level_invalid' : undefined;
       const partialReasonCode = droppedRows > 0 ? 'receipt_rows_dropped' : undefined;
       const validation = resolveValidation(malformedReasonCode, partialReasonCode);
       return {
@@ -260,8 +261,12 @@ export class ReceiptsConsoleModel {
                 SUM(CASE WHEN level = 'effect' THEN 1 ELSE 0 END) AS effect_count,
                 SUM(CASE WHEN level = 'presence' THEN 1 ELSE 0 END) AS presence_count,
                 MAX(CASE WHEN level = 'effect' THEN created_at END) AS last_effect_at,
-                COUNT(*) AS total_count
-         FROM principle_applications GROUP BY principle_id`,
+                COUNT(*) AS total_count,
+                SUM(CASE WHEN kind NOT IN ('rule_blocked','auto_correct_applied','self_reported','prompt_injected') THEN 1 ELSE 0 END) AS invalid_kind_count
+          FROM principle_applications GROUP BY principle_id`,
+      // invalid_kind_count mirrors the timeline's KINDS set (toEvent): rows with
+      // an unknown kind are dropped from the detail timeline (partial) — the
+      // counts endpoint must reach the SAME verdict for the same table.
       ).all() as unknown;
       // Global observed range (the retention sweep is table-wide, not per principle).
       const firstAtRow = conn.getDb().prepare(
@@ -271,7 +276,7 @@ export class ReceiptsConsoleModel {
       const counts: ReceiptCountEntry[] = [];
       let skippedRows = 0;
       let levelAnomaly = false;
-      let countsUnreadable = false;
+      let kindAnomaly = false;
       for (const row of Array.isArray(rows) ? rows : []) {
         const rec = row as Record<string, unknown>;
         const principleId = asNullableString(rec.principle_id);
@@ -279,13 +284,20 @@ export class ReceiptsConsoleModel {
           skippedRows++;
           continue;
         }
+        // SUM(CASE ... ELSE 0 END) / COUNT(*) in GROUP BY output are always
+        // numbers — no unreadable-counts branch exists on this endpoint
+        // (ERR-099: no unreachable conditionals).
         const effectCount = typeof rec.effect_count === 'number' ? rec.effect_count : 0;
         const presenceCount = typeof rec.presence_count === 'number' ? rec.presence_count : 0;
-        if (typeof rec.effect_count !== 'number' || typeof rec.presence_count !== 'number') countsUnreadable = true;
         if (typeof rec.total_count === 'number' && rec.total_count > effectCount + presenceCount) {
           // Rows outside the effect/presence level space inflate the row total
           // without landing in either count — the aggregate is untrustworthy.
           levelAnomaly = true;
+        }
+        if (typeof rec.invalid_kind_count === 'number' && rec.invalid_kind_count > 0) {
+          // Unknown-kind rows are still counted (valid level) but the detail
+          // timeline drops them — align the partial verdict across endpoints.
+          kindAnomaly = true;
         }
         counts.push({
           principleId,
@@ -294,8 +306,8 @@ export class ReceiptsConsoleModel {
           lastEffectAt: asNullableString(rec.last_effect_at),
         });
       }
-      const malformedReasonCode = levelAnomaly ? 'ledger_level_invalid' : countsUnreadable ? 'ledger_counts_unreadable' : undefined;
-      const partialReasonCode = skippedRows > 0 ? 'receipt_rows_dropped' : undefined;
+      const malformedReasonCode = levelAnomaly ? 'ledger_level_invalid' : undefined;
+      const partialReasonCode = skippedRows > 0 || kindAnomaly ? 'receipt_rows_dropped' : undefined;
       const validation = resolveValidation(malformedReasonCode, partialReasonCode);
       return {
         status: 'ok',

@@ -99,6 +99,22 @@ registry.given(/原则 princ-B 有一条 level 异常的脏记录/, () => {
   conn.close();
 });
 
+registry.given(/原则 princ-B 有一条 kind 异常的脏记录/, () => {
+  // Schema drift / tampering simulation — bypasses the writer-side CHECK.
+  // Level stays valid (so counts stay arithmetically correct) but the unknown
+  // kind is dropped from the detail timeline; both endpoints must agree on
+  // the partial verdict (endpoint parity contract).
+  const conn = new SqliteConnection(workspaceDir);
+  const db = conn.getDb();
+  db.pragma('ignore_check_constraints = 1');
+  db.prepare(`
+    INSERT INTO principle_applications (principle_id, channel, level, kind, session_id, digest, created_at)
+    VALUES ('princ-B', 'prompt', 'effect', 'weird-kind', NULL, NULL, '2026-08-16T07:00:00.000Z')
+  `).run();
+  db.pragma('ignore_check_constraints = 0');
+  conn.close();
+});
+
 registry.given(/\.pd\/config\.yaml 关闭 principle_receipt_self_report/, () => {
   expect(updateFeatureFlag(workspaceDir, 'principle_receipt_self_report', false).ok).toBe(true);
 });
@@ -178,8 +194,16 @@ registry.then(/生效计数的 coverage validationStatus=malformed/, () => {
   expect(countsResult?.coverage.validationStatus).toBe('malformed');
 });
 
+registry.then(/生效计数的 coverage validationStatus=partial/, () => {
+  expect(countsResult?.coverage.validationStatus).toBe('partial');
+});
+
 registry.then(/生效计数的 coverage reasonCode 为 ledger_level_invalid/, () => {
   expect(countsResult?.coverage.reasonCode).toBe('ledger_level_invalid');
+});
+
+registry.then(/生效计数的 coverage reasonCode 为 receipt_rows_dropped/, () => {
+  expect(countsResult?.coverage.reasonCode).toBe('receipt_rows_dropped');
 });
 
 beforeEach(() => {

@@ -63,6 +63,14 @@ Feature: Principle Receipt — Console 生效履历展示 (PRI-533)
     Then 生效计数的 coverage validationStatus=malformed
     And 生效计数的 coverage reasonCode 为 ledger_level_invalid
 
+  Scenario: kind 异常的脏行让两端可信度判定一致（partial 而非 valid）
+    Given 一个已安装 PD 的工作区，且 .pd/config.yaml 启用 principle_receipt_ledger
+    And 原则 princ-A 有一条 effect 记录
+    And 原则 princ-B 有一条 kind 异常的脏记录
+    When 查询全部原则的生效计数
+    Then 生效计数的 coverage validationStatus=partial
+    And 生效计数的 coverage reasonCode 为 receipt_rows_dropped
+
   Scenario: self-report 独立关闭不影响 coverage 可用性
     Given 一个已安装 PD 的工作区，且 .pd/config.yaml 启用 principle_receipt_ledger
     And .pd/config.yaml 关闭 principle_receipt_self_report
