@@ -376,6 +376,10 @@ export function ActivationPage() {
   const [receiptDegraded, setReceiptDegraded] = useState<{ reason: string; nextAction?: string } | null>(null);
   // PRI-590: page-level coverage disclosure for the receipt counts.
   const [receiptCoverage, setReceiptCoverage] = useState<ReceiptEvidenceCoverageData | null>(null);
+  // PRI-594: unknown is never presented as a trustworthy zero — when the ledger
+  // is malformed the per-card count rows are omitted and the page-level
+  // coverage block carries the "requires recovery" verdict instead.
+  const receiptCountsUntrustworthy = receiptCoverage !== null && receiptCoverage.validationStatus === "malformed";
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [disablingIds, setDisablingIds] = useState<Set<string>>(new Set());
@@ -615,11 +619,11 @@ export function ActivationPage() {
           className="mt-4 text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2"
           data-testid="receipt-counts-degraded"
         >
-          {/* PRI-590: localized zero-state headline (disabled vs unavailable) when coverage is known */}
+          {/* PRI-590: localized zero-state headline (disabled vs unavailable) when coverage is known.
+              Own line — locale-neutral, no inline separator. */}
           {receiptCoverage !== null && (
-            <span className="font-medium text-ink-3">{t(getReceiptSourceStatusLabelKey(receiptCoverage.sourceStatus))}</span>
+            <span className="block font-medium text-ink-3">{t(getReceiptSourceStatusLabelKey(receiptCoverage.sourceStatus))}</span>
           )}
-          {receiptCoverage !== null ? ". " : ""}
           {t("pages.activation.receiptsUnavailable", { reason: receiptDegraded.reason })}
           {receiptDegraded.nextAction && (
             <span className="mt-1 block font-mono text-[12px]">{receiptDegraded.nextAction}</span>
@@ -654,7 +658,7 @@ export function ActivationPage() {
                 key={record.activationId}
                 record={record}
                 lifecycleData={lifecycleCache[record.principleId]}
-                receiptCount={receiptCounts !== null ? (Object.hasOwn(receiptCounts, record.principleId) ? receiptCounts[record.principleId] : null) : undefined}
+                receiptCount={receiptCounts !== null && !receiptCountsUntrustworthy ? (Object.hasOwn(receiptCounts, record.principleId) ? receiptCounts[record.principleId] : null) : undefined}
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
                 onChanged={() => void loadData()}
@@ -680,7 +684,7 @@ export function ActivationPage() {
                 key={record.activationId}
                 record={record}
                 lifecycleData={lifecycleCache[record.principleId]}
-                receiptCount={receiptCounts !== null ? (Object.hasOwn(receiptCounts, record.principleId) ? receiptCounts[record.principleId] : null) : undefined}
+                receiptCount={receiptCounts !== null && !receiptCountsUntrustworthy ? (Object.hasOwn(receiptCounts, record.principleId) ? receiptCounts[record.principleId] : null) : undefined}
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
                 onChanged={() => void loadData()}

@@ -120,4 +120,11 @@ describe('PRI-590 receipt evidence coverage disclosure', () => {
     // event-level fields (property access pattern, doc comments excluded).
     expect(coverageComponent).not.toMatch(/\.(filePath|digest|toolName|sessionId)\b/);
   });
+
+  it('suppresses per-card count rows when the ledger verdict is malformed (unknown ≠ zero)', () => {
+    // PRI-594: a malformed ledger must not render 0/0 rows as if they were a
+    // true zero — the page-level coverage block carries the recovery verdict.
+    expect(activationPage).toContain('receiptCountsUntrustworthy');
+    expect(activationPage).toContain('receiptCoverage.validationStatus === "malformed"');
+  });
 });

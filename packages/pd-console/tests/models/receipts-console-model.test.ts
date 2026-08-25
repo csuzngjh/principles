@@ -11,10 +11,11 @@
  * ERR entries: ERR-002 (degradation carries reason), ERR-001/005 (rows narrowed
  * with typeof, no as bypass).
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import Database from 'better-sqlite3';
 import { ReceiptsConsoleModel } from '../../src/server/models/ReceiptsConsoleModel.js';
 import { updateFeatureFlag } from '../../src/server/config/pd-config-store.js';
 import { SqliteConnection } from '@principles/core/runtime-v2';
@@ -351,5 +352,25 @@ describe('ReceiptsConsoleModel — evidence coverage (PRI-590)', () => {
     const asOfMs = new Date(first.coverage.asOf).getTime();
     expect(asOfMs).toBeGreaterThanOrEqual(before);
     expect(asOfMs).toBeLessThanOrEqual(after);
+  });
+
+  it('issues a constant number of prepared statements regardless of principle count (no N+1)', async () => {
+    enableLedgerFlag();
+    seedLedger([
+      { principleId: 'princ-A', kind: 'rule_blocked', level: 'effect', createdAt: '2026-08-14T10:00:00.000Z' },
+      { principleId: 'princ-B', kind: 'rule_blocked', level: 'effect', createdAt: '2026-08-15T10:00:00.000Z' },
+      { principleId: 'princ-C', kind: 'prompt_injected', level: 'presence', createdAt: '2026-08-16T10:00:00.000Z' },
+    ]);
+    const prepareSpy = vi.spyOn(Database.prototype, 'prepare');
+    try {
+      const counts = await model.getReceiptCounts();
+      expect(counts.status).toBe('ok');
+      expect(counts.counts).toHaveLength(3);
+      // 1 aggregate GROUP BY + 1 global MIN scalar — independent of how many
+      // principles hold receipts (spec PRI-594: no N+1 queries).
+      expect(prepareSpy.mock.calls.length).toBe(2);
+    } finally {
+      prepareSpy.mockRestore();
+    }
   });
 });
