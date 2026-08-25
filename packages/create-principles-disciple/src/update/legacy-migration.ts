@@ -88,7 +88,7 @@ function readOverlayProductVersion(overlayDir: string): string {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new ProductIdentityError('overlay', 'The overlay plugin manifest is not an object.');
   }
-  const {version} = (value as Record<string, unknown>);
+  const version: unknown = Reflect.get(value, 'version');
   return parseProductVersion(version, 'overlay.plugin.version').productVersion;
 }
 

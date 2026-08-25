@@ -115,10 +115,9 @@ function readActiveRecord(paths: PdHomePaths): ActiveRecord | null {
       'Run the official installer recovery or an explicit update operation; the last journal-confirmed release is selected automatically.',
     );
   }
-  const record = value as Record<string, unknown>;
-  const {generation} = record;
-  const {releaseId} = record;
-  const {productVersion} = record;
+  const generation: unknown = Reflect.get(value, 'generation');
+  const releaseId: unknown = Reflect.get(value, 'releaseId');
+  const productVersion: unknown = Reflect.get(value, 'productVersion');
   if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 1
     || typeof releaseId !== 'string' || releaseId.length === 0
     || typeof productVersion !== 'string' || productVersion.length === 0) {

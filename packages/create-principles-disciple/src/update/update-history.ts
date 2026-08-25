@@ -54,6 +54,16 @@ const HISTORY_KINDS: ReadonlySet<string> = new Set([
   'update', 'reinstall', 'channel_promotion', 'legacy_migration', 'rollback', 'refusal', 'recovery',
 ]);
 
+const HISTORY_DIRECTIONS: ReadonlySet<string> = new Set(['forward', 'backward', 'none']);
+
+const HISTORY_OUTCOMES: ReadonlySet<string> = new Set(['succeeded', 'refused', 'failed', 'recovered']);
+
+const isHistoryKind = (value: string): value is HistoryKind => HISTORY_KINDS.has(value);
+
+const isHistoryDirection = (value: string): value is HistoryDirection => HISTORY_DIRECTIONS.has(value);
+
+const isHistoryOutcome = (value: string): value is HistoryOutcome => HISTORY_OUTCOMES.has(value);
+
 /**
  * Direction is derived from canonical publication sequences: forward when the
  * event's release is newer than the previous one, backward when older,
@@ -110,19 +120,36 @@ export function readHistoryEvents(historyFilePath: string): UpdateHistoryEvent[]
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       throw new UpdateHistoryError('line', 'history lines must be objects');
     }
-    const record = parsed as Record<string, unknown>;
+    const read = (field: string): unknown => Reflect.get(parsed, field);
+    const fail = (field: string, value: unknown): never => {
+      throw new UpdateHistoryError('line', `history field "${field}" has invalid type: ${JSON.stringify(value)}`);
+    };
+    const requireString = (field: string): string => {
+      const value = read(field);
+      return typeof value === 'string' ? value : fail(field, value);
+    };
+    const stringOrNull = (field: string): string | null => {
+      const value = read(field);
+      if (value === null || value === undefined) return null;
+      return typeof value === 'string' ? value : fail(field, value);
+    };
+    // Enum fields are narrowed through their closed vocabularies before
+    // construction; validateEvent below re-checks cross-field contracts.
+    const kindValue = requireString('kind');
+    const directionValue = requireString('direction');
+    const outcomeValue = requireString('outcome');
     const event: UpdateHistoryEvent = {
-      at: record.at as string,
-      kind: record.kind as HistoryKind,
-      direction: record.direction as HistoryDirection,
-      outcome: record.outcome as HistoryOutcome,
-      productVersion: (record.productVersion ?? null) as string | null,
-      releaseId: (record.releaseId ?? null) as string | null,
-      previousReleaseId: (record.previousReleaseId ?? null) as string | null,
-      previousRemainsActive: record.previousRemainsActive === true,
-      reason: (record.reason ?? null) as string | null,
-      nextAction: (record.nextAction ?? null) as string | null,
-      transactionId: (record.transactionId ?? null) as string | null,
+      at: requireString('at'),
+      kind: isHistoryKind(kindValue) ? kindValue : fail('kind', kindValue),
+      direction: isHistoryDirection(directionValue) ? directionValue : fail('direction', directionValue),
+      outcome: isHistoryOutcome(outcomeValue) ? outcomeValue : fail('outcome', outcomeValue),
+      productVersion: stringOrNull('productVersion'),
+      releaseId: stringOrNull('releaseId'),
+      previousReleaseId: stringOrNull('previousReleaseId'),
+      previousRemainsActive: read('previousRemainsActive') === true,
+      reason: stringOrNull('reason'),
+      nextAction: stringOrNull('nextAction'),
+      transactionId: stringOrNull('transactionId'),
     };
     validateEvent(event);
     events.push(event);

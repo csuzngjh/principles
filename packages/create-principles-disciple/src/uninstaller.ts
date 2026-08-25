@@ -216,7 +216,7 @@ function getWorkspacePath(): string | null {
   try {
     const config: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
     if (config && typeof config === 'object' && !Array.isArray(config)) {
-      const { workspace } = config as Record<string, unknown>;
+      const workspace: unknown = Reflect.get(config, 'workspace');
       return typeof workspace === 'string' && workspace.length > 0 ? workspace : null;
     }
     return null;

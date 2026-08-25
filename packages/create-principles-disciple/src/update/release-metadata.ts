@@ -232,28 +232,27 @@ export function buildReleaseMetadata(input: {
   dataSchemaForwardReadableFrom: string;
 }): ReleaseMetadata {
   const releaseId = deriveReleaseId(input);
-  const withoutDigest: Record<string, unknown> = {
+  const metadata: ReleaseMetadata = {
     schemaVersion: RELEASE_METADATA_SCHEMA_VERSION,
     productVersion: input.productVersion,
     releaseId,
     sourceCommit: input.sourceCommit,
+    metadataDigest: '',
     minBootstrapVersion: input.minBootstrapVersion,
     publicationSequence: input.publicationSequence,
     expiresAt: input.expiresAt,
     assets: [...input.assets],
     compatibility: { dataSchemaForwardReadableFrom: input.dataSchemaForwardReadableFrom },
   };
-  const metadataDigest = computeReleaseContentDigest(withoutDigest);
-  const metadata: ReleaseMetadata = {
-    ...(withoutDigest as unknown as ReleaseMetadata),
-    metadataDigest,
-  };
-  verifyReleaseMetadataIdentity(metadata);
-  return metadata;
+  const metadataDigest = computeReleaseContentDigest(metadataToJsonValue(metadata));
+  const complete: ReleaseMetadata = { ...metadata, metadataDigest };
+  verifyReleaseMetadataIdentity(complete);
+  return complete;
 }
 
 export function isReleaseMetadata(value: unknown): value is ReleaseMetadata {
-  if (!isSha256Hex((value as { releaseId?: unknown })?.releaseId)) return false;
+  if (typeof value !== 'object' || value === null) return false;
+  if (!isSha256Hex(Reflect.get(value, 'releaseId'))) return false;
   try {
     parseReleaseMetadata(value);
     return true;
