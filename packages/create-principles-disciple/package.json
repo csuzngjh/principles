@@ -36,6 +36,7 @@
   "license": "MIT",
   "dependencies": {
     "@principles/install-layout": "0.1.0",
+    "@tufjs/models": "3.0.1",
     "@inquirer/prompts": "^8.5.2",
     "commander": "^14.0.3",
     "fs-extra": "^11.4.0",
@@ -43,7 +44,8 @@
     "ora": "^9.4.0",
     "picocolors": "^1.0.0",
     "semver": "^7.8.5",
-    "tar": "^7.5.15"
+    "tar": "^7.5.15",
+    "tuf-js": "3.1.0"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",

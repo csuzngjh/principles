@@ -1,0 +1,151 @@
+import { type Fetcher, Updater } from 'tuf-js';
+
+export type ReleaseTrustErrorCode =
+  | 'invalid_request'
+  | 'metadata_refresh_failed'
+  | 'target_not_found'
+  | 'target_identity_mismatch'
+  | 'target_integrity_missing';
+
+interface ReleaseTrustErrorOptions {
+  code: ReleaseTrustErrorCode;
+  message: string;
+  nextAction: string;
+  cause?: unknown;
+}
+
+export class ReleaseTrustError extends Error {
+  readonly code: ReleaseTrustErrorCode;
+  readonly nextAction: string;
+
+  constructor(options: ReleaseTrustErrorOptions) {
+    super(options.message, { cause: options.cause });
+    this.name = 'ReleaseTrustError';
+    this.code = options.code;
+    this.nextAction = options.nextAction;
+  }
+}
+
+export interface ResolveTrustedReleaseTargetOptions {
+  metadataDir: string;
+  metadataBaseUrl: string;
+  targetPath: string;
+  expectedChannel: string;
+  expectedPlatform: string;
+  fetcher?: Fetcher;
+}
+
+export interface TrustedReleaseTarget {
+  artifactSha256: string;
+  artifactSize: number;
+  channel: string;
+  platform: string;
+  releaseId: string;
+  targetPath: string;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasRequiredOptions(options: ResolveTrustedReleaseTargetOptions): boolean {
+  return isNonEmptyString(options.metadataDir)
+    && isNonEmptyString(options.metadataBaseUrl)
+    && isNonEmptyString(options.targetPath)
+    && isNonEmptyString(options.expectedChannel)
+    && isNonEmptyString(options.expectedPlatform);
+}
+
+function readSignedIdentity(custom: Record<string, unknown>): {
+  channel: string;
+  platform: string;
+  releaseId: string;
+} {
+  const releaseId = Object.hasOwn(custom, 'releaseId') ? custom.releaseId : undefined;
+  const channel = Object.hasOwn(custom, 'channel') ? custom.channel : undefined;
+  const platform = Object.hasOwn(custom, 'platform') ? custom.platform : undefined;
+  if (!isNonEmptyString(releaseId) || !isNonEmptyString(channel) || !isNonEmptyString(platform)) {
+    throw new ReleaseTrustError({
+      code: 'target_identity_mismatch',
+      message: 'The signed target is missing a release ID, channel, or platform identity.',
+      nextAction: 'Do not install this release. Publish complete signed target metadata and retry.',
+    });
+  }
+  return { releaseId, channel, platform };
+}
+
+function readArtifactSha256(hashes: Record<string, string>): string {
+  const sha256 = Object.hasOwn(hashes, 'sha256') ? hashes.sha256 : undefined;
+  if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(sha256)) {
+    throw new ReleaseTrustError({
+      code: 'target_integrity_missing',
+      message: 'The signed target does not contain a valid SHA-256 artifact hash.',
+      nextAction: 'Do not install this release. Publish signed target metadata with a SHA-256 hash and retry.',
+    });
+  }
+  return sha256.toLowerCase();
+}
+
+/**
+ * Resolves a release target only after the official TUF client verifies the
+ * trusted-root → timestamp → snapshot → targets metadata chain.
+ *
+ * This module deliberately does not download or install the target. Phase 1
+ * uses it as an independently testable trust boundary before update execution
+ * is wired to the new release system.
+ */
+export async function resolveTrustedReleaseTarget(
+  options: ResolveTrustedReleaseTargetOptions,
+): Promise<TrustedReleaseTarget> {
+  if (!hasRequiredOptions(options)) {
+    throw new ReleaseTrustError({
+      code: 'invalid_request',
+      message: 'Trusted release verification requires metadata storage, a repository URL, target path, channel, and platform.',
+      nextAction: 'Correct the release verification request before retrying.',
+    });
+  }
+
+  let target;
+  try {
+    const updater = new Updater({
+      metadataDir: options.metadataDir,
+      metadataBaseUrl: options.metadataBaseUrl,
+      fetcher: options.fetcher,
+    });
+    await updater.refresh();
+    target = await updater.getTargetInfo(options.targetPath);
+  } catch (error) {
+    throw new ReleaseTrustError({
+      code: 'metadata_refresh_failed',
+      message: 'Release metadata could not be verified against the trusted root.',
+      nextAction: 'Do not install this release. Check the signed release repository and retry after the metadata issue is resolved.',
+      cause: error,
+    });
+  }
+
+  if (!target) {
+    throw new ReleaseTrustError({
+      code: 'target_not_found',
+      message: `No signed target exists for ${options.targetPath}.`,
+      nextAction: 'Do not install this release. Publish the target in signed metadata or select a supported channel and platform.',
+    });
+  }
+
+  const identity = readSignedIdentity(target.custom);
+  if (identity.channel !== options.expectedChannel || identity.platform !== options.expectedPlatform) {
+    throw new ReleaseTrustError({
+      code: 'target_identity_mismatch',
+      message: `The signed target identity (${identity.channel}/${identity.platform}) does not match the requested channel and platform (${options.expectedChannel}/${options.expectedPlatform}).`,
+      nextAction: 'Do not install this release. Select the matching signed channel and platform target.',
+    });
+  }
+
+  return {
+    artifactSha256: readArtifactSha256(target.hashes),
+    artifactSize: target.length,
+    channel: identity.channel,
+    platform: identity.platform,
+    releaseId: identity.releaseId,
+    targetPath: target.path,
+  };
+}
