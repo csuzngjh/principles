@@ -1203,6 +1203,15 @@
       "noHistory": "No update history available.",
       "version": "Version",
       "failed": "Failed",
+      "historyKind": {
+        "update": "Update",
+        "reinstall": "Reinstall",
+        "legacy_migration": "Legacy migration",
+        "rollback": "Rollback",
+        "refusal": "Refused",
+        "failure": "Failed",
+        "recovery": "Recovery"
+      },
       "checkError": "Check error",
       "syncPending": "Version {{pluginVersion}} is published, but the installer is syncing (you can update to the version shown above for now). Please try again later.",
       "loadError": "Unable to load update data. You can try refreshing the page.",

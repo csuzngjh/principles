@@ -1288,7 +1288,7 @@ describe('validateUpdateHistory', () => {
   it('accepts valid update history', () => {
     const result = validateUpdateHistory({
       updates: [
-        { id: 'upd-1', timestamp: '2026-06-01T00:00:00Z', fromVersion: '1.0.0', toVersion: '1.1.0', success: true },
+        { id: 'upd-1', timestamp: '2026-06-01T00:00:00Z', fromVersion: '1.0.0', toVersion: '1.1.0', success: true, kind: 'update' },
       ],
     });
     expect(result).not.toBeNull();
