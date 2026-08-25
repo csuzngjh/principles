@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import * as http from 'http';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
@@ -12,23 +12,36 @@ let installLayoutTarballPath: string;
 let tempHomeDir: string;
 let tempWorkspaceDir: string;
 
-function npmExecSync(args: string[], options: Record<string, unknown> = {}): Buffer {
-  const cmd = ['npm', ...args].join(' ');
-  return execSync(cmd, {
-    ...options,
-    shell: true,
-    env: { ...process.env, ...(options.env as Record<string, string> ?? {}) },
-  });
+// npm is invoked as `node <npm-cli.js> <args>` with argv arrays only — no
+// shell strings, and no bare `npm`/`npm.cmd` spawn (EINVAL on Windows).
+function resolveNpmCliEntry(): string {
+  const nodeDir = path.dirname(process.execPath);
+  for (const candidate of [
+    path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(path.dirname(nodeDir), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ]) {
+    if (fs.existsSync(candidate)) return path.resolve(candidate);
+  }
+  throw new Error(`npm-cli.js not found near ${process.execPath}`);
 }
 
-function npmInstallSync(tarball: string, cwd: string, env?: Record<string, string>): void {
-  execSync(`npm install "${installLayoutTarballPath}" "${tarball}"`, {
-    cwd,
-    shell: true,
-    stdio: 'pipe',
-    env: { ...process.env, ...(env ?? {}) },
-    timeout: 180_000,
+type ExecFileAsync = (file: string, args: readonly string[], options: Record<string, unknown>) => Promise<{ stdout: string; stderr: string }>;
+
+async function loadExecFileAsync(): Promise<ExecFileAsync> {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile);
+  return (file, args, options) => execFileAsync(file, args, options) as Promise<{ stdout: string; stderr: string }>;
+}
+
+async function npmRun(args: readonly string[], options: Record<string, unknown> = {}): Promise<string> {
+  const execFileAsync = await loadExecFileAsync();
+  const npmCli = resolveNpmCliEntry();
+  const { stdout } = await execFileAsync(process.execPath, [npmCli, ...args], {
+    ...options,
+    env: { ...process.env, ...((options.env as Record<string, string>) ?? {}) },
   });
+  return stdout;
 }
 
 function cleanupDir(dir: string): void {
@@ -43,22 +56,20 @@ function getInstalledConsoleDir(homeDir: string): string {
   return path.join(homeDir, '.pd', 'runtime', 'console');
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   const installLayoutDir = path.resolve(INSTALLER_DIR, '..', 'install-layout');
-  const installLayoutPackOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
+  const installLayoutPackOutput = await npmRun(['pack', '--pack-destination', TMPDIR], {
     cwd: installLayoutDir,
-    stdio: 'pipe',
     timeout: 120_000,
-  }).toString().trim();
+  });
   const installLayoutTarballName = installLayoutPackOutput.split('\n').map(line => line.trim()).filter(Boolean).at(-1);
   if (!installLayoutTarballName?.endsWith('.tgz')) throw new Error('install-layout npm pack did not produce a tarball');
   installLayoutTarballPath = path.resolve(TMPDIR, installLayoutTarballName);
 
-  const packOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
+  const packOutput = await npmRun(['pack', '--pack-destination', TMPDIR], {
     cwd: INSTALLER_DIR,
-    stdio: 'pipe',
     timeout: 300_000,
-  }).toString().trim();
+  });
 
   const lines = packOutput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const tarballName = lines[lines.length - 1];
@@ -71,6 +82,38 @@ beforeAll(() => {
   if (!fs.existsSync(tarballPath)) {
     throw new Error(`Tarball not found at ${tarballPath}`);
   }
+
+  // Materialize self-contained component trees in the package root using the
+  // committed release locks, then stamp the release asset identity in place
+  // (_release/asset.json + manifest.json). The packaged-install CLI test
+  // below executes the built installer directly, so PLUGIN_DIR must be a
+  // complete self-contained release asset — npm's tarball representation
+  // strips node_modules and never carries _release/.
+  const bundleEntry = path.resolve(INSTALLER_DIR, 'scripts', 'bundle-plugin.mjs');
+  if (!bundleEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(bundleEntry)) {
+    throw new Error(`Bundler entry is missing: ${bundleEntry}`);
+  }
+  const execFileAsync = await loadExecFileAsync();
+  await execFileAsync(process.execPath, [bundleEntry, '--self-contained'], {
+    cwd: INSTALLER_DIR,
+    timeout: 600_000,
+  });
+  const assetStampEntry = path.resolve(INSTALLER_DIR, 'scripts', 'build-release-asset.mjs');
+  if (!assetStampEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(assetStampEntry)) {
+    throw new Error(`Release asset stamping entry is missing: ${assetStampEntry}`);
+  }
+  await execFileAsync(process.execPath, [
+    assetStampEntry,
+    '--input', INSTALLER_DIR,
+    '--output', INSTALLER_DIR,
+    '--in-place', 'true',
+    '--platform', process.platform,
+    '--arch', process.arch,
+    '--node-abi', process.versions.modules,
+  ], {
+    cwd: INSTALLER_DIR,
+    timeout: 600_000,
+  });
 
   tempHomeDir = path.join(TMPDIR, `pd-smoke-home-${Date.now()}`);
   tempWorkspaceDir = path.join(TMPDIR, `pd-smoke-ws-${Date.now()}`);
@@ -119,10 +162,14 @@ describe('Real packaged install smoke test', () => {
     expect(tarOutput).toContain('plugin/dist/governance-audit.js');
   }, 60_000);
 
-  it('install to clean temp HOME succeeds', () => {
-    npmInstallSync(tarballPath, tempHomeDir, {
-      HOME: tempHomeDir,
-      USERPROFILE: tempHomeDir,
+  it('install to clean temp HOME succeeds', async () => {
+    await npmRun(['install', installLayoutTarballPath, tarballPath], {
+      cwd: tempHomeDir,
+      timeout: 180_000,
+      env: {
+        HOME: tempHomeDir,
+        USERPROFILE: tempHomeDir,
+      },
     });
     const pkgJsonPath = path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'package.json');
     expect(fs.existsSync(pkgJsonPath)).toBe(true);
@@ -137,6 +184,87 @@ describe('Real packaged install smoke test', () => {
     expect(pluginPkgJson.dependencies?.['@principles/host-runtime']).toBeUndefined();
     expect(pluginPkgJson.devDependencies?.['@principles/host-runtime']).toBeUndefined();
   }, 240_000);
+
+  it('production self-contained bundle installs with no npm invocation', async () => {
+    // npm pack's prepack runs the real production bundler. Execute that built
+    // installer directly so PLUGIN_DIR points at the self-contained component
+    // trees (including node_modules) rather than npm's node_modules-stripped
+    // tarball representation.
+    const cliEntry = path.resolve(INSTALLER_DIR, 'dist', 'index.js');
+    if (!cliEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(cliEntry)) {
+      throw new Error(`CLI build output is missing: ${cliEntry}`);
+    }
+    const fakeBinDir = path.join(tempHomeDir, 'bin');
+    const npmPoisonMarker = path.join(tempHomeDir, 'npm-was-invoked');
+    const npmPoison = path.join(fakeBinDir, process.platform === 'win32' ? 'npm.cmd' : 'npm');
+    fs.writeFileSync(
+      npmPoison,
+      process.platform === 'win32'
+        ? `@echo off\r\n>"${npmPoisonMarker}" echo invoked\r\nexit /b 97\r\n`
+        : `#!/bin/sh\nprintf invoked > "${npmPoisonMarker}"\nexit 97\n`,
+      'utf-8',
+    );
+    if (process.platform !== 'win32') fs.chmodSync(npmPoison, 0o755);
+
+    let stdout = '';
+    let stderr = '';
+    const execFileAsync = await loadExecFileAsync();
+    const npmWasInvokedBefore = fs.existsSync(npmPoisonMarker);
+    try {
+      const result = await execFileAsync(process.execPath, [
+        cliEntry,
+        '--yes',
+        '--workspace', tempWorkspaceDir,
+        '--json',
+      ], {
+        env: {
+          ...process.env,
+          HOME: tempHomeDir,
+          USERPROFILE: tempHomeDir,
+          // Skip npm upgrade so we test the bundled pd-cli (built from current
+          // repo state) rather than the npm-published version, which may be
+          // incompatible with local core changes (e.g., removed exports).
+          PD_SKIP_NPM_UPGRADE: '1',
+          PD_SKIP_GLOBAL_SHIM: '1',
+        },
+        timeout: 600_000,
+      });
+      stdout = result.stdout;
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; stderr?: string };
+      stdout = err.stdout ?? '';
+      stderr = err.stderr ?? '';
+      if (stdout.trim().length === 0) {
+        throw new Error(`Installer CLI failed without stdout. stderr=${stderr.slice(0, 2000)}`);
+      }
+    }
+    const npmWasInvoked = fs.existsSync(npmPoisonMarker) || npmWasInvokedBefore;
+    fs.rmSync(npmPoison, { force: true });
+    fs.rmSync(npmPoisonMarker, { force: true });
+
+    if (!stdout.trim()) {
+      throw new Error(`No stdout output. stderr=${stderr.slice(0, 2000)}`);
+    }
+
+    const parsed: unknown = JSON.parse(stdout);
+    expect(typeof parsed).toBe('object');
+    expect(parsed).not.toBeNull();
+    if (typeof parsed === 'object' && parsed !== null) {
+      const obj = parsed as Record<string, unknown>;
+      if (!obj['success']) {
+        throw new Error(`Install failed: reason=${obj['reason']}, error=${obj['error']}, nextAction=${obj['nextAction']}, components=${JSON.stringify(obj['components'])}, stderr=${stderr.slice(0, 1000)}`);
+      }
+      expect(obj['success']).toBe(true);
+      expect(obj['components']).toBeDefined();
+      const components = obj['components'] as Record<string, unknown>;
+      expect(components['plugin']).toBe('verified');
+      expect(['verified', 'verified_local_only']).toContain(components['cli']);
+      expect(components['console']).toBe('configured');
+      const verification = obj['verification'] as Record<string, unknown>;
+      expect(verification['storyA']).toBe('passed');
+    }
+    expect(npmWasInvoked).toBe(false);
+  }, 600_000);
 
   it('installer demo verification does not pollute the user workspace', () => {
     // P0-1 anti-regression: the installer's Story A verification must run in
@@ -220,7 +348,7 @@ describe('Real packaged install smoke test', () => {
   }, 60_000);
 
   it('tarball ships exactly the approved 5 skills and no legacy skill payload', () => {
-    // P1-4: the installer package must not carry its own (historical,
+    // P1-4: the installer package must not carry its own (historically
     // unread) skill tree, and the bundled plugin must ship exactly the
     // maintainer-approved MVP skill set in both languages.
     const APPROVED_SKILLS = [
@@ -325,10 +453,10 @@ describe('Real packaged install smoke test', () => {
       try { child.kill('SIGKILL'); } catch { /* ignore */ }
     }
 
-    expect(healthOk).toBe(true);
+    expect(healthOk, healthReason).toBe(true);
   }, 60_000);
 
-  it('console refuses --no-auth with non-loopback host', () => {
+  it('console refuses --no-auth with non-loopback host', async () => {
     const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);
     const serverEntry = path.join(installedConsoleDir, 'dist', 'server.js');
     if (!fs.existsSync(serverEntry)) {
@@ -336,41 +464,40 @@ describe('Real packaged install smoke test', () => {
     }
 
     const port = 3300 + Math.floor(Math.random() * 100);
-    let exitCode: number | null = null;
-    try {
-      execFileSync(process.execPath, [
-        serverEntry,
-        '--workspace', tempWorkspaceDir,
-        '--port', String(port),
-        '--host', '0.0.0.0',
-        '--no-auth',
-      ], {
-        stdio: 'pipe',
-        env: {
-          ...process.env,
-          HOME: tempHomeDir,
-          USERPROFILE: tempHomeDir,
-        },
-        timeout: 10_000,
-      });
-    } catch (e: unknown) {
-      const err = e as { status?: number };
-      exitCode = err.status ?? 1;
-    }
+    const execFileAsync = await loadExecFileAsync();
+    const failure = await execFileAsync(process.execPath, [
+      serverEntry,
+      '--workspace', tempWorkspaceDir,
+      '--port', String(port),
+      '--host', '0.0.0.0',
+      '--no-auth',
+    ], {
+      env: {
+        ...process.env,
+        HOME: tempHomeDir,
+        USERPROFILE: tempHomeDir,
+      },
+      timeout: 10_000,
+    }).then(() => undefined, (error: unknown) => error);
 
-    expect(exitCode).not.toBe(0);
-  });
+    // The console must refuse to start; exit code 0 would be the failure.
+    expect(failure).toBeDefined();
+  }, 60_000);
 
-  it('failure injection: missing console triggers rollback', () => {
+  it('failure injection: missing console triggers rollback', async () => {
     const backupHomeDir = path.join(TMPDIR, `pd-smoke-rollback-${Date.now()}`);
     const backupWorkspaceDir = path.join(TMPDIR, `pd-smoke-rollback-ws-${Date.now()}`);
     fs.mkdirSync(backupHomeDir, { recursive: true });
     fs.mkdirSync(backupWorkspaceDir, { recursive: true });
 
     try {
-      npmInstallSync(tarballPath, backupHomeDir, {
-        HOME: backupHomeDir,
-        USERPROFILE: backupHomeDir,
+      await npmRun(['install', installLayoutTarballPath, tarballPath], {
+        cwd: backupHomeDir,
+        timeout: 180_000,
+        env: {
+          HOME: backupHomeDir,
+          USERPROFILE: backupHomeDir,
+        },
       });
 
       const consoleDir = path.join(
@@ -397,7 +524,7 @@ describe('Real packaged install smoke test', () => {
             HOME: backupHomeDir,
             USERPROFILE: backupHomeDir,
             PD_SKIP_NPM_UPGRADE: '1',
-          PD_SKIP_GLOBAL_SHIM: '1',
+            PD_SKIP_GLOBAL_SHIM: '1',
           },
           timeout: 180_000,
         }).toString();
@@ -412,9 +539,9 @@ describe('Real packaged install smoke test', () => {
           const parsed: unknown = JSON.parse(stdout);
           if (typeof parsed === 'object' && parsed !== null) {
             const obj = parsed as Record<string, unknown>;
-            expect(obj.success).toBe(false);
-            expect(obj.reason).toBeDefined();
-            expect(obj.nextAction).toBeDefined();
+            expect(obj['success']).toBe(false);
+            expect(obj['reason']).toBeDefined();
+            expect(obj['nextAction']).toBeDefined();
           }
         } catch {
           // stdout was not JSON, which is fine for error cases

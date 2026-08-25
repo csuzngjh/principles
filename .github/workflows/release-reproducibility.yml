@@ -1,0 +1,95 @@
+name: Release Reproducibility
+
+# Evidence contract (commercial update system SPEC §4.3/§13/§18-3):
+# - canonical-fixture proves the deterministic archive builder is byte-stable
+#   on a synthetic input and that committed dependency locks stay installable.
+# - native-release-matrix proves, for EVERY supported OS/CPU/Node-ABI target,
+#   that the REAL production asset builds twice byte-identically from a clean
+#   checkout and installs from the archive without npm. Release publication
+#   and channel promotion must require this workflow green on the exact
+#   release commit; it is not an optional manual check.
+#
+# Evidence limits (documented deliberately): Node versions are pinned exactly
+# via setup-node, but GitHub runner images float beneath the label. The
+# same-job double build controls toolchain drift within a job; cross-runner
+# absolute byte-equality is NOT claimed.
+on:
+  pull_request:
+    paths:
+      - 'packages/create-principles-disciple/scripts/**'
+      - 'packages/create-principles-disciple/release-locks/**'
+      - 'packages/create-principles-disciple/tests/build-release-asset.test.ts'
+      - 'packages/create-principles-disciple/tests/release-asset-smoke.test.ts'
+      - 'packages/create-principles-disciple/package.json'
+      - 'package-lock.json'
+      - '.github/workflows/release-reproducibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-fixture:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '26.7.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Build release producers and verify committed dependency locks
+        run: |
+          npm run build
+          npm run build:production --workspace=principles-disciple
+          npm run build --workspace=@principles/pd-cli
+          npm run build --workspace=@principles/pd-console
+          npm run build --workspace=create-principles-disciple
+          npm run check:release-locks --workspace=create-principles-disciple
+      - name: Rebuild canonical asset twice and compare bytes
+        run: node packages/create-principles-disciple/scripts/verify-release-reproducibility.mjs
+
+  native-release-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025]
+        node: ['22.22.2', '24.12.0', '26.7.0']
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      SOURCE_DATE_EPOCH: '1700000000'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Build every release component from the clean checkout
+        run: |
+          npm run build
+          npm run build:production --workspace=principles-disciple
+          npm run build --workspace=@principles/pd-cli
+          npm run build --workspace=@principles/pd-console
+          npm run build --workspace=create-principles-disciple
+      - name: Build the real production asset twice and compare bytes
+        shell: bash
+        run: |
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_ONE"
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_TWO"
+          node packages/create-principles-disciple/scripts/compare-release-archives.mjs \
+            "$PUBLICATION_ONE/asset.tar" \
+            "$PUBLICATION_TWO/asset.tar"
+          rm -rf "$PUBLICATION_ONE" "$PUBLICATION_TWO/payload"
+        env:
+          PUBLICATION_ONE: ${{ runner.temp }}/pd-publication-one
+          PUBLICATION_TWO: ${{ runner.temp }}/pd-publication-two
+      - name: Install and probe the published archive without npm
+        run: npm test --workspace=create-principles-disciple -- --run tests/release-asset-smoke.test.ts
+        env:
+          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two

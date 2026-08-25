@@ -47,13 +47,15 @@ describe('internationalization utilities', () => {
       expect(t('install_complete')).toBe('安装完成！');
       expect(t('install_failed')).toBe('安装失败');
       expect(t('cancel_install')).toBe('安装已取消');
-      expect(t('node_required')).toBe('需要 Node.js (>= 18)。请先安装 Node.js。');
+      expect(t('node_required')).toBe('需要 Node.js (>= 22)。请先安装 Node.js。');
+      expect(t('node_version_unsupported')).toBe('当前 Node.js 版本不受支持（需要 >= 22）。');
 
       setLanguage('en');
       expect(t('install_complete')).toBe('Install complete!');
       expect(t('install_failed')).toBe('Install failed');
       expect(t('cancel_install')).toBe('Install cancelled');
-      expect(t('node_required')).toBe('Node.js is required (>= 18). Install Node.js first.');
+      expect(t('node_required')).toBe('Node.js is required (>= 22). Install Node.js first.');
+      expect(t('node_version_unsupported')).toBe('The installed Node.js version is unsupported (requires >= 22).');
     });
 
     it('supports all critical uninstallation messages', () => {

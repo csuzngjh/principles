@@ -20,6 +20,7 @@ export interface EnvCheckResult {
   openclawVersion?: string;
   hasNode: boolean;
   nodeVersion?: string;
+  isNodeSupported: boolean;
   hasPython: boolean;
   pythonVersion?: string;
   hasGit: boolean;
@@ -58,15 +59,20 @@ export function checkEnvironment(): EnvCheckResult {
   const result: EnvCheckResult = {
     hasOpenClaw: false,
     hasNode: false,
+    isNodeSupported: false,
     hasPython: false,
     hasGit: false,
   };
 
   // 检测 Node.js
-  const nodeVersion = probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
-  if (nodeVersion !== null) {
-    result.nodeVersion = nodeVersion;
+  try {
+    result.nodeVersion = execSync('node -v', { encoding: 'utf-8' }).trim();
+    const major = Number(/^v?(\d+)/.exec(result.nodeVersion)?.[1]);
     result.hasNode = true;
+    result.isNodeSupported = Number.isInteger(major) && major >= 22;
+  } catch {
+    result.hasNode = false;
+    result.isNodeSupported = false;
   }
 
   // 检测 OpenClaw（win32 上 openclaw 是 .cmd shim，无 .exe，须经 cmd.exe /c）

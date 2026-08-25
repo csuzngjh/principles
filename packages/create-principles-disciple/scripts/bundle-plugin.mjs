@@ -28,7 +28,9 @@ const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
 const HOST_RUNTIME_DEST = join(OUTPUT_ROOT, 'host-runtime');
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
 const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
+const RELEASE_LOCKS_ROOT = join(ROOT_DIR, 'packages', 'create-principles-disciple', 'release-locks');
 const BUILD_SELF_CONTAINED_ASSET = process.argv.includes('--self-contained');
+const PREPARE_RELEASE_LOCKS = process.argv.includes('--prepare-release-locks');
 const execFileAsync = promisify(execFile);
 
 const PLUGIN_REQUIRED = [
@@ -357,7 +359,12 @@ if (BUILD_SELF_CONTAINED_ASSET) {
         windowsHide: true,
       },
     );
-    await runNpm(['install', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
+    const lockPath = join(RELEASE_LOCKS_ROOT, label, 'package-lock.json');
+    if (!existsSync(lockPath)) {
+      throw new Error(`Missing committed release lock for ${label}: ${lockPath}`);
+    }
+    copyFileSync(lockPath, join(directory, 'package-lock.json'));
+    await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
     const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
     if (pkg.dependencies && Object.hasOwn(pkg.dependencies, 'better-sqlite3')) {
       await runNpm(['rebuild', 'better-sqlite3']);
@@ -367,7 +374,6 @@ if (BUILD_SELF_CONTAINED_ASSET) {
         timeout: 30_000,
       });
     }
-    rmSync(join(directory, 'package-lock.json'), { force: true });
     console.log(`  ✅ ${label}/node_modules is complete`);
   };
 
@@ -404,7 +410,7 @@ if (BUILD_SELF_CONTAINED_ASSET) {
 // to main). Without this sync, the bundled plugin carries a stale version,
 // causing a permanent false "update available" after install.
 // ---------------------------------------------------------------------------
-if (BUILD_SELF_CONTAINED_ASSET) {
+if (BUILD_SELF_CONTAINED_ASSET || PREPARE_RELEASE_LOCKS) {
   console.log('\n🔢 Preserving source component versions for the immutable release asset.');
 } else {
 console.log('\n🔢 Syncing bundled plugin version to latest npm principles-disciple...');

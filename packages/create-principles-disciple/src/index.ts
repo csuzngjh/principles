@@ -100,9 +100,24 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 
   if (!env.hasNode) {
     if (jsonMode) {
-      console.log(JSON.stringify(buildFailureOutput('node_not_found', 'Install Node.js >= 18 and retry'), null, 2));
+      console.log(JSON.stringify(buildFailureOutput('node_not_found', 'Install Node.js >= 22 and retry'), null, 2));
     } else {
       logger.error(t('node_required'));
+    }
+    process.exit(1);
+    return;
+  }
+
+  if (!env.isNodeSupported) {
+    const nextAction = `Install Node.js >= 22 and retry. Detected: ${env.nodeVersion ?? 'unknown'}`;
+    if (jsonMode) {
+      console.log(JSON.stringify({
+        ...buildFailureOutput('node_version_unsupported', nextAction),
+        detectedVersion: env.nodeVersion,
+      }, null, 2));
+    } else {
+      logger.error(t('node_version_unsupported'));
+      logger.info(`${t('next_action')}: ${nextAction}`);
     }
     process.exit(1);
     return;

@@ -1,11 +1,33 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { createDeterministicReleaseArchive, parseSourceDateEpoch } from './deterministic-release-archive.mjs';
 
 const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'];
+
+function isPathWithin(directory, candidate) {
+  const candidateRelativePath = relative(directory, candidate);
+  return candidateRelativePath === ''
+    || (!isAbsolute(candidateRelativePath) && candidateRelativePath !== '..' && !candidateRelativePath.startsWith(`..${sep}`));
+}
+
+// Lexical containment alone is defeated by junction/symlink aliases of the
+// input directory, so archive/digest destinations are resolved through the
+// realpath of their parent before containment is checked. statSync (which
+// follows links) decides whether the parent is a directory — lstatSync would
+// report a directory junction/symlink as a non-directory and silently skip
+// canonicalization.
+function canonicalNewFilePath(requestedPath) {
+  const resolved = resolve(requestedPath);
+  const parentDirectory = dirname(resolved);
+  if (!existsSync(parentDirectory) || !statSync(parentDirectory).isDirectory()) {
+    return resolved;
+  }
+  return join(realpathSync(parentDirectory), basename(resolved));
+}
 
 function readArguments(argv) {
   const values = new Map();
@@ -89,7 +111,7 @@ async function listPayloadFiles(assetDirectory) {
     }
   };
   visit(assetDirectory);
-  paths.sort((left, right) => left.relative.localeCompare(right.relative));
+  paths.sort((left, right) => left.relative < right.relative ? -1 : left.relative > right.relative ? 1 : 0);
 
   const files = new Array(paths.length);
   const concurrency = Math.min(64, Math.max(1, paths.length));
@@ -112,18 +134,42 @@ async function listPayloadFiles(assetDirectory) {
 
 async function main() {
   const args = readArguments(process.argv.slice(2));
-  const inputDirectory = resolve(args.input);
-  const outputDirectory = resolve(args.output);
-  const inPlace = args['in-place'] === 'true';
-  if (!existsSync(inputDirectory) || !lstatSync(inputDirectory).isDirectory()) {
-    throw new Error(`Release input directory does not exist: ${inputDirectory}`);
+  const requestedInputDirectory = resolve(args.input);
+  const requestedOutputDirectory = resolve(args.output);
+  if (!existsSync(requestedInputDirectory) || !lstatSync(requestedInputDirectory).isDirectory()) {
+    throw new Error(`Release input directory does not exist: ${requestedInputDirectory}`);
   }
-  if ((!inPlace && inputDirectory === outputDirectory) || outputDirectory.startsWith(`${inputDirectory}${sep}`)) {
+  const inputDirectory = realpathSync(requestedInputDirectory);
+  const outputParent = realpathSync(dirname(requestedOutputDirectory));
+  const outputDirectory = resolve(outputParent, basename(requestedOutputDirectory));
+  const inPlace = args['in-place'] === 'true';
+  const requestedArchiveFile = args.archive ? resolve(args.archive) : undefined;
+  const requestedDigestFile = args['digest-output'] ? resolve(args['digest-output']) : undefined;
+  if ((requestedArchiveFile === undefined) !== (requestedDigestFile === undefined)) {
+    throw new Error('--archive and --digest-output must be provided together');
+  }
+  if (requestedArchiveFile !== undefined && requestedArchiveFile === requestedDigestFile) {
+    throw new Error('Release archive and digest outputs must be different files');
+  }
+  const archiveFile = requestedArchiveFile !== undefined ? canonicalNewFilePath(requestedArchiveFile) : undefined;
+  const digestFile = requestedDigestFile !== undefined ? canonicalNewFilePath(requestedDigestFile) : undefined;
+  if ((archiveFile && (isPathWithin(inputDirectory, archiveFile) || isPathWithin(outputDirectory, archiveFile)))
+    || (digestFile && (isPathWithin(inputDirectory, digestFile) || isPathWithin(outputDirectory, digestFile)))) {
+    throw new Error('Release archive and digest outputs must be outside the input and asset directories');
+  }
+  if (archiveFile || digestFile) {
+    if (existsSync(archiveFile)) throw new Error(`Release archive already exists and cannot be replaced: ${archiveFile}`);
+    if (existsSync(digestFile)) throw new Error(`Release digest already exists and cannot be replaced: ${digestFile}`);
+    parseSourceDateEpoch(process.env.SOURCE_DATE_EPOCH);
+  }
+  if (!inPlace && isPathWithin(inputDirectory, outputDirectory)) {
     throw new Error('Release output must not be inside the input directory');
   }
   if (inPlace && inputDirectory !== outputDirectory) {
     throw new Error('In-place release verification requires identical input and output directories');
   }
+  let ownsOutput = false;
+  try {
   for (const component of REQUIRED_COMPONENTS) {
     const source = join(inputDirectory, component);
     if (!existsSync(source) || !lstatSync(source).isDirectory()) {
@@ -138,6 +184,7 @@ async function main() {
       throw new Error(`Release output already exists and immutable assets cannot be replaced: ${outputDirectory}`);
     }
     mkdirSync(outputDirectory, { recursive: true });
+    ownsOutput = true;
     for (const component of REQUIRED_COMPONENTS) {
       cpSync(join(inputDirectory, component), join(outputDirectory, component), { recursive: true, dereference: false });
     }
@@ -157,7 +204,17 @@ async function main() {
     platform: args.platform,
     schemaVersion: 1,
   }, null, 2)}\n`);
-  process.stdout.write(`${JSON.stringify({ assetDirectory: outputDirectory, files: manifest.files.length, platform: `${args.platform}-${args.arch}-abi${args['node-abi']}` })}\n`);
+  const archive = archiveFile && digestFile ? await createDeterministicReleaseArchive({
+    inputDirectory: outputDirectory,
+    outputFile: archiveFile,
+    digestFile,
+    sourceDateEpoch: process.env.SOURCE_DATE_EPOCH,
+  }) : undefined;
+  process.stdout.write(`${JSON.stringify({ assetDirectory: outputDirectory, archive, files: manifest.files.length, platform: `${args.platform}-${args.arch}-abi${args['node-abi']}` })}\n`);
+  } catch (error) {
+    if (ownsOutput) rmSync(outputDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    throw error;
+  }
 }
 
 try {

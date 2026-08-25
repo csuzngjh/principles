@@ -184,3 +184,8 @@ packages/pd-console/playwright/.cache/
 # Brainstorming visual companion (mockups, session state)
 .superpowers/
 .mimosa/
+
+# Self-contained release staging artifacts (in-tree stamping from bundle tests)
+packages/create-principles-disciple/_release/
+packages/create-principles-disciple/*/package-lock.json
+*.stackdump

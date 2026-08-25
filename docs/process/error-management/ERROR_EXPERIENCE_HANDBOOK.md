@@ -49,10 +49,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-041 | Install success reported when delivered components are incomplete | PRI-247 |
 | ERR-042 | Output reports requested config instead of actual disk state | PRI-247 |
 | ERR-043 | nextAction wraps entire shell command in quotes, making it unrunnable | PRI-247 |
-| ERR-044 | Structured failure reason hardcoded to console gap regardless of actual failure | PRI-247 |
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
-| ERR-046 | Rollback failure silently swallowed — install result may falsely claim old state restored | PRI-247 |
-| ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 | ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
 | ERR-100 | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle | PRI-552 |
@@ -132,10 +129,8 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 | ERR-023 | CLI dry-run command opens writable database connection instead of readonly | PRI-218 |
-| ERR-028 | Baseline fixture directly constructs writer instead of routing through production dispatcher | PRI-240 |
 | ERR-029 | CLI unknown input silently dropped instead of failing loud | PRI-240 |
 | ERR-030 | Path prefix `startsWith` matches sibling directories as production workspace | PRI-240 |
-| ERR-031 | Config resolver hard-fails on valid runtime when optional mode flags are absent | PRI-162 |
 | ERR-032 | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014 | PRI-227 |
 | ERR-033 | Operator failure path returns success exit code and breaks JSON contract | PRI-162 |
 | ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162; PRI-516 |
@@ -234,18 +229,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-028]** | Baseline fixture directly constructs writer instead of routing through production dispatcher
-
-- **What happened**: `proven-channel-baseline.ts` directly constructed `PromptWriter`, `RuleHostWriter`, and `DeferArchiveWriter` instances and called `canActivate()`/`activate()` on them, then claimed the results proved production continuity. But the real production path routes through `ActivationDispatcher.dispatch()`, which performs writer selection, gate evaluation, approval queue routing, and idempotency checks.
-- **Why it's wrong**: A baseline that bypasses the production dispatcher proves the writer works in isolation, not that the production activation path works. This is the same class as ERR-024/ERR-025 (validator/helper tested in isolation but not wired into production path). The baseline would pass even if the dispatcher was broken.
-- **Correct approach**: Baseline fixtures must route through the same `ActivationDispatcher.dispatch()` path used by production, with in-memory read models. The fixture's `evidenceSource` must reference `ActivationDispatcher.dispatch` to prove the real path was exercised.
-- **How to prevent**: For any baseline/continuity fixture, the test must exercise the same entry point as production code. If production uses a dispatcher/facade/mediator, the fixture must use it too. Never test the leaf component and claim the tree is healthy.
-- **Source**: PRI-240 / PR #699
-- **Date**: 2026-05-24
-- **Recurrence**: Yes - same class as ERR-024, ERR-025
-
----
-
 **[ERR-029]** | CLI unknown input silently dropped instead of failing loud
 
 - **What happened**: `parseChannels()` in the CLI handler silently dropped unrecognized channel names from `--channels` input. When all tokens were invalid, it returned `undefined`, causing the runner to fall back to all MVP channels. A typo like `--channels code-hook` would yield a successful full-baseline run instead of an input error.
@@ -270,18 +253,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**:
   - Yes - same class as ERR-003, ERR-013.
   - 2026-07-03 / PRI-442 / PR #1164: `handleFrictionTrackingForFailure` used `workspaceDir.includes('e2e-workspace')` to decide whether to admit shell-tool failures as pain signals. A production workspace whose absolute path happens to contain the substring `e2e-workspace` (e.g. `D:\ci\e2e-workspace-prod\owner-1`) would silently get E2E behavior in production. Fixed by replacing the substring test with an explicit env-var signal (`process.env.PD_E2E_MODE === '1'`) set only by the E2E harness. The generalization: when gating behavior by environment/context, use explicit signals (env vars / config flags), never path-substring matching — path substrings cannot distinguish a sibling directory from a true descendant.
-
----
-
-**[ERR-031]** | Config resolver hard-fails on valid runtime when optional mode flags are absent
-
-- **What happened**: `resolvePDConfig()` required `--openclaw-local` or `--openclaw-gateway` when `runtimeKind === 'openclaw-cli'`, but the `run-once` command and `--runtime config` path don't always expose these flags. This made previously supported `openclaw-cli` runtime paths unreachable.
-- **Why it's wrong**: Making optional mode flags mandatory breaks backward compatibility and violates the principle that config resolution should succeed when the runtime kind is valid. The mode can be resolved later by the consumer. This is the same class as ERR-009 (required field check that's too strict for the actual use case).
-- **Correct approach**: When `runtimeKind === 'openclaw-cli'` and neither mode flag is set, set `openclawMode = undefined` instead of failing. The mode is optional metadata that the consumer can resolve. Only fail when both flags are set (mutually exclusive).
-- **How to prevent**: When adding validation to a config resolver, distinguish between "required for the resolver to produce a valid config" and "required for the consumer to operate". The resolver should produce the config; the consumer should validate its own requirements. Add tests for each runtime kind without optional flags.
-- **Source**: PRI-162 / PR #700
-- **Date**: 2026-05-24
-- **Recurrence**: None
 
 ---
 
@@ -761,16 +732,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-26
 - **Recurrence**: Same class as ERR-042
 
-**[ERR-044]** | Structured failure reason hardcoded to console gap regardless of actual failure
-
-- **What happened**: `buildSuccessOutput` always set `reason: 'owner_review_console_not_deliverable'` when `isComplete` was false, even when the actual failure was `plugin: 'failed'` or `cli: 'failed'`. A user seeing `reason: owner_review_console_not_deliverable` would investigate the console, but the real problem was a broken CLI or plugin.
-- **Why it's wrong**: The `reason` field is a contract with the caller for diagnostics and automated remediation. An incorrect reason misdirects troubleshooting. This is the same class as ERR-002 (silent degradation hides failure reason) and ERR-042 (output does not reflect actual state).
-- **Correct approach**: Compute the reason from the actual component statuses: `plugin_failed`, `cli_failed`, `console_not_deliverable`. When multiple components fail, comma-separate the reasons. Never hardcode a single reason when multiple failure modes exist.
-- **How to prevent**: When a function has multiple failure paths, the output must distinguish them. Add tests that: (1) each failure mode produces a distinct reason, (2) the reason does not mention unrelated components, (3) multiple failures produce a combined reason.
-- **Source**: PRI-247 / PR #721
-- **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-002, ERR-042
-
 ---
 
 **[ERR-045]** | Shell interpolation of user-provided paths enables command injection
@@ -783,30 +744,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-26
 - **Recurrence**: Same class as ERR-024 (security mechanism exists but is bypassed). Recurred 2026-08-17 (PRI-543 / PR #1349): `resolveGitUserEmail` in `create-principles-disciple/src/installer.ts` used `execSync(\`git -C "${workspaceDir}" config user.email\`, { shell: 'cmd' })` — CodeQL flagged it as command injection; fixed with `execFileSync('git', ['-C', workspaceDir, 'config', 'user.email'])`. Lesson: the argv-array rule applies even for "internal-looking" paths (installer workspace dirs), and any new `execSync`+`shell:` in a diff is a P1 review blocker.
   - 2026-08-21 RuleCode Owner Live Decision self-review: `SqliteActivationSafetyStore.deactivateWithDecision` interpolated an internally selected `actionClause` into SELECT and UPDATE DML. The values were fixed constants, but this still bypassed the repository's no-dynamic-DML guard and left an injection-shaped maintenance seam. Replaced it with two fully static prepared statements for reject-after-shadow versus emergency deactivation. Prevention: SQL structure is code, not a parameter; choose between complete static statements and bind only values.
-
----
-
-**[ERR-046]** | Rollback failure silently swallowed — install result may falsely claim old state restored
-
-- **What happened**: `restoreBackup()` caught its own errors and only logged them. The install catch block then returned `success: false` with `nextAction: 'Previous install has been restored if it existed'` — but if rollback failed, the previous install was NOT restored and the user received misleading guidance.
-- **Why it's wrong**: After a failed install + failed rollback, the system is in an uncertain state. Telling the user "previous install restored" when it wasn't is worse than no message at all — it prevents the user from taking corrective action. This is the same class as ERR-002 (silent degradation hides failure reason).
-- **Correct approach**: `restoreBackup` returns `{ restored: boolean; error?: string }`. The install catch block distinguishes: (1) install failed, rollback succeeded → normal failure with restored state; (2) install failed, rollback failed → CRITICAL, state uncertain, manual intervention required. JSON output `reason` includes `install_failed_rollback_failed` for the second case.
-- **How to prevent**: Any function that can fail must report its outcome. When composing operations (install + rollback), each failure mode must be distinguishable in the output. Never assume a recovery action succeeded without confirmation.
-- **Source**: PRI-247 / PR #721
-- **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-002, ERR-044
-
----
-
-**[ERR-047]** | Non-boolean enabled field in feature flags silently treated as disabled
-
-- **What happened**: `readEnabledChannelsFromDisk()` checked `flag.enabled === true` but did not validate that `enabled` was a boolean. YAML values like `enabled: "true"` (string), `enabled: 1` (number), or `enabled: null` were silently treated as disabled, since strict equality `=== true` fails for non-boolean types.
-- **Why it's wrong**: A user writing `enabled: "true"` in YAML expects the channel to be enabled. Silently treating it as disabled violates the principle of least surprise and violates Runtime Contract Rule 3 (required fields must fail loud when malformed). This is the same class as ERR-001/ERR-005 (using `===` comparison instead of runtime type validation).
-- **Correct approach**: Validate `typeof flag.enabled === 'boolean'` before comparing. Non-boolean values throw a structured error with the configPath, channel name, actual type, and remediation instructions.
-- **How to prevent**: When validating configuration fields, always check the type first, then the value. Never rely on strict equality to implicitly reject wrong types — it silently accepts the wrong behavior instead of failing loud.
-- **Source**: PRI-247 / PR #721
-- **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-001, ERR-005
 
 ---
 
@@ -905,6 +842,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Same class as ERR-025, ERR-026. Also 2026-08-21 PR #1371 (RuleCode owner live-decision): the bundled console started statically importing `OPENCLAW_HOST_LIVENESS_CONTRACT` from `@principles/host-runtime`, but `bundle-plugin.mjs`'s dependency-rewrite step rewrote console's `@principles/core` → `file:../core` and never the new `@principles/host-runtime`. The packaged console therefore resolved `@principles/host-runtime` from the npm registry and crashed with an ESM named-export `SyntaxError` on clean install (source-tree tests passed because the monorepo had the package built). Fixed by rewriting console's `@principles/host-runtime` → `file:../host-runtime`, mirroring pd-cli's existing wiring; caught by `smoke-packaged-install.test.ts`. Lesson: when a new `@principles/*` package is consumed by any package `bundle-plugin.mjs` ships (pd-cli, pd-console), extend the console/cli `file:` dependency-rewrite map for it, and confirm the smoke-packaged-install test exercises that import before merging. Also 2026-06-02 PRI-250 (PR #794): Three missing-component issues — (1) `js-yaml`/`semver` in `devDependencies` instead of `dependencies`, npm publish stripped them; (2) console's bundled `agents.js` imports `better-sqlite3` but console `package.json` didn't declare it; (3) `installBundledCore` copies core/ but never runs `npm install`. Also 2026-06-03 PRI-299 (PR #800): pd-cli imported better-sqlite3 without declaring it. 2026-07-01 PR #1146: onboarding spawned a bare npm `pd` shim that fails under Windows `shell:false`; fixed by resolving the installed sibling `pd-cli/dist/index.js` and spawning it with `process.execPath`, with a regression assertion on the delivered layout. 2026-07-03 PRI-505 / PR #1164 review: `bundle-plugin.mjs` `PLUGIN_REQUIRED` array only checked for `dist` directory existence, not the specific `dist/bundle.js` file (while PD_CLI_REQUIRED/CORE_REQUIRED correctly checked `dist/index.js`). If only `tsc` ran (no esbuild), `dist/` exists but `bundle.js` is missing — bundle passes but published plugin is broken. Fix: added `'dist/bundle.js'` to `PLUGIN_REQUIRED`. 2026-08-13 PRI-523: bundled plugin retained an inlined workspace-only dependency, breaking clean install; packaging now strips and pack-tests it. Also 2026-08-14 PRI-524 (PR #1316 review): the new Codex plugin scripts (pd-setup/pd-status/pd-review) re-committed the exact PR #1146 error — spawning the pd .cmd shim with shell:false (EINVAL on modern Windows Node). Fixed the same way: resolve the real pd-cli JS entry under the global npm root and spawn via process.execPath. When a new consumption surface gains scripts that spawn project CLIs, grep the handbook for the CLI name first. Also 2026-08-22 PRI-561: the same gap on the UPDATE delivery surface — the console's `/apply-full` inline updater (`doInlineFullUpdate` in pd-console `update.ts`) copied plugin/console/core/pd-cli but never `host-runtime/`, and created no `node_modules/@principles/host-runtime` resolution link (fresh installs get the link via npm install of the `file:../host-runtime` rewrite; the updater deliberately skips npm install). Any install created before 2026-08-14 (installers without bundled host-runtime) that ran a full update after 41cf97ee5 received a console dist statically importing `@principles/host-runtime` with nothing to resolve it → `ERR_MODULE_NOT_FOUND` at console startup. Fixed by adding a host-runtime copy mapping + create-if-missing junction/symlink links (mirroring installer `syncPdCli`), with a real-Node ESM resolution-probe regression test. Lesson: when a shipped package gains a new `@principles/*` dependency, EVERY delivery surface must be extended — `bundle-plugin.mjs` (publish), `installer.ts` (fresh install), AND the console inline updater (`update.ts` `/apply-full`).
 
   - 2026-08-25 release-update SPEC review (no Linear issue): the installer required self-contained component dependencies, but the producer still copied only dist/package metadata, the release test fabricated `node_modules`, and the plugin declared `./governance-audit` without delivering its export target after the production esbuild clean. Fixed by materializing production dependencies during bundling, validating every declared dependency before release-manifest creation, generating the export in both tsc/esbuild paths, and requiring a clean no-legacy packaged-install smoke. Prevention: every zero-install consumer contract must land with the producer and a clean consumer smoke in the same change; fixtures may not pre-create the invariant they claim the producer establishes.
+
+  - 2026-08-25 release-update Phase 2b SPEC review (no Linear issue): the native clean-machine matrix initially ran the repository's TypeScript `build` only, while the release producer requires `openclaw-plugin/dist/bundle.js`, which is emitted by `build:production`. All matrix jobs would therefore have failed before exercising the native asset. Fixed by explicitly running the production plugin bundler before the platform/Node smoke matrix. Prevention: a clean-checkout release workflow must enumerate the exact producer for every required generated artifact; a generic package `build` name is not evidence that production bundle outputs exist.
+
+  - 2026-08-25 release-update Phase 2b quality review (no Linear issue): spawning `npm` directly with `execFile` on Windows fails with EINVAL because `npm` resolves to `npm.cmd` (shell shim, not an executable). The release-lock generate/check scripts and the self-contained bundler now spawn npm through `ComSpec /d /s /c` on win32 (same ERR-040 Windows CLI execution family as the PR #1146 pd-shim recurrence). Prevention: on win32 every child-process invocation of an npm-provided binary must go through `process.env.ComSpec`, never the bare command name.
 
 ---
 
@@ -1490,7 +1431,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-040 (published artifact missing components — same EP-06 family), ERR-050 (modified bundled copy instead of source — same EP-06 family), ERR-068 (wrong package manager lockfile — same EP-06 family), EP-06
 - **Source**: PRI-501 / PR #1162
 - **Date**: 2026-07-02
-- **Recurrence**: None
+- **Recurrence**: Yes — the platform-semantics flavor this design SPEC (§16) maps to this entry: path/atomicity behavior verified under one OS's semantics and assumed portable.
+  - 2026-08-25 release-update Phase 2b quality review (no Linear issue): two Windows-only defects in the release publish path. (1) A containment guard decided "is the parent a directory" with `lstatSync().isDirectory()` — on Windows a directory junction (and on POSIX a directory symlink) reports `isSymbolicLink()` via lstat, so the guard skipped path canonicalization and a junction alias of the input directory defeated the lexical containment check (`--archive <input-alias>/asset.tar` wrote the archive INTO the input). Fixed by deciding directory-ness with `statSync` (follows links) before `realpathSync` canonicalization, with a junction-alias regression test. (2) The final atomic publication `renameSync(staging, output)` failed EPERM because antivirus/indexer handles from the just-written ~270k-file payload transiently deny directory renames; fixed with a bounded retry (attempt stays one atomic rename; immutable-destination re-checked each attempt; fail loud with next action after the window). Prevention: on Windows, directory-ness checks that gate canonicalization must use stat-following semantics, and any single-rename atomic publication after a mass write needs a bounded EPERM/EACCES retry adapter (see also the atomic record adapters in the update-system SPEC Phase 4a).
 
 ---
 
