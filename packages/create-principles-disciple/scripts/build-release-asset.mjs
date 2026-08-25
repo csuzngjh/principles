@@ -31,6 +31,28 @@ function assertSafeSourceTree(directory) {
   }
 }
 
+function assertRuntimeDependenciesComplete(component, directory) {
+  const packageJsonPath = join(directory, 'package.json');
+  let packageJson;
+  try {
+    packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Release input has an invalid ${component}/package.json: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (typeof packageJson !== 'object' || packageJson === null || Array.isArray(packageJson)) {
+    throw new Error(`Release input has an invalid ${component}/package.json object`);
+  }
+  const dependencies = Object.hasOwn(packageJson, 'dependencies') ? packageJson.dependencies : undefined;
+  if (dependencies !== undefined && (typeof dependencies !== 'object' || dependencies === null || Array.isArray(dependencies))) {
+    throw new Error(`Release input has invalid dependencies in ${component}/package.json`);
+  }
+  for (const dependency of Object.keys(dependencies ?? {})) {
+    if (!existsSync(join(directory, 'node_modules', dependency))) {
+      throw new Error(`Release input ${component} is missing declared runtime dependency: ${dependency}`);
+    }
+  }
+}
+
 function listPayloadFiles(assetDirectory) {
   const files = [];
   const visit = (directory) => {
@@ -72,6 +94,7 @@ function main() {
       throw new Error(`Release input is missing required component: ${component}`);
     }
     assertSafeSourceTree(source);
+    assertRuntimeDependenciesComplete(component, source);
   }
   if (existsSync(outputDirectory)) rmSync(outputDirectory, { recursive: true, force: true });
   mkdirSync(outputDirectory, { recursive: true });

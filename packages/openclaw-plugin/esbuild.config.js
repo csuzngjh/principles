@@ -32,8 +32,11 @@ async function bundlePlugin() {
     // throws "Dynamic require of 'process' is not supported".
     // OpenClaw loads via setupEntry (dynamic import), so the banner is safe.
     await build({
-      entryPoints: ['src/index.ts'],
-      outfile: 'dist/bundle.js',
+      entryPoints: {
+        bundle: 'src/index.ts',
+        'governance-audit': 'src/governance-audit.ts',
+      },
+      outdir: 'dist',
       bundle: true,
       platform: 'node',
       target: 'node20',

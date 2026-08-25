@@ -3,7 +3,8 @@
 import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFile, execFileSync, execSync } from 'child_process';
+import { promisify } from 'util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,10 +22,13 @@ const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
 const HOST_RUNTIME_DEST = join(__dirname, '..', 'host-runtime');
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
 const INSTALL_LAYOUT_DEST = join(__dirname, '..', 'install-layout');
+const BUILD_SELF_CONTAINED_ASSET = process.argv.includes('--self-contained');
+const execFileAsync = promisify(execFile);
 
 const PLUGIN_REQUIRED = [
   'dist',
   'dist/bundle.js',
+  'dist/governance-audit.js',
   'templates',
   'openclaw.plugin.json',
   'package.json',
@@ -333,6 +337,57 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'princip
 // Without this rewrite + symlink, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
 // because pd-cli statically imports initTrajectorySchema/initWorkflowSchema from it.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principles-disciple', 'file:../plugin');
+
+if (BUILD_SELF_CONTAINED_ASSET) {
+  console.log('\n📦 Installing build-time runtime dependencies for the self-contained release asset...');
+
+  const installBundledRuntimeDependencies = async (directory, label) => {
+    const runNpm = (args) => execFileAsync(
+      process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm',
+      process.platform === 'win32' ? ['/d', '/s', '/c', ['npm', ...args].join(' ')] : args,
+      {
+        cwd: directory,
+        timeout: 300_000,
+        windowsHide: true,
+      },
+    );
+    await runNpm(['install', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
+    const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
+    if (pkg.dependencies && Object.hasOwn(pkg.dependencies, 'better-sqlite3')) {
+      await runNpm(['rebuild', 'better-sqlite3']);
+      execFileSync(process.execPath, ['-e', "require('better-sqlite3')"], {
+        cwd: directory,
+        stdio: 'pipe',
+        timeout: 30_000,
+      });
+    }
+    rmSync(join(directory, 'package-lock.json'), { force: true });
+    console.log(`  ✅ ${label}/node_modules is complete`);
+  };
+
+  // plugin's local core reference is package-relative (`file:./core`). Provide
+  // the source while npm materializes it into node_modules via --install-links,
+  // then remove the temporary duplicate from the shipped component root.
+  cpSync(CORE_DEST, join(PLUGIN_DEST, 'core'), { recursive: true });
+  try {
+    await Promise.all([
+      installBundledRuntimeDependencies(CORE_DEST, 'core'),
+      installBundledRuntimeDependencies(HOST_RUNTIME_DEST, 'host-runtime'),
+    ]);
+    await installBundledRuntimeDependencies(PLUGIN_DEST, 'plugin');
+    const installedPluginCore = join(PLUGIN_DEST, 'node_modules', '@principles', 'core');
+    rmSync(installedPluginCore, { recursive: true, force: true });
+    cpSync(CORE_DEST, installedPluginCore, { recursive: true });
+    await Promise.all([
+      installBundledRuntimeDependencies(PD_CLI_DEST, 'pd-cli'),
+      installBundledRuntimeDependencies(CONSOLE_DEST, 'console'),
+    ]);
+  } finally {
+    rmSync(join(PLUGIN_DEST, 'core'), { recursive: true, force: true });
+  }
+} else {
+  console.log('\nℹ️  Skipping platform node_modules (use --self-contained for release assets).');
+}
 
 // ---------------------------------------------------------------------------
 // Version sync: stamp the bundled plugin with the latest published

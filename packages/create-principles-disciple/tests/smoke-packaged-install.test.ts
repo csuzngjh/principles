@@ -57,7 +57,7 @@ beforeAll(() => {
   const packOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
     cwd: INSTALLER_DIR,
     stdio: 'pipe',
-    timeout: 120_000,
+    timeout: 300_000,
   }).toString().trim();
 
   const lines = packOutput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -72,11 +72,16 @@ beforeAll(() => {
     throw new Error(`Tarball not found at ${tarballPath}`);
   }
 
+  execFileSync(process.execPath, [path.join(INSTALLER_DIR, 'scripts', 'bundle-plugin.mjs'), '--self-contained'], {
+    cwd: INSTALLER_DIR,
+    stdio: 'pipe',
+    timeout: 300_000,
+  });
+
   tempHomeDir = path.join(TMPDIR, `pd-smoke-home-${Date.now()}`);
   tempWorkspaceDir = path.join(TMPDIR, `pd-smoke-ws-${Date.now()}`);
   fs.mkdirSync(tempHomeDir, { recursive: true });
   fs.mkdirSync(tempWorkspaceDir, { recursive: true });
-
   // Create a fake `openclaw` binary on PATH so the installer's readiness
   // check (spec §6.2 — terminate if OpenClaw missing) passes in CI.
   // The real OpenClaw detection logic is covered by env.test.ts BDD tests.
@@ -93,7 +98,7 @@ beforeAll(() => {
   }
   // Prepend fakeBinDir to PATH so checkEnvironment finds the fake openclaw.
   process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH}`;
-}, 180_000);
+}, 600_000);
 
 afterAll(() => {
   if (tarballPath) {
@@ -117,6 +122,7 @@ describe('Real packaged install smoke test', () => {
     }).toString();
     expect(tarOutput).toContain('core/');
     expect(tarOutput).toContain('install-layout/dist/index.js');
+    expect(tarOutput).toContain('plugin/dist/governance-audit.js');
   }, 60_000);
 
   it('install to clean temp HOME succeeds', () => {
@@ -124,7 +130,6 @@ describe('Real packaged install smoke test', () => {
       HOME: tempHomeDir,
       USERPROFILE: tempHomeDir,
     });
-
     const pkgJsonPath = path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'package.json');
     expect(fs.existsSync(pkgJsonPath)).toBe(true);
 
@@ -139,8 +144,23 @@ describe('Real packaged install smoke test', () => {
     expect(pluginPkgJson.devDependencies?.['@principles/host-runtime']).toBeUndefined();
   }, 240_000);
 
-  it('--json install produces parseable JSON with all components verified', () => {
-    const cliEntry = path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'dist', 'index.js');
+  it('production self-contained bundle installs with no npm invocation', () => {
+    // npm pack's prepack runs the real production bundler. Execute that built
+    // installer directly so PLUGIN_DIR points at the self-contained component
+    // trees (including node_modules) rather than npm's node_modules-stripped
+    // tarball representation.
+    const cliEntry = path.join(INSTALLER_DIR, 'dist', 'index.js');
+    const fakeBinDir = path.join(tempHomeDir, 'bin');
+    const npmPoisonMarker = path.join(tempHomeDir, 'npm-was-invoked');
+    const npmPoison = path.join(fakeBinDir, process.platform === 'win32' ? 'npm.cmd' : 'npm');
+    fs.writeFileSync(
+      npmPoison,
+      process.platform === 'win32'
+        ? `@echo off\r\n>"${npmPoisonMarker}" echo invoked\r\nexit /b 97\r\n`
+        : `#!/bin/sh\nprintf invoked > "${npmPoisonMarker}"\nexit 97\n`,
+      'utf8',
+    );
+    if (process.platform !== 'win32') fs.chmodSync(npmPoison, 0o755);
 
     let stdout = '';
     let exitCode = 0;
@@ -162,11 +182,8 @@ describe('Real packaged install smoke test', () => {
           // incompatible with local core changes (e.g., removed exports).
           PD_SKIP_NPM_UPGRADE: '1',
           PD_SKIP_GLOBAL_SHIM: '1',
-          // This smoke covers the legacy npm-package layout. The supported
-          // release-asset path is self-contained and never enables this gate.
-          PD_ALLOW_LEGACY_NPM_INSTALL: '1',
         },
-        timeout: 180_000,
+        timeout: 600_000,
       });
       stdout = result.toString();
     } catch (e: unknown) {
@@ -175,6 +192,9 @@ describe('Real packaged install smoke test', () => {
       stdout = err.stdout?.toString() ?? '';
       stderr = err.stderr?.toString() ?? '';
     }
+    const npmWasInvoked = fs.existsSync(npmPoisonMarker);
+    fs.rmSync(npmPoison, { force: true });
+    fs.rmSync(npmPoisonMarker, { force: true });
 
     if (!stdout.trim()) {
       throw new Error(`No stdout output. exitCode=${exitCode}, stderr=${stderr.slice(0, 2000)}`);
@@ -197,7 +217,8 @@ describe('Real packaged install smoke test', () => {
       const verification = obj.verification as Record<string, unknown>;
       expect(verification.storyA).toBe('passed');
     }
-  }, 240_000);
+    expect(npmWasInvoked).toBe(false);
+  }, 600_000);
 
   it('installer demo verification does not pollute the user workspace', () => {
     // P0-1 anti-regression: the installer's Story A verification must run in

@@ -35,6 +35,22 @@ if (typeof pkgVersionValue !== 'string' || pkgVersionValue.length === 0) {
 }
 const pkgVersion = pkgVersionValue;
 
+export function toInstallJsonOutput(result: Awaited<ReturnType<typeof install>>): Record<string, unknown> {
+  return {
+    success: result.success,
+    workspace: result.workspaceDir,
+    components: result.components,
+    enabledChannels: result.enabledChannels,
+    verification: result.verification,
+    nextAction: result.nextAction,
+    ...(result.success ? {} : {
+      reason: result.reason,
+      component: result.component,
+      dependency: result.dependency,
+    }),
+  };
+}
+
 async function runInstall(options: Record<string, unknown>): Promise<void> {
   const jsonMode = options.json === true;
 
@@ -240,15 +256,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   const result = await install(installOptions, PLUGIN_DIR, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
 
   if (jsonMode) {
-    const output = {
-      success: result.success,
-      workspace: result.workspaceDir,
-      components: result.components,
-      enabledChannels: result.enabledChannels,
-      verification: result.verification,
-      nextAction: result.nextAction,
-      ...(result.success ? {} : { reason: result.reason }),
-    };
+    const output = toInstallJsonOutput(result);
     console.log(JSON.stringify(output, null, 2));
     if (!result.success) {
       process.exit(1);

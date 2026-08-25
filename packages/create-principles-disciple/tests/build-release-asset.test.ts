@@ -14,7 +14,10 @@ function createFixture(): { inputDir: string; outputDir: string } {
   const outputDir = path.join(root, 'output');
   for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout']) {
     fs.mkdirSync(path.join(inputDir, component, 'node_modules', 'runtime-dependency'), { recursive: true });
-    fs.writeFileSync(path.join(inputDir, component, 'package.json'), JSON.stringify({ name: component }));
+    fs.writeFileSync(path.join(inputDir, component, 'package.json'), JSON.stringify({
+      name: component,
+      dependencies: { 'runtime-dependency': '1.0.0' },
+    }));
     fs.writeFileSync(path.join(inputDir, component, 'node_modules', 'runtime-dependency', 'index.js'), 'module.exports = true;');
   }
   return { inputDir, outputDir };
@@ -39,5 +42,15 @@ describe('build-release-asset', () => {
     verifyReleaseAssetManifest(outputDir, parseReleaseAssetManifest(manifest));
     expect(fs.existsSync(path.join(outputDir, 'plugin', 'node_modules', 'runtime-dependency', 'index.js'))).toBe(true);
     expect(fs.existsSync(path.join(outputDir, '_release', 'asset.json'))).toBe(true);
+  });
+
+  it('rejects release input missing a declared runtime dependency', () => {
+    const { inputDir, outputDir } = createFixture();
+    fs.rmSync(path.join(inputDir, 'pd-cli', 'node_modules', 'runtime-dependency'), { recursive: true });
+    const script = path.resolve(__dirname, '..', 'scripts', 'build-release-asset.mjs');
+
+    expect(() => execFileSync(process.execPath, [script, '--input', inputDir, '--output', outputDir, '--platform', 'win32', '--arch', 'x64', '--node-abi', '127'], {
+      stdio: 'pipe',
+    })).toThrow();
   });
 });

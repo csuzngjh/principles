@@ -7,6 +7,7 @@ import {
   SelfContainedDependencyError,
   prepareBundledComponentDependencies,
 } from '../src/installer.js';
+import { toInstallJsonOutput } from '../src/index.js';
 
 vi.mock('node:child_process', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:child_process')>(),
@@ -87,5 +88,27 @@ describe('self-contained bundled component dependency contract', () => {
     });
     expect(childProcess.execFileSync).toHaveBeenCalledOnce();
     expect(childProcess.execSync).not.toHaveBeenCalled();
+  });
+
+  it('preserves structured dependency details in JSON failure output', () => {
+    const output = toInstallJsonOutput({
+      success: false,
+      workspaceDir: '/workspace',
+      configYamlPath: '/workspace/.pd/config.yaml',
+      templatesCount: 0,
+      components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+      verification: { features: 'skipped', storyA: 'skipped' },
+      enabledChannels: [],
+      nextAction: 'Install the matching asset.',
+      reason: 'self_contained_runtime_dependency_missing',
+      component: 'PD CLI',
+      dependency: 'commander',
+    });
+
+    expect(output).toMatchObject({
+      reason: 'self_contained_runtime_dependency_missing',
+      component: 'PD CLI',
+      dependency: 'commander',
+    });
   });
 });

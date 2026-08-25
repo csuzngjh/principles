@@ -9,11 +9,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as childProcess from 'child_process';
 import { CodexHostInstaller } from '../src/installers/codex-host-installer.js';
 
 // Mock fs (hoisted). vi.mock is hoisted by vitest before imports execute,
 // so the CodexHostInstaller module sees the mocked fs.
 vi.mock('fs');
+vi.mock('child_process', () => ({ execSync: vi.fn(() => Buffer.from('/global/node_modules')) }));
 vi.mock('../src/mvp-config.js', () => ({
   getInstalledBinDir: vi.fn(() => '/home/user/.openclaw/extensions/principles-disciple/bin'),
   isWindows: vi.fn(() => false),
@@ -140,6 +142,18 @@ describe('resolvePdHookPath — global npm root fallback', () => {
       resolveFromDir: () => undefined,
     } satisfies PdHookPathDeps);
     expect(resolved).toBeUndefined();
+  });
+
+  it('does not invoke npm global discovery on the default supported path', () => {
+    delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+
+    const resolved = resolvePdHookPath({
+      localResolve: () => undefined,
+      resolveFromDir: () => undefined,
+    });
+
+    expect(resolved).toBeUndefined();
+    expect(childProcess.execSync).not.toHaveBeenCalled();
   });
 
   it('still returns undefined when npm root -g itself fails but global dir probe is unavailable', () => {

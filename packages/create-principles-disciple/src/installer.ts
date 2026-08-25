@@ -1149,9 +1149,10 @@ function syncPdCli(pluginDir: string): boolean {
   return installGlobalPdShim();
 }
 
-function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: string } {
+function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: string; localError?: string } {
   const localShim = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
   let localOk = false;
+  let localError: string | undefined;
   try {
     const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
     execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
@@ -1159,6 +1160,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   } catch (e: unknown) {
     const err = e as { stderr?: Buffer; message?: string };
     const detail = err.stderr?.toString().slice(0, 500) ?? err.message ?? 'unknown error';
+    localError = detail;
     logger.warn(`PD CLI local verification failed: ${detail}`);
   }
 
@@ -1177,7 +1179,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
     }
   })();
 
-  return { localOk, globalOk, localPath: localShim };
+  return { localOk, globalOk, localPath: localShim, localError };
 }
 
 function installConsole(consoleDir: string): void {
@@ -1716,6 +1718,8 @@ export interface InstallResult {
   enabledChannels: string[];
   nextAction: string;
   reason?: string;
+  component?: string;
+  dependency?: string;
   error?: string;
   /** Task 8: URL the browser was opened to when the installer auto-launched the
    * console via `pd console open`. Undefined when auto-launch was skipped or failed. */
@@ -1902,7 +1906,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd CLI...');
     const cliVerify = verifyPdCliShim();
     if (!cliVerify.localOk) {
-      throw new Error('PD CLI verification failed — local shim is not executable after install. Check Node.js and PATH configuration.');
+      throw new Error(`PD CLI verification failed — local shim is not executable after install: ${cliVerify.localError ?? 'unknown error'}. Check Node.js and PATH configuration.`);
     }
     if (cliVerify.globalOk) {
       components.cli = 'verified';
@@ -2146,6 +2150,8 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       enabledChannels: options.channels,
       nextAction,
       reason,
+      component: error instanceof SelfContainedDependencyError ? error.component : undefined,
+      dependency: error instanceof SelfContainedDependencyError ? error.dependency : undefined,
       error: `${errorMsg} — ${rollbackSuffix}`,
     };
   } finally {

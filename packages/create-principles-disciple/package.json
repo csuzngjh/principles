@@ -21,7 +21,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "bundle": "node scripts/bundle-plugin.mjs",
-    "build:release-asset": "node scripts/build-release-asset.mjs",
+    "build:release-asset": "node scripts/bundle-plugin.mjs --self-contained && node scripts/build-release-asset.mjs",
     "prepack": "npm run build && npm run bundle",
     "prepublishOnly": "npm run build && npm run bundle",
     "test": "vitest run"
