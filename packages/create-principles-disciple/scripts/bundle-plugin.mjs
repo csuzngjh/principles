@@ -9,19 +9,25 @@ import { promisify } from 'util';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+function readOption(name) {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? undefined : process.argv[index + 1];
+}
+
 const ROOT_DIR = join(__dirname, '..', '..', '..');
+const OUTPUT_ROOT = readOption('--output-root') ?? join(__dirname, '..');
 const PLUGIN_SRC = join(ROOT_DIR, 'packages', 'openclaw-plugin');
-const PLUGIN_DEST = join(__dirname, '..', 'plugin');
+const PLUGIN_DEST = join(OUTPUT_ROOT, 'plugin');
 const PD_CLI_SRC = join(ROOT_DIR, 'packages', 'pd-cli');
-const PD_CLI_DEST = join(__dirname, '..', 'pd-cli');
+const PD_CLI_DEST = join(OUTPUT_ROOT, 'pd-cli');
 const CONSOLE_SRC = join(ROOT_DIR, 'packages', 'pd-console');
-const CONSOLE_DEST = join(__dirname, '..', 'console');
+const CONSOLE_DEST = join(OUTPUT_ROOT, 'console');
 const CORE_SRC = join(ROOT_DIR, 'packages', 'principles-core');
-const CORE_DEST = join(__dirname, '..', 'core');
+const CORE_DEST = join(OUTPUT_ROOT, 'core');
 const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
-const HOST_RUNTIME_DEST = join(__dirname, '..', 'host-runtime');
+const HOST_RUNTIME_DEST = join(OUTPUT_ROOT, 'host-runtime');
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
-const INSTALL_LAYOUT_DEST = join(__dirname, '..', 'install-layout');
+const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
 const BUILD_SELF_CONTAINED_ASSET = process.argv.includes('--self-contained');
 const execFileAsync = promisify(execFile);
 
@@ -398,6 +404,9 @@ if (BUILD_SELF_CONTAINED_ASSET) {
 // to main). Without this sync, the bundled plugin carries a stale version,
 // causing a permanent false "update available" after install.
 // ---------------------------------------------------------------------------
+if (BUILD_SELF_CONTAINED_ASSET) {
+  console.log('\n🔢 Preserving source component versions for the immutable release asset.');
+} else {
 console.log('\n🔢 Syncing bundled plugin version to latest npm principles-disciple...');
 
 let npmPluginVersion = null;
@@ -432,7 +441,7 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   // build-time-frozen plugin) drift and produce the permanent false
   // "update available". Unknown fields are preserved; only the
   // `pd.bundledPluginVersion` stamp is added/updated.
-  const installerPkgPath = join(__dirname, '..', 'package.json');
+  const installerPkgPath = join(OUTPUT_ROOT, 'package.json');
   try {
     const installerRaw = readFileSync(installerPkgPath, 'utf-8');
     const installerPkg = JSON.parse(installerRaw);
@@ -460,6 +469,7 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   } catch {
     console.log('  ⚠️  openclaw.plugin.json not found or unreadable — skipping version stamp');
   }
+}
 }
 
 console.log('\n🔍 Verifying hook activation contract...');

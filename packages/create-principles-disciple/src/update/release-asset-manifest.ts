@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 export interface ReleaseAssetManifestFile {
@@ -13,12 +14,21 @@ export interface ReleaseAssetManifest {
   schemaVersion: 1;
 }
 
+export interface ReleaseAssetIdentity {
+  arch: string;
+  nodeAbi: string;
+  platform: string;
+  schemaVersion: 1;
+}
+
 export type ReleaseAssetManifestErrorCode =
   | 'asset_directory_missing'
   | 'asset_file_unexpected'
   | 'asset_digest_mismatch'
+  | 'asset_identity_invalid'
   | 'asset_manifest_invalid'
-  | 'asset_path_unsafe';
+  | 'asset_path_unsafe'
+  | 'asset_target_mismatch';
 
 export class ReleaseAssetManifestError extends Error {
   readonly code: ReleaseAssetManifestErrorCode;
@@ -36,11 +46,16 @@ function isSafeRelativePath(value: string): boolean {
     && !value.split(/[\\/]/).some((segment) => segment.length === 0 || segment === '.' || segment === '..');
 }
 
-function readPayloadFiles(assetDir: string): ReleaseAssetManifestFile[] {
+interface PayloadFilePath {
+  absolutePath: string;
+  relativePath: string;
+}
+
+function listPayloadFilePaths(assetDir: string): PayloadFilePath[] {
   if (!fs.existsSync(assetDir) || !fs.statSync(assetDir).isDirectory()) {
     throw new ReleaseAssetManifestError('asset_directory_missing', `Release asset directory does not exist: ${assetDir}`);
   }
-  const files: ReleaseAssetManifestFile[] = [];
+  const files: PayloadFilePath[] = [];
   const visit = (directory: string): void => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const absolutePath = path.join(directory, entry.name);
@@ -56,16 +71,22 @@ function readPayloadFiles(assetDir: string): ReleaseAssetManifestFile[] {
       if (!entry.isFile() || !isSafeRelativePath(relativePath)) {
         throw new ReleaseAssetManifestError('asset_path_unsafe', `Release asset contains an unsafe entry: ${relativePath}`);
       }
-      const bytes = fs.readFileSync(absolutePath);
-      files.push({
-        path: relativePath,
-        sha256: createHash('sha256').update(bytes).digest('hex'),
-        size: bytes.length,
-      });
+      files.push({ absolutePath, relativePath });
     }
   };
   visit(assetDir);
-  return files.sort((left, right) => left.path.localeCompare(right.path));
+  return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
+
+function readPayloadFiles(assetDir: string): ReleaseAssetManifestFile[] {
+  return listPayloadFilePaths(assetDir).map(({ absolutePath, relativePath }) => {
+    const bytes = fs.readFileSync(absolutePath);
+    return {
+      path: relativePath,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      size: bytes.length,
+    };
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,6 +116,36 @@ export function parseReleaseAssetManifest(value: unknown): ReleaseAssetManifest 
   return { schemaVersion: 1, files };
 }
 
+export function parseReleaseAssetIdentity(value: unknown): ReleaseAssetIdentity {
+  if (!isRecord(value) || value.schemaVersion !== 1) {
+    throw new ReleaseAssetManifestError('asset_identity_invalid', 'Release asset identity has an unsupported schema.');
+  }
+  const platform = Object.hasOwn(value, 'platform') ? value.platform : undefined;
+  const arch = Object.hasOwn(value, 'arch') ? value.arch : undefined;
+  const nodeAbi = Object.hasOwn(value, 'nodeAbi') ? value.nodeAbi : undefined;
+  if (typeof platform !== 'string' || platform.trim().length === 0
+    || typeof arch !== 'string' || arch.trim().length === 0
+    || typeof nodeAbi !== 'string' || !/^\d+$/.test(nodeAbi)) {
+    throw new ReleaseAssetManifestError('asset_identity_invalid', 'Release asset identity must declare platform, architecture, and numeric Node ABI.');
+  }
+  return { schemaVersion: 1, platform, arch, nodeAbi };
+}
+
+export function verifyReleaseAssetTarget(
+  identity: ReleaseAssetIdentity,
+  target: { platform: string; arch: string; nodeAbi: string },
+): void {
+  const validatedIdentity = parseReleaseAssetIdentity(identity);
+  if (validatedIdentity.platform !== target.platform
+    || validatedIdentity.arch !== target.arch
+    || validatedIdentity.nodeAbi !== target.nodeAbi) {
+    throw new ReleaseAssetManifestError(
+      'asset_target_mismatch',
+      `Release asset target ${validatedIdentity.platform}/${validatedIdentity.arch}/abi${validatedIdentity.nodeAbi} does not match this runtime ${target.platform}/${target.arch}/abi${target.nodeAbi}.`,
+    );
+  }
+}
+
 export function createReleaseAssetManifest(assetDir: string): ReleaseAssetManifest {
   return { schemaVersion: 1, files: readPayloadFiles(assetDir) };
 }
@@ -115,4 +166,33 @@ export function verifyReleaseAssetManifest(assetDir: string, manifest: ReleaseAs
       throw new ReleaseAssetManifestError('asset_digest_mismatch', `Release asset integrity check failed: ${actualFile.path}`);
     }
   }
+}
+
+export async function verifyReleaseAssetManifestAsync(assetDir: string, manifest: ReleaseAssetManifest): Promise<void> {
+  const validatedManifest = parseReleaseAssetManifest(manifest);
+  const payloadPaths = listPayloadFilePaths(assetDir);
+  const expectedByPath = new Map(validatedManifest.files.map((file) => [file.path, file]));
+  if (payloadPaths.length !== expectedByPath.size) {
+    throw new ReleaseAssetManifestError('asset_file_unexpected', 'Release asset file set does not match its manifest.');
+  }
+
+  const concurrency = Math.min(64, Math.max(1, payloadPaths.length));
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (nextIndex < payloadPaths.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const payload = payloadPaths[index];
+      if (!payload) throw new ReleaseAssetManifestError('asset_manifest_invalid', 'Release asset verification lost its file cursor.');
+      const expected = expectedByPath.get(payload.relativePath);
+      if (!expected) {
+        throw new ReleaseAssetManifestError('asset_file_unexpected', `Release asset contains an unexpected file: ${payload.relativePath}`);
+      }
+      const bytes = await readFile(payload.absolutePath);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      if (bytes.length !== expected.size || digest !== expected.sha256) {
+        throw new ReleaseAssetManifestError('asset_digest_mismatch', `Release asset integrity check failed: ${payload.relativePath}`);
+      }
+    }
+  }));
 }

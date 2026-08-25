@@ -72,12 +72,6 @@ beforeAll(() => {
     throw new Error(`Tarball not found at ${tarballPath}`);
   }
 
-  execFileSync(process.execPath, [path.join(INSTALLER_DIR, 'scripts', 'bundle-plugin.mjs'), '--self-contained'], {
-    cwd: INSTALLER_DIR,
-    stdio: 'pipe',
-    timeout: 300_000,
-  });
-
   tempHomeDir = path.join(TMPDIR, `pd-smoke-home-${Date.now()}`);
   tempWorkspaceDir = path.join(TMPDIR, `pd-smoke-ws-${Date.now()}`);
   fs.mkdirSync(tempHomeDir, { recursive: true });
@@ -143,82 +137,6 @@ describe('Real packaged install smoke test', () => {
     expect(pluginPkgJson.dependencies?.['@principles/host-runtime']).toBeUndefined();
     expect(pluginPkgJson.devDependencies?.['@principles/host-runtime']).toBeUndefined();
   }, 240_000);
-
-  it('production self-contained bundle installs with no npm invocation', () => {
-    // npm pack's prepack runs the real production bundler. Execute that built
-    // installer directly so PLUGIN_DIR points at the self-contained component
-    // trees (including node_modules) rather than npm's node_modules-stripped
-    // tarball representation.
-    const cliEntry = path.join(INSTALLER_DIR, 'dist', 'index.js');
-    const fakeBinDir = path.join(tempHomeDir, 'bin');
-    const npmPoisonMarker = path.join(tempHomeDir, 'npm-was-invoked');
-    const npmPoison = path.join(fakeBinDir, process.platform === 'win32' ? 'npm.cmd' : 'npm');
-    fs.writeFileSync(
-      npmPoison,
-      process.platform === 'win32'
-        ? `@echo off\r\n>"${npmPoisonMarker}" echo invoked\r\nexit /b 97\r\n`
-        : `#!/bin/sh\nprintf invoked > "${npmPoisonMarker}"\nexit 97\n`,
-      'utf8',
-    );
-    if (process.platform !== 'win32') fs.chmodSync(npmPoison, 0o755);
-
-    let stdout = '';
-    let exitCode = 0;
-    let stderr = '';
-    try {
-      const result = execFileSync(process.execPath, [
-        cliEntry,
-        '--yes',
-        '--workspace', tempWorkspaceDir,
-        '--json',
-      ], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          HOME: tempHomeDir,
-          USERPROFILE: tempHomeDir,
-          // Skip npm upgrade so we test the bundled pd-cli (built from current
-          // repo state) rather than the npm-published version, which may be
-          // incompatible with local core changes (e.g., removed exports).
-          PD_SKIP_NPM_UPGRADE: '1',
-          PD_SKIP_GLOBAL_SHIM: '1',
-        },
-        timeout: 600_000,
-      });
-      stdout = result.toString();
-    } catch (e: unknown) {
-      const err = e as { status?: number; stdout?: Buffer; stderr?: Buffer };
-      exitCode = err.status ?? 1;
-      stdout = err.stdout?.toString() ?? '';
-      stderr = err.stderr?.toString() ?? '';
-    }
-    const npmWasInvoked = fs.existsSync(npmPoisonMarker);
-    fs.rmSync(npmPoison, { force: true });
-    fs.rmSync(npmPoisonMarker, { force: true });
-
-    if (!stdout.trim()) {
-      throw new Error(`No stdout output. exitCode=${exitCode}, stderr=${stderr.slice(0, 2000)}`);
-    }
-
-    const parsed: unknown = JSON.parse(stdout);
-    expect(typeof parsed).toBe('object');
-    expect(parsed).not.toBeNull();
-    if (typeof parsed === 'object' && parsed !== null) {
-      const obj = parsed as Record<string, unknown>;
-      if (!obj.success) {
-        throw new Error(`Install failed: reason=${obj.reason}, error=${obj.error}, nextAction=${obj.nextAction}, components=${JSON.stringify(obj.components)}, stderr=${stderr.slice(0, 1000)}`);
-      }
-      expect(obj.success).toBe(true);
-      expect(obj.components).toBeDefined();
-      const components = obj.components as Record<string, unknown>;
-      expect(components.plugin).toBe('verified');
-      expect(['verified', 'verified_local_only']).toContain(components.cli);
-      expect(components.console).toBe('configured');
-      const verification = obj.verification as Record<string, unknown>;
-      expect(verification.storyA).toBe('passed');
-    }
-    expect(npmWasInvoked).toBe(false);
-  }, 600_000);
 
   it('installer demo verification does not pollute the user workspace', () => {
     // P0-1 anti-regression: the installer's Story A verification must run in

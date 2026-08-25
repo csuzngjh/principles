@@ -36,6 +36,13 @@ import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { parseInstallManifest } from '@principles/install-layout';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
+import {
+  parseReleaseAssetIdentity,
+  parseReleaseAssetManifest,
+  ReleaseAssetManifestError,
+  verifyReleaseAssetManifestAsync,
+  verifyReleaseAssetTarget,
+} from './update/release-asset-manifest.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -92,7 +99,7 @@ export function ensureConversationAccess(config: Record<string, unknown>): Recor
 const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
 
 // 超时常量
-const PD_CLI_VERIFICATION_TIMEOUT_MS = 10_000;
+const PD_CLI_VERIFICATION_TIMEOUT_MS = 30_000;
 const STORY_A_VERIFICATION_TIMEOUT_MS = 30_000;
 const CONSOLE_HEALTH_CHECK_TIMEOUT_MS = 8_000;
 const CONSOLE_WARMUP_TIME_MS = 6_000;
@@ -346,6 +353,55 @@ export async function prepareBundledComponentDependencies(
       dependency: 'better-sqlite3',
       cause: error,
     });
+  }
+}
+
+const SELF_CONTAINED_COMPONENTS = [
+  ['Core', 'core'],
+  ['Host runtime', 'host-runtime'],
+  ['Plugin', 'plugin'],
+  ['PD CLI', 'pd-cli'],
+  ['Console', 'console'],
+  ['Install layout', 'install-layout'],
+] as const;
+
+export async function preflightSelfContainedReleaseAsset(assetDir: string): Promise<void> {
+  const identityPath = path.join(assetDir, '_release', 'asset.json');
+  let identityValue: unknown;
+  try {
+    identityValue = JSON.parse(readFileSync(identityPath, 'utf8')) as unknown;
+    const identity = parseReleaseAssetIdentity(identityValue);
+    verifyReleaseAssetTarget(identity, {
+      platform: process.platform,
+      arch: process.arch,
+      nodeAbi: process.versions.modules,
+    });
+  } catch (error) {
+    const targetMismatch = error instanceof ReleaseAssetManifestError && error.code === 'asset_target_mismatch';
+    throw new SelfContainedDependencyError({
+      reason: targetMismatch ? 'self_contained_asset_target_mismatch' : 'self_contained_asset_identity_invalid',
+      nextAction: targetMismatch ? SELF_CONTAINED_NATIVE_NEXT_ACTION : SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: error instanceof Error ? error.message : 'Release asset identity is missing or malformed.',
+      component: 'Release asset',
+      cause: error,
+    });
+  }
+
+  try {
+    const manifestValue: unknown = JSON.parse(readFileSync(path.join(assetDir, '_release', 'manifest.json'), 'utf8')) as unknown;
+    await verifyReleaseAssetManifestAsync(assetDir, parseReleaseAssetManifest(manifestValue));
+  } catch (error) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_asset_integrity_invalid',
+      nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: error instanceof Error ? error.message : 'Release asset manifest is missing, malformed, or does not match its files.',
+      component: 'Release asset',
+      cause: error,
+    });
+  }
+
+  for (const [componentName, componentDirectory] of SELF_CONTAINED_COMPONENTS) {
+    await prepareBundledComponentDependencies(path.join(assetDir, componentDirectory), componentName);
   }
 }
 
@@ -1158,8 +1214,16 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
     execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
     localOk = true;
   } catch (e: unknown) {
-    const err = e as { stderr?: Buffer; message?: string };
-    const detail = err.stderr?.toString().slice(0, 500) ?? err.message ?? 'unknown error';
+    let detail = 'unknown error';
+    if (typeof e === 'object' && e !== null) {
+      const stderr = Object.hasOwn(e, 'stderr') ? Reflect.get(e, 'stderr') : undefined;
+      const message = Object.hasOwn(e, 'message') ? Reflect.get(e, 'message') : undefined;
+      const stderrText = Buffer.isBuffer(stderr) ? stderr.toString().trim().slice(0, 500) : '';
+      if (stderrText.length > 0) detail = stderrText;
+      else if (typeof message === 'string' && message.trim().length > 0) detail = message.trim().slice(0, 500);
+    } else if (typeof e === 'string' && e.trim().length > 0) {
+      detail = e.trim().slice(0, 500);
+    }
     localError = detail;
     logger.warn(`PD CLI local verification failed: ${detail}`);
   }
@@ -1777,6 +1841,35 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   const quiet = mode.quiet === true;
   const nonInteractive = mode.nonInteractive ?? quiet;
   activeHostTarget = options.host;
+  if (!legacyNpmInstallEnabled()) {
+    try {
+      await preflightSelfContainedReleaseAsset(pluginDir);
+    } catch (error) {
+      const preflightError = error instanceof SelfContainedDependencyError
+        ? error
+        : new SelfContainedDependencyError({
+          reason: 'self_contained_asset_preflight_failed',
+          nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+          message: error instanceof Error ? error.message : String(error),
+          component: 'Release asset',
+          cause: error,
+        });
+      return {
+        success: false,
+        workspaceDir: options.workspaceDir,
+        configYamlPath: getConfigYamlPath(options.workspaceDir),
+        templatesCount: 0,
+        components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+        verification: { features: 'skipped', storyA: 'skipped' },
+        enabledChannels: options.channels,
+        nextAction: preflightError.nextAction,
+        reason: preflightError.reason,
+        component: preflightError.component,
+        dependency: preflightError.dependency,
+        error: `${preflightError.message} — ${t('rollback_no_changes')}`,
+      };
+    }
+  }
   // Gateway lock pre-flight: a running gateway holds native-module file handles
   // that make the backup rename fail with EPERM. Decide stop/abort/proceed
   // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).

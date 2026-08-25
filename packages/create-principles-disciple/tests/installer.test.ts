@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as childProcess from 'child_process';
 import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin, ensureConversationAccess, install } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
@@ -288,16 +289,79 @@ describe('install() gateway lock pre-flight', () => {
   // Pin English so string assertions on operator-visible failure text are
   // deterministic (the catch block now routes through t()).
   let savedLang: 'zh' | 'en';
+  let savedLegacyNpmInstall: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
     savedLang = 'zh';
+    savedLegacyNpmInstall = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    process.env.PD_ALLOW_LEGACY_NPM_INSTALL = '1';
     setLanguage('en');
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+    vi.mocked(fs.readdirSync).mockReset();
+    vi.mocked(fs.statSync).mockReset();
+    if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
     setLanguage(savedLang);
+  });
+
+  it('refuses a wrong-ABI release before gateway control or filesystem mutation', async () => {
+    delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      schemaVersion: 1,
+      platform: process.platform,
+      arch: process.arch,
+      nodeAbi: process.versions.modules === '999999' ? '999998' : '999999',
+    }));
+
+    const result = await install(baseInstallOptions, '/asset', { quiet: true });
+
+    expect(result).toMatchObject({
+      success: false,
+      reason: 'self_contained_asset_target_mismatch',
+      component: 'Release asset',
+    });
+    expect(checkOpenClawGateway).not.toHaveBeenCalled();
+    expect(fs.rmSync).not.toHaveBeenCalled();
+    expect(fs.cpSync).not.toHaveBeenCalled();
+    expect(fs.renameSync).not.toHaveBeenCalled();
+  });
+
+  it('refuses a missing source dependency before gateway control or filesystem mutation', async () => {
+    delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    const actualFs = await vi.importActual<typeof import('fs')>('fs');
+    vi.mocked(fs.existsSync).mockImplementation((value) => !String(value).endsWith(path.join('node_modules', 'missing-runtime')));
+    vi.mocked(fs.readFileSync).mockImplementation((value) => {
+      const filePath = String(value);
+      if (filePath.endsWith(path.join('_release', 'asset.json'))) {
+        return JSON.stringify({ schemaVersion: 1, platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules });
+      }
+      if (filePath.endsWith(path.join('_release', 'manifest.json'))) {
+        return JSON.stringify({ schemaVersion: 1, files: [] });
+      }
+      return JSON.stringify({ dependencies: { 'missing-runtime': '1.0.0' } });
+    });
+    vi.mocked(fs.statSync).mockReturnValue(actualFs.statSync(process.cwd()));
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const result = await install(baseInstallOptions, '/asset', { quiet: true });
+
+    expect(result).toMatchObject({
+      success: false,
+      reason: 'self_contained_runtime_dependency_missing',
+      component: 'Core',
+      dependency: 'missing-runtime',
+    });
+    expect(checkOpenClawGateway).not.toHaveBeenCalled();
+    expect(fs.rmSync).not.toHaveBeenCalled();
+    expect(fs.cpSync).not.toHaveBeenCalled();
+    expect(fs.renameSync).not.toHaveBeenCalled();
   });
 
   // cli-5: the abort path must NOT mutate — gateway is never stopped and no

@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { basename, join, relative, resolve, sep } from 'node:path';
 
 const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'];
@@ -23,11 +24,29 @@ function readArguments(argv) {
   return Object.fromEntries(values);
 }
 
-function assertSafeSourceTree(directory) {
+function isBuildOnlyBinPath(rootDirectory, entryPath) {
+  const entryRelativePath = relative(rootDirectory, entryPath).split(sep).join('/');
+  return /(^|\/)node_modules\/\.bin($|\/)/.test(entryRelativePath);
+}
+
+function assertSafeSourceTree(directory, rootDirectory = directory, allowBuildOnlyBin = false) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const entryPath = join(directory, entry.name);
+    if (allowBuildOnlyBin && isBuildOnlyBinPath(rootDirectory, entryPath)) continue;
     if (entry.isSymbolicLink()) throw new Error(`Release input contains a symlink: ${entryPath}`);
-    if (entry.isDirectory()) assertSafeSourceTree(entryPath);
+    if (entry.isDirectory()) assertSafeSourceTree(entryPath, rootDirectory, allowBuildOnlyBin);
+  }
+}
+
+function removeBuildOnlyBinTrees(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = join(directory, entry.name);
+    if (!entry.isDirectory()) continue;
+    if (entry.name === '.bin' && basename(directory) === 'node_modules') {
+      rmSync(entryPath, { recursive: true, force: true });
+      continue;
+    }
+    removeBuildOnlyBinTrees(entryPath);
   }
 }
 
@@ -53,8 +72,8 @@ function assertRuntimeDependenciesComplete(component, directory) {
   }
 }
 
-function listPayloadFiles(assetDirectory) {
-  const files = [];
+async function listPayloadFiles(assetDirectory) {
+  const paths = [];
   const visit = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const entryPath = join(directory, entry.name);
@@ -66,42 +85,69 @@ function listPayloadFiles(assetDirectory) {
         continue;
       }
       if (!entry.isFile()) throw new Error(`Release asset contains a non-file entry: ${entryRelativePath}`);
-      const bytes = readFileSync(entryPath);
-      files.push({
-        path: entryRelativePath,
-        sha256: createHash('sha256').update(bytes).digest('hex'),
-        size: bytes.length,
-      });
+      paths.push({ absolute: entryPath, relative: entryRelativePath });
     }
   };
   visit(assetDirectory);
-  return files.sort((left, right) => left.path.localeCompare(right.path));
+  paths.sort((left, right) => left.relative.localeCompare(right.relative));
+
+  const files = new Array(paths.length);
+  const concurrency = Math.min(64, Math.max(1, paths.length));
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (nextIndex < paths.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const file = paths[index];
+      const bytes = await readFile(file.absolute);
+      files[index] = {
+        path: file.relative,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        size: bytes.length,
+      };
+    }
+  }));
+  return files;
 }
 
-function main() {
+async function main() {
   const args = readArguments(process.argv.slice(2));
   const inputDirectory = resolve(args.input);
   const outputDirectory = resolve(args.output);
+  const inPlace = args['in-place'] === 'true';
   if (!existsSync(inputDirectory) || !lstatSync(inputDirectory).isDirectory()) {
     throw new Error(`Release input directory does not exist: ${inputDirectory}`);
   }
-  if (inputDirectory === outputDirectory || outputDirectory.startsWith(`${inputDirectory}${sep}`)) {
+  if ((!inPlace && inputDirectory === outputDirectory) || outputDirectory.startsWith(`${inputDirectory}${sep}`)) {
     throw new Error('Release output must not be inside the input directory');
+  }
+  if (inPlace && inputDirectory !== outputDirectory) {
+    throw new Error('In-place release verification requires identical input and output directories');
   }
   for (const component of REQUIRED_COMPONENTS) {
     const source = join(inputDirectory, component);
     if (!existsSync(source) || !lstatSync(source).isDirectory()) {
       throw new Error(`Release input is missing required component: ${component}`);
     }
-    assertSafeSourceTree(source);
+    if (inPlace) removeBuildOnlyBinTrees(source);
+    assertSafeSourceTree(source, source, !inPlace);
     assertRuntimeDependenciesComplete(component, source);
   }
-  if (existsSync(outputDirectory)) rmSync(outputDirectory, { recursive: true, force: true });
-  mkdirSync(outputDirectory, { recursive: true });
-  for (const component of REQUIRED_COMPONENTS) {
-    cpSync(join(inputDirectory, component), join(outputDirectory, component), { recursive: true, dereference: false });
+  if (!inPlace) {
+    if (existsSync(outputDirectory)) {
+      throw new Error(`Release output already exists and immutable assets cannot be replaced: ${outputDirectory}`);
+    }
+    mkdirSync(outputDirectory, { recursive: true });
+    for (const component of REQUIRED_COMPONENTS) {
+      cpSync(join(inputDirectory, component), join(outputDirectory, component), { recursive: true, dereference: false });
+    }
   }
-  const manifest = { schemaVersion: 1, files: listPayloadFiles(outputDirectory) };
+  for (const component of REQUIRED_COMPONENTS) {
+    const outputComponent = join(outputDirectory, component);
+    removeBuildOnlyBinTrees(outputComponent);
+    assertSafeSourceTree(outputComponent);
+  }
+  const manifest = { schemaVersion: 1, files: await listPayloadFiles(outputDirectory) };
   const releaseDirectory = join(outputDirectory, '_release');
   mkdirSync(releaseDirectory, { recursive: true });
   writeFileSync(join(releaseDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -115,7 +161,7 @@ function main() {
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;

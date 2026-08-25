@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ReleaseAssetManifestError,
   createReleaseAssetManifest,
+  parseReleaseAssetIdentity,
+  verifyReleaseAssetManifestAsync,
+  verifyReleaseAssetTarget,
   verifyReleaseAssetManifest,
 } from '../src/update/release-asset-manifest.js';
 
@@ -27,6 +30,28 @@ afterEach(() => {
 });
 
 describe('release asset manifest', () => {
+  it('validates the platform, architecture, and Node ABI identity as untrusted data', () => {
+    const identity = parseReleaseAssetIdentity({
+      schemaVersion: 1,
+      platform: 'win32',
+      arch: 'x64',
+      nodeAbi: '147',
+    });
+
+    expect(() => verifyReleaseAssetTarget(identity, {
+      platform: 'win32',
+      arch: 'x64',
+      nodeAbi: '147',
+    })).not.toThrow();
+    expect(() => verifyReleaseAssetTarget(identity, {
+      platform: 'linux',
+      arch: 'x64',
+      nodeAbi: '147',
+    })).toThrowError(expect.objectContaining({ code: 'asset_target_mismatch' }));
+    expect(() => parseReleaseAssetIdentity({ schemaVersion: 1, platform: 'win32', arch: 'x64', nodeAbi: [] }))
+      .toThrowError(expect.objectContaining({ code: 'asset_identity_invalid' }));
+  });
+
   it('records every payload file with a stable path, size, and SHA-256 digest', () => {
     const assetDir = createAssetDirectory();
 
@@ -60,6 +85,15 @@ describe('release asset manifest', () => {
       if (!(error instanceof ReleaseAssetManifestError)) throw error;
       expect(error.code).toBe('asset_digest_mismatch');
     }
+  });
+
+  it('refuses tampered bytes through the asynchronous production verifier', async () => {
+    const assetDir = createAssetDirectory();
+    const manifest = createReleaseAssetManifest(assetDir);
+    fs.writeFileSync(path.join(assetDir, 'pd.js'), 'tampered cli entry');
+
+    await expect(verifyReleaseAssetManifestAsync(assetDir, manifest))
+      .rejects.toMatchObject({ code: 'asset_digest_mismatch' });
   });
 
   it('refuses payload files that the manifest does not declare', () => {
