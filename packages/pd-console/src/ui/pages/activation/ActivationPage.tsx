@@ -22,8 +22,10 @@ import type {
   ActivationsData,
   LifecycleMetricsData,
   ReceiptCountEntryData,
+  ReceiptEvidenceCoverageData,
   RuleCodeOwnerReviewData,
 } from "../../api.js";
+import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import {
   validateActivationsData,
   validateLifecycleMetricsData,
@@ -372,6 +374,8 @@ export function ActivationPage() {
   const [lifecycleCache, setLifecycleCache] = useState<Record<string, LifecycleMetricsData | null>>({});
   const [receiptCounts, setReceiptCounts] = useState<Record<string, ReceiptCountEntryData> | null>(null);
   const [receiptDegraded, setReceiptDegraded] = useState<{ reason: string; nextAction?: string } | null>(null);
+  // PRI-590: page-level coverage disclosure for the receipt counts.
+  const [receiptCoverage, setReceiptCoverage] = useState<ReceiptEvidenceCoverageData | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [disablingIds, setDisablingIds] = useState<Set<string>>(new Set());
@@ -383,6 +387,7 @@ export function ActivationPage() {
     setDegradedNote(null);
     setReceiptCounts(null);
     setReceiptDegraded(null);
+    setReceiptCoverage(null);
 
     const result = await fetchAllActivations();
 
@@ -421,11 +426,15 @@ export function ActivationPage() {
           byId[entry.principleId] = entry;
         }
         setReceiptCounts(byId);
+        setReceiptCoverage(rResult.data.coverage);
       } else {
         setReceiptDegraded({
           reason: rResult.data.reason ?? "unknown",
           ...(rResult.data.nextAction === undefined ? {} : { nextAction: rResult.data.nextAction }),
         });
+        // Degraded responses still carry coverage — it names the state
+        // (disabled vs unavailable) for the localized headline.
+        setReceiptCoverage(rResult.data.coverage);
       }
     } catch (err) {
       // EP-03: counts are optional — degrade with reason, never block the page.
@@ -606,10 +615,26 @@ export function ActivationPage() {
           className="mt-4 text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2"
           data-testid="receipt-counts-degraded"
         >
+          {/* PRI-590: localized zero-state headline (disabled vs unavailable) when coverage is known */}
+          {receiptCoverage !== null && (
+            <span className="font-medium text-ink-3">{t(getReceiptSourceStatusLabelKey(receiptCoverage.sourceStatus))}</span>
+          )}
+          {receiptCoverage !== null ? ". " : ""}
           {t("pages.activation.receiptsUnavailable", { reason: receiptDegraded.reason })}
           {receiptDegraded.nextAction && (
             <span className="mt-1 block font-mono text-[12px]">{receiptDegraded.nextAction}</span>
           )}
+        </div>
+      )}
+
+      {/* PRI-590: page-level receipt evidence coverage disclosure (ok counts only —
+          the degraded note above already covers the unavailable/disabled states). */}
+      {receiptCounts !== null && receiptCoverage !== null && (
+        <div
+          className="mt-4 bg-surface/60 border-l-2 border-line px-3 py-2"
+          data-testid="receipt-counts-coverage"
+        >
+          <ReceiptCoverageDisclosure coverage={receiptCoverage} />
         </div>
       )}
 

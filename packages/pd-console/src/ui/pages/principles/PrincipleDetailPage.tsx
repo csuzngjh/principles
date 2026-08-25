@@ -18,6 +18,7 @@ import {
   editApproval,
 } from "../../api.js";
 import type { PrincipleReceiptsData } from "../../api.js";
+import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import { formatDate } from "../../utils/format-date.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
@@ -609,10 +610,17 @@ export function PrincipleDetailPage() {
                 <p className="mt-2 text-[13px] text-ink-3">{t('principles.detail.receipts.empty')}</p>
               )}
               <p className="mt-3 text-[11px] leading-relaxed text-ink-4">{t('principles.detail.receipts.note')}</p>
+              {/* PRI-590: evidence coverage disclosure — observed evidence, not full history */}
+              <div className="mt-3 border-t border-line pt-3">
+                <ReceiptCoverageDisclosure coverage={receipts.coverage} />
+              </div>
             </div>
           ) : (
             <div data-testid="receipt-history-degraded" className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
-              <p className="text-[13px] text-ink-2">{receipts.reason ?? t('principles.detail.receipts.unavailableReason')}</p>
+              {/* PRI-590: localized zero-state headline (disabled vs unavailable), then the technical reason.
+                  i18n.t (common ns) because the label key is a full path shared with the Activation page. */}
+              <h3 className="text-[13px] font-semibold text-ink">{i18n.t(getReceiptSourceStatusLabelKey(receipts.coverage.sourceStatus))}</h3>
+              <p className="mt-1 text-[13px] text-ink-2">{receipts.reason ?? t('principles.detail.receipts.unavailableReason')}</p>
               {receipts.nextAction && <p className="mt-1 text-[12px] text-ink-3">{receipts.nextAction}</p>}
             </div>
           )}

@@ -41,6 +41,9 @@ export type {
   GovernanceExperienceNextActionCode, GovernanceExperienceSummary, GovernanceExperienceSnapshot,
 } from './governance-experience-contract.js';
 export { GOVERNANCE_EXPERIENCE_ITEMS_LIMIT, GOVERNANCE_EXPERIENCE_ISSUE_GROUPS_LIMIT, deriveGovernanceExperienceSnapshot } from './governance-experience.js';
+// Receipt evidence coverage disclosure contract (PRI-590)
+export { RECEIPT_RETENTION_POLICY_DAYS } from './receipt-coverage.js';
+export type { ReceiptSourceStatus, ReceiptValidationStatus, ReceiptEvidenceCoverage } from './receipt-coverage.js';
 export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetryPolicySchema, AgentSpecSchema } from './agent-spec.js';
 export { SchemaVersionRefSchema, RuntimeV2SchemaVersionSchema } from './schema-version.js';
 export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';

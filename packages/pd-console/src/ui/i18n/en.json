@@ -526,6 +526,19 @@
           "empty": "No recent records — this principle has not been triggered at runtime yet.",
           "note": "Two levels: Effect = the principle actually changed behavior (block / auto-correction / agent self-report); Presence = the principle entered task context (gray rows). Presence in a decision ≠ changed behavior. Self-reports are probabilistic agent claims, listed separately from deterministic events.",
           "unavailableReason": "Receipt history is unavailable right now.",
+          "coverage": {
+            "label": "Evidence coverage",
+            "statusAvailable": "Available",
+            "statusDisabled": "Receipt collection disabled",
+            "statusUnavailable": "Receipt data unavailable",
+            "observedSince": "Observed since {{date}}",
+            "observedSinceEmpty": "No records retained",
+            "asOf": "as of {{date}}",
+            "retention": "retention {{days}} days",
+            "limitation": "Historical completeness cannot be guaranteed — counts show currently retained evidence, not full history.",
+            "validationPartial": "Some records could not be displayed ({{reasonCode}}).",
+            "validationMalformed": "Receipt data requires recovery — counts may be unreliable ({{reasonCode}})."
+          },
           "kind": {
             "rule_blocked": "Block",
             "auto_correct_applied": "Auto-correct",

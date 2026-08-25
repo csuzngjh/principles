@@ -8,6 +8,8 @@ import { getNestedString, parseJsonRecord } from './i18n-test-helper.js';
 // vitest runs in node env, no jsdom mounting).
 
 const page = fs.readFileSync(path.resolve('src/ui/pages/principles/PrincipleDetailPage.tsx'), 'utf8');
+const activationPage = fs.readFileSync(path.resolve('src/ui/pages/activation/ActivationPage.tsx'), 'utf8');
+const coverageComponent = fs.readFileSync(path.resolve('src/ui/components/receipts/ReceiptCoverageDisclosure.tsx'), 'utf8');
 const en = parseJsonRecord(fs.readFileSync(path.resolve('src/ui/i18n/en.json'), 'utf8'));
 const zh = parseJsonRecord(fs.readFileSync(path.resolve('src/ui/i18n/zh-CN.json'), 'utf8'));
 
@@ -71,5 +73,51 @@ describe('PRI-572 receipt presence/effect semantic separation', () => {
     expect(noteZh).toContain('Effect（行为生效）');
     expect(noteZh).toContain('Presence（参与上下文）');
     expect(noteZh).toContain('参与决策 ≠ 已改变行为');
+  });
+});
+
+describe('PRI-590 receipt evidence coverage disclosure', () => {
+  it('renders the coverage disclosure on both existing receipt surfaces', () => {
+    // Detail page receipt section renders the shared component with the response coverage.
+    expect(page).toContain('<ReceiptCoverageDisclosure coverage={receipts.coverage} />');
+    expect(activationPage).toContain('<ReceiptCoverageDisclosure coverage={receiptCoverage} />');
+    // The disclosure block itself lives in the shared component.
+    expect(coverageComponent).toContain('data-testid="receipt-coverage"');
+    // Activation page page-level context for the counts.
+    expect(activationPage).toContain('data-testid="receipt-counts-coverage"');
+  });
+
+  it('labels the disabled/unavailable zero-states from the coverage sourceStatus, not from reason text', () => {
+    // Both pages derive the localized zero-state headline from coverage.
+    expect(page).toContain('getReceiptSourceStatusLabelKey(receipts.coverage.sourceStatus)');
+    expect(activationPage).toContain('getReceiptSourceStatusLabelKey(receiptCoverage.sourceStatus)');
+  });
+
+  it('maps every sourceStatus/validationStatus member via exhaustive Records (ERR-106)', () => {
+    expect(coverageComponent).toContain(': Record<ReceiptSourceStatusData, string>');
+    expect(coverageComponent).toContain(': Record<ReceiptValidationStatusData, string | null>');
+  });
+
+  it('discloses observed range, retention and the completeness limitation in both locales', () => {
+    for (const locale of [en, zh]) {
+      const c = (key: string) => getNestedString(locale, ['pages', 'principles', 'detail', 'receipts', 'coverage', key]);
+      expect(c('label').length).toBeGreaterThan(0);
+      expect(c('statusAvailable').length).toBeGreaterThan(0);
+      expect(c('statusDisabled').length).toBeGreaterThan(0);
+      expect(c('statusUnavailable').length).toBeGreaterThan(0);
+      expect(c('observedSince')).toContain('{{date}}');
+      expect(c('observedSinceEmpty').length).toBeGreaterThan(0);
+      expect(c('asOf')).toContain('{{date}}');
+      expect(c('retention')).toContain('{{days}}');
+      expect(c('limitation').length).toBeGreaterThan(0);
+      expect(c('validationPartial')).toContain('{{reasonCode}}');
+      expect(c('validationMalformed')).toContain('{{reasonCode}}');
+    }
+  });
+
+  it('never renders event-level internals in the coverage disclosure', () => {
+    // The disclosure block renders only coverage metadata; it must not access
+    // event-level fields (property access pattern, doc comments excluded).
+    expect(coverageComponent).not.toMatch(/\.(filePath|digest|toolName|sessionId)\b/);
   });
 });
