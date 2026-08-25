@@ -1145,6 +1145,21 @@ export async function handleUpdateRoute(
       // createBackup is a boolean (default false)
       const createBackup = typeof body.createBackup === 'boolean' ? body.createBackup : false;
 
+      // The Console updater owns only the installed PD runtime selected at
+      // process start. A caller-supplied path inside a workspace may be a
+      // development checkout; accepting it lets a registry package overwrite
+      // source files and makes version history describe the wrong product.
+      if (path.resolve(targetDir) !== path.resolve(pluginDir)) {
+        sendError(
+          res,
+          400,
+          'update_target_not_installed',
+          'Updates may only target the installed PD runtime.',
+          { nextAction: 'Run the official installer to repair the installation, then retry from Console.' },
+        );
+        return;
+      }
+
       // Path traversal validation
       if (!validatePathInWorkspace(targetDir, workspaceDir)) {
         sendBadRequest(res, 'targetDir must be within workspace or extensions directory');

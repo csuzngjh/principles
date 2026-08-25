@@ -325,6 +325,31 @@ describe('handleUpdateRoute', () => {
   // ── POST /apply ─────────────────────────────────────────────────────
 
   describe('POST /apply', () => {
+    it('refuses an explicit workspace target before backup, download, or file mutation', async () => {
+      const checkoutDir = path.join(workspaceDir, 'checkout-copy');
+      fs.mkdirSync(checkoutDir, { recursive: true });
+      fs.writeFileSync(path.join(checkoutDir, 'package.json'), JSON.stringify({ version: '0.9.0' }));
+
+      const req = createMockRequest('POST', {
+        targetDir: checkoutDir,
+        mergeStrategy: 'smart',
+        createBackup: true,
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; error: string; nextAction?: string }>(res);
+      expect(body).toMatchObject({
+        success: false,
+        error: 'update_target_not_installed',
+        nextAction: expect.any(String),
+      });
+      expect(fs.copyFileSync).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
     it('should apply update with explicit targetDir', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
 
@@ -355,13 +380,8 @@ describe('handleUpdateRoute', () => {
         }
       }) as unknown as typeof execSyncMock);
 
-      // Create a real target dir within extensions (passes path validation)
-      const targetDir = path.join(tmpDir, 'extensions', 'target');
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
-
       const req = createMockRequest('POST', {
-        targetDir,
+        targetDir: pluginDir,
         mergeStrategy: 'smart',
         createBackup: false,
       });
@@ -578,8 +598,8 @@ describe('handleUpdateRoute', () => {
       await handleUpdateRoute(req, res, workspaceDir, '/apply');
 
       expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; message: string }>(res);
-      expect(body.message).toContain('targetDir');
+      const body = parseResponseBody<{ success: boolean; error: string }>(res);
+      expect(body.error).toBe('update_target_not_installed');
     });
   });
 
@@ -686,12 +706,8 @@ describe('handleUpdateRoute', () => {
         json: async () => ({}),
       } as Response);
 
-      const targetDir = path.join(tmpDir, 'extensions', 'target-non-ok');
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
-
       const req = createMockRequest('POST', {
-        targetDir,
+        targetDir: pluginDir,
         mergeStrategy: 'smart',
         createBackup: false,
       });
@@ -934,8 +950,8 @@ describe('handleUpdateRoute', () => {
       await handleUpdateRoute(req, res, workspaceDir, '/apply');
 
       expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; message: string }>(res);
-      expect(body.message).toContain('targetDir');
+      const body = parseResponseBody<{ success: boolean; error: string }>(res);
+      expect(body.error).toBe('update_target_not_installed');
     });
 
     it('should reject absolute path outside workspace', async () => {
@@ -1008,8 +1024,7 @@ describe('handleUpdateRoute', () => {
       }) as unknown as typeof fetch);
 
       // Create a workspace file in target
-      const targetDir = path.join(tmpDir, 'extensions', 'keep-target');
-      fs.mkdirSync(targetDir, { recursive: true });
+      const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original content');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
@@ -1056,8 +1071,7 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      const targetDir = path.join(tmpDir, 'extensions', 'overwrite-target');
-      fs.mkdirSync(targetDir, { recursive: true });
+      const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
@@ -1104,8 +1118,7 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      const targetDir = path.join(tmpDir, 'extensions', 'smart-target');
-      fs.mkdirSync(targetDir, { recursive: true });
+      const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
