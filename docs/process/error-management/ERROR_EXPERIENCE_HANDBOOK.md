@@ -141,6 +141,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162; PRI-516 |
 | ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
 | ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
+| ERR-108 | Governance derivation implemented from the implementer's audit-delta narrative instead of clause-by-clause against the normative spec — precedence order and evidence gates drifted | PRI-584 / PR #1409 |
 
 ---
 
@@ -189,7 +190,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-095 | Additive envelope/`contentJson` merge uses a key that collides with an existing output-schema field — silently overwrites the legitimate field | PR #1273 |
 | ERR-098 | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing dirs, never silence errors on critical cleanup | PRI-538; PR #1358 (near-miss: worktree node_modules junctioned into shared repo) |
 | ERR-101 | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree | PRI-553 |
-| ERR-102 | Optional governance projection fails open to legacy approval mutation authority | PRI-553 |
+| ERR-102 | Optional governance gate conflates disabled/unavailable/loading states and fails open to the legacy path | PRI-553 |
 | ERR-104 | Auth bootstrap redirects overwrite authenticated deep links because splash/onboarding state is not scoped to entry routes | RuleCode Owner Live Decision E2E |
 
 ---
@@ -312,18 +313,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-102]** | Optional governance projection fails open to legacy approval mutation authority
+**[ERR-102]** | Optional governance gate conflates disabled/unavailable/loading states and fails open to the legacy path
 
 - **What happened**: The Principle Detail page disabled legacy approval actions only when a validated governance view explicitly said no Owner action was required. If the enabled projection endpoint failed validation or storage access, the page showed an unavailable card but left legacy approval/edit/reject controls authorized from the separate approval-group response.
 - **Why it's wrong**: The governance projection is the authority for whether a strong current pending approval exists. Once enabled, its absence cannot authorize a mutation; falling back to a less constrained reader turns a degraded read path into a privilege bypass.
-- **Generalized failure mode**: When a stricter optional authority gates an existing mutation, code handles explicit deny but not authority-unavailable, so failure falls through to the legacy allow decision.
-- **Correct approach**: Distinguish feature-disabled from enabled-but-unavailable. Preserve legacy behavior only when the feature is disabled; when enabled, show mutation controls only for a validated `owner_required` projection and hide them for deny or unavailable states.
-- **How to prevent**: For every optional authority gate, test all three states: disabled uses legacy behavior, validated allow exposes the action, and validated deny/unavailable hides or refuses the action. Never model unavailable as equivalent to feature-disabled.
-- **Regression guard**: `principle-governance-projection.test.ts` locks the fail-closed decision-control predicate; the browser BDD covers strong approval and flag-off rollback.
+- **Generalized failure mode**: When an optional authority gates existing behavior, code handles explicit deny but not authority-unavailable or still-loading, so those states fall through to the legacy decision (mutation allow, or firing the legacy read path).
+- **Correct approach**: Distinguish feature-disabled from enabled-but-unavailable and from still-loading. Preserve legacy behavior only when the feature is resolved-disabled; hold loading behavior until the gate resolves; when enabled, show mutation controls only for a validated `owner_required` projection and hide them for deny or unavailable states.
+- **How to prevent**: For every optional authority gate, test all four states: resolved-off uses legacy behavior, still-loading fires nothing, validated allow exposes the action, and validated deny/unavailable hides or refuses it. Never model unavailable or loading as equivalent to feature-disabled.
+- **Regression guard**: `principle-governance-projection.test.ts` locks the fail-closed decision-control predicate; the browser BDD covers strong approval and flag-off rollback; PR #1409's `governance-experience.spec.ts` caps queue requests during flag-on focus loads (transient legacy fetch regression).
 - **Related ERRs**: ERR-009, ERR-024, ERR-033
 - **Source**: PRI-553
 - **Date**: 2026-08-20
-- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must refuse promotion. That left room for the stricter Owner decision authority to disappear while the legacy unchecked mutation remained available. The same review also found that local no-auth Console had been allowed to write `reject-after-shadow`, incorrectly granting governance authority to a break-glass operator. Fixed before implementation by making feature-off refuse promotion across Console and CLI, requiring both paths to use one application service, and restricting unauthenticated authority to inspect/deactivate/global-pause only. Regression requirement: disabled, unavailable, validated-deny, and authenticated-allow must be exercised at every promotion entry point; no-auth tests must prove governance writes are refused.
+- **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must refuse promotion. That left room for the stricter Owner decision authority to disappear while the legacy unchecked mutation remained available. The same review also found that local no-auth Console had been allowed to write `reject-after-shadow`, incorrectly granting governance authority to a break-glass operator. Fixed before implementation by making feature-off refuse promotion across Console and CLI, requiring both paths to use one application service, and restricting unauthenticated authority to inspect/deactivate/global-pause only. Regression requirement: disabled, unavailable, validated-deny, and authenticated-allow must be exercised at every promotion entry point; no-auth tests must prove governance writes are refused. 2026-08-25 PR #1409 (PRI-586): READ-side sibling — `featureFlags?.enabled === true` gating made the still-loading state indistinguishable from flag-off, so FocusPage fired the legacy `/governance/queue` request before flipping to experience mode (wasted call + legacy-panel flash). Fixed by gating the data load on flags-resolved; loading ≠ disabled extends the same three-state rule to read paths.
 
 ---
 
@@ -884,8 +885,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 107 |
-| Last updated | 2026-08-24 |
+| Total lessons | 108 |
+| Last updated | 2026-08-25 |
 | Top category | Schema & Type |
 | Recurring errors | 56 |
 
@@ -1661,4 +1662,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-032 (active architecture contract contradicted), ERR-100 (runtime boundary crossed through an unsafe dependency graph)
 - **Source**: PRI-566 / PR #1392
 - **Date**: 2026-08-24
+- **Recurrence**: None
+
+---
+
+**[ERR-108]** | Governance derivation implemented from the implementer's audit-delta narrative instead of clause-by-clause against the normative spec
+
+- **What happened**: The experience-snapshot derivation (PR #1409, PRI-584) was written to match the implementer's own Phase-0 delta notes rather than re-checking SPEC §7–§9 clauses. Review found four conformance bugs: per-principle classification applied decision-first although §7.3 defines recovery > decision precedence (the UI-priority clause is presentation-only); `queued` counted as processing despite §8.4 requiring active execution evidence; `blocked` emitted a bare count with no evidence refs; and RuleCode/frontier evidence counted raw rows without the §9 linkage requirement.
+- **Why it's wrong**: A spec carries its normative semantics in numbered clauses; a delta log records intent summaries. When implementation AND tests are both written from the narrative, they validate each other and the drift passes green — self-referential verification inherits the narrative's blind spots.
+- **Generalized failure mode**: When implementation follows a summarized interpretation of a normative spec, assistants must re-verify each numbered clause against the final code diff during adversarial self-review; otherwise precedence lists, forbidden-inference rules, and evidence requirements silently degrade to whatever the summary remembered.
+- **Correct approach**: Walk the spec's clauses one by one against the code (never against the delta doc). Express explicit orderings as a single ordered data structure shared by classification. For evidence requirements, assert the presence of linkage references — never accept counts alone.
+- **How to prevent**: In review, pick every spec sentence containing an explicit ordering or forbidden inference and name the test that locks it; if that test only asserts the implementation's own output shape, rewrite the test from the clause before handoff.
+- **Regression guard**: PR #1409 round-1 tests: within-one-principle recovery>decision lock; pending-only workspace not processing; blocked marker carrying frontier sourceRefs; unlinked shadow activations degrading to data quality instead of inflating needs_decision.
+- **Related ERRs**: ERR-099 (tests proving own output shape), ERR-106 (enum folding), ERR-032 (doc/code contradiction family)
+- **Source**: PRI-584
+- **Date**: 2026-08-25
 - **Recurrence**: None
