@@ -887,6 +887,10 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // consulted (SPEC §14.2 no old-queue + snapshot merge). Approvals and
   // activations remain the MUTATION surface (action cards), not a status source.
   const experienceMode = featureFlags?.governance_experience_v1?.enabled === true;
+  // Flags still loading (undefined): fire NEITHER governance status endpoint —
+  // otherwise a transient legacy queue request goes out before the flag turns
+  // experience mode on (wasted call + legacy-panel flash). Hold in `loading`.
+  const flagsResolved = featureFlags !== undefined;
   const [queueData, setQueueData] = useState<GovernanceQueueData | null>(null);
   const [experienceData, setExperienceData] = useState<GovernanceExperienceSnapshot | null>(null);
   const [groupedData, setGroupedData] = useState<ApprovalsGroupedData | null>(null);
@@ -954,8 +958,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   }, [experienceMode, t]);
 
   useEffect(() => {
+    if (!flagsResolved) return;
     loadData();
-  }, [loadData]);
+  }, [flagsResolved, loadData]);
 
   // ── Loading state ────────────────────────────────────────────────────────
   if (loadingState === "loading") {
@@ -1109,7 +1114,10 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         </>
       )}
 
-      {/* Daily thought — pause before judgment (not governance status; both modes) */}
+      {/* Daily thought — pause before judgment (reflection content, not governance status).
+          Intentionally retained in BOTH modes: this PR migrates only the governance STATUS
+          source; whether reflection stays on Focus after graduation is PRI-589
+          (Focus Information Architecture Cleanup). */}
       <DailyThoughtCard />
 
       {experienceMode && experienceData !== null && experienceData.summary.primaryAttention === "all_clear" && pendingGroups.length === 0 && (

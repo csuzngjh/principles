@@ -40,8 +40,24 @@ test('governance experience snapshot serves and drives Focus', async ({ page }) 
   // Pin the UI language to en so the text assertions below are deterministic
   // (default locale is zh-CN).
   await page.addInitScript(() => localStorage.setItem('pd-language', 'en'));
+  // Request contract (maintainer review round): in experience mode governance
+  // STATUS comes solely from the snapshot — the queue endpoint is never
+  // requested — while approvals/activations remain loaded as ACTION surfaces.
+  const apiRequests: string[] = [];
+  page.on('request', (req) => {
+    const pathname = new URL(req.url()).pathname;
+    if (pathname.startsWith('/api/')) apiRequests.push(pathname);
+  });
   await page.goto('/#/focus');
   await expect(page.getByTestId('experience-summary')).toBeVisible();
+  expect(apiRequests).toContain('/api/v1/governance/experience');
+  // Exactly ONE /governance/queue request is permitted: the NotificationProvider's
+  // mount-time badge poll (global notification subsystem — migration deferred to
+  // PRI-589 because badge semantics need a product decision). FocusPage itself
+  // must add none: a regression that re-introduces the legacy status fetch in the
+  // Focus data load pushes this count above 1 and fails here.
+  const queueRequests = apiRequests.filter(pathname => pathname.startsWith('/api/v1/governance/queue'));
+  expect(queueRequests.length).toBeLessThanOrEqual(1);
   await expect(page.getByTestId('experience-reason')).toContainText('waiting for your decision');
   await expect(page.getByTestId('experience-readiness')).toContainText('Owner identity');
   await expect(page.getByTestId('experience-trust')).toContainText('Environment: test');
