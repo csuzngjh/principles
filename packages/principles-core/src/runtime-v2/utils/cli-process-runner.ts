@@ -6,7 +6,7 @@
  * Runs arbitrary CLI commands, captures stdout/stderr, and handles timeouts with
  * graceful tree kill (SIGTERM → grace period → SIGKILL).
  */
-import { spawn, execSync, type SpawnOptions } from 'child_process';
+import { spawn, execFileSync, type SpawnOptions } from 'child_process';
 
 export interface CliProcessRunnerOptions {
   command: string;
@@ -58,7 +58,8 @@ function resolveCommandForWindows(command: string): string {
 
   try {
     // Use where.exe to resolve the command — works for .cmd, .bat, .exe shims
-    const result = execSync(`where.exe ${command}`, {
+    // Array-form spawn: constant binary + single validated argument, no shell.
+    const result = execFileSync('where.exe', [command], {
       encoding: 'utf-8',
       timeout: 5000,
       windowsHide: true,

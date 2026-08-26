@@ -2,7 +2,7 @@ import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSy
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as http from 'http';
-import { execSync, execFileSync, spawn, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import type { ExecSyncOptions } from 'child_process';
 import ora, { type Ora } from 'ora';
 import { select } from '@inquirer/prompts';
@@ -181,7 +181,7 @@ function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyn
 async function runNpmInstall(cwd: string, componentName = 'npm'): Promise<void> {
   const execOpts = getCapturingExecOptions(cwd);
   try {
-    execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
+    execFileSync('npm', ['install', '--ignore-scripts', '--legacy-peer-deps'], execOpts);
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e);
 
@@ -209,7 +209,7 @@ export async function rebuildNativeModules(cwd: string, componentName: string): 
     if (!existsSync(modPath)) continue;
 
     try {
-      execSync(`npm rebuild ${mod}`, getCapturingExecOptions(cwd));
+      execFileSync('npm', ['rebuild', mod], getCapturingExecOptions(cwd));
     } catch (e) {
       throw new Error(`${componentName} native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${cwd} && npm rebuild ${mod}`, { cause: e });
     }
@@ -826,7 +826,7 @@ async function installPluginDependencies(): Promise<void> {
 
 function getNpmGlobalBinDir(): string | null {
   try {
-    const prefix = execSync('npm prefix -g', { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const prefix = execFileSync('npm', ['prefix', '-g'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
     if (!prefix) return null;
     return process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
   } catch {
@@ -883,7 +883,7 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
     return;
   }
   try {
-    const npmVersion = execSync('npm view @principles/pd-cli version', {
+    const npmVersion = execFileSync('npm', ['view', '@principles/pd-cli', 'version'], {
       encoding: 'utf-8',
       timeout: 15_000,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -902,7 +902,7 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
     const tmpDir = path.join(installedPdCliDir, '__npm_upgrade_tmp');
     try {
       mkdirSync(tmpDir, { recursive: true });
-      execSync(`npm pack @principles/pd-cli@${npmVersion} --pack-destination "${tmpDir}"`, {
+      execFileSync('npm', ['pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir], {
         encoding: 'utf-8',
         timeout: 30_000,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -917,7 +917,7 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
 
       const extractDir = path.join(tmpDir, 'extracted');
       mkdirSync(extractDir, { recursive: true });
-      execSync(`tar -xzf "${path.join(tmpDir, tgzFile)}" -C "${extractDir}"`, {
+      execFileSync('tar', ['-xzf', path.join(tmpDir, tgzFile), '-C', extractDir], {
         encoding: 'utf-8',
         timeout: 15_000,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -1067,7 +1067,9 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   const globalOk = (() => {
     try {
       if (isWindows()) {
-        execSync('pd --version', { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, shell: 'cmd' });
+        // 'pd' is an npm .cmd shim on Windows — resolve via cmd.exe with a
+        // constant argv array (no shell string, no interpolation).
+        execFileSync('cmd.exe', ['/c', 'pd', '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, windowsHide: true });
       } else {
         execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
       }
