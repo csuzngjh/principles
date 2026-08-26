@@ -220,6 +220,7 @@ describe('ReleaseManager shadow mode', () => {
     const manager = new ReleaseManager({
       pdHome: path.join(pdHome, '.pd'),
       metadataBaseUrl: 'http://127.0.0.1:1',
+      openclawHome: path.join(pdHome, 'no-openclaw'),
     });
     const status = manager.inspect();
     expect(status).toMatchObject({
@@ -239,7 +240,7 @@ describe('ReleaseManager shadow mode', () => {
     ensurePdHomeLayout(paths);
     fs.writeFileSync(paths.bootstrapManifestPath, `${JSON.stringify({ bootstrapVersion: '1.2.0', installedAt: '2026-08-25T00:00:00Z' })}\n`);
     fs.writeFileSync(paths.activeRecordPath, `${JSON.stringify({ generation: 3, releaseId: 'c'.repeat(64), productVersion: '1.222.0' })}\n`);
-    const manager = new ReleaseManager({ pdHome: paths.home, metadataBaseUrl: 'http://127.0.0.1:1' });
+    const manager = new ReleaseManager({ pdHome: paths.home, metadataBaseUrl: 'http://127.0.0.1:1' , openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-')});
     expect(manager.inspect()).toMatchObject({
       layout: 'dual-slot',
       productVersion: '1.222.0',
@@ -255,7 +256,7 @@ describe('ReleaseManager shadow mode', () => {
     const paths = resolvePdHomePaths(path.join(pdHome, '.pd'));
     ensurePdHomeLayout(paths);
     fs.writeFileSync(paths.activeRecordPath, JSON.stringify({ generation: 'three' }));
-    const manager = new ReleaseManager({ pdHome: paths.home, metadataBaseUrl: 'http://127.0.0.1:1' });
+    const manager = new ReleaseManager({ pdHome: paths.home, metadataBaseUrl: 'http://127.0.0.1:1' , openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-')});
     expect(() => manager.inspect()).toThrow(ReleaseManagerError);
     try {
       manager.inspect();
@@ -319,7 +320,7 @@ describe('ReleaseManager shadow mode', () => {
 
   it('refuses apply and rollback in shadow mode with owner-facing next actions', async () => {
     const fixture = await createShadowFixture();
-    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl });
+    const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl , openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-')});
     await expect(manager.apply()).rejects.toMatchObject({ reason: 'shadow_mode_read_only' });
     await expect(manager.rollback()).rejects.toMatchObject({ reason: 'shadow_mode_read_only' });
   });
@@ -367,7 +368,7 @@ describe('bootstrap protocol', () => {
   it('dispatches inspect and surfaces manager refusals as structured failures', async () => {
     const pdHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-shadow-proto-'));
     temporaryDirectories.push(pdHome);
-    const manager = new ReleaseManager({ pdHome: path.join(pdHome, '.pd'), metadataBaseUrl: 'http://127.0.0.1:1' });
+    const manager = new ReleaseManager({ pdHome: path.join(pdHome, '.pd'), metadataBaseUrl: 'http://127.0.0.1:1', openclawHome: path.join(pdHome, 'no-openclaw') });
 
     const inspect = await handleBootstrapRequest({ op: 'inspect' }, manager);
     expect(inspect).toMatchObject({ ok: true, result: { layout: 'none' } });

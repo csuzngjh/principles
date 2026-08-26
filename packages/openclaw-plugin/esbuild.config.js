@@ -43,7 +43,7 @@ async function bundlePlugin() {
       outdir: 'dist',
       bundle: true,
       platform: 'node',
-      target: 'node20',
+      target: 'node22',
       format: 'esm',
       banner: {
         js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
@@ -84,7 +84,7 @@ async function bundlePlugin() {
         outdir: 'dist',
         bundle: true,
         platform: 'node',
-        target: 'node20',
+        target: 'node22',
         format: 'esm',
         outbase: 'src',
         external: [

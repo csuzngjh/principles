@@ -379,29 +379,19 @@ if (BUILD_SELF_CONTAINED_ASSET) {
   console.log('\n📦 Installing build-time runtime dependencies for the self-contained release asset...');
 
   const installBundledRuntimeDependencies = async (directory, label) => {
+    // Run npm through the running Node binary and npm-cli.js with pure argv
+    // arrays — no cmd.exe shell string concatenation (ERR-045).  On POSIX
+    // npm is a real executable and can be spawned directly.
+    const npmCliJs = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
     const runNpm = (args) => execFileAsync(
-      process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm',
-      process.platform === 'win32' ? ['/d', '/s', '/c', ['npm', ...args].join(' ')] : args,
+      process.execPath,
+      [npmCliJs, ...args],
       {
         cwd: directory,
         timeout: 300_000,
         windowsHide: true,
       },
     );
-    const tryPrebuildBetterSqlite3 = async () => {
-      // prebuild-install downloads the official prebuilt binding for the
-      // RUNNING node's exact version+arch from the project's GitHub releases.
-      // Deterministic bytes per platform/ABI; Windows-2025 runners have no
-      // usable Visual Studio for node-gyp, so this is the only viable path
-      // there. Returns true only when the binding actually landed.
-      try {
-        await runNpm(['exec', '--yes', '--', 'prebuild-install', '-r', 'node', '-t', process.versions.node, '-a', process.arch]);
-      } catch {
-        return false;
-      }
-      return existsSync(join(directory, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'))
-        || existsSync(join(directory, 'node_modules', 'better-sqlite3', 'prebuilds', process.platform === 'win32' ? `win32-${process.arch}` : process.platform === 'darwin' ? `darwin-${process.arch}` : `linux-${process.arch}`, 'node.napi.node'));
-    };
     const lockPath = join(RELEASE_LOCKS_ROOT, label, 'package-lock.json');
     if (!existsSync(lockPath)) {
       throw new Error(`Missing committed release lock for ${label}: ${lockPath}`);

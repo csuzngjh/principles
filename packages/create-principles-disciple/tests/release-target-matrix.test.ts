@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import {
   assertSupportedLocalReleaseTarget,
   NATIVE_RUNTIME_DEPENDENCY,
   SUPPORTED_NATIVE_TARGETS,
 } from '../scripts/release-target-matrix.mjs';
 
+const require = createRequire(import.meta.url);
+const thisDir = path.dirname(fileURLToPath(import.meta.url));
+
 describe('native release target matrix', () => {
   it('captures the supported platform, architecture, Node major, and exact ABI combinations', () => {
     expect(NATIVE_RUNTIME_DEPENDENCY).toEqual({ name: 'better-sqlite3', version: '13.0.3', nodeEngine: '>=22' });
-    const packageMetadata: unknown = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'node_modules', 'better-sqlite3', 'package.json'), 'utf8'));
+    // Resolve through the module system instead of hardcoding ../../..
+    const betterSqlite3Manifest = require.resolve('better-sqlite3/package.json', { paths: [path.resolve(thisDir, '..', '..', '..')] });
+    const packageMetadata: unknown = JSON.parse(fs.readFileSync(betterSqlite3Manifest, 'utf8'));
     expect(packageMetadata).toMatchObject({ name: NATIVE_RUNTIME_DEPENDENCY.name, version: NATIVE_RUNTIME_DEPENDENCY.version, engines: { node: NATIVE_RUNTIME_DEPENDENCY.nodeEngine } });
     expect(SUPPORTED_NATIVE_TARGETS).toEqual({
       platforms: {

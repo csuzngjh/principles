@@ -12,6 +12,7 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { resolveTrustedReleaseTarget, downloadTrustedReleasePayload, ReleaseTrustError, type TrustedReleaseTarget } from './trust-metadata.js';
 import { parseChannelMetadata, type ChannelMetadata } from './channel-metadata.js';
@@ -97,6 +98,14 @@ export interface ReleaseManagerOptions {
   readonly now?: () => Date;
   /** Injected in production from the legacy updater; tests inject fakes. */
   readonly legacyCheck?: (currentVersion: string) => Promise<LegacyUpdaterDecision | null>;
+  /**
+   * Explicit OpenClaw home directory for legacy-overlay detection.  When
+   * omitted, falls back to `~/.openclaw` relative to the OS home — correct
+   * for standard installs but WRONG for custom pdHome roots (test dirs,
+   * enterprise installs, containers).  Callers that pass a custom pdHome
+   * MUST also pass the matching openclawHome.
+   */
+  readonly openclawHome?: string;
 }
 
 interface ActiveRecord {
@@ -275,7 +284,9 @@ export class ReleaseManager {
   }
 
   private legacyOverlayMarker(): string {
-    return path.join(this.paths.home, '..', '.openclaw', 'extensions', 'principles-disciple');
+    const openclawRoot = this.options.openclawHome
+      ?? path.join(os.homedir(), '.openclaw');
+    return path.join(openclawRoot, 'extensions', 'principles-disciple');
   }
 
   private readChannelMetadataPayload(channel: ReleaseChannelName): ChannelMetadata {

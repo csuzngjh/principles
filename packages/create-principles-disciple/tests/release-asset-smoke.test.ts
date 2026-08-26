@@ -105,7 +105,7 @@ beforeAll(async () => {
 afterAll(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }), 300_000);
 
 describe('production self-contained release asset', () => {
-  it('rejects a truncated published archive before extraction', async () => {
+  it('rejects a tampered published archive before extraction', async () => {
     const tamperedArchive = path.resolve(path.join(root, 'tampered.tar'));
     const digestSidecar = path.resolve(path.join(publicationDir, 'asset.tar.sha256'));
     // Both read paths stay inside the allowed roots by construction; assert
