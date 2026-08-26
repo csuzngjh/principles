@@ -10,7 +10,7 @@
     "test:contract": "node --test tests/homepage-contract.test.mjs",
     "test:relay": "vitest run functions/_lib/__tests__/relay-core.test.ts",
     "test": "npm run docs:build && npm run test:contract && npm run test:relay && npm run test:telemetry",
-    "test:telemetry": "vitest run functions/_lib/__tests__/telemetry-core.test.ts functions/_lib/__tests__/product-signals-core.test.ts"
+    "test:telemetry": "vitest run functions/_lib/__tests__/telemetry-core.test.ts functions/_lib/__tests__/telemetry-cleanup-core.test.ts functions/_lib/__tests__/product-signals-core.test.ts"
   },
   "devDependencies": {
     "@principles/core": "*",

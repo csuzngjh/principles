@@ -1,19 +1,25 @@
 // product-signals-core.ts
-// Protected maintainer product-signals view (PRI-601, SPEC §56-§63).
+// Protected maintainer product-signals view (PRI-601, SPEC §56-§63; review
+// remediation: workspace measurement unit + tri-state denominators).
 //
 // GET /product-signals with `Authorization: Bearer <PRODUCT_SIGNALS_TOKEN>`.
 // Renders a minimal HTML page from D1 aggregates. NOT a BI platform:
-// exactly four signal groups — daily participating telemetry units, version
+// exactly four signal groups — daily participating workspaces, version
 // distribution, milestone reach, coarse reliability — plus the permanent
-// opt-in-bias warning (SPEC §62). No per-unit rows or IDs are ever rendered;
-// the identity architecture makes a per-deployment timeline impossible by
-// construction (daily unlinkable IDs, server-HMACed before storage).
+// opt-in-bias warning (SPEC §62). No per-workspace rows or IDs are ever
+// rendered; the identity architecture makes a per-workspace timeline
+// impossible by construction (daily unlinkable IDs, server-HMACed before
+// storage).
 //
 // Measurement wording is part of the metric contract (SPEC §57):
-// - "participating installations", never "users";
-// - multi-day sums are "daily-unit observations" (cross-day dedup is
-//   intentionally impossible);
-// - "Effect receipt observed", never "Agent improved".
+// - "participating workspaces", never "installations" or "users";
+// - these are accepted anonymous submissions — the collector cannot prove
+//   the sender is a real PD installation;
+// - multi-day sums are "daily-workspace observations" (cross-day dedup is
+//   intentionally impossible) — never "unique workspaces";
+// - "Effect receipt observed", never "Agent improved";
+// - NULL facts are excluded from denominators (Observed / Evaluable /
+//   Unavailable per milestone) — never summed as 0.
 
 /** Minimal D1 query surface for aggregate reads. */
 export interface SignalsD1 {
@@ -45,48 +51,69 @@ export interface SignalsResult {
 }
 
 const PERMANENT_WARNING =
-  'Anonymous telemetry is opt-in and represents only participating telemetry units. It must not be interpreted as the complete PD user population.';
+  'Anonymous telemetry is opt-in and represents only participating workspaces that submitted this snapshot. Figures are accepted anonymous submissions, not verified product usage, and must not be interpreted as the complete PD population.';
+
+interface FactCounts {
+  observed: number;
+  evaluable: number;
+  unavailable: number;
+}
 
 interface DailyCounts {
   total: number;
-  initialized: number;
-  painObserved: number;
-  principleObserved: number;
-  activationObserved: number;
-  presenceReceiptObserved: number;
-  effectReceiptObserved: number;
-  initializationFailed: number;
+  initialized: FactCounts;
+  painObserved: FactCounts;
+  principleObserved: FactCounts;
+  activationObserved: FactCounts;
+  presenceReceiptObserved: FactCounts;
+  effectReceiptObserved: FactCounts;
+  initializationFailed: FactCounts;
 }
 
 function esc(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+const FACT_COLUMNS = [
+  'initialized',
+  'pain_observed',
+  'principle_observed',
+  'activation_observed',
+  'presence_receipt_observed',
+  'effect_receipt_observed',
+  'initialization_failed',
+] as const;
+
+/**
+ * Per-fact tri-state aggregation for one bucket date. `observed` = SUM(col)
+ * (SQL SUM ignores NULL); `evaluable` = COUNT(col) (non-NULL rows); the
+ * complement of COUNT(*) is `unavailable`. Unknown facts never enter a
+ * denominator and are never counted as 0.
+ */
 async function readDailyCounts(db: SignalsD1['PD_PRODUCT_TELEMETRY'], bucketDate: string): Promise<DailyCounts> {
+  const selects = FACT_COLUMNS.map((col) => `COALESCE(SUM(${col}), 0) AS sum_${col}, COUNT(${col}) AS eval_${col}`).join(', ');
   const row = await db
-    .prepare(
-      `SELECT COUNT(*) AS total,
-              COALESCE(SUM(initialized), 0) AS initialized,
-              COALESCE(SUM(pain_observed), 0) AS painObserved,
-              COALESCE(SUM(principle_observed), 0) AS principleObserved,
-              COALESCE(SUM(activation_observed), 0) AS activationObserved,
-              COALESCE(SUM(presence_receipt_observed), 0) AS presenceReceiptObserved,
-              COALESCE(SUM(effect_receipt_observed), 0) AS effectReceiptObserved,
-              COALESCE(SUM(initialization_failed), 0) AS initializationFailed
-       FROM product_telemetry_daily WHERE bucket_date = ?`,
-    )
+    .prepare(`SELECT COUNT(*) AS total, ${selects} FROM product_telemetry_daily WHERE bucket_date = ?`)
     .bind(bucketDate)
     .first();
   const toNum = (v: unknown): number => (typeof v === 'number' ? v : 0);
+  const fact = (col: string): FactCounts => {
+    const evaluable = toNum(row?.[`eval_${col}`]);
+    return {
+      observed: toNum(row?.[`sum_${col}`]),
+      evaluable,
+      unavailable: toNum(row?.total) - evaluable,
+    };
+  };
   return {
     total: toNum(row?.total),
-    initialized: toNum(row?.initialized),
-    painObserved: toNum(row?.painObserved),
-    principleObserved: toNum(row?.principleObserved),
-    activationObserved: toNum(row?.activationObserved),
-    presenceReceiptObserved: toNum(row?.presenceReceiptObserved),
-    effectReceiptObserved: toNum(row?.effectReceiptObserved),
-    initializationFailed: toNum(row?.initializationFailed),
+    initialized: fact('initialized'),
+    painObserved: fact('pain_observed'),
+    principleObserved: fact('principle_observed'),
+    activationObserved: fact('activation_observed'),
+    presenceReceiptObserved: fact('presence_receipt_observed'),
+    effectReceiptObserved: fact('effect_receipt_observed'),
+    initializationFailed: fact('initialization_failed'),
   };
 }
 
@@ -127,7 +154,7 @@ export async function handleProductSignals(deps: SignalsDeps): Promise<SignalsRe
       .first();
     const versionRows = await db
       .prepare(
-        'SELECT pd_version AS version, COUNT(*) AS units FROM product_telemetry_daily WHERE bucket_date = ? GROUP BY pd_version ORDER BY units DESC, version ASC LIMIT 20',
+        'SELECT pd_version AS version, COUNT(*) AS workspaces FROM product_telemetry_daily WHERE bucket_date = ? GROUP BY pd_version ORDER BY workspaces DESC, version ASC LIMIT 20',
       )
       .bind(today)
       .all();
@@ -135,11 +162,10 @@ export async function handleProductSignals(deps: SignalsDeps): Promise<SignalsRe
     const sevenDayObservations = typeof sevenDayRow?.observations === 'number' ? sevenDayRow.observations : 0;
     const versions = versionRows.results.map((r) => ({
       version: typeof r.version === 'string' ? r.version : String(r.version),
-      units: typeof r.units === 'number' ? r.units : 0,
+      workspaces: typeof r.workspaces === 'number' ? r.workspaces : 0,
     }));
 
-    const healthy = counts.total - counts.initializationFailed;
-    const html = renderSignalsPage({ today, counts, sevenDayObservations, versions, healthy });
+    const html = renderSignalsPage({ today, counts, sevenDayObservations, versions });
     return { status: 200, body: html, contentType: 'text/html; charset=utf-8' };
   } catch (error) {
     // Fixed coarse reason only — backend error text never reaches the responder.
@@ -152,14 +178,14 @@ function renderSignalsPage(data: {
   today: string;
   counts: DailyCounts;
   sevenDayObservations: number;
-  versions: Array<{ version: string; units: number }>;
-  healthy: number;
+  versions: Array<{ version: string; workspaces: number }>;
 }): string {
-  const { today, counts, sevenDayObservations, versions, healthy } = data;
+  const { today, counts, sevenDayObservations, versions } = data;
   const versionRows = versions
-    .map((v) => `        <tr><td>${esc(v.version)}</td><td>${v.units}</td></tr>`)
+    .map((v) => `        <tr><td>${esc(v.version)}</td><td>${v.workspaces}</td></tr>`)
     .join('\n');
-  const milestone = (label: string, value: number): string => `        <tr><td>${label}</td><td>${value}</td></tr>`;
+  const milestone = (label: string, f: FactCounts): string =>
+    `        <tr><td>${label}</td><td>${f.observed}</td><td>${f.evaluable}</td><td>${f.unavailable}</td></tr>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -179,23 +205,23 @@ function renderSignalsPage(data: {
   <h1>PD Anonymous Product Signals — ${esc(today)} (UTC)</h1>
   <p class="warning"><strong>${esc(PERMANENT_WARNING)}</strong></p>
 
-  <h2>Participating telemetry units (today)</h2>
+  <h2>Participating workspaces (today)</h2>
   <table>
-    <tr><th>Signal</th><th>Participating installations</th></tr>
-    <tr><td>Daily participating telemetry units</td><td>${counts.total}</td></tr>
-    <tr><td>7-day participating daily-unit observations</td><td>${sevenDayObservations}</td></tr>
+    <tr><th>Signal</th><th>Count</th></tr>
+    <tr><td>Daily participating workspaces</td><td>${counts.total}</td></tr>
+    <tr><td>7-day participating daily-workspace observations</td><td>${sevenDayObservations}</td></tr>
   </table>
-  <p class="note">Cross-day deduplication is intentionally impossible (daily unlinkable IDs) — the 7-day figure is a sum of daily observations, not unique installations.</p>
+  <p class="note">Cross-day deduplication is intentionally impossible (daily unlinkable IDs) — the 7-day figure is a sum of daily workspace observations, NOT unique workspaces.</p>
 
   <h2>Version distribution (today)</h2>
   <table>
-    <tr><th>PD version</th><th>Participating daily units</th></tr>
+    <tr><th>PD version</th><th>Daily workspace observations</th></tr>
 ${versionRows || '        <tr><td colspan="2">(no data)</td></tr>'}
   </table>
 
   <h2>Milestone reach (today)</h2>
   <table>
-    <tr><th>Milestone</th><th>Participating daily units</th></tr>
+    <tr><th>Milestone</th><th>Observed</th><th>Evaluable workspaces</th><th>Unavailable</th></tr>
 ${milestone('Initialized', counts.initialized)}
 ${milestone('Pain observed', counts.painObserved)}
 ${milestone('Principle observed', counts.principleObserved)}
@@ -203,13 +229,13 @@ ${milestone('Activation observed', counts.activationObserved)}
 ${milestone('Presence receipt observed', counts.presenceReceiptObserved)}
 ${milestone('Effect receipt observed', counts.effectReceiptObserved)}
   </table>
+  <p class="note">Observed / Evaluable / Unavailable: NULL ("source unavailable") facts are excluded from the denominator and never counted as false.</p>
   <p class="note">An effect receipt proves a governance mechanism affected one execution — it is not evidence of durable Agent improvement.</p>
 
   <h2>Reliability (today, coarse)</h2>
   <table>
-    <tr><th>Signal</th><th>Daily units</th></tr>
-    <tr><td>Healthy</td><td>${healthy}</td></tr>
-    <tr><td>Initialization failure</td><td>${counts.initializationFailed}</td></tr>
+    <tr><th>Signal</th><th>Observed</th><th>Evaluable workspaces</th><th>Unavailable</th></tr>
+    ${milestone('Initialization failure', counts.initializationFailed)}
   </table>
 </body>
 </html>

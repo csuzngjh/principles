@@ -1,9 +1,10 @@
 /**
- * Protected maintainer product-signals view tests (PRI-601).
+ * Protected maintainer product-signals view tests (PRI-601; review
+ * remediation: workspace measurement wording + tri-state denominators).
  *
  * Access protection, aggregate correctness, honest metric wording, and the
  * no-IDs-rendered property. The D1 shim reuses the real SQLite schema from
- * migrations/0001 (same approach as telemetry-core.test.ts).
+ * migrations/0001 + 0002 (same approach as telemetry-core.test.ts).
  */
 
 import Database from 'better-sqlite3';
@@ -13,18 +14,24 @@ import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleProductSignals, type SignalsD1, type SignalsEnv } from '../product-signals-core.js';
 
-const MIGRATION_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'migrations', '0001_product_telemetry_daily.sql');
+const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'migrations');
 
-function applyMigration(db: Database.Database): void {
-  const ddl = fs.readFileSync(MIGRATION_PATH, 'utf8');
-  const stripped = ddl
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('--'))
-    .join('\n');
-  for (const statement of stripped.split(';')) {
-    const trimmed = statement.trim();
-    if (trimmed.length > 0) {
-      db.prepare(trimmed).run();
+function applyMigrations(db: Database.Database): void {
+  const files = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
+    .sort();
+  for (const file of files) {
+    const ddl = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
+    const stripped = ddl
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('--'))
+      .join('\n');
+    for (const statement of stripped.split(';')) {
+      const trimmed = statement.trim();
+      if (trimmed.length > 0) {
+        db.prepare(trimmed).run();
+      }
     }
   }
 }
@@ -40,19 +47,20 @@ interface SeededDb {
     bucketDate: string;
     pdVersion: string;
     hostKind: string;
-    initialized: number;
-    pain: number;
-    principle: number;
-    activation: number;
-    presence: number;
-    effect: number;
-    initFailed: number;
+    /** 1 = observed true, 0 = evaluated false, null = unavailable. */
+    initialized: number | null;
+    pain: number | null;
+    principle: number | null;
+    activation: number | null;
+    presence: number | null;
+    effect: number | null;
+    initFailed: number | null;
   }): void;
 }
 
 function makeDb(): SeededDb {
   const db = new Database(':memory:');
-  applyMigration(db);
+  applyMigrations(db);
   const d1: SignalsD1 = {
     prepare: (query: string) => {
       const statement = db.prepare(query);
@@ -96,7 +104,7 @@ let seeded: SeededDb;
 
 beforeEach(() => {
   seeded = makeDb();
-  // Today: 3 participating installations.
+  // Today: 3 participating workspaces.
   seeded.seed({ serverDailyId: 'a'.repeat(64), bucketDate: '2026-08-26', pdVersion: '1.218.0', hostKind: 'openclaw', initialized: 1, pain: 1, principle: 1, activation: 1, presence: 1, effect: 1, initFailed: 0 });
   seeded.seed({ serverDailyId: 'b'.repeat(64), bucketDate: '2026-08-26', pdVersion: '1.217.0', hostKind: 'codex', initialized: 1, pain: 1, principle: 0, activation: 0, presence: 0, effect: 0, initFailed: 0 });
   seeded.seed({ serverDailyId: 'c'.repeat(64), bucketDate: '2026-08-26', pdVersion: '1.218.0', hostKind: 'openclaw', initialized: 0, pain: 0, principle: 0, activation: 0, presence: 0, effect: 0, initFailed: 1 });
@@ -137,28 +145,45 @@ describe('signal rendering (honest metric wording, SPEC §57-§62)', () => {
     expect(result.status).toBe(200);
     expect(result.contentType).toBe('text/html; charset=utf-8');
     const html = result.body;
-    expect(html).toContain('Daily participating telemetry units</td><td>3');
-    expect(html).toContain('7-day participating daily-unit observations</td><td>5');
+    expect(html).toContain('Daily participating workspaces</td><td>3');
+    expect(html).toContain('7-day participating daily-workspace observations</td><td>5');
     expect(html).toContain('<td>1.218.0</td><td>2</td>');
     expect(html).toContain('<td>1.217.0</td><td>1</td>');
-    expect(html).toContain('Initialized</td><td>2');
-    expect(html).toContain('Pain observed</td><td>2');
-    expect(html).toContain('Effect receipt observed</td><td>1');
-    expect(html).toContain('Initialization failure</td><td>1');
-    expect(html).toContain('Healthy</td><td>2');
+    // Tri-state columns: Observed / Evaluable / Unavailable per milestone.
+    expect(html).toContain('Initialized</td><td>2</td><td>3</td><td>0</td>');
+    expect(html).toContain('Pain observed</td><td>2</td><td>3</td><td>0</td>');
+    expect(html).toContain('Effect receipt observed</td><td>1</td><td>3</td><td>0</td>');
+    expect(html).toContain('Initialization failure</td><td>1</td><td>3</td><td>0</td>');
+  });
+
+  it('excludes NULL facts from denominators — Observed/Evaluable/Unavailable, never 2/11', async () => {
+    // Two more workspaces today with unavailable (NULL) effect receipts.
+    seeded.seed({ serverDailyId: 'f'.repeat(64), bucketDate: '2026-08-26', pdVersion: '1.218.0', hostKind: 'openclaw', initialized: 1, pain: 1, principle: 1, activation: 1, presence: 1, effect: null, initFailed: null });
+    seeded.seed({ serverDailyId: 'g'.repeat(64), bucketDate: '2026-08-26', pdVersion: '1.218.0', hostKind: 'openclaw', initialized: 1, pain: 0, principle: 0, activation: 0, presence: null, effect: null, initFailed: null });
+    const result = await handleProductSignals({ env: makeEnv(), authorization: `Bearer ${TOKEN}`, now: () => NOW });
+    expect(result.status).toBe(200);
+    const html = result.body;
+    // 5 workspaces today, but only 3 evaluable for effect receipts:
+    // observed=1, evaluable=3, unavailable=2 — NOT 1/5 and NOT summed to 0.
+    expect(html).toContain('Effect receipt observed</td><td>1</td><td>3</td><td>2</td>');
+    expect(html).toContain('Presence receipt observed</td><td>2</td><td>4</td><td>1</td>');
+    expect(html).toContain('Daily participating workspaces</td><td>5');
+    expect(html).toContain('excluded from the denominator');
   });
 
   it('permanently displays the opt-in bias warning (SPEC §62) and effect≠improvement note', async () => {
     const result = await handleProductSignals({ env: makeEnv(), authorization: `Bearer ${TOKEN}`, now: () => NOW });
-    expect(result.body).toContain('must not be interpreted as the complete PD user population');
+    expect(result.body).toContain('must not be interpreted as the complete PD population');
     expect(result.body).toContain('not evidence of durable Agent improvement');
     expect(result.body).toContain('Cross-day deduplication is intentionally impossible');
+    expect(result.body).toContain('accepted anonymous submissions');
   });
 
-  it('never uses "user" wording or renders any server_daily_id / unit rows', async () => {
+  it('never uses "user"/"installation" wording or renders any server_daily_id / workspace rows', async () => {
     const result = await handleProductSignals({ env: makeEnv(), authorization: `Bearer ${TOKEN}`, now: () => NOW });
     const html = result.body;
     expect(html).not.toMatch(/\busers\b/i);
+    expect(html).not.toMatch(/\binstallations\b/i);
     expect(html).not.toContain('DAU');
     expect(html).not.toContain('retention rate');
     for (const id of ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)]) {
