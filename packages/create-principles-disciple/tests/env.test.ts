@@ -9,37 +9,20 @@ import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDi
 vi.mock('fs');
 vi.mock('os');
 vi.mock('child_process', () => ({
-  execFileSync: vi.fn(),
+  execSync: vi.fn(),
 }));
 
 describe('environment detection utilities', () => {
-  // PRI-569: env.ts spawns via array-form execFileSync with literal binaries;
-  // this mock routes on (binary + joined argv) so tests can decide which tool
-  // "exists" without touching a real shell.
-  const mockExecFileSync = vi.mocked(childProcess.execFileSync);
+  const mockExecSync = vi.mocked(childProcess.execSync);
   const mockExistsSync = vi.spyOn(fs, 'existsSync');
   const mockHomedir = vi.spyOn(os, 'homedir');
   let savedOpenClawWorkspace: string | undefined;
   let savedPdWorkspaceDir: string | undefined;
 
-  /**
-   * Table-driven spawn mock: key = "<binary> <joined args>", value = stdout.
-   * Missing keys throw (tool not installed).
-   */
-  function mockSpawnResponses(responses: Record<string, string>): void {
-    mockExecFileSync.mockImplementation((...callArgs: unknown[]) => {
-      const file = String(callArgs[0]);
-      const argv = Array.isArray(callArgs[1]) ? (callArgs[1] as string[]).join(' ') : '';
-      const key = `${file} ${argv}`.trim();
-      if (!(key in responses)) throw new Error(`spawn not found: ${key}`);
-      return responses[key]!;
-    });
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
     mockHomedir.mockReturnValue('/home/user');
-    mockExecFileSync.mockReturnValue('');
+    mockExecSync.mockImplementation(() => '');
     savedOpenClawWorkspace = process.env.OPENCLAW_WORKSPACE;
     savedPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
   });
@@ -60,11 +43,12 @@ describe('environment detection utilities', () => {
 
   describe('checkEnvironment', () => {
     it('detects all tools when available', () => {
-      mockSpawnResponses({
-        'node -v': 'v20.0.0',
-        'cmd.exe /c openclaw --version': 'OpenClaw 1.0.0',
-        'python3 --version': 'Python 3.11.0',
-        'git --version': 'git version 2.40.0',
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('node')) return 'v20.0.0';
+        if (cmd.includes('openclaw')) return 'OpenClaw 1.0.0';
+        if (cmd.includes('python3')) return 'Python 3.11.0';
+        if (cmd.includes('git')) return 'git version 2.40.0';
+        throw new Error('not found');
       });
 
       const result = checkEnvironment();
@@ -79,10 +63,11 @@ describe('environment detection utilities', () => {
     });
 
     it('detects clawd when openclaw is not available', () => {
-      mockSpawnResponses({
-        'node -v': 'v20.0.0',
-        // openclaw probe key intentionally absent -> spawn throws -> fallback
-        'cmd.exe /c clawd --version': 'clawd 2.0.0',
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('node')) return 'v20.0.0';
+        if (cmd.includes('openclaw')) throw new Error('not found');
+        if (cmd.includes('clawd')) return 'clawd 2.0.0';
+        throw new Error('not found');
       });
 
       const result = checkEnvironment();
@@ -92,7 +77,9 @@ describe('environment detection utilities', () => {
     });
 
     it('returns false when tools are not available', () => {
-      mockSpawnResponses({});
+      mockExecSync.mockImplementation(() => {
+        throw new Error('not found');
+      });
 
       const result = checkEnvironment();
 
@@ -105,9 +92,11 @@ describe('environment detection utilities', () => {
 
   describe('OpenClaw readiness check', () => {
     it('Given OpenClaw is installed, When checkEnvironment runs, Then hasOpenClaw is true with version', () => {
-      mockSpawnResponses({
-        'cmd.exe /c openclaw --version': 'openclaw 1.2.0',
-        'cmd.exe /c clawd --version': 'openclaw 1.2.0',
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version') || cmd.includes('clawd --version')) {
+          return 'openclaw 1.2.0';
+        }
+        return '';
       });
       const result = checkEnvironment();
       expect(result.hasOpenClaw).toBe(true);
@@ -115,9 +104,11 @@ describe('environment detection utilities', () => {
     });
 
     it('Given OpenClaw is missing, When checkEnvironment runs, Then hasOpenClaw is false and version is absent', () => {
-      mockSpawnResponses({
-        'node -v': 'v18.0.0',
-        // both openclaw and clawd probes absent -> throw -> not found
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version') || cmd.includes('clawd --version')) {
+          throw new Error('command not found');
+        }
+        return 'v18.0.0';
       });
       const result = checkEnvironment();
       expect(result.hasOpenClaw).toBe(false);
@@ -125,10 +116,14 @@ describe('environment detection utilities', () => {
     });
 
     it('Given only clawd alias is available, When checkEnvironment runs, Then hasOpenClaw is true via fallback', () => {
-      mockSpawnResponses({
-        'node -v': 'v20.0.0',
-        // openclaw probe absent (throws); clawd answers
-        'cmd.exe /c clawd --version': 'clawd 2.1.3',
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('openclaw --version')) {
+          throw new Error('not found');
+        }
+        if (cmd.includes('clawd --version')) {
+          return 'clawd 2.1.3';
+        }
+        return 'v20.0.0';
       });
       const result = checkEnvironment();
       expect(result.hasOpenClaw).toBe(true);
@@ -220,39 +215,31 @@ describe('environment detection utilities', () => {
 
   describe('gateway service control (stopOpenClawGateway / restartOpenClawGateway)', () => {
     it('stopOpenClawGateway returns ok:true and invokes "openclaw gateway stop"', async () => {
-      mockExecFileSync.mockReturnValue('');
+      mockExecSync.mockImplementation(() => '');
       const res = await stopOpenClawGateway();
       expect(res.ok).toBe(true);
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'cmd.exe',
-        ['/c', 'openclaw', 'gateway', 'stop'],
-        expect.objectContaining({ timeout: 15000 }),
-      );
+      expect(mockExecSync).toHaveBeenCalledWith('openclaw gateway stop', expect.objectContaining({ timeout: 15000 }));
     });
 
     it('restartOpenClawGateway returns ok:true and invokes "openclaw gateway start"', async () => {
-      mockExecFileSync.mockReturnValue('');
+      mockExecSync.mockImplementation(() => '');
       const res = await restartOpenClawGateway();
       expect(res.ok).toBe(true);
-      expect(mockExecFileSync).toHaveBeenCalledWith(
-        'cmd.exe',
-        ['/c', 'openclaw', 'gateway', 'start'],
-        expect.objectContaining({ timeout: 15000 }),
-      );
+      expect(mockExecSync).toHaveBeenCalledWith('openclaw gateway start', expect.objectContaining({ timeout: 15000 }));
     });
 
     // rc-9: control helpers must NEVER throw — they degrade with a structured
     // reason so the installer can emit nextAction instead of crashing.
-    it('stopOpenClawGateway returns ok:false (does not throw) when the spawn fails', async () => {
-      mockExecFileSync.mockImplementation(() => { throw new Error('service not found'); });
+    it('stopOpenClawGateway returns ok:false (does not throw) when execSync throws', async () => {
+      mockExecSync.mockImplementation(() => { throw new Error('service not found'); });
       const res = await stopOpenClawGateway();
       expect(res.ok).toBe(false);
       expect(res.error).toContain('openclaw gateway stop');
       expect(res.error).toMatch(/failed/);
     });
 
-    it('restartOpenClawGateway returns ok:false (does not throw) when the spawn fails', async () => {
-      mockExecFileSync.mockImplementation(() => { throw new Error('boom'); });
+    it('restartOpenClawGateway returns ok:false (does not throw) when execSync throws', async () => {
+      mockExecSync.mockImplementation(() => { throw new Error('boom'); });
       const res = await restartOpenClawGateway();
       expect(res.ok).toBe(false);
       expect(res.error).toContain('openclaw gateway start');
