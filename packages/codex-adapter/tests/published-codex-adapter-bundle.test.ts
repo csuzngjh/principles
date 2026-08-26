@@ -69,8 +69,38 @@ describe('published @principles/codex-adapter bundle safety', () => {
     }
     const hostRuntimeTarball = packTarballPath(hostRuntimePackDir, (hrPacked[0] as Record<string, unknown>).filename);
 
+    // host-runtime depends on @principles/install-layout at runtime; pack it
+    // too so the standalone install resolves offline.
+    const installLayoutDir = path.resolve(packageRoot, '../install-layout');
+    const installLayoutPackDir = path.join(tempDir, 'install-layout-pack');
+    fs.mkdirSync(installLayoutPackDir);
+    const ilPackOutput = runNpm(['pack', '--json', '--', installLayoutDir], {
+      cwd: installLayoutPackDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const ilPacked: unknown = JSON.parse(ilPackOutput);
+    if (!Array.isArray(ilPacked) || !ilPacked[0] || typeof ilPacked[0] !== 'object' || !Object.hasOwn(ilPacked[0], 'filename')) {
+      throw new Error(`npm pack install-layout returned an unexpected result: ${ilPackOutput.slice(0, 500)}`);
+    }
+    const installLayoutTarball = packTarballPath(installLayoutPackDir, (ilPacked[0] as Record<string, unknown>).filename);
+
+    // host-runtime's telemetry modules import new @principles/core/runtime-v2
+    // exports that the npm-registry core may not yet carry; pack core from the
+    // worktree too so the standalone consumer resolves the same code the repo
+    // tests against (same fallback pattern as host-runtime above).
+    const coreDir = path.resolve(packageRoot, '../principles-core');
+    const corePackDir = path.join(tempDir, 'core-pack');
+    fs.mkdirSync(corePackDir);
+    const corePackOutput = runNpm(['pack', '--json', '--', coreDir], {
+      cwd: corePackDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const corePacked: unknown = JSON.parse(corePackOutput);
+    if (!Array.isArray(corePacked) || !corePacked[0] || typeof corePacked[0] !== 'object' || !Object.hasOwn(corePacked[0], 'filename')) {
+      throw new Error(`npm pack core returned an unexpected result: ${corePackOutput.slice(0, 500)}`);
+    }
+    const coreTarball = packTarballPath(corePackDir, (corePacked[0] as Record<string, unknown>).filename);
+
     runNpm(
-      ['install', '--ignore-scripts', '--omit=optional', '--no-package-lock', '--', adapterTarball, hostRuntimeTarball],
+      ['install', '--ignore-scripts', '--omit=optional', '--no-package-lock', '--', adapterTarball, hostRuntimeTarball, installLayoutTarball, coreTarball],
       { cwd: consumerDir, stdio: 'pipe', timeout: 180_000 },
     );
 

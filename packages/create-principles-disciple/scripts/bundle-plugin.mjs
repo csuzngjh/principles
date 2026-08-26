@@ -319,6 +319,7 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@princi
 // reference so the bundled host-runtime package can resolve core without a
 // separate npm install. The installer creates the corresponding symlink.
 rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime', '@principles/core', 'file:../core');
+rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime', '@principles/install-layout', 'file:../install-layout');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
 // console statically imports OPENCLAW_HOST_LIVENESS_CONTRACT at runtime for the
 // RuleCode owner live-decision readiness checks. Rewrite to a local file reference
