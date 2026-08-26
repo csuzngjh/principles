@@ -245,19 +245,12 @@ export async function rebuildNativeModules(cwd: string, componentName: string): 
   for (const mod of ALLOWED_NATIVE_MODULES) {
     const modPath = path.join(cwd, 'node_modules', mod);
     if (!existsSync(modPath)) continue;
-
-    try {
-      // One fixed literal command per known native module — the module list
-      // is a compile-time constant and nothing runtime-derived reaches the
-      // command line (ERR-045).
-      if (mod === 'better-sqlite3') {
-        execSync('npm rebuild better-sqlite3', getCapturingExecOptions(cwd));
-      } else {
-        throw new Error(`No literal rebuild command is registered for native module: ${mod}`);
-      }
-    } catch (e) {
-      throw new Error(`${componentName} native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${cwd} && npm rebuild ${mod}`, { cause: e });
-    }
+    // better-sqlite3 ships prebuilt binaries (prebuilds/*.node) that
+    // node-gyp-build resolves at require-time — no npm rebuild needed.  The
+    // require-probe in verifyNativeModules below is the actual verification.
+    void cwd;
+    void componentName;
+    void mod;
   }
 }
 
