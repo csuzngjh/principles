@@ -175,7 +175,9 @@ function installBundledLayoutPackage(pluginDir: string): void {
  * Returns captured stdout (encoding utf-8).
  */
 function execNpm(args: string[], cwd?: string, timeoutOverride?: number): string {
-  const output = process.platform === 'win32'
+  // encoding:'utf-8' resolves the string overload of execFileSync (TS-typed);
+  // callers and tests must honor that contract (string output).
+  return (process.platform === 'win32'
     ? execFileSync('cmd.exe', ['/c', 'npm', ...args], {
         cwd,
         encoding: 'utf-8',
@@ -190,8 +192,8 @@ function execNpm(args: string[], cwd?: string, timeoutOverride?: number): string
         stdio: 'pipe',
         env: process.env,
         timeout: timeoutOverride ?? INSTALL_TIMEOUT_MS,
-      });
-  return output.trim();
+      })
+  ).trim();
 }
 
 /**

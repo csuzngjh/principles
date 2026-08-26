@@ -1,9 +1,7 @@
 /**
  * 环境检测工具
- * PRI-569 round: process spawning converted to array-form execFileSync —
- * no shell, no interpolated command strings (Mimosa hardening).
  */
-import { execFileSync } from 'child_process';
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -38,24 +36,22 @@ export function checkEnvironment(): EnvCheckResult {
     hasGit: false,
   };
 
-  // 检测 Node.js — literal binary, array-form spawn.
+  // 检测 Node.js
   try {
-    result.nodeVersion = execFileSync('node', ['-v'], { encoding: 'utf-8' }).trim();
+    result.nodeVersion = execSync('node -v', { encoding: 'utf-8' }).trim();
     result.hasNode = true;
   } catch {
     result.hasNode = false;
   }
 
-  // 检测 OpenClaw — openclaw/clawd are npm .cmd shims on Windows; direct
-  // spawn fails with EINVAL/ENOENT, so route through cmd.exe with CONSTANT
-  // argv elements (no interpolation → no injection surface).
+  // 检测 OpenClaw
   try {
-    result.openclawVersion = execFileSync('cmd.exe', ['/c', 'openclaw', '--version'], { encoding: 'utf-8', windowsHide: true }).trim();
+    result.openclawVersion = execSync('openclaw --version', { encoding: 'utf-8' }).trim();
     result.hasOpenClaw = true;
   } catch {
     // 尝试 clawd 命令
     try {
-      result.openclawVersion = execFileSync('cmd.exe', ['/c', 'clawd', '--version'], { encoding: 'utf-8', windowsHide: true }).trim();
+      result.openclawVersion = execSync('clawd --version', { encoding: 'utf-8' }).trim();
       result.hasOpenClaw = true;
     } catch {
       result.hasOpenClaw = false;
@@ -64,7 +60,7 @@ export function checkEnvironment(): EnvCheckResult {
 
   // 检测 Python
   try {
-    const [, pythonVersion] = execFileSync('python3', ['--version'], { encoding: 'utf-8' }).trim().split(' ');
+    const [, pythonVersion] = execSync('python3 --version', { encoding: 'utf-8' }).trim().split(' ');
     result.pythonVersion = pythonVersion;
     result.hasPython = true;
   } catch {
@@ -73,7 +69,7 @@ export function checkEnvironment(): EnvCheckResult {
 
   // 检测 Git
   try {
-    execFileSync('git', ['--version'], { encoding: 'utf-8' });
+    execSync('git --version', { encoding: 'utf-8' });
     result.hasGit = true;
   } catch {
     result.hasGit = false;
@@ -88,7 +84,7 @@ export function checkEnvironment(): EnvCheckResult {
 export function detectWorkspace(): WorkspaceInfo {
   const homeDir = os.homedir();
   const candidates: string[] = [];
-
+  
   // 安全地添加候选路径
   if (process.env.OPENCLAW_WORKSPACE) {
     candidates.push(process.env.OPENCLAW_WORKSPACE);
@@ -205,28 +201,21 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
 
   let pid: number | undefined = undefined;
   try {
-    // Windows: parse `netstat -ano` locally instead of embedding the port in
-    // a PowerShell one-liner (literal binary, constant argv, no shell).
     if (process.platform === 'win32') {
-      const output = execFileSync('netstat.exe', ['-ano'], { encoding: 'utf-8', timeout: 5000, windowsHide: true });
-      const localSuffix = ':' + String(port);
-      for (const line of output.split('\n')) {
-        if (!line.includes('LISTENING')) continue;
-        const cols = line.trim().split(/\s+/);
-        if (cols.length < 4) continue;
-        const [, localAddr] = cols;
-        const candidatePid = cols[cols.length - 1];
-        if (localAddr && localAddr.endsWith(localSuffix) && candidatePid) {
-          const parsed = parseInt(candidatePid, 10);
-          if (Number.isFinite(parsed)) {
-            pid = parsed;
-            break;
-          }
-        }
+      const output = execSync(
+        `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess"`,
+        { encoding: 'utf-8', timeout: 5000 }
+      ).trim();
+      if (output) {
+        const [firstLine] = output.split('\n');
+        if (firstLine) pid = parseInt(firstLine.trim(), 10);
       }
     } else {
-      const [firstLine] = execFileSync('lsof', ['-i', ':' + String(port), '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000 }).trim().split('\n');
-      if (firstLine) pid = parseInt(firstLine.trim(), 10);
+      const output = execSync(`lsof -i :${port} -t -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
+      if (output) {
+        const [firstLine] = output.split('\n');
+        if (firstLine) pid = parseInt(firstLine.trim(), 10);
+      }
     }
   } catch { /* ignore */ }
 
@@ -240,15 +229,12 @@ export interface GatewayControlResult {
 
 /**
  * Run `openclaw gateway <subcommand>` (service-level: launchd/systemd/schtasks).
- * subcommand is a compile-time union ('stop' | 'start') passed as its own argv
- * element via cmd.exe /c (Windows npm shim resolution) — constant arguments,
- * no interpolation. rc-9: never throws — returns {ok:false, error} so callers
- * can degrade with a structured reason + nextAction instead of crashing
- * mid-install.
+ * rc-9: never throws — returns {ok:false, error} so callers can degrade with a
+ * structured reason + nextAction instead of crashing mid-install.
  */
 function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlResult {
   try {
-    execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', subcommand], { stdio: 'pipe', encoding: 'utf-8', timeout: 15000, windowsHide: true });
+    execSync(`openclaw gateway ${subcommand}`, { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

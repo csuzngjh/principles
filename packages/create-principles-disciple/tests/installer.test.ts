@@ -8,8 +8,8 @@ import type { InstallOptions } from '../src/prompts.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
-  execFileSync: vi.fn(() => Buffer.from('')),
-  execSync: vi.fn(() => Buffer.from('')),
+  execFileSync: vi.fn(() => ''),
+  execSync: vi.fn(() => ''),
 }));
 // Control the gateway detection + service-control helpers without spawning real
 // processes. Spread importOriginal so other env exports (detectWorkspace, etc.)
@@ -66,7 +66,7 @@ describe('Native module verification', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockExecFileSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => '');
   });
 
   afterEach(() => {
@@ -108,12 +108,13 @@ describe('Native module verification', () => {
 });
 
 describe('rebuildNativeModules', () => {
-  // PRI-569: rebuild now runs via array-form execFileSync (execNpm).
+  // PRI-569: rebuild now runs via array-form execFileSync (execNpm), which
+  // uses encoding 'utf-8' → the mock contract is a STRING stdout.
   const mockExecFileSync = vi.mocked(childProcess.execFileSync);
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockExecFileSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => '');
   });
 
   afterEach(() => {
@@ -133,7 +134,7 @@ describe('rebuildNativeModules', () => {
     const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
       return p.toString().includes('better-sqlite3');
     });
-    mockExecFileSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => '');
 
     await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
 
