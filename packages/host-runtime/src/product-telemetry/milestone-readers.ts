@@ -27,11 +27,12 @@
  * Per-milestone evaluability (not all-or-nothing): each milestone consults
  * only ITS authority/fallback sources; e.g. a malformed principle ledger
  * does not make `initialized` unknown while state.db is readable.
- * `principleObserved` merges its authority (principle_candidates) with the
- * ledger fallback authority-first: either source observing evidence yields
- * true, a definite value from an evaluable source stands when the other is
- * unknown, and the milestone is null only when BOTH sources are
- * undeterminable.
+ * `principleObserved` combines its two evidence populations (pipeline
+ * candidates ∪ tree principles) with a three-valued OR: either source
+ * observing evidence yields true, false only when BOTH populations are
+ * definitively empty, and null whenever a population is unknown and the
+ * other did not observe evidence (Kleene OR — an evaluated-empty source
+ * can never resolve another source's unknown).
  *
  * `initializationFailed` can only be TRUE from an explicit readable-DB fact
  * (state.db exists, opens, and its schema is definitively not initialized).
@@ -67,16 +68,20 @@ export interface MilestoneReadResult {
 }
 
 /**
- * Authority-first merge for sources of one milestone: the authoritative
- * source's definite value stands even when a fallback source is unknown
- * (e.g. ledger malformed + readable principle_candidates still yields a
- * computed result — review remediation instruction: unknown ONLY when every
- * authority/fallback source of THAT milestone is undeterminable). Either
- * source observing evidence still yields true.
+ * Three-valued OR for the principle milestone's two evidence populations
+ * (pipeline candidates ∪ tree principles). `false` from one source means
+ * "its population is definitively empty" — it can never resolve the OTHER
+ * source's unknown, so any null keeps the existence claim unknown:
+ *   true OR anything  → true   (evidence observed somewhere)
+ *   false AND false    → false (both populations definitively empty)
+ *   otherwise          → null
+ * Review round 4: an authority-first variant that let a single definite
+ * `false` override a `null` silently degraded "unknown" into
+ * "observed false".
  */
-function authorityOrFallback(authority: TelemetryFact, fallback: TelemetryFact): TelemetryFact {
-  if (authority === true || fallback === true) return true;
-  if (authority === false || fallback === false) return false;
+function kleeneOr(a: TelemetryFact, b: TelemetryFact): TelemetryFact {
+  if (a === true || b === true) return true;
+  if (a === false && b === false) return false;
   return null;
 }
 
@@ -247,7 +252,7 @@ export function readMilestoneFacts(workspaceDir: string): MilestoneReadResult {
       }
     }
   }
-  facts.principleObserved = authorityOrFallback(facts.principleObserved, ledgerFact);
+  facts.principleObserved = kleeneOr(facts.principleObserved, ledgerFact);
 
   return { facts, notes };
 }

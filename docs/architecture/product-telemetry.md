@@ -77,7 +77,7 @@ The privacy guard (`PROHIBITED_TELEMETRY_FIELD_TOKENS` + `assertTelemetrySchemaP
 |---|---|---|
 | initialized | `<ws>/.pd/state.db` + populated `schema_version` | PD reached effective runtime state (uniform for both hosts). Missing DB = definitive false; unreadable = null. |
 | painObserved | trajectory.db `pain_events` | ≥1 admitted, canonical-deduped pain (failed pains live in `dead_letter_pains`, excluded). Missing file = false; unreadable/table-missing = null. |
-| principleObserved | `principle_candidates` (authority) / principle ledger (fallback) | Authority-first merge: either source observing evidence → true; an evaluable source's definite value stands when the other is unknown; null only when both are undeterminable (a malformed ledger is preflight-detected because loadLedger is fail-soft). |
+| principleObserved | `principle_candidates` ∪ principle ledger (two evidence populations, three-valued OR) | Either source observing evidence → true; false only when BOTH populations are definitively empty; any unknown population without observed evidence → null (Kleene OR — an evaluated-empty source cannot resolve another source's unknown; the ledger is preflight-checked because loadLedger is fail-soft). |
 | activationObserved | `activations` | ≥1 durable activation fact ever |
 | presenceReceiptObserved | `principle_applications` level='presence' | ≥1 presence receipt (principle entered an Agent context) — **presence ≠ behavior change** |
 | effectReceiptObserved | `principle_applications` level='effect' | ≥1 effect receipt (`rule_blocked` / `auto_correct_applied` / `self_reported`, aggregated without self-report breakdown) — **effect ≠ durable improvement** |

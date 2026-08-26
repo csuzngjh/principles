@@ -531,6 +531,36 @@ describe('milestone readers', () => {
     expect(facts.principleObserved).toBeNull();
   });
 
+  it('one source evaluated empty does NOT collapse the other unknown source to false (Kleene OR)', () => {
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    // Row 1: candidates UNKNOWN (unreadable db) + ledger readable but empty
+    // (definitively no tree principles) — the candidates population is still
+    // unknown, so the existence claim is unknown, not false.
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'state.db'), 'not a sqlite db');
+    fs.writeFileSync(
+      path.join(workspaceDir, '.state', 'principle_training_state.json'),
+      JSON.stringify({ version: 1, tree: { principles: {} } }),
+    );
+    let result = readMilestoneFacts(workspaceDir);
+    expect(result.facts.principleObserved).toBeNull();
+
+    // Row 2: candidates definitively empty (readable table) + ledger MALFORMED
+    // (unknown) — must be null as well (review round 4).
+    fs.rmSync(path.join(workspaceDir, '.pd', 'state.db'), { force: true }); // drop row 1's corrupt file
+    const db = new Database(path.join(workspaceDir, '.pd', 'state.db'));
+    db.exec("CREATE TABLE principle_candidates (id TEXT, status TEXT NOT NULL DEFAULT 'pending')");
+    db.close();
+    fs.writeFileSync(path.join(workspaceDir, '.state', 'principle_training_state.json'), '{not json');
+    result = readMilestoneFacts(workspaceDir);
+    expect(result.facts.principleObserved).toBeNull();
+
+    // Both definitively empty → false stands.
+    fs.rmSync(path.join(workspaceDir, '.state', 'principle_training_state.json'));
+    result = readMilestoneFacts(workspaceDir);
+    expect(result.facts.principleObserved).toBe(false);
+  });
+
   it('trajectory.db unreadable renders painObserved unknown (not false)', () => {
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, '.state', 'trajectory.db'), 'garbage');
