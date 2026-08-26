@@ -381,7 +381,7 @@ if (BUILD_SELF_CONTAINED_ASSET) {
       // reproducibility. Strip everything except the runtime artifact.
       await runNpm(['rebuild', 'better-sqlite3']);
       const bsql3Build = join(directory, 'node_modules', 'better-sqlite3', 'build');
-      for (const residue of ['Release/obj', 'Release/better_sqlite3.exp', 'Release/better_sqlite3.lib', 'Release/obj.folder', 'better_sqlite3.vcxproj', 'better_sqlite3.vcxproj.filters', 'test_extension.vcxproj', 'test_extension.exe', 'binding.sln', 'config.gypi']) {
+      for (const residue of ['Release/obj', 'Release/better_sqlite3.exp', 'Release/better_sqlite3.lib', 'Release/obj.folder', 'better_sqlite3.vcxproj', 'better_sqlite3.vcxproj.filters', 'test_extension.vcxproj', 'test_extension.exe', 'binding.sln', 'config.gypi', 'Makefile']) {
         rmSync(join(bsql3Build, residue), { recursive: true, force: true });
       }
       // ELF/Mach-O builds embed DWARF debug info containing the ABSOLUTE
