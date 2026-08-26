@@ -15,6 +15,7 @@ import type {
 } from './openclaw-sdk.js';
 import * as path from 'path';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
+import { scheduleTelemetryExportForWorkspace } from './core/product-telemetry-trigger.js';
 import { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig } from './core/config-health.js';
 export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig } from './core/config-health.js';
 export type { ConversationAccessCheckResult } from './core/config-health.js';
@@ -404,6 +405,13 @@ const plugin = {
               api.logger.info(`[PD] InternalizationAutoConsumer NOT started for workspace: ${workspaceDir}. ${autoConsGate.disabledInfo}`);
               SystemLogger.log(workspaceDir, 'INTERNALIZATION_CONSUMER_DISABLED', autoConsGate.disabledInfo ?? '');
             }
+
+            // ── Schedule anonymous product telemetry export (fire-and-forget) ──
+            // PRI-595~603: opt-in (default OFF), one bounded attempt per
+            // normal-activity window, never blocks hooks (unref'd timer, all
+            // failures contained inside the service). Gating (flag + consent +
+            // environment eligibility) happens inside maybeExportDaily.
+            scheduleTelemetryExportForWorkspace(workspaceDir, api.logger);
           }
 
           const hookContext = { ...ctx, workspaceDir };

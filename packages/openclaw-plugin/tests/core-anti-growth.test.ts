@@ -89,6 +89,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'thinking-os-parser.ts',
     'system-logger.ts',
     'detection-funnel.ts',
+    // Anonymous Product Telemetry v1 (PRI-595~603, ADR-0021): one-time-init
+    // trigger shell wiring the host-neutral telemetry service (logic lives in
+    // @principles/host-runtime product-telemetry) into the plugin lifecycle.
+    'product-telemetry-trigger.ts',
     'migration.ts',
     'file-store.ts',
     'pd-task-store.ts',

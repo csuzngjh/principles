@@ -15,6 +15,13 @@ export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';
 export * from './production-pain-evidence.js';
 export * from './host-liveness-contract.js';
+// Anonymous Product Telemetry v1 (PRI-595~603) — opt-in, default-off,
+// read-only with respect to all PD governance facts.
+export * from './product-telemetry/consent-store.js';
+export * from './product-telemetry/eligibility.js';
+export * from './product-telemetry/exporter.js';
+export * from './product-telemetry/milestone-readers.js';
+export * from './product-telemetry/service.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',

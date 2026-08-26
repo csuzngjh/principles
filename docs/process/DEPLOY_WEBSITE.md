@@ -60,9 +60,25 @@ npx wrangler kv namespace create FEEDBACK_KV
 cd packages/website
 npx wrangler pages secret put INGEST_TOKEN     # 输入:随发布版分发的防滥用令牌(非安全边界,见 spec §9.2)
 npx wrangler pages secret put LIN_API_KEY      # 输入:Linear 个人/服务 token(personal API key)
+npx wrangler pages secret put TELEMETRY_HMAC_SECRET  # 输入:≥32 字节随机 hex(node -e "require('crypto').randomBytes(32).toString('hex')")。遥测收集器服务端 ID 保护,缺失/过短 → 收集器 500 fail-closed
+npx wrangler pages secret put PRODUCT_SIGNALS_TOKEN  # 输入:≥24 字节随机 hex。/product-signals 维护者视图 Bearer token
 ```
 
 每个 secret 设置后需重新 deploy 生效。
+
+## 4a. 匿名产品遥测 D1(ADR-0021)
+
+D1 数据库与迁移(一次性,已完成):
+
+```bash
+cd packages/website
+npx wrangler d1 create pd-product-telemetry    # 已创建:id c96b7ef1-f6f4-43b0-bce7-9c12881d6b21(APAC),binding PD_PRODUCT_TELEMETRY 已写入 wrangler.toml
+npx wrangler d1 migrations apply pd-product-telemetry --remote   # 应用 migrations/0001_product_telemetry_daily.sql
+```
+
+- 保留策略:90 天,由每次成功写入时的 DELETE 清扫强制执行(Pages Functions 无 cron)。
+- 验证:`node scripts/telemetry-e2e-validate.mjs --endpoint https://principles-website.pages.dev --signals-token <token>`。
+- 本地开发:`.dev.vars`(已 gitignore)+ `wrangler d1 migrations apply pd-product-telemetry --local`。
 
 ## 5. Vars(`LIN_TEAM_ID`)
 
@@ -85,9 +101,11 @@ npx wrangler pages secret put LIN_API_KEY      # 输入:Linear 个人/服务 tok
 3. **提交连通**:本地 Console 配置 `ingest_url` + `ingest_token` 后,从 failed-tasks 入口完成一次真实提交,Linear 出现 `[PD反馈]` issue(见 spec §15 验收①)。
 4. **绑定生效**:提交触发 KV 写入(rl 计数/指纹记录),`wrangler kv key get` 可查到对应 key(或 dashboard KV 查看)。
 5. **LFS 资源**:`homepage-demo-*.mp4` 仍为真实内容(>1KB),未被 LFS 占位指针替代。
+6. **遥测端点**:`curl https://principles-website.pages.dev/api/product-telemetry/health` → `200 {"ok":true}`;完整校验跑 `scripts/telemetry-e2e-validate.mjs`(含 schema 拒绝、413、限流、视图 401)。
 
 ## 8. 回滚
 
 - **部署方式回退**:将 deploy step 改回 `cloudflare/pages-action@v1`(或本文件的上一版),重跑 workflow。
 - **binding 回退**:从 wrangler.toml 删除 `[[kv_namespaces]]`/`[vars]` 段,回到 dashboard 管理(dashboard 中还原绑定)。
 - **功能回退**:`features.feedback_channel.enabled: false`(端 403)或删除 `feedback:` 段对应键;新字段全可选,PR revert 无迁移成本(spec §10 禁用路径)。
+- **遥测回滚**(ADR-0021,四条独立路径):客户端 flag `anonymous_product_telemetry.enabled: false`(默认即 off)→ 零请求;用户 `pd telemetry disable`;环境 `PD_TELEMETRY_DISABLED=1`;服务端删除 endpoint binding 或清空 D1(`wrangler d1 execute pd-product-telemetry --remote --command "DELETE FROM product_telemetry_daily"`)。

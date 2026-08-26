@@ -8,7 +8,18 @@ pages_build_output_dir = ".vitepress/dist"
 binding = "FEEDBACK_KV"
 id = "4fee3748e8004992a94e5aaa7895c874"
 
-# Vars (non-secret). Secrets (INGEST_TOKEN, LIN_API_KEY) are NOT stored here —
-# set them via `wrangler pages secret put`.
+# ---- Anonymous Product Telemetry v1 collector (PRI-600) ----
+# D1: daily boolean-milestone storage. serverDailyId = HMAC(server secret,
+# client daily unlinkable ID) — no client IDs or cross-day identities stored.
+# Schema lives in migrations/ (wrangler d1 migrations apply).
+[[d1_databases]]
+binding = "PD_PRODUCT_TELEMETRY"
+database_name = "pd-product-telemetry"
+database_id = "c96b7ef1-f6f4-43b0-bce7-9c12881d6b21"
+migrations_dir = "migrations"
+
+# Vars (non-secret). Secrets (INGEST_TOKEN, LIN_API_KEY, TELEMETRY_HMAC_SECRET,
+# PRODUCT_SIGNALS_TOKEN) are NOT stored here — set them via
+# `wrangler pages secret put`.
 [vars]
 LIN_TEAM_ID = "5e746d13-253f-43fa-a0e5-716b4da7edcd"
