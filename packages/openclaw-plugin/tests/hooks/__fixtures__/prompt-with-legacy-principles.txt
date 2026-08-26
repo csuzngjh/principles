@@ -29,8 +29,16 @@ Probation principles (contextual, caution):
 </evolution_principles>
 
 <core_principles>
-- [P-001] Always validate input before processing
-- [P-002] Never use `as` for type assertions
+T-01: 在做出变更前，先理解其结构。
+T-02: 信任文件而非上下文窗口，将结论写入文件。
+T-03: 在推断原因之前，先使用日志、代码和输出作为证据。
+T-04: 在高风险时，优先选择可安全回滚的变更。
+T-05: 明确指出护栏、禁令和故障预防约束。
+T-06: 优先选择最小可理解的方案，而非过度设计。
+T-07: 限制爆炸半径，只触碰必要的部分。
+T-08: 将失败和摩擦视为线索，退一步重新思考。
+T-09: 在执行前将任务拆分为更小的阶段。
+T-10: 将中间结论写入文件以实现持久化。
 </core_principles>
 
 ---
