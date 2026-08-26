@@ -232,4 +232,73 @@ describe('PRI-606: core principles injection (production path, empty reducer)', 
     const append = await getAppendSystemContext();
     expect(append).toContain('<core_principles>');
   });
+
+  it('falls back to the default language when config reports an invalid value', async () => {
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir: '/fake/workspace',
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn(), listAssistantTurns: vi.fn().mockReturnValue([]), recordPainEvent: vi.fn() },
+      config: { get: vi.fn().mockReturnValue('fr') }, // invalid → resolveOutputLanguage degrades with warning
+      eventLog: {
+        recordPainSignal: vi.fn(),
+        recordRuntimeV2ActivationsInjected: vi.fn(),
+        recordHeartbeatDiagnosis: vi.fn(),
+      },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+    const { handleBeforePromptBuild, resetPromptStateForTest } = await import('../../src/hooks/prompt.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri606-'));
+    try {
+      resetPromptStateForTest(tmpDir);
+      const result = await handleBeforePromptBuild(
+        makeEvent({ trigger: 'heartbeat' }),
+        makeCtx() as Parameters<typeof handleBeforePromptBuild>[1],
+      );
+      const append = (result?.appendSystemContext as string | undefined) ?? '';
+      // Degraded language must NOT break injection — T-01 still lands (rc-9).
+      expect(append).toContain('<core_principles>');
+      expect(append).toContain('T-01');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('still injects when config service itself throws (guard covers lazy init)', async () => {
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir: '/fake/workspace',
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn(), listAssistantTurns: vi.fn().mockReturnValue([]), recordPainEvent: vi.fn() },
+      config: { get: vi.fn().mockImplementation(() => { throw new Error('config store corrupted'); }) },
+      eventLog: {
+        recordPainSignal: vi.fn(),
+        recordRuntimeV2ActivationsInjected: vi.fn(),
+        recordHeartbeatDiagnosis: vi.fn(),
+      },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+    const { handleBeforePromptBuild, resetPromptStateForTest } = await import('../../src/hooks/prompt.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri606-'));
+    try {
+      resetPromptStateForTest(tmpDir);
+      const result = await handleBeforePromptBuild(
+        makeEvent({ trigger: 'heartbeat' }),
+        makeCtx() as Parameters<typeof handleBeforePromptBuild>[1],
+      );
+      // The hook must survive; core principles degrade gracefully (empty, warned).
+      const append = (result?.appendSystemContext as string | undefined) ?? '';
+      expect(append).not.toContain('<core_principles>');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

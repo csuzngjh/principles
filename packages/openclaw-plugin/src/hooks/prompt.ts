@@ -379,18 +379,20 @@ export async function handleBeforePromptBuild(
   // Core principles: ALWAYS inject the canonical T-01..T-10 axioms directly from
   // the @principles/core registry (PRI-606). These are built-in axioms, NOT
   // owner-approved learned principles — those flow via <evolution_principles>.
-  // Language: PainSettings.language ('zh'|'en') maps onto OutputLanguage ('zh-CN'|'en').
-  const configuredLanguage = wctx.config?.get('language');
-  const mappedLanguage = configuredLanguage === 'zh' ? 'zh-CN' : configuredLanguage;
-  const resolvedLanguage = resolveOutputLanguage(mappedLanguage);
-  if (resolvedLanguage.degradationWarning) {
-    logger?.warn?.(`[PD:Prompt] ${resolvedLanguage.degradationWarning}`);
-  }
   let principlesContent = '';
   try {
+    // Language: PainSettings.language ('zh'|'en') maps onto OutputLanguage ('zh-CN'|'en').
+    // Kept inside the guard: wctx.config lazy-init must never break the prompt hook.
+    const configuredLanguage = wctx.config?.get('language');
+    const mappedLanguage = configuredLanguage === 'zh' ? 'zh-CN' : configuredLanguage;
+    const resolvedLanguage = resolveOutputLanguage(mappedLanguage);
+    if (resolvedLanguage.degradationWarning) {
+      logger?.warn?.(`[PD:Prompt] ${resolvedLanguage.degradationWarning}`);
+    }
     principlesContent = formatCorePrinciplesList(resolvedLanguage.outputLanguage);
   } catch (e) {
-    logger?.warn?.(`[PD:Prompt] Failed to format core principles from registry: ${String(e)}`);
+    // rc-9: degrade to no-injection with structured reason; never break the hook.
+    logger?.warn?.(`[PD:Prompt] Failed to load core principles from registry: ${String(e)}`);
   }
 
   let thinkingOsContent = '';
