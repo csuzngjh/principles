@@ -380,9 +380,19 @@ if (BUILD_SELF_CONTAINED_ASSET) {
 
   const installBundledRuntimeDependencies = async (directory, label) => {
     // Run npm through the running Node binary and npm-cli.js with pure argv
-    // arrays — no cmd.exe shell string concatenation (ERR-045).  On POSIX
-    // npm is a real executable and can be spawned directly.
-    const npmCliJs = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    // arrays — no cmd.exe shell string concatenation (ERR-045).  npm-cli.js
+    // location varies by platform: Windows puts it under <node_dir>/node_modules,
+    // Linux/macOS hosted toolchains under <prefix>/lib/node_modules.
+    const nodeDir = dirname(process.execPath);
+    const prefixDir = dirname(nodeDir);
+    const npmCliJs = [
+      join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      join(prefixDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      join(prefixDir, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    ].find(p => existsSync(p));
+    if (!npmCliJs) {
+      throw new Error(`npm-cli.js not found near ${process.execPath} (checked node_modules and lib/node_modules layouts)`);
+    }
     const runNpm = (args) => execFileAsync(
       process.execPath,
       [npmCliJs, ...args],
