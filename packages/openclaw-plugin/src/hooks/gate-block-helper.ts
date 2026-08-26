@@ -34,7 +34,14 @@ import {
  * Block context containing all information needed for block persistence
  */
 export interface BlockContext {
-  filePath: string;
+  /**
+   * Target path. Nullable by contract (PRI-569 round 3): the shared
+   * host-runtime path may deny a call whose path cannot be normalized, and
+   * trajectory.db accepts a null file_path — a deny is always accounted,
+   * never dropped for lack of a path. Display-only contexts use
+   * `<unresolved>` via the caller-side displayPath coercion.
+   */
+  filePath: string | null;
   reason: string;
   toolName: string;
   sessionId?: string;
@@ -116,7 +123,8 @@ export function persistGateBlock(
   }
 
   // 2. Prepare trajectory payload. Note: trajectory.db gate_blocks has no
-  // source column — blockSource is EventLog-only attribution.
+  // source column — blockSource is EventLog-only attribution. A null
+  // file_path is valid here (unresolved path still counts, PRI-569 r3).
   const trajectoryPayload: TrajectoryGateBlockPayload = {
     sessionId: sessionId ?? null,
     toolName,
@@ -124,11 +132,12 @@ export function persistGateBlock(
     reason,
   };
 
-  // 3. Record to EventLog (primary persistence)
+  // 3. Record to EventLog (primary persistence). Its schema requires a
+  // string path, so an unresolved target carries a placeholder instead.
   try {
     wctx.eventLog.recordGateBlock(sessionId, {
       toolName,
-      filePath,
+      filePath: filePath ?? '<unresolved>',
       reason,
       blockSource: blockSource ?? 'gate',
     });
@@ -166,6 +175,10 @@ export function recordGateBlockAndReturn(
    
 ): PluginHookBeforeToolCallResult {
   const { filePath, reason, toolName, sessionId, blockSource } = blockCtx;
+  // Legacy hook path always has a resolvable path (gate.ts returns before
+  // calling this when none can be extracted); the coercion only satisfies
+  // the widened BlockContext contract for display/risk-matching contexts.
+  const displayPath = filePath ?? '<unresolved>';
 
   // Default logger if not provided
   const logWarn = (msg: string) => logger.warn?.(msg);
@@ -173,7 +186,7 @@ export function recordGateBlockAndReturn(
 
   // Log the block event
   const sourceTag = blockSource ? `[${blockSource}]` : '';
-  logError(`[PD_GATE]${sourceTag} BLOCKED: ${filePath}. Reason: ${reason}`);
+  logError(`[PD_GATE]${sourceTag} BLOCKED: ${displayPath}. Reason: ${reason}`);
 
   // Steps 1-4 (session GFI tracking, EventLog row, trajectory row with
   // bounded retry) are the authoritative persistence core shared by BOTH
@@ -221,7 +234,7 @@ export function recordGateBlockAndReturn(
       // it IS a high-confidence unsafe action. The pain score (45) is the evidence friction
       // weight, NOT the action risk severity. The rulehost principle already determined
       // this action was important enough to block — that is the real signal.
-      const isUnsafe = isRisky(filePath, profile.risk_paths);
+      const isUnsafe = isRisky(displayPath, profile.risk_paths);
       // PRI-454 P2-1: Pass consecutiveErrors and isRisky to match Gate A's
       // upgrade logic. Rule 3 (consecutiveErrors >= 4 → admit) was being
       // dropped, so non-risky repeated gate blocks never triggered diagnosis.
@@ -235,7 +248,7 @@ export function recordGateBlockAndReturn(
         logger.info?.(`[PD_GATE] Triage ${triage.decision}: ${triage.reason}`);
       } else {
         // PRI-454: Gate B path — TriggerController owns admission
-        const errorHash = `${toolName}:${filePath}:${reason}`;
+        const errorHash = `${toolName}:${displayPath}:${reason}`;
         const cooldownActive = isSharedCooldownActive('rulehost_block', sessionId, errorHash);
         const triggerDecision = evaluateTriggerController({
           triageResult: triage,
@@ -254,7 +267,7 @@ export function recordGateBlockAndReturn(
               painId: gatePainId,
               painType: 'user_frustration',
               source: 'gate_blocked',
-              reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+              reason: `Gate blocked ${toolName} on ${displayPath}: ${reason}`,
               score: GATE_BLOCK_PAIN_SCORE,
               sessionId,
               agentId: 'main',
@@ -274,7 +287,7 @@ export function recordGateBlockAndReturn(
         currentGfi: session?.currentGfi ?? 0,
         consecutiveErrors: session?.consecutiveErrors ?? 0,
         sessionId,
-        errorHash: `${toolName}:${filePath}:${reason}`,
+        errorHash: `${toolName}:${displayPath}:${reason}`,
         thresholds: {
           painTrigger: wctx.config.get('thresholds.pain_trigger') || 40,
           highSeverity: wctx.config.get('severity_thresholds.high') || 70,
@@ -289,7 +302,7 @@ export function recordGateBlockAndReturn(
             painId: gatePainId,
             painType: 'user_frustration',
             source: 'gate_blocked',
-            reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+            reason: `Gate blocked ${toolName} on ${displayPath}: ${reason}`,
             score: GATE_BLOCK_PAIN_SCORE,
             sessionId,
             agentId: 'main',
@@ -312,17 +325,17 @@ export function recordGateBlockAndReturn(
     const metadata = loadPrincipleReceiptMetadata(wctx.workspaceDir, blockCtx.ruleId, blockCtx.principleId);
     if (metadata) {
       blockMessage = buildReceiptBlockMessage({
-        filePath,
+        filePath: displayPath,
         reason,
         toolName,
         metadata,
       });
     } else {
       logWarn('[PD_GATE] Receipt metadata unresolved — generic block copy used (rc-9)');
-      blockMessage = buildContextualBlockMessage({ filePath, reason });
+      blockMessage = buildContextualBlockMessage({ filePath: displayPath, reason });
     }
   } else {
-    blockMessage = buildContextualBlockMessage({ filePath, reason });
+    blockMessage = buildContextualBlockMessage({ filePath: displayPath, reason });
   }
 
   return {

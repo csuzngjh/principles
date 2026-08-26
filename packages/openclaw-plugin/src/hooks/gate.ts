@@ -555,18 +555,24 @@ export function handleSharedRuleHostResult(
     isBashTool: BASH_TOOLS_SET.has(event.toolName),
     isWriteTool: WRITE_TOOLS.has(event.toolName),
   });
-  if (action.normalizedPath === null) {
-    if (result.decision === 'deny') {
-      // PRI-569 review fix: a deny must never vanish from accounting
-      // silently when the target path cannot be normalized — warn fail-loud
-      // even though no gate_blocks row can be built without a path (rc-9).
-      logger.warn?.('[PD_GATE] Shared-path deny not accounted: target path unresolved (reasonCode=shared_deny_path_unresolved); nextAction=inspect event.params shape');
-    }
-    return;
-  }
   const ruleId = typeof metadata?.['ruleId'] === 'string' ? metadata['ruleId'] : undefined;
   const principleId = typeof metadata?.['principleId'] === 'string' ? metadata['principleId'] : undefined;
   const denyReason = result.reason ?? 'RuleHost denied the tool call';
+  if (action.normalizedPath === null) {
+    if (result.decision === 'deny') {
+      // PRI-569 round 3: a deny is ALWAYS accounted — trajectory.db accepts
+      // a null file_path, so record with null instead of dropping the count.
+      accountSharedDeny(wctx, {
+        sessionId: ctx.sessionId,
+        toolName: event.toolName,
+        filePath: null,
+        reason: denyReason,
+        ruleId,
+        principleId,
+      }, logger);
+    }
+    return;
+  }
   try {
     const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
     eventLog.recordRuleHostEvaluated({
@@ -582,17 +588,75 @@ export function handleSharedRuleHostResult(
     logger.warn?.(`[PD_GATE] Failed to record shared RuleHost result: ${String(error)}`);
   }
   if (result.decision === 'deny') {
-    // PRI-569: parity with the legacy hook path — a denied call must land in
-    // trajectory.db gate_blocks (Wave-4 "blocks today") and session GFI
-    // tracking, not only in EventLog JSONL. persistGateBlock never throws.
-    persistGateBlock(wctx, {
+    accountSharedDeny(wctx, {
+      sessionId: ctx.sessionId,
+      toolName: event.toolName,
       filePath: action.normalizedPath,
       reason: denyReason,
-      toolName: event.toolName,
-      sessionId: ctx.sessionId,
-      blockSource: 'rule-host-shared',
       ruleId,
       principleId,
     }, logger);
   }
+}
+
+/**
+ * Authoritative accounting for ONE shared-path deny decision (PRI-569).
+ *
+ * Both shared-handler deny branches (resolvable and unresolved target path)
+ * funnel here: receipt-ledger effect row (flag-gated, failure-degrading —
+ * parity with the legacy hook path) plus persistGateBlock (session GFI,
+ * EventLog gate_block, trajectory gate_blocks with bounded retry). A null
+ * filePath is accounted with a null trajectory file_path; the EventLog copy
+ * carries an '<unresolved>' placeholder. Never throws into the caller;
+ * every skip/failure warns with a reasonCode (rc-9).
+ */
+export function accountSharedDeny(
+  wctx: WorkspaceContext,
+  accounting: {
+    sessionId?: string;
+    toolName: string;
+    filePath: string | null;
+    reason: string;
+    ruleId?: string;
+    principleId?: string;
+  },
+  logger: { warn?: (_message: string) => void; error?: (_message: string) => void },
+): void {
+  if (accounting.filePath === null) {
+    logger.warn?.('[PD_GATE] Shared-path deny accounted with unresolved target path (reasonCode=shared_deny_path_unresolved)');
+  }
+  try {
+    if (loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_ledger').enabled) {
+      const ledgerPrincipleId = accounting.principleId ?? accounting.ruleId;
+      if (ledgerPrincipleId) {
+        const written = recordPrincipleApplication(wctx.workspaceDir, {
+          principleId: ledgerPrincipleId,
+          ruleId: accounting.ruleId,
+          channel: 'code_tool_hook',
+          level: 'effect',
+          kind: 'rule_blocked',
+          sessionId: accounting.sessionId,
+          toolName: accounting.toolName,
+          filePath: accounting.filePath ?? undefined,
+          digest: accounting.reason,
+        });
+        if (!written) {
+          logger.warn?.('[PD_GATE] Receipt ledger write failed (rule_blocked, shared) — history degraded, block unaffected (rc-9)');
+        }
+      } else {
+        logger.warn?.('[PD_GATE] Receipt ledger row skipped (rule_blocked, shared): decision carries no principleId/ruleId — effect evidence not captured (rc-9)');
+      }
+    }
+  } catch (ledgerErr) {
+    logger.warn?.(`[PD_GATE] Receipt ledger write threw (rule_blocked, shared): ${String(ledgerErr)}`);
+  }
+  persistGateBlock(wctx, {
+    filePath: accounting.filePath,
+    reason: accounting.reason,
+    toolName: accounting.toolName,
+    sessionId: accounting.sessionId,
+    blockSource: 'rule-host-shared',
+    ruleId: accounting.ruleId,
+    principleId: accounting.principleId,
+  }, logger);
 }
