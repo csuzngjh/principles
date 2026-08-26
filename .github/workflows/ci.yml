@@ -333,7 +333,9 @@ jobs:
         run: npm rebuild better-sqlite3
 
       - name: Build dependencies
-        run: npm run build --workspace=@principles/core
+        run: |
+          npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
 
       - name: Build and test
         run: npm run build --workspace=@principles/host-runtime && npm test --workspace=@principles/host-runtime
@@ -363,6 +365,7 @@ jobs:
       - name: Build runtime dependencies and OpenClaw plugin
         run: |
           npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=principles-disciple
 
@@ -394,6 +397,7 @@ jobs:
       - name: Build runtime dependencies
         run: |
           npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
 
       - name: Build and test adapter

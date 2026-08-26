@@ -37,6 +37,7 @@ vi.mock('../../src/resolve-workspace.js', async (importOriginal) => {
 let tmpHome: string;
 let tmpWorkspace: string;
 let originalUserprofile: string | undefined;
+let originalHome: string | undefined;
 let stdoutSpy: ReturnType<typeof vi.spyOn>;
 
 function capturedOutput(): { text: string; json: Record<string, unknown> } {
@@ -48,8 +49,12 @@ function capturedOutput(): { text: string; json: Record<string, unknown> } {
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-tel-cli-home-'));
   tmpWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-tel-cli-ws-'));
+  // os.homedir() reads USERPROFILE on Windows and HOME on POSIX — set both so
+  // the machine-scope consent store is isolated on every CI runner.
   originalUserprofile = process.env.USERPROFILE;
+  originalHome = process.env.HOME;
   process.env.USERPROFILE = tmpHome;
+  process.env.HOME = tmpHome;
   stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 
@@ -59,6 +64,11 @@ afterEach(() => {
     delete process.env.USERPROFILE;
   } else {
     process.env.USERPROFILE = originalUserprofile;
+  }
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
   }
   fs.rmSync(tmpHome, { recursive: true, force: true });
   fs.rmSync(tmpWorkspace, { recursive: true, force: true });
