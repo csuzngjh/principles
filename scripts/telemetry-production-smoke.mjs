@@ -27,7 +27,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createRequire } from 'node:module';
 
@@ -46,12 +45,6 @@ if (!values.endpoint) {
 const ENDPOINT = values.endpoint.replace(/\/+$/, '');
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 const SMOKE_VERSION = '9.9.9-telemetry-smoke';
-
-const checks = [];
-function check(label, pass, detail = '') {
-  checks.push({ label, pass });
-  console.log(`${pass ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`);
-}
 
 // ── 1. Isolated production-equivalent HOME ───────────────────────────────────
 
@@ -200,6 +193,3 @@ console.log(`RUNNER=${runnerPath}`);
 console.log(`WORKSPACE=${workspace}`);
 
 fs.writeFileSync(path.join(home, 'smoke-meta.json'), JSON.stringify({ home, workspace, runnerPath, endpoint: ENDPOINT, version: SMOKE_VERSION }, null, 2));
-const failed = checks.filter((c) => !c.pass);
-console.log(checks.map((c) => `${c.pass ? 'PASS' : 'FAIL'}  ${c.label}`).join('\n'));
-process.exit(failed.length > 0 ? 1 : 0);
