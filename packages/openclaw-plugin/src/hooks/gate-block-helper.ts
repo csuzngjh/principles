@@ -13,6 +13,7 @@
 import * as fs from 'fs';
 import { getSession, trackBlock } from '../core/session-tracker.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
+import type { TrajectoryDatabase, TrajectoryGateBlockInput } from '../core/trajectory.js';
 import type { PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent } from './pain.js';
@@ -43,6 +44,103 @@ export interface BlockContext {
   ruleId?: string;
   /** Principle id from the rule result — enables PRI-530 receipt copy attribution */
   principleId?: string;
+}
+
+/** Payload persisted to trajectory.db gate_blocks for one block decision. */
+interface TrajectoryGateBlockPayload extends TrajectoryGateBlockInput {}
+
+type GateBlockWriteOutcome = 'written' | 'retryable' | 'skipped';
+
+/**
+ * One synchronous attempt to write a gate_blocks row.
+ *
+ * Every failure mode warns with a distinct reasonCode instead of skipping
+ * silently (rc-9 / PRI-569). Only a thrown write is retryable; an unmounted
+ * or failing collector is permanent for this process lifetime.
+ */
+function attemptTrajectoryGateBlockWrite(
+  wctx: WorkspaceContext,
+  payload: TrajectoryGateBlockPayload,
+  logWarn: (message: string) => void
+): GateBlockWriteOutcome {
+  let trajectory: TrajectoryDatabase | undefined;
+  try {
+    trajectory = wctx.trajectory;
+  } catch (error: unknown) {
+    logWarn(`[PD_GATE] Trajectory gate block skipped (reasonCode=trajectory_getter_failed): ${String(error)}`);
+    return 'skipped';
+  }
+  if (!trajectory || typeof trajectory.recordGateBlock !== 'function') {
+    logWarn('[PD_GATE] Trajectory gate block skipped: collector not mounted (reasonCode=trajectory_collector_unmounted); event-log row retained');
+    return 'skipped';
+  }
+  try {
+    trajectory.recordGateBlock(payload);
+    return 'written';
+  } catch (error: unknown) {
+    logWarn(`[PD_GATE] Failed to record trajectory gate block (reasonCode=trajectory_write_failed): ${String(error)}`);
+    return 'retryable';
+  }
+}
+
+/**
+ * Authoritative persistence core for ONE gate-block decision.
+ *
+ * Shared by BOTH enforcement paths (PRI-569): recordGateBlockAndReturn
+ * (legacy hook path) and handleSharedRuleHostResult's deny branch (shared
+ * host-runtime path). Before PRI-569 the shared path recorded only EventLog
+ * JSONL rows, so trajectory.db gate_blocks stayed empty and Wave-4's
+ * "blocks today" metric read 0 despite live blocks.
+ *
+ * None of the steps throws into the caller; degradation is observable via
+ * reasonCode-carrying warnings, and trajectory write failures schedule the
+ * bounded retry chain.
+ */
+export function persistGateBlock(
+  wctx: WorkspaceContext,
+  blockCtx: BlockContext,
+  logger: { warn?: (_message: string) => void; error?: (_message: string) => void }
+): void {
+  const { filePath, reason, toolName, sessionId, blockSource } = blockCtx;
+  const logWarn = (msg: string) => logger.warn?.(msg);
+  const logError = (msg: string) => logger.error?.(msg);
+
+  // 1. Track block for session-level GFI calculation. Guarded so the
+  // persistGateBlock never-throws invariant holds end to end.
+  if (sessionId) {
+    try {
+      trackBlock(sessionId);
+    } catch (error: unknown) {
+      logWarn(`[PD_GATE] Session GFI tracking skipped (reasonCode=gfi_track_failed): ${String(error)}`);
+    }
+  }
+
+  // 2. Prepare trajectory payload. Note: trajectory.db gate_blocks has no
+  // source column — blockSource is EventLog-only attribution.
+  const trajectoryPayload: TrajectoryGateBlockPayload = {
+    sessionId: sessionId ?? null,
+    toolName,
+    filePath,
+    reason,
+  };
+
+  // 3. Record to EventLog (primary persistence)
+  try {
+    wctx.eventLog.recordGateBlock(sessionId, {
+      toolName,
+      filePath,
+      reason,
+      blockSource: blockSource ?? 'gate',
+    });
+  } catch (error: unknown) {
+    logWarn(`[PD_GATE] Failed to record gate block event: ${String(error)}`);
+  }
+
+  // 4. Record to trajectory (secondary persistence with retry). Only a thrown
+  // write schedules retries; skipped outcomes are permanent for this process.
+  if (attemptTrajectoryGateBlockWrite(wctx, trajectoryPayload, logWarn) === 'retryable') {
+    scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logWarn, logError);
+  }
 }
 
 /**
@@ -77,41 +175,11 @@ export function recordGateBlockAndReturn(
   const sourceTag = blockSource ? `[${blockSource}]` : '';
   logError(`[PD_GATE]${sourceTag} BLOCKED: ${filePath}. Reason: ${reason}`);
 
-  // 1. Track block for session-level GFI calculation
-  if (sessionId) {
-    trackBlock(sessionId);
-  }
-
-  // 2. Prepare trajectory payload
-  const trajectoryPayload = {
-    sessionId: sessionId ?? null,
-    toolName,
-    filePath,
-    reason,
-    blockSource: blockSource ?? 'gate',
-  };
-
-  // 3. Record to EventLog (primary persistence)
-  try {
-    wctx.eventLog.recordGateBlock(sessionId, {
-      toolName,
-      filePath,
-      reason,
-      blockSource: blockSource ?? 'gate',
-    });
-  } catch (error: unknown) {
-    logWarn(`[PD_GATE] Failed to record gate block event: ${String(error)}`);
-  }
-
-  // 4. Record to trajectory (secondary persistence with retry)
-  try {
-    wctx.trajectory?.recordGateBlock?.(trajectoryPayload);
-  } catch (error: unknown) {
-    logWarn(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
-
-     
-    scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logWarn, logError);
-  }
+  // Steps 1-4 (session GFI tracking, EventLog row, trajectory row with
+  // bounded retry) are the authoritative persistence core shared by BOTH
+  // enforcement paths — the legacy hook path here, and
+  // handleSharedRuleHostResult's deny branch (PRI-569).
+  persistGateBlock(wctx, blockCtx, logger);
 
   // 5. Record gate block pain context. Runtime V2 diagnosis is gated by GFI
   // so one mild block does not start a long diagnostician run.
@@ -336,29 +404,26 @@ and ask for explicit confirmation to proceed.
  
 function scheduleTrajectoryGateBlockRetry(
   wctx: WorkspaceContext,
-  payload: {
-    sessionId: string | null;
-    toolName: string;
-    filePath: string;
-    reason: string;
-    blockSource?: string;
-  },
+  payload: TrajectoryGateBlockPayload,
   attempt: number,
   logWarn: (message: string) => void,
   logError: (message: string) => void
 ): void {
   if (attempt > TRAJECTORY_GATE_BLOCK_MAX_RETRIES) {
-    logError(`[PD_GATE] Failed to persist trajectory gate block after ${TRAJECTORY_GATE_BLOCK_MAX_RETRIES} retries: ${payload.toolName} ${payload.filePath}`);
+    logError(`[PD_GATE] Failed to persist trajectory gate block after ${TRAJECTORY_GATE_BLOCK_MAX_RETRIES} retries (reasonCode=trajectory_write_exhausted): ${payload.toolName} ${payload.filePath}`);
     return;
   }
 
   setTimeout(() => {
-    try {
-      wctx.trajectory?.recordGateBlock?.(payload);
+    const outcome = attemptTrajectoryGateBlockWrite(wctx, payload, logWarn);
+    if (outcome === 'written') {
       logWarn(`[PD_GATE] Trajectory gate block persisted on retry ${attempt}`);
-    } catch (error: unknown) {
-      logWarn(`[PD_GATE] Retrying trajectory gate block persistence (attempt ${attempt + 1}): ${String(error)}`);
-      scheduleTrajectoryGateBlockRetry(wctx, payload, attempt + 1, logWarn, logError);
+      return;
     }
+    if (outcome === 'skipped') {
+      // Collector went away mid-retry — not retryable, warn already emitted.
+      return;
+    }
+    scheduleTrajectoryGateBlockRetry(wctx, payload, attempt + 1, logWarn, logError);
   }, TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS * attempt).unref();
 }
