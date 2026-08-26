@@ -179,6 +179,7 @@ describe('RuleCodeOwnerDecisionService promotion authority', () => {
       summary: expect.stringContaining('durable safety store'),
       nextAction: expect.stringContaining('retry'),
     });
+    expect(result.ok === false && result.summary.includes('SQLite write failed')).toBe(true);
     expect(failingCommit).toHaveBeenCalledOnce();
   });
 });

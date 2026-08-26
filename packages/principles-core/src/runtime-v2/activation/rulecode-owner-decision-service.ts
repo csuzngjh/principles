@@ -164,11 +164,11 @@ export class RuleCodeOwnerDecisionService {
         idempotencyKey: request.idempotencyKey,
       });
       return { ok: true, decision: 'promoted', ...committed };
-    } catch {
+    } catch (error) {
       return refused({
         reasonCode: 'promotion_commit_failed',
-        summary: 'Failed to record the promotion decision in the durable safety store.',
-        nextAction: 'Check store permissions and retry the Owner review.',
+        summary: `Failed to record the promotion decision in the durable safety store: ${error instanceof Error ? error.message : String(error)}`,
+        nextAction: 'Resolve the reported store error (refresh the control version if it changed), then retry the Owner review.',
       });
     }
   }
