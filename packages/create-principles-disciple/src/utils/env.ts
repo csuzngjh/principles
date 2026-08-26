@@ -1,7 +1,15 @@
 /**
  * 环境检测工具
+ *
+ * PRI-605: 跨平台 child_process 调用统一为数组形式 execFileSync（不走 shell）,
+ * 并按平台路由二进制：
+ *   - win32: 无 .exe 的 shim（openclaw/clawd/npm 等）经 cmd.exe /c 解析 PATH;
+ *     python 探测 python3 → python; 网关 PID 用 netstat.exe 而非 PowerShell。
+ *   - 非 win32: 直接 execFileSync 字面量二进制。
+ * 语义与原 execSync 字符串形式一致（找不到命令 → 对应能力置 false / PID 留空,
+ * rc-9 不静默抛出）。
  */
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -25,6 +33,8 @@ export interface WorkspaceInfo {
   coreFiles: string[];      // 已存在的核心文件列表
 }
 
+const IS_WIN32 = process.platform === 'win32';
+
 /**
  * 检测运行环境
  */
@@ -38,38 +48,69 @@ export function checkEnvironment(): EnvCheckResult {
 
   // 检测 Node.js
   try {
-    result.nodeVersion = execSync('node -v', { encoding: 'utf-8' }).trim();
+    result.nodeVersion = execFileSync('node', ['-v'], { encoding: 'utf-8' }).trim();
     result.hasNode = true;
   } catch {
     result.hasNode = false;
   }
 
-  // 检测 OpenClaw
-  try {
-    result.openclawVersion = execSync('openclaw --version', { encoding: 'utf-8' }).trim();
-    result.hasOpenClaw = true;
-  } catch {
-    // 尝试 clawd 命令
+  // 检测 OpenClaw（win32 上 openclaw 是 .cmd shim，无 .exe，须经 cmd.exe /c）
+  if (IS_WIN32) {
     try {
-      result.openclawVersion = execSync('clawd --version', { encoding: 'utf-8' }).trim();
+      result.openclawVersion = execFileSync('cmd.exe', ['/c', 'openclaw', '--version'], { encoding: 'utf-8' }).trim();
       result.hasOpenClaw = true;
     } catch {
-      result.hasOpenClaw = false;
+      // 尝试 clawd 命令
+      try {
+        result.openclawVersion = execFileSync('cmd.exe', ['/c', 'clawd', '--version'], { encoding: 'utf-8' }).trim();
+        result.hasOpenClaw = true;
+      } catch {
+        result.hasOpenClaw = false;
+      }
+    }
+  } else {
+    try {
+      result.openclawVersion = execFileSync('openclaw', ['--version'], { encoding: 'utf-8' }).trim();
+      result.hasOpenClaw = true;
+    } catch {
+      // 尝试 clawd 命令
+      try {
+        result.openclawVersion = execFileSync('clawd', ['--version'], { encoding: 'utf-8' }).trim();
+        result.hasOpenClaw = true;
+      } catch {
+        result.hasOpenClaw = false;
+      }
     }
   }
 
-  // 检测 Python
-  try {
-    const [, pythonVersion] = execSync('python3 --version', { encoding: 'utf-8' }).trim().split(' ');
-    result.pythonVersion = pythonVersion;
-    result.hasPython = true;
-  } catch {
-    result.hasPython = false;
+  // 检测 Python（win32 上 python.org 安装通常只提供 python.exe，python3 可能不在 PATH）
+  if (IS_WIN32) {
+    try {
+      const [, pythonVersion] = execFileSync('python3', ['--version'], { encoding: 'utf-8' }).trim().split(' ');
+      result.pythonVersion = pythonVersion;
+      result.hasPython = true;
+    } catch {
+      try {
+        const [, pythonVersion] = execFileSync('python', ['--version'], { encoding: 'utf-8' }).trim().split(' ');
+        result.pythonVersion = pythonVersion;
+        result.hasPython = true;
+      } catch {
+        result.hasPython = false;
+      }
+    }
+  } else {
+    try {
+      const [, pythonVersion] = execFileSync('python3', ['--version'], { encoding: 'utf-8' }).trim().split(' ');
+      result.pythonVersion = pythonVersion;
+      result.hasPython = true;
+    } catch {
+      result.hasPython = false;
+    }
   }
 
   // 检测 Git
   try {
-    execSync('git --version', { encoding: 'utf-8' });
+    execFileSync('git', ['--version'], { encoding: 'utf-8' });
     result.hasGit = true;
   } catch {
     result.hasGit = false;
@@ -192,6 +233,29 @@ function checkPortListening(port: number): Promise<boolean> {
   });
 }
 
+/**
+ * 从 netstat -ano -p tcp 输出解析监听指定端口的 PID。
+ * 行形如：TCP  0.0.0.0:135  0.0.0.0:0  LISTENING  1234（IPv6 本地地址为 [::]:port）。
+ * rc-1/rc-5: 按 unknown 语义逐字段校验，键/列缺失即跳过，不信任列位置。
+ */
+export function parseNetstatPid(output: string, port: number): number | undefined {
+  for (const line of output.split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 5) continue;
+    // parts.length >= 5 已守卫，[0],[1],[3],[4] 存在；`?? ''` 仅为满足严格类型
+    const proto = parts[0] ?? '';
+    const local = parts[1] ?? '';
+    const state = parts[3] ?? '';
+    const pidField = parts[4] ?? '';
+    if (proto !== 'TCP' || state !== 'LISTENING') continue;
+    if (!local.endsWith(`:${port}`)) continue;
+    if (!/^\d+$/.test(pidField)) continue;
+    const pid = parseInt(pidField, 10);
+    if (Number.isInteger(pid) && pid > 0) return pid;
+  }
+  return undefined;
+}
+
 export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
   const port = readOpenClawPort();
   if (!port) return { isRunning: false };
@@ -201,17 +265,12 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
 
   let pid: number | undefined = undefined;
   try {
-    if (process.platform === 'win32') {
-      const output = execSync(
-        `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess"`,
-        { encoding: 'utf-8', timeout: 5000 }
-      ).trim();
-      if (output) {
-        const [firstLine] = output.split('\n');
-        if (firstLine) pid = parseInt(firstLine.trim(), 10);
-      }
+    if (IS_WIN32) {
+      // netstat.exe 在 Windows 全系自带，避免依赖 PowerShell
+      const output = execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000 }).trim();
+      pid = parseNetstatPid(output, port);
     } else {
-      const output = execSync(`lsof -i :${port} -t -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
+      const output = execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000 }).trim();
       if (output) {
         const [firstLine] = output.split('\n');
         if (firstLine) pid = parseInt(firstLine.trim(), 10);
@@ -234,7 +293,11 @@ export interface GatewayControlResult {
  */
 function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlResult {
   try {
-    execSync(`openclaw gateway ${subcommand}`, { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
+    if (IS_WIN32) {
+      execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', subcommand], { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
+    } else {
+      execFileSync('openclaw', ['gateway', subcommand], { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
+    }
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
