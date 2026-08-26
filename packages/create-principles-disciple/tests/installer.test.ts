@@ -108,11 +108,12 @@ describe('Native module verification', () => {
 });
 
 describe('rebuildNativeModules', () => {
-  const mockExecSync = vi.mocked(childProcess.execSync);
+  // PRI-569: rebuild now runs via array-form execFileSync (execNpm).
+  const mockExecFileSync = vi.mocked(childProcess.execFileSync);
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
   });
 
   afterEach(() => {
@@ -125,25 +126,25 @@ describe('rebuildNativeModules', () => {
     await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
 
     expect(mockExistsSync).toHaveBeenCalled();
-    expect(mockExecSync).not.toHaveBeenCalled();
+    expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 
   it('rebuilds existing native modules', async () => {
     const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
       return p.toString().includes('better-sqlite3');
     });
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
 
     await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
 
-    expect(mockExecSync).toHaveBeenCalled();
+    expect(mockExecFileSync).toHaveBeenCalled();
   });
 
   it('throws when rebuild fails', async () => {
     const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
       return p.toString().includes('better-sqlite3');
     });
-    mockExecSync.mockImplementation(() => {
+    mockExecFileSync.mockImplementation(() => {
       throw new Error('rebuild failed');
     });
 
