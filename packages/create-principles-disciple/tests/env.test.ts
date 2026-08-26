@@ -9,7 +9,6 @@ import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDi
 vi.mock('fs');
 vi.mock('os');
 vi.mock('child_process', () => ({
-  execSync: vi.fn(),
   execFileSync: vi.fn(),
 }));
 
@@ -71,13 +70,14 @@ describe('environment detection utilities', () => {
 
   describe('checkEnvironment', () => {
     it('detects all tools when available', () => {
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes('node')) return 'v22.0.0';
-        if (cmd.includes('openclaw')) return 'OpenClaw 1.0.0';
-        if (cmd.includes('python3')) return 'Python 3.11.0';
-        if (cmd.includes('git')) return 'git version 2.40.0';
-        throw new Error('not found');
-      });
+      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, {
+          'node -v': 'v22.0.0',
+          'openclaw --version': 'OpenClaw 1.0.0',
+          'python3 --version': 'Python 3.11.0',
+          'git --version': 'git version 2.40.0',
+        })
+      );
 
       const result = checkEnvironment();
 
@@ -92,7 +92,11 @@ describe('environment detection utilities', () => {
     });
 
     it('rejects Node.js below the native runtime minimum', () => {
-      mockExecSync.mockImplementation((cmd: string) => cmd.includes('node') ? 'v20.19.0' : '');
+      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, {
+          'node -v': 'v20.19.0',
+        })
+      );
 
       const result = checkEnvironment();
 

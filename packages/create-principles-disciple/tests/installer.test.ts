@@ -131,7 +131,11 @@ describe('rebuildNativeModules', () => {
     expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 
-  it('rebuilds existing native modules', async () => {
+  it('does not shell out when native modules ship prebuilt binaries', async () => {
+    // better-sqlite3 >= 13 ships prebuilds/*.node that node-gyp-build loads at
+    // require time, so rebuildNativeModules intentionally performs no npm
+    // rebuild (hosts without a VS toolchain cannot run one). Fail-loud is
+    // pinned separately by verifyNativeModules' require-probe tests above.
     const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
       return p.toString().includes('better-sqlite3');
     });
@@ -139,18 +143,8 @@ describe('rebuildNativeModules', () => {
 
     await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
 
-    expect(mockExecFileSync).toHaveBeenCalled();
-  });
-
-  it('throws when rebuild fails', async () => {
-    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
-      return p.toString().includes('better-sqlite3');
-    });
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error('rebuild failed');
-    });
-
-    await expect(rebuildNativeModules('/test/path', 'Test')).rejects.toThrow(/rebuild failed/);
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+    expect(mockExistsSync).toHaveBeenCalled();
   });
 });
 
