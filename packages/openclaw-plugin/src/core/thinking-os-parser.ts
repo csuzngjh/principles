@@ -2,10 +2,12 @@
  * Thinking OS XML Parser
  *
  * Parses THINKING_OS.md to extract directive definitions.
- * THINKING_OS.md is the single source of truth for thinking models.
+ * The Core Principle Registry in @principles/core (core-principle-registry.ts)
+ * is the single source of truth for directive ids/names; THINKING_OS.md
+ * templates mirror it and the drift test enforces alignment (PRI-607).
  *
  * XML structure:
- *   <directive id="T-01" name="MAP_BEFORE_TERRITORY">
+ *   <directive id="T-01" name="Survey Before Acting">
  *     <trigger>...</trigger>
  *     <must>...</must>
  *     <forbidden>...</forbidden>
