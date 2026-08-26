@@ -174,11 +174,11 @@ jobs:
       - name: Build core dependency
         run: npm run build --workspace=@principles/core
 
-      - name: Build host runtime dependency
-        run: npm run build --workspace=@principles/host-runtime
-
       - name: Build install layout dependency
         run: npm run build --workspace=@principles/install-layout
+
+      - name: Build host runtime dependency
+        run: npm run build --workspace=@principles/host-runtime
 
       - name: Build plugin dependency
         run: npm run build --workspace=principles-disciple
