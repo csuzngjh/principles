@@ -506,6 +506,81 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
       fs.rmSync(wsB, { recursive: true, force: true });
     }
   });
+
+  it('concurrent multi-workspace exports both succeed AND both entries survive in control state (no lost update)', async () => {
+    const wsB = secondWorkspace();
+    try {
+      // Both fetches are slow and overlapping: A's network flight covers B's
+      // whole read→export→write window. The state update critical section
+      // must serialize the file merge so NEITHER entry is lost — sequential
+      // Case A cannot catch this race (review round 4).
+      let active = 0;
+      let overlapped = false;
+      const slowFetch: TelemetryFetchFn = async (url, init) => {
+        active += 1;
+        if (active === 2) overlapped = true;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        requests.push({ url, body: init.body });
+        active -= 1;
+        return { status: 204 };
+      };
+      expect(overlapped).toBe(false);
+      const serviceA = makeService({ fetchFn: slowFetch });
+      const serviceB = makeService({ fetchFn: slowFetch });
+      serviceA.enable();
+
+      const [outcomeA, outcomeB] = await Promise.all([
+        serviceA.maybeExportDaily(workspaceDir),
+        serviceB.maybeExportDaily(wsB),
+      ]);
+      // The flights genuinely overlapped (otherwise this test proves nothing).
+      expect(overlapped, JSON.stringify([outcomeA, outcomeB])).toBe(true);
+      expect(outcomeA).toMatchObject({ attempted: true, ok: true });
+      expect(outcomeB).toMatchObject({ attempted: true, ok: true });
+
+      // THE assertion: the final file holds BOTH workspaces' success entries.
+      const read = readProductTelemetryControlState(homeDir);
+      expect(read.ok).toBe(true);
+      if (!read.ok) return;
+      const entries = read.state.workspaceExports ?? {};
+      const entryA = entries[scopeKeyFor(workspaceDir)];
+      const entryB = entries[scopeKeyFor(wsB)];
+      expect(entryA?.lastSucceededAt, 'workspace A entry lost').toBeDefined();
+      expect(entryB?.lastSucceededAt, 'workspace B entry lost').toBeDefined();
+    } finally {
+      fs.rmSync(wsB, { recursive: true, force: true });
+    }
+  });
+
+  it('an export result never resurrects identity after a concurrent reset/disable (fresh-read under state lock)', async () => {
+    const slowFetch: TelemetryFetchFn = async (url, init) => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      requests.push({ url, body: init.body });
+      return { status: 204 };
+    };
+    const service = makeService({ fetchFn: slowFetch });
+    service.enable();
+    const secretBefore = (() => {
+      const read = readProductTelemetryControlState(homeDir);
+      if (!read.ok || read.state.telemetrySecret === undefined) throw new Error('missing secret');
+      return read.state.telemetrySecret;
+    })();
+
+    // Start the export; while its network flight is in progress, reset rotates
+    // the secret underneath it.
+    const flight = service.maybeExportDaily(workspaceDir);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    service.reset();
+    expect(readProductTelemetryControlState(homeDir).ok && readProductTelemetryControlState(homeDir).state.telemetrySecret).not.toBe(secretBefore);
+
+    await flight;
+    const read = readProductTelemetryControlState(homeDir);
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    // The rotated secret survives; the stale export must NOT write an entry
+    // keyed under (or carrying) the OLD secret back into the file.
+    expect(read.state.telemetrySecret).not.toBe(secretBefore);
+  });
 });
 
 describe('control plane — enable / disable / reset / status / preview', () => {

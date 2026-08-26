@@ -59,6 +59,19 @@ export const MAX_DAILY_EXPORT_ATTEMPTS = 5;
 /** A lock older than this is treated as orphaned (holder crashed) and taken over. */
 const EXPORT_LOCK_STALE_MS = 5 * 60 * 1000;
 
+/**
+ * The state-update critical section (fresh read → prune → merge → atomic
+ * write) holds for a few ms, so the poll budget and stale threshold are
+ * tiny compared to the export lock's — a crashed holder blocks bookkeeping
+ * for seconds, not minutes, and live holders can never be evicted (the
+ * hold is far shorter than the stale threshold).
+ */
+const STATE_UPDATE_LOCK_STALE_MS = 5 * 1000;
+const STATE_UPDATE_LOCK_TIMEOUT_MS = 3 * 1000;
+const STATE_UPDATE_LOCK_POLL_MS = 15;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 interface ExportLock {
   acquired: boolean;
   lockPath?: string;
@@ -106,6 +119,91 @@ function releaseExportLock(lockPath: string): void {
     fs.rmSync(lockPath, { force: true });
   } catch {
     // best effort; a leaked lock is reclaimed after EXPORT_LOCK_STALE_MS
+  }
+}
+
+/**
+ * Machine-scope state-update lock: serializes ONLY the control-state file
+ * read→merge→write across workspaces (a few ms each) — the network export
+ * itself stays fully concurrent. Review round 4: without it, two
+ * concurrently-completing exports built their writes from the same stale
+ * base and the later write silently dropped the earlier workspace's entry
+ * (lost update), defeating once/day dedup, backoff, and the attempt cap.
+ *
+ * Lock acquisition polls asynchronously (never blocks the event loop) and
+ * takes over a stale (crashed-holder) lock after STATE_UPDATE_LOCK_STALE_MS.
+ */
+async function acquireStateUpdateLock(stateFilePath: string): Promise<ExportLock> {
+  const lockPath = `${stateFilePath}.state-lock`;
+  const deadline = Date.now() + STATE_UPDATE_LOCK_TIMEOUT_MS;
+  const create = (): boolean => {
+    try {
+      const fd = fs.openSync(lockPath, 'wx');
+      try {
+        fs.writeSync(fd, `${process.pid} ${new Date().toISOString()}`);
+      } finally {
+        fs.closeSync(fd);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (;;) {
+    if (create()) return { acquired: true, lockPath };
+    try {
+      const stat = fs.statSync(lockPath);
+      if (Date.now() - stat.mtimeMs > STATE_UPDATE_LOCK_STALE_MS) {
+        fs.rmSync(lockPath, { force: true });
+        if (create()) return { acquired: true, lockPath };
+      }
+    } catch {
+      // disappeared between poll attempts → next loop's create decides
+    }
+    if (Date.now() >= deadline) return { acquired: false };
+    await sleep(STATE_UPDATE_LOCK_POLL_MS);
+  }
+}
+
+type StateMergeOutcome =
+  | 'written'
+  | 'skipped_contention'
+  | 'skipped_unreadable'
+  | 'skipped_identity_changed';
+
+/**
+ * Merge ONE workspace's export entry into the control state inside the
+ * state-update critical section. The entry itself is built by the caller
+ * (its inputs are stable for this workspace under the per-workspace export
+ * lock); the OTHER workspaces' entries come from a FRESH read under the
+ * lock, so concurrent completions compose instead of overwrite. Identity
+ * transitions that raced the export (reset/disable/secret rotation mid-
+ * flight) are detected and win — an in-flight result is never merged into
+ * a rotated/denied identity. Best-effort by contract: every non-written
+ * outcome is observable at the call site via structured logs (rc-9).
+ */
+async function mergeWorkspaceExportEntry(args: {
+  homeDir: string;
+  secret: string;
+  scopeKey: string;
+  timestamp: number;
+  nextEntry: WorkspaceExportState;
+}): Promise<StateMergeOutcome> {
+  const stateFilePath = getProductTelemetryStatePath(args.homeDir);
+  const lock = await acquireStateUpdateLock(stateFilePath);
+  if (!lock.acquired) return 'skipped_contention';
+  try {
+    const read = readProductTelemetryControlState(args.homeDir);
+    if (!read.ok) return 'skipped_unreadable';
+    if (read.state.consent !== 'granted' || read.state.telemetrySecret !== args.secret) return 'skipped_identity_changed';
+    const pruned = pruneWorkspaceExports(read.state, args.timestamp);
+    const nextState: ProductTelemetryControlState = {
+      ...pruned,
+      workspaceExports: { ...(pruned.workspaceExports ?? {}), [args.scopeKey]: args.nextEntry },
+    };
+    return writeProductTelemetryControlState(args.homeDir, nextState).ok ? 'written' : 'skipped_unreadable';
+  } finally {
+    releaseExportLock(lock.lockPath as string);
   }
 }
 
@@ -466,16 +564,25 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
               dailyAttemptCount: priorAttempts + 1,
               attemptBucketDate: bucketDate,
             };
-        // Prune stale workspace bookkeeping before the write (bounded local
-        // operational state), then merge this workspace's entry.
-        const pruned = pruneWorkspaceExports(effectiveState, timestamp);
-        const nextState: ProductTelemetryControlState = {
-          ...pruned,
-          workspaceExports: { ...(pruned.workspaceExports ?? {}), [scopeKey]: nextEntry },
-        };
-        const written = writeProductTelemetryControlState(homeDir(), nextState);
-        if (!written.ok) {
-          logger.warn?.(`[PD:Telemetry] Export ${result.ok ? 'succeeded' : `failed (${result.code})`} but control state could not be persisted: ${written.reason}`);
+        // Review round 4: merge under the machine-scope state-update lock —
+        // the OTHER workspaces' entries come from a fresh read inside the
+        // critical section, so concurrently-completing exports compose
+        // instead of dropping each other's bookkeeping (lost update). The
+        // network export above stayed concurrent; only this ms-scale file
+        // RMW is serialized. Every non-written outcome is logged (rc-9).
+        const merged = await mergeWorkspaceExportEntry({
+          homeDir: homeDir(),
+          secret,
+          scopeKey,
+          timestamp,
+          nextEntry,
+        });
+        if (merged === 'skipped_contention') {
+          logger.warn?.(`[PD:Telemetry] Export ${result.ok ? 'succeeded' : `failed (${result.code})`} but control state update was skipped after ${STATE_UPDATE_LOCK_TIMEOUT_MS / 1000}s of state-lock contention — this workspace may re-attempt today.`);
+        } else if (merged === 'skipped_unreadable') {
+          logger.warn?.(`[PD:Telemetry] Export ${result.ok ? 'succeeded' : `failed (${result.code})`} but control state could not be read/updated — ${getProductTelemetryStatePath(homeDir())}`);
+        } else if (merged === 'skipped_identity_changed') {
+          logger.info?.('[PD:Telemetry] Export finished after a consent/secret change; stale export bookkeeping was NOT written back.');
         }
         if (result.ok) {
           logger.info?.('[PD:Telemetry] Daily anonymous product telemetry snapshot exported.');
