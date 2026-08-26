@@ -89,10 +89,16 @@ jobs:
         run: |
           node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_ONE"
           node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_TWO"
-          node packages/create-principles-disciple/scripts/compare-release-archives.mjs \
+          if node packages/create-principles-disciple/scripts/compare-release-archives.mjs \
             "$PUBLICATION_ONE/asset.tar" \
-            "$PUBLICATION_TWO/asset.tar"
-          rm -rf "$PUBLICATION_ONE" "$PUBLICATION_TWO/payload"
+            "$PUBLICATION_TWO/asset.tar"; then
+            rm -rf "$PUBLICATION_ONE" "$PUBLICATION_TWO/payload"
+          else
+            # Diagnostic: pinpoint the exact nondeterministic files before failing.
+            node packages/create-principles-disciple/scripts/diff-release-archives.mjs \
+              "$PUBLICATION_ONE/asset.tar" "$PUBLICATION_TWO/asset.tar" || true
+            exit 1
+          fi
         env:
           PUBLICATION_ONE: ${{ runner.temp }}/pd-publication-one
           PUBLICATION_TWO: ${{ runner.temp }}/pd-publication-two
