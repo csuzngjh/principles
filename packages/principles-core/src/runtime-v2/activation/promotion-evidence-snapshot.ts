@@ -84,10 +84,17 @@ export function buildPromotionEvidenceSnapshot(
   const redaction = { version: 'v1', rawParametersStored: false } as const;
   const ownerIdentity = normalizeOwnerIdentity(input.ownerIdentity);
 
+  // snapshotDigest is a JOINT attestation, not standalone-recomputable from one
+  // row: every field below must stay recoverable from persisted data —
+  // activationId / evaluationId / ownerIdentity via the activation_decisions
+  // row that references this snapshot, all remaining fields via
+  // activation_evidence_snapshots columns. Adding a field here requires a
+  // matching persisted column or decision-row source.
   const digestBody = JSON.stringify({
     activationId: input.activationId ?? null,
     evaluationId: input.evaluationId ?? null,
     artifactDigest,
+    lineageRefs,
     checks: input.checks,
     ownerIdentity,
     hostRuntimeVersion,

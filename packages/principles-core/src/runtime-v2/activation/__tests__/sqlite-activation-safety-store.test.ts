@@ -369,6 +369,15 @@ describe('SqliteActivationSafetyStore', () => {
     const decisionCount = (db.prepare("SELECT COUNT(*) AS n FROM activation_decisions WHERE decision_id = 'decision-promote-1'").get() as { n: number }).n;
     expect(decisionCount).toBe(0);
 
+    // no orphan evidence snapshot (inserted before the failing decision INSERT)
+    const snapshotCount = (db.prepare('SELECT COUNT(*) AS n FROM activation_evidence_snapshots').get() as { n: number }).n;
+    expect(snapshotCount).toBe(0);
+
+    // control state untouched by the aborted transaction
+    const control = db.prepare("SELECT enforcement, version FROM activation_control_states WHERE activation_id = 'activation-1'").get() as { enforcement: string; version: number };
+    expect(control.enforcement).toBe('eligible');
+    expect(control.version).toBe(1);
+
     connection.close();
   });
 });

@@ -39,4 +39,49 @@ describe('Activation i18n key alignment', () => {
       expect((value as string).trim().length).toBeGreaterThan(0);
     }
   });
+
+  // Production reasonCodes statically emitted by principles-core promotion
+  // paths: promotion-readiness-reader.ts, promotion-readiness-evaluator.ts,
+  // openclaw-promotion-checks.ts, rulecode-owner-decision-service.ts.
+  // Dynamic gate.reason values from RuleHostWriter.canActivate are not
+  // enumerable here; unknown codes fall back to the raw identifier via the
+  // t() defaultValue in ActivationPage.
+  const PRODUCTION_REASON_CODES = [
+    'activation_artifact_mismatch',
+    'activation_not_unique',
+    'active_shadow_activation_required',
+    'artifact_digest_mismatch',
+    'artifact_lineage_missing',
+    'artifact_not_found',
+    'cli_owner_note_required',
+    'configured_owner_missing',
+    'confirmation_required',
+    'duplicate_check_result',
+    'evidence_override_note_required',
+    'evidence_override_reason_required',
+    'explicit_affected_tools_required',
+    'feature_not_enabled',
+    'hard_check_failed',
+    'host_liveness_contract_missing_invalid_or_unsupported',
+    'neutral_probe_or_live_composition_failed',
+    'out_of_band_controls_unavailable',
+    'owner_authentication_required',
+    'promotion_commit_failed',
+    'promotion_readiness_unavailable',
+    'promotion_request_invalid',
+    'promotion_safety_gate_blocked',
+    'promotion_snapshot_stale',
+    'required_check_missing',
+    'safety_controls_disabled',
+    'safety_controls_unavailable',
+    'shadow_telemetry_source_unavailable',
+    'unresolved_shadow_unhealthy_evidence',
+  ];
+
+  it('covers every statically emitted production reasonCode in both locales', () => {
+    for (const code of PRODUCTION_REASON_CODES) {
+      expect(en.pages.activation.reasonCodes, `en missing ${code}`).toHaveProperty(code);
+      expect(zhCN.pages.activation.reasonCodes, `zh-CN missing ${code}`).toHaveProperty(code);
+    }
+  });
 });

@@ -59,6 +59,29 @@ describe('promotion-evidence-snapshot factory', () => {
     expect(snapBase.snapshotDigest).not.toBe(snapDiffEval.snapshotDigest);
   });
 
+  it('changes digest when lineageRefs change (lineage is digest-bound)', () => {
+    const base = {
+      activationId: 'act-1',
+      evaluationId: 'eval-1',
+      checks: [{ checkId: 'bounded_scope', status: 'passed' as const }],
+      artifact: sampleArtifact,
+      now: () => '2026-08-21T12:00:00.000Z',
+    };
+
+    const snapBase = buildPromotionEvidenceSnapshot(base);
+    const snapDiffLineage = buildPromotionEvidenceSnapshot({
+      ...base,
+      artifact: { ...sampleArtifact, lineageArtifactIds: ['parent-1'] },
+      // explicit override must win over the derived list, so both differ
+      lineageRefs: ['task-100', 'parent-9'],
+    });
+    const snapExplicit = buildPromotionEvidenceSnapshot({ ...base, lineageRefs: ['task-100', 'parent-1', 'parent-2'] });
+
+    expect(snapBase.lineageRefs).toEqual(['task-100', 'parent-1', 'parent-2']);
+    expect(snapBase.snapshotDigest).not.toBe(snapDiffLineage.snapshotDigest);
+    expect(snapBase.snapshotDigest).toBe(snapExplicit.snapshotDigest);
+  });
+
   it('changes digest when owner identity or runtime version changes', () => {
     const base = {
       activationId: 'act-1',

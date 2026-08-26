@@ -427,7 +427,7 @@ export class ActivationsConsoleModel {
     }
   }
 
-  async getOwnerReview(activationId: string, ownerIdentityConfigured = false): Promise<RuleCodeOwnerReview> {
+  async getOwnerReview(activationId: string, ownerIdentityConfigured = false, ownerActor?: OwnerPromotionActor): Promise<RuleCodeOwnerReview> {
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
       const activationStore = new SqliteActivationStateStore(conn);
@@ -472,12 +472,9 @@ export class ActivationsConsoleModel {
             checks,
             artifact: value,
             expectedArtifactDigest: digest,
-            ownerIdentity: {
-              principalKind: 'configured_owner',
-              actorId: 'console_owner',
-              authenticationMethod: 'console_token',
-              credentialId: 'console_session',
-            },
+            // Bind the real authenticated actor; null (not a placeholder) when
+            // the review is read without an Owner session.
+            ownerIdentity: ownerActor ?? null,
             hostRuntimeVersion: 'openclaw-legacy@1',
             shadowSummary: telemetry.shadowSummary,
           });
@@ -604,7 +601,7 @@ export class ActivationsConsoleModel {
   }
 
   async promoteRuleCode(activationId: string, expected: { artifactId: string; artifactDigest: string; controlVersion: number; confirmed: boolean }, input: OwnerMutationInput): Promise<OwnerPromotionResult> {
-    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner' && input.actor.authentication.method === 'console_token');
+    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner' && input.actor.authentication.method === 'console_token', input.actor);
     const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
     try {
