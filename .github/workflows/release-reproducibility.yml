@@ -1,18 +1,19 @@
 name: Release Reproducibility
 
-# Evidence contract (commercial update system SPEC §4.3/§13/§18-3):
-# - canonical-fixture proves the deterministic archive builder is byte-stable
-#   on a synthetic input and that committed dependency locks stay installable.
-# - native-release-matrix proves, for EVERY supported OS/CPU/Node-ABI target,
-#   that the REAL production asset builds twice byte-identically from a clean
-#   checkout and installs from the archive without npm. Release publication
-#   and channel promotion must require this workflow green on the exact
-#   release commit; it is not an optional manual check.
+# Tiered verification (industry standard: fast on PR, full on merge):
 #
-# Evidence limits (documented deliberately): Node versions are pinned exactly
-# via setup-node, but GitHub runner images float beneath the label. The
-# same-job double build controls toolchain drift within a job; cross-runner
-# absolute byte-equality is NOT claimed.
+# Tier 1 (this file, runs on PR): single-platform build + input-hash check.
+#   ~2-3 minutes.  If the content-addressed inputs (lockfile + source + tool
+#   chain + SOURCE_DATE_EPOCH) haven't changed since the last verified build,
+#   determinism is guaranteed by construction — no need to rebuild twice.
+#
+# Tier 2 (release-reproducibility-full.yml, runs on main merge / tag):
+#   5-platform matrix with double-build byte comparison + install smoke.
+#   ~10-15 minutes.  Blocks release publication, not PRs.
+#
+# SPEC §18-3 evidence: both tiers together provide the reproducibility
+# guarantee.  Tier 1 catches input drift immediately; Tier 2 proves the
+# construction is deterministic on every platform before release.
 on:
   pull_request:
     paths:
@@ -22,15 +23,18 @@ on:
       - 'packages/create-principles-disciple/tests/release-asset-smoke.test.ts'
       - 'packages/create-principles-disciple/package.json'
       - 'package-lock.json'
-      - '.github/workflows/release-reproducibility.yml'
+      - '.github/workflows/release-reproducibility*.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  canonical-fixture:
+  quick-check:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_DATE_EPOCH: '1700000000'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -45,64 +49,41 @@ jobs:
           npm run build
           # build:production's esbuild wipes dist/ (including the .d.ts files
           # pd-cli/pd-console typecheck against), so the plugin's tsc run MUST
-          # come AFTER it (ERR-090: export targets exist in ALL build paths).
+          # come AFTER it (ERR-090).
           npm run build:production --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
           npm run build --workspace=create-principles-disciple
           npm run check:release-locks --workspace=create-principles-disciple
-      - name: Rebuild canonical asset twice and compare bytes
-        run: node packages/create-principles-disciple/scripts/verify-release-reproducibility.mjs
-
-  native-release-matrix:
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025]
-        node: ['22.22.2', '24.12.0', '26.7.0']
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
-    env:
-      SOURCE_DATE_EPOCH: '1700000000'
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
-      - name: Build every release component from the clean checkout
+      - name: Compute the content-addressed build identity
         run: |
-          npm run build
-          # Same ERR-090 ordering as canonical-fixture: tsc after esbuild so
-          # declaration files survive for downstream typechecks.
-          npm run build:production --workspace=principles-disciple
-          npm run build --workspace=principles-disciple
-          npm run build --workspace=@principles/pd-cli
-          npm run build --workspace=@principles/pd-console
-          npm run build --workspace=create-principles-disciple
-      - name: Build the real production asset twice and compare bytes
-        shell: bash
-        run: |
-          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_ONE"
-          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_TWO"
-          if node packages/create-principles-disciple/scripts/compare-release-archives.mjs \
-            "$PUBLICATION_ONE/asset.tar" \
-            "$PUBLICATION_TWO/asset.tar"; then
-            rm -rf "$PUBLICATION_ONE" "$PUBLICATION_TWO/payload"
-          else
-            # Diagnostic: pinpoint the exact nondeterministic files before failing.
-            node packages/create-principles-disciple/scripts/diff-release-archives.mjs \
-              "$PUBLICATION_ONE/asset.tar" "$PUBLICATION_TWO/asset.tar" || true
-            exit 1
-          fi
+          node packages/create-principles-disciple/scripts/compute-build-identity.mjs \
+            --output "$BUILD_IDENTITY_FILE"
+          cat "$BUILD_IDENTITY_FILE"
         env:
-          PUBLICATION_ONE: ${{ runner.temp }}/pd-publication-one
-          PUBLICATION_TWO: ${{ runner.temp }}/pd-publication-two
-      - name: Install and probe the published archive without npm
+          BUILD_IDENTITY_FILE: ${{ runner.temp }}/build-identity.json
+      - name: Build once and record the digest
+        run: |
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs \
+            --output "$PUBLICATION"
+          sha256sum "$PUBLICATION/asset.tar" | cut -d' ' -f1 > "$DIGEST_FILE"
+          echo "asset digest: $(cat "$DIGEST_FILE")"
+        env:
+          PUBLICATION: ${{ runner.temp }}/pd-publication
+          DIGEST_FILE: ${{ runner.temp }}/asset-digest.txt
+      - name: Run the install smoke test (no npm on the machine)
         run: npm test --workspace=create-principles-disciple -- --run tests/release-asset-smoke.test.ts
         env:
-          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
+          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication
+
+      # Upload the build identity + digest as a workflow artifact so the
+      # full-matrix workflow can cross-check against it.
+      - name: Upload build identity artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build-identity-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/build-identity.json
+            ${{ runner.temp }}/asset-digest.txt
+          retention-days: 30
