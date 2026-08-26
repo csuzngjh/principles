@@ -126,7 +126,7 @@ export async function handleActivationsRoute(
     try { activationId = decodeURIComponent(rawId); }
     catch { sendError(res, 400, 'invalid_id', 'Activation ID contains invalid URI encoding'); return; }
     try {
-      sendSuccess(res, await getModel(workspaceDir).getOwnerReview(activationId, authority?.ownerActor !== null && authority?.ownerActor !== undefined));
+      sendSuccess(res, await getModel(workspaceDir).getOwnerReview(activationId, authority?.ownerActor !== null && authority?.ownerActor !== undefined, authority?.ownerActor ?? undefined));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('requires exactly one') || message.includes('not found')) sendNotFound(res, message);

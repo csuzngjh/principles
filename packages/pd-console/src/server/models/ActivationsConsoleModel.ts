@@ -12,6 +12,7 @@ import {
   RuleCodeOwnerDecisionService,
   collectOpenClawPromotionChecks,
   summarizeRuleCodeShadowEvents,
+  buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
 import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
@@ -426,7 +427,7 @@ export class ActivationsConsoleModel {
     }
   }
 
-  async getOwnerReview(activationId: string, ownerIdentityConfigured = false): Promise<RuleCodeOwnerReview> {
+  async getOwnerReview(activationId: string, ownerIdentityConfigured = false, ownerActor?: OwnerPromotionActor): Promise<RuleCodeOwnerReview> {
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
       const activationStore = new SqliteActivationStateStore(conn);
@@ -464,19 +465,19 @@ export class ActivationsConsoleModel {
             validateProductionArtifact: candidate => writer.canActivate(candidate),
           });
         },
-        buildEvidenceSnapshot: (checks, value) => {
-          const createdAt = new Date().toISOString();
-          const artifactDigest = value
-            ? `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}` : digest;
-          const body = JSON.stringify({ artifactDigest, checks, createdAt });
-          return {
-            snapshotId: `snapshot-${randomUUID()}`,
-            snapshotDigest: `sha256:${createHash('sha256').update(body, 'utf8').digest('hex')}`,
-            artifactDigest, lineageRefs: value ? [value.sourceTaskId, ...value.lineageArtifactIds] : [],
-            hostRuntimeVersion: 'openclaw-legacy@1', safetyGateResults: checks,
+        buildEvidenceSnapshot: (checks, value, evaluationId) => {
+          return buildPromotionEvidenceSnapshot({
+            activationId,
+            evaluationId,
+            checks,
+            artifact: value,
+            expectedArtifactDigest: digest,
+            // Bind the real authenticated actor; null (not a placeholder) when
+            // the review is read without an Owner session.
+            ownerIdentity: ownerActor ?? null,
+            hostRuntimeVersion: 'openclaw-legacy@1',
             shadowSummary: telemetry.shadowSummary,
-            configurationVersion: 'pd-config-current', redaction: { version: 'v1', rawParametersStored: false }, createdAt,
-          };
+          });
         },
         newEvaluationId: () => `readiness-${randomUUID()}`,
       });
@@ -600,7 +601,7 @@ export class ActivationsConsoleModel {
   }
 
   async promoteRuleCode(activationId: string, expected: { artifactId: string; artifactDigest: string; controlVersion: number; confirmed: boolean }, input: OwnerMutationInput): Promise<OwnerPromotionResult> {
-    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner' && input.actor.authentication.method === 'console_token');
+    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner' && input.actor.authentication.method === 'console_token', input.actor);
     const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
     try {
