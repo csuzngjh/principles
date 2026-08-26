@@ -375,7 +375,15 @@ if (BUILD_SELF_CONTAINED_ASSET) {
     await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
     const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
     if (pkg.dependencies && Object.hasOwn(pkg.dependencies, 'better-sqlite3')) {
+      // Local compilation is required (better-sqlite3 v13 ships sources
+      // only), but node-gyp leaves timestamp/path-bearing metadata behind
+      // (obj/, *.tlog, *.vcxproj, *.sln, config.gypi) that breaks byte
+      // reproducibility. Strip everything except the runtime artifact.
       await runNpm(['rebuild', 'better-sqlite3']);
+      const bsql3Build = join(directory, 'node_modules', 'better-sqlite3', 'build');
+      for (const residue of ['Release/obj', 'Release/better_sqlite3.exp', 'Release/better_sqlite3.lib', 'Release/obj.folder', 'better_sqlite3.vcxproj', 'better_sqlite3.vcxproj.filters', 'test_extension.vcxproj', 'test_extension.exe', 'binding.sln', 'config.gypi']) {
+        rmSync(join(bsql3Build, residue), { recursive: true, force: true });
+      }
       execFileSync(process.execPath, ['-e', "require('better-sqlite3')"], {
         cwd: directory,
         stdio: 'pipe',
