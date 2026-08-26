@@ -277,8 +277,8 @@ jobs:
       - name: Build dependencies
         run: |
           npm run build --workspace=@principles/core
-          npm run build --workspace=@principles/host-runtime
           npm run build --workspace=@principles/install-layout
+          npm run build --workspace=@principles/host-runtime
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli
