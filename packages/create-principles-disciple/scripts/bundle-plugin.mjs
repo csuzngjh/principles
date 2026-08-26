@@ -384,6 +384,17 @@ if (BUILD_SELF_CONTAINED_ASSET) {
       for (const residue of ['Release/obj', 'Release/better_sqlite3.exp', 'Release/better_sqlite3.lib', 'Release/obj.folder', 'better_sqlite3.vcxproj', 'better_sqlite3.vcxproj.filters', 'test_extension.vcxproj', 'test_extension.exe', 'binding.sln', 'config.gypi']) {
         rmSync(join(bsql3Build, residue), { recursive: true, force: true });
       }
+      // ELF/Mach-O builds embed DWARF debug info containing the ABSOLUTE
+      // staging path (random per build) — strip symbols so the shipped
+      // .node is byte-identical across builds. MSVC .node carries no such
+      // paths, so Windows needs no stripping.
+      const nativeBinary = join(bsql3Build, 'Release', 'better_sqlite3.node');
+      if (process.platform !== 'win32' && existsSync(nativeBinary)) {
+        execFileSync('strip', process.platform === 'darwin' ? ['-x', nativeBinary] : ['--strip-debug', nativeBinary], {
+          stdio: 'pipe',
+          timeout: 60_000,
+        });
+      }
       execFileSync(process.execPath, ['-e', "require('better-sqlite3')"], {
         cwd: directory,
         stdio: 'pipe',
