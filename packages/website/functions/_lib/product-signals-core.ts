@@ -90,15 +90,28 @@ async function readDailyCounts(db: SignalsD1['PD_PRODUCT_TELEMETRY'], bucketDate
   };
 }
 
+/** Constant-time byte-string comparison (same construction as relay-core; WebCrypto has no timingSafeEqual). */
+function constantTimeEqual(a: string, b: string): boolean {
+  const ab = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) {
+    diff |= ab[i]! ^ bb[i]!;
+  }
+  return diff === 0;
+}
+
 export async function handleProductSignals(deps: SignalsDeps): Promise<SignalsResult> {
   const now = deps.now ?? Date.now;
   const token = deps.env.PRODUCT_SIGNALS_TOKEN;
-  if (token === undefined || token.length < 16) {
-    return { status: 500, body: JSON.stringify({ error: 'view_misconfigured', reason: 'PRODUCT_SIGNALS_TOKEN missing or too short' }), contentType: 'application/json' };
+  // Token floor matches the runbook exactly: ≥24 bytes as hex (48+ hex chars).
+  if (token === undefined || !/^[0-9a-f]{48,}$/i.test(token)) {
+    return { status: 500, body: JSON.stringify({ error: 'view_misconfigured', reason: 'PRODUCT_SIGNALS_TOKEN must be >=24 bytes as hex (48+ hex chars)' }), contentType: 'application/json' };
   }
   const expected = `Bearer ${token}`;
   const provided = deps.authorization ?? '';
-  if (provided.length !== expected.length || provided !== expected) {
+  if (!constantTimeEqual(provided, expected)) {
     return { status: 401, body: JSON.stringify({ error: 'unauthorized' }), contentType: 'application/json' };
   }
 
@@ -129,8 +142,9 @@ export async function handleProductSignals(deps: SignalsDeps): Promise<SignalsRe
     const html = renderSignalsPage({ today, counts, sevenDayObservations, versions, healthy });
     return { status: 200, body: html, contentType: 'text/html; charset=utf-8' };
   } catch (error) {
-    const reason = error instanceof Error ? error.message.split('\n')[0] : 'd1_error';
-    return { status: 500, body: JSON.stringify({ error: 'storage_unavailable', reason }), contentType: 'application/json' };
+    // Fixed coarse reason only — backend error text never reaches the responder.
+    console.error('[product-signals] read failed:', error instanceof Error ? error.message : String(error));
+    return { status: 500, body: JSON.stringify({ error: 'storage_unavailable', reason: 'signals could not be read' }), contentType: 'application/json' };
   }
 }
 

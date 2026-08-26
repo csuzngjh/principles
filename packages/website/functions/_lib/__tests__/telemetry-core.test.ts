@@ -94,7 +94,8 @@ class MemKV {
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
-const HMAC_SECRET = 'unit-test-server-secret-0123456789abcdef';
+// 64 hex chars = 32 bytes — matches the enforced HMAC secret floor exactly.
+const HMAC_SECRET = 'ab'.repeat(32);
 const NOW = Date.parse('2026-08-26T10:00:00.000Z');
 
 function buildSnapshot(overrides: { dailyTelemetryId?: string; bucketDate?: string } = {}): ProductTelemetrySnapshotV1 {
@@ -244,19 +245,21 @@ describe('request hardening', () => {
     expect((await handleTelemetrySnapshot({ env: makeEnv(db, kv), body: JSON.stringify(other), now: () => NOW })).status).toBe(204);
   });
 
-  it('fails closed when the server HMAC secret is missing or too short', async () => {
-    const envNoSecret = { ...makeEnv(db, kv), TELEMETRY_HMAC_SECRET: undefined };
-    const result = await handleTelemetrySnapshot({ env: envNoSecret, body: JSON.stringify(buildSnapshot()), now: () => NOW });
-    expect(result.status).toBe(500);
-    expect(JSON.stringify(result.json)).toContain('collector_misconfigured');
+  it('fails closed when the server HMAC secret is missing, too short, or non-hex', async () => {
+    for (const bad of [undefined, 'short', 'z'.repeat(64), 'ab'.repeat(31) /* 62 hex chars = 31 bytes */]) {
+      const envBad = { ...makeEnv(db, kv), ...(bad !== undefined ? { TELEMETRY_HMAC_SECRET: bad } : { TELEMETRY_HMAC_SECRET: undefined }) };
+      const result = await handleTelemetrySnapshot({ env: envBad, body: JSON.stringify(buildSnapshot()), now: () => NOW });
+      expect(result.status, `secret=${String(bad)}`).toBe(500);
+      expect(JSON.stringify(result.json), `secret=${String(bad)}`).toContain('collector_misconfigured');
+    }
   });
 
-  it('maps D1 failure to a bounded 500 with a coarse reason (no body echo)', async () => {
+  it('maps D1 persist failure to a bounded 500 with a fixed coarse reason — no backend error text', async () => {
     const brokenDb: TelemetryD1 = {
       prepare: () => ({
         bind: () => ({
           run: async () => {
-            throw new Error('D1_ERROR: network failed');
+            throw new Error('D1_ERROR: network failed at /internal/path');
           },
         }),
       }),
@@ -264,7 +267,34 @@ describe('request hardening', () => {
     const env = { ...makeEnv(db, kv), PD_PRODUCT_TELEMETRY: brokenDb };
     const result = await handleTelemetrySnapshot({ env, body: JSON.stringify(buildSnapshot()), now: () => NOW });
     expect(result.status).toBe(500);
-    expect(JSON.stringify(result.json)).toContain('storage_unavailable');
+    const body = JSON.stringify(result.json);
+    expect(body).toContain('storage_unavailable');
+    // The public responder must never see backend error text (review round 2).
+    expect(body).not.toContain('D1_ERROR');
+    expect(body).not.toContain('/internal/path');
+  });
+
+  it('still returns 204 when the persist succeeds but the retention sweep fails (sweep is best-effort)', async () => {
+    // Real SQLite for the upsert; the DELETE statement throws.
+    const sweepBrokenDb: TelemetryD1 = {
+      prepare: (query: string) => {
+        if (query.startsWith('DELETE')) {
+          return {
+            bind: () => ({
+              run: async () => {
+                throw new Error('D1_ERROR: delete failed');
+              },
+            }),
+          };
+        }
+        return db.prepare(query);
+      },
+    };
+    const env = { ...makeEnv(db, kv), PD_PRODUCT_TELEMETRY: sweepBrokenDb };
+    const result = await handleTelemetrySnapshot({ env, body: JSON.stringify(buildSnapshot()), now: () => NOW });
+    expect(result.status).toBe(204);
+    // The snapshot itself was persisted.
+    expect(db.rows()).toHaveLength(1);
   });
 });
 

@@ -88,7 +88,8 @@ function makeDb(): SeededDb {
   };
 }
 
-const TOKEN = 'maintainer-view-token-0123456789abcdef';
+// 48 hex chars = 24 bytes — matches the enforced token floor exactly.
+const TOKEN = 'cd'.repeat(24);
 const NOW = Date.parse('2026-08-26T10:00:00.000Z');
 
 let seeded: SeededDb;
@@ -120,11 +121,13 @@ describe('access protection (SPEC §47)', () => {
     expect(result.status).toBe(401);
   });
 
-  it('fails closed when the token is not configured', async () => {
-    const env = { PD_PRODUCT_TELEMETRY: seeded.d1 };
-    const result = await handleProductSignals({ env, authorization: `Bearer ${TOKEN}`, now: () => NOW });
-    expect(result.status).toBe(500);
-    expect(result.body).toContain('view_misconfigured');
+  it('fails closed when the token is not configured, too short, or non-hex', async () => {
+    for (const bad of [undefined, 'short', 'z'.repeat(48), 'cd'.repeat(23) /* 46 hex chars = 23 bytes */]) {
+      const env = { PD_PRODUCT_TELEMETRY: seeded.d1, ...(bad !== undefined ? { PRODUCT_SIGNALS_TOKEN: bad } : {}) };
+      const result = await handleProductSignals({ env, authorization: `Bearer ${TOKEN}`, now: () => NOW });
+      expect(result.status, `token=${String(bad)}`).toBe(500);
+      expect(result.body, `token=${String(bad)}`).toContain('view_misconfigured');
+    }
   });
 });
 

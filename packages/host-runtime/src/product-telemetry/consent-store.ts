@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   generateTelemetrySecretHex,
+  isValidBucketDate,
   isValidTelemetrySecretHex,
   PRODUCT_TELEMETRY_CONSENT_VERSION,
 } from '@principles/core/runtime-v2';
@@ -31,6 +32,10 @@ export interface ProductTelemetryControlState {
   /** Coarse failure code (TelemetryFailureCode). No response bodies. */
   lastFailureCode?: string;
   nextRetryAt?: string;
+  /** Failed export attempts in the current attemptBucketDate (0–99; hard cap enforced by the service). */
+  dailyAttemptCount?: number;
+  /** UTC date bucket the dailyAttemptCount belongs to (resets on day change). */
+  attemptBucketDate?: string;
   schemaVersion: string;
 }
 
@@ -52,8 +57,25 @@ function isConsent(value: unknown): value is ProductTelemetryConsent {
   return value === 'unset' || value === 'granted' || value === 'denied';
 }
 
+/**
+ * Optional timestamp fields must be parseable dates, not just short strings —
+ * a "garbage" lastSucceededAt/nextRetryAt would otherwise slip validation and
+ * turn into NaN inside Date.parse, silently skipping same-day dedup or retry
+ * backoff (fail-loud contract, review round 2).
+ */
 function isOptionalIsoString(value: unknown): value is string {
-  return value === undefined || (typeof value === 'string' && value.length > 0 && value.length <= 40);
+  if (value === undefined) return true;
+  if (typeof value !== 'string' || value.length === 0 || value.length > 40) return false;
+  return !Number.isNaN(Date.parse(value));
+}
+
+function isOptionalAttemptBucketDate(value: unknown): value is string {
+  if (value === undefined) return true;
+  return isValidBucketDate(value);
+}
+
+function isOptionalAttemptCount(value: unknown): value is number {
+  return value === undefined || (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 99);
 }
 
 /**
@@ -104,7 +126,7 @@ export function readProductTelemetryControlState(homeDir: string): ControlStateR
   const obj = parsed as Record<string, unknown>;
   const errors: string[] = [];
   for (const key of Object.keys(obj)) {
-    if (!['consent', 'consentVersion', 'telemetrySecret', 'lastAttemptedAt', 'lastSucceededAt', 'lastFailureCode', 'nextRetryAt', 'schemaVersion'].includes(key)) {
+    if (!['consent', 'consentVersion', 'telemetrySecret', 'lastAttemptedAt', 'lastSucceededAt', 'lastFailureCode', 'nextRetryAt', 'dailyAttemptCount', 'attemptBucketDate', 'schemaVersion'].includes(key)) {
       errors.push(`unknown field '${key}'`);
     }
   }
@@ -112,8 +134,10 @@ export function readProductTelemetryControlState(homeDir: string): ControlStateR
   if (typeof obj.consentVersion !== 'string' || obj.consentVersion.length === 0 || obj.consentVersion.length > 8) errors.push('consentVersion must be a short non-empty string');
   if (!isValidTelemetrySecretHex(obj.telemetrySecret) && obj.telemetrySecret !== undefined) errors.push('telemetrySecret must be 64 hex chars when present');
   if (!isOptionalIsoString(obj.lastAttemptedAt) || !isOptionalIsoString(obj.lastSucceededAt) || !isOptionalIsoString(obj.nextRetryAt)) {
-    errors.push('timestamps must be short non-empty strings when present');
+    errors.push('timestamps must be parseable ISO-8601 strings (≤40 chars) when present');
   }
+  if (!isOptionalAttemptCount(obj.dailyAttemptCount)) errors.push('dailyAttemptCount must be an integer 0–99 when present');
+  if (!isOptionalAttemptBucketDate(obj.attemptBucketDate)) errors.push('attemptBucketDate must be a valid YYYY-MM-DD UTC date when present');
   if (obj.lastFailureCode !== undefined && (typeof obj.lastFailureCode !== 'string' || obj.lastFailureCode.length === 0 || obj.lastFailureCode.length > 40)) {
     errors.push('lastFailureCode must be a short non-empty string when present');
   }
@@ -141,6 +165,8 @@ export function readProductTelemetryControlState(homeDir: string): ControlStateR
     ...(typeof obj.lastFailureCode === 'string' && obj.lastFailureCode.length > 0 && obj.lastFailureCode.length <= 40
       ? { lastFailureCode: obj.lastFailureCode }
       : {}),
+    ...(isOptionalAttemptCount(obj.dailyAttemptCount) && obj.dailyAttemptCount !== undefined ? { dailyAttemptCount: obj.dailyAttemptCount } : {}),
+    ...(isOptionalAttemptBucketDate(obj.attemptBucketDate) && obj.attemptBucketDate !== undefined ? { attemptBucketDate: obj.attemptBucketDate } : {}),
     schemaVersion: PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION,
   };
   return { ok: true, state, existed: true };
@@ -181,6 +207,8 @@ export function grantedControlState(previous: ProductTelemetryControlState): Pro
     lastSucceededAt: previous.lastSucceededAt,
     lastFailureCode: previous.lastFailureCode,
     nextRetryAt: previous.nextRetryAt,
+    dailyAttemptCount: previous.dailyAttemptCount,
+    attemptBucketDate: previous.attemptBucketDate,
     schemaVersion: PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION,
   };
 }

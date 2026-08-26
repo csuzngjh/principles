@@ -91,6 +91,52 @@ describe('control-state store', () => {
     expect(readProductTelemetryControlState(homeDir).ok).toBe(false);
   });
 
+  it('fails loud on unparseable timestamps and bad attempt-counter fields (review round 2)', () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    // Each well-shaped-but-garbage timestamp must be rejected — a NaN
+    // Date.parse would silently skip same-day dedup / retry backoff.
+    for (const field of ['lastAttemptedAt', 'lastSucceededAt', 'nextRetryAt']) {
+      fs.writeFileSync(
+        statePath,
+        JSON.stringify({ consent: 'granted', consentVersion: '1', schemaVersion: '1', [field]: 'not-a-date' }),
+      );
+      const read = readProductTelemetryControlState(homeDir);
+      expect(read.ok, field).toBe(false);
+      if (!read.ok) expect(read.reason).toContain('parseable ISO-8601');
+    }
+    // Bad counter fields are rejected too.
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ consent: 'granted', consentVersion: '1', schemaVersion: '1', dailyAttemptCount: 3.5 }),
+    );
+    expect(readProductTelemetryControlState(homeDir).ok).toBe(false);
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ consent: 'granted', consentVersion: '1', schemaVersion: '1', attemptBucketDate: '2026/08/26' }),
+    );
+    expect(readProductTelemetryControlState(homeDir).ok).toBe(false);
+    // Valid ISO timestamps and a same-day counter round-trip cleanly.
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        consent: 'granted',
+        consentVersion: '1',
+        schemaVersion: '1',
+        lastAttemptedAt: '2026-08-26T10:00:00.000Z',
+        nextRetryAt: '2026-08-26T11:00:00.000Z',
+        dailyAttemptCount: 4,
+        attemptBucketDate: '2026-08-26',
+      }),
+    );
+    const ok = readProductTelemetryControlState(homeDir);
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.state.dailyAttemptCount).toBe(4);
+      expect(ok.state.attemptBucketDate).toBe('2026-08-26');
+    }
+  });
+
   it('never writes the secret world-readable (0600 where the platform supports it)', () => {
     writeProductTelemetryControlState(homeDir, grantedControlState(defaultProductTelemetryControlState()));
     const statePath = getProductTelemetryStatePath(homeDir);

@@ -15,7 +15,7 @@ import {
   PREVIEW_BANNER,
   type ProductTelemetryServiceDeps,
 } from '../src/product-telemetry/service.js';
-import { readProductTelemetryControlState } from '../src/product-telemetry/consent-store.js';
+import { readProductTelemetryControlState, writeProductTelemetryControlState } from '../src/product-telemetry/consent-store.js';
 import type { TelemetryFetchFn } from '../src/product-telemetry/exporter.js';
 import { loadPdConfigForPlugin } from '../src/pd-config.js';
 import { validateProductTelemetrySnapshot, bucketDateFromTime } from '@principles/core/runtime-v2';
@@ -242,6 +242,64 @@ describe('daily export flow — bounded frequency, identity rotation, resilience
     expect(requests).toHaveLength(1);
   });
 
+  it('hard-caps failed attempts at 5/day via dailyAttemptCount (review round 2)', async () => {
+    fetchStatus = async () => 500;
+    const service = makeService();
+    service.enable();
+    // Simulate 5 prior same-day failures recorded in the control state.
+    const stateRead = readProductTelemetryControlState(homeDir);
+    expect(stateRead.ok).toBe(true);
+    if (!stateRead.ok) return;
+    const capState = {
+      ...stateRead.state,
+      dailyAttemptCount: 5,
+      attemptBucketDate: '2026-08-26',
+      nextRetryAt: undefined,
+    };
+    expect(writeProductTelemetryControlState(homeDir, capState).ok).toBe(true);
+
+    const capped = await service.maybeExportDaily(workspaceDir);
+    expect(capped).toEqual({ attempted: false, skipReason: 'daily_attempt_cap' });
+    expect(requests).toHaveLength(0);
+
+    // A stale counter from a previous day resets (new bucket date).
+    const staleState = { ...capState, attemptBucketDate: '2026-08-25' };
+    expect(writeProductTelemetryControlState(homeDir, staleState).ok).toBe(true);
+    const afterReset = await service.maybeExportDaily(workspaceDir);
+    expect(afterReset.attempted).toBe(true);
+    expect(requests).toHaveLength(1);
+    // The 6th failure re-records the counter against TODAY's bucket.
+    const recorded = readProductTelemetryControlState(homeDir);
+    expect(recorded.ok && recorded.state.dailyAttemptCount).toBe(1);
+    expect(recorded.ok && recorded.state.attemptBucketDate).toBe('2026-08-26');
+  });
+
+  it('one network request when two processes export concurrently (export lock, review round 2)', async () => {
+    // The lock is acquired synchronously before the fetch await, so the second
+    // caller sees it busy and skips without a network call.
+    const slowFetch: TelemetryFetchFn = async (url, init) => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      requests.push({ url, body: init.body });
+      return { status: 204 };
+    };
+    const serviceA = makeService({ fetchFn: slowFetch });
+    const serviceB = makeService({ fetchFn: slowFetch });
+    serviceA.enable();
+
+    const [outcomeA, outcomeB] = await Promise.all([
+      serviceA.maybeExportDaily(workspaceDir),
+      serviceB.maybeExportDaily(workspaceDir),
+    ]);
+
+    const outcomes = [outcomeA, outcomeB].sort((a, b) => (a.attempted === b.attempted ? 0 : a.attempted ? -1 : 1));
+    expect(outcomes[0], JSON.stringify([outcomeA, outcomeB])).toMatchObject({ attempted: true, ok: true });
+    expect(outcomes[1], JSON.stringify([outcomeA, outcomeB])).toEqual({ attempted: false, skipReason: 'export_lock_busy' });
+    expect(requests).toHaveLength(1);
+    // The lock is released afterwards, so a later sequential trigger works.
+    const later = await serviceA.maybeExportDaily(workspaceDir);
+    expect(later).toEqual({ attempted: false, skipReason: 'already_succeeded_today' });
+  });
+
   it('derives a different (unlinkable) daily ID on the next day', async () => {
     let now = T0;
     const service = makeService({ now: () => now });
@@ -297,6 +355,9 @@ describe('daily export flow — bounded frequency, identity rotation, resilience
     const state = readProductTelemetryControlState(homeDir);
     expect(state.ok && state.state.lastFailureCode).toBeUndefined();
     expect(state.ok && state.state.nextRetryAt).toBeUndefined();
+    // Success also clears the daily attempt counter (fresh budget tomorrow).
+    expect(state.ok && state.state.dailyAttemptCount).toBeUndefined();
+    expect(state.ok && state.state.attemptBucketDate).toBeUndefined();
     expect(state.ok && bucketDateFromTime(Date.parse(state.state.lastSucceededAt as string))).toBe(bucketDateFromTime(now));
   });
 
@@ -332,6 +393,27 @@ describe('control plane — enable / disable / reset / status / preview', () => 
     expect(status.view.lastSucceededAt).toBeDefined();
     expect(status.view.lastFailureCode).toBeUndefined();
     expect(status.view.canExport).toBe(true);
+  });
+
+  it('names an unresolved flag distinctly from a disabled flag (review round 2)', () => {
+    const service = makeService();
+    service.enable();
+    // No workspace → the workspace-scope flag cannot be resolved at all.
+    const status = service.getStatus(undefined);
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.view.flagEnabled).toBeNull();
+    expect(status.view.blockers).toContain('feature_flag_unresolved');
+    expect(status.view.blockers).not.toContain('feature_flag_disabled');
+    // A workspace with the flag explicitly OFF reports 'disabled'; ON reports neither.
+    const flagOnWorkspace = workspaceDir;
+    const flagOffWorkspace = freshWorkspace(FLAG_OFF_CONFIG);
+    const withOff = service.getStatus(flagOffWorkspace);
+    expect(withOff.ok && withOff.view.blockers).toContain('feature_flag_disabled');
+    expect(withOff.ok && withOff.view.blockers).not.toContain('feature_flag_unresolved');
+    const withOn = service.getStatus(flagOnWorkspace);
+    expect(withOn.ok && withOn.view.blockers).not.toContain('feature_flag_unresolved');
+    expect(withOn.ok && withOn.view.blockers).not.toContain('feature_flag_disabled');
   });
 
   it('disable immediately stops future exports and deletes identity (SPEC §19)', async () => {
@@ -385,7 +467,7 @@ describe('control plane — enable / disable / reset / status / preview', () => 
     expect(preview.secretEphemeral).toBe(true);
     expect(preview.gates.canExport).toBe(false);
     expect(preview.gates.consent).toBe('unset');
-    expect(preview.notes.join()).toContain('ephemeral');
+    expect(preview.notes.join()).toContain('provisional');
     expect(requests).toHaveLength(0);
   });
 });

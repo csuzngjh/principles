@@ -267,9 +267,10 @@ export async function handleTelemetrySnapshot(deps: TelemetryDeps): Promise<Tele
     // fail open — see above
   }
 
-  if (deps.env.TELEMETRY_HMAC_SECRET === undefined || deps.env.TELEMETRY_HMAC_SECRET.length < 16) {
-    // Misconfigured secret: fail closed rather than persisting raw client IDs.
-    return { status: 500, json: { error: 'collector_misconfigured', reason: 'TELEMETRY_HMAC_SECRET missing or too short' } };
+  // Secret floor matches the runbook exactly: ≥32 bytes as hex (64+ hex
+  // chars). Fail closed rather than persisting weakly-derived IDs.
+  if (deps.env.TELEMETRY_HMAC_SECRET === undefined || !/^[0-9a-f]{64,}$/i.test(deps.env.TELEMETRY_HMAC_SECRET)) {
+    return { status: 500, json: { error: 'collector_misconfigured', reason: 'TELEMETRY_HMAC_SECRET must be >=32 bytes as hex (64+ hex chars)' } };
   }
   const serverDailyId = await hmacHex(deps.env.TELEMETRY_HMAC_SECRET, snapshot.dailyTelemetryId);
 
@@ -315,15 +316,21 @@ export async function handleTelemetrySnapshot(deps: TelemetryDeps): Promise<Tele
         storedAt,
       )
       .run();
+  } catch (error) {
+    // Fixed coarse reason only — backend error text never reaches a public
+    // responder; detail goes to the platform log (owner-controlled).
+    console.error('[telemetry] snapshot persist failed:', error instanceof Error ? error.message : String(error));
+    return { status: 500, json: { error: 'storage_unavailable', reason: 'snapshot could not be stored' } };
+  }
 
-    // Retention sweep (write-time; Pages Functions have no cron). Bounded:
-    // one indexed DELETE per accepted snapshot, volume is tiny by design.
+  // Retention sweep (write-time best-effort; Pages Functions have no cron).
+  // Deliberately outside the persist try: an accepted snapshot stays accepted
+  // even if the sweep hiccups — stale rows are reclaimed by the next write.
+  try {
     const cutoff = bucketDateOf(now() - RETENTION_DAYS * dayMs);
     await db.prepare('DELETE FROM product_telemetry_daily WHERE bucket_date < ?').bind(cutoff).run();
   } catch (error) {
-    const reason = error instanceof Error ? error.message.split('\n')[0] : 'd1_error';
-    // Coarse reason only — never the request body.
-    return { status: 500, json: { error: 'storage_unavailable', reason } };
+    console.error('[telemetry] retention sweep failed:', error instanceof Error ? error.message : String(error));
   }
 
   // Bounded success response (empty body).

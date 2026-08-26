@@ -87,7 +87,11 @@ export async function exportSnapshot(args: ExportSnapshotArgs): Promise<Telemetr
   }
 }
 
-/** First failure retries after 1h; any further failure within 24h backs off 6h (bounded ≤4 attempts/day). */
+/**
+ * First failure retries after 1h; any further failure within 24h backs off 6h.
+ * Combined with the service's dailyAttemptCount hard cap this bounds a bad day
+ * to at most 5 attempts (0h/1h/7h/13h/19h), independent of clock skew.
+ */
 export function nextRetryDelayMs(previousFailureWithin24h: boolean): number {
   return previousFailureWithin24h ? 6 * 60 * 60 * 1000 : 60 * 60 * 1000;
 }

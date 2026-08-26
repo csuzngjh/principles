@@ -81,19 +81,20 @@ Conservative-boolean rule: missing/unreadable/disabled sources render `false` (n
 
 `canExport = flag ∧ consent ∧ ¬suppressed`. Suppression reasons (each named in `pd telemetry status`): `env_kill_switch` (`PD_TELEMETRY_DISABLED` ∈ {1,true}), `ci_environment` (CI), `vitest_environment` (VITEST), `e2e_mode` (PD_E2E_MODE=1), `workspace_environment` ({test,demo,development}), `install_layout_missing`, `repo_checkout` (executing module inside a PD monorepo checkout — build-layout fact, not a path heuristic).
 
-Export policy: ≤1 successful snapshot/installation/day (client-side same-day skip + server-side upsert dedup); retries bounded (1h then 6h backoff, ≤4 attempts/day); failures recorded as coarse codes only (`timeout`, `network_error`, `http_400`, `http_429`, `http_5xx`, `http_unexpected_status`, `invalid_response`).
+Export policy: ≤1 successful snapshot/installation/day (client-side same-day skip + server-side upsert dedup + machine-scope export lock closing the multi-process race). Failed attempts are hard-capped at **5 per UTC day** (`dailyAttemptCount`/`attemptBucketDate` in the control state; backoff 1h then 6h — the worst-case timeline 0h/1h/7h/13h/19h is bounded by the counter, independent of clock skew). Failures are recorded as coarse codes only (`timeout`, `network_error`, `http_400`, `http_429`, `http_5xx`, `http_unexpected_status`, `invalid_response`); a success clears the counter.
 
 ## 5. Cloudflare deployment
 
-Project `principles-website` (existing). Binding added: `[[d1_databases]] PD_PRODUCT_TELEMETRY → pd-product-telemetry` (id `c96b7ef1-f6f4-43b0-bce7-9c12881d6b21`, APAC). Migrations: `packages/website/migrations/` (`wrangler d1 migrations apply pd-product-telemetry --remote`). KV rate limiting reuses `FEEDBACK_KV` with `tl-rl:` prefix (60/hour/daily-ID).
+Project `principles-website` (existing). Binding added: `[[d1_databases]] PD_PRODUCT_TELEMETRY → pd-product-telemetry` (id `c96b7ef1-f6f4-43b0-bce7-9c12881d6b21`, APAC). Migrations: `packages/website/migrations/` (`wrangler d1 migrations apply pd-product-telemetry --remote`). KV rate limiting reuses `FEEDBACK_KV` with `tl-rl:` prefix (60/hour/daily-ID). **KV limits are best-effort, not strict**: the get→put counter is not atomic (concurrent requests can undercount; same trade-off as the feedback relay). Strict per-ID limiting would need a D1 counter table or Durable Objects — acceptable to add later if abuse is observed.
 
-Secrets (already set, production): `TELEMETRY_HMAC_SECRET` (server-side ID protection; fail-closed 500 if missing/short), `PRODUCT_SIGNALS_TOKEN` (maintainer view Bearer token). Rotate: `wrangler pages secret put <NAME> --project-name=principles-website`.
+Secrets (already set, production): `TELEMETRY_HMAC_SECRET` (server-side ID protection; **enforced format: ≥32 bytes as hex, i.e. 64+ hex chars — anything else fails closed with 500**), `PRODUCT_SIGNALS_TOKEN` (maintainer view Bearer token; **enforced format: ≥24 bytes as hex, i.e. 48+ hex chars**; compared in constant time). Rotate: `wrangler pages secret put <NAME> --project-name=principles-website`.
 
-Retention: 90 days, enforced by an indexed `DELETE` sweep on every accepted write (Pages Functions have no cron triggers). Local development: `packages/website/.dev.vars` (gitignored; see `.gitignore`), `wrangler d1 migrations apply pd-product-telemetry --local` after starting `wrangler pages dev`.
+Retention: 90 days, enforced by an indexed `DELETE` sweep after each accepted write (**best-effort write-time cleanup** — Pages Functions have no cron; if a sweep hiccups, the accepted snapshot stays accepted and stale rows are reclaimed by the next successful write). Local development: `packages/website/.dev.vars` (gitignored; see `.gitignore`), `wrangler d1 migrations apply pd-product-telemetry --local` after starting `wrangler pages dev`.
 
 ## 6. Metric semantics & caveats (part of the metric contract)
 
 - Figures are **opt-in samples of participating installations** — never a population estimate. The view permanently displays this warning.
+- **Signals are forgeable**: the collector is an anonymous public endpoint by design — anyone can POST well-formed snapshots (fake versions/milestones). Schema strictness, size caps, rate limits, and the server-side HMAC bound storage and abuse, but cannot prove origin. Treat all figures as **directional opt-in signals, not authenticated measurements**.
 - Telemetry units ≠ users. 7-day sums are "daily-unit observations" (cross-day dedup is intentionally impossible).
 - "Effect receipt observed" is NOT "Agent improved" — it proves one governance mechanism affected one execution.
 - ClawHub download counts are an external distribution metric; combining them with telemetry into a conversion rate is forbidden.

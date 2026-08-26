@@ -114,13 +114,15 @@ function formatMutationText(output: TelemetryMutationOutput): string {
 
 function formatPreviewText(output: TelemetryPreviewOutput): string {
   const lines: string[] = [];
-  lines.push('PD Telemetry Preview — exact outbound payload');
+  lines.push(output.secretEphemeral
+    ? 'PD Telemetry Preview — exact payload shape (dailyTelemetryId is provisional until enabled)'
+    : 'PD Telemetry Preview — exact outbound payload');
   lines.push('');
   lines.push(JSON.stringify(output.snapshot, null, 2));
   lines.push('');
   lines.push(`Collected: PD version, anonymous boolean milestones, coarse reliability.`);
   lines.push(`Never collected: conversations, code/files, Principle content, Pain content.`);
-  lines.push(`Gates: flag=${output.gates.flagEnabled ?? 'unknown'} consent=${output.gates.consent} environment=${output.gates.environmentSuppressed ? 'suppressed' : 'eligible'} → wouldExport=${output.gates.canExport}`);
+  lines.push(`Gates: flag=${output.gates.flagEnabled ?? 'unresolved'} consent=${output.gates.consent} environment=${output.gates.environmentSuppressed ? 'suppressed' : 'eligible'} → wouldExport=${output.gates.canExport}`);
   if (output.notes.length > 0) {
     lines.push('Notes:');
     for (const note of output.notes) lines.push(`  [!] ${note}`);

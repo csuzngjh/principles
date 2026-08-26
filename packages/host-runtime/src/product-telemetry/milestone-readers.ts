@@ -105,8 +105,13 @@ export function readMilestoneFacts(workspaceDir: string): MilestoneReadResult {
   const facts = emptyFacts();
   const workspace = path.resolve(workspaceDir);
 
+  const stateDbPath = path.join(workspace, '.pd', 'state.db');
+  // existsSync never throws (errors render as false) — safe inside the
+  // never-throws contract; the single lookup is shared by the note and the
+  // initializationFailed derivation below.
+  const stateDbExists = fs.existsSync(stateDbPath);
   const stateResults = existsQueries(
-    path.join(workspace, '.pd', 'state.db'),
+    stateDbPath,
     {
       schemaInitialized:
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version') AND EXISTS(SELECT 1 FROM schema_version)",
@@ -117,14 +122,14 @@ export function readMilestoneFacts(workspaceDir: string): MilestoneReadResult {
     },
     { notes, unavailableNote: 'state_db_unreadable' },
   );
-  if (!fs.existsSync(path.join(workspace, '.pd', 'state.db'))) {
+  if (!stateDbExists) {
     notes.push('state_db_missing_or_unreadable');
   }
   facts.initialized = stateResults.schemaInitialized === true;
   // initializationFailed is only claimable when the DB exists but its schema
   // was never (fully) initialized — a missing DB means PD was never brought
   // up in this workspace, not that initialization failed.
-  facts.initializationFailed = fs.existsSync(path.join(workspace, '.pd', 'state.db')) && stateResults.schemaInitialized !== true;
+  facts.initializationFailed = stateDbExists && stateResults.schemaInitialized !== true;
   facts.principleObserved = stateResults.principleCandidates === true;
   facts.activationObserved = stateResults.activations === true;
   facts.presenceReceiptObserved = stateResults.presenceReceipts === true;
