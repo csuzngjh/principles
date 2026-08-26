@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createDeterministicReleaseArchive, parseSourceDateEpoch } from './deterministic-release-archive.mjs';
 
 const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'];
@@ -171,6 +172,14 @@ async function main() {
   }
   if (inPlace && inputDirectory !== outputDirectory) {
     throw new Error('In-place release verification requires identical input and output directories');
+  }
+  // Source-tree immutability guard: this script lives inside
+  // create-principles-disciple, so its own package root IS the repository
+  // source package. In-place stamping writes _release/ plus component trees
+  // and must only ever target isolated staging directories.
+  const thisPackageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+  if (inPlace && inputDirectory === thisPackageRoot) {
+    throw new Error('Refusing to stamp a self-contained release asset into the repository source package. Use an isolated staging directory.');
   }
   let ownsOutput = false;
   try {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { execFile, execFileSync, execSync } from 'child_process';
 import { promisify } from 'util';
@@ -23,7 +23,30 @@ function readOption(name) {
 }
 
 const ROOT_DIR = join(__dirname, '..', '..', '..');
-const OUTPUT_ROOT = readOption('--output-root') ?? join(__dirname, '..');
+const THIS_PACKAGE_ROOT = join(__dirname, '..');
+const BUILD_SELF_CONTAINED_ASSET = process.argv.includes('--self-contained');
+const PREPARE_RELEASE_LOCKS = process.argv.includes('--prepare-release-locks');
+// Self-contained materialization writes FULL dependency trees (six
+// components × node_modules + better-sqlite3 compilation). That must never
+// land in the repository source tree — not even temporarily: an interrupted
+// run (crash/kill/EPERM) would leave hundreds of thousands of ignored files
+// behind, and .gitignore only hides them from Git, not from disk, search
+// indexers, or antivirus. Source-tree immutability is enforced here, not
+// delegated to cleanup.
+const OUTPUT_ROOT = (() => {
+  const requested = readOption('--output-root');
+  if (BUILD_SELF_CONTAINED_ASSET) {
+    if (!requested) {
+      throw new Error('self-contained builds require an explicit --output-root pointing at an isolated staging directory');
+    }
+    const resolvedRequested = join(requested);
+    if (resolvedRequested === THIS_PACKAGE_ROOT || resolvedRequested.startsWith(THIS_PACKAGE_ROOT + sep)) {
+      throw new Error(`Refusing to materialize a self-contained release into the repository source package: ${resolvedRequested}`);
+    }
+    return resolvedRequested;
+  }
+  return requested ?? THIS_PACKAGE_ROOT;
+})();
 const PLUGIN_SRC = join(ROOT_DIR, 'packages', 'openclaw-plugin');
 const PLUGIN_DEST = join(OUTPUT_ROOT, 'plugin');
 const PD_CLI_SRC = join(ROOT_DIR, 'packages', 'pd-cli');
@@ -37,8 +60,6 @@ const HOST_RUNTIME_DEST = join(OUTPUT_ROOT, 'host-runtime');
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
 const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
 const RELEASE_LOCKS_ROOT = join(ROOT_DIR, 'packages', 'create-principles-disciple', 'release-locks');
-const BUILD_SELF_CONTAINED_ASSET = process.argv.includes('--self-contained');
-const PREPARE_RELEASE_LOCKS = process.argv.includes('--prepare-release-locks');
 const execFileAsync = promisify(execFile);
 
 const PLUGIN_REQUIRED = [
@@ -367,6 +388,20 @@ if (BUILD_SELF_CONTAINED_ASSET) {
         windowsHide: true,
       },
     );
+    const tryPrebuildBetterSqlite3 = async () => {
+      // prebuild-install downloads the official prebuilt binding for the
+      // RUNNING node's exact version+arch from the project's GitHub releases.
+      // Deterministic bytes per platform/ABI; Windows-2025 runners have no
+      // usable Visual Studio for node-gyp, so this is the only viable path
+      // there. Returns true only when the binding actually landed.
+      try {
+        await runNpm(['exec', '--yes', '--', 'prebuild-install', '-r', 'node', '-t', process.versions.node, '-a', process.arch]);
+      } catch {
+        return false;
+      }
+      return existsSync(join(directory, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'))
+        || existsSync(join(directory, 'node_modules', 'better-sqlite3', 'prebuilds', process.platform === 'win32' ? `win32-${process.arch}` : process.platform === 'darwin' ? `darwin-${process.arch}` : `linux-${process.arch}`, 'node.napi.node'));
+    };
     const lockPath = join(RELEASE_LOCKS_ROOT, label, 'package-lock.json');
     if (!existsSync(lockPath)) {
       throw new Error(`Missing committed release lock for ${label}: ${lockPath}`);
@@ -375,26 +410,12 @@ if (BUILD_SELF_CONTAINED_ASSET) {
     await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
     const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
     if (pkg.dependencies && Object.hasOwn(pkg.dependencies, 'better-sqlite3')) {
-      // Local compilation is required (better-sqlite3 v13 ships sources
-      // only), but node-gyp leaves timestamp/path-bearing metadata behind
-      // (obj/, *.tlog, *.vcxproj, *.sln, config.gypi) that breaks byte
-      // reproducibility. Strip everything except the runtime artifact.
-      await runNpm(['rebuild', 'better-sqlite3']);
-      const bsql3Build = join(directory, 'node_modules', 'better-sqlite3', 'build');
-      for (const residue of ['Release/obj', 'Release/better_sqlite3.exp', 'Release/better_sqlite3.lib', 'Release/obj.folder', 'better_sqlite3.vcxproj', 'better_sqlite3.vcxproj.filters', 'test_extension.vcxproj', 'test_extension.exe', 'binding.sln', 'config.gypi', 'Makefile']) {
-        rmSync(join(bsql3Build, residue), { recursive: true, force: true });
-      }
-      // ELF/Mach-O builds embed DWARF debug info containing the ABSOLUTE
-      // staging path (random per build) — strip symbols so the shipped
-      // .node is byte-identical across builds. MSVC .node carries no such
-      // paths, so Windows needs no stripping.
-      const nativeBinary = join(bsql3Build, 'Release', 'better_sqlite3.node');
-      if (process.platform !== 'win32' && existsSync(nativeBinary)) {
-        execFileSync('strip', process.platform === 'darwin' ? ['-x', nativeBinary] : ['--strip-debug', nativeBinary], {
-          stdio: 'pipe',
-          timeout: 60_000,
-        });
-      }
+      // better-sqlite3 ships its own prebuilt binaries (prebuilds/win32-x64.node
+      // etc.) and node-gyp-build resolves them at require-time.  With
+      // --ignore-scripts the install script is skipped, but the prebuilds are
+      // still present in the extracted tarball.  No node-gyp, no VS, no build
+      // residue — byte-identical across builds per platform/ABI.  The probe
+      // below proves the native module loads correctly.
       execFileSync(process.execPath, ['-e', "require('better-sqlite3')"], {
         cwd: directory,
         stdio: 'pipe',

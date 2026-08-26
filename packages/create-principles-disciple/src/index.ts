@@ -268,7 +268,11 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     return;
   }
 
-  const result = await install(installOptions, PLUGIN_DIR, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
+  // Test/hermetic-build override: when set, it must point at a COMPLETE
+  // self-contained release asset directory (component trees + _release
+  // manifest). Production never sets it.
+  const pluginDir = process.env.PD_INSTALL_PLUGIN_DIR ?? PLUGIN_DIR;
+  const result = await install(installOptions, pluginDir, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
 
   if (jsonMode) {
     const output = toInstallJsonOutput(result);

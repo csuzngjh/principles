@@ -104,9 +104,20 @@ const STORY_A_VERIFICATION_TIMEOUT_MS = 30_000;
 const CONSOLE_HEALTH_CHECK_TIMEOUT_MS = 8_000;
 const CONSOLE_WARMUP_TIME_MS = 6_000;
 
-// 端口范围常量
-const CONSOLE_PORT_RANGE_MIN = 3100;
-const CONSOLE_PORT_RANGE_MAX = 3199;
+// 端口范围常量。PD_CONSOLE_PORT_BASE 允许在操作系统保留了大段端口
+// (如 Windows excludedportrange) 的机器上整体平移探测窗口；未设置时
+// 保持历史默认 3100–3199。
+function consolePortBase(): number {
+  const raw = process.env.PD_CONSOLE_PORT_BASE;
+  if (raw === undefined) return 3100;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1024 || parsed > 65000) {
+    throw new Error(`PD_CONSOLE_PORT_BASE must be an integer in [1024, 65000], got: ${JSON.stringify(raw)}`);
+  }
+  return parsed;
+}
+const CONSOLE_PORT_RANGE_MIN = consolePortBase();
+const CONSOLE_PORT_RANGE_MAX = CONSOLE_PORT_RANGE_MIN + 99;
 
 // Task 8: auto-launch console via `pd console open` after successful install
 const CONSOLE_AUTOLAUNCH_BASE_PORT = 3100;

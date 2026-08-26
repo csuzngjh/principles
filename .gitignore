@@ -185,7 +185,9 @@ packages/pd-console/playwright/.cache/
 .superpowers/
 .mimosa/
 
-# Self-contained release staging artifacts (in-tree stamping from bundle tests)
-packages/create-principles-disciple/_release/
-packages/create-principles-disciple/*/package-lock.json
+# Agent scratch files (repro scripts, bundle test fixtures, debug dumps)
+.tmp/
+
+# Release materialization is hermetic (temp staging only); nothing belongs
+# in-tree anymore. *.stackdump stays ignored as a Windows crash artifact.
 *.stackdump

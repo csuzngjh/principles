@@ -171,7 +171,12 @@ describe('production self-contained release asset', () => {
     );
     const markerIndex = stdout.lastIndexOf(resultMarker);
     expect(markerIndex).toBeGreaterThanOrEqual(0);
-    const result: unknown = JSON.parse(stdout.slice(markerIndex + resultMarker.length));
+    // The JSON output may be followed by autolaunch text (console open
+    // messages not suppressed during --json mode on some platforms), so
+    // parse only from the marker to the last closing brace.
+    const jsonStart = markerIndex + resultMarker.length;
+    const jsonEnd = stdout.lastIndexOf('}') + 1;
+    const result: unknown = JSON.parse(stdout.slice(jsonStart, jsonEnd));
     if (typeof result === 'object' && result !== null && Object.hasOwn(result, 'success') && Reflect.get(result, 'success') !== true) {
       throw new Error(`Self-contained asset install failed: ${JSON.stringify(result)}`);
     }

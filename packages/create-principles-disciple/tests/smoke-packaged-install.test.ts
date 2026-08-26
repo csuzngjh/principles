@@ -11,6 +11,10 @@ let tarballPath: string;
 let installLayoutTarballPath: string;
 let tempHomeDir: string;
 let tempWorkspaceDir: string;
+// Hermetic self-contained publication (temp), consumed by the CLI test via
+// PD_INSTALL_PLUGIN_DIR; cleaned up in afterAll together with the temp home.
+let hermeticPublicationDir: string;
+let hermeticReleaseRoot: string;
 
 // npm is invoked as `node <npm-cli.js> <args>` with argv arrays only — no
 // shell strings, and no bare `npm`/`npm.cmd` spawn (EINVAL on Windows).
@@ -60,6 +64,38 @@ function getInstalledConsoleDir(homeDir: string): string {
   return path.join(homeDir, '.pd', 'runtime', 'console');
 }
 
+// Port discovery happens ASYNC in beforeAll into this pool; test bodies
+// then consume ports synchronously. (Windows reserves arbitrary dynamic
+// ranges — 3101-3200 on the dev machine — so hardcoded windows flake.)
+const discoveredPortPool: number[] = [];
+let consolePortBaseForThisRun = 4100;
+
+async function discoverLoopbackPort(): Promise<number> {
+  const net = require('node:net') as typeof import('node:net');
+  return await new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() => {
+        if (address === null || typeof address === 'string') {
+          reject(new Error('failed to discover a bindable loopback port'));
+          return;
+        }
+        resolve(address.port);
+      });
+    });
+  });
+}
+
+function freeLoopbackPort(): number {
+  const port = discoveredPortPool.shift();
+  if (port === undefined) {
+    throw new Error('port pool exhausted — increase discovery count in beforeAll');
+  }
+  return port;
+}
+
 beforeAll(async () => {
   const installLayoutDir = path.resolve(INSTALLER_DIR, '..', 'install-layout');
   const installLayoutPackOutput = await npmRun(['pack', '--pack-destination', TMPDIR], {
@@ -87,37 +123,30 @@ beforeAll(async () => {
     throw new Error(`Tarball not found at ${tarballPath}`);
   }
 
-  // Materialize self-contained component trees in the package root using the
-  // committed release locks, then stamp the release asset identity in place
-  // (_release/asset.json + manifest.json). The packaged-install CLI test
-  // below executes the built installer directly, so PLUGIN_DIR must be a
-  // complete self-contained release asset — npm's tarball representation
-  // strips node_modules and never carries _release/.
-  const bundleEntry = path.resolve(INSTALLER_DIR, 'scripts', 'bundle-plugin.mjs');
-  if (!bundleEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(bundleEntry)) {
-    throw new Error(`Bundler entry is missing: ${bundleEntry}`);
+  // HERMETIC self-contained materialization: the production builder runs in
+  // an isolated temp publication (staging → stamp → archive → atomic
+  // publish) and NEVER touches the repository source tree. The CLI test
+  // below points the installer at this publication via PD_INSTALL_PLUGIN_DIR.
+  // Pre-discover bindable ports (async) for the console tests, and derive
+  // the installer's console-verify window base from the first one.
+  for (let index = 0; index < 6; index += 1) {
+    discoveredPortPool.push(await discoverLoopbackPort());
+  }
+  consolePortBaseForThisRun = Math.floor((discoveredPortPool[0] ?? 4100) / 100) * 100;
+  const releaseTestRoot = path.join(TMPDIR, `pd-packaged-release-${Date.now()}`);
+  const publicationDir = path.join(releaseTestRoot, 'publication');
+  const builderEntry = path.resolve(INSTALLER_DIR, 'scripts', 'build-self-contained-release.mjs');
+  if (!builderEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(builderEntry)) {
+    throw new Error(`Builder entry is missing: ${builderEntry}`);
   }
   const execFileAsync = await loadExecFileAsync();
-  await execFileAsync(process.execPath, [bundleEntry, '--self-contained'], {
+  await execFileAsync(process.execPath, [builderEntry, '--output', publicationDir], {
     cwd: INSTALLER_DIR,
-    timeout: 600_000,
+    env: { ...process.env, SOURCE_DATE_EPOCH: '1700000000' },
+    timeout: 1_800_000,
   });
-  const assetStampEntry = path.resolve(INSTALLER_DIR, 'scripts', 'build-release-asset.mjs');
-  if (!assetStampEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(assetStampEntry)) {
-    throw new Error(`Release asset stamping entry is missing: ${assetStampEntry}`);
-  }
-  await execFileAsync(process.execPath, [
-    assetStampEntry,
-    '--input', INSTALLER_DIR,
-    '--output', INSTALLER_DIR,
-    '--in-place', 'true',
-    '--platform', process.platform,
-    '--arch', process.arch,
-    '--node-abi', process.versions.modules,
-  ], {
-    cwd: INSTALLER_DIR,
-    timeout: 600_000,
-  });
+  hermeticPublicationDir = fs.realpathSync(path.join(publicationDir, 'payload'));
+  hermeticReleaseRoot = releaseTestRoot;
 
   tempHomeDir = path.join(TMPDIR, `pd-smoke-home-${Date.now()}`);
   tempWorkspaceDir = path.join(TMPDIR, `pd-smoke-ws-${Date.now()}`);
@@ -150,6 +179,7 @@ afterAll(() => {
   }
   if (tempHomeDir) cleanupDir(tempHomeDir);
   if (tempWorkspaceDir) cleanupDir(tempWorkspaceDir);
+  if (hermeticReleaseRoot) cleanupDir(hermeticReleaseRoot);
 }, 120_000);
 
 describe('Real packaged install smoke test', () => {
@@ -190,10 +220,9 @@ describe('Real packaged install smoke test', () => {
   }, 240_000);
 
   it('production self-contained bundle installs with no npm invocation', async () => {
-    // npm pack's prepack runs the real production bundler. Execute that built
-    // installer directly so PLUGIN_DIR points at the self-contained component
-    // trees (including node_modules) rather than npm's node_modules-stripped
-    // tarball representation.
+    // The real CLI installs from the HERMETIC temp publication via
+    // PD_INSTALL_PLUGIN_DIR — the source package stays read-only throughout
+    // (source-tree immutability, see the closing test).
     const cliEntry = path.resolve(INSTALLER_DIR, 'dist', 'index.js');
     if (!cliEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(cliEntry)) {
       throw new Error(`CLI build output is missing: ${cliEntry}`);
@@ -225,6 +254,12 @@ describe('Real packaged install smoke test', () => {
           ...process.env,
           HOME: tempHomeDir,
           USERPROFILE: tempHomeDir,
+          // Hermetic plugin source: the real CLI installs from the temp
+          // publication instead of the (un-stamped) source package.
+          PD_INSTALL_PLUGIN_DIR: hermeticPublicationDir,
+          // Steer the installer's console-verify port window away from
+          // OS-reserved ranges (this machine excludes 3101-3200).
+          PD_CONSOLE_PORT_BASE: String(consolePortBaseForThisRun),
           // Skip npm upgrade so we test the bundled pd-cli (built from current
           // repo state) rather than the npm-published version, which may be
           // incompatible with local core changes (e.g., removed exports).
@@ -235,11 +270,11 @@ describe('Real packaged install smoke test', () => {
       });
       stdout = result.stdout;
     } catch (e: unknown) {
-      const err = e as { stdout?: string; stderr?: string };
+      const err = e as { stdout?: string; stderr?: string; message?: string; code?: unknown; killed?: boolean; signal?: unknown };
       stdout = err.stdout ?? '';
       stderr = err.stderr ?? '';
       if (stdout.trim().length === 0) {
-        throw new Error(`Installer CLI failed without stdout. stderr=${stderr.slice(0, 2000)}`);
+        throw new Error(`Installer CLI failed without stdout. message=${String(err.message)} code=${String(err.code)} killed=${String(err.killed)} signal=${String(err.signal)} stderr=${stderr.slice(0, 2000)}`);
       }
     }
     const npmWasInvoked = fs.existsSync(npmPoisonMarker) || npmWasInvokedBefore;
@@ -402,7 +437,7 @@ describe('Real packaged install smoke test', () => {
       throw new Error('Console server entry not found at installed location');
     }
 
-    const port = 3200 + Math.floor(Math.random() * 100);
+    const port = freeLoopbackPort();
     const child = spawn(process.execPath, [
       serverEntry,
       '--workspace', tempWorkspaceDir,
@@ -467,7 +502,7 @@ describe('Real packaged install smoke test', () => {
       throw new Error('Console server entry not found at installed location');
     }
 
-    const port = 3300 + Math.floor(Math.random() * 100);
+    const port = freeLoopbackPort();
     const execFileAsync = await loadExecFileAsync();
     const failure = await execFileAsync(process.execPath, [
       serverEntry,
@@ -556,4 +591,29 @@ describe('Real packaged install smoke test', () => {
       cleanupDir(backupWorkspaceDir);
     }
   }, 300_000);
+
+  it('never mutates the repository source tree (hermetic contract)', () => {
+    // Closing guard for source-tree immutability: after every test above —
+    // including the real self-contained build and the CLI install — the
+    // installer package must contain none of the release materialization
+    // artifacts. If this regresses, an interrupted run can strand hundreds
+    // of thousands of ignored files in the repo (observed as 7 GB / 720k
+    // files on the dev machine).
+    for (const pollution of [
+      '_release',
+      'plugin/node_modules',
+      'core/node_modules',
+      'console/node_modules',
+      'pd-cli/node_modules',
+      'host-runtime/node_modules',
+      'install-layout/node_modules',
+      'plugin/package-lock.json',
+      'core/package-lock.json',
+      'console/package-lock.json',
+      'pd-cli/package-lock.json',
+      'host-runtime/package-lock.json',
+    ]) {
+      expect(fs.existsSync(path.join(INSTALLER_DIR, pollution)), `source tree pollution: ${pollution}`).toBe(false);
+    }
+  }, 30_000);
 });
