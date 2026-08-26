@@ -15,7 +15,7 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
-import { recordInjectionPresence, alignActivationIds } from '../core/principle-application-ledger.js';
+import { recordInjectionPresence, alignActivationIds, alignInjectedPrinciples } from '../core/principle-application-ledger.js';
 import { setInjectedPrincipleIds } from '../core/session-tracker.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
@@ -561,22 +561,15 @@ export async function handleBeforePromptBuild(
         && sharedActivePrinciplePrompt.allValidatedPrinciplesExcluded;
       // PRI-537: pair the source arrays with the INJECTED subset — dedupedV2
       // is the full post-dedup candidate list, so raw .map() mispairs under
-      // budget truncation (rc-6-adjacent; same shape as the receipt ledger's
-      // alignActivationIds). Map-dedupe keeps 1:1 with the principleIds Set
-      // even if a build ever yields duplicate ids.
-      const injectedCandidatesById = new Map(
-        dedupedV2
-          .filter((p) => runtimeV2PrincipleIds.has(p.principleId))
-          .map((p) => [p.principleId, p] as const),
-      );
-      const alignedActivationIds = [...injectedCandidatesById.values()].map((p) => p.activationId);
-      const alignedArtifactIds = [...injectedCandidatesById.values()].map((p) => p.artifactId);
+      // budget truncation (rc-6-adjacent). All three arrays derive from the
+      // same aligned list so index alignment cannot drift between them.
+      const alignedPrinciples = alignInjectedPrinciples(dedupedV2, runtimeV2PrincipleIds);
       eventLog.recordRuntimeV2ActivationsInjected({
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
-        principleIds: [...runtimeV2PrincipleIds],
-        activationIds: sharedActivePrinciplePrompt?.activationIds ?? alignedActivationIds,
-        artifactIds: sharedActivePrinciplePrompt?.artifactIds ?? alignedArtifactIds,
+        principleIds: sharedActivePrinciplePrompt?.principleIds ?? alignedPrinciples.map((p) => p.principleId),
+        activationIds: sharedActivePrinciplePrompt?.activationIds ?? alignedPrinciples.map((p) => p.activationId),
+        artifactIds: sharedActivePrinciplePrompt?.artifactIds ?? alignedPrinciples.map((p) => p.artifactId),
         injectedCount: runtimeV2PrincipleIds.size,
         skippedWarnings: v2Result.warnings,
         injectedCharCount: runtimeV2PrinciplesContent.length,

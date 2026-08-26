@@ -119,6 +119,25 @@ export function alignActivationIds(
 }
 
 /**
+ * Filter a candidate list down to the actually-injected subset, deduped by
+ * principleId in first-occurrence order (PRI-537). Callers derive every
+ * paired field (principleId/activationId/artifactId) from this single list,
+ * so index alignment cannot drift between them. Supersedes per-field helpers
+ * like alignActivationIds for new call sites.
+ */
+export function alignInjectedPrinciples<T extends { principleId: string }>(
+  principles: ReadonlyArray<T>,
+  injectedIds: ReadonlySet<string>,
+): T[] {
+  const byId = new Map(
+    principles
+      .filter(p => injectedIds.has(p.principleId))
+      .map(p => [p.principleId, p] as const),
+  );
+  return [...byId.values()];
+}
+
+/**
  * Presence rows for a prompt injection event — one per principle, deduped per
  * session×principle by the partial unique index (restarts included).
  * Returns the number of NEW rows written (0 when all were already present).
