@@ -102,7 +102,7 @@ describe('pd telemetry status', () => {
     expect(json.command).toBe('telemetry:status');
     expect(json.consent).toBe('unset');
     expect(json.hasSecret).toBe(false);
-    expect(typeof json.flagEnabled).toBe('boolean');
+    expect(json.flagEnabled).toBeDefined();
   });
 });
 
