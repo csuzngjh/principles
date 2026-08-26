@@ -20,6 +20,10 @@ function listEntries(root) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const absolute = resolve(directory, entry.name);
       const archivePath = relative(root, absolute).split(sep).join('/');
+      // Depth-0 node_modules is toolchain scope, not archive payload — must
+      // match build-release-asset's listPayloadFiles exclusion exactly so
+      // manifest and tar describe the identical file set.
+      if (archivePath === 'node_modules') continue;
       if (entry.isSymbolicLink()) throw new Error(`Release archive input contains a symlink: ${archivePath}`);
       if (!entry.isDirectory() && !entry.isFile()) throw new Error(`Release archive input contains a non-file entry: ${archivePath}`);
       entries.push(archivePath);

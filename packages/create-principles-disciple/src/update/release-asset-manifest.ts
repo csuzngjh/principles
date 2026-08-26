@@ -66,6 +66,11 @@ function listPayloadFilePaths(assetDir: string): PayloadFilePath[] {
       }
       const relativePath = path.relative(rootDir, absolutePath).split(path.sep).join('/');
       if (relativePath === '_release') continue;
+      // Depth-0 node_modules is the package's own toolchain install, excluded
+      // from the manifest by build-release-asset — the verifier must apply
+      // the identical rule or every packaged install would report unexpected
+      // files.
+      if (relativePath === 'node_modules') continue;
       if (entry.isSymbolicLink()) {
         throw new ReleaseAssetManifestError('asset_path_unsafe', `Release asset must not contain symlinks: ${relativePath}`);
       }

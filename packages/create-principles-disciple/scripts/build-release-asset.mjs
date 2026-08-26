@@ -101,6 +101,10 @@ async function listPayloadFiles(assetDirectory) {
       const entryPath = join(directory, entry.name);
       const entryRelativePath = relative(assetDirectory, entryPath).split(sep).join('/');
       if (entryRelativePath === '_release') continue;
+      // Depth-0 node_modules is the PACKAGE'S OWN toolchain install (dev deps
+      // of create-principles-disciple itself), not release payload — the
+      // shipped components are the six REQUIRED_COMPONENTS trees.
+      if (entryRelativePath === 'node_modules') continue;
       if (entry.isSymbolicLink()) throw new Error(`Release asset contains a symlink: ${entryRelativePath}`);
       if (entry.isDirectory()) {
         visit(entryPath);

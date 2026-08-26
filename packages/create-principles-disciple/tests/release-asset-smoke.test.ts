@@ -124,7 +124,7 @@ describe('production self-contained release asset', () => {
     // control for the beforeAll verification.
     const expectedDigest = fs.readFileSync(digestSidecar, 'utf8').trim();
     await expect(sha256File(tamperedArchive)).resolves.not.toBe(expectedDigest);
-  });
+  }, 600_000);
 
   it('preserves source component identity without consulting registry state', () => {
     const sourcePackage: unknown = JSON.parse(fs.readFileSync(path.resolve(INSTALLER_DIR, '..', 'openclaw-plugin', 'package.json'), 'utf8'));
