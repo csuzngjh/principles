@@ -51,6 +51,37 @@ describe('Core Principle Registry drift test', () => {
           expect(d.must.length, `${lang} ${d.id} must`).toBeGreaterThan(0);
         }
       });
+
+      // PRI-607: id-set equality alone let names drift (legacy SCREAMING_SNAKE
+      // vs registry Title Case). Names are canonical — enforce strict equality.
+      it('every directive name matches the registry name exactly', () => {
+        const directives = loadTemplateDirectives(lang);
+        const nameById = new Map(CORE_PRINCIPLES.map(p => [p.id, p.name]));
+        for (const d of directives) {
+          expect(d.name, `${lang} ${d.id} name drift`).toBe(nameById.get(d.id));
+        }
+      });
     });
   }
+
+  // PRI-607: the workspace distribution template ships to fresh installs and
+  // was frozen at the legacy 8-entry version, invisible to the langs guard.
+  describe('workspace distribution template', () => {
+    const WORKSPACE_TEMPLATE = path.resolve(
+      __dirname, '..', '..', 'templates', 'workspace', '.principles', 'THINKING_OS.md',
+    );
+
+    it('ships the same directive id set as the registry (no legacy 8-entry copy)', () => {
+      const directives = parseThinkingOsMd(fs.readFileSync(WORKSPACE_TEMPLATE, 'utf-8'));
+      expect(directives.map(d => d.id).sort()).toEqual([...CORE_PRINCIPLE_IDS].sort());
+    });
+
+    it('directive names match the registry exactly', () => {
+      const directives = parseThinkingOsMd(fs.readFileSync(WORKSPACE_TEMPLATE, 'utf-8'));
+      const nameById = new Map(CORE_PRINCIPLES.map(p => [p.id, p.name]));
+      for (const d of directives) {
+        expect(d.name, `workspace ${d.id} name drift`).toBe(nameById.get(d.id));
+      }
+    });
+  });
 });
