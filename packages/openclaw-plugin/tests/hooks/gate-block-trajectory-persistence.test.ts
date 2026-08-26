@@ -29,6 +29,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createRequire } from 'node:module';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import type { TrajectoryDatabase } from '../../src/core/trajectory.js';
 import type { PluginLogger } from '../../src/openclaw-sdk.js';
@@ -36,7 +37,7 @@ import { persistGateBlock, recordGateBlockAndReturn } from '../../src/hooks/gate
 import { handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 
  
-const require_ = eval('require') as NodeRequire;
+const require_ = createRequire(import.meta.url);
 
 function makeWorkspace(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'pri569-'));
@@ -222,8 +223,7 @@ describe('PRI-569 gate-block trajectory persistence', () => {
     expect(() => persistGateBlock(
       wctx,
       { filePath: 'b.txt', reason: 'pri569-direct', toolName: 'Edit', blockSource: 'rule-host-shared' },
-      (msg) => logger.warn?.(msg),
-      (msg) => logger.error?.(msg),
+      logger,
     )).not.toThrow();
 
     const rows = readGateBlocks(dir);

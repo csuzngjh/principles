@@ -13,7 +13,7 @@
 import * as fs from 'fs';
 import { getSession, trackBlock } from '../core/session-tracker.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
-import type { TrajectoryDatabase } from '../core/trajectory.js';
+import type { TrajectoryDatabase, TrajectoryGateBlockInput } from '../core/trajectory.js';
 import type { PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent } from './pain.js';
@@ -47,13 +47,7 @@ export interface BlockContext {
 }
 
 /** Payload persisted to trajectory.db gate_blocks for one block decision. */
-interface TrajectoryGateBlockPayload {
-  sessionId: string | null;
-  toolName: string;
-  filePath: string;
-  reason: string;
-  blockSource?: string;
-}
+interface TrajectoryGateBlockPayload extends TrajectoryGateBlockInput {}
 
 type GateBlockWriteOutcome = 'written' | 'retryable' | 'skipped';
 
@@ -105,23 +99,29 @@ function attemptTrajectoryGateBlockWrite(
 export function persistGateBlock(
   wctx: WorkspaceContext,
   blockCtx: BlockContext,
-  logWarn: (message: string) => void,
-  logError: (message: string) => void
+  logger: { warn?: (_message: string) => void; error?: (_message: string) => void }
 ): void {
   const { filePath, reason, toolName, sessionId, blockSource } = blockCtx;
+  const logWarn = (msg: string) => logger.warn?.(msg);
+  const logError = (msg: string) => logger.error?.(msg);
 
-  // 1. Track block for session-level GFI calculation
+  // 1. Track block for session-level GFI calculation. Guarded so the
+  // persistGateBlock never-throws invariant holds end to end.
   if (sessionId) {
-    trackBlock(sessionId);
+    try {
+      trackBlock(sessionId);
+    } catch (error: unknown) {
+      logWarn(`[PD_GATE] Session GFI tracking skipped (reasonCode=gfi_track_failed): ${String(error)}`);
+    }
   }
 
-  // 2. Prepare trajectory payload
+  // 2. Prepare trajectory payload. Note: trajectory.db gate_blocks has no
+  // source column — blockSource is EventLog-only attribution.
   const trajectoryPayload: TrajectoryGateBlockPayload = {
     sessionId: sessionId ?? null,
     toolName,
     filePath,
     reason,
-    blockSource: blockSource ?? 'gate',
   };
 
   // 3. Record to EventLog (primary persistence)
@@ -179,7 +179,7 @@ export function recordGateBlockAndReturn(
   // bounded retry) are the authoritative persistence core shared by BOTH
   // enforcement paths — the legacy hook path here, and
   // handleSharedRuleHostResult's deny branch (PRI-569).
-  persistGateBlock(wctx, blockCtx, logWarn, logError);
+  persistGateBlock(wctx, blockCtx, logger);
 
   // 5. Record gate block pain context. Runtime V2 diagnosis is gated by GFI
   // so one mild block does not start a long diagnostician run.
