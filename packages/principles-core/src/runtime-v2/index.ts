@@ -417,6 +417,8 @@ export {
   getCorePrinciple,
   CorePrincipleSchema,
   stripFabricatedCorePrincipleIds,
+  formatCorePrinciplesList,
+  buildCoreAxiomBlock,
 } from './core-principles/index.js';
 
 export type { CorePrinciple } from './core-principles/index.js';

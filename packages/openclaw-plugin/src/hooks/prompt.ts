@@ -10,7 +10,7 @@ import type { ContextInjectionConfig } from '../types.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
@@ -29,7 +29,6 @@ import {
   buildEmpathySilenceConstraint,
   extractUserMessageFromPrompt,
   assembleHeartbeatChecklist,
-  formatCorePrinciples,
   formatEvolutionPrinciples,
   assembleAppendSystemContext,
 } from './prompt-helpers.js';
@@ -377,15 +376,21 @@ export async function handleBeforePromptBuild(
   // Thinking OS, reflection_log, project_context are configurable
   // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
 
-  // Core principles: use structured data from evolution-reducer instead of reading PRINCIPLES.md
+  // Core principles: ALWAYS inject the canonical T-01..T-10 axioms directly from
+  // the @principles/core registry (PRI-606). These are built-in axioms, NOT
+  // owner-approved learned principles — those flow via <evolution_principles>.
+  // Language: PainSettings.language ('zh'|'en') maps onto OutputLanguage ('zh-CN'|'en').
+  const configuredLanguage = wctx.config?.get('language');
+  const mappedLanguage = configuredLanguage === 'zh' ? 'zh-CN' : configuredLanguage;
+  const resolvedLanguage = resolveOutputLanguage(mappedLanguage);
+  if (resolvedLanguage.degradationWarning) {
+    logger?.warn?.(`[PD:Prompt] ${resolvedLanguage.degradationWarning}`);
+  }
   let principlesContent = '';
   try {
-    const activePrinciples = wctx.evolutionReducer.getActivePrinciples();
-    if (activePrinciples.length > 0) {
-      principlesContent = formatCorePrinciples(activePrinciples);
-    }
+    principlesContent = formatCorePrinciplesList(resolvedLanguage.outputLanguage);
   } catch (e) {
-    logger?.warn?.(`[PD:Prompt] Failed to load core principles from reducer: ${String(e)}`);
+    logger?.warn?.(`[PD:Prompt] Failed to format core principles from registry: ${String(e)}`);
   }
 
   let thinkingOsContent = '';
