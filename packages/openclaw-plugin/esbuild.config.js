@@ -35,6 +35,10 @@ async function bundlePlugin() {
       entryPoints: {
         bundle: 'src/index.ts',
         'governance-audit': 'src/governance-audit.ts',
+        // package.json exports ./rulehost-evidence -> dist/rulehost-evidence.js;
+        // a clean production-only build must emit it (ERR-090: export targets
+        // have to exist in ALL build paths, not just tsc's).
+        'rulehost-evidence': 'src/rulehost-evidence.ts',
       },
       outdir: 'dist',
       bundle: true,

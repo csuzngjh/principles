@@ -43,6 +43,9 @@ jobs:
       - name: Build release producers and verify committed dependency locks
         run: |
           npm run build
+          # Plugin tsc emits the .d.ts files pd-cli/pd-console typecheck against
+          # (esbuild's build:production emits runtime JS only — ERR-090).
+          npm run build --workspace=principles-disciple
           npm run build:production --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
@@ -73,6 +76,8 @@ jobs:
       - name: Build every release component from the clean checkout
         run: |
           npm run build
+          # Plugin tsc first: downstream typechecks need its .d.ts outputs.
+          npm run build --workspace=principles-disciple
           npm run build:production --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console

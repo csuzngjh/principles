@@ -1063,11 +1063,22 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
     const tmpDir = path.join(installedPdCliDir, '__npm_upgrade_tmp');
     try {
       mkdirSync(tmpDir, { recursive: true });
-      execFileSync('cmd.exe', ['/d', '/s', '/c', 'npm', 'pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir], {
-        encoding: 'utf-8',
-        timeout: 30_000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      // Platform dispatch (CodeRabbit review): cmd.exe does not exist on
+      // POSIX, where npm is a real executable and can be spawned directly.
+      const packArgs = ['pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir];
+      if (process.platform === 'win32') {
+        execFileSync('cmd.exe', ['/d', '/s', '/c', 'npm', ...packArgs], {
+          encoding: 'utf-8',
+          timeout: 30_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } else {
+        execFileSync('npm', packArgs, {
+          encoding: 'utf-8',
+          timeout: 30_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      }
 
       const tgzFiles = readdirSync(tmpDir).filter(f => f.endsWith('.tgz'));
       const [tgzFile] = tgzFiles;

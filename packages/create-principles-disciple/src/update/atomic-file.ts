@@ -60,6 +60,18 @@ function fsyncDirectory(directoryPath: string): void {
 
 const RENAME_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 800, 800, 800];
 
+/**
+ * Synchronous bounded sleep for the rename retry loop. Atomics.wait is
+ * intentional here: this module is a synchronous CLI code path where
+ * blocking the thread IS the requested behaviour (there is no concurrent
+ * work to yield to), and Node.js — unlike browsers — permits Atomics.wait on
+ * the main thread. It returns 'timed-out' after the delay, which is exactly
+ * the sleep semantics we need.
+ */
+function sleepSync(delayMs: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+}
+
 function renameWithWindowsRetry(source: string, destination: string): void {
   for (let attempt = 0; ; attempt += 1) {
     try {
@@ -76,7 +88,7 @@ function renameWithWindowsRetry(source: string, destination: string): void {
           `Atomic record replacement failed (${code}): ${source} -> ${destination}. The previous record is untouched.`,
         );
       }
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+      sleepSync(delayMs);
     }
   }
 }

@@ -16,9 +16,13 @@ let tempWorkspaceDir: string;
 // shell strings, and no bare `npm`/`npm.cmd` spawn (EINVAL on Windows).
 function resolveNpmCliEntry(): string {
   const nodeDir = path.dirname(process.execPath);
+  const prefixDir = path.dirname(nodeDir);
   for (const candidate of [
+    // Windows / plain POSIX layout
     path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    path.join(path.dirname(nodeDir), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(prefixDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    // nvm and most Linux distro layouts keep the global npm under lib/
+    path.join(prefixDir, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
   ]) {
     if (fs.existsSync(candidate)) return path.resolve(candidate);
   }

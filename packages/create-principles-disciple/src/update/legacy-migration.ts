@@ -20,6 +20,7 @@ import { ensurePdHomeLayout, resolvePdHomePaths } from './install-layout.js';
 import { appendJournalTransition, writeActiveRecord, type TransactionState } from './transaction-journal.js';
 import { appendHistoryEvent, classifyDirection } from './update-history.js';
 import { deriveReleaseId } from './release-identity.js';
+import { buildReleaseMetadata } from './release-metadata.js';
 import { parseProductVersion, ProductIdentityError } from './product-identity.js';
 
 /** Every path this migration writes must resolve inside the target ~/.pd root. */
@@ -207,9 +208,31 @@ export function migrateLegacyOverlay(input: LegacyMigrationInput): MigrationResu
   const releaseDir = assertWithinPdHome(path.join(paths.releasesDir, releaseId), pdHome, 'releases');
   const releaseMetadataPath = assertWithinPdHome(path.join(releaseDir, 'metadata.json'), pdHome, 'release-metadata');
   const activeRecordPath = assertWithinPdHome(paths.activeRecordPath, pdHome, 'active-record');
-  const previousRecordPath = assertWithinPdHome(paths.previousRecordPath, pdHome, 'previous-record');
   const installConfigPath = assertWithinPdHome(paths.installConfigPath, pdHome, 'install-config');
   const historyPath = assertWithinPdHome(path.join(paths.logsDir, 'history.jsonl'), pdHome, 'history');
+
+  // The migrated release's metadata is built through the strict producer so
+  // its releaseId AND canonical metadataDigest close the identity chain —
+  // placeholder digests would fail verifyReleaseMetadataIdentity on the
+  // first future update check.
+  const migratedRelease = buildReleaseMetadata({
+    productVersion,
+    sourceCommit: '0'.repeat(40),
+    minBootstrapVersion: input.bootstrapVersion,
+    publicationSequence: 1,
+    expiresAt: '9999-12-31T00:00:00Z',
+    assets: componentDigests.map((digest) => ({
+      platform: `overlay-${digest.component}`,
+      arch: 'x64',
+      nodeAbi: '0',
+      archiveSha256: digest.sha256,
+      archiveSizeBytes: digest.sizeBytes,
+    })),
+    dataSchemaForwardReadableFrom: productVersion,
+  });
+  if (migratedRelease.releaseId !== releaseId) {
+    throw new ProductIdentityError('releaseId', 'Migration identity derivation diverged between planning and execution.');
+  }
 
   const transition = (from: TransactionState | null, to: TransactionState, detail: string): void => {
     appendJournalTransition(journalPath, {
@@ -219,7 +242,7 @@ export function migrateLegacyOverlay(input: LegacyMigrationInput): MigrationResu
       transactionId: input.transactionId,
       releaseId,
       productVersion,
-      releaseMetadataDigest: 'f'.repeat(64),
+      releaseMetadataDigest: migratedRelease.metadataDigest,
       generation: 1,
       detail,
     });
@@ -235,35 +258,20 @@ export function migrateLegacyOverlay(input: LegacyMigrationInput): MigrationResu
   transition('planned', 'staged', 'bootstrap manifest written by the official installer');
 
   fs.mkdirSync(releaseDir, { recursive: true });
-  fs.writeFileSync(releaseMetadataPath, `${JSON.stringify({
-    schemaVersion: 1,
-    productVersion,
-    releaseId,
-    sourceCommit: '0'.repeat(40),
-    metadataDigest: 'f'.repeat(64),
-    minBootstrapVersion: input.bootstrapVersion,
-    publicationSequence: 1,
-    expiresAt: '9999-12-31T00:00:00Z',
-    assets: componentDigests.map((digest) => ({
-      platform: `overlay-${digest.component}`,
-      arch: 'x64',
-      nodeAbi: '0',
-      archiveSha256: digest.sha256,
-      archiveSizeBytes: digest.sizeBytes,
-    })),
-    compatibility: { dataSchemaForwardReadableFrom: productVersion },
-  }, null, 2)}\n`);
+  fs.writeFileSync(releaseMetadataPath, `${JSON.stringify(migratedRelease, null, 2)}\n`);
   transition('staged', 'probed', 'overlay identity recorded as generation 1 release');
 
   writeActiveRecord(activeRecordPath, {
     generation: 1,
     releaseId,
-    releaseMetadataDigest: 'f'.repeat(64),
+    releaseMetadataDigest: migratedRelease.metadataDigest,
     previousReleaseId: null,
     transactionId: input.transactionId,
     productVersion,
   });
-  fs.copyFileSync(activeRecordPath, previousRecordPath);
+  // No previous.json: a freshly migrated installation has exactly ONE slot.
+  // Copying the generation-1 record here would let a rollback "succeed" as a
+  // no-op onto the same release while reporting a switch.
   transition('probed', 'activated', 'generation 1 active record written');
 
   fs.writeFileSync(installConfigPath, `${JSON.stringify({ channel: 'stable', autoCheck: false }, null, 2)}\n`);

@@ -108,10 +108,13 @@ describe('production self-contained release asset', () => {
   it('rejects a truncated published archive before extraction', async () => {
     const tamperedArchive = path.resolve(path.join(root, 'tampered.tar'));
     const digestSidecar = path.resolve(path.join(publicationDir, 'asset.tar.sha256'));
-    // Both read paths stay inside the test root / publication by construction;
-    // assert it explicitly before reading (containment inline, no helper).
+    // Both read paths stay inside the allowed roots by construction; assert
+    // it explicitly before reading (containment inline, no helper). The
+    // allowed set matches beforeAll: the CI-provided publication lives
+    // OUTSIDE the test root, so it must be included when present.
+    const allowedRoots = buildPublicationInternally ? [root] : [root, publicationDir];
     for (const readPath of [tamperedArchive, digestSidecar]) {
-      const contained = readPath === root || readPath.startsWith(root + path.sep);
+      const contained = allowedRoots.some((allowedRoot) => readPath === allowedRoot || readPath.startsWith(allowedRoot + path.sep));
       expect(contained, readPath).toBe(true);
     }
     fs.copyFileSync(path.join(publicationDir, 'asset.tar'), tamperedArchive);

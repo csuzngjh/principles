@@ -138,7 +138,10 @@ describe('CLI full flow', () => {
   it('pd --version exits 0 and prints version', async () => {
     const { stdout, exitCode } = await runPd(['--version']);
     expect(exitCode).toBe(0);
-    expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    // SPEC §12 stable short-text contract. On a machine without a supported
+    // installation the CLI falls back to its own package version and marks
+    // itself as a development checkout instead of impersonating a release.
+    expect(stdout.trim()).toMatch(/^Principles Disciple \d+\.\d+\.\d+ \([a-f0-9]{12}|^Principles Disciple \d+\.\d+\.\d+ \(development-checkout\)$/);
   });
 
   it('pd runtime features --json on fresh workspace returns valid JSON with defaults', async () => {

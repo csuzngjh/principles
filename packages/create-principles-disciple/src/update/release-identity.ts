@@ -93,18 +93,21 @@ export function deriveReleaseId(inputs: ReleaseIdentityInputs): string {
     throw new ProductIdentityError('assets', 'a release must declare at least one platform asset');
   }
   const assets = inputs.assets.map(validateAssetIdentity);
-  const seen = new Set<string>();
+  // Duplicate detection runs BEFORE sorting as an explicit pass — sort
+  // comparators are not guaranteed to compare every element pair, so a
+  // duplicate key could slip into the identity input unnoticed.
+  const seenKeys = new Set<string>();
+  for (const asset of assets) {
+    const key = `${asset.platform}/${asset.arch}/abi${asset.nodeAbi}`;
+    if (seenKeys.has(key)) {
+      throw new ProductIdentityError('assets', `duplicate platform asset declared: ${key}`);
+    }
+    seenKeys.add(key);
+  }
   const sortedAssets = [...assets].sort((a, b) => {
     const keyA = `${a.platform}/${a.arch}/abi${a.nodeAbi}`;
     const keyB = `${b.platform}/${b.arch}/abi${b.nodeAbi}`;
-    if (keyA === keyB) {
-      throw new ProductIdentityError('assets', `duplicate platform asset declared: ${keyA}`);
-    }
-    if (seen.has(keyB)) {
-      throw new ProductIdentityError('assets', `duplicate platform asset declared: ${keyB}`);
-    }
-    seen.add(keyA);
-    return keyA < keyB ? -1 : 1;
+    return keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
   });
 
   const identityContent = {

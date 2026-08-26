@@ -11,7 +11,15 @@ const __dirname = dirname(__filename);
 
 function readOption(name) {
   const index = process.argv.indexOf(name);
-  return index === -1 ? undefined : process.argv[index + 1];
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  // Fail loud instead of silently falling back to the package root when the
+  // flag is present but its value is missing — building into the source tree
+  // would be silent corruption (ERR-002 / EP-03).
+  if (value === undefined || value.startsWith('-')) {
+    throw new Error(`Option ${name} requires a value`);
+  }
+  return value;
 }
 
 const ROOT_DIR = join(__dirname, '..', '..', '..');

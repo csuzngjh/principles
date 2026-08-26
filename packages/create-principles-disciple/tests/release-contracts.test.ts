@@ -125,6 +125,22 @@ describe('deriveReleaseId', () => {
     expect(() => deriveReleaseId(validMetadataInput({ assets: [validAsset({ nodeAbi: 'abi' })] } as unknown as Record<string, unknown>))).toThrow(ProductIdentityError);
     expect(() => deriveReleaseId(validMetadataInput({ assets: [validAsset(), validAsset({ arch: 'arm64' })] } as unknown as Record<string, unknown>))).not.toThrow();
   });
+
+  it('rejects duplicate platform assets regardless of position in the list', () => {
+    // Regression: dedup must be an explicit pre-sort pass, not comparator
+    // side effects — sort does not guarantee comparing every element pair,
+    // so a trailing duplicate could slip into the identity input.
+    const duplicatePair = [validAsset(), validAsset()];
+    for (const order of [duplicatePair, [...duplicatePair].reverse()]) {
+      expect(() => deriveReleaseId(validMetadataInput({ assets: order } as unknown as Record<string, unknown>)))
+        .toThrow(/duplicate platform asset declared: win32\/x64\/abi147/);
+    }
+    const triple = [validAsset(), validAsset({ arch: 'arm64' }), validAsset()];
+    for (const rotated of [triple, [...triple].reverse(), [triple[1], triple[2], triple[0]] as typeof triple]) {
+      expect(() => deriveReleaseId(validMetadataInput({ assets: rotated } as unknown as Record<string, unknown>)))
+        .toThrow(/duplicate platform asset declared/);
+    }
+  });
 });
 
 describe('parseReleaseMetadata', () => {

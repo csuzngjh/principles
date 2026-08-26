@@ -9,6 +9,7 @@ import { checkEnvironment, detectWorkspace, getOpenClawConfigDir, getPluginExtDi
 vi.mock('fs');
 vi.mock('os');
 vi.mock('child_process', () => ({
+  execSync: vi.fn(),
   execFileSync: vi.fn(),
 }));
 
