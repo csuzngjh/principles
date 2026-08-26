@@ -27,13 +27,19 @@ PD supports two hosts over one shared host contract (`packages/principles-core/s
 
 ## 3. Telemetry Unit
 
+> **⚠ Review correction (2026-08-26, PR #1419 review remediation)**
+>
+> - **Original decision**: Telemetry Unit = the PD installation; snapshot describes "the telemetry unit's active workspace"; maintainer wording "participating installations".
+> - **Why invalid**: the milestone facts come from ONE workspace (whichever triggers first), while dedup/retry/lock state was machine-global — so on a multi-workspace installation, the FIRST workspace to succeed froze the day's result for everyone (`already_succeeded_today`), and "installation-level" milestone reach was actually first-workspace-wins sampling. Justification 4 ("typical installations have one primary workspace") cannot support the statistical contract.
+> - **Final decision**: measurement unit = **the workspace**. Consent/secret stay machine-scope; daily ID, dedup, retry, attempt caps, and the export lock are workspace-scoped via a local opaque `workspaceScopeId = HMAC(secret, canonical workspace path)` (never uploaded). Maintainer wording: "participating workspaces" / "daily-workspace observations". See ADR-0021 §2.0.
+
 **Telemetry Unit = the PD installation** — the `~/.pd` home boundary (home-dir root that holds `install.json`, and for legacy installs is created on first telemetry enable). All maintainer-facing wording says **"participating installations"** (never "users").
 
 Justification (verified):
 1. It is the only durable boundary shared by both hosts across all workspaces.
 2. Consent is a machine/user-scope decision (one consent, not one nag per workspace).
 3. Feature flags are per-workspace (`{workspace}/.pd/config.yaml`, ADR-0016) — a workspace-keyed unit would overcount flag-gated state; the release feature flag is read for the **resolved workspace** and ANDed with machine-scope consent.
-4. The daily snapshot is derived from the **resolved workspace's** durable facts (typical installations have one primary workspace). Documented as: *snapshot describes the telemetry unit's active workspace*.
+4. The daily snapshot is derived from the **resolved workspace's** durable facts (typical installations have one primary workspace). Documented as: *snapshot describes the telemetry unit's active workspace*. *(Superseded by the review correction above: point 4's "typical single workspace" assumption does not hold as a measurement contract.)*
 
 ## 4. Authority Matrix (verified durable sources)
 

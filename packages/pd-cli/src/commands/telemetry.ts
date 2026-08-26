@@ -2,9 +2,10 @@
  * pd telemetry — Anonymous Product Telemetry v1 control plane
  * (PRI-597, SPEC §40-§43).
  *
- * Consent lives at the installation level (~/.pd/product-telemetry.json via
- * host-runtime). The release feature flag (anonymous_product_telemetry) is an
- * INDEPENDENT gate read from the resolved workspace's .pd/config.yaml.
+ * Consent lives at the machine level (~/.pd/product-telemetry.json via
+ * host-runtime); measurement (daily ID, dedup, retry, lock) is
+ * workspace-scoped. The release feature flag (anonymous_product_telemetry)
+ * is an INDEPENDENT gate read from the resolved workspace's .pd/config.yaml.
  *
  * Commands:
  *   pd telemetry status   — gates, consent, eligibility, bounded export status
@@ -97,7 +98,7 @@ function formatStatusText(output: TelemetryStatusOutput): string {
   if (output.nextRetryAt) lines.push(`next retry: ${output.nextRetryAt}`);
   lines.push(`collector: ${output.endpoint}`);
   lines.push('');
-  lines.push('Collects: PD version, anonymous boolean milestones, coarse reliability.');
+  lines.push('Collects: PD version, anonymous tri-state milestones (true/false/unavailable), coarse reliability.');
   lines.push('Never collects: conversations, code/files, Principle content, Pain content.');
   if (output.nextAction) lines.push(`Next action: ${output.nextAction}`);
   return lines.join('\n');
@@ -120,7 +121,7 @@ function formatPreviewText(output: TelemetryPreviewOutput): string {
   lines.push('');
   lines.push(JSON.stringify(output.snapshot, null, 2));
   lines.push('');
-  lines.push(`Collected: PD version, anonymous boolean milestones, coarse reliability.`);
+    lines.push(`Collected: PD version, anonymous tri-state milestones (true/false/unavailable), coarse reliability.`);
   lines.push(`Never collected: conversations, code/files, Principle content, Pain content.`);
   lines.push(`Gates: flag=${output.gates.flagEnabled ?? 'unresolved'} consent=${output.gates.consent} environment=${output.gates.environmentSuppressed ? 'suppressed' : 'eligible'} → wouldExport=${output.gates.canExport}`);
   if (output.notes.length > 0) {
