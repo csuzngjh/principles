@@ -1,6 +1,6 @@
 # Principles Disciple 文档索引
 
-> 本文件是 docs/ 目录的导航索引。公开 docs 全部被 git 跟踪;私人 docs 在独立仓库,通过 `docs/.private/` junction 透明访问。
+> 本文件是 docs/ 目录的导航索引。公开 docs 全部被 git 跟踪;私人 docs 在独立仓库,通过 `$PD_PRIVATE_DOCS_DIR`(环境变量,默认 `~/principles-private/docs`)直接访问。
 
 ## 公开文档(本仓库)
 
@@ -42,29 +42,31 @@
 
 ## 私人文档(独立仓库)
 
-私人 docs 在独立 git 仓库 `D:/Code/principles-private/`,通过 `docs/.private/` junction 透明访问。
+私人 docs 在独立 git 仓库 `D:/Code/principles-private/`(路径由 `$PD_PRIVATE_DOCS_DIR` 覆盖),**直接读取私有仓库路径**,不再使用 `docs/.private/` junction。
 
 子目录:agents/、articles/、configuration/、design/、exemplars/、memory/、okr/、operator/、pd-runtime-v2/、product/、prototypes/、quality-reports/、reports/、reviews/、runbooks/、troubleshooting/、user/
 
 常用私人 docs:
-- `docs/.private/agents/issue-tracker.md` — Linear 工作流
-- `docs/.private/agents/triage-labels.md` — 分诊标签
-- `docs/.private/agents/domain.md` — 领域文档工作流
-- `docs/.private/product/emotional-value.md` — 情绪价值设计准则
-- `docs/.private/exemplars/` — PR review exemplars
+- `$PD_PRIVATE_DOCS_DIR/agents/issue-tracker.md` — Linear 工作流
+- `$PD_PRIVATE_DOCS_DIR/agents/triage-labels.md` — 分诊标签
+- `$PD_PRIVATE_DOCS_DIR/agents/domain.md` — 领域文档工作流
+- `$PD_PRIVATE_DOCS_DIR/product/emotional-value.md` — 情绪价值设计准则
+- `$PD_PRIVATE_DOCS_DIR/exemplars/` — PR review exemplars
 
 ## AI 助手访问规则
 
 - 公开 docs:直接通过 `docs/<path>` 访问
-- 私人 docs:通过 `docs/.private/<path>` junction 访问
-- **禁止**在主 worktree 运行 `git clean -fdx`、`git stash -a`、`git checkout -f`(会破坏 junction 和未跟踪私人 docs)
-- 如果 `docs/.private/` 丢失,运行 `node scripts/setup-private-docs-symlink.mjs` 重建
+- 私人 docs:直接读 `$PD_PRIVATE_DOCS_DIR/<path>`(环境变量,默认 `~/principles-private/docs`);**主仓库内不存在 `docs/.private/`**
+- **搜索**:私有 docs 在主仓库目录树外,`rg`/grep 搜不到——需要搜索时到私有仓库目录内执行
+- **修改**:只改私有仓库内的文件,并在私有仓库 commit + push;不得在主仓库创建私有内容副本
+- **隐私**:公开 PR/issue/commit message 不得粘贴私有 docs 正文,只能引用路径
+- **验证**:运行 `node scripts/setup-private-docs-symlink.mjs --check` 确认私有 docs 路径可解析(只打印,不创建)
 
 ## 自动化校验
 
 `npm run check:docs-structure` 校验以下不变量(已集成到 `verify:merge`):
 
-1. `docs/.private/` 下无 git 跟踪文件(防止 junction 失效后私人 docs 被误提交)
+1. `docs/.private/` 下无 git 跟踪文件(主仓库不跟踪任何私有内容,应为 0)
 2. 9 个关键 docs 文件存在(导航索引引用的路径,防止路径被意外改动)
 3. `docs/` 根目录无散落 `.md` 文件(除 README.md,所有文档应归入 4 层子目录)
 

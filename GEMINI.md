@@ -75,16 +75,13 @@ The `record-error` skill handles: classify → number → Linear comment → tag
 - `docs/adr/` — Architecture Decision Records
 - `CLAUDE.md` — Full project guidance (also applies to you)
 
-## Private Docs Access (Symlink)
+## Private Docs Access
 
-Private docs live in an independent git repo (example path: `D:/Code/principles-private/` — adjust per your environment) and are accessed transparently via the `docs/.private/` junction:
-- `docs/.private/agents/issue-tracker.md` (issue tracker workflow)
-- `docs/.private/agents/triage-labels.md` (triage labels)
-- `docs/.private/agents/domain.md` (domain workflow)
-- `docs/.private/product/emotional-value.md` (emotional value guideline)
-- `docs/.private/exemplars/` (PR review exemplars)
-- ... etc (see `docs/.private/README.md`)
+Private docs live in an **independent private git repo** — they are NOT tracked in this repo and are never committed here.
 
-**CRITICAL: Never run `git clean -fdx`, `git stash -a`, or `git checkout -f` in the main worktree** — these will destroy the junction and untrack private docs.
-
-If `docs/.private/` is missing, run `node scripts/setup-private-docs-symlink.mjs` to recreate.
+- **Location**: `$PD_PRIVATE_DOCS_DIR` (env var) if set, otherwise `~/principles-private/docs` (e.g. `D:/Code/principles-private/docs`)
+- **Read**: read files directly from that path (e.g. `$PD_PRIVATE_DOCS_DIR/agents/domain.md`). There is **no** `docs/.private/` junction anymore.
+- **Search**: private docs are outside this repo tree — `rg`/grep in this repo does NOT cover them. Run searches inside the private docs directory.
+- **Edit rule**: modify private docs **only inside the private repo**, then commit + push there (`git -C <private-repo> ...`). Never create copies of private content inside this repo.
+- **Privacy**: never paste private doc content into public PRs/issues/commit messages — reference paths only.
+- **Verify**: if unsure whether private docs are reachable, run `node scripts/setup-private-docs-symlink.mjs --check` (prints the resolved path, creates nothing).

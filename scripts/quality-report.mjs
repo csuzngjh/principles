@@ -4,7 +4,8 @@
  * Quality Report Generator
  *
  * Aggregates quality metrics from multiple sources and outputs a Markdown
- * monthly report to docs/.private/quality-reports/YYYY-MM.md (via symlink to private repo).
+ * monthly report to the private docs repo (PD_PRIVATE_DOCS_DIR or
+ * ~/principles-private/docs/quality-reports/YYYY-MM.md).
  *
  * Data sources:
  *   1. ERR data:        docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md
@@ -25,6 +26,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -399,8 +401,14 @@ function main() {
     month: args.month,
   });
 
-  // Write output
-  const outputPath = args.output || join(ROOT, 'docs', '.private', 'quality-reports', `${args.month}.md`);
+  // Write output — default to private docs repo (PD_PRIVATE_DOCS_DIR or ~/principles-private/docs)
+  let defaultOutDir;
+  if (process.env.PD_PRIVATE_DOCS_DIR && process.env.PD_PRIVATE_DOCS_DIR.length > 0) {
+    defaultOutDir = join(process.env.PD_PRIVATE_DOCS_DIR, 'quality-reports');
+  } else {
+    defaultOutDir = join(os.homedir(), 'principles-private', 'docs', 'quality-reports');
+  }
+  const outputPath = args.output || join(defaultOutDir, `${args.month}.md`);
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
