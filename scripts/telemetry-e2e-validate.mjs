@@ -41,13 +41,16 @@ const core = await import('@principles/core/runtime-v2');
 const {
   buildProductTelemetrySnapshot,
   deriveDailyTelemetryId,
+  deriveWorkspaceScopeId,
   generateTelemetrySecretHex,
   bucketDateFromTime,
 } = core;
 
 const secret = generateTelemetrySecretHex();
 const today = bucketDateFromTime(Date.now());
-const dailyId = deriveDailyTelemetryId(secret, today);
+// One simulated workspace (measurement unit = workspace; review remediation).
+const scopeId = deriveWorkspaceScopeId(secret, '/e2e/validation-workspace');
+const dailyId = deriveDailyTelemetryId(secret, scopeId, today);
 
 function snapshot(overrides = {}) {
   return buildProductTelemetrySnapshot({
@@ -101,8 +104,8 @@ await post('valid snapshot accepted', snapshot(), 204);
 // 3. Same-day duplicate accepted (idempotent; D1 upsert keeps one row)
 await post('same-day duplicate idempotent', snapshot(), 204);
 
-// 4. Different secret (different unit) same day accepted
-await post('second unit accepted', snapshot({ dailyTelemetryId: deriveDailyTelemetryId(generateTelemetrySecretHex(), today) }), 204);
+// 4. Different secret (different workspace) same day accepted
+await post('second workspace accepted', snapshot({ dailyTelemetryId: deriveDailyTelemetryId(generateTelemetrySecretHex(), scopeId, today) }), 204);
 
 // 5. Strict schema rejections
 const tampered = snapshot();
@@ -126,9 +129,9 @@ if (values['signals-token']) {
   const withToken = await getSignals('signals view authorized', values['signals-token'], 200);
   if (withToken.pass) {
     const checks = [
-      ['permanent warning', withToken.text.includes('must not be interpreted as the complete PD user population')],
-      ['honest unit wording', withToken.text.includes('participating telemetry units')],
-      ['no user wording', !/\busers\b/i.test(withToken.text)],
+      ['permanent warning', withToken.text.includes('must not be interpreted as the complete PD population')],
+      ['honest unit wording', withToken.text.includes('participating workspaces')],
+      ['no installation/user wording', !/\b(users|installations)\b/i.test(withToken.text)],
       ['effect not improvement', withToken.text.includes('Effect receipt observed')],
       ['validation units counted', withToken.text.includes('0.0.0-e2e-validation')],
     ];

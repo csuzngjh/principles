@@ -1,6 +1,6 @@
 /**
  * Product telemetry service — Anonymous Product Telemetry v1
- * (PRI-597/598/599 orchestration).
+ * (PRI-597/598/599 orchestration; review remediation: workspace unit).
  *
  * Single seam for the CLI control plane (`pd telemetry status/enable/disable/
  * preview/reset`) and the two fire-and-forget export triggers (OpenClaw plugin
@@ -10,8 +10,11 @@
  *             AND consent granted (~/.pd/product-telemetry.json)
  *             AND environment not suppressed (eligibility.ts)
  *
- * Telemetry Unit = the PD installation (home dir). The daily snapshot is
- * derived from the resolved workspace's durable facts.
+ * Scope model (review remediation P1-1): the MEASUREMENT UNIT is the
+ * workspace. Consent, consentVersion, and the telemetry secret are
+ * machine-scope; the daily identity, dedup, retry bookkeeping, and export
+ * lock are workspace-scope. One workspace's success/backoff/lock never
+ * suppresses another workspace on the same installation.
  */
 
 import fs from 'node:fs';
@@ -33,21 +36,24 @@ import {
   defaultProductTelemetryControlState,
   getProductTelemetryStatePath,
   grantedControlState,
+  pruneWorkspaceExports,
   readProductTelemetryControlState,
   resetControlState,
   writeProductTelemetryControlState,
   type ProductTelemetryConsent,
   type ProductTelemetryControlState,
+  type WorkspaceExportState,
 } from './consent-store.js';
 import { computeTelemetryEnvironment, type TelemetrySuppressionReason } from './eligibility.js';
 import { DEFAULT_PRODUCT_TELEMETRY_ENDPOINT, exportSnapshot, nextRetryDelayMs, type TelemetryFetchFn } from './exporter.js';
 import { readMilestoneFacts } from './milestone-readers.js';
+import { workspaceExportLockPath, workspaceScopeIdFor } from './workspace-scope.js';
 
 export const ANONYMOUS_PRODUCT_TELEMETRY_FLAG = 'anonymous_product_telemetry';
 export const PD_TELEMETRY_DISABLED_ENV = 'PD_TELEMETRY_DISABLED';
 export const PREVIEW_BANNER = 'Preview only. Nothing was sent.';
 
-/** Hard cap on export attempts per UTC day (1 initial + 4 retries; review round 2). */
+/** Hard cap on export attempts per UTC day per workspace (1 initial + 4 retries; review round 2). */
 export const MAX_DAILY_EXPORT_ATTEMPTS = 5;
 
 /** A lock older than this is treated as orphaned (holder crashed) and taken over. */
@@ -59,14 +65,16 @@ interface ExportLock {
 }
 
 /**
- * Machine-scope cross-process export lock: exclusive create ('wx') is atomic,
- * so exactly one of N simultaneous holders wins. Stale takeover uses mtime —
- * a crashed holder can block exports for at most EXPORT_LOCK_STALE_MS. Never
- * throws: any filesystem failure degrades to "not acquired" (telemetry skips,
- * PD unaffected).
+ * Per-workspace cross-process export lock: exclusive create ('wx') is atomic,
+ * so exactly one of N simultaneous holders wins — and the lock name embeds
+ * only the opaque scope key, so workspace A's in-flight export never blocks
+ * workspace B's (review remediation P1-1). Stale takeover uses mtime — a
+ * crashed holder can block that workspace for at most EXPORT_LOCK_STALE_MS.
+ * Never throws: any filesystem failure degrades to "not acquired"
+ * (telemetry skips, PD unaffected).
  */
-function tryAcquireExportLock(homeDir: string): ExportLock {
-  const lockPath = `${getProductTelemetryStatePath(homeDir)}.export-lock`;
+function tryAcquireExportLock(stateFilePath: string, workspaceScopeId: string): ExportLock {
+  const lockPath = workspaceExportLockPath(stateFilePath, workspaceScopeId);
   const create = (): boolean => {
     try {
       const fd = fs.openSync(lockPath, 'wx');
@@ -252,19 +260,27 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
   }
 
   return {
-    /** Machine-scope status for `pd telemetry status`. Never exposes the secret. */
+    /** Status for `pd telemetry status`. Never exposes the secret. */
     getStatus(workspaceDir?: string): { ok: true; view: ProductTelemetryStatusView } | { ok: false; reason: string; nextAction: string } {
       const read = readProductTelemetryControlState(homeDir());
       if (!read.ok) return read;
       const gates = gatesFor(read.state, workspaceDir);
+      // Export bookkeeping is workspace-scoped: show this workspace's entry
+      // (when a workspace was given and its scope can be derived).
+      let workspaceEntry: WorkspaceExportState | undefined;
+      const storedSecret = read.state.telemetrySecret;
+      if (workspaceDir !== undefined && isValidTelemetrySecretHex(storedSecret)) {
+        const scopeKey = workspaceScopeIdFor(storedSecret, workspaceDir);
+        workspaceEntry = read.state.workspaceExports?.[scopeKey];
+      }
       const view: ProductTelemetryStatusView = {
         ...gates,
         consentVersion: read.state.consentVersion,
         hasSecret: isValidTelemetrySecretHex(read.state.telemetrySecret),
-        ...(read.state.lastAttemptedAt !== undefined ? { lastAttemptedAt: read.state.lastAttemptedAt } : {}),
-        ...(read.state.lastSucceededAt !== undefined ? { lastSucceededAt: read.state.lastSucceededAt } : {}),
-        ...(read.state.lastFailureCode !== undefined ? { lastFailureCode: read.state.lastFailureCode } : {}),
-        ...(read.state.nextRetryAt !== undefined ? { nextRetryAt: read.state.nextRetryAt } : {}),
+        ...(workspaceEntry?.lastAttemptedAt !== undefined ? { lastAttemptedAt: workspaceEntry.lastAttemptedAt } : {}),
+        ...(workspaceEntry?.lastSucceededAt !== undefined ? { lastSucceededAt: workspaceEntry.lastSucceededAt } : {}),
+        ...(workspaceEntry?.lastFailureCode !== undefined ? { lastFailureCode: workspaceEntry.lastFailureCode } : {}),
+        ...(workspaceEntry?.nextRetryAt !== undefined ? { nextRetryAt: workspaceEntry.nextRetryAt } : {}),
         endpoint: deps.endpoint ?? DEFAULT_PRODUCT_TELEMETRY_ENDPOINT,
         ...(nextActionFor(gates) !== undefined ? { nextAction: nextActionFor(gates) } : {}),
       };
@@ -279,15 +295,15 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
       const timestamp = now();
       const bucketDate = bucketDateFromTime(timestamp);
       const secretEphemeral = !isValidTelemetrySecretHex(state.telemetrySecret);
-      // Without a stored secret there is no stable daily ID; an ephemeral
-      // secret keeps the preview shape exact while the note says the ID would
-      // differ after enable.
-      const secret =
-        state.telemetrySecret ?? deriveDailyTelemetryId(`${bucketDate}-ephemeral`, bucketDate).padEnd(64, '0').slice(0, 64);
+      // Without a stored secret there is no stable daily ID; an all-zero
+      // hex placeholder keeps the preview shape exact while the note says
+      // the ID would differ after enable.
+      const secret = state.telemetrySecret ?? '0'.repeat(64);
+      const scopeKey = workspaceScopeIdFor(secret, workspaceDir);
       const install = resolveInstallContext(homeDir());
       const { facts, notes } = readMilestoneFacts(workspaceDir);
       const snapshot = buildProductTelemetrySnapshot({
-        dailyTelemetryId: deriveDailyTelemetryId(secret, bucketDate),
+        dailyTelemetryId: deriveDailyTelemetryId(secret, scopeKey, bucketDate),
         bucketDate,
         pdVersion: install.pdVersion,
         hostKind: install.hostKind,
@@ -343,10 +359,12 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
      * One gate-checked export attempt for a normal-activity trigger.
      * Never throws; every path returns a structured outcome.
      *
-     * Concurrency: a machine-scope lock file (`product-telemetry.json.export-lock`)
-     * closes the read→send→write race between simultaneous triggers (OpenClaw
-     * gateway init + pd-console startup in different processes). Stale locks
-     * (crashed holder) are taken over after EXPORT_LOCK_STALE_MS.
+     * Concurrency: a per-workspace lock file
+     * (`product-telemetry.json.export-lock.<scopeId>`) closes the read→send→
+     * write race between simultaneous triggers (OpenClaw gateway init +
+     * pd-console startup in different processes) WITHOUT coupling unrelated
+     * workspaces. Stale locks (crashed holder) are taken over after
+     * EXPORT_LOCK_STALE_MS.
      */
     async maybeExportDaily(workspaceDir: string): Promise<MaybeExportOutcome> {
       const read = readProductTelemetryControlState(homeDir());
@@ -366,42 +384,53 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
         logger.warn?.('[PD:Telemetry] Export skipped: telemetry secret missing/invalid. Run: pd telemetry enable --confirm');
         return { attempted: false, skipReason: 'secret_missing' };
       }
+      const secret = state.telemetrySecret;
       const timestamp = now();
       const bucketDate = bucketDateFromTime(timestamp);
-      if (state.lastSucceededAt !== undefined && bucketDateFromTime(Date.parse(state.lastSucceededAt)) === bucketDate) {
+      const scopeKey = workspaceScopeIdFor(secret, workspaceDir);
+      const workspaceEntry = state.workspaceExports?.[scopeKey];
+      if (workspaceEntry?.lastSucceededAt !== undefined && bucketDateFromTime(Date.parse(workspaceEntry.lastSucceededAt)) === bucketDate) {
         return { attempted: false, skipReason: 'already_succeeded_today' };
       }
-      if (state.nextRetryAt !== undefined && timestamp < Date.parse(state.nextRetryAt)) {
+      if (workspaceEntry?.nextRetryAt !== undefined && timestamp < Date.parse(workspaceEntry.nextRetryAt)) {
         return { attempted: false, skipReason: 'retry_backoff' };
       }
       // Hard daily attempt cap (review round 2): the 1h/6h backoff alone
       // permits up to 5 attempts on a bad day (0h/1h/7h/13h/19h); the counter
-      // makes the bound explicit and independent of clock skew.
-      const priorAttempts = state.attemptBucketDate === bucketDate ? (state.dailyAttemptCount ?? 0) : 0;
+      // makes the bound explicit and independent of clock skew. Per-workspace.
+      const priorAttempts = workspaceEntry?.attemptBucketDate === bucketDate ? (workspaceEntry?.dailyAttemptCount ?? 0) : 0;
       if (priorAttempts >= MAX_DAILY_EXPORT_ATTEMPTS) {
         return { attempted: false, skipReason: 'daily_attempt_cap' };
       }
 
-      const lock = tryAcquireExportLock(homeDir());
+      const lock = tryAcquireExportLock(getProductTelemetryStatePath(homeDir()), scopeKey);
       if (!lock.acquired || lock.lockPath === undefined) {
-        // Another process is mid-export; it will record shared-day success and
-        // our next trigger will see already_succeeded_today.
-        logger.info?.('[PD:Telemetry] Export skipped: another export is in flight (lock busy).');
+        // Another process is mid-export for THIS workspace; it will record
+        // shared-day success and our next trigger will see
+        // already_succeeded_today.
+        logger.info?.('[PD:Telemetry] Export skipped: another export is in flight for this workspace (lock busy).');
         return { attempted: false, skipReason: 'export_lock_busy' };
       }
       try {
         // Re-read inside the lock: the lock holder before us may have just
         // succeeded for today (fresh state beats the stale pre-lock copy).
         const fresh = readProductTelemetryControlState(homeDir());
-        if (fresh.ok && fresh.state.lastSucceededAt !== undefined && bucketDateFromTime(Date.parse(fresh.state.lastSucceededAt)) === bucketDate) {
-          return { attempted: false, skipReason: 'already_succeeded_today' };
+        const freshSecret = fresh.ok ? fresh.state.telemetrySecret : undefined;
+        const effectiveState =
+          fresh.ok && freshSecret === secret
+            ? fresh.state
+            : state;
+        if (isValidTelemetrySecretHex(effectiveState.telemetrySecret)) {
+          const freshEntry = effectiveState.workspaceExports?.[scopeKey];
+          if (freshEntry?.lastSucceededAt !== undefined && bucketDateFromTime(Date.parse(freshEntry.lastSucceededAt)) === bucketDate) {
+            return { attempted: false, skipReason: 'already_succeeded_today' };
+          }
         }
-        const effectiveState = fresh.ok ? fresh.state : state;
 
         const install = resolveInstallContext(homeDir());
         const { facts } = readMilestoneFacts(workspaceDir);
         const snapshot = buildProductTelemetrySnapshot({
-          dailyTelemetryId: deriveDailyTelemetryId(effectiveState.telemetrySecret ?? state.telemetrySecret, bucketDate),
+          dailyTelemetryId: deriveDailyTelemetryId(secret, scopeKey, bucketDate),
           bucketDate,
           pdVersion: install.pdVersion,
           hostKind: install.hostKind,
@@ -422,26 +451,28 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
           ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
         });
 
+        const priorEntry = effectiveState.workspaceExports?.[scopeKey];
         const failedRecently =
-          effectiveState.lastAttemptedAt !== undefined && timestamp - Date.parse(effectiveState.lastAttemptedAt) < 24 * 60 * 60 * 1000;
-        const nextState: ProductTelemetryControlState = result.ok
+          priorEntry?.lastAttemptedAt !== undefined && timestamp - Date.parse(priorEntry.lastAttemptedAt) < 24 * 60 * 60 * 1000;
+        const nextEntry: WorkspaceExportState = result.ok
           ? {
-              ...effectiveState,
               lastAttemptedAt: new Date(timestamp).toISOString(),
               lastSucceededAt: new Date(timestamp).toISOString(),
-              lastFailureCode: undefined,
-              nextRetryAt: undefined,
-              dailyAttemptCount: undefined,
-              attemptBucketDate: undefined,
             }
           : {
-              ...effectiveState,
               lastAttemptedAt: new Date(timestamp).toISOString(),
               lastFailureCode: result.code,
               nextRetryAt: new Date(timestamp + nextRetryDelayMs(failedRecently)).toISOString(),
               dailyAttemptCount: priorAttempts + 1,
               attemptBucketDate: bucketDate,
             };
+        // Prune stale workspace bookkeeping before the write (bounded local
+        // operational state), then merge this workspace's entry.
+        const pruned = pruneWorkspaceExports(effectiveState, timestamp);
+        const nextState: ProductTelemetryControlState = {
+          ...pruned,
+          workspaceExports: { ...(pruned.workspaceExports ?? {}), [scopeKey]: nextEntry },
+        };
         const written = writeProductTelemetryControlState(homeDir(), nextState);
         if (!written.ok) {
           logger.warn?.(`[PD:Telemetry] Export ${result.ok ? 'succeeded' : `failed (${result.code})`} but control state could not be persisted: ${written.reason}`);
@@ -450,7 +481,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
           logger.info?.('[PD:Telemetry] Daily anonymous product telemetry snapshot exported.');
           return { attempted: true, ok: true, httpStatus: result.status };
         }
-        logger.warn?.(`[PD:Telemetry] Export failed (${result.code}); next retry after ${nextState.nextRetryAt}. PD behavior is unaffected.`);
+        logger.warn?.(`[PD:Telemetry] Export failed (${result.code}); next retry after ${nextEntry.nextRetryAt}. PD behavior is unaffected.`);
         return { attempted: true, ok: false, failureCode: result.code };
       } finally {
         releaseExportLock(lock.lockPath);

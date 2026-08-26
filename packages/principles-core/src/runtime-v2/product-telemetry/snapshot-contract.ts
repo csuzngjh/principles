@@ -1,6 +1,6 @@
 /**
  * Product telemetry snapshot contract — Anonymous Product Telemetry v1
- * (PRI-598, SPEC §23-§34).
+ * (PRI-598, SPEC §23-§34; review remediation: tri-state milestone facts).
  *
  * Pure contract: schema, strict validator, and snapshot builder. No I/O.
  * Durable-fact readers live in host-runtime (I/O boundary); this module only
@@ -9,9 +9,16 @@
  * Privacy invariants enforced here:
  * - Exact-key strictness: unknown top-level or nested fields are validation
  *   errors (mirrored by the collector, which must reject them with 400).
- * - Only boolean milestones — no counts, no content, no paths.
+ * - Only boolean-or-null milestones — no counts, no content, no paths.
  * - A privacy guard makes schema scope creep (fields whose names carry
  *   prohibited concepts) fail tests, not just review.
+ *
+ * Tri-state semantics (measurement honesty — "Unknown ≠ false"):
+ * - `true`  = source evaluable AND evidence observed;
+ * - `false` = source evaluable AND no evidence observed;
+ * - `null`  = source not currently evaluable (missing/unreadable/degraded).
+ * A null milestone is excluded from the dashboard denominator — it must
+ * never be summed, counted as 0, or interpreted as "not observed".
  */
 
 import { Type, type Static } from '@sinclair/typebox';
@@ -27,6 +34,11 @@ export type ProductTelemetryHostKind = (typeof PRODUCT_TELEMETRY_HOST_KINDS)[num
 /** Bounded PD version (npm version string, e.g. "1.218.0"). */
 export const PRODUCT_TELEMETRY_PD_VERSION_MAX_LENGTH = 32;
 
+/** A milestone or reliability fact: observed true / evaluated false / unavailable null. */
+export type TelemetryFact = boolean | null;
+
+const TelemetryFactSchema = Type.Union([Type.Boolean(), Type.Null()]);
+
 export const ProductTelemetrySnapshotV1Schema = Type.Object({
   schemaVersion: Type.Literal(PRODUCT_TELEMETRY_SNAPSHOT_SCHEMA_VERSION),
   dailyTelemetryId: Type.String(),
@@ -34,15 +46,15 @@ export const ProductTelemetrySnapshotV1Schema = Type.Object({
   pdVersion: Type.String({ maxLength: PRODUCT_TELEMETRY_PD_VERSION_MAX_LENGTH }),
   hostKind: Type.Union([Type.Literal('openclaw'), Type.Literal('codex'), Type.Literal('other')]),
   milestones: Type.Object({
-    initialized: Type.Boolean(),
-    painObserved: Type.Boolean(),
-    principleObserved: Type.Boolean(),
-    activationObserved: Type.Boolean(),
-    presenceReceiptObserved: Type.Boolean(),
-    effectReceiptObserved: Type.Boolean(),
+    initialized: TelemetryFactSchema,
+    painObserved: TelemetryFactSchema,
+    principleObserved: TelemetryFactSchema,
+    activationObserved: TelemetryFactSchema,
+    presenceReceiptObserved: TelemetryFactSchema,
+    effectReceiptObserved: TelemetryFactSchema,
   }),
   reliability: Type.Object({
-    initializationFailed: Type.Boolean(),
+    initializationFailed: TelemetryFactSchema,
   }),
   consentVersion: Type.String(),
 });
@@ -117,6 +129,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** `true` / `false` / `null` (null = source unavailable — never "observed false"). */
+function isTelemetryFact(value: unknown): value is TelemetryFact {
+  return value === null || typeof value === 'boolean';
+}
+
 /**
  * Strict validation of an untrusted parsed snapshot (EP-01: unknown until
  * proven). Rejects unknown keys at both levels, wrong types, malformed
@@ -175,8 +192,8 @@ export function validateProductTelemetrySnapshot(raw: unknown): SnapshotValidati
       }
     }
     for (const key of MILESTONE_KEYS) {
-      if (!Object.hasOwn(milestones, key) || typeof milestones[key] !== 'boolean') {
-        errors.push(`milestones.${key} must be a boolean`);
+      if (!Object.hasOwn(milestones, key) || !isTelemetryFact(milestones[key])) {
+        errors.push(`milestones.${key} must be a boolean or null`);
       }
     }
   }
@@ -190,8 +207,8 @@ export function validateProductTelemetrySnapshot(raw: unknown): SnapshotValidati
         errors.push(`unknown reliability field '${key}'`);
       }
     }
-    if (!Object.hasOwn(reliability, 'initializationFailed') || typeof reliability.initializationFailed !== 'boolean') {
-      errors.push('reliability.initializationFailed must be a boolean');
+    if (!Object.hasOwn(reliability, 'initializationFailed') || !isTelemetryFact(reliability.initializationFailed)) {
+      errors.push('reliability.initializationFailed must be a boolean or null');
     }
   }
 
@@ -208,6 +225,9 @@ export function validateProductTelemetrySnapshot(raw: unknown): SnapshotValidati
   if (hostKind === undefined || milestonesInput === undefined || reliabilityInput === undefined) {
     return { ok: false, errors: ['schema fields failed post-validation narrowing'] };
   }
+  // Guard-narrowed copy that PRESERVES null facts (an `=== true` collapse here
+  // would silently turn "unavailable" into "observed false").
+  const fact = (value: unknown): TelemetryFact => (value === null ? null : value === true);
   return {
     ok: true,
     value: {
@@ -217,34 +237,34 @@ export function validateProductTelemetrySnapshot(raw: unknown): SnapshotValidati
       pdVersion: typeof raw.pdVersion === 'string' ? raw.pdVersion : '',
       hostKind,
       milestones: {
-        initialized: milestonesInput.initialized === true,
-        painObserved: milestonesInput.painObserved === true,
-        principleObserved: milestonesInput.principleObserved === true,
-        activationObserved: milestonesInput.activationObserved === true,
-        presenceReceiptObserved: milestonesInput.presenceReceiptObserved === true,
-        effectReceiptObserved: milestonesInput.effectReceiptObserved === true,
+        initialized: fact(milestonesInput.initialized),
+        painObserved: fact(milestonesInput.painObserved),
+        principleObserved: fact(milestonesInput.principleObserved),
+        activationObserved: fact(milestonesInput.activationObserved),
+        presenceReceiptObserved: fact(milestonesInput.presenceReceiptObserved),
+        effectReceiptObserved: fact(milestonesInput.effectReceiptObserved),
       },
       reliability: {
-        initializationFailed: reliabilityInput.initializationFailed === true,
+        initializationFailed: fact(reliabilityInput.initializationFailed),
       },
       consentVersion: typeof raw.consentVersion === 'string' ? raw.consentVersion : '',
     },
   };
 }
 
-/** Milestone booleans derived by the host-runtime reader from durable facts. */
+/** Milestone facts derived by the host-runtime reader from durable sources. */
 export interface ProductTelemetryMilestoneInput {
-  initialized: boolean;
-  painObserved: boolean;
-  principleObserved: boolean;
-  activationObserved: boolean;
-  presenceReceiptObserved: boolean;
-  effectReceiptObserved: boolean;
+  initialized: TelemetryFact;
+  painObserved: TelemetryFact;
+  principleObserved: TelemetryFact;
+  activationObserved: TelemetryFact;
+  presenceReceiptObserved: TelemetryFact;
+  effectReceiptObserved: TelemetryFact;
 }
 
-/** Reliability booleans (coarse; no messages, no stacks, no enums). */
+/** Reliability facts (coarse; no messages, no stacks, no enums). */
 export interface ProductTelemetryReliabilityInput {
-  initializationFailed: boolean;
+  initializationFailed: TelemetryFact;
 }
 
 export interface BuildSnapshotInput {

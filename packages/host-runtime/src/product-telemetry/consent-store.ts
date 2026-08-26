@@ -1,11 +1,24 @@
 /**
  * Product telemetry control-state store — Anonymous Product Telemetry v1
- * (PRI-597, SPEC §44).
+ * (PRI-597, SPEC §44; review remediation: workspace-scoped export state).
  *
- * Persists the machine-scope telemetry control state (consent, local secret,
- * bounded export status) to `~/.pd/product-telemetry.json`. This file is
- * Telemetry Control State — it never enters Principle/Pain/receipt/governance
- * stores, and the secret never leaves the machine.
+ * Persists the telemetry control state to `~/.pd/product-telemetry.json`.
+ * This file is Telemetry Control State — it never enters
+ * Principle/Pain/receipt/governance stores, and the secret never leaves the
+ * machine.
+ *
+ * Scope model (schema v2, review remediation P1-1):
+ * - MACHINE scope: consent, consentVersion, telemetrySecret.
+ * - WORKSPACE scope: `workspaceExports[scopeId]` — per-workspace dedup,
+ *   retry, and attempt bookkeeping keyed by the opaque local scope ID
+ *   (HMAC(secret, canonical workspace path); never uploaded). One
+ *   workspace succeeding must never suppress another workspace's export.
+ *
+ * Migration from schema v1: consent, consentVersion, and telemetrySecret are
+ * preserved; legacy machine-global export bookkeeping (lastSucceededAt,
+ * retry state, attempt counters) is DISCARDED — it cannot be attributed to a
+ * workspace, and it is operational state, not a governance fact. Dropping it
+ * can cause at most one extra same-day snapshot per installation.
  */
 
 import fs from 'node:fs';
@@ -18,15 +31,23 @@ import {
 } from '@principles/core/runtime-v2';
 
 export const PRODUCT_TELEMETRY_STATE_FILENAME = 'product-telemetry.json';
-export const PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION = '1';
+export const PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION = '2';
+/** v1 files are still read (then migrated in memory and rewritten as v2). */
+export const PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION = '1';
+
+/** Hard bound on tracked workspaces so the file cannot grow unboundedly. */
+export const MAX_WORKSPACE_EXPORT_ENTRIES = 200;
+
+/**
+ * Entries untouched for this long are pruned on the next write. This is local
+ * telemetry operational state only — no workspace history is retained.
+ */
+export const WORKSPACE_EXPORT_STATE_MAX_AGE_DAYS = 30;
 
 export type ProductTelemetryConsent = 'unset' | 'granted' | 'denied';
 
-export interface ProductTelemetryControlState {
-  consent: ProductTelemetryConsent;
-  consentVersion: string;
-  /** Cryptographically random hex secret. Never uploaded. */
-  telemetrySecret?: string;
+/** Per-workspace export bookkeeping (operational state; never exported). */
+export interface WorkspaceExportState {
   lastAttemptedAt?: string;
   lastSucceededAt?: string;
   /** Coarse failure code (TelemetryFailureCode). No response bodies. */
@@ -36,6 +57,15 @@ export interface ProductTelemetryControlState {
   dailyAttemptCount?: number;
   /** UTC date bucket the dailyAttemptCount belongs to (resets on day change). */
   attemptBucketDate?: string;
+}
+
+export interface ProductTelemetryControlState {
+  consent: ProductTelemetryConsent;
+  consentVersion: string;
+  /** Cryptographically random hex secret. Never uploaded. */
+  telemetrySecret?: string;
+  /** Per-workspace export bookkeeping keyed by opaque local scope ID. */
+  workspaceExports?: Record<string, WorkspaceExportState>;
   schemaVersion: string;
 }
 
@@ -78,11 +108,43 @@ function isOptionalAttemptCount(value: unknown): value is number {
   return value === undefined || (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 99);
 }
 
+function isOptionalFailureCode(value: unknown): value is string {
+  return value === undefined || (typeof value === 'string' && value.length > 0 && value.length <= 40);
+}
+
+function isScopeKey(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{4,32}$/.test(value);
+}
+
+/** Validate one `workspaceExports` entry; collect errors under `prefix`. */
+function workspaceExportErrors(entry: Record<string, unknown>, prefix: string): string[] {
+  const errors: string[] = [];
+  for (const key of Object.keys(entry)) {
+    if (!['lastAttemptedAt', 'lastSucceededAt', 'lastFailureCode', 'nextRetryAt', 'dailyAttemptCount', 'attemptBucketDate'].includes(key)) {
+      errors.push(`${prefix}: unknown field '${key}'`);
+    }
+  }
+  if (!isOptionalIsoString(entry.lastAttemptedAt) || !isOptionalIsoString(entry.lastSucceededAt) || !isOptionalIsoString(entry.nextRetryAt)) {
+    errors.push(`${prefix}: timestamps must be parseable ISO-8601 strings (≤40 chars) when present`);
+  }
+  if (!isOptionalAttemptCount(entry.dailyAttemptCount)) errors.push(`${prefix}: dailyAttemptCount must be an integer 0–99 when present`);
+  if (!isOptionalAttemptBucketDate(entry.attemptBucketDate)) errors.push(`${prefix}: attemptBucketDate must be a valid YYYY-MM-DD UTC date when present`);
+  if (!isOptionalFailureCode(entry.lastFailureCode)) errors.push(`${prefix}: lastFailureCode must be a short non-empty string when present`);
+  return errors;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * Read and validate the control state. A missing file is the normal
  * never-configured case (defaults, existed=false). A malformed file is a
  * loud failure — silently treating it as "unset" could re-prompt or re-export
  * against the user's recorded decision (rc-3/rc-9).
+ *
+ * v1 files are migrated in memory (export bookkeeping dropped, consent
+ * identity preserved); the migration is persisted on the next write.
  */
 export function readProductTelemetryControlState(homeDir: string): ControlStateRead {
   const filePath = getProductTelemetryStatePath(homeDir);
@@ -124,25 +186,59 @@ export function readProductTelemetryControlState(homeDir: string): ControlStateR
     };
   }
   const obj = parsed as Record<string, unknown>;
+  const { schemaVersion } = obj;
+  const isV1 = schemaVersion === PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION;
+  const isV2 = schemaVersion === PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION;
+  if (!isV1 && !isV2) {
+    return {
+      ok: false,
+      reason: `product_telemetry_state_malformed: schemaVersion must be '${PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION}' or legacy '${PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION}'`,
+      nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
+    };
+  }
+  // v1 machine-global export fields exist only in v1 files; v2 files carry
+  // workspaceExports instead. Unknown keys are rejected per shape.
+  const allowedKeys = isV1
+    ? ['consent', 'consentVersion', 'telemetrySecret', 'lastAttemptedAt', 'lastSucceededAt', 'lastFailureCode', 'nextRetryAt', 'dailyAttemptCount', 'attemptBucketDate', 'schemaVersion']
+    : ['consent', 'consentVersion', 'telemetrySecret', 'workspaceExports', 'schemaVersion'];
   const errors: string[] = [];
   for (const key of Object.keys(obj)) {
-    if (!['consent', 'consentVersion', 'telemetrySecret', 'lastAttemptedAt', 'lastSucceededAt', 'lastFailureCode', 'nextRetryAt', 'dailyAttemptCount', 'attemptBucketDate', 'schemaVersion'].includes(key)) {
+    if (!allowedKeys.includes(key)) {
       errors.push(`unknown field '${key}'`);
     }
   }
   if (!isConsent(obj.consent)) errors.push('consent must be unset|granted|denied');
   if (typeof obj.consentVersion !== 'string' || obj.consentVersion.length === 0 || obj.consentVersion.length > 8) errors.push('consentVersion must be a short non-empty string');
   if (!isValidTelemetrySecretHex(obj.telemetrySecret) && obj.telemetrySecret !== undefined) errors.push('telemetrySecret must be 64 hex chars when present');
-  if (!isOptionalIsoString(obj.lastAttemptedAt) || !isOptionalIsoString(obj.lastSucceededAt) || !isOptionalIsoString(obj.nextRetryAt)) {
-    errors.push('timestamps must be parseable ISO-8601 strings (≤40 chars) when present');
-  }
-  if (!isOptionalAttemptCount(obj.dailyAttemptCount)) errors.push('dailyAttemptCount must be an integer 0–99 when present');
-  if (!isOptionalAttemptBucketDate(obj.attemptBucketDate)) errors.push('attemptBucketDate must be a valid YYYY-MM-DD UTC date when present');
-  if (obj.lastFailureCode !== undefined && (typeof obj.lastFailureCode !== 'string' || obj.lastFailureCode.length === 0 || obj.lastFailureCode.length > 40)) {
-    errors.push('lastFailureCode must be a short non-empty string when present');
-  }
-  if (typeof obj.schemaVersion !== 'string' || obj.schemaVersion !== PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION) {
-    errors.push(`schemaVersion must be '${PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION}'`);
+  if (isV1) {
+    // v1 legacy export fields are migrated by DISCARDING them — validating
+    // values that are about to be dropped would only turn a smooth migration
+    // into a hard failure (the identity fields carry the user's decision).
+    // Only the field-NAME allowlist above still applies to v1 files.
+  } else {
+    if (obj.workspaceExports !== undefined) {
+      if (typeof obj.workspaceExports !== 'object' || obj.workspaceExports === null || Array.isArray(obj.workspaceExports)) {
+        errors.push('workspaceExports must be an object');
+      } else {
+        const entries = obj.workspaceExports as Record<string, unknown>;
+        const scopeKeys = Object.keys(entries);
+        if (scopeKeys.length > MAX_WORKSPACE_EXPORT_ENTRIES) {
+          errors.push(`workspaceExports must track at most ${MAX_WORKSPACE_EXPORT_ENTRIES} workspaces`);
+        }
+        for (const scopeKey of scopeKeys) {
+          if (!isScopeKey(scopeKey)) {
+            errors.push(`workspaceExports key '${scopeKey}' must be 4–32 hex chars`);
+            continue;
+          }
+          const entry = entries[scopeKey];
+          if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+            errors.push(`workspaceExports['${scopeKey}'] must be an object`);
+            continue;
+          }
+          errors.push(...workspaceExportErrors(entry as Record<string, unknown>, `workspaceExports['${scopeKey}']`));
+        }
+      }
+    }
   }
   if (errors.length > 0) {
     return {
@@ -154,22 +250,62 @@ export function readProductTelemetryControlState(homeDir: string): ControlStateR
 
   // Post-validation reconstruction from guard-narrowed fields — no `as` on
   // the untrusted parsed object (rc-2). isConsent is a type guard; the
-  // optional-field spreads carry only guard-passing values.
+  // optional-field spreads carry only guard-passing values. v1 export
+  // bookkeeping is deliberately NOT carried over (see module doc).
   const state: ProductTelemetryControlState = {
     consent: isConsent(obj.consent) ? obj.consent : 'unset',
     consentVersion: typeof obj.consentVersion === 'string' ? obj.consentVersion : PRODUCT_TELEMETRY_CONSENT_VERSION,
     ...(isValidTelemetrySecretHex(obj.telemetrySecret) ? { telemetrySecret: obj.telemetrySecret } : {}),
-    ...(isOptionalIsoString(obj.lastAttemptedAt) && obj.lastAttemptedAt !== undefined ? { lastAttemptedAt: obj.lastAttemptedAt } : {}),
-    ...(isOptionalIsoString(obj.lastSucceededAt) && obj.lastSucceededAt !== undefined ? { lastSucceededAt: obj.lastSucceededAt } : {}),
-    ...(isOptionalIsoString(obj.nextRetryAt) && obj.nextRetryAt !== undefined ? { nextRetryAt: obj.nextRetryAt } : {}),
-    ...(typeof obj.lastFailureCode === 'string' && obj.lastFailureCode.length > 0 && obj.lastFailureCode.length <= 40
-      ? { lastFailureCode: obj.lastFailureCode }
+    ...(isV2 && isPlainRecord(obj.workspaceExports)
+      ? {
+          workspaceExports: Object.fromEntries(
+            Object.entries(obj.workspaceExports)
+              .filter(([scopeKey, entry]) => isScopeKey(scopeKey) && isPlainRecord(entry))
+              .map(([scopeKey, entry]) => {
+                const record = entry as Record<string, unknown>;
+                return [
+                  scopeKey,
+                  {
+                    ...(isOptionalIsoString(record.lastAttemptedAt) && record.lastAttemptedAt !== undefined ? { lastAttemptedAt: record.lastAttemptedAt } : {}),
+                    ...(isOptionalIsoString(record.lastSucceededAt) && record.lastSucceededAt !== undefined ? { lastSucceededAt: record.lastSucceededAt } : {}),
+                    ...(isOptionalIsoString(record.nextRetryAt) && record.nextRetryAt !== undefined ? { nextRetryAt: record.nextRetryAt } : {}),
+                    ...(isOptionalFailureCode(record.lastFailureCode) && record.lastFailureCode !== undefined ? { lastFailureCode: record.lastFailureCode } : {}),
+                    ...(isOptionalAttemptCount(record.dailyAttemptCount) && record.dailyAttemptCount !== undefined ? { dailyAttemptCount: record.dailyAttemptCount } : {}),
+                    ...(isOptionalAttemptBucketDate(record.attemptBucketDate) && record.attemptBucketDate !== undefined ? { attemptBucketDate: record.attemptBucketDate } : {}),
+                  } satisfies WorkspaceExportState,
+                ];
+              }),
+          ),
+        }
       : {}),
-    ...(isOptionalAttemptCount(obj.dailyAttemptCount) && obj.dailyAttemptCount !== undefined ? { dailyAttemptCount: obj.dailyAttemptCount } : {}),
-    ...(isOptionalAttemptBucketDate(obj.attemptBucketDate) && obj.attemptBucketDate !== undefined ? { attemptBucketDate: obj.attemptBucketDate } : {}),
     schemaVersion: PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION,
   };
+  if (state.workspaceExports !== undefined && Object.keys(state.workspaceExports).length === 0) {
+    delete state.workspaceExports;
+  }
   return { ok: true, state, existed: true };
+}
+
+/**
+ * Drop `workspaceExports` entries whose most recent activity (attempt or
+ * success) is older than WORKSPACE_EXPORT_STATE_MAX_AGE_DAYS. Bounded local
+ * operational state only — this is not a workspace history database.
+ */
+export function pruneWorkspaceExports(state: ProductTelemetryControlState, nowMs: number): ProductTelemetryControlState {
+  const exports = state.workspaceExports;
+  if (exports === undefined) return state;
+  const cutoff = nowMs - WORKSPACE_EXPORT_STATE_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const kept: Record<string, WorkspaceExportState> = {};
+  for (const [scopeKey, entry] of Object.entries(exports)) {
+    const stamps = [entry.lastAttemptedAt, entry.lastSucceededAt].filter((s): s is string => s !== undefined).map((s) => Date.parse(s));
+    const latest = stamps.length > 0 ? Math.max(...stamps) : Number.NEGATIVE_INFINITY;
+    if (Number.isNaN(latest) || latest < cutoff) continue;
+    kept[scopeKey] = entry;
+  }
+  const next: ProductTelemetryControlState = { ...state };
+  if (Object.keys(kept).length > 0) next.workspaceExports = kept;
+  else delete next.workspaceExports;
+  return next;
 }
 
 /** Atomic write (temp file + rename) so a crash never truncates the state. */
@@ -203,12 +339,7 @@ export function grantedControlState(previous: ProductTelemetryControlState): Pro
     consent: 'granted',
     consentVersion: PRODUCT_TELEMETRY_CONSENT_VERSION,
     telemetrySecret: isValidTelemetrySecretHex(previous.telemetrySecret) ? previous.telemetrySecret : generateTelemetrySecretHex(),
-    lastAttemptedAt: previous.lastAttemptedAt,
-    lastSucceededAt: previous.lastSucceededAt,
-    lastFailureCode: previous.lastFailureCode,
-    nextRetryAt: previous.nextRetryAt,
-    dailyAttemptCount: previous.dailyAttemptCount,
-    attemptBucketDate: previous.attemptBucketDate,
+    ...(previous.workspaceExports !== undefined ? { workspaceExports: previous.workspaceExports } : {}),
     schemaVersion: PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION,
   };
 }
@@ -226,7 +357,8 @@ export function deniedControlState(): ProductTelemetryControlState {
  * State after `pd telemetry reset` (SPEC §18): secret and export status are
  * deleted — no future daily ID relates to previous ones. The consent choice
  * is preserved; a fresh secret is generated only while telemetry remains
- * enabled.
+ * enabled. Workspace bookkeeping keyed under the OLD secret's scope IDs is
+ * dropped with it (the IDs are meaningless under a new secret).
  */
 export function resetControlState(previous: ProductTelemetryControlState): ProductTelemetryControlState {
   return {

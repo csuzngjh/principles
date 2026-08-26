@@ -51,10 +51,12 @@ export {
   isValidTelemetrySecretHex,
   bucketDateFromTime,
   isValidBucketDate,
+  deriveWorkspaceScopeId,
   deriveDailyTelemetryId,
   isValidDailyTelemetryId,
   TELEMETRY_SECRET_BYTES,
   DAILY_TELEMETRY_ID_HEX_LENGTH,
+  WORKSPACE_SCOPE_ID_HEX_LENGTH,
 } from './product-telemetry/daily-identity.js';
 export {
   ProductTelemetrySnapshotV1Schema,
@@ -68,6 +70,7 @@ export {
   validateProductTelemetrySnapshot,
   buildProductTelemetrySnapshot,
 } from './product-telemetry/snapshot-contract.js';
+export type { TelemetryFact } from './product-telemetry/snapshot-contract.js';
 export type {
   ProductTelemetryHostKind,
   ProductTelemetrySnapshotV1,
