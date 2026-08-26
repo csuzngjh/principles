@@ -559,12 +559,24 @@ export async function handleBeforePromptBuild(
       const eventLog = wctx.eventLog;
       const allSharedPrinciplesExcluded = sharedActivePrinciplePrompt !== undefined
         && sharedActivePrinciplePrompt.allValidatedPrinciplesExcluded;
+      // PRI-537: pair the source arrays with the INJECTED subset — dedupedV2
+      // is the full post-dedup candidate list, so raw .map() mispairs under
+      // budget truncation (rc-6-adjacent; same shape as the receipt ledger's
+      // alignActivationIds). Map-dedupe keeps 1:1 with the principleIds Set
+      // even if a build ever yields duplicate ids.
+      const injectedCandidatesById = new Map(
+        dedupedV2
+          .filter((p) => runtimeV2PrincipleIds.has(p.principleId))
+          .map((p) => [p.principleId, p] as const),
+      );
+      const alignedActivationIds = [...injectedCandidatesById.values()].map((p) => p.activationId);
+      const alignedArtifactIds = [...injectedCandidatesById.values()].map((p) => p.artifactId);
       eventLog.recordRuntimeV2ActivationsInjected({
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
         principleIds: [...runtimeV2PrincipleIds],
-        activationIds: sharedActivePrinciplePrompt?.activationIds ?? dedupedV2.map((p) => p.activationId),
-        artifactIds: sharedActivePrinciplePrompt?.artifactIds ?? dedupedV2.map((p) => p.artifactId),
+        activationIds: sharedActivePrinciplePrompt?.activationIds ?? alignedActivationIds,
+        artifactIds: sharedActivePrinciplePrompt?.artifactIds ?? alignedArtifactIds,
         injectedCount: runtimeV2PrincipleIds.size,
         skippedWarnings: v2Result.warnings,
         injectedCharCount: runtimeV2PrinciplesContent.length,

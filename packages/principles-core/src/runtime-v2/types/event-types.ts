@@ -596,6 +596,10 @@ export type RuleHostAutoCorrectAppliedEventDataStatic = Static<typeof RuleHostAu
 /**
  * runtime_v2_prompt_activations_injected — Runtime V2 prompt activations were read and injected.
  * Emitted from prompt.ts after readActivatedPrinciples() completes.
+ *
+ * Index-pairing contract (PRI-537): principleIds[i], activationIds[i] and
+ * artifactIds[i] describe the SAME injected principle — the three arrays are
+ * index-aligned and each length equals injectedCount.
  */
 export interface RuntimeV2PromptActivationsInjectedEventData {
   sessionId: string;
