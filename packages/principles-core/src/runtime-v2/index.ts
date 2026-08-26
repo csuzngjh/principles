@@ -1218,6 +1218,8 @@ export type {
   ArtifactLineageIdentity,
   ApprovalWithContext,
   ConfidenceLabel,
+  BuildPromotionEvidenceSnapshotInput,
+  PromotionEvidenceOwnerIdentity,
 } from './activation/index.js';
 
 export {
@@ -1260,6 +1262,9 @@ export {
   renderPrinciplesToDirectives,
   createProductionGateDeps,
   ApprovalCompletionService,
+  buildPromotionEvidenceSnapshot,
+  computeArtifactDigest,
+  normalizeOwnerIdentity,
 } from './activation/index.js';
 
 export type {

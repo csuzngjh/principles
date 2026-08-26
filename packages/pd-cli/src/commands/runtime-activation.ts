@@ -23,6 +23,7 @@ import {
   SqliteActivationSafetyStore,
   collectOpenClawPromotionChecks,
   summarizeRuleCodeShadowEvents,
+  buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
@@ -552,22 +553,17 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               validateProductionArtifact: value => writer.canActivate(value),
             });
           },
-          buildEvidenceSnapshot: (checks, artifact) => {
-            const createdAt = new Date().toISOString();
-            const artifactDigest = artifact
-              ? `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`
-              : request.expectedArtifactDigest;
-            const snapshotBody = JSON.stringify({ artifactDigest, checks, createdAt });
-            return {
-              snapshotId: `snapshot-${randomUUID()}`,
-              snapshotDigest: `sha256:${createHash('sha256').update(snapshotBody, 'utf8').digest('hex')}`,
-              artifactDigest,
-              lineageRefs: artifact ? [artifact.sourceTaskId, ...artifact.lineageArtifactIds] : [],
-              hostRuntimeVersion: 'openclaw-legacy@1', safetyGateResults: checks,
+          buildEvidenceSnapshot: (checks, artifact, evaluationId) => {
+            return buildPromotionEvidenceSnapshot({
+              activationId,
+              evaluationId,
+              checks,
+              artifact,
+              expectedArtifactDigest: request.expectedArtifactDigest,
+              ownerIdentity: actor,
+              hostRuntimeVersion: 'openclaw-legacy@1',
               shadowSummary: readShadowSummaryForActivation(workspaceDir, activationId),
-              configurationVersion: 'pd-config-current',
-              redaction: { version: 'v1', rawParametersStored: false }, createdAt,
-            };
+            });
           },
           newEvaluationId: () => `readiness-${randomUUID()}`,
         });

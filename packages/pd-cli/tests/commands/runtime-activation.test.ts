@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 const mockRuleHostWriterConfigs = vi.hoisted(() => [] as Array<{ featureFlagProbe?: (flagId: string) => boolean }>);
 const mockFeatureFlags = vi.hoisted(() => ({
@@ -100,7 +104,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     }),
     RuleHostWriter: vi.fn().mockImplementation(function (config) {
       mockRuleHostWriterConfigs.push(config);
-      return { channel: 'code_tool_hook' };
+      return { channel: 'code_tool_hook', canActivate: async () => ({ ok: true }) };
     }),
     resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   };
@@ -1006,6 +1010,68 @@ describe('handleRuntimeActivationPromote', () => {
     await handleRuntimeActivationPromote({ workspace: WS, activationId: 'act-hook-1', dryRun: true, confirm: true, json: true });
     expect(mockPromoteActivation).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+  });
+
+  it('P0-3: commit store failure emits structured refusal JSON and exit code 1', async () => {
+    mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
+    vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
+    vi.stubEnv('PD_OWNER_ID', 'owner-1');
+    vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'credential-1');
+
+    const artifact = makeArtifact({
+      artifactId: 'art-002',
+      lineageArtifactIds: ['task-000'],
+      contentJson: JSON.stringify({
+        principleId: 'P_001',
+        affectedTools: ['Bash'],
+        goldenTrace: {
+          traceId: 'trace-1',
+          sourcePainId: 'pain-1',
+          cases: [{ caseId: 'c1', kind: 'positive', toolName: 'Bash', params: {}, expectedDecision: 'allow' }],
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+    });
+    mockGetArtifactById.mockResolvedValue(artifact);
+    const artifactDigest = `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`;
+
+    // PRI-577 fail-loud contract: readiness is unavailable without a readable
+    // shadow telemetry source, so seed a real events file before promoting.
+    const wsDir = mkdtempSync(path.join(tmpdir(), 'pd-cli-p03-'));
+    mkdirSync(path.join(wsDir, '.pd', 'logs'), { recursive: true });
+    writeFileSync(
+      path.join(wsDir, '.pd', 'logs', 'events_20260821.jsonl'),
+      `${JSON.stringify({ type: 'rulehost_evaluated', ts: '2026-08-21T00:00:00.000Z', data: { activationId: 'act-hook-1', activationMode: 'shadow', matched: true, decision: 'allow' } })}\n`,
+      'utf8',
+    );
+
+    try {
+      await handleRuntimeActivationPromote({
+        workspace: wsDir,
+        activationId: 'act-hook-1',
+        confirm: true,
+        json: true,
+        artifactId: 'art-002',
+        artifactDigest,
+        controlVersion: 1,
+        idempotencyKey: 'promote-commit-fail-1',
+        reasonCode: 'controlled_rollout',
+        note: 'Owner accepts limited evidence for a controlled rollout.',
+      });
+
+      const output = JSON.parse(consoleLogSpy.mock.calls[0][0]) as {
+        ok: boolean; decision: string; reasonCode: string; summary?: string; nextAction?: string;
+      };
+      expect(output.ok).toBe(false);
+      expect(output.decision).toBe('refused');
+      expect(output.reasonCode).toBe('promotion_commit_failed');
+      expect(output.summary).toContain('durable safety store');
+      expect(output.nextAction).toContain('retry');
+      expect(process.exitCode).toBe(1);
+      expect(mockPromoteActivation).not.toHaveBeenCalled();
+    } finally {
+      try { rmSync(wsDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
   });
 });
 
