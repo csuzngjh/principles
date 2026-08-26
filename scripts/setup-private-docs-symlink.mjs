@@ -1,15 +1,24 @@
 // scripts/setup-private-docs-symlink.mjs
-// Cross-platform replacement for setup-private-docs-symlink.ps1.
-// Creates a junction (Windows) or symlink (Unix) at docs/.private in every
-// git worktree, pointing to the private docs repo.
+// DEPRECATED (kept as fallback only).
+//
+// The private docs access model changed: AI assistants now read the private
+// docs repo DIRECTLY via $PD_PRIVATE_DOCS_DIR (default ~/principles-private/docs).
+// There is no docs/.private junction anymore.
+//
+// This script is preserved for two purposes:
+//   1. `--check` — verify the private docs path resolves (used by
+//      setup-worktree.mjs and AI assistants to self-check access).
+//   2. Legacy junction creation — ONLY as a manual fallback for AI assistants
+//      whose sandbox cannot read paths outside the repo tree.
 //
 // Path resolution (priority):
 //   1. PD_PRIVATE_DOCS_DIR env var (absolute path)
 //   2. ~/principles-private/docs  (default)
 //
 // Usage:
-//   node scripts/setup-private-docs-symlink.mjs
-//   PD_PRIVATE_DOCS_DIR=/path/to/docs node scripts/setup-private-docs-symlink.mjs
+//   node scripts/setup-private-docs-symlink.mjs --check        # verify only
+//   node scripts/setup-private-docs-symlink.mjs                # legacy junction fallback
+//   PD_PRIVATE_DOCS_DIR=/path/to/docs node scripts/setup-private-docs-symlink.mjs --check
 //
 // Notes:
 // - Windows uses 'junction' link type — no admin/dev-mode required.
@@ -121,7 +130,31 @@ function logOk(msg) { console.log(`[ok]   ${msg}`); }
 function logSkip(msg) { console.log(`[skip] ${msg}`); }
 function logFail(msg) { console.error(`[fail] ${msg}`); }
 
-function main() {
+/**
+ * --check mode: resolve + validate the private docs path, create nothing.
+ */
+function checkOnly() {
+  const target = resolvePrivateDocsTarget();
+  const validation = validateTarget(target);
+  if (validation.ok) {
+    console.log(`Private docs path: ${target}`);
+    console.log('(verified: exists and is a directory)');
+    return 0;
+  }
+  console.error(validation.reason);
+  console.error('Fix: set PD_PRIVATE_DOCS_DIR env var, or clone the private repo so that');
+  console.error('     ~/principles-private/docs exists (default fallback path).');
+  return 1;
+}
+
+/**
+ * Legacy mode: create docs/.private junction in every worktree (fallback only).
+ */
+function createJunctions() {
+  console.warn('[deprecated] Junction-based private docs access is replaced by direct path access.');
+  console.warn('  See AGENTS.md / CLAUDE.md / GEMINI.md for the new workflow.');
+  console.warn('  Use `--check` to verify the private docs path instead.\n');
+
   const target = resolvePrivateDocsTarget();
   const validation = validateTarget(target);
   if (!validation.ok) {
@@ -129,7 +162,7 @@ function main() {
     const privateRepoRoot = path.dirname(path.dirname(target));
     console.error(`请先创建独立 git 仓库: git init ${privateRepoRoot}`);
     console.error('或设置环境变量 PD_PRIVATE_DOCS_DIR 指向已存在的 docs 目录');
-    process.exit(1);
+    return 1;
   }
 
   let output;
@@ -137,7 +170,7 @@ function main() {
     output = execSync('git worktree list --porcelain', { encoding: 'utf-8' });
   } catch (err) {
     console.error(`无法获取 worktree 列表 (是否不在 git 仓库内?): ${err.message}`);
-    process.exit(1);
+    return 1;
   }
   let worktrees = parseWorktreeList(output);
   if (worktrees.length === 0) {
@@ -171,10 +204,12 @@ function main() {
 
   console.log('');
   console.log(`完成: ${created} 创建, ${skipped} 跳过, ${failed} 失败`);
-  if (failed > 0) process.exit(1);
+  return failed > 0 ? 1 : 0;
 }
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
-  main();
+  const args = process.argv.slice(2);
+  const exitCode = args.includes('--check') ? checkOnly() : createJunctions();
+  process.exit(exitCode);
 }

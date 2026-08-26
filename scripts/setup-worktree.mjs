@@ -6,7 +6,7 @@
 //   node scripts/setup-worktree.mjs                  # full setup
 //   node scripts/setup-worktree.mjs --skip-install    # skip npm install
 //   node scripts/setup-worktree.mjs --skip-build     # skip npm run build
-//   node scripts/setup-worktree.mjs --skip-private-docs  # skip docs/.private junction
+//   node scripts/setup-worktree.mjs --skip-private-docs  # skip private docs check
 //   node scripts/setup-worktree.mjs --from-hook      # invoked by post-checkout hook (skip PATH fix)
 //   node scripts/setup-worktree.mjs --dry-run        # only print actions
 //
@@ -18,12 +18,13 @@
 //
 // Solves:
 //   - Trae IDE terminal PATH bug on Windows (git/node/npm missing in shell)
-//   - New worktree missing docs/.private junction
+//   - New worktree missing private docs (direct access via PD_PRIVATE_DOCS_DIR)
 //   - New worktree missing node_modules
 //   - Forgetting to initialize a worktree, leading AI assistants to read wrong state
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { execSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -173,30 +174,24 @@ function main() {
     console.log(`      Branch: ${branch} @ ${commit}`);
   } catch { /* detached HEAD */ }
 
-  // ---- Step 3: Private docs junction ----
-  console.log('\nStep 3: Private docs junction (docs/.private)');
+  // ---- Step 3: Private docs check ----
+  console.log('\nStep 3: Private docs check');
   if (args.skipPrivateDocs) {
-    logStep('skip', 'Private docs junction (--skip-private-docs)');
+    logStep('skip', 'Private docs check (--skip-private-docs)');
   } else {
-    const junctionPath = path.join(repoRoot, 'docs', '.private');
     const setupScript = path.join(repoRoot, 'scripts', 'setup-private-docs-symlink.mjs');
-    if (fs.existsSync(junctionPath)) {
-      // Just verify it's a link; full check happens in setup-private-docs-symlink.mjs on next run
-      logStep('skip', `${junctionPath} already exists (rerun setup-private-docs-symlink.mjs to verify)`);
-    } else if (!fs.existsSync(setupScript)) {
+    if (!fs.existsSync(setupScript)) {
       logStep('fail', `${setupScript} not found`);
     } else {
-      const r = spawnSync('node', [setupScript], { stdio: 'inherit' });
+      const r = spawnSync('node', [setupScript, '--check'], { stdio: 'inherit' });
       if (r.status === 0) {
-        logStep('ok', 'Created docs/.private junction');
+        logStep('ok', 'Private docs path resolved (see output above)');
       } else {
-        logStep('fail', `setup-private-docs-symlink.mjs exited with ${r.status}`);
-        console.error('Private docs junction 创建失败。');
+        logStep('fail', `Private docs not reachable. Run setup-private-docs-symlink.mjs --check to debug.`);
+        console.error('Private docs 路径不可达。');
         console.error('可能原因:');
         console.error('  1. ~/principles-private/docs 不存在 (需先 git clone private repo)');
-        console.error('  2. private repo 工作区文件被误删 (在 private repo 运行 \'git restore docs/\')');
-        console.error('  3. 权限问题');
-        console.error('或设置 PD_PRIVATE_DOCS_DIR 环境变量指向已存在目录');
+        console.error('  2. PD_PRIVATE_DOCS_DIR 环境变量未设置或指向错误路径');
         console.error('脚本继续,但 AI 助手将无法访问 private docs。');
       }
     }
@@ -267,9 +262,12 @@ function main() {
     else logStep('fail', `  - ${f} (missing)`);
   }
 
-  const emotionalValue = path.join(repoRoot, 'docs', '.private', 'product', 'emotional-value.md');
+  const privateDocsRoot = (process.env.PD_PRIVATE_DOCS_DIR && process.env.PD_PRIVATE_DOCS_DIR.length > 0)
+    ? process.env.PD_PRIVATE_DOCS_DIR
+    : path.join(os.homedir(), 'principles-private', 'docs');
+  const emotionalValue = path.join(privateDocsRoot, 'product', 'emotional-value.md');
   if (fs.existsSync(emotionalValue)) logStep('ok', 'private docs readable (emotional-value.md OK)');
-  else logStep('skip', 'private docs not readable (run scripts/setup-private-docs-symlink.mjs manually)');
+  else logStep('skip', 'private docs not readable (set PD_PRIVATE_DOCS_DIR or clone ~/principles-private/docs)');
 
   const pnpmLock = path.join(repoRoot, 'pnpm-lock.yaml');
   const pnpmWorkspace = path.join(repoRoot, 'pnpm-workspace.yaml');

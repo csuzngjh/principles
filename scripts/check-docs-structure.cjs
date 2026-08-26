@@ -8,11 +8,13 @@ const path = require('node:path');
  * 防止 AI 助手或开发者意外破坏文档结构约定（4 层 architecture/process/runbooks/archive + .private junction）。
  *
  * 校验项：
- *   1. docs/.private/ 下无 git 跟踪文件（防止 junction 失效后私人 docs 被误提交）
+ *   1. docs/.private/ 下无 git 跟踪文件（主仓库不跟踪任何私有内容，应为 0）
  *   2. 关键 docs 文件存在（导航索引 README.md 引用的路径）
  *   3. docs/ 根目录无散落 .md 文件（除 README.md）
  *
- * Runtime Contract: rc-9-no-silent-fallback — 所有失败均带 reason + nextAction。
+ * Note: docs/.private/ junction has been removed (Aug 2026). Private docs
+ * are now accessed directly via $PD_PRIVATE_DOCS_DIR. This check still
+ * verifies that no private content is accidentally tracked in this repo.
  */
 
 const root = process.cwd();
@@ -36,7 +38,7 @@ const privateTracked = gitTrackedFiles('docs/.private/');
 if (privateTracked.length > 0) {
   errors.push(
     `docs/.private/ 下发现 ${privateTracked.length} 个被 git 跟踪的文件（应为 0）。` +
-      ` 私人 docs 在独立仓库 D:/Code/principles-private/，junction docs/.private/ 不应进 git。\n` +
+      ` 私有 docs 在独立仓库（PD_PRIVATE_DOCS_DIR），不应进主仓库。\n` +
       `  样例: ${privateTracked.slice(0, 3).join(', ')}\n` +
       `  nextAction: 运行 \`git rm --cached -r docs/.private/\` 移除跟踪，并确认 .gitignore 含 \`docs/.private/\``
   );
