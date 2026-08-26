@@ -176,12 +176,28 @@ function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyn
 }
 
 /**
+ * Run npm with array-form argv, no shell (PRI-569 hardening).
+ *
+ * On Windows `npm` is an npm.cmd shim: Node cannot spawn .cmd without a
+ * shell (EINVAL/ENOENT), so win32 routes through cmd.exe with CONSTANT argv
+ * elements — args are compile-time literals at every call site; the one
+ * external-derived value (registry version) is regex-guarded before use.
+ * Returns captured stdout (encoding utf-8).
+ */
+function execNpm(args: string[], opts?: ExecSyncOptions): string {
+  if (isWindows()) {
+    return execFileSync('cmd.exe', ['/c', 'npm', ...args], { ...opts, windowsHide: true }) as unknown as string;
+  }
+  return execFileSync('npm', args, opts) as unknown as string;
+}
+
+/**
  * 执行 npm install 并提供友好的错误提示
  */
 async function runNpmInstall(cwd: string, componentName = 'npm'): Promise<void> {
   const execOpts = getCapturingExecOptions(cwd);
   try {
-    execFileSync('npm', ['install', '--ignore-scripts', '--legacy-peer-deps'], execOpts);
+    execNpm(['install', '--ignore-scripts', '--legacy-peer-deps'], execOpts);
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e);
 
@@ -209,7 +225,7 @@ export async function rebuildNativeModules(cwd: string, componentName: string): 
     if (!existsSync(modPath)) continue;
 
     try {
-      execFileSync('npm', ['rebuild', mod], getCapturingExecOptions(cwd));
+      execNpm(['rebuild', mod], getCapturingExecOptions(cwd));
     } catch (e) {
       throw new Error(`${componentName} native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${cwd} && npm rebuild ${mod}`, { cause: e });
     }
@@ -826,7 +842,7 @@ async function installPluginDependencies(): Promise<void> {
 
 function getNpmGlobalBinDir(): string | null {
   try {
-    const prefix = execFileSync('npm', ['prefix', '-g'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const prefix = execNpm(['prefix', '-g'], { encoding: 'utf-8', stdio: 'pipe' }).trim();
     if (!prefix) return null;
     return process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
   } catch {
@@ -883,7 +899,7 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
     return;
   }
   try {
-    const npmVersion = execFileSync('npm', ['view', '@principles/pd-cli', 'version'], {
+    const npmVersion = execNpm(['view', '@principles/pd-cli', 'version'], {
       encoding: 'utf-8',
       timeout: 15_000,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -902,7 +918,7 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
     const tmpDir = path.join(installedPdCliDir, '__npm_upgrade_tmp');
     try {
       mkdirSync(tmpDir, { recursive: true });
-      execFileSync('npm', ['pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir], {
+      execNpm(['pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir], {
         encoding: 'utf-8',
         timeout: 30_000,
         stdio: ['pipe', 'pipe', 'pipe'],
