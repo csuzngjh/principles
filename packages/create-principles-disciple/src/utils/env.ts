@@ -35,6 +35,22 @@ export interface WorkspaceInfo {
 
 const IS_WIN32 = process.platform === 'win32';
 
+/** 探测超时：卡死的 .cmd shim / 挂起的二进制不应挂住安装器（rc-9 降级）。 */
+const DETECT_TIMEOUT_MS = 5000;
+
+/**
+ * 探测工具版本。失败（未安装/退出非零/超时）返回 null，调用方据此降级
+ * （能力置 false / 进入回退链），绝不抛出（rc-9）。探测函数由调用点以
+ * 字面量二进制构造，保持 Mimosa 写门要求的 literal argv。
+ */
+function probeVersion(probe: () => string): string | null {
+  try {
+    return probe().trim();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 检测运行环境
  */
@@ -47,73 +63,45 @@ export function checkEnvironment(): EnvCheckResult {
   };
 
   // 检测 Node.js
-  try {
-    result.nodeVersion = execFileSync('node', ['-v'], { encoding: 'utf-8' }).trim();
+  const nodeVersion = probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  if (nodeVersion !== null) {
+    result.nodeVersion = nodeVersion;
     result.hasNode = true;
-  } catch {
-    result.hasNode = false;
   }
 
   // 检测 OpenClaw（win32 上 openclaw 是 .cmd shim，无 .exe，须经 cmd.exe /c）
-  if (IS_WIN32) {
-    try {
-      result.openclawVersion = execFileSync('cmd.exe', ['/c', 'openclaw', '--version'], { encoding: 'utf-8' }).trim();
-      result.hasOpenClaw = true;
-    } catch {
-      // 尝试 clawd 命令
-      try {
-        result.openclawVersion = execFileSync('cmd.exe', ['/c', 'clawd', '--version'], { encoding: 'utf-8' }).trim();
-        result.hasOpenClaw = true;
-      } catch {
-        result.hasOpenClaw = false;
-      }
-    }
+  const openclawVersion = IS_WIN32
+    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'openclaw', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
+    : probeVersion(() => execFileSync('openclaw', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  if (openclawVersion !== null) {
+    result.openclawVersion = openclawVersion;
+    result.hasOpenClaw = true;
   } else {
-    try {
-      result.openclawVersion = execFileSync('openclaw', ['--version'], { encoding: 'utf-8' }).trim();
+    // 尝试 clawd 命令
+    const clawdVersion = IS_WIN32
+      ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'clawd', '--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
+      : probeVersion(() => execFileSync('clawd', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+    if (clawdVersion !== null) {
+      result.openclawVersion = clawdVersion;
       result.hasOpenClaw = true;
-    } catch {
-      // 尝试 clawd 命令
-      try {
-        result.openclawVersion = execFileSync('clawd', ['--version'], { encoding: 'utf-8' }).trim();
-        result.hasOpenClaw = true;
-      } catch {
-        result.hasOpenClaw = false;
-      }
     }
   }
 
   // 检测 Python（win32 上 python.org 安装通常只提供 python.exe，python3 可能不在 PATH）
-  if (IS_WIN32) {
-    try {
-      const [, pythonVersion] = execFileSync('python3', ['--version'], { encoding: 'utf-8' }).trim().split(' ');
-      result.pythonVersion = pythonVersion;
-      result.hasPython = true;
-    } catch {
-      try {
-        const [, pythonVersion] = execFileSync('python', ['--version'], { encoding: 'utf-8' }).trim().split(' ');
-        result.pythonVersion = pythonVersion;
-        result.hasPython = true;
-      } catch {
-        result.hasPython = false;
-      }
-    }
-  } else {
-    try {
-      const [, pythonVersion] = execFileSync('python3', ['--version'], { encoding: 'utf-8' }).trim().split(' ');
-      result.pythonVersion = pythonVersion;
-      result.hasPython = true;
-    } catch {
-      result.hasPython = false;
-    }
+  let pythonVersion: string | null = probeVersion(() => execFileSync('python3', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  if (pythonVersion === null && IS_WIN32) {
+    pythonVersion = probeVersion(() => execFileSync('python', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  }
+  if (pythonVersion !== null) {
+    const [, version] = pythonVersion.split(' ');
+    result.pythonVersion = version;
+    result.hasPython = true;
   }
 
   // 检测 Git
-  try {
-    execFileSync('git', ['--version'], { encoding: 'utf-8' });
+  const gitVersion = probeVersion(() => execFileSync('git', ['--version'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  if (gitVersion !== null) {
     result.hasGit = true;
-  } catch {
-    result.hasGit = false;
   }
 
   return result;

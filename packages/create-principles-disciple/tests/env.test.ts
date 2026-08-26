@@ -117,23 +117,6 @@ describe('environment detection utilities', () => {
       expect(result.hasPython).toBe(false);
       expect(result.hasGit).toBe(false);
     });
-
-    // PRI-605: win32 上 python.org 安装常只提供 python.exe，python3 不在 PATH。
-    // 该回退是 win32 专属行为，仅在本机（win32）验证，Linux CI 上跳过。
-    it.skipIf(process.platform !== 'win32')('falls back to python when python3 is absent on win32', () => {
-      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
-        routeByCommand(binary, args, {
-          'node -v': 'v20.0.0',
-          'python3 --version': 'throw',
-          'python --version': 'Python 3.12.0',
-        })
-      );
-
-      const result = checkEnvironment();
-
-      expect(result.hasPython).toBe(true);
-      expect(result.pythonVersion).toBe('3.12.0');
-    });
   });
 
   describe('OpenClaw readiness check', () => {
@@ -349,6 +332,100 @@ describe('environment detection utilities', () => {
     it('returns undefined when the port is not listening', () => {
       const output = '  TCP    0.0.0.0:8081           0.0.0.0:0              LISTENING       1\n';
       expect(parseNetstatPid(output, 8080)).toBeUndefined();
+    });
+  });
+
+  describe('win32 专属路径（platform 注入，任意平台执行）', () => {
+    let platformSpy: ReturnType<typeof vi.spyOn> | undefined;
+    let win32Env: typeof import('../src/utils/env.js');
+    let win32ExecFileSync: typeof mockExecFileSync;
+    let win32Fs: typeof fs;
+
+    /**
+     * env.ts 在模块加载时求值 IS_WIN32。先注入 process.platform='win32'，
+     * 再 resetModules + 动态 import，使 win32 分支在任意平台（含 Linux CI）
+     * 真实执行。resetModules 后重新取 child_process/fs 引用（mock 工厂可能重建）。
+     */
+    async function loadWin32Env(): Promise<typeof import('../src/utils/env.js')> {
+      platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+      vi.resetModules();
+      win32Env = await import('../src/utils/env.js');
+      const freshChildProcess = await import('child_process');
+      win32ExecFileSync = vi.mocked(freshChildProcess.execFileSync);
+      win32Fs = await import('fs');
+      return win32Env;
+    }
+
+    afterEach(() => {
+      platformSpy?.mockRestore();
+      vi.resetModules();
+    });
+
+    // PRI-605: win32 上 python.org 安装常只提供 python.exe，python3 不在 PATH。
+    it('falls back to python when python3 is absent on win32', async () => {
+      await loadWin32Env();
+      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, {
+          'node -v': 'v20.0.0',
+          'python3 --version': 'throw',
+          'python --version': 'Python 3.12.0',
+        })
+      );
+      const result = win32Env.checkEnvironment();
+      expect(result.hasPython).toBe(true);
+      expect(result.pythonVersion).toBe('3.12.0');
+    });
+
+    it('routes openclaw probes through cmd.exe on win32', async () => {
+      await loadWin32Env();
+      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, {
+          'node -v': 'v20.0.0',
+          'openclaw --version': 'OpenClaw 1.0.0',
+          'python3 --version': 'Python 3.11.0',
+          'git --version': 'git version 2.40.0',
+        })
+      );
+      const result = win32Env.checkEnvironment();
+      expect(result.hasOpenClaw).toBe(true);
+      expect(result.openclawVersion).toBe('OpenClaw 1.0.0');
+      const openclawCalls = win32ExecFileSync.mock.calls.filter((c) => joinedCall(c).includes('openclaw --version'));
+      expect(openclawCalls.length).toBeGreaterThan(0);
+      expect(joinedCall(openclawCalls[0])).toContain('cmd.exe /c openclaw --version');
+    });
+
+    it('routes gateway service commands through cmd.exe on win32', async () => {
+      await loadWin32Env();
+      win32ExecFileSync.mockImplementation(() => '');
+      const res = await win32Env.stopOpenClawGateway();
+      expect(res.ok).toBe(true);
+      expect(win32ExecFileSync).toHaveBeenCalledTimes(1);
+      expect(joinedCall(win32ExecFileSync.mock.calls[0])).toContain('cmd.exe /c openclaw gateway stop');
+    });
+
+    it('resolves gateway PID via netstat on win32', async () => {
+      await loadWin32Env();
+      const server = net.createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      if (typeof addr !== 'object' || addr === null) throw new Error('listen failed');
+      const port = addr.port;
+      try {
+        vi.mocked(win32Fs.existsSync).mockReturnValue(true);
+        vi.mocked(win32Fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { port } }));
+        win32ExecFileSync.mockImplementation((binary: string, args: string[]) => {
+          if (joinedCall([binary, args]).includes('netstat.exe -ano -p tcp')) {
+            return `  TCP    127.0.0.1:${port}   0.0.0.0:0   LISTENING   4242`;
+          }
+          return '';
+        });
+        const status = await win32Env.checkOpenClawGateway();
+        expect(status.isRunning).toBe(true);
+        expect(status.port).toBe(port);
+        expect(status.pid).toBe(4242);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
   });
 });
