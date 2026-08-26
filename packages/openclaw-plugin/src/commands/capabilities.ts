@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
@@ -6,31 +6,57 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { atomicWriteFileSync, normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
-const TOOLS_TO_SCAN = [
-  { name: 'rg', cmd: ['rg', '--version'] },
-  { name: 'sg', cmd: ['sg', '--version'] },
-  { name: 'fd', cmd: ['fd', '--version'] },
-  { name: 'qmd', cmd: ['qmd', '--version'] },
-  { name: 'ast-grep', cmd: ['ast-grep', '--version'] },
-  { name: 'shellcheck', cmd: ['shellcheck', '--version'] },
-];
-
  
 function scanEnvironment(wctx: WorkspaceContext): any {
   const tools: Record<string, { available: boolean; version?: string }> = {};
 
-  for (const tool of TOOLS_TO_SCAN) {
-    try {
-      const lines = execSync(tool.cmd.join(' '), { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
-      const versionLine = lines[0];
-      tools[tool.name] = {
-        available: true,
-        version: versionLine ? versionLine.trim() : undefined,
-      };
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch parameter intentionally unused - we only care that the command failed
-    } catch (_e) {
-      tools[tool.name] = { available: false };
-    }
+  // PRI-569: one literal-binary execFileSync probe per tool — the binary is a
+  // compile-time literal and args are constant, so there is no shell and no
+  // injection surface (Mimosa write-gate requirement).
+  const recordVersion = (name: string, version?: string): void => {
+    tools[name] = { available: true, version: version?.trim() };
+  };
+
+  try {
+    const lines = execFileSync('rg', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
+    recordVersion('rg', lines[0]);
+  } catch {
+    tools['rg'] = { available: false };
+  }
+
+  try {
+    const lines = execFileSync('sg', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
+    recordVersion('sg', lines[0]);
+  } catch {
+    tools['sg'] = { available: false };
+  }
+
+  try {
+    const lines = execFileSync('fd', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
+    recordVersion('fd', lines[0]);
+  } catch {
+    tools['fd'] = { available: false };
+  }
+
+  try {
+    const lines = execFileSync('qmd', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
+    recordVersion('qmd', lines[0]);
+  } catch {
+    tools['qmd'] = { available: false };
+  }
+
+  try {
+    const lines = execFileSync('ast-grep', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
+    recordVersion('ast-grep', lines[0]);
+  } catch {
+    tools['ast-grep'] = { available: false };
+  }
+
+  try {
+    const lines = execFileSync('shellcheck', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
+    recordVersion('shellcheck', lines[0]);
+  } catch {
+    tools['shellcheck'] = { available: false };
   }
 
   const capabilities = {
