@@ -814,6 +814,9 @@ function ensureRuntimeResolutionLinks(layout: UpdateLayout): string | undefined 
     { linkPath: path.join(layout.pdCliDir, 'node_modules', '@principles', 'host-runtime'), target: layout.hostRuntimeDir },
     { linkPath: path.join(layout.consoleDir, 'node_modules', '@principles', 'install-layout'), target: layout.installLayoutDir },
     { linkPath: path.join(layout.pdCliDir, 'node_modules', '@principles', 'install-layout'), target: layout.installLayoutDir },
+    // host-runtime depends on @principles/install-layout at runtime; /apply-full
+    // skips npm install, so its node_modules must self-provision the link too.
+    { linkPath: path.join(layout.hostRuntimeDir, 'node_modules', '@principles', 'install-layout'), target: layout.installLayoutDir },
     { linkPath: path.join(layout.consoleDir, 'node_modules', 'principles-disciple'), target: layout.pluginDir },
   ];
   for (const { linkPath, target } of links) {

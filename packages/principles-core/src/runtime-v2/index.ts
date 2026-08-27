@@ -44,6 +44,41 @@ export { GOVERNANCE_EXPERIENCE_ITEMS_LIMIT, GOVERNANCE_EXPERIENCE_ISSUE_GROUPS_L
 // Receipt evidence coverage disclosure contract (PRI-590)
 export { RECEIPT_RETENTION_POLICY_DAYS } from './receipt-coverage.js';
 export type { ReceiptSourceStatus, ReceiptValidationStatus, ReceiptEvidenceCoverage } from './receipt-coverage.js';
+// Anonymous Product Telemetry v1 (PRI-595~603) — pure contract, no I/O.
+// Durable-fact readers and the HTTPS exporter live in @principles/host-runtime.
+export {
+  generateTelemetrySecretHex,
+  isValidTelemetrySecretHex,
+  bucketDateFromTime,
+  isValidBucketDate,
+  deriveWorkspaceScopeId,
+  deriveDailyTelemetryId,
+  isValidDailyTelemetryId,
+  TELEMETRY_SECRET_BYTES,
+  DAILY_TELEMETRY_ID_HEX_LENGTH,
+  WORKSPACE_SCOPE_ID_HEX_LENGTH,
+} from './product-telemetry/daily-identity.js';
+export {
+  ProductTelemetrySnapshotV1Schema,
+  PRODUCT_TELEMETRY_SNAPSHOT_SCHEMA_VERSION,
+  PRODUCT_TELEMETRY_CONSENT_VERSION,
+  PRODUCT_TELEMETRY_HOST_KINDS,
+  PRODUCT_TELEMETRY_TOP_LEVEL_FIELDS,
+  PROHIBITED_TELEMETRY_FIELD_TOKENS,
+  PRODUCT_TELEMETRY_PD_VERSION_MAX_LENGTH,
+  assertTelemetrySchemaPrivacy,
+  validateProductTelemetrySnapshot,
+  buildProductTelemetrySnapshot,
+} from './product-telemetry/snapshot-contract.js';
+export type { TelemetryFact } from './product-telemetry/snapshot-contract.js';
+export type {
+  ProductTelemetryHostKind,
+  ProductTelemetrySnapshotV1,
+  ProductTelemetryMilestoneInput,
+  ProductTelemetryReliabilityInput,
+  BuildSnapshotInput,
+  SnapshotValidationResult,
+} from './product-telemetry/snapshot-contract.js';
 export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetryPolicySchema, AgentSpecSchema } from './agent-spec.js';
 export { SchemaVersionRefSchema, RuntimeV2SchemaVersionSchema } from './schema-version.js';
 export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';

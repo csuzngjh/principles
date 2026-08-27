@@ -191,3 +191,7 @@ packages/pd-console/playwright/.cache/
 # Release materialization is hermetic (temp staging only); nothing belongs
 # in-tree anymore. *.stackdump stays ignored as a Windows crash artifact.
 *.stackdump
+# Cloudflare Pages local dev secrets/logs (never commit)
+packages/website/.dev.vars
+packages/website/.wrangler-dev.log
+packages/website/.wrangler/

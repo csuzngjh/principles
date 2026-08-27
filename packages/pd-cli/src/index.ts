@@ -70,6 +70,7 @@ import { registerRulecodeCommand } from './commands/rulecode.js';
 import { registerIntentCommand } from './commands/intent.js';
 import { registerErrorsListCommand } from './commands/errors-list.js';
 import { registerPrinciplesCommand } from './commands/principles-stats.js';
+import { registerTelemetryCommand } from './commands/telemetry.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -181,6 +182,10 @@ tasksCmd
   });
 
 registerHealthCommand(program);
+
+// ── Anonymous Product Telemetry v1 control plane (PRI-595~603) ────────────────
+
+registerTelemetryCommand(program);
 
 // ── Runtime v2 task/run commands ──────────────────────────────────────────────鈹€鈹€鈹€鈹€鈹€鈹€
 
