@@ -13,7 +13,12 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+// PRI-612: spread the real barrel exports so pure constants consumed by the
+// command (PD_TASK_STATUSES) stay authentic; only the stateful classes are
+// mocked. Previously a bare factory mock left new barrel exports undefined
+// at runtime (ERR-083 vi.mock variant — 19 tests failed on CI).
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@principles/core/runtime-v2')>()),
   RuntimeStateManager: vi.fn().mockImplementation(function (opts: Record<string, unknown>) {
     mockRuntimeStateManagerOpts(opts);
     return {
@@ -286,6 +291,7 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
   it('default mode is dry-run', async () => {
     const dreamerTask = makeSucceededTask('dreamer-default', 'dreamer');
     mockDryRunListTasks([dreamerTask]);
+    process.on('unhandledRejection', (e) => console.error('UNHANDLED:', e));
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-default',
