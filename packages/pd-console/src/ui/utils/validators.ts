@@ -1315,7 +1315,27 @@ export interface UpdateHistoryEntryData {
   fromVersion: string;
   toVersion: string;
   success: boolean;
+  kind: UpdateHistoryKind;
   backupPath?: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+export const UPDATE_HISTORY_KINDS = [
+  'update',
+  'reinstall',
+  'legacy_migration',
+  'rollback',
+  'refusal',
+  'failure',
+  'recovery',
+  'unknown',
+] as const;
+
+export type UpdateHistoryKind = (typeof UPDATE_HISTORY_KINDS)[number];
+
+function isUpdateHistoryKind(value: unknown): value is UpdateHistoryKind {
+  return typeof value === 'string' && (UPDATE_HISTORY_KINDS as readonly string[]).includes(value);
 }
 
 export function validateUpdateHistoryEntry(v: unknown): UpdateHistoryEntryData | null {
@@ -1325,9 +1345,23 @@ export function validateUpdateHistoryEntry(v: unknown): UpdateHistoryEntryData |
   if (!Object.hasOwn(v, 'fromVersion') || !isString(v.fromVersion)) return null;
   if (!Object.hasOwn(v, 'toVersion') || !isString(v.toVersion)) return null;
   if (!Object.hasOwn(v, 'success') || !isBoolean(v.success)) return null;
-  const entry: UpdateHistoryEntryData = { id: v.id, timestamp: v.timestamp, fromVersion: v.fromVersion, toVersion: v.toVersion, success: v.success };
+  if (!Object.hasOwn(v, 'kind') || !isUpdateHistoryKind(v.kind)) return null;
+  const entry: UpdateHistoryEntryData = {
+    id: v.id,
+    timestamp: v.timestamp,
+    fromVersion: v.fromVersion,
+    toVersion: v.toVersion,
+    success: v.success,
+    kind: v.kind,
+  };
   if (Object.hasOwn(v, 'backupPath') && isString(v.backupPath)) {
     entry.backupPath = v.backupPath;
+  }
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) {
+    entry.reason = v.reason;
+  }
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) {
+    entry.nextAction = v.nextAction;
   }
   return entry;
 }

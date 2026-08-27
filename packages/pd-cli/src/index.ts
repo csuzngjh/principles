@@ -15,6 +15,8 @@ import { handleSamplesReview } from './commands/samples-review.js';
 import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
 import { handleEvolutionTasksShow } from './commands/evolution-tasks-show.js';
 import { registerHealthCommand } from './commands/health.js';
+import { registerVersionCommand } from './commands/version.js';
+import { buildVersionReport, formatShortVersion, VersionReportError } from './services/version-report.js';
 import { handleTaskShow, registerTaskListCommand } from './commands/task.js';
 import { handleRunList, handleRunShow } from './commands/run.js';
 import { handleTrajectoryLocate } from './commands/trajectory.js';
@@ -76,11 +78,37 @@ const pkg = require('../package.json') as { version: string };
 
 const program = new Command();
 
+// SPEC §12: `pd --version` prints the canonical product version when a
+// supported installation exists; a development checkout falls back to the
+// CLI package version with an explicit marker instead of impersonating an
+// installed release.
+function handleVersionFlag(args: readonly string[]): boolean {
+  if (!args.includes('--version') && !args.includes('-V')) return false;
+  try {
+    console.log(formatShortVersion(buildVersionReport()));
+    return true;
+  } catch (error) {
+    if (error instanceof VersionReportError && error.reason === 'not_installed') {
+      console.log(`Principles Disciple ${pkg.version} (development-checkout)`);
+      return true;
+    }
+    if (error instanceof VersionReportError) {
+      console.error(error.message);
+      console.error(`Next: ${error.nextAction}`);
+      process.exitCode = 1;
+      return true;
+    }
+    throw error;
+  }
+}
+
 program
   .name('pd')
   .description('PD CLI — Pain recording, sample management, and evolution tasks')
-  .version(pkg.version)
+  .option('-V, --version', 'output the canonical PD product version')
   .enablePositionalOptions();
+
+registerVersionCommand(program);
 
 const painCmd = program
   .command('pain')
@@ -1103,4 +1131,6 @@ qualityCmd
     await handleQualityScorecard(opts);
   });
 
-program.parse();
+if (!handleVersionFlag(process.argv.slice(2))) {
+  program.parse();
+}

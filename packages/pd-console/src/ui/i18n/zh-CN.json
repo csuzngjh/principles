@@ -1203,6 +1203,16 @@
       "noHistory": "暂无更新历史。",
       "version": "版本",
       "failed": "失败",
+      "historyKind": {
+        "update": "更新",
+        "reinstall": "重新安装",
+        "legacy_migration": "历史迁移",
+        "rollback": "回滚",
+        "refusal": "已拒绝",
+        "failure": "失败",
+        "recovery": "恢复",
+        "unknown": "未知操作"
+      },
       "checkError": "检查出错",
       "syncPending": "最新版 {{pluginVersion}} 已发布，安装器同步中（当前可更新至上方列出的版本）。请稍后再试。",
       "loadError": "无法加载更新数据。你可以尝试刷新页面。",

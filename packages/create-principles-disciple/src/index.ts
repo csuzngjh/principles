@@ -35,6 +35,22 @@ if (typeof pkgVersionValue !== 'string' || pkgVersionValue.length === 0) {
 }
 const pkgVersion = pkgVersionValue;
 
+export function toInstallJsonOutput(result: Awaited<ReturnType<typeof install>>): Record<string, unknown> {
+  return {
+    success: result.success,
+    workspace: result.workspaceDir,
+    components: result.components,
+    enabledChannels: result.enabledChannels,
+    verification: result.verification,
+    nextAction: result.nextAction,
+    ...(result.success ? {} : {
+      reason: result.reason,
+      component: result.component,
+      dependency: result.dependency,
+    }),
+  };
+}
+
 async function runInstall(options: Record<string, unknown>): Promise<void> {
   const jsonMode = options.json === true;
 
@@ -84,9 +100,24 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 
   if (!env.hasNode) {
     if (jsonMode) {
-      console.log(JSON.stringify(buildFailureOutput('node_not_found', 'Install Node.js >= 18 and retry'), null, 2));
+      console.log(JSON.stringify(buildFailureOutput('node_not_found', 'Install Node.js >= 22 and retry'), null, 2));
     } else {
       logger.error(t('node_required'));
+    }
+    process.exit(1);
+    return;
+  }
+
+  if (!env.isNodeSupported) {
+    const nextAction = `Install Node.js >= 22 and retry. Detected: ${env.nodeVersion ?? 'unknown'}`;
+    if (jsonMode) {
+      console.log(JSON.stringify({
+        ...buildFailureOutput('node_version_unsupported', nextAction),
+        detectedVersion: env.nodeVersion,
+      }, null, 2));
+    } else {
+      logger.error(t('node_version_unsupported'));
+      logger.info(`${t('next_action')}: ${nextAction}`);
     }
     process.exit(1);
     return;
@@ -237,18 +268,27 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     return;
   }
 
-  const result = await install(installOptions, PLUGIN_DIR, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
+  // Test/hermetic-build override: when set, it must point at a COMPLETE
+  // self-contained release asset directory (component trees + _release
+  // manifest). Production never sets it. The env value is a PATH reaching
+  // install()'s file operations, so it is validated (absolute, no parent
+  // traversal) before use — an unvalidated env path here would be a
+  // path-traversal trust boundary hole even for a test-only override.
+  const pluginDirOverride = process.env.PD_INSTALL_PLUGIN_DIR;
+  if (pluginDirOverride !== undefined
+    && (!path.isAbsolute(pluginDirOverride) || pluginDirOverride.includes('..'))) {
+    console.log(JSON.stringify(buildFailureOutput(
+      'invalid_environment',
+      `PD_INSTALL_PLUGIN_DIR must be an absolute directory path without '..': ${JSON.stringify(pluginDirOverride)}`,
+    ), null, 2));
+    process.exit(1);
+    return;
+  }
+  const pluginDir = pluginDirOverride ?? PLUGIN_DIR;
+  const result = await install(installOptions, pluginDir, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
 
   if (jsonMode) {
-    const output = {
-      success: result.success,
-      workspace: result.workspaceDir,
-      components: result.components,
-      enabledChannels: result.enabledChannels,
-      verification: result.verification,
-      nextAction: result.nextAction,
-      ...(result.success ? {} : { reason: result.reason }),
-    };
+    const output = toInstallJsonOutput(result);
     console.log(JSON.stringify(output, null, 2));
     if (!result.success) {
       process.exit(1);
