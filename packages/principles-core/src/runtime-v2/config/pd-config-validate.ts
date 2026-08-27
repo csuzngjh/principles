@@ -25,6 +25,7 @@ import {
   type DiagnosticsMode,
   type WorkspaceConfig,
   type WorkspaceEnvironment,
+  type PrinciplesConfig,
   WORKSPACE_ENVIRONMENTS,
   type ProfileConfig,
   type ContextInjectionConfig,
@@ -38,6 +39,7 @@ import {
   DANGEROUS_KEYS,
 } from './pd-config-types.js';
 import { validateProfileConfig } from './pd-validate-profile.js';
+import { VALID_OUTPUT_LANGUAGES, isValidOutputLanguage } from '../language-directive.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -755,6 +757,27 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     }
   }
 
+  // principles (optional — PRI-336). Must survive validation into the returned
+  // PdConfig: `principles.outputLanguage` is the canonical language SSOT that
+  // loadPdConfigForPlugin consumers (prompt injection, principle generation)
+  // read from effective config. Dropping it here silently disabled the SSOT.
+  const principlesRaw = readOwn(raw, 'principles');
+  let principles: PrinciplesConfig | undefined;
+  if (principlesRaw !== undefined) {
+    if (!isRecord(principlesRaw)) {
+      errors.push(err('principles', `principles must be an object, got ${safePreview(principlesRaw)}`, 'Set principles to a mapping (e.g. principles: { outputLanguage: zh-CN })'));
+    } else {
+      const outputLanguageRaw = Object.hasOwn(principlesRaw, 'outputLanguage') ? principlesRaw.outputLanguage : undefined;
+      if (outputLanguageRaw === undefined) {
+        principles = {};
+      } else if (isValidOutputLanguage(outputLanguageRaw)) {
+        principles = { outputLanguage: outputLanguageRaw };
+      } else {
+        errors.push(err('principles.outputLanguage', `outputLanguage must be one of ${VALID_OUTPUT_LANGUAGES.join(', ')}, got ${safePreview(outputLanguageRaw)}`, `Set principles.outputLanguage to one of: ${VALID_OUTPUT_LANGUAGES.join(', ')}`));
+      }
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -770,6 +793,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     runtimeProfiles,
     internalAgents,
     ui: ui ?? { diagnostics: { mode: 'simple' } },
+    ...(principles ? { principles } : {}),
     ...(profile ? { profile } : {}),
     ...(contextInjection ? { contextInjection } : {}),
   };

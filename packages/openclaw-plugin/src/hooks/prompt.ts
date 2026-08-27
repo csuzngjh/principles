@@ -10,7 +10,8 @@ import type { ContextInjectionConfig } from '../types.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
+import type { ResolvedOutputLanguage } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
@@ -237,6 +238,52 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
   return { ...result.effective.resolvedContextInjection };
 }
 
+/**
+ * Resolve the output language for the `<core_principles>` axioms.
+ *
+ * Canonical SSOT (PRI-606): `.pd/config.yaml` → `principles.outputLanguage`,
+ * the same source principle generation reads. `loadPdConfigForPlugin` never
+ * throws (malformed config returns structured errors with effective
+ * defaults), and `resolveOutputLanguage` is pure validation logic — but the
+ * belt-and-braces catch below keeps the contract explicit: a config failure
+ * may only degrade the LANGUAGE, never remove the axioms.
+ *
+ * Missing config → canonical default (no warning).
+ * Malformed value/config → structured warning + canonical default (rc-9).
+ */
+function resolveCoreAxiomLanguage(
+  workspaceDir: string,
+  logger?: PluginLogger,
+): ResolvedOutputLanguage {
+  try {
+    const configResult = loadPdConfigForPlugin(workspaceDir);
+    if (!configResult.ok) {
+      const reasons = configResult.errors
+        .map(error => `${error.path || '(root)'}: ${error.reason}`)
+        .join('; ');
+      logger?.warn?.(
+        `[PD:Prompt] .pd/config.yaml malformed (${reasons}). ` +
+        `Core axioms fall back to default language ${DEFAULT_OUTPUT_LANGUAGE}. ` +
+        `nextAction: ${configResult.errors[0]?.nextAction ?? 'Fix .pd/config.yaml and retry'}`
+      );
+    }
+    const resolved = resolveOutputLanguage(configResult.effective.config.principles?.outputLanguage);
+    if (resolved.degradationWarning) {
+      logger?.warn?.(`[PD:Prompt] ${resolved.degradationWarning}`);
+    }
+    return resolved;
+  } catch (e) {
+    // Loader contract is "never throws"; if it ever does, language degrades
+    // with a structured reason — the axioms themselves stay injected.
+    logger?.warn?.(
+      `[PD:Prompt] Core axiom language resolution failed (${String(e)}); ` +
+      `falling back to default language ${DEFAULT_OUTPUT_LANGUAGE}. ` +
+      `nextAction: Check that .pd/config.yaml is readable YAML`
+    );
+    return { outputLanguage: DEFAULT_OUTPUT_LANGUAGE };
+  }
+}
+
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi },
@@ -376,22 +423,27 @@ export async function handleBeforePromptBuild(
   // Thinking OS, reflection_log, project_context are configurable
   // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
 
-  // Core principles: ALWAYS inject the canonical T-01..T-10 axioms directly from
-  // the @principles/core registry (PRI-606). These are built-in axioms, NOT
-  // owner-approved learned principles — those flow via <evolution_principles>.
+  // Core principles: ALWAYS inject the canonical foundational axioms directly
+  // from the @principles/core registry (PRI-606). These are built-in axioms,
+  // NOT owner-approved learned principles — those flow via <evolution_principles>.
+  // PRI-606/PRI-607: only the foundational layer is injected here (the
+  // NON-NEGOTIABLE highest-priority block); operating principles reach the
+  // agent via THINKING_OS directives.
+  //
+  // Language SSOT: .pd/config.yaml → principles.outputLanguage (the same
+  // source principle generation uses). Config failure degrades the LANGUAGE
+  // only — never the axioms themselves: the registry is static code data and
+  // stays injected even when config is unreadable.
   let principlesContent = '';
   try {
-    // Language: PainSettings.language ('zh'|'en') maps onto OutputLanguage ('zh-CN'|'en').
-    // Kept inside the guard: wctx.config lazy-init must never break the prompt hook.
-    const configuredLanguage = wctx.config?.get('language');
-    const mappedLanguage = configuredLanguage === 'zh' ? 'zh-CN' : configuredLanguage;
-    const resolvedLanguage = resolveOutputLanguage(mappedLanguage);
-    if (resolvedLanguage.degradationWarning) {
-      logger?.warn?.(`[PD:Prompt] ${resolvedLanguage.degradationWarning}`);
-    }
-    principlesContent = formatCorePrinciplesList(resolvedLanguage.outputLanguage);
+    principlesContent = formatCorePrinciplesList(
+      resolveCoreAxiomLanguage(workspaceDir, logger).outputLanguage,
+      'foundational',
+    );
   } catch (e) {
-    // rc-9: degrade to no-injection with structured reason; never break the hook.
+    // rc-9: degrade to no-injection with a structured reason; never break the hook.
+    // Only a registry/format defect can land here — config errors are already
+    // absorbed by resolveCoreAxiomLanguage as language degradation.
     logger?.warn?.(`[PD:Prompt] Failed to load core principles from registry: ${String(e)}`);
   }
 

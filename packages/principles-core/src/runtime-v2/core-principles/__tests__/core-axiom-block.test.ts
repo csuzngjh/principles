@@ -7,31 +7,65 @@ import {
   formatCorePrinciplesList,
   buildCoreAxiomBlock,
 } from '../core-axiom-block.js';
-import { CORE_PRINCIPLES } from '../core-principle-registry.js';
+import {
+  getActiveCorePrinciples,
+  getFoundationalPrinciples,
+  getOperatingPrinciples,
+} from '../core-principle-registry.js';
 
 describe('formatCorePrinciplesList', () => {
-  it('formats all 10 principles as "T-XX: statement" lines', () => {
+  it('formats the 10 ACTIVE principles as "T-XX: statement" lines (deprecated excluded)', () => {
     const result = formatCorePrinciplesList();
     const lines = result.split('\n');
     expect(lines).toHaveLength(10);
     expect(lines[0]).toMatch(/^T-01: /);
-    expect(lines[9]).toMatch(/^T-10: /);
+    expect(lines[9]).toMatch(/^T-11: /);
+    expect(result).not.toContain('T-07:');
   });
 
   it('uses English statements by default', () => {
     const result = formatCorePrinciplesList();
-    expect(result).toContain('Understand the structure first');
+    expect(result).toContain('Build a sufficient model of the relevant system');
   });
 
   it('uses Chinese statements when outputLanguage is zh-CN', () => {
     const result = formatCorePrinciplesList('zh-CN');
-    expect(result).toContain('在做出变更前，先理解其结构');
+    expect(result).toContain('在进行有后果的变更前，先建立对相关系统足够准确的理解');
   });
 
   it('uses English statements when outputLanguage is en', () => {
     const result = formatCorePrinciplesList('en');
-    expect(result).toContain('Understand the structure first');
-    expect(result).not.toContain('在做出变更前');
+    expect(result).toContain('Build a sufficient model of the relevant system');
+    expect(result).not.toContain('在进行有后果的变更前');
+  });
+
+  it("scope 'foundational' lists exactly the foundational axioms", () => {
+    const result = formatCorePrinciplesList('en', 'foundational');
+    const lines = result.split('\n');
+    expect(lines).toHaveLength(getFoundationalPrinciples().length);
+    expect(lines[0]).toMatch(/^T-01: /);
+    expect(result).toContain('T-06:');
+    expect(result).toContain('T-08:');
+    expect(result).not.toContain('T-05:');
+    expect(result).not.toContain('T-11:');
+    expect(result).not.toContain('T-07:');
+  });
+
+  it("scope 'operating' lists exactly the operating principles", () => {
+    const result = formatCorePrinciplesList('en', 'operating');
+    const lines = result.split('\n');
+    expect(lines).toHaveLength(getOperatingPrinciples().length);
+    expect(result).toContain('T-05:');
+    expect(result).toContain('T-09:');
+    expect(result).toContain('T-10:');
+    expect(result).toContain('T-11:');
+    expect(result).not.toContain('T-01:');
+  });
+
+  it("scope 'all' includes deprecated entries (historical/debug views)", () => {
+    const result = formatCorePrinciplesList('en', 'all');
+    expect(result).toContain('T-07:');
+    expect(result).toContain('Limit the blast radius');
   });
 });
 
@@ -62,11 +96,18 @@ describe('buildCoreAxiomBlock', () => {
     expect(result).toContain('validation failure');
   });
 
-  it('includes all 10 core principles', () => {
+  it('includes all ACTIVE core principles (deprecated excluded by default scope)', () => {
     const result = buildCoreAxiomBlock({ coreGrounding: true });
-    for (const p of CORE_PRINCIPLES) {
+    for (const p of getActiveCorePrinciples()) {
       expect(result).toContain(p.id + ':');
     }
+    expect(result).not.toContain('T-07:');
+  });
+
+  it('honors scope override (foundational only)', () => {
+    const result = buildCoreAxiomBlock({ coreGrounding: true, scope: 'foundational' });
+    expect(result).toContain('T-01:');
+    expect(result).not.toContain('T-05:');
   });
 
   it('uses custom section title', () => {
@@ -99,7 +140,7 @@ describe('buildCoreAxiomBlock', () => {
 
   it('uses Chinese statements when outputLanguage is zh-CN', () => {
     const result = buildCoreAxiomBlock({ coreGrounding: true, outputLanguage: 'zh-CN' });
-    expect(result).toContain('在做出变更前，先理解其结构');
+    expect(result).toContain('在进行有后果的变更前，先建立对相关系统足够准确的理解');
   });
 
   it('block starts with newline for easy insertion into prompts', () => {

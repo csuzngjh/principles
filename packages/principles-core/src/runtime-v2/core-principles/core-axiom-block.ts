@@ -1,22 +1,41 @@
 /**
  * Core Axiom Block Builder — shared prompt section for CORE_PRINCIPLES injection.
  *
- * Provides a single, consistent way to inject the T-01..T-10 core axiom list
- * into any prompt builder. Used by both the diagnostician pipeline (rootcause,
- * distiller) and the internalization pipeline (dreamer, philosopher, scribe, etc.).
+ * Provides a single, consistent way to inject the core principle list
+ * into any prompt builder. Used by the OpenClaw prompt hook (foundational
+ * axioms → `<core_principles>`), the diagnostician pipeline (rootcause,
+ * distiller), and the internalization pipeline (dreamer, philosopher, scribe).
  *
  * ## Design
  *
  * - `formatCorePrinciplesList()` — low-level: just the formatted list lines
  * - `buildCoreAxiomBlock()` — high-level: conditional block with header + instruction
  *
- * Both support bilingual output via `outputLanguage`.
+ * Both support bilingual output via `outputLanguage` and layer scoping via
+ * `scope` (default `'active'`: all active principles for LLM grounding).
  */
 
-import { CORE_PRINCIPLES } from './core-principle-registry.js';
+import {
+  CORE_PRINCIPLES,
+  getActiveCorePrinciples,
+  getFoundationalPrinciples,
+  getOperatingPrinciples,
+} from './core-principle-registry.js';
+import type { CorePrinciple } from './core-principle-registry.js';
 import type { OutputLanguage } from '../language-directive.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
+
+/**
+ * Which registry slice a formatter emits. The registry is the only
+ * classification source — callers never hand-write id filters.
+ * - 'foundational' — active foundational axioms (the `<core_principles>` set)
+ * - 'operating'    — active operating principles
+ * - 'active'       — all active principles (deprecated excluded) — default,
+ *                    used for LLM axiom grounding in diagnostician/internalization prompts
+ * - 'all'          — including deprecated entries (historical/debug views only)
+ */
+export type CorePrincipleScope = 'foundational' | 'operating' | 'active' | 'all';
 
 export interface CoreAxiomBlockOptions {
   /** Whether to include the core axioms section (default: false). */
@@ -34,27 +53,48 @@ export interface CoreAxiomBlockOptions {
   instruction?: string;
   /** Output language for bilingual principle statements. */
   outputLanguage?: OutputLanguage;
+  /** Which registry slice to list (default: 'active'). */
+  scope?: CorePrincipleScope;
   /** Fallback string when coreGrounding is false (default: ''). */
   fallback?: string;
+}
+
+function selectCorePrinciples(scope: CorePrincipleScope): readonly CorePrinciple[] {
+  switch (scope) {
+    case 'foundational':
+      return getFoundationalPrinciples();
+    case 'operating':
+      return getOperatingPrinciples();
+    case 'active':
+      return getActiveCorePrinciples();
+    case 'all':
+      return CORE_PRINCIPLES;
+  }
 }
 
 // ── Low-level: formatted list ────────────────────────────────────────────────
 
 /**
- * Format the CORE_PRINCIPLES list as a newline-separated string.
+ * Format a core principle list as a newline-separated string.
  *
  * Each line: `T-XX: <statement>`
  * When `outputLanguage` is 'zh-CN', uses `statementZh` instead of `statement`.
  *
  * @param outputLanguage - Optional language override for bilingual output.
- * @returns Formatted list string (e.g. "T-01: Understand the structure first...\nT-02: ...")
+ * @param scope - Which registry slice to list (default: 'active').
+ * @returns Formatted list string (e.g. "T-01: Build a sufficient model...\nT-02: ...")
  */
-export function formatCorePrinciplesList(outputLanguage?: OutputLanguage): string {
+export function formatCorePrinciplesList(
+  outputLanguage?: OutputLanguage,
+  scope: CorePrincipleScope = 'active',
+): string {
   const useZh = outputLanguage === 'zh-CN';
-  return CORE_PRINCIPLES.map(p => {
-    const statement = useZh && p.statementZh ? p.statementZh : p.statement;
-    return `${p.id}: ${statement}`;
-  }).join('\n');
+  return selectCorePrinciples(scope)
+    .map(p => {
+      const statement = useZh && p.statementZh ? p.statementZh : p.statement;
+      return `${p.id}: ${statement}`;
+    })
+    .join('\n');
 }
 
 // ── High-level: conditional block ────────────────────────────────────────────
@@ -80,7 +120,7 @@ const DEFAULT_INSTRUCTION =
  * ```typescript
  * // In a prompt builder:
  * const axiomBlock = buildCoreAxiomBlock({ coreGrounding: true, outputLanguage: 'zh-CN' });
- * return `...existing prompt...\n${axiomBlock}\n...rest...`;
+ * return `...existing prompt...\n${axiomBlock}\n...rest of prompt...`;
  * ```
  *
  * @param opts - Block options (see CoreAxiomBlockOptions).
@@ -92,6 +132,7 @@ export function buildCoreAxiomBlock(opts: CoreAxiomBlockOptions = {}): string {
     sectionTitle = 'CORE AXIOMS:',
     instruction = DEFAULT_INSTRUCTION,
     outputLanguage,
+    scope = 'active',
     fallback = '',
   } = opts;
 
@@ -99,7 +140,7 @@ export function buildCoreAxiomBlock(opts: CoreAxiomBlockOptions = {}): string {
     return fallback;
   }
 
-  const principlesList = formatCorePrinciplesList(outputLanguage);
+  const principlesList = formatCorePrinciplesList(outputLanguage, scope);
 
   const parts: string[] = [
     `\n${sectionTitle}`,

@@ -21,9 +21,10 @@ import { resolvePdPath } from './paths.js';
 
 export interface ThinkingOsDirective {
   id: string;         // "T-01"
-  name: string;       // "MAP_BEFORE_TERRITORY"
+  name: string;       // "Survey Before Acting"
+  layer: string;      // "foundational" | "operating" — registry layer (may be '' if attr absent)
   trigger: string;    // <trigger> content — used for detection patterns
-  must: string;       // <must> content — used as description
+  must: string;       // <must> content — used as description; first sentence anchors the registry statement
   forbidden: string;  // <forbidden> content — used as anti-pattern
 }
 
@@ -57,8 +58,9 @@ export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
     const body = _match[2];
     if (!attrs || !body) continue;
 
-    const idMatch = /id="([^"]+)"/i.exec(attrs);
-    const nameMatch = /name="([^"]+)"/i.exec(attrs);
+    const idMatch = attrs.match(/id="([^"]+)"/i);
+    const nameMatch = attrs.match(/name="([^"]+)"/i);
+    const layerMatch = attrs.match(/layer="([^"]+)"/i);
 
     if (!idMatch) continue;
     const id = idMatch[1];
@@ -67,6 +69,7 @@ export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
     const directive: ThinkingOsDirective = {
       id,
       name: nameMatch ? (nameMatch[1] ?? '') : '',
+      layer: layerMatch ? (layerMatch[1] ?? '') : '',
       trigger: extractTag(body, 'trigger'),
       must: extractTag(body, 'must'),
       forbidden: extractTag(body, 'forbidden'),

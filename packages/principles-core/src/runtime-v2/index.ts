@@ -444,10 +444,14 @@ export type {
   ValidationResultErr as FeatureFlagValidationResultErr,
 } from './feature-flags/index.js';
 
-// Core Principle Registry (PRI-367) — T-01..T-10 canonical definitions
+// Core Principle Registry (PRI-367) — canonical built-in principle definitions
+// (6 foundational axioms + 4 operating principles + deprecated T-07, PRI-606/607)
 export {
   CORE_PRINCIPLES,
   CORE_PRINCIPLE_IDS,
+  getActiveCorePrinciples,
+  getFoundationalPrinciples,
+  getOperatingPrinciples,
   isCorePrincipleId,
   getCorePrinciple,
   CorePrincipleSchema,
@@ -456,7 +460,12 @@ export {
   buildCoreAxiomBlock,
 } from './core-principles/index.js';
 
-export type { CorePrinciple } from './core-principles/index.js';
+export type {
+  CorePrinciple,
+  CorePrincipleLayer,
+  CorePrincipleStatus,
+  CorePrincipleScope,
+} from './core-principles/index.js';
 
 // Plugin Surface Registry (PRI-289) — MVP hook/service/startup surface guard
 
