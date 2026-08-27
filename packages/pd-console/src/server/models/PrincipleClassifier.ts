@@ -7,13 +7,14 @@
  *  - demo: Demo / example principles planted by the framework
  *  - smoke: Smoke-test principles for CI validation
  *  - historical: Archived or deprecated principles (already decided long ago)
- *  - builtin: Core Thinking OS axioms (T-01..T-10) — not governance targets
+ *  - builtin: Core Thinking OS axioms (registry T-NN ids) — not governance targets
  *  - already_decided: Approved / rejected via approval queue
  *
  * Classification is purely read-side; it does NOT mutate any data.
  */
 
 import type { PrincipleListItem } from './PrinciplesConsoleModel.js';
+import { isCorePrincipleId } from '@principles/core/runtime-v2';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -31,9 +32,6 @@ export interface ClassifiedPrinciple {
 }
 
 // ── Heuristics ────────────────────────────────────────────────────────────────
-
-/** Regex that matches core Thinking OS axiom IDs (T-NN pattern, e.g. T-01..T-10) */
-const BUILTIN_ID_REGEX = /^T-(0[1-9]|10)$/;
 
 /** ID prefixes that indicate demo / dogfood data */
 const DEMO_ID_PREFIXES = ['DEMO_', 'demo_', 'story-a', 'story_a', 'dogfood_'];
@@ -58,8 +56,12 @@ function hasKeyword(text: string, keywords: readonly string[]): boolean {
   return keywords.some((k) => lower.includes(k));
 }
 
+/**
+ * Core Thinking OS axiom IDs — validated against the @principles/core
+ * registry so the builtin set always mirrors the canonical T-01..T-10.
+ */
 function isBuiltinId(id: string): boolean {
-  return BUILTIN_ID_REGEX.test(id);
+  return isCorePrincipleId(id);
 }
 
 // ── Classifier ────────────────────────────────────────────────────────────────

@@ -23,9 +23,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PACKAGE_ROOT = path.resolve(__dirname, '..', '..');
 
-describe('AC-01/02: T-01..T-10 core axioms stay canonical (A)', () => {
-  it('registry has exactly 10 core principles', () => {
+describe('AC-01/02: registry core axioms stay canonical (A)', () => {
+  it('registry has exactly 10 built-in principles (pre-release reset model)', () => {
     expect(CORE_PRINCIPLES).toHaveLength(10);
+    expect(CORE_PRINCIPLE_IDS).toHaveLength(10);
   });
 
   it('ids are exactly T-01 through T-10', () => {
@@ -45,13 +46,13 @@ describe('AC-01/02: T-01..T-10 core axioms stay canonical (A)', () => {
 });
 
 describe('AC-03: ensureCorePrinciples initializes all 10 from empty state', () => {
-  it('bootstraps the full set into a fresh state dir', () => {
+  it('bootstraps exactly the registry set into a fresh state dir', () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ac03-'));
     const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as never;
     const initialized = ensureCorePrinciples(stateDir, logger);
     expect(initialized).toBe(true);
 
-    // Training store contains all 10 ids.
+    // Training store contains exactly the 10 registry ids.
     const storePath = path.join(stateDir, 'principle_training_state.json');
     expect(fs.existsSync(storePath)).toBe(true);
     const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
@@ -79,15 +80,16 @@ describe('AC-04/05: principle templates (B/C)', () => {
       // T-list reprint would create a second source of truth; bare mention ok.
       const tNames = [
         'survey before acting',
-        'respect constraints',
+        'intent & constraints first',
         'evidence over assumption',
-        'reversible first',
+        'reversible & safe by default',
         'safety rails',
-        'simplicity first',
+        'minimal sufficient change',
         'minimal change',
         'pain as signal',
         'divide and conquer',
         'memory externalization',
+        'close the loop',
       ];
       for (const name of tNames) {
         expect(content.toLowerCase()).not.toContain(name);

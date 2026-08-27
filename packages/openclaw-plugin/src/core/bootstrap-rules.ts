@@ -81,14 +81,14 @@ export function selectPrinciplesForBootstrap(stateDir: string, limit = 3): strin
  * @throws Error if no deterministic principles found
  */
 export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
-  // Migration: if T-01..T-10 exist in Training Store but not in Ledger Tree, backfill.
+  // Migration: if registry core axiom ids (T-NN) exist in Training Store but not in Ledger Tree, backfill.
   // This handles workspaces initialized before Ledger Tree was added.
   const store = loadStore(stateDir);
   let ledger = loadLedger(stateDir);
   const hasTrainingT = Object.keys(store).some((id) => id.startsWith('T-'));
   const hasAnyLedgerT = Object.keys(ledger.tree.principles).some((id) => id.startsWith('T-'));
   if (hasTrainingT && !hasAnyLedgerT) {
-    console.warn('[bootstrap] Migrating T-01..T-10 from Training Store to Ledger Tree');
+    console.warn('[bootstrap] Migrating core axiom ids from Training Store to Ledger Tree');
     const now = new Date().toISOString();
     for (const [id, entry] of Object.entries(store)) {
       if (!id.startsWith('T-')) continue;

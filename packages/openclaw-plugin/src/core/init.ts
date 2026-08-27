@@ -149,7 +149,8 @@ function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginA
 }
 
 /**
- * Core thinking model definitions (T-01 through T-10).
+ * Core thinking model definitions (the full registry — exactly T-01..T-10:
+ * 6 foundational axioms + 4 operating principles).
  * Derived from the Core Principle Registry — the single source of truth.
  */
 export const CORE_THINKING_MODELS: Array<{

@@ -269,7 +269,10 @@ describe('Golden fixture: prompt output', () => {
     // Verify key structural elements even without fixture file
     expect(result.prependSystemContext).toContain('## 【PD GOVERNANCE CONTEXT】');
     expect(result.appendSystemContext ?? '').not.toContain('<project_context>');
-    expect(result.appendSystemContext ?? '').not.toContain('<core_principles>');
+    // PRI-606: canonical T-01..T-10 axioms are ALWAYS injected from the registry,
+    // even in the empty state (evolution reducer has zero principles).
+    expect(result.appendSystemContext ?? '').toContain('<core_principles>');
+    expect(result.appendSystemContext ?? '').toContain('T-01');
 
     if (!UPDATE_GOLDEN && fs.existsSync(fixturePath('prompt-default.txt'))) {
       expect(output).toBe(readFixture('prompt-default.txt'));

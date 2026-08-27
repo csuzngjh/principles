@@ -83,12 +83,15 @@ vi.mock('../../src/core/path-resolver.js', () => ({
 }));
 
 vi.mock('../../src/core/principle-injection.js', () => ({
-  selectPrinciplesForInjection: vi.fn().mockReturnValue({
-    selected: [],
+  // PRI-606: pass-through so reducer-sourced active/probation principles reach
+  // the <evolution_principles> block (previously they squatted in
+  // <core_principles> via the broken injection path this fix removes).
+  selectPrinciplesForInjection: vi.fn().mockImplementation((principles: unknown[]) => ({
+    selected: principles,
     wasTruncated: false,
     breakdown: { p0: 0, p1: 0, p2: 0 },
     totalChars: 0,
-  }),
+  })),
   DEFAULT_PRINCIPLE_BUDGET: 3000,
 }));
 

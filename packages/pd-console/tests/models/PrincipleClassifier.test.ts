@@ -25,9 +25,10 @@ function makePrinciple(overrides: Partial<PrincipleListItem> = {}): PrincipleLis
 }
 
 describe('classifyPrinciple', () => {
-  it('classifies T-01..T-10 as builtin', () => {
+  it('classifies registry ids T-01..T-10 as builtin', () => {
     expect(classifyPrinciple(makePrinciple({ id: 'T-01' }))).toBe('builtin');
     expect(classifyPrinciple(makePrinciple({ id: 'T-05' }))).toBe('builtin');
+    expect(classifyPrinciple(makePrinciple({ id: 'T-07' }))).toBe('builtin');
     expect(classifyPrinciple(makePrinciple({ id: 'T-10' }))).toBe('builtin');
   });
 
