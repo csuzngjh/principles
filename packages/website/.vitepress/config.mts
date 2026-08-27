@@ -63,6 +63,7 @@ export default defineConfig({
                 { text: 'Getting Started', link: '/docs/getting-started' },
                 { text: 'User Guide', link: '/docs/user-guide' },
                 { text: 'Slash Commands', link: '/docs/slash-commands' },
+                { text: 'Anonymous Telemetry (Privacy)', link: '/docs/telemetry' },
                 { text: 'Development Guide', link: '/docs/development' },
               ]
             }
@@ -109,6 +110,7 @@ export default defineConfig({
                 { text: '快速开始 (Getting Started)', link: '/zh/docs/getting-started' },
                 { text: '用户指南 (User Guide)', link: '/zh/docs/user-guide' },
                 { text: '斜杠命令参考 (Slash Commands)', link: '/zh/docs/slash-commands' },
+                { text: '匿名遥测（隐私说明）', link: '/zh/docs/telemetry' },
                 { text: '开发指南 (Development Guide)', link: '/zh/docs/development' },
               ]
             }
