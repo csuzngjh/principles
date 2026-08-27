@@ -26,7 +26,10 @@
     "check:release-locks": "node scripts/check-release-locks.mjs",
     "prepack": "npm run build && npm run bundle",
     "prepublishOnly": "npm run build && npm run bundle",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:fast": "vitest run --exclude tests/smoke-packaged-install.test.ts --exclude tests/release-asset-smoke.test.ts",
+    "test:smoke:packaged": "vitest run tests/smoke-packaged-install.test.ts",
+    "test:smoke:release-asset": "vitest run tests/release-asset-smoke.test.ts"
   },
   "keywords": [
     "openclaw",

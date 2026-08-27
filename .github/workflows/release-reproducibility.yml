@@ -26,6 +26,11 @@ on:
       - '.github/workflows/release-reproducibility*.yml'
   workflow_dispatch:
 
+# Tier 1 runs per-PR; a newer commit supersedes the older verification.
+concurrency:
+  group: release-reproducibility-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 

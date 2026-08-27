@@ -4,10 +4,16 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+# Lightweight meta-checks — a superseded commit's labels/audit have no value.
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   label:
     name: Auto Label PR
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: write
@@ -19,6 +25,7 @@ jobs:
   size:
     name: Check PR Size
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - name: Label PR Size
@@ -39,6 +46,7 @@ jobs:
   welcome:
     name: Welcome First Time Contributor
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       pull-requests: write
     steps:
@@ -55,6 +63,7 @@ jobs:
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
