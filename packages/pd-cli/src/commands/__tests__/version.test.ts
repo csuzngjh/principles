@@ -71,7 +71,11 @@ describe('canonical version report (SPEC 12 / 18-1, 18-10)', () => {
 
   it('classifies a legacy overlay installation with an installer next action', () => {
     const home = tempHome();
-    const overlay = path.join(home, '.openclaw', 'extensions', 'principles-disciple', 'plugin');
+    // The current official installer creates ~/.pd/bin before the transactional
+    // dual-slot layout is activated. That support directory must not make a
+    // valid legacy overlay look like a corrupt partial dual-slot install.
+    fs.mkdirSync(path.join(home, '.pd', 'bin'), { recursive: true });
+    const overlay = path.join(home, '.openclaw', 'extensions', 'principles-disciple');
     fs.mkdirSync(overlay, { recursive: true });
     fs.writeFileSync(path.join(overlay, 'package.json'), JSON.stringify({ version: '1.218.0' }));
     const report = buildVersionReport(home);
@@ -80,6 +84,16 @@ describe('canonical version report (SPEC 12 / 18-1, 18-10)', () => {
       source: 'official-legacy-overlay',
       health: 'degraded',
       generation: 0,
+    });
+  });
+
+  it('retains compatibility with the older nested legacy overlay manifest', () => {
+    const home = tempHome();
+    const overlay = path.join(home, '.openclaw', 'extensions', 'principles-disciple', 'plugin');
+    fs.mkdirSync(overlay, { recursive: true });
+    fs.writeFileSync(path.join(overlay, 'package.json'), JSON.stringify({ version: '1.202.0' }));
+    expect(buildVersionReport(home)).toMatchObject({
+      productVersion: '1.202.0', source: 'official-legacy-overlay', health: 'degraded',
     });
   });
 

@@ -75,7 +75,11 @@ export function formatShortVersion(report: Pick<VersionReport, 'productVersion' 
 }
 
 function buildLegacyOverlayReport(overlayDir: string, bootstrap: Record<string, unknown> | null): VersionReport {
-  const pluginManifest = readJsonIfPresent(path.join(overlayDir, 'plugin', 'package.json'));
+  // The current official installer copies the plugin package directly into
+  // the OpenClaw extension root. Older overlay bundles kept it under plugin/;
+  // accept that layout only when the canonical root manifest is absent.
+  const rootManifest = readJsonIfPresent(path.join(overlayDir, 'package.json'));
+  const pluginManifest = rootManifest ?? readJsonIfPresent(path.join(overlayDir, 'plugin', 'package.json'));
   const version = pluginManifest?.version;
   if (typeof version !== 'string' || version.length === 0) {
     throw new VersionReportError(
@@ -134,10 +138,10 @@ export function buildVersionReport(homeDir: string = os.homedir()): VersionRepor
 
   const overlayDir = path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple');
 
+  if (active === null && fs.existsSync(overlayDir)) {
+    return buildLegacyOverlayReport(overlayDir, bootstrap);
+  }
   if (active === null && !fs.existsSync(pdHome)) {
-    if (fs.existsSync(overlayDir)) {
-      return buildLegacyOverlayReport(overlayDir, bootstrap);
-    }
     throw new VersionReportError(
       'not_installed',
       'No PD installation was found under ~/.pd or the legacy overlay location.',
