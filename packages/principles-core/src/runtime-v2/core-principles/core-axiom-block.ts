@@ -12,12 +12,11 @@
  * - `buildCoreAxiomBlock()` — high-level: conditional block with header + instruction
  *
  * Both support bilingual output via `outputLanguage` and layer scoping via
- * `scope` (default `'active'`: all active principles for LLM grounding).
+ * `scope` (default `'all'`: the full 10-principle set for LLM grounding).
  */
 
 import {
   CORE_PRINCIPLES,
-  getActiveCorePrinciples,
   getFoundationalPrinciples,
   getOperatingPrinciples,
 } from './core-principle-registry.js';
@@ -29,13 +28,12 @@ import type { OutputLanguage } from '../language-directive.js';
 /**
  * Which registry slice a formatter emits. The registry is the only
  * classification source — callers never hand-write id filters.
- * - 'foundational' — active foundational axioms (the `<core_principles>` set)
- * - 'operating'    — active operating principles
- * - 'active'       — all active principles (deprecated excluded) — default,
- *                    used for LLM axiom grounding in diagnostician/internalization prompts
- * - 'all'          — including deprecated entries (historical/debug views only)
+ * - 'foundational' — foundational axioms (the `<core_principles>` set)
+ * - 'operating'    — operating principles
+ * - 'all'          — the full 10-principle set; default, used for LLM axiom
+ *                    grounding in diagnostician/internalization prompts
  */
-export type CorePrincipleScope = 'foundational' | 'operating' | 'active' | 'all';
+export type CorePrincipleScope = 'foundational' | 'operating' | 'all';
 
 export interface CoreAxiomBlockOptions {
   /** Whether to include the core axioms section (default: false). */
@@ -65,8 +63,6 @@ function selectCorePrinciples(scope: CorePrincipleScope): readonly CorePrinciple
       return getFoundationalPrinciples();
     case 'operating':
       return getOperatingPrinciples();
-    case 'active':
-      return getActiveCorePrinciples();
     case 'all':
       return CORE_PRINCIPLES;
   }
@@ -81,12 +77,12 @@ function selectCorePrinciples(scope: CorePrincipleScope): readonly CorePrinciple
  * When `outputLanguage` is 'zh-CN', uses `statementZh` instead of `statement`.
  *
  * @param outputLanguage - Optional language override for bilingual output.
- * @param scope - Which registry slice to list (default: 'active').
+ * @param scope - Which registry slice to list (default: 'all').
  * @returns Formatted list string (e.g. "T-01: Build a sufficient model...\nT-02: ...")
  */
 export function formatCorePrinciplesList(
   outputLanguage?: OutputLanguage,
-  scope: CorePrincipleScope = 'active',
+  scope: CorePrincipleScope = 'all',
 ): string {
   const useZh = outputLanguage === 'zh-CN';
   return selectCorePrinciples(scope)
@@ -132,7 +128,7 @@ export function buildCoreAxiomBlock(opts: CoreAxiomBlockOptions = {}): string {
     sectionTitle = 'CORE AXIOMS:',
     instruction = DEFAULT_INSTRUCTION,
     outputLanguage,
-    scope = 'active',
+    scope = 'all',
     fallback = '',
   } = opts;
 

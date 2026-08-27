@@ -12,10 +12,11 @@
  * EMPTY reducer (fresh-install simulation) and assert the final appendSystemContext.
  *
  * Layer model (PRI-606/PRI-607): <core_principles> carries ONLY the 6 foundational
- * axioms; the 4 operating principles surface via THINKING_OS; deprecated T-07 never
- * appears in any active surface. Language follows the canonical SSOT
- * (.pd/config.yaml → principles.outputLanguage) and config failure degrades the
- * LANGUAGE only — never the axioms.
+ * axioms (T-01/T-02/T-03/T-04/T-06/T-08); the 4 operating principles (T-05/
+ * T-07/T-09/T-10) surface via THINKING_OS and must never leak into the core
+ * block. Language follows the canonical SSOT (.pd/config.yaml →
+ * principles.outputLanguage) and config failure degrades the LANGUAGE only —
+ * never the axioms.
  *
  * EP-02 (Error Experience Handbook): component exists with isolated tests but the
  * production path never called it — these tests exercise the production entry point.
@@ -300,13 +301,15 @@ describe('PRI-606: core principles injection (production path, empty reducer)', 
     }
   });
 
-  it('core block contains ONLY foundational axioms — operating principles and deprecated T-07 are absent', async () => {
+  it('core block contains ONLY foundational axioms — all 4 operating principles are absent', async () => {
     const append = await runHook();
     const block = coreBlock(append);
     for (const p of OPERATING) {
       expect(block, `operating principle ${p.id} must not sit in <core_principles>`).not.toContain(`${p.id}:`);
     }
-    expect(block, 'deprecated T-07 must never appear in an active injection surface').not.toContain('T-07');
+    // Explicit pins (T-07 is Close the Loop, an operating principle).
+    expect(block).not.toContain('T-05:');
+    expect(block).not.toContain('T-07:');
   });
 
   it('wraps the axioms in the highest-priority <core_principles> block', async () => {

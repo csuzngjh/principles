@@ -3,13 +3,12 @@
 此文件通过 XML 结构化注入给大语言模型，定义其元认知框架。
 大模型对 XML 标签极其敏感，此结构旨在提升指令遵循度。
 
-directive 的 id、name 与每条 <must> 的第一句是规范锚点：必须与 @principles/core
-中的 Core Principle Registry（core-principle-registry.ts）完全一致。drift test
-（core-principle-registry-drift.test.ts）强制校验 id + name + statement 锚点——请勿在此改名或改写首句。
+directive 的 id、name、layer 与每条 <must> 的第一句是规范锚点：必须与 @principles/core
+中的 Core Principle Registry 完全一致。drift test 强制校验 id + name + layer +
+statement 锚点——请勿在此改名或改写首句。
 
-层级模型（PRI-606/PRI-607）：6 条 Foundational Axioms（必须保证什么）+
-4 条 Operating Principles（如何落地为工作方式）。已废弃的 id（如 T-07，语义并入
-T-06 Minimal Sufficient Change）绝不允许出现在本模板中。
+层级模型：恰好 10 条 directive——6 条 Foundational Axioms（必须保证什么）+
+4 条 Operating Principles（如何落地为工作方式），按层分组排列。
 -->
 <thinking_os_core_directives>
   <system_role>
@@ -85,7 +84,7 @@ T-06 Minimal Sufficient Change）绝不允许出现在本模板中。
     <forbidden>仅依靠会话上下文保存重要状态。</forbidden>
   </directive>
 
-  <directive id="T-11" layer="operating" name="Close the Loop">
+  <directive id="T-07" layer="operating" name="Close the Loop">
     <!-- 闭环验证 -->
     <trigger>在完成任何声称会改变现状的行动之后——代码修改、迁移、部署、修复。</trigger>
     <must>行动后观察实际结果，并与预期目标进行比较；完成执行并不等于已经成功。运行涉及的测试与构建、阅读实际输出，确认预期效果之后才能报告完成。</must>

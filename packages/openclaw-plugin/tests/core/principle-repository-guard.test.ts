@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { CORE_PRINCIPLE_IDS, getActiveCorePrinciples } from '@principles/core/runtime-v2';
+import { CORE_PRINCIPLES, CORE_PRINCIPLE_IDS } from '@principles/core/runtime-v2';
 import { ensureCorePrinciples } from '../../src/core/init.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,15 +24,15 @@ const __dirname = path.dirname(__filename);
 const PACKAGE_ROOT = path.resolve(__dirname, '..', '..');
 
 describe('AC-01/02: registry core axioms stay canonical (A)', () => {
-  it('registry has 11 entries: 10 active + deprecated T-07', () => {
-    expect(CORE_PRINCIPLE_IDS).toHaveLength(11);
-    expect(getActiveCorePrinciples()).toHaveLength(10);
+  it('registry has exactly 10 built-in principles (pre-release reset model)', () => {
+    expect(CORE_PRINCIPLES).toHaveLength(10);
+    expect(CORE_PRINCIPLE_IDS).toHaveLength(10);
   });
 
-  it('ids are exactly T-01 through T-11 (T-07 deprecated, kept resolvable)', () => {
+  it('ids are exactly T-01 through T-10', () => {
     expect(CORE_PRINCIPLE_IDS.slice().sort()).toEqual([
       'T-01', 'T-02', 'T-03', 'T-04', 'T-05',
-      'T-06', 'T-07', 'T-08', 'T-09', 'T-10', 'T-11',
+      'T-06', 'T-07', 'T-08', 'T-09', 'T-10',
     ]);
   });
 
@@ -45,21 +45,20 @@ describe('AC-01/02: registry core axioms stay canonical (A)', () => {
   });
 });
 
-describe('AC-03: ensureCorePrinciples initializes the active set from empty state', () => {
-  it('bootstraps the full ACTIVE set into a fresh state dir (deprecated T-07 excluded)', () => {
+describe('AC-03: ensureCorePrinciples initializes all 10 from empty state', () => {
+  it('bootstraps exactly the registry set into a fresh state dir', () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ac03-'));
     const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as never;
     const initialized = ensureCorePrinciples(stateDir, logger);
     expect(initialized).toBe(true);
 
-    // Training store contains exactly the 10 ACTIVE ids.
+    // Training store contains exactly the 10 registry ids.
     const storePath = path.join(stateDir, 'principle_training_state.json');
     expect(fs.existsSync(storePath)).toBe(true);
     const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
     const storedIds = Object.keys(store).filter((k) => k !== '_tree');
-    expect(storedIds.sort()).toEqual(getActiveCorePrinciples().map(p => p.id).sort());
+    expect(storedIds.sort()).toEqual(CORE_PRINCIPLE_IDS.slice().sort());
     expect(storedIds).toHaveLength(10);
-    expect(storedIds).not.toContain('T-07');
   });
 });
 

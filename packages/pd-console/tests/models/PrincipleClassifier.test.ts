@@ -25,17 +25,15 @@ function makePrinciple(overrides: Partial<PrincipleListItem> = {}): PrincipleLis
 }
 
 describe('classifyPrinciple', () => {
-  it('classifies registry ids (incl. T-11 Close the Loop and deprecated T-07) as builtin', () => {
+  it('classifies registry ids T-01..T-10 as builtin', () => {
     expect(classifyPrinciple(makePrinciple({ id: 'T-01' }))).toBe('builtin');
     expect(classifyPrinciple(makePrinciple({ id: 'T-05' }))).toBe('builtin');
-    expect(classifyPrinciple(makePrinciple({ id: 'T-10' }))).toBe('builtin');
-    expect(classifyPrinciple(makePrinciple({ id: 'T-11' }))).toBe('builtin');
-    // Deprecated T-07 stays a known registry id — historical ledger entries
-    // must land in the builtin bucket, not owner_actionable.
     expect(classifyPrinciple(makePrinciple({ id: 'T-07' }))).toBe('builtin');
+    expect(classifyPrinciple(makePrinciple({ id: 'T-10' }))).toBe('builtin');
   });
 
-  it('does NOT classify T-100, T-0 as builtin', () => {
+  it('does NOT classify T-11, T-100, T-0 as builtin', () => {
+    expect(classifyPrinciple(makePrinciple({ id: 'T-11', status: 'candidate' }))).toBe('owner_actionable');
     expect(classifyPrinciple(makePrinciple({ id: 'T-100', status: 'candidate' }))).toBe('owner_actionable');
     expect(classifyPrinciple(makePrinciple({ id: 'T-0', status: 'candidate' }))).toBe('owner_actionable');
   });

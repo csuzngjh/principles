@@ -8,7 +8,7 @@ import { addPrincipleToLedger } from './principle-tree-ledger.js';
 import type { LedgerPrinciple } from './principle-tree-ledger.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { createDefaultKeywordStore, saveKeywordStore } from './empathy-keyword-matcher.js';
-import { getActiveCorePrinciples } from '@principles/core/runtime-v2';
+import { CORE_PRINCIPLES } from '@principles/core/runtime-v2';
 
 /**
  * Default PROFILE.json content
@@ -149,15 +149,15 @@ function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginA
 }
 
 /**
- * Core thinking model definitions (the registry's ACTIVE set — 6 foundational
- * axioms + 4 operating principles; deprecated ids like T-07 are excluded).
+ * Core thinking model definitions (the full registry — exactly T-01..T-10:
+ * 6 foundational axioms + 4 operating principles).
  * Derived from the Core Principle Registry — the single source of truth.
  */
 export const CORE_THINKING_MODELS: Array<{
   id: string;
   name: string;
   description: string;
-}> = getActiveCorePrinciples().map(p => ({
+}> = CORE_PRINCIPLES.map(p => ({
   id: p.id,
   name: p.name,
   description: p.statement,

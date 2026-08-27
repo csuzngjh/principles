@@ -1,30 +1,28 @@
 /**
- * Core Principle Registry — T-01..T-11
+ * Core Principle Registry — T-01..T-10
  *
- * Canonical source of truth for the built-in core principles.
+ * Canonical source of truth for the 10 built-in core principles.
  * The shipped THINKING_OS.md templates carry the same T-NN ids; the drift
  * test in openclaw-plugin validates template ↔ registry alignment
- * (id + name + canonical statement anchor).
+ * (id + name + layer + canonical statement anchor).
  *
- * ## Layer model (PRI-606/PRI-607 correction)
+ * ## Layer model (PRI-606/PRI-607)
  *
- * The active set is 10 principles in two layers:
+ * The registry is exactly 10 principles in two layers:
  * - 6 Foundational Axioms (`layer: 'foundational'`) — high-abstraction,
  *   tool-agnostic, generative decision rules. Injected via
  *   `<core_principles>`.
  * - 4 Operating Principles (`layer: 'operating'`) — how an agent puts the
  *   axioms into practice. Surfaced via THINKING_OS directives.
  *
- * ## T-07 compatibility migration
+ * ## Pre-release reset policy (Owner decision, PR #1421 round 3)
  *
- * T-07 (Minimal Change Surface) historically duplicated T-06's semantic
- * (solution simplicity + change surface). Its meaning is absorbed by
- * T-06 (Minimal Sufficient Change). T-07 ids persist in workspace training
- * state, ledger trees, and pi_artifacts `groundedOnCorePrincipleIds`, so the
- * id is NOT reused: it stays resolvable (`isCorePrincipleId('T-07')` → true)
- * but is `status: 'deprecated'` and excluded from every active surface
- * (prompt injection, THINKING_OS templates, training-state init).
- * T-11 (Close the Loop) takes the freed slot as a new operating principle.
+ * Built-in core principle semantics were redesigned during the pre-release
+ * MVP phase. Existing experimental PD workspaces are NOT migrated in place;
+ * testing this version requires a fresh workspace. The project intentionally
+ * prioritizes a simple canonical model over compatibility machinery for
+ * experimental state: there are no deprecated entries, no status/supersededBy
+ * lifecycle fields, and no legacy aliases here.
  *
  * Bilingual: each principle has EN (name/statement) and
  * ZH (nameZh/statementZh) fields.
@@ -37,26 +35,11 @@ import { Type } from '@sinclair/typebox';
 /** Semantic layer of a core principle (PRI-606/PRI-607 two-layer model). */
 export type CorePrincipleLayer = 'foundational' | 'operating';
 
-/** Lifecycle status. Deprecated ids stay resolvable for historical data. */
-export type CorePrincipleStatus = 'active' | 'deprecated';
-
 export interface CorePrinciple {
   /** Canonical id — also the directive id in THINKING_OS.md templates (e.g. 'T-01') */
   id: string;
   /** Semantic layer: foundational axiom vs operating principle. */
   layer: CorePrincipleLayer;
-  /**
-   * Lifecycle status. Absent means 'active'. Deprecated entries are excluded
-   * from prompt injection, THINKING_OS templates, and training-state init,
-   * but remain resolvable via getCorePrinciple()/isCorePrincipleId() so
-   * historical artifacts referencing them keep validating.
-   */
-  status?: CorePrincipleStatus;
-  /**
-   * For deprecated entries: id of the active principle that absorbed this
-   * principle's semantics (e.g. T-07 → T-06).
-   */
-  supersededBy?: string;
   /** Human-readable name (EN) */
   name: string;
   /** Human-readable name (ZH) — bilingual counterpart */
@@ -70,8 +53,6 @@ export interface CorePrinciple {
 export const CorePrincipleSchema = Type.Object({
   id: Type.String({ pattern: '^T-\\d{2}$' }),
   layer: Type.Union([Type.Literal('foundational'), Type.Literal('operating')]),
-  status: Type.Optional(Type.Union([Type.Literal('active'), Type.Literal('deprecated')])),
-  supersededBy: Type.Optional(Type.String({ pattern: '^T-\\d{2}$' })),
   name: Type.String({ minLength: 1 }),
   nameZh: Type.String({ minLength: 1 }),
   statement: Type.String({ minLength: 1 }),
@@ -130,17 +111,12 @@ const CORE_PRINCIPLE_DATA: CorePrinciple[] = [
     statementZh: '选择能够满足真实意图的最简单干预方式，并且只改变必要的状态。',
   },
   {
-    // Deprecated compatibility entry — see file header. Statement kept
-    // verbatim from the pre-migration registry: it is the identity persisted
-    // in existing workspaces' training state and historical artifacts.
     id: 'T-07',
-    layer: 'foundational',
-    status: 'deprecated',
-    supersededBy: 'T-06',
-    name: 'Minimal Change Surface',
-    nameZh: '最小变更面',
-    statement: 'Limit the blast radius and touch only what is necessary.',
-    statementZh: '限制爆炸半径，只触碰必要的部分。',
+    layer: 'operating',
+    name: 'Close the Loop',
+    nameZh: '闭环验证',
+    statement: 'After acting, observe the result and compare it with the intended outcome; execution is not success until verified.',
+    statementZh: '行动后观察实际结果，并与预期目标进行比较；完成执行并不等于已经成功。',
   },
   {
     id: 'T-08',
@@ -166,49 +142,28 @@ const CORE_PRINCIPLE_DATA: CorePrinciple[] = [
     statement: 'Persist important intermediate conclusions, decisions, and state outside transient context when continuity matters.',
     statementZh: '当连续性重要时，把关键中间结论、决策与状态持久化到瞬时上下文之外。',
   },
-  {
-    id: 'T-11',
-    layer: 'operating',
-    name: 'Close the Loop',
-    nameZh: '闭环验证',
-    statement: 'After acting, observe the result and compare it with the intended outcome; execution is not success until verified.',
-    statementZh: '行动后观察实际结果，并与预期目标进行比较；完成执行并不等于已经成功。',
-  },
 ];
 
 // ── Frozen public API ─────────────────────────────────────────────────────
 
-/** Frozen array of all core principles, including deprecated entries */
+/** Frozen array of all 10 core principles */
 export const CORE_PRINCIPLES: readonly CorePrinciple[] = Object.freeze(
   CORE_PRINCIPLE_DATA.map(p => Object.freeze({ ...p }))
 );
 
-/** Frozen array of all core principle ids, including deprecated ones */
+/** Frozen array of all core principle ids */
 export const CORE_PRINCIPLE_IDS: readonly string[] = Object.freeze(
   CORE_PRINCIPLE_DATA.map(p => p.id)
 );
 
-/**
- * Active core principles (deprecated entries excluded).
- * This is the set every active surface — prompt injection, THINKING_OS
- * templates, training-state initialization — must be derived from.
- */
-export function getActiveCorePrinciples(): readonly CorePrinciple[] {
-  return CORE_PRINCIPLES.filter(p => (p.status ?? 'active') === 'active');
-}
-
 /** Active foundational axioms — the `<core_principles>` injection set. */
 export function getFoundationalPrinciples(): readonly CorePrinciple[] {
-  return CORE_PRINCIPLES.filter(
-    p => p.layer === 'foundational' && (p.status ?? 'active') === 'active'
-  );
+  return CORE_PRINCIPLES.filter(p => p.layer === 'foundational');
 }
 
 /** Active operating principles — surfaced via THINKING_OS directives. */
 export function getOperatingPrinciples(): readonly CorePrinciple[] {
-  return CORE_PRINCIPLES.filter(
-    p => p.layer === 'operating' && (p.status ?? 'active') === 'active'
-  );
+  return CORE_PRINCIPLES.filter(p => p.layer === 'operating');
 }
 
 /** Type guard: returns true if the value is a known core principle id */

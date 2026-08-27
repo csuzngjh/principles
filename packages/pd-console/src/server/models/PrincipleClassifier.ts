@@ -57,9 +57,8 @@ function hasKeyword(text: string, keywords: readonly string[]): boolean {
 }
 
 /**
- * Core Thinking OS axiom IDs. Validated against the @principles/core
- * registry — deprecated ids (e.g. T-07) still classify as builtin so
- * historical ledger entries render in the right bucket.
+ * Core Thinking OS axiom IDs — validated against the @principles/core
+ * registry so the builtin set always mirrors the canonical T-01..T-10.
  */
 function isBuiltinId(id: string): boolean {
   return isCorePrincipleId(id);

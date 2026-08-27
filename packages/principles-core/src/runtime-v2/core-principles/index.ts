@@ -1,7 +1,6 @@
 export {
   CORE_PRINCIPLES,
   CORE_PRINCIPLE_IDS,
-  getActiveCorePrinciples,
   getFoundationalPrinciples,
   getOperatingPrinciples,
   isCorePrincipleId,
@@ -9,11 +8,7 @@ export {
   CorePrincipleSchema,
 } from './core-principle-registry.js';
 
-export type {
-  CorePrinciple,
-  CorePrincipleLayer,
-  CorePrincipleStatus,
-} from './core-principle-registry.js';
+export type { CorePrinciple, CorePrincipleLayer } from './core-principle-registry.js';
 
 export {
   formatCorePrinciplesList,

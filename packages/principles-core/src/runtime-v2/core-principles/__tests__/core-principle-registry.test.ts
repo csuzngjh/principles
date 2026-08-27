@@ -3,7 +3,6 @@ import { Value } from '@sinclair/typebox/value';
 import {
   CORE_PRINCIPLES,
   CORE_PRINCIPLE_IDS,
-  getActiveCorePrinciples,
   getFoundationalPrinciples,
   getOperatingPrinciples,
   isCorePrincipleId,
@@ -12,48 +11,54 @@ import {
 } from '../core-principle-registry.js';
 
 describe('Core Principle Registry', () => {
-  it('exports 11 registry entries: 10 active + 1 deprecated (T-07 migration)', () => {
-    expect(CORE_PRINCIPLES).toHaveLength(11);
-    expect(getActiveCorePrinciples()).toHaveLength(10);
+  it('exports exactly 10 built-in principles', () => {
+    expect(CORE_PRINCIPLES).toHaveLength(10);
+    expect(CORE_PRINCIPLE_IDS).toHaveLength(10);
   });
 
-  it('contains T-01 through T-11', () => {
-    const ids = CORE_PRINCIPLES.map(p => p.id);
-    expect(ids).toEqual(['T-01','T-02','T-03','T-04','T-05','T-06','T-07','T-08','T-09','T-10','T-11']);
+  it('contains exactly T-01 through T-10', () => {
+    expect(CORE_PRINCIPLES.map(p => p.id)).toEqual(
+      ['T-01','T-02','T-03','T-04','T-05','T-06','T-07','T-08','T-09','T-10']
+    );
   });
 
-  it('active set excludes T-07; T-07 stays resolvable with supersededBy T-06', () => {
-    const activeIds = getActiveCorePrinciples().map(p => p.id);
-    expect(activeIds).not.toContain('T-07');
-    const t07 = getCorePrinciple('T-07');
-    expect(t07?.status).toBe('deprecated');
-    expect(t07?.supersededBy).toBe('T-06');
-    // Historical artifacts referencing T-07 keep validating (rc-6 style lineage safety).
-    expect(isCorePrincipleId('T-07')).toBe(true);
-  });
-
-  it('layer helpers partition the active set: 6 foundational + 4 operating', () => {
+  it('layer helpers partition the registry: 6 foundational + 4 operating', () => {
     const foundational = getFoundationalPrinciples();
     const operating = getOperatingPrinciples();
     expect(foundational).toHaveLength(6);
     expect(operating).toHaveLength(4);
-    expect(foundational.every(p => p.layer === 'foundational')).toBe(true);
-    expect(operating.every(p => p.layer === 'operating')).toBe(true);
     expect([...foundational, ...operating].map(p => p.id).sort())
-      .toEqual(getActiveCorePrinciples().map(p => p.id).sort());
+      .toEqual(CORE_PRINCIPLES.map(p => p.id).sort());
   });
 
-  it('CORE_PRINCIPLE_IDS matches principle ids (including deprecated)', () => {
-    expect(CORE_PRINCIPLE_IDS).toEqual(CORE_PRINCIPLES.map(p => p.id));
+  it('foundational set is exactly the <core_principles> injection set', () => {
+    expect(getFoundationalPrinciples().map(p => p.id).sort())
+      .toEqual(['T-01', 'T-02', 'T-03', 'T-04', 'T-06', 'T-08']);
+  });
+
+  it('operating set carries Safety Rails, Close the Loop, Divide And Conquer, Memory Externalization', () => {
+    const byId = new Map(getOperatingPrinciples().map(p => [p.id, p.name]));
+    expect(byId.get('T-05')).toBe('Safety Rails');
+    expect(byId.get('T-07')).toBe('Close the Loop');
+    expect(byId.get('T-09')).toBe('Divide And Conquer');
+    expect(byId.get('T-10')).toBe('Memory Externalization');
+  });
+
+  it('T-07 is Close the Loop and no T-11 exists (pre-release reset)', () => {
+    const t07 = getCorePrinciple('T-07');
+    expect(t07?.name).toBe('Close the Loop');
+    expect(t07?.nameZh).toBe('闭环验证');
+    expect(isCorePrincipleId('T-11')).toBe(false);
   });
 
   it('isCorePrincipleId returns true for valid ids', () => {
     expect(isCorePrincipleId('T-01')).toBe(true);
+    expect(isCorePrincipleId('T-07')).toBe(true);
     expect(isCorePrincipleId('T-10')).toBe(true);
-    expect(isCorePrincipleId('T-11')).toBe(true);
   });
 
   it('isCorePrincipleId returns false for invalid ids', () => {
+    expect(isCorePrincipleId('T-11')).toBe(false);
     expect(isCorePrincipleId('T-99')).toBe(false);
     expect(isCorePrincipleId('')).toBe(false);
     expect(isCorePrincipleId('t-01')).toBe(false); // case-sensitive
@@ -67,12 +72,12 @@ describe('Core Principle Registry', () => {
   });
 
   it('getCorePrinciple returns undefined for invalid id', () => {
+    expect(getCorePrinciple('T-11')).toBeUndefined();
     expect(getCorePrinciple('T-99')).toBeUndefined();
   });
 
   it('registry is frozen (immutable)', () => {
     expect(Object.isFrozen(CORE_PRINCIPLES)).toBe(true);
-    // Attempting mutation should not change the value
     expect(() => {
       (CORE_PRINCIPLES as typeof CORE_PRINCIPLES[number][]).push(
         Object.freeze({ id: 'T-99', layer: 'foundational', name: 'Fake', nameZh: '假', statement: 'Fake', statementZh: '假' })
@@ -84,9 +89,6 @@ describe('Core Principle Registry', () => {
     for (const p of CORE_PRINCIPLES) {
       expect(p.id).toMatch(/^T-\d{2}$/);
       expect(['foundational', 'operating']).toContain(p.layer);
-      if (p.status !== undefined) {
-        expect(['active', 'deprecated']).toContain(p.status);
-      }
       expect(typeof p.name).toBe('string');
       expect(p.name.length).toBeGreaterThan(0);
       expect(typeof p.nameZh).toBe('string');
@@ -100,11 +102,9 @@ describe('Core Principle Registry', () => {
 
   it('each principle has bilingual (EN+ZH) fields', () => {
     for (const p of CORE_PRINCIPLES) {
-      // ZH fields must be non-empty
       expect(p.nameZh.length).toBeGreaterThan(0);
       expect(p.statementZh.length).toBeGreaterThan(0);
-      // ZH should differ from EN (not just a copy)
-      expect(p.nameZh).not.toEqual(p.name);
+      expect(p.nameZh).not.toEqual(p.name); // ZH should differ from EN
     }
   });
 
@@ -112,12 +112,6 @@ describe('Core Principle Registry', () => {
     const t01 = getCorePrinciple('T-01');
     expect(t01).toBeDefined();
     expect(Value.Check(CorePrincipleSchema, t01)).toBe(true);
-  });
-
-  it('CorePrincipleSchema validates the deprecated entry', () => {
-    const t07 = getCorePrinciple('T-07');
-    expect(t07).toBeDefined();
-    expect(Value.Check(CorePrincipleSchema, t07)).toBe(true);
   });
 
   it('CorePrincipleSchema rejects invalid data', () => {

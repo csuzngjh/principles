@@ -3,15 +3,14 @@
 This file defines the meta-cognitive framework injected into the Large Language Model via XML structures.
 LLMs are highly sensitive to XML tags; this structure is designed to boost instruction adherence.
 
-Directive ids, names, and the first sentence of each <must> are canonical: they
-MUST match the Core Principle Registry in @principles/core
-(core-principle-registry.ts). The drift test
-(core-principle-registry-drift.test.ts) enforces id + name + statement-anchor
-alignment — do not rename or rephrase here.
+Directive ids, names, layers, and the first sentence of each <must> are
+canonical: they MUST match the Core Principle Registry in @principles/core.
+The drift test enforces id + name + layer + statement-anchor alignment — do
+not rename or rephrase here.
 
-Layer model (PRI-606/PRI-607): 6 foundational axioms (what to guarantee) +
-4 operating principles (how to work). Deprecated ids (e.g. T-07, absorbed by
-T-06 Minimal Sufficient Change) must never appear in this template.
+Layer model: exactly 10 directives — 6 foundational axioms (what must hold
+before/during/after action) + 4 operating principles (how to work). Directives
+are grouped by layer below.
 -->
 <thinking_os_core_directives>
   <system_role>
@@ -78,7 +77,7 @@ T-06 Minimal Sufficient Change) must never appear in this template.
     <forbidden>Relying solely on conversation context to retain important state.</forbidden>
   </directive>
 
-  <directive id="T-11" layer="operating" name="Close the Loop">
+  <directive id="T-07" layer="operating" name="Close the Loop">
     <trigger>After completing an action that claims to change anything — code edits, migrations, deployments, fixes.</trigger>
     <must>After acting, observe the result and compare it with the intended outcome; execution is not success until verified. Run the tests and builds you touched, read the actual output, and confirm the intended effect before reporting done.</must>
     <forbidden>Reporting a task as done without observing its result, or treating "the command exited" as "the outcome is correct".</forbidden>

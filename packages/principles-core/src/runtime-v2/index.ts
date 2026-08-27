@@ -445,11 +445,10 @@ export type {
 } from './feature-flags/index.js';
 
 // Core Principle Registry (PRI-367) — canonical built-in principle definitions
-// (6 foundational axioms + 4 operating principles + deprecated T-07, PRI-606/607)
+// (exactly 10: 6 foundational axioms + 4 operating principles, PRI-606/607)
 export {
   CORE_PRINCIPLES,
   CORE_PRINCIPLE_IDS,
-  getActiveCorePrinciples,
   getFoundationalPrinciples,
   getOperatingPrinciples,
   isCorePrincipleId,
@@ -463,7 +462,6 @@ export {
 export type {
   CorePrinciple,
   CorePrincipleLayer,
-  CorePrincipleStatus,
   CorePrincipleScope,
 } from './core-principles/index.js';
 

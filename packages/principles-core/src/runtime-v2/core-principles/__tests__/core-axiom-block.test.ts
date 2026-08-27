@@ -8,19 +8,19 @@ import {
   buildCoreAxiomBlock,
 } from '../core-axiom-block.js';
 import {
-  getActiveCorePrinciples,
+  CORE_PRINCIPLES,
   getFoundationalPrinciples,
   getOperatingPrinciples,
 } from '../core-principle-registry.js';
 
 describe('formatCorePrinciplesList', () => {
-  it('formats the 10 ACTIVE principles as "T-XX: statement" lines (deprecated excluded)', () => {
+  it('formats all 10 principles as "T-XX: statement" lines by default', () => {
     const result = formatCorePrinciplesList();
     const lines = result.split('\n');
     expect(lines).toHaveLength(10);
     expect(lines[0]).toMatch(/^T-01: /);
-    expect(lines[9]).toMatch(/^T-11: /);
-    expect(result).not.toContain('T-07:');
+    expect(lines[9]).toMatch(/^T-10: /);
+    expect(result).toContain('T-07:');
   });
 
   it('uses English statements by default', () => {
@@ -41,31 +41,22 @@ describe('formatCorePrinciplesList', () => {
 
   it("scope 'foundational' lists exactly the foundational axioms", () => {
     const result = formatCorePrinciplesList('en', 'foundational');
-    const lines = result.split('\n');
-    expect(lines).toHaveLength(getFoundationalPrinciples().length);
-    expect(lines[0]).toMatch(/^T-01: /);
-    expect(result).toContain('T-06:');
-    expect(result).toContain('T-08:');
-    expect(result).not.toContain('T-05:');
-    expect(result).not.toContain('T-11:');
-    expect(result).not.toContain('T-07:');
+    expect(result.split('\n')).toHaveLength(getFoundationalPrinciples().length);
+    for (const p of getFoundationalPrinciples()) {
+      expect(result).toContain(`${p.id}:`);
+    }
+    // Operating principles must never land in the foundational slice.
+    for (const p of getOperatingPrinciples()) {
+      expect(result).not.toContain(`${p.id}:`);
+    }
   });
 
   it("scope 'operating' lists exactly the operating principles", () => {
     const result = formatCorePrinciplesList('en', 'operating');
-    const lines = result.split('\n');
-    expect(lines).toHaveLength(getOperatingPrinciples().length);
+    expect(result.split('\n')).toHaveLength(getOperatingPrinciples().length);
     expect(result).toContain('T-05:');
-    expect(result).toContain('T-09:');
-    expect(result).toContain('T-10:');
-    expect(result).toContain('T-11:');
-    expect(result).not.toContain('T-01:');
-  });
-
-  it("scope 'all' includes deprecated entries (historical/debug views)", () => {
-    const result = formatCorePrinciplesList('en', 'all');
     expect(result).toContain('T-07:');
-    expect(result).toContain('Limit the blast radius');
+    expect(result).not.toContain('T-01:');
   });
 });
 
@@ -96,18 +87,21 @@ describe('buildCoreAxiomBlock', () => {
     expect(result).toContain('validation failure');
   });
 
-  it('includes all ACTIVE core principles (deprecated excluded by default scope)', () => {
+  it('includes all 10 core principles under the default scope', () => {
     const result = buildCoreAxiomBlock({ coreGrounding: true });
-    for (const p of getActiveCorePrinciples()) {
+    for (const p of CORE_PRINCIPLES) {
       expect(result).toContain(p.id + ':');
     }
-    expect(result).not.toContain('T-07:');
   });
 
   it('honors scope override (foundational only)', () => {
     const result = buildCoreAxiomBlock({ coreGrounding: true, scope: 'foundational' });
     expect(result).toContain('T-01:');
-    expect(result).not.toContain('T-05:');
+    // The list section must be exactly the foundational slice.
+    expect(result).toContain(formatCorePrinciplesList(undefined, 'foundational'));
+    for (const p of getOperatingPrinciples()) {
+      expect(result).not.toContain(`${p.id}:`);
+    }
   });
 
   it('uses custom section title', () => {
