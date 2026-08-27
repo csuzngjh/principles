@@ -1,0 +1,64 @@
+name: Release Reproducibility (Full Matrix)
+
+# Tier 2: full-platform double-build verification. Runs as a mandatory
+# reusable gate in publish-npm.yml or by explicit manual dispatch. PRs use
+# the quick-check workflow
+# (release-reproducibility.yml) for fast feedback; this workflow provides
+# the definitive per-platform byte-reproducibility evidence required by
+# SPEC §18-3 before release publication.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-release-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025]
+        node: ['22.22.2', '24.12.0', '26.7.0']
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      SOURCE_DATE_EPOCH: '1700000000'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Build every release component from the clean checkout
+        run: |
+          npm run build
+          npm run build:production --workspace=principles-disciple
+          npm run build --workspace=principles-disciple
+          npm run build --workspace=@principles/pd-cli
+          npm run build --workspace=@principles/pd-console
+          npm run build --workspace=create-principles-disciple
+      - name: Build the real production asset twice and compare bytes
+        shell: bash
+        run: |
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_ONE"
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs --output "$PUBLICATION_TWO"
+          if node packages/create-principles-disciple/scripts/compare-release-archives.mjs \
+            "$PUBLICATION_ONE/asset.tar" \
+            "$PUBLICATION_TWO/asset.tar"; then
+            rm -rf "$PUBLICATION_ONE" "$PUBLICATION_TWO/payload"
+          else
+            node packages/create-principles-disciple/scripts/diff-release-archives.mjs \
+              "$PUBLICATION_ONE/asset.tar" "$PUBLICATION_TWO/asset.tar" || true
+            exit 1
+          fi
+        env:
+          PUBLICATION_ONE: ${{ runner.temp }}/pd-publication-one
+          PUBLICATION_TWO: ${{ runner.temp }}/pd-publication-two
+      - name: Install and probe the published archive without npm
+        run: npm test --workspace=create-principles-disciple -- --run tests/release-asset-smoke.test.ts
+        env:
+          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two

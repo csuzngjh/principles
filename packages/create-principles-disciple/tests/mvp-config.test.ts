@@ -699,28 +699,6 @@ describe('CLI verification requires localOk first (P1 fix)', () => {
   });
 });
 
-describe('Native module verification always runs (P1 fix)', () => {
-  it('rebuildNativeModules runs outside needsInstall guard', () => {
-    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
-    const content = fs.readFileSync(installerPath, 'utf-8');
-    const needsInstallBlock = content.indexOf('if (needsInstall)');
-    const rebuildCall = content.indexOf("rebuildNativeModules(extDir, 'Plugin')");
-    expect(needsInstallBlock).toBeGreaterThan(0);
-    expect(rebuildCall).toBeGreaterThan(0);
-    expect(rebuildCall).toBeGreaterThan(needsInstallBlock);
-  });
-
-  it('verifyNativeModules runs after rebuildNativeModules', () => {
-    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
-    const content = fs.readFileSync(installerPath, 'utf-8');
-    const rebuildCall = content.indexOf("rebuildNativeModules(extDir, 'Plugin')");
-    const verifyCall = content.indexOf("verifyNativeModules(extDir, 'Plugin')");
-    expect(rebuildCall).toBeGreaterThan(0);
-    expect(verifyCall).toBeGreaterThan(0);
-    expect(verifyCall).toBeGreaterThan(rebuildCall);
-  });
-});
-
 describe('Bundle script required vs optional artifacts (Fix A)', () => {
   const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
   const content = fs.readFileSync(scriptPath, 'utf-8');

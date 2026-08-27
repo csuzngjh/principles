@@ -1,30 +1,71 @@
 #!/usr/bin/env node
 
 import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, sep } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFile, execFileSync, execSync } from 'child_process';
+import { promisify } from 'util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+function readOption(name) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  // Fail loud instead of silently falling back to the package root when the
+  // flag is present but its value is missing — building into the source tree
+  // would be silent corruption (ERR-002 / EP-03).
+  if (value === undefined || value.startsWith('-')) {
+    throw new Error(`Option ${name} requires a value`);
+  }
+  return value;
+}
+
 const ROOT_DIR = join(__dirname, '..', '..', '..');
+const THIS_PACKAGE_ROOT = join(__dirname, '..');
+const BUILD_SELF_CONTAINED_ASSET = process.argv.includes('--self-contained');
+const PREPARE_RELEASE_LOCKS = process.argv.includes('--prepare-release-locks');
+// Self-contained materialization writes FULL dependency trees (six
+// components × node_modules + better-sqlite3 compilation). That must never
+// land in the repository source tree — not even temporarily: an interrupted
+// run (crash/kill/EPERM) would leave hundreds of thousands of ignored files
+// behind, and .gitignore only hides them from Git, not from disk, search
+// indexers, or antivirus. Source-tree immutability is enforced here, not
+// delegated to cleanup.
+const OUTPUT_ROOT = (() => {
+  const requested = readOption('--output-root');
+  if (BUILD_SELF_CONTAINED_ASSET) {
+    if (!requested) {
+      throw new Error('self-contained builds require an explicit --output-root pointing at an isolated staging directory');
+    }
+    const resolvedRequested = join(requested);
+    if (resolvedRequested === THIS_PACKAGE_ROOT || resolvedRequested.startsWith(THIS_PACKAGE_ROOT + sep)) {
+      throw new Error(`Refusing to materialize a self-contained release into the repository source package: ${resolvedRequested}`);
+    }
+    return resolvedRequested;
+  }
+  return requested ?? THIS_PACKAGE_ROOT;
+})();
 const PLUGIN_SRC = join(ROOT_DIR, 'packages', 'openclaw-plugin');
-const PLUGIN_DEST = join(__dirname, '..', 'plugin');
+const PLUGIN_DEST = join(OUTPUT_ROOT, 'plugin');
 const PD_CLI_SRC = join(ROOT_DIR, 'packages', 'pd-cli');
-const PD_CLI_DEST = join(__dirname, '..', 'pd-cli');
+const PD_CLI_DEST = join(OUTPUT_ROOT, 'pd-cli');
 const CONSOLE_SRC = join(ROOT_DIR, 'packages', 'pd-console');
-const CONSOLE_DEST = join(__dirname, '..', 'console');
+const CONSOLE_DEST = join(OUTPUT_ROOT, 'console');
 const CORE_SRC = join(ROOT_DIR, 'packages', 'principles-core');
-const CORE_DEST = join(__dirname, '..', 'core');
+const CORE_DEST = join(OUTPUT_ROOT, 'core');
 const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
-const HOST_RUNTIME_DEST = join(__dirname, '..', 'host-runtime');
+const HOST_RUNTIME_DEST = join(OUTPUT_ROOT, 'host-runtime');
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
-const INSTALL_LAYOUT_DEST = join(__dirname, '..', 'install-layout');
+const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
+const RELEASE_LOCKS_ROOT = join(ROOT_DIR, 'packages', 'create-principles-disciple', 'release-locks');
+const execFileAsync = promisify(execFile);
 
 const PLUGIN_REQUIRED = [
   'dist',
   'dist/bundle.js',
+  'dist/governance-audit.js',
   'templates',
   'openclaw.plugin.json',
   'package.json',
@@ -319,6 +360,7 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@princi
 // reference so the bundled host-runtime package can resolve core without a
 // separate npm install. The installer creates the corresponding symlink.
 rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime', '@principles/core', 'file:../core');
+rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime', '@principles/install-layout', 'file:../install-layout');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
 // console statically imports OPENCLAW_HOST_LIVENESS_CONTRACT at runtime for the
 // RuleCode owner live-decision readiness checks. Rewrite to a local file reference
@@ -334,6 +376,86 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'princip
 // because pd-cli statically imports initTrajectorySchema/initWorkflowSchema from it.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principles-disciple', 'file:../plugin');
 
+if (BUILD_SELF_CONTAINED_ASSET) {
+  console.log('\n📦 Installing build-time runtime dependencies for the self-contained release asset...');
+
+  const installBundledRuntimeDependencies = async (directory, label) => {
+    // Run npm through the running Node binary and npm-cli.js with pure argv
+    // arrays — no cmd.exe shell string concatenation (ERR-045).  npm-cli.js
+    // location varies by platform: Windows puts it under <node_dir>/node_modules,
+    // Linux/macOS hosted toolchains under <prefix>/lib/node_modules.
+    const nodeDir = dirname(process.execPath);
+    const prefixDir = dirname(nodeDir);
+    const npmCliJs = [
+      join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      join(prefixDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      join(prefixDir, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    ].find(p => existsSync(p));
+    if (!npmCliJs) {
+      throw new Error(`npm-cli.js not found near ${process.execPath} (checked node_modules and lib/node_modules layouts)`);
+    }
+    const runNpm = (args) => execFileAsync(
+      process.execPath,
+      [npmCliJs, ...args],
+      {
+        cwd: directory,
+        timeout: 300_000,
+        windowsHide: true,
+      },
+    );
+    const lockPath = join(RELEASE_LOCKS_ROOT, label, 'package-lock.json');
+    if (!existsSync(lockPath)) {
+      throw new Error(`Missing committed release lock for ${label}: ${lockPath}`);
+    }
+    copyFileSync(lockPath, join(directory, 'package-lock.json'));
+    try {
+      await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
+    } catch (error) {
+      // rc-9: name the failing component — without this the piped stderr of a
+      // mass component-materialization loop points at no directory at all.
+      throw new Error(`[self-contained] npm ci failed for component "${label}" (cwd ${directory}): ${error.message}`, { cause: error });
+    }
+    const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
+    if (pkg.dependencies && Object.hasOwn(pkg.dependencies, 'better-sqlite3')) {
+      // better-sqlite3 ships its own prebuilt binaries (prebuilds/win32-x64.node
+      // etc.) and node-gyp-build resolves them at require-time.  With
+      // --ignore-scripts the install script is skipped, but the prebuilds are
+      // still present in the extracted tarball.  No node-gyp, no VS, no build
+      // residue — byte-identical across builds per platform/ABI.  The probe
+      // below proves the native module loads correctly.
+      execFileSync(process.execPath, ['-e', "require('better-sqlite3')"], {
+        cwd: directory,
+        stdio: 'pipe',
+        timeout: 30_000,
+      });
+    }
+    console.log(`  ✅ ${label}/node_modules is complete`);
+  };
+
+  // plugin's local core reference is package-relative (`file:./core`). Provide
+  // the source while npm materializes it into node_modules via --install-links,
+  // then remove the temporary duplicate from the shipped component root.
+  cpSync(CORE_DEST, join(PLUGIN_DEST, 'core'), { recursive: true });
+  try {
+    await Promise.all([
+      installBundledRuntimeDependencies(CORE_DEST, 'core'),
+      installBundledRuntimeDependencies(HOST_RUNTIME_DEST, 'host-runtime'),
+    ]);
+    await installBundledRuntimeDependencies(PLUGIN_DEST, 'plugin');
+    const installedPluginCore = join(PLUGIN_DEST, 'node_modules', '@principles', 'core');
+    rmSync(installedPluginCore, { recursive: true, force: true });
+    cpSync(CORE_DEST, installedPluginCore, { recursive: true });
+    await Promise.all([
+      installBundledRuntimeDependencies(PD_CLI_DEST, 'pd-cli'),
+      installBundledRuntimeDependencies(CONSOLE_DEST, 'console'),
+    ]);
+  } finally {
+    rmSync(join(PLUGIN_DEST, 'core'), { recursive: true, force: true });
+  }
+} else {
+  console.log('\nℹ️  Skipping platform node_modules (use --self-contained for release assets).');
+}
+
 // ---------------------------------------------------------------------------
 // Version sync: stamp the bundled plugin with the latest published
 // principles-disciple npm version.
@@ -343,6 +465,9 @@ rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principle
 // to main). Without this sync, the bundled plugin carries a stale version,
 // causing a permanent false "update available" after install.
 // ---------------------------------------------------------------------------
+if (BUILD_SELF_CONTAINED_ASSET || PREPARE_RELEASE_LOCKS) {
+  console.log('\n🔢 Preserving source component versions for the immutable release asset.');
+} else {
 console.log('\n🔢 Syncing bundled plugin version to latest npm principles-disciple...');
 
 let npmPluginVersion = null;
@@ -377,7 +502,7 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   // build-time-frozen plugin) drift and produce the permanent false
   // "update available". Unknown fields are preserved; only the
   // `pd.bundledPluginVersion` stamp is added/updated.
-  const installerPkgPath = join(__dirname, '..', 'package.json');
+  const installerPkgPath = join(OUTPUT_ROOT, 'package.json');
   try {
     const installerRaw = readFileSync(installerPkgPath, 'utf-8');
     const installerPkg = JSON.parse(installerRaw);
@@ -405,6 +530,7 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   } catch {
     console.log('  ⚠️  openclaw.plugin.json not found or unreadable — skipping version stamp');
   }
+}
 }
 
 console.log('\n🔍 Verifying hook activation contract...');

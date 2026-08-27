@@ -180,6 +180,11 @@ const REQUIRED_SOURCE_FILES = [
   // Slice 1 (PRI-543): deterministic fingerprint for feedback dedup/clustering.
   'feedback/fingerprint.ts',
   'feedback/index.ts',
+  // Anonymous Product Telemetry v1 (PRI-595~603, ADR-0021): pure contract —
+  // daily unlinkable identity derivation + strict snapshot schema/validator
+  // + privacy guard. No I/O; readers/exporter live in @principles/host-runtime.
+  'product-telemetry/daily-identity.ts',
+  'product-telemetry/snapshot-contract.ts',
   // PRI-372 (T-G)
   'diagnostician/diag-rootcause-output.ts',
   'diagnostician/diag-distiller-output.ts',
@@ -329,6 +334,11 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'dictionary.ts',
   'thinking-os-parser.ts',
   'system-logger.ts',
+  // Anonymous Product Telemetry v1 (PRI-595~603, ADR-0021): one-time-init
+  // trigger shell — wires the host-neutral telemetry service (all logic in
+  // @principles/host-runtime product-telemetry) into the OpenClaw plugin
+  // lifecycle. Plugin-specific because the trigger point is plugin-owned.
+  'product-telemetry-trigger.ts',
   // PRI-446: now a thin shell wiring DetectionFunnelCore (core runtime-v2/detection)
   // with crypto.createHash + PainDictionary. Kept here because it owns the
   // crypto + dictionary I/O boundary.
@@ -423,7 +433,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (97 files)', async () => {
+  it('known baseline count is self-consistent (98 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -471,7 +481,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // projection + auto-consumer governance dispatcher/repair wiring (I/O boundary).
     // RuleCode Owner Live Decision: Added rulecode-safety-circuit.ts (96 → 97)
     // as the plugin I/O shell for scope reads and durable safety isolation.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
   });
 });
 

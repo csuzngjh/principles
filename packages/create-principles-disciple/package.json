@@ -21,9 +21,15 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "bundle": "node scripts/bundle-plugin.mjs",
+    "build:release-asset": "node scripts/build-self-contained-release.mjs",
+    "generate:release-locks": "node scripts/generate-release-locks.mjs",
+    "check:release-locks": "node scripts/check-release-locks.mjs",
     "prepack": "npm run build && npm run bundle",
     "prepublishOnly": "npm run build && npm run bundle",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:fast": "vitest run --exclude tests/smoke-packaged-install.test.ts --exclude tests/release-asset-smoke.test.ts",
+    "test:smoke:packaged": "vitest run tests/smoke-packaged-install.test.ts",
+    "test:smoke:release-asset": "vitest run tests/release-asset-smoke.test.ts"
   },
   "keywords": [
     "openclaw",
@@ -36,14 +42,16 @@
   "license": "MIT",
   "dependencies": {
     "@principles/install-layout": "0.1.0",
+    "@tufjs/models": "3.0.1",
     "@inquirer/prompts": "^8.5.2",
     "commander": "^14.0.3",
     "fs-extra": "^11.4.0",
-    "js-yaml": "^5.2.0",
+    "js-yaml": "^5.3.0",
     "ora": "^9.4.0",
     "picocolors": "^1.0.0",
     "semver": "^7.8.5",
-    "tar": "^7.5.15"
+    "tar": "^7.5.22",
+    "tuf-js": "3.1.0"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
@@ -56,7 +64,7 @@
     "vitest": "^4.1.10"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "repository": {
     "type": "git",
@@ -64,6 +72,6 @@
     "directory": "packages/create-principles-disciple"
   },
   "pd": {
-    "bundledPluginVersion": "1.218.0"
+    "bundledPluginVersion": "1.222.4"
   }
 }

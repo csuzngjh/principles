@@ -460,7 +460,10 @@ export function UpdatePage() {
                     <span className="font-mono text-[13px] text-ink">
                       {entry.fromVersion} → {entry.toVersion}
                     </span>
-                    {!entry.success && (
+                    <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
+                      {t(`pages.update.historyKind.${entry.kind}`)}
+                    </span>
+                    {!entry.success && entry.kind !== 'refusal' && (
                       <span className="inline-flex items-center border border-red/35 text-red rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
                         {t("pages.update.failed")}
                       </span>
@@ -490,6 +493,12 @@ export function UpdatePage() {
                     )}
                   </div>
                 </div>
+                {(entry.reason || entry.nextAction) && (
+                  <div className="mt-3 border-t border-line pt-3 text-[12px] leading-relaxed text-ink-3">
+                    {entry.reason && <p>{entry.reason}</p>}
+                    {entry.nextAction && <p className="mt-1 text-ink-2">{entry.nextAction}</p>}
+                  </div>
+                )}
               </article>
             ))}
           </div>

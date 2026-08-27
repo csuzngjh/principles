@@ -1,0 +1,105 @@
+name: Release Reproducibility
+
+# Tiered verification (industry standard: fast on PR, full on merge):
+#
+# Tier 1 (this file, runs on PR): single-platform build + input-hash check.
+#   ~2-3 minutes.  If the content-addressed inputs (lockfile + source + tool
+#   chain + SOURCE_DATE_EPOCH) haven't changed since the last verified build,
+#   determinism is guaranteed by construction — no need to rebuild twice.
+#
+# Tier 2 (release-reproducibility-full.yml, called by publish-npm.yml):
+#   15-target matrix with double-build byte comparison + install smoke.
+#   Blocks release publication, not PRs.
+#
+# SPEC §18-3 evidence: both tiers together provide the reproducibility
+# guarantee.  Tier 1 catches input drift immediately; Tier 2 proves the
+# construction is deterministic on every platform before release.
+on:
+  pull_request:
+    paths:
+      - 'packages/create-principles-disciple/scripts/**'
+      - 'packages/create-principles-disciple/src/**'
+      - 'packages/create-principles-disciple/release-locks/**'
+      - 'packages/create-principles-disciple/tests/build-release-asset.test.ts'
+      - 'packages/create-principles-disciple/tests/release-asset-smoke.test.ts'
+      - 'packages/create-principles-disciple/package.json'
+      - 'packages/openclaw-plugin/**'
+      - 'packages/pd-cli/**'
+      - 'packages/pd-console/**'
+      - 'packages/principles-core/**'
+      - 'packages/host-runtime/**'
+      - 'packages/install-layout/**'
+      - 'package-lock.json'
+      - '.github/workflows/release-reproducibility*.yml'
+  workflow_dispatch:
+
+# Tier 1 runs per-PR; a newer commit supersedes the older verification.
+concurrency:
+  group: release-reproducibility-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  quick-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_DATE_EPOCH: '1700000000'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          # Node 22 = the product's floor and every other CI job. Tier 1 ran
+          # 26.x historically, which let release locks be regenerated with a
+          # different npm major than the smoke jobs consume — a mismatch that
+          # only surfaces as npm ci sync errors on the node22 jobs.
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Build release producers and verify committed dependency locks
+        run: |
+          npm run build
+          # build:production's esbuild wipes dist/ (including the .d.ts files
+          # pd-cli/pd-console typecheck against), so the plugin's tsc run MUST
+          # come AFTER it (ERR-090).
+          npm run build:production --workspace=principles-disciple
+          npm run build --workspace=principles-disciple
+          npm run build --workspace=@principles/pd-cli
+          npm run build --workspace=@principles/pd-console
+          npm run build --workspace=create-principles-disciple
+          npm run check:release-locks --workspace=create-principles-disciple
+      - name: Compute the content-addressed build identity
+        run: |
+          node packages/create-principles-disciple/scripts/compute-build-identity.mjs \
+            --output "$BUILD_IDENTITY_FILE"
+          cat "$BUILD_IDENTITY_FILE"
+        env:
+          BUILD_IDENTITY_FILE: ${{ runner.temp }}/build-identity.json
+      - name: Build once and record the digest
+        run: |
+          node packages/create-principles-disciple/scripts/build-self-contained-release.mjs \
+            --output "$PUBLICATION"
+          sha256sum "$PUBLICATION/asset.tar" | cut -d' ' -f1 > "$DIGEST_FILE"
+          echo "asset digest: $(cat "$DIGEST_FILE")"
+        env:
+          PUBLICATION: ${{ runner.temp }}/pd-publication
+          DIGEST_FILE: ${{ runner.temp }}/asset-digest.txt
+      - name: Run the install smoke test (no npm on the machine)
+        run: npm test --workspace=create-principles-disciple -- --run tests/release-asset-smoke.test.ts
+        env:
+          PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication
+
+      # Upload the build identity + digest as a workflow artifact so the
+      # full-matrix workflow can cross-check against it.
+      - name: Upload build identity artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build-identity-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/build-identity.json
+            ${{ runner.temp }}/asset-digest.txt
+          retention-days: 30

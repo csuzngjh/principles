@@ -4,10 +4,15 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: repo-health-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   size-guard:
     name: Repository Size & Large File Guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:

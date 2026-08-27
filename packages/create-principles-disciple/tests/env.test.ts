@@ -72,7 +72,7 @@ describe('environment detection utilities', () => {
     it('detects all tools when available', () => {
       mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
         routeByCommand(binary, args, {
-          'node -v': 'v20.0.0',
+          'node -v': 'v22.0.0',
           'openclaw --version': 'OpenClaw 1.0.0',
           'python3 --version': 'Python 3.11.0',
           'git --version': 'git version 2.40.0',
@@ -82,12 +82,27 @@ describe('environment detection utilities', () => {
       const result = checkEnvironment();
 
       expect(result.hasNode).toBe(true);
-      expect(result.nodeVersion).toBe('v20.0.0');
+      expect(result.isNodeSupported).toBe(true);
+      expect(result.nodeVersion).toBe('v22.0.0');
       expect(result.hasOpenClaw).toBe(true);
       expect(result.openclawVersion).toBe('OpenClaw 1.0.0');
       expect(result.hasPython).toBe(true);
       expect(result.pythonVersion).toBe('3.11.0');
       expect(result.hasGit).toBe(true);
+    });
+
+    it('rejects Node.js below the native runtime minimum', () => {
+      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+        routeByCommand(binary, args, {
+          'node -v': 'v20.19.0',
+        })
+      );
+
+      const result = checkEnvironment();
+
+      expect(result.hasNode).toBe(true);
+      expect(result.isNodeSupported).toBe(false);
+      expect(result.nodeVersion).toBe('v20.19.0');
     });
 
     it('detects clawd when openclaw is not available', () => {

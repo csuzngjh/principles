@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as childProcess from 'child_process';
-import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin, ensureConversationAccess, install } from '../src/installer.js';
+import { validateWorkspacePath, verifyNativeModules, checkBuiltPlugin, ensureConversationAccess, install, resolveConsolePortBase } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
 import { setLanguage } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
@@ -22,6 +23,31 @@ vi.mock('../src/utils/env.js', async (importOriginal) => {
     stopOpenClawGateway: vi.fn(),
     restartOpenClawGateway: vi.fn(),
   };
+});
+
+describe('console port base authority (PD_CONSOLE_PORT_BASE)', () => {
+  const originalBase = process.env.PD_CONSOLE_PORT_BASE;
+  afterEach(() => {
+    if (originalBase === undefined) delete process.env.PD_CONSOLE_PORT_BASE;
+    else process.env.PD_CONSOLE_PORT_BASE = originalBase;
+  });
+
+  it('defaults to the historical 3100 window', () => {
+    delete process.env.PD_CONSOLE_PORT_BASE;
+    expect(resolveConsolePortBase()).toBe(3100);
+  });
+
+  it('shifts the resolved base to 3300 (e.g. past a reserved port range)', () => {
+    process.env.PD_CONSOLE_PORT_BASE = '3300';
+    expect(resolveConsolePortBase()).toBe(3300);
+  });
+
+  it('rejects non-integer and out-of-range values loudly', () => {
+    for (const invalid of ['not-a-number', '3100.5', '1023', '65001', '-1']) {
+      process.env.PD_CONSOLE_PORT_BASE = invalid;
+      expect(() => resolveConsolePortBase()).toThrow(/PD_CONSOLE_PORT_BASE/);
+    }
+  });
 });
 
 describe('validateWorkspacePath security guard', () => {
@@ -103,53 +129,7 @@ describe('Native module verification', () => {
       throw new Error('Cannot load native module');
     });
 
-    expect(() => verifyNativeModules(cwd, 'Test')).toThrow(/verification failed/);
-  });
-});
-
-describe('rebuildNativeModules', () => {
-  // PRI-569: rebuild now runs via array-form execFileSync (execNpm), which
-  // uses encoding 'utf-8' → the mock contract is a STRING stdout.
-  const mockExecFileSync = vi.mocked(childProcess.execFileSync);
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockExecFileSync.mockImplementation(() => '');
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('skips modules that do not exist', async () => {
-    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-
-    await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
-
-    expect(mockExistsSync).toHaveBeenCalled();
-    expect(mockExecFileSync).not.toHaveBeenCalled();
-  });
-
-  it('rebuilds existing native modules', async () => {
-    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
-      return p.toString().includes('better-sqlite3');
-    });
-    mockExecFileSync.mockImplementation(() => '');
-
-    await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
-
-    expect(mockExecFileSync).toHaveBeenCalled();
-  });
-
-  it('throws when rebuild fails', async () => {
-    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
-      return p.toString().includes('better-sqlite3');
-    });
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error('rebuild failed');
-    });
-
-    await expect(rebuildNativeModules('/test/path', 'Test')).rejects.toThrow(/rebuild failed/);
+    expect(() => verifyNativeModules(cwd, 'Test')).toThrow(/require probe/);
   });
 });
 
@@ -288,16 +268,79 @@ describe('install() gateway lock pre-flight', () => {
   // Pin English so string assertions on operator-visible failure text are
   // deterministic (the catch block now routes through t()).
   let savedLang: 'zh' | 'en';
+  let savedLegacyNpmInstall: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
     savedLang = 'zh';
+    savedLegacyNpmInstall = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    process.env.PD_ALLOW_LEGACY_NPM_INSTALL = '1';
     setLanguage('en');
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+    vi.mocked(fs.readdirSync).mockReset();
+    vi.mocked(fs.statSync).mockReset();
+    if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
     setLanguage(savedLang);
+  });
+
+  it('refuses a wrong-ABI release before gateway control or filesystem mutation', async () => {
+    delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      schemaVersion: 1,
+      platform: process.platform,
+      arch: process.arch,
+      nodeAbi: process.versions.modules === '999999' ? '999998' : '999999',
+    }));
+
+    const result = await install(baseInstallOptions, '/asset', { quiet: true });
+
+    expect(result).toMatchObject({
+      success: false,
+      reason: 'self_contained_asset_target_mismatch',
+      component: 'Release asset',
+    });
+    expect(checkOpenClawGateway).not.toHaveBeenCalled();
+    expect(fs.rmSync).not.toHaveBeenCalled();
+    expect(fs.cpSync).not.toHaveBeenCalled();
+    expect(fs.renameSync).not.toHaveBeenCalled();
+  });
+
+  it('refuses a missing source dependency before gateway control or filesystem mutation', async () => {
+    delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    const actualFs = await vi.importActual<typeof import('fs')>('fs');
+    vi.mocked(fs.existsSync).mockImplementation((value) => !String(value).endsWith(path.join('node_modules', 'missing-runtime')));
+    vi.mocked(fs.readFileSync).mockImplementation((value) => {
+      const filePath = String(value);
+      if (filePath.endsWith(path.join('_release', 'asset.json'))) {
+        return JSON.stringify({ schemaVersion: 1, platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules });
+      }
+      if (filePath.endsWith(path.join('_release', 'manifest.json'))) {
+        return JSON.stringify({ schemaVersion: 1, files: [] });
+      }
+      return JSON.stringify({ dependencies: { 'missing-runtime': '1.0.0' } });
+    });
+    vi.mocked(fs.statSync).mockReturnValue(actualFs.statSync(process.cwd()));
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const result = await install(baseInstallOptions, '/asset', { quiet: true });
+
+    expect(result).toMatchObject({
+      success: false,
+      reason: 'self_contained_runtime_dependency_missing',
+      component: 'Core',
+      dependency: 'missing-runtime',
+    });
+    expect(checkOpenClawGateway).not.toHaveBeenCalled();
+    expect(fs.rmSync).not.toHaveBeenCalled();
+    expect(fs.cpSync).not.toHaveBeenCalled();
+    expect(fs.renameSync).not.toHaveBeenCalled();
   });
 
   // cli-5: the abort path must NOT mutate — gateway is never stopped and no

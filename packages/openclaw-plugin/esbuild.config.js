@@ -32,11 +32,18 @@ async function bundlePlugin() {
     // throws "Dynamic require of 'process' is not supported".
     // OpenClaw loads via setupEntry (dynamic import), so the banner is safe.
     await build({
-      entryPoints: ['src/index.ts'],
-      outfile: 'dist/bundle.js',
+      entryPoints: {
+        bundle: 'src/index.ts',
+        'governance-audit': 'src/governance-audit.ts',
+        // package.json exports ./rulehost-evidence -> dist/rulehost-evidence.js;
+        // a clean production-only build must emit it (ERR-090: export targets
+        // have to exist in ALL build paths, not just tsc's).
+        'rulehost-evidence': 'src/rulehost-evidence.ts',
+      },
+      outdir: 'dist',
       bundle: true,
       platform: 'node',
-      target: 'node20',
+      target: 'node22',
       format: 'esm',
       banner: {
         js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
@@ -77,7 +84,7 @@ async function bundlePlugin() {
         outdir: 'dist',
         bundle: true,
         platform: 'node',
-        target: 'node20',
+        target: 'node22',
         format: 'esm',
         outbase: 'src',
         external: [

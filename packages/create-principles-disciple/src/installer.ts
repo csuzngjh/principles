@@ -36,6 +36,13 @@ import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { parseInstallManifest } from '@principles/install-layout';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
+import {
+  parseReleaseAssetIdentity,
+  parseReleaseAssetManifest,
+  ReleaseAssetManifestError,
+  verifyReleaseAssetManifestAsync,
+  verifyReleaseAssetTarget,
+} from './update/release-asset-manifest.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -92,18 +99,34 @@ export function ensureConversationAccess(config: Record<string, unknown>): Recor
 const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
 
 // 超时常量
-const PD_CLI_VERIFICATION_TIMEOUT_MS = 10_000;
+const PD_CLI_VERIFICATION_TIMEOUT_MS = 30_000;
 const STORY_A_VERIFICATION_TIMEOUT_MS = 30_000;
 const CONSOLE_HEALTH_CHECK_TIMEOUT_MS = 8_000;
 const CONSOLE_WARMUP_TIME_MS = 6_000;
 
-// 端口范围常量
-const CONSOLE_PORT_RANGE_MIN = 3100;
-const CONSOLE_PORT_RANGE_MAX = 3199;
+// 端口范围常量。PD_CONSOLE_PORT_BASE 允许在操作系统保留了大段端口
+// (如 Windows excludedportrange) 的机器上整体平移探测窗口；未设置时
+// 保持历史默认 3100–3199。resolveConsolePortBase() 是唯一 resolved
+// base：安装验证窗口、console 健康检查、autolaunch 扫描、测试全部
+// 消费它——任何新窗口不得再硬编码第二个 base。
+export function resolveConsolePortBase(): number {
+  const raw = process.env.PD_CONSOLE_PORT_BASE;
+  if (raw === undefined) return 3100;
+  // Number() (not parseInt) so '3300.5' is rejected instead of silently
+  // truncating to 3300.
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65000) {
+    throw new Error(`PD_CONSOLE_PORT_BASE must be an integer in [1024, 65000], got: ${JSON.stringify(raw)}`);
+  }
+  return parsed;
+}
+const CONSOLE_PORT_RANGE_MIN = resolveConsolePortBase();
+const CONSOLE_PORT_RANGE_MAX = CONSOLE_PORT_RANGE_MIN + 99;
 
-// Task 8: auto-launch console via `pd console open` after successful install
-const CONSOLE_AUTOLAUNCH_BASE_PORT = 3100;
-const CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT = 20; // 3100..3119 (matches pd console open PORT_FALLBACK_LIMIT)
+// Task 8: auto-launch console via `pd console open` after successful install.
+// Derived from the SAME resolved base as the verification window above.
+const CONSOLE_AUTOLAUNCH_BASE_PORT = CONSOLE_PORT_RANGE_MIN;
+const CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT = 20; // base..base+19 (matches pd console open PORT_FALLBACK_LIMIT)
 const CONSOLE_AUTOLAUNCH_READY_TIMEOUT_MS = 12_000;
 const CONSOLE_AUTOLAUNCH_POLL_INTERVAL_MS = 500;
 
@@ -221,23 +244,10 @@ async function runNpmInstall(cwd: string, componentName = 'npm'): Promise<void> 
 }
 
 /**
- * 重建原生模块
- */
-export async function rebuildNativeModules(cwd: string, componentName: string): Promise<void> {
-  for (const mod of ALLOWED_NATIVE_MODULES) {
-    const modPath = path.join(cwd, 'node_modules', mod);
-    if (!existsSync(modPath)) continue;
-
-    try {
-      execNpm(['rebuild', mod], cwd);
-    } catch (e) {
-      throw new Error(`${componentName} native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${cwd} && npm rebuild ${mod}`, { cause: e });
-    }
-  }
-}
-
-/**
- * 验证原生模块
+ * 验证原生模块：better-sqlite3 随发布资产携带 prebuilt 二进制
+ * (prebuilds/*.node)，node-gyp-build 在 require 时解析——无需（也没有）
+ * npm rebuild 步骤。本函数的 require 探针就是唯一验证（历史上存在一个
+ * 名为 rebuildNativeModules 的空壳函数，已删除以避免误导维护者）。
  */
 export function verifyNativeModules(cwd: string, componentName: string): void {
   for (const nativeMod of ALLOWED_NATIVE_MODULES) {
@@ -247,9 +257,165 @@ export function verifyNativeModules(cwd: string, componentName: string): void {
     try {
       execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe' });
     } catch {
-      throw new Error(`${componentName} native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
+      throw new Error(`${componentName} native module ${nativeMod} failed its require probe: the prebuilt binary for this Node.js ABI is missing or incompatible (no rebuild step exists by design). Install the platform release asset matching this OS, architecture, and ABI.`);
     }
   }
+}
+
+const SELF_CONTAINED_DEPENDENCY_NEXT_ACTION = 'Install a complete platform release asset for this Node.js ABI and re-run the installer.';
+const SELF_CONTAINED_NATIVE_NEXT_ACTION = 'Install the platform release asset matching this operating system, architecture, and Node.js ABI.';
+
+export class SelfContainedDependencyError extends Error {
+  public readonly reason: string;
+  public readonly nextAction: string;
+  public readonly component: string;
+  public readonly dependency?: string;
+
+  constructor(options: {
+    reason: string;
+    nextAction: string;
+    message: string;
+    component: string;
+    dependency?: string;
+    cause?: unknown;
+  }) {
+    super(options.message, { cause: options.cause });
+    this.name = 'SelfContainedDependencyError';
+    this.reason = options.reason;
+    this.nextAction = options.nextAction;
+    this.component = options.component;
+    this.dependency = options.dependency;
+  }
+}
+
+function legacyNpmInstallEnabled(): boolean {
+  const value = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+  return value === '1' || value === 'true';
+}
+
+/**
+ * Supported release assets are self-contained: installation validates the
+ * copied component and never resolves dependencies or runs lifecycle scripts.
+ * The old npm path remains opt-in for development/legacy recovery only.
+ */
+export async function prepareBundledComponentDependencies(
+  cwd: string,
+  componentName: string,
+): Promise<void> {
+  const packageJsonPath = path.join(cwd, 'package.json');
+  let packageJsonRaw: unknown;
+  try {
+    packageJsonRaw = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+  } catch (error) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_package_manifest_invalid',
+      nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: `${componentName} package.json is missing or malformed after copy.`,
+      component: componentName,
+      cause: error,
+    });
+  }
+  if (!isRecord(packageJsonRaw)) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_package_manifest_invalid',
+      nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: `${componentName} package.json must contain an object.`,
+      component: componentName,
+    });
+  }
+
+  const { dependencies } = packageJsonRaw;
+  if (dependencies !== undefined && !isRecord(dependencies)) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_package_manifest_invalid',
+      nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: `${componentName} package.json dependencies must contain an object.`,
+      component: componentName,
+    });
+  }
+  for (const dependency of Object.keys(dependencies ?? {})) {
+    if (!existsSync(path.join(cwd, 'node_modules', dependency))) {
+      throw new SelfContainedDependencyError({
+        reason: 'self_contained_runtime_dependency_missing',
+        nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+        message: `${componentName} self-contained release asset is missing declared runtime dependency ${dependency}.`,
+        component: componentName,
+        dependency,
+      });
+    }
+  }
+
+  try {
+    verifyNativeModules(cwd, componentName);
+  } catch (error) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_native_module_unloadable',
+      nextAction: SELF_CONTAINED_NATIVE_NEXT_ACTION,
+      message: `${componentName} bundled better-sqlite3 cannot be loaded by this Node.js runtime.`,
+      component: componentName,
+      dependency: 'better-sqlite3',
+      cause: error,
+    });
+  }
+}
+
+const SELF_CONTAINED_COMPONENTS = [
+  ['Core', 'core'],
+  ['Host runtime', 'host-runtime'],
+  ['Plugin', 'plugin'],
+  ['PD CLI', 'pd-cli'],
+  ['Console', 'console'],
+  ['Install layout', 'install-layout'],
+] as const;
+
+export async function preflightSelfContainedReleaseAsset(assetDir: string): Promise<void> {
+  const identityPath = path.join(assetDir, '_release', 'asset.json');
+  let identityValue: unknown;
+  try {
+    identityValue = JSON.parse(readFileSync(identityPath, 'utf8')) as unknown;
+    const identity = parseReleaseAssetIdentity(identityValue);
+    verifyReleaseAssetTarget(identity, {
+      platform: process.platform,
+      arch: process.arch,
+      nodeAbi: process.versions.modules,
+    });
+  } catch (error) {
+    const targetMismatch = error instanceof ReleaseAssetManifestError && error.code === 'asset_target_mismatch';
+    throw new SelfContainedDependencyError({
+      reason: targetMismatch ? 'self_contained_asset_target_mismatch' : 'self_contained_asset_identity_invalid',
+      nextAction: targetMismatch ? SELF_CONTAINED_NATIVE_NEXT_ACTION : SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: error instanceof Error ? error.message : 'Release asset identity is missing or malformed.',
+      component: 'Release asset',
+      cause: error,
+    });
+  }
+
+  try {
+    const manifestValue: unknown = JSON.parse(readFileSync(path.join(assetDir, '_release', 'manifest.json'), 'utf8')) as unknown;
+    await verifyReleaseAssetManifestAsync(assetDir, parseReleaseAssetManifest(manifestValue));
+  } catch (error) {
+    throw new SelfContainedDependencyError({
+      reason: 'self_contained_asset_integrity_invalid',
+      nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+      message: error instanceof Error ? error.message : 'Release asset manifest is missing, malformed, or does not match its files.',
+      component: 'Release asset',
+      cause: error,
+    });
+  }
+
+  for (const [componentName, componentDirectory] of SELF_CONTAINED_COMPONENTS) {
+    await prepareBundledComponentDependencies(path.join(assetDir, componentDirectory), componentName);
+  }
+}
+
+async function prepareComponentDependencies(cwd: string, componentName: string): Promise<void> {
+  if (!legacyNpmInstallEnabled()) {
+    await prepareBundledComponentDependencies(cwd, componentName);
+    return;
+  }
+
+  await runNpmInstall(cwd, componentName);
+  verifyNativeModules(cwd, componentName);
 }
 
 /**
@@ -274,17 +440,18 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Checking workspace rule compatibility', weight: 1 },
   { name: 'Backing up existing install', weight: 3 },
   { name: 'Installing bundled @principles/core', weight: 8 },
+  { name: 'Validating bundled core dependencies', weight: 5 },
   { name: 'Installing bundled @principles/host-runtime', weight: 3 },
-  { name: 'Installing core dependencies', weight: 10 },
+  { name: 'Validating bundled host runtime dependencies', weight: 5 },
   { name: 'Installing plugin', weight: 10 },
   { name: 'Preparing core library for plugin', weight: 3 },
-  { name: 'Installing plugin dependencies', weight: 20 },
+  { name: 'Validating bundled plugin dependencies', weight: 10 },
   { name: 'Installing pd CLI', weight: 8 },
   { name: 'Preparing core library for pd-cli', weight: 3 },
   { name: 'Verifying pd CLI', weight: 3 },
   { name: 'Installing pd-console', weight: 8 },
   { name: 'Preparing core library for console', weight: 3 },
-  { name: 'Installing console dependencies', weight: 10 },
+  { name: 'Validating bundled console dependencies', weight: 5 },
   { name: 'Verifying pd-console', weight: 3 },
   { name: 'Copying templates', weight: 3 },
   { name: 'Generating config.yaml', weight: 2 },
@@ -805,42 +972,7 @@ export async function installPluginToStaging(pluginDir: string, language: SkillL
 
 async function installPluginDependencies(): Promise<void> {
   for (const extDir of pluginInstallDirs()) {
-    const packageJsonPath = path.join(extDir, 'package.json');
-    const nodeModulesPath = path.join(extDir, 'node_modules');
-
-    if (!existsSync(packageJsonPath)) {
-      throw new Error(`Plugin package.json not found after copy at ${extDir} — install is corrupted`);
-    }
-
-    const packageJsonRaw: unknown = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-    if (!isRecord(packageJsonRaw)) {
-      throw new Error('Plugin package.json is malformed');
-    }
-    const pkg = packageJsonRaw;
-    const deps = (typeof pkg.dependencies === 'object' && pkg.dependencies !== null && !Array.isArray(pkg.dependencies))
-      ? Object.keys(pkg.dependencies)
-      : [];
-    const devDeps = (typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null && !Array.isArray(pkg.devDependencies))
-      ? Object.keys(pkg.devDependencies)
-      : [];
-    const allDeps = [...deps, ...devDeps];
-
-    let needsInstall = !existsSync(nodeModulesPath);
-    if (!needsInstall) {
-      for (const dep of allDeps) {
-        if (!existsSync(path.join(extDir, 'node_modules', dep))) {
-          needsInstall = true;
-          break;
-        }
-      }
-    }
-
-    if (needsInstall) {
-      await runNpmInstall(extDir, 'Plugin');
-    }
-
-    await rebuildNativeModules(extDir, 'Plugin');
-    verifyNativeModules(extDir, 'Plugin');
+    await prepareComponentDependencies(extDir, 'Plugin');
   }
 }
 
@@ -855,6 +987,10 @@ function getNpmGlobalBinDir(): string | null {
 }
 
 function installGlobalPdShim(): boolean {
+  if (!legacyNpmInstallEnabled()) {
+    logger.info('Skipping npm global shim discovery for the self-contained release asset.');
+    return false;
+  }
   // Allow skipping global shim installation in smoke tests to avoid
   // polluting the host's npm global bin dir. The bundled pd-cli is
   // still installed locally (getInstalledBinDir); only the global
@@ -893,6 +1029,10 @@ function installGlobalPdShim(): boolean {
 }
 
 function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+  if (!legacyNpmInstallEnabled()) {
+    logger.info('Skipping npm pd-cli upgrade for the self-contained release asset.');
+    return;
+  }
   // Allow skipping the npm upgrade in smoke tests / offline environments.
   // The bundled pd-cli is built from the current repo state and is the
   // authoritative version for testing. Upgrading to an npm-published version
@@ -905,7 +1045,10 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
   try {
     const npmVersion = execNpm(['view', '@principles/pd-cli', 'version'], undefined, 15_000).trim();
 
-    if (!npmVersion || !/^\d+\.\d+\.\d+/.test(npmVersion)) return;
+    // Fully anchored semver: this value is interpolated into a cmd.exe
+    // command line below, so a registry response carrying shell
+    // metacharacters after a valid-looking prefix must be rejected outright.
+    if (!npmVersion || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(npmVersion)) return;
 
     const localPkgPath = path.join(installedPdCliDir, 'package.json');
     const localPkg = JSON.parse(readFileSync(localPkgPath, 'utf-8')) as { version: string };
@@ -918,7 +1061,28 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
     const tmpDir = path.join(installedPdCliDir, '__npm_upgrade_tmp');
     try {
       mkdirSync(tmpDir, { recursive: true });
-      execNpm(['pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir], undefined, 30_000);
+      // Platform dispatch (CodeRabbit review): cmd.exe does not exist on
+      // POSIX, where npm is a real executable and can be spawned directly.
+      // The only registry-derived value on this command line is npmVersion,
+      // restricted to a metacharacter-free semver charset by the anchored
+      // check above; tmpDir is the local install root (profile-derived, not
+      // attacker-controlled). CodeQL's js/indirect-command-line-injection
+      // cannot model the regex sanitizer — see the evidence-based dismissal
+      // on alert 431.
+      const packArgs = ['pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir];
+      if (process.platform === 'win32') {
+        execFileSync('cmd.exe', ['/d', '/s', '/c', 'npm', ...packArgs], {
+          encoding: 'utf-8',
+          timeout: 30_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } else {
+        execFileSync('npm', packArgs, {
+          encoding: 'utf-8',
+          timeout: 30_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      }
 
       const tgzFiles = readdirSync(tmpDir).filter(f => f.endsWith('.tgz'));
       const [tgzFile] = tgzFiles;
@@ -970,6 +1134,10 @@ function syncPdCli(pluginDir: string): boolean {
   mkdirSync(installedPdCliDir, { recursive: true });
   cpSync(distDir, path.join(installedPdCliDir, 'dist'), { recursive: true });
   copyFileSync(path.join(pdCliSourceDir, 'package.json'), path.join(installedPdCliDir, 'package.json'));
+  const bundledNodeModules = path.join(pdCliSourceDir, 'node_modules');
+  if (existsSync(bundledNodeModules)) {
+    cpSync(bundledNodeModules, path.join(installedPdCliDir, 'node_modules'), { recursive: true });
+  }
 
   // Create node_modules/@principles/core symlink so pd-cli can resolve
   // its @principles/core dependency (rewritten to "file:../core" by bundle-plugin.mjs).
@@ -1063,16 +1231,26 @@ function syncPdCli(pluginDir: string): boolean {
   return installGlobalPdShim();
 }
 
-function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: string } {
+function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: string; localError?: string } {
   const localShim = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
   let localOk = false;
+  let localError: string | undefined;
   try {
     const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
     execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
     localOk = true;
   } catch (e: unknown) {
-    const err = e as { stderr?: Buffer; message?: string };
-    const detail = err.stderr?.toString().slice(0, 500) ?? err.message ?? 'unknown error';
+    let detail = 'unknown error';
+    if (typeof e === 'object' && e !== null) {
+      const stderr = Object.hasOwn(e, 'stderr') ? Reflect.get(e, 'stderr') : undefined;
+      const message = Object.hasOwn(e, 'message') ? Reflect.get(e, 'message') : undefined;
+      const stderrText = Buffer.isBuffer(stderr) ? stderr.toString().trim().slice(0, 500) : '';
+      if (stderrText.length > 0) detail = stderrText;
+      else if (typeof message === 'string' && message.trim().length > 0) detail = message.trim().slice(0, 500);
+    } else if (typeof e === 'string' && e.trim().length > 0) {
+      detail = e.trim().slice(0, 500);
+    }
+    localError = detail;
     logger.warn(`PD CLI local verification failed: ${detail}`);
   }
 
@@ -1091,7 +1269,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
     }
   })();
 
-  return { localOk, globalOk, localPath: localShim };
+  return { localOk, globalOk, localPath: localShim, localError };
 }
 
 function installConsole(consoleDir: string): void {
@@ -1178,49 +1356,22 @@ function ensureCoreDependency(_targetDir: string): void {
 
 async function installCoreDependencies(): Promise<void> {
   const coreDir = getInstalledCoreDir();
-  const packageJsonPath = path.join(coreDir, 'package.json');
-
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('Core package.json not found after copy — install is corrupted');
-  }
-
-  await runNpmInstall(coreDir, 'Core');
-  await rebuildNativeModules(coreDir, 'Core');
-  verifyNativeModules(coreDir, 'Core');
+  await prepareComponentDependencies(coreDir, 'Core');
 }
 
 async function installHostRuntimeDependencies(): Promise<void> {
   const hostRuntimeDir = getInstalledHostRuntimeDir();
-  const packageJsonPath = path.join(hostRuntimeDir, 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('Host runtime package.json not found after copy — install is corrupted');
-  }
-  await runNpmInstall(hostRuntimeDir, 'Host runtime');
-  await rebuildNativeModules(hostRuntimeDir, 'Host runtime');
-  verifyNativeModules(hostRuntimeDir, 'Host runtime');
+  await prepareComponentDependencies(hostRuntimeDir, 'Host runtime');
 }
 
 async function installPdCliDependencies(): Promise<void> {
   const pdCliDir = getInstalledPdCliDir();
-  const packageJsonPath = path.join(pdCliDir, 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('PD CLI package.json not found after copy — install is corrupted');
-  }
-  await runNpmInstall(pdCliDir, 'PD CLI');
-  await rebuildNativeModules(pdCliDir, 'PD CLI');
-  verifyNativeModules(pdCliDir, 'PD CLI');
+  await prepareComponentDependencies(pdCliDir, 'PD CLI');
 }
 
 async function installConsoleDependencies(): Promise<void> {
   const consoleDest = getInstalledConsoleDir();
-  const packageJsonPath = path.join(consoleDest, 'package.json');
-
-  if (!existsSync(packageJsonPath)) {
-    throw new Error('Console package.json not found after copy — install is corrupted');
-  }
-
-  await runNpmInstall(consoleDest, 'Console');
-  await rebuildNativeModules(consoleDest, 'Console');
+  await prepareComponentDependencies(consoleDest, 'Console');
 }
 
 const CONSOLE_PORT_MAX_RETRIES = 3;
@@ -1657,6 +1808,8 @@ export interface InstallResult {
   enabledChannels: string[];
   nextAction: string;
   reason?: string;
+  component?: string;
+  dependency?: string;
   error?: string;
   /** Task 8: URL the browser was opened to when the installer auto-launched the
    * console via `pd console open`. Undefined when auto-launch was skipped or failed. */
@@ -1714,6 +1867,35 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   const quiet = mode.quiet === true;
   const nonInteractive = mode.nonInteractive ?? quiet;
   activeHostTarget = options.host;
+  if (!legacyNpmInstallEnabled()) {
+    try {
+      await preflightSelfContainedReleaseAsset(pluginDir);
+    } catch (error) {
+      const preflightError = error instanceof SelfContainedDependencyError
+        ? error
+        : new SelfContainedDependencyError({
+          reason: 'self_contained_asset_preflight_failed',
+          nextAction: SELF_CONTAINED_DEPENDENCY_NEXT_ACTION,
+          message: error instanceof Error ? error.message : String(error),
+          component: 'Release asset',
+          cause: error,
+        });
+      return {
+        success: false,
+        workspaceDir: options.workspaceDir,
+        configYamlPath: getConfigYamlPath(options.workspaceDir),
+        templatesCount: 0,
+        components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+        verification: { features: 'skipped', storyA: 'skipped' },
+        enabledChannels: options.channels,
+        nextAction: preflightError.nextAction,
+        reason: preflightError.reason,
+        component: preflightError.component,
+        dependency: preflightError.dependency,
+        error: `${preflightError.message} — ${t('rollback_no_changes')}`,
+      };
+    }
+  }
   // Gateway lock pre-flight: a running gateway holds native-module file handles
   // that make the backup rename fail with EPERM. Decide stop/abort/proceed
   // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).
@@ -1804,19 +1986,19 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     installBundledCore(pluginDir);
     stepIndex++;
 
+    if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled core dependencies...');
+    await installCoreDependencies();
+    stepIndex++;
+
     if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/host-runtime...');
     installBundledHostRuntime(pluginDir);
     stepIndex++;
 
-    installBundledLayoutPackage(pluginDir);
-
-    if (spinner) updateProgress(spinner, stepIndex, 'Installing core dependencies...');
-    await installCoreDependencies();
-    stepIndex++;
-
-    if (spinner) updateProgress(spinner, stepIndex, 'Installing host runtime dependencies...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled host runtime dependencies...');
     await installHostRuntimeDependencies();
     stepIndex++;
+
+    installBundledLayoutPackage(pluginDir);
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
     await installPluginToStaging(pluginDir, options.language);
@@ -1826,7 +2008,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     ensureCoreDependency(getPluginExtDir());
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin dependencies...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled plugin dependencies...');
     await installPluginDependencies();
     components.plugin = 'verified';
     stepIndex++;
@@ -1843,7 +2025,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd CLI...');
     const cliVerify = verifyPdCliShim();
     if (!cliVerify.localOk) {
-      throw new Error('PD CLI verification failed — local shim is not executable after install. Check Node.js and PATH configuration.');
+      throw new Error(`PD CLI verification failed — local shim is not executable after install: ${cliVerify.localError ?? 'unknown error'}. Check Node.js and PATH configuration.`);
     }
     if (cliVerify.globalOk) {
       components.cli = 'verified';
@@ -1862,7 +2044,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     ensureCoreDependency(getInstalledConsoleDir());
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Installing console dependencies...');
+    if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled console dependencies...');
     await installConsoleDependencies();
     stepIndex++;
 
@@ -2055,7 +2237,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '');
-    const nextAction = !hasBackup
+    const rollbackNextAction = !hasBackup
       ? (isLockError
         ? t('next_no_changes_lock')
         : t('next_no_changes_other'))
@@ -2065,11 +2247,17 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '')
           .replace('{errorMsg}', errorMsg);
-    const reason = !hasBackup
+    const rollbackReason = !hasBackup
       ? (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)
       : restoreResult.restored
         ? errorMsg
         : `install_failed_rollback_failed: ${errorMsg}`;
+    const nextAction = error instanceof SelfContainedDependencyError
+      ? restoreResult.restored || !hasBackup
+        ? error.nextAction
+        : `${error.nextAction} ${rollbackNextAction}`
+      : rollbackNextAction;
+    const reason = error instanceof SelfContainedDependencyError ? error.reason : rollbackReason;
 
     return {
       success: false,
@@ -2081,6 +2269,8 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       enabledChannels: options.channels,
       nextAction,
       reason,
+      component: error instanceof SelfContainedDependencyError ? error.component : undefined,
+      dependency: error instanceof SelfContainedDependencyError ? error.dependency : undefined,
       error: `${errorMsg} — ${rollbackSuffix}`,
     };
   } finally {
