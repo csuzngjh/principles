@@ -46,7 +46,11 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: '26.7.0'
+          # Node 22 = the product's floor and every other CI job. Tier 1 ran
+          # 26.x historically, which let release locks be regenerated with a
+          # different npm major than the smoke jobs consume — a mismatch that
+          # only surfaces as npm ci sync errors on the node22 jobs.
+          node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts
       - name: Build release producers and verify committed dependency locks

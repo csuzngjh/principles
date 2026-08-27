@@ -408,7 +408,13 @@ if (BUILD_SELF_CONTAINED_ASSET) {
       throw new Error(`Missing committed release lock for ${label}: ${lockPath}`);
     }
     copyFileSync(lockPath, join(directory, 'package-lock.json'));
-    await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
+    try {
+      await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
+    } catch (error) {
+      // rc-9: name the failing component — without this the piped stderr of a
+      // mass component-materialization loop points at no directory at all.
+      throw new Error(`[self-contained] npm ci failed for component "${label}" (cwd ${directory}): ${error.message}`, { cause: error });
+    }
     const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
     if (pkg.dependencies && Object.hasOwn(pkg.dependencies, 'better-sqlite3')) {
       // better-sqlite3 ships its own prebuilt binaries (prebuilds/win32-x64.node
