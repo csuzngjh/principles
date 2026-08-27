@@ -11,6 +11,7 @@ export const UPDATE_HISTORY_KINDS = [
   'refusal',
   'failure',
   'recovery',
+  'unknown',
 ] as const;
 
 export type UpdateHistoryKind = (typeof UPDATE_HISTORY_KINDS)[number];
@@ -51,9 +52,10 @@ function parseHistoryEntry(value: unknown): UpdateHistoryEntry | undefined {
     fromVersion: raw.fromVersion,
     toVersion: raw.toVersion,
     success: raw.success,
-    // Pre-Phase-0 records did not identify their operation. Preserve them as
-    // legacy data rather than deriving intent from a version comparison.
-    kind: raw.kind === undefined ? 'legacy_migration' : raw.kind,
+    // Pre-Phase-0 records did not identify their operation. The operation is
+    // UNKNOWN — labeling them legacy_migration would claim a migration
+    // happened, which the record cannot prove (unknown ≠ legacy_migration).
+    kind: raw.kind === undefined ? 'unknown' : raw.kind,
     ...(typeof raw.backupPath === 'string' ? { backupPath: raw.backupPath } : {}),
     ...(typeof raw.reason === 'string' ? { reason: raw.reason } : {}),
     ...(typeof raw.nextAction === 'string' ? { nextAction: raw.nextAction } : {}),

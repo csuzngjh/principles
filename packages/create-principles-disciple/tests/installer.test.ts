@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as childProcess from 'child_process';
-import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin, ensureConversationAccess, install } from '../src/installer.js';
+import { validateWorkspacePath, verifyNativeModules, checkBuiltPlugin, ensureConversationAccess, install, resolveConsolePortBase } from '../src/installer.js';
 import { checkOpenClawGateway, stopOpenClawGateway, restartOpenClawGateway } from '../src/utils/env.js';
 import { setLanguage } from '../src/i18n.js';
 import type { InstallOptions } from '../src/prompts.js';
@@ -23,6 +23,31 @@ vi.mock('../src/utils/env.js', async (importOriginal) => {
     stopOpenClawGateway: vi.fn(),
     restartOpenClawGateway: vi.fn(),
   };
+});
+
+describe('console port base authority (PD_CONSOLE_PORT_BASE)', () => {
+  const originalBase = process.env.PD_CONSOLE_PORT_BASE;
+  afterEach(() => {
+    if (originalBase === undefined) delete process.env.PD_CONSOLE_PORT_BASE;
+    else process.env.PD_CONSOLE_PORT_BASE = originalBase;
+  });
+
+  it('defaults to the historical 3100 window', () => {
+    delete process.env.PD_CONSOLE_PORT_BASE;
+    expect(resolveConsolePortBase()).toBe(3100);
+  });
+
+  it('shifts the resolved base to 3300 (e.g. past a reserved port range)', () => {
+    process.env.PD_CONSOLE_PORT_BASE = '3300';
+    expect(resolveConsolePortBase()).toBe(3300);
+  });
+
+  it('rejects non-integer and out-of-range values loudly', () => {
+    for (const invalid of ['not-a-number', '3100.5', '1023', '65001', '-1']) {
+      process.env.PD_CONSOLE_PORT_BASE = invalid;
+      expect(() => resolveConsolePortBase()).toThrow(/PD_CONSOLE_PORT_BASE/);
+    }
+  });
 });
 
 describe('validateWorkspacePath security guard', () => {
@@ -104,47 +129,7 @@ describe('Native module verification', () => {
       throw new Error('Cannot load native module');
     });
 
-    expect(() => verifyNativeModules(cwd, 'Test')).toThrow(/verification failed/);
-  });
-});
-
-describe('rebuildNativeModules', () => {
-  // PRI-569: rebuild now runs via array-form execFileSync (execNpm), which
-  // uses encoding 'utf-8' → the mock contract is a STRING stdout.
-  const mockExecFileSync = vi.mocked(childProcess.execFileSync);
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockExecFileSync.mockImplementation(() => '');
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('skips modules that do not exist', async () => {
-    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-
-    await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
-
-    expect(mockExistsSync).toHaveBeenCalled();
-    expect(mockExecFileSync).not.toHaveBeenCalled();
-  });
-
-  it('does not shell out when native modules ship prebuilt binaries', async () => {
-    // better-sqlite3 >= 13 ships prebuilds/*.node that node-gyp-build loads at
-    // require time, so rebuildNativeModules intentionally performs no npm
-    // rebuild (hosts without a VS toolchain cannot run one). Fail-loud is
-    // pinned separately by verifyNativeModules' require-probe tests above.
-    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
-      return p.toString().includes('better-sqlite3');
-    });
-    mockExecFileSync.mockImplementation(() => '');
-
-    await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
-
-    expect(mockExecFileSync).not.toHaveBeenCalled();
-    expect(mockExistsSync).toHaveBeenCalled();
+    expect(() => verifyNativeModules(cwd, 'Test')).toThrow(/require probe/);
   });
 });
 

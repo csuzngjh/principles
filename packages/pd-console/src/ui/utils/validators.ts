@@ -1329,6 +1329,7 @@ export const UPDATE_HISTORY_KINDS = [
   'refusal',
   'failure',
   'recovery',
+  'unknown',
 ] as const;
 
 export type UpdateHistoryKind = (typeof UPDATE_HISTORY_KINDS)[number];

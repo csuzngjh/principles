@@ -1210,7 +1210,8 @@
         "rollback": "Rollback",
         "refusal": "Refused",
         "failure": "Failed",
-        "recovery": "Recovery"
+        "recovery": "Recovery",
+        "unknown": "Unknown operation"
       },
       "checkError": "Check error",
       "syncPending": "Version {{pluginVersion}} is published, but the installer is syncing (you can update to the version shown above for now). Please try again later.",

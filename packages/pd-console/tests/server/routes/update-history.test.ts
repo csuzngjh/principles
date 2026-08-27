@@ -188,7 +188,7 @@ describe('Update History API route', () => {
       expect(data[0]?.fromVersion).toBe('1.0.0');
       expect(data[0]?.toVersion).toBe('1.1.0');
       expect(data[0]?.success).toBe(true);
-      expect(data[0]).toMatchObject({ kind: 'legacy_migration' });
+      expect(data[0]).toMatchObject({ kind: 'unknown' });
     });
 
     it('filters entries with an unknown kind or malformed refusal details', async () => {

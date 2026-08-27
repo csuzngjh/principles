@@ -52,14 +52,27 @@ export async function createDeterministicReleaseArchive({ inputDirectory, output
   if (!existsSync(input) || !lstatSync(input).isDirectory()) throw new Error(`Release archive input directory does not exist: ${input}`);
   if (output === digest) throw new Error('Release archive and digest outputs must be different files');
   if (isPathWithin(input, output) || isPathWithin(input, digest)) throw new Error('Release archive and digest outputs must be outside the input directory');
-  if (existsSync(output)) throw new Error(`Release archive already exists and cannot be replaced: ${output}`);
-  if (existsSync(digest)) throw new Error(`Release digest already exists and cannot be replaced: ${digest}`);
+  // Existing outputs are rejected by the exclusive ('wx') open below — a
+  // check-then-open pair here would be a TOCTOU window (js/file-system-race).
+  // EEXIST from the open maps to the same explicit refusal message.
+  const fileExistsError = (kind, filePath) => new Error(
+    kind === 'archive'
+      ? `Release archive already exists and cannot be replaced: ${filePath}`
+      : `Release digest already exists and cannot be replaced: ${filePath}`,
+  );
   const entries = listEntries(input);
   let ownsOutput = false;
   let ownsDigest = false;
   let outputDescriptor;
   try {
-    outputDescriptor = openSync(output, 'wx');
+    try {
+      outputDescriptor = openSync(output, 'wx');
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && error.code === 'EEXIST') {
+        throw fileExistsError('archive', output);
+      }
+      throw error;
+    }
     ownsOutput = true;
     const archiveHash = createHash('sha256');
     const archiveStream = createTar({
@@ -82,7 +95,15 @@ export async function createDeterministicReleaseArchive({ inputDirectory, output
     }
     fsyncSync(outputDescriptor);
     const sha256 = archiveHash.digest('hex');
-    const digestDescriptor = openSync(digest, 'wx');
+    let digestDescriptor;
+    try {
+      digestDescriptor = openSync(digest, 'wx');
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && error.code === 'EEXIST') {
+        throw fileExistsError('digest', digest);
+      }
+      throw error;
+    }
     ownsDigest = true;
     try {
       const digestText = `${sha256}\n`;

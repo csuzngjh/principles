@@ -1,11 +1,29 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { migrateLegacyOverlay } from '../src/update/legacy-migration.js';
 import { readHistoryEvents } from '../src/update/update-history.js';
-import { readActiveRecord } from '../src/update/transaction-journal.js';
+import { readActiveRecord, readTransactionJournalForRecovery } from '../src/update/transaction-journal.js';
 import { readInstallConfig, readBootstrapManifest } from '../src/update/install-layout.js';
+
+// Crash-injection seam: node:fs's ESM namespace cannot be spied directly, so
+// the write path is wrapped through vi.mock with a hoisted control slot.
+// Empty target = pure delegation (all other tests see the real fs).
+const crashInjection = vi.hoisted(() => ({ target: '' }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    writeFileSync: ((target: unknown, data: unknown, options: unknown) => {
+      if (typeof target === 'string' && crashInjection.target !== ''
+        && target.includes(crashInjection.target) && target.includes('.pd')) {
+        throw new Error(`INJECTED_CRASH:${crashInjection.target}`);
+      }
+      return actual.writeFileSync(target as never, data as never, options as never);
+    }) as typeof actual.writeFileSync,
+  };
+});
 
 const temporaryDirectories: string[] = [];
 
@@ -136,5 +154,52 @@ describe('official legacy overlay migration (SPEC 15 / 18-9)', () => {
       invokedByOfficialInstaller: true, dryRun: false, bootstrapVersion: '1.0.0', transactionId: 'mig-bad',
     });
     expect(result).toMatchObject({ migrated: false, reason: 'overlay_manifest_invalid' });
+  });
+
+  // Journal-first crash injection (SPEC §8): EVERY transition must already be
+  // persisted when its side effect is attempted. Crashing exactly at each
+  // side effect leaves a journal that never understates reality — the
+  // recovery rules can then decide old/new/refusal without guessing.
+  it('appends each journal transition BEFORE its side effect (crash injected at every write)', () => {
+    const cases: readonly { crashOn: string; expectedLastTransition: string }[] = [
+      { crashOn: 'bootstrap.json', expectedLastTransition: 'staged' },
+      { crashOn: 'releases', expectedLastTransition: 'probed' },
+      { crashOn: 'install.json', expectedLastTransition: 'confirmed' },
+    ];
+    for (const testCase of cases) {
+      const home = tempRoot('pd-mig-crash-');
+      createOverlay(home);
+      crashInjection.target = testCase.crashOn;
+      try {
+        const crashed = migrateLegacyOverlay({
+          homeDir: home,
+          openclawHome: path.join(home, '.openclaw'),
+          invokedByOfficialInstaller: true,
+          dryRun: false,
+          bootstrapVersion: '1.0.0',
+          transactionId: 'mig-crash',
+        });
+        expect(crashed.migrated).toBe(true); // must NOT reach here
+        throw new Error(`crash injection on ${testCase.crashOn} never fired`);
+      } catch (error) {
+        expect(String(error)).toMatch(new RegExp(`INJECTED_CRASH:${testCase.crashOn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+      } finally {
+        crashInjection.target = '';
+      }
+
+      const journalPath = path.join(home, '.pd', 'transactions', 'mig-crash.jsonl');
+      const journalRead = readTransactionJournalForRecovery(journalPath);
+      expect(journalRead.tornTailDetected).toBe(false);
+      const last = journalRead.transitions[journalRead.transitions.length - 1];
+      expect(last?.to).toBe(testCase.expectedLastTransition);
+      // The side effect that crashed did not land.
+      if (testCase.crashOn === 'bootstrap.json') {
+        expect(fs.existsSync(path.join(home, '.pd', 'bootstrap', 'bootstrap.json'))).toBe(false);
+        expect(fs.existsSync(path.join(home, '.pd', 'active.json'))).toBe(false);
+      }
+      if (testCase.crashOn === 'install.json') {
+        expect(fs.existsSync(path.join(home, '.pd', 'install.json'))).toBe(false);
+      }
+    }
   });
 });

@@ -22,11 +22,8 @@ import {
   parseBootstrapRequest,
   serializeBootstrapResponse,
 } from '../src/update/bootstrap-protocol.js';
-import {
-  ensurePdHomeLayout,
-  resolvePdHomePaths,
-  writeInstallConfig,
-} from '../src/update/install-layout.js';
+import { ensurePdHomeLayout, resolvePdHomePaths, writeInstallConfig } from '../src/update/install-layout.js';
+import { writeActiveRecord } from '../src/update/transaction-journal.js';
 import { buildReleaseMetadata } from '../src/update/release-metadata.js';
 import type { ChannelMetadata } from '../src/update/channel-metadata.js';
 import type { LegacyUpdaterDecision } from '../src/update/release-manager.js';
@@ -147,11 +144,14 @@ async function createShadowFixture(overrides: {
   });
   fs.mkdirSync(path.join(paths.releasesDir, activeRelease.releaseId), { recursive: true });
   fs.writeFileSync(path.join(paths.releasesDir, activeRelease.releaseId, 'metadata.json'), `${JSON.stringify(activeRelease, null, 2)}\n`);
-  fs.writeFileSync(paths.activeRecordPath, `${JSON.stringify({
+  writeActiveRecord(paths.activeRecordPath, {
     generation: 2,
     releaseId: activeRelease.releaseId,
+    releaseMetadataDigest: activeRelease.metadataDigest,
+    previousReleaseId: null,
+    transactionId: 'txn-fixture-active',
     productVersion: activeRelease.productVersion,
-  }, null, 2)}\n`);
+  });
 
   const channelPayload: ChannelMetadata = {
     schemaVersion: 1,
@@ -239,7 +239,14 @@ describe('ReleaseManager shadow mode', () => {
     const paths = resolvePdHomePaths(path.join(pdHome, '.pd'));
     ensurePdHomeLayout(paths);
     fs.writeFileSync(paths.bootstrapManifestPath, `${JSON.stringify({ bootstrapVersion: '1.2.0', installedAt: '2026-08-25T00:00:00Z' })}\n`);
-    fs.writeFileSync(paths.activeRecordPath, `${JSON.stringify({ generation: 3, releaseId: 'c'.repeat(64), productVersion: '1.222.0' })}\n`);
+    writeActiveRecord(paths.activeRecordPath, {
+      generation: 3,
+      releaseId: 'c'.repeat(64),
+      releaseMetadataDigest: 'd'.repeat(64),
+      previousReleaseId: null,
+      transactionId: 'txn-fixture-inspect',
+      productVersion: '1.222.0',
+    });
     const manager = new ReleaseManager({ pdHome: paths.home, metadataBaseUrl: 'http://127.0.0.1:1' , openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-')});
     expect(manager.inspect()).toMatchObject({
       layout: 'dual-slot',
@@ -262,7 +269,25 @@ describe('ReleaseManager shadow mode', () => {
       manager.inspect();
     } catch (error) {
       const refusal = error as ReleaseManagerError;
-      expect(refusal.reason).toBe('release_metadata_invalid');
+      expect(refusal.reason).toBe('active_record_corrupt');
+      expect(refusal.nextAction).toMatch(/journal-confirmed/i);
+    }
+  });
+
+  it('maps a non-JSON active record to active_record_corrupt, never a bare SyntaxError', () => {
+    const pdHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-shadow-syntax-'));
+    temporaryDirectories.push(pdHome);
+    const paths = resolvePdHomePaths(path.join(pdHome, '.pd'));
+    ensurePdHomeLayout(paths);
+    fs.writeFileSync(paths.activeRecordPath, '{"generation": 3, "releaseId":'); // torn write
+    const manager = new ReleaseManager({ pdHome: paths.home, metadataBaseUrl: 'http://127.0.0.1:1', openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-') });
+    try {
+      manager.inspect();
+      throw new Error('expected inspect() to refuse a torn active record');
+    } catch (error) {
+      const refusal = error as ReleaseManagerError;
+      expect(refusal).toBeInstanceOf(ReleaseManagerError);
+      expect(refusal.reason).toBe('active_record_corrupt');
       expect(refusal.nextAction).toMatch(/journal-confirmed/i);
     }
   });

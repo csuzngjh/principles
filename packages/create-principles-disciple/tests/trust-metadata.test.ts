@@ -9,7 +9,6 @@ import {
   MetaFile,
   Metadata,
   Root,
-  Role,
   Signature,
   Snapshot,
   TargetFile,

@@ -133,7 +133,10 @@ beforeAll(async () => {
     discoveredPortPool.push(await discoverLoopbackPort());
   }
   consolePortBaseForThisRun = Math.floor((discoveredPortPool[0] ?? 4100) / 100) * 100;
-  const releaseTestRoot = path.join(TMPDIR, `pd-packaged-release-${Date.now()}`);
+  // mkdtemp: private unpredictable directories — predictable Date.now()-named
+  // paths in the shared os tmpdir are a symlink-hijack surface
+  // (js/insecure-temporary-file) and collide when two runs share a ms.
+  const releaseTestRoot = fs.mkdtempSync(path.join(TMPDIR, 'pd-packaged-release-'));
   const publicationDir = path.join(releaseTestRoot, 'publication');
   const builderEntry = path.resolve(INSTALLER_DIR, 'scripts', 'build-self-contained-release.mjs');
   if (!builderEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(builderEntry)) {
@@ -148,10 +151,8 @@ beforeAll(async () => {
   hermeticPublicationDir = fs.realpathSync(path.join(publicationDir, 'payload'));
   hermeticReleaseRoot = releaseTestRoot;
 
-  tempHomeDir = path.join(TMPDIR, `pd-smoke-home-${Date.now()}`);
-  tempWorkspaceDir = path.join(TMPDIR, `pd-smoke-ws-${Date.now()}`);
-  fs.mkdirSync(tempHomeDir, { recursive: true });
-  fs.mkdirSync(tempWorkspaceDir, { recursive: true });
+  tempHomeDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-smoke-home-'));
+  tempWorkspaceDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-smoke-ws-'));
   // Create a fake `openclaw` binary on PATH so the installer's readiness
   // check (spec §6.2 — terminate if OpenClaw missing) passes in CI.
   // The real OpenClaw detection logic is covered by env.test.ts BDD tests.
