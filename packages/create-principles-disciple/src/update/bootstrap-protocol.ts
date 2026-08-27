@@ -78,6 +78,15 @@ export function parseBootstrapRequest(raw: string): BootstrapRequest {
   if (typeof op !== 'string' || !knownOps.includes(op as BootstrapRequestOp)) {
     throw new BootstrapProtocolError('protocol_unknown_op', `Unknown bootstrap op: ${JSON.stringify(op)}. Supported: ${knownOps.join(', ')}.`);
   }
+  const allowedFields = op === 'check'
+    ? new Set(['op', 'channel'])
+    : op === 'apply'
+      ? new Set(['op', 'releaseId'])
+      : new Set(['op']);
+  const extraFields = Object.keys(record).filter((key) => !allowedFields.has(key));
+  if (extraFields.length > 0) {
+    throw new BootstrapProtocolError('protocol_unknown_field', `Unknown bootstrap request fields: ${extraFields.join(', ')}`);
+  }
   if (op === 'check') {
     if (!Object.hasOwn(record, 'channel')) {
       throw new BootstrapProtocolError('protocol_missing_channel', 'A check request requires the "channel" field.');
@@ -95,10 +104,6 @@ export function parseBootstrapRequest(raw: string): BootstrapRequest {
       throw new BootstrapProtocolError('protocol_invalid_release_id', `releaseId must be a non-empty string, got: ${JSON.stringify(record.releaseId)}`);
     }
     return { op, releaseId: record.releaseId };
-  }
-  const extraFields = Object.keys(record).filter((key) => key !== 'op');
-  if (extraFields.length > 0) {
-    throw new BootstrapProtocolError('protocol_unknown_field', `Unknown bootstrap request fields: ${extraFields.join(', ')}`);
   }
   return op === 'rollback' ? { op: 'rollback' } : { op: 'inspect' };
 }

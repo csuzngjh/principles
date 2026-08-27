@@ -1,18 +1,13 @@
 name: Release Reproducibility (Full Matrix)
 
-# Tier 2: full-platform double-build verification.  Runs on merge to main
-# or on a release tag — NOT on every PR.  PRs use the quick-check workflow
+# Tier 2: full-platform double-build verification. Runs as a mandatory
+# reusable gate in publish-npm.yml or by explicit manual dispatch. PRs use
+# the quick-check workflow
 # (release-reproducibility.yml) for fast feedback; this workflow provides
 # the definitive per-platform byte-reproducibility evidence required by
 # SPEC §18-3 before release publication.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'packages/create-principles-disciple/scripts/**'
-      - 'packages/create-principles-disciple/release-locks/**'
-      - 'packages/create-principles-disciple/package.json'
-      - 'package-lock.json'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -24,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025]
-        node: ['26.7.0']
+        node: ['22.22.2', '24.12.0', '26.7.0']
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:

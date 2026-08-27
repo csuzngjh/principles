@@ -7,9 +7,9 @@ name: Release Reproducibility
 #   chain + SOURCE_DATE_EPOCH) haven't changed since the last verified build,
 #   determinism is guaranteed by construction — no need to rebuild twice.
 #
-# Tier 2 (release-reproducibility-full.yml, runs on main merge / tag):
-#   5-platform matrix with double-build byte comparison + install smoke.
-#   ~10-15 minutes.  Blocks release publication, not PRs.
+# Tier 2 (release-reproducibility-full.yml, called by publish-npm.yml):
+#   15-target matrix with double-build byte comparison + install smoke.
+#   Blocks release publication, not PRs.
 #
 # SPEC §18-3 evidence: both tiers together provide the reproducibility
 # guarantee.  Tier 1 catches input drift immediately; Tier 2 proves the
@@ -18,10 +18,17 @@ on:
   pull_request:
     paths:
       - 'packages/create-principles-disciple/scripts/**'
+      - 'packages/create-principles-disciple/src/**'
       - 'packages/create-principles-disciple/release-locks/**'
       - 'packages/create-principles-disciple/tests/build-release-asset.test.ts'
       - 'packages/create-principles-disciple/tests/release-asset-smoke.test.ts'
       - 'packages/create-principles-disciple/package.json'
+      - 'packages/openclaw-plugin/**'
+      - 'packages/pd-cli/**'
+      - 'packages/pd-console/**'
+      - 'packages/principles-core/**'
+      - 'packages/host-runtime/**'
+      - 'packages/install-layout/**'
       - 'package-lock.json'
       - '.github/workflows/release-reproducibility*.yml'
   workflow_dispatch:

@@ -49,7 +49,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function readJsonIfPresent(filePath: string): Record<string, unknown> | null {
   if (!fs.existsSync(filePath)) return null;
-  const value: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+  } catch (error) {
+    throw new VersionReportError(
+      'state_corrupt',
+      `Installation state file is not valid JSON: ${filePath} (${error instanceof Error ? error.message : String(error)})`,
+      'Run the official installer recovery, or re-run the official installer to repair the installation record.',
+    );
+  }
   if (!isPlainObject(value)) {
     throw new VersionReportError(
       'state_corrupt',
@@ -94,7 +103,16 @@ function readLastTransaction(historyPath: string): VersionReport['lastTransactio
   const lines = fs.readFileSync(historyPath, 'utf8').split('\n').filter((line) => line.trim().length > 0);
   const lastLine = lines[lines.length - 1];
   if (lastLine === undefined) return null;
-  const value: unknown = JSON.parse(lastLine) as unknown;
+  let value: unknown;
+  try {
+    value = JSON.parse(lastLine) as unknown;
+  } catch (error) {
+    throw new VersionReportError(
+      'state_corrupt',
+      `The last transaction record is not valid JSON: ${historyPath} (${error instanceof Error ? error.message : String(error)})`,
+      'Run the official installer recovery to reconcile the transaction journal before trusting the installed version.',
+    );
+  }
   if (!isPlainObject(value)) return null;
   const { transactionId, kind, outcome } = value;
   if (typeof transactionId !== 'string' || typeof kind !== 'string' || typeof outcome !== 'string') {
@@ -147,7 +165,13 @@ export function buildVersionReport(homeDir: string = os.homedir()): VersionRepor
 
   const releaseDir = path.join(pdHome, 'releases', releaseId);
   const releaseManifest = readJsonIfPresent(path.join(releaseDir, 'metadata.json'));
-  const health: VersionReport['health'] = releaseManifest === null ? 'degraded' : 'healthy';
+  const releaseMetadataMatchesActive = releaseManifest !== null
+    && releaseManifest.productVersion === productVersion
+    && releaseManifest.releaseId === releaseId
+    && releaseManifest.metadataDigest === active.releaseMetadataDigest;
+  const health: VersionReport['health'] = releaseManifest === null
+    ? 'degraded'
+    : releaseMetadataMatchesActive ? 'healthy' : 'corrupt';
 
   const components: Record<string, string> = {};
   for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout']) {

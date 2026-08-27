@@ -11,6 +11,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const thisDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(thisDir, '..', '..', '..');
 
 describe('native release target matrix', () => {
   it('captures the supported platform, architecture, Node major, and exact ABI combinations', () => {
@@ -38,5 +39,28 @@ describe('native release target matrix', () => {
     expect(() => assertSupportedLocalReleaseTarget({ ...runtime, platform: 'darwin' }, runtime)).toThrow(/local release builds/i);
     expect(() => assertSupportedLocalReleaseTarget({ ...runtime, platform: '__proto__' }, runtime)).toThrow(/unsupported native release target/i);
     expect(() => assertSupportedLocalReleaseTarget({ ...runtime, platform: 'constructor' }, runtime)).toThrow(/unsupported native release target/i);
+  });
+
+  it('gates publication on the complete supported matrix while keeping PR verification single-tier', () => {
+    const fullWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release-reproducibility-full.yml'), 'utf8');
+    const quickWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release-reproducibility.yml'), 'utf8');
+    const publishWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'publish-npm.yml'), 'utf8');
+
+    expect(fullWorkflow).toContain("node: ['22.22.2', '24.12.0', '26.7.0']");
+    expect(fullWorkflow).toContain('workflow_call:');
+    expect(publishWorkflow).toMatch(/release-reproducibility:\s+[\s\S]*uses: \.\/\.github\/workflows\/release-reproducibility-full\.yml/);
+    expect(publishWorkflow).toMatch(/release-reproducibility:\s+[\s\S]*needs: detect\s+[\s\S]*if: needs\.detect\.outputs\.matrix != '\[\]'/);
+    expect(publishWorkflow).toContain('needs: [detect, release-reproducibility]');
+    for (const payloadPath of [
+      'packages/create-principles-disciple/src/**',
+      'packages/openclaw-plugin/**',
+      'packages/pd-cli/**',
+      'packages/pd-console/**',
+      'packages/principles-core/**',
+      'packages/host-runtime/**',
+      'packages/install-layout/**',
+    ]) {
+      expect(quickWorkflow).toContain(`- '${payloadPath}'`);
+    }
   });
 });

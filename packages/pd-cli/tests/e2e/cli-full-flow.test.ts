@@ -106,12 +106,13 @@ function readExitCode(obj: unknown): number {
 
 async function runPd(
   args: string[],
-  options: { timeout?: number } = {},
+  options: { timeout?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<RunResult> {
   try {
     const { stdout, stderr } = await execFileAsync('node', [PD_BIN, ...args], {
       timeout: options.timeout ?? 30_000,
       maxBuffer: 10 * 1024 * 1024,
+      env: options.env,
     });
     return { stdout, stderr, exitCode: 0 };
   } catch (err: unknown) {
@@ -136,12 +137,43 @@ describe('CLI full flow', () => {
   });
 
   it('pd --version exits 0 and prints version', async () => {
-    const { stdout, exitCode } = await runPd(['--version']);
+    const home = makeWorkspace();
+    const { stdout, exitCode } = await runPd(['--version'], {
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
     expect(exitCode).toBe(0);
     // SPEC §12 stable short-text contract. On a machine without a supported
     // installation the CLI falls back to its own package version and marks
     // itself as a development checkout instead of impersonating a release.
     expect(stdout.trim()).toMatch(/^Principles Disciple \d+\.\d+\.\d+ \([a-f0-9]{12}|^Principles Disciple \d+\.\d+\.\d+ \(development-checkout\)$/);
+  });
+
+  it('pd --version refuses a corrupt installed state instead of impersonating a development checkout', async () => {
+    const home = makeWorkspace();
+    fs.mkdirSync(path.join(home, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.pd', 'active.json'), '{');
+    const { stdout, stderr, exitCode } = await runPd(['--version'], {
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toMatch(/not valid JSON/i);
+    expect(stderr).toMatch(/Next:/);
+    expect(stderr).not.toContain('development-checkout');
+  });
+
+  it('pd version --json returns exactly one structured refusal for corrupt JSON state', async () => {
+    const home = makeWorkspace();
+    fs.mkdirSync(path.join(home, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.pd', 'active.json'), '{');
+    const { stdout, stderr, exitCode } = await runPd(['version', '--json'], {
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toBe('');
+    const result = requireRecord(JSON.parse(stdout), 'corrupt version response');
+    expect(result).toMatchObject({ ok: false, reason: 'state_corrupt' });
+    expect(typeof result.nextAction).toBe('string');
   });
 
   it('pd runtime features --json on fresh workspace returns valid JSON with defaults', async () => {

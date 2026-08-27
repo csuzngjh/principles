@@ -31,7 +31,11 @@ function writeDualSlotHome(home: string): void {
     installedAt: '2026-08-25T00:00:00Z',
   }));
   fs.writeFileSync(path.join(pdHome, 'install.json'), JSON.stringify({ channel: 'candidate', autoCheck: true }));
-  fs.writeFileSync(path.join(pdHome, 'releases', 'b'.repeat(64), 'metadata.json'), '{}');
+  fs.writeFileSync(path.join(pdHome, 'releases', 'b'.repeat(64), 'metadata.json'), JSON.stringify({
+    productVersion: '1.223.0',
+    releaseId: 'b'.repeat(64),
+    metadataDigest: '2'.repeat(64),
+  }));
   fs.writeFileSync(path.join(pdHome, 'releases', 'b'.repeat(64), 'plugin', 'package.json'), JSON.stringify({ version: '1.76.1' }));
   fs.writeFileSync(path.join(pdHome, 'logs', 'history.jsonl'), [
     JSON.stringify({ at: '2026-08-24T00:00:00Z', kind: 'update', outcome: 'succeeded', transactionId: 'txn-8' }),
@@ -98,6 +102,14 @@ describe('canonical version report (SPEC 12 / 18-1, 18-10)', () => {
     fs.rmSync(path.join(home, '.pd', 'releases', 'b'.repeat(64), 'metadata.json'), { force: true });
     const report = buildVersionReport(home);
     expect(report.health).toBe('degraded');
+  });
+
+  it('reports corrupt health when release metadata exists but disagrees with active.json', () => {
+    const home = tempHome();
+    writeDualSlotHome(home);
+    fs.writeFileSync(path.join(home, '.pd', 'releases', 'b'.repeat(64), 'metadata.json'), '{}');
+    const report = buildVersionReport(home);
+    expect(report.health).toBe('corrupt');
   });
 
   it('refuses a malformed active record loudly instead of guessing', () => {

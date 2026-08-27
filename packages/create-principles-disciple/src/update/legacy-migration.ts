@@ -85,7 +85,15 @@ function readOverlayProductVersion(overlayDir: string): string {
   if (!fs.existsSync(manifestPath)) {
     throw new ProductIdentityError('overlay', `The overlay installation has no plugin manifest: ${manifestPath}`);
   }
-  const value: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
+  } catch (error) {
+    throw new ProductIdentityError(
+      'overlay',
+      `The overlay plugin manifest is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new ProductIdentityError('overlay', 'The overlay plugin manifest is not an object.');
   }

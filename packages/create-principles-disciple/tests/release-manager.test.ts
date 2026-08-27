@@ -368,6 +368,8 @@ describe('bootstrap protocol', () => {
       '{"op":"check","channel":"beta"}',
       '{"op":"apply","releaseId":""}',
       '{"op":"inspect","extra":1}',
+      '{"op":"check","channel":"stable","extra":1}',
+      '{"op":"apply","releaseId":"abc","extra":1}',
     ]) {
       let captured: unknown;
       try {

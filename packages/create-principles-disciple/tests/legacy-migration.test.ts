@@ -156,6 +156,18 @@ describe('official legacy overlay migration (SPEC 15 / 18-9)', () => {
     expect(result).toMatchObject({ migrated: false, reason: 'overlay_manifest_invalid' });
   });
 
+  it('returns the structured overlay refusal when package.json is invalid JSON', () => {
+    const home = tempRoot('pd-mig-json-');
+    const overlayDir = path.join(home, '.openclaw', 'extensions', 'principles-disciple', 'plugin');
+    fs.mkdirSync(overlayDir, { recursive: true });
+    fs.writeFileSync(path.join(overlayDir, 'package.json'), '{');
+    const result = migrateLegacyOverlay({
+      homeDir: home, openclawHome: path.join(home, '.openclaw'),
+      invokedByOfficialInstaller: true, dryRun: false, bootstrapVersion: '1.0.0', transactionId: 'mig-json',
+    });
+    expect(result).toMatchObject({ migrated: false, reason: 'overlay_manifest_invalid' });
+  });
+
   // Journal-first crash injection (SPEC §8): EVERY transition must already be
   // persisted when its side effect is attempted. Crashing exactly at each
   // side effect leaves a journal that never understates reality — the

@@ -643,6 +643,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-209 / PR #689
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — tests assert shapes/strings/isolated helper behavior instead of the real production contract, or vacuously pass when data is absent.
+  - 2026-08-27 PR #1413 review (release-update SPEC, no Linear issue): the recovery, rollback, migration, and transactional release modules had extensive direct tests, but the shipped installer, Console, and Companion update entry points still did not call them. The PR had therefore implemented and validated a foundation/shadow contract, not the complete production update system claimed by the original SPEC. The current PR scope was corrected rather than expanding an already oversized change; production-entry wiring and BDD that enters through the real installer/Console/Companion remain mandatory follow-up work. Prevention: a release/update milestone is complete only when at least one test starts at every shipped update entry point and proves that the transaction/recovery module is actually invoked.
   - 2026-08-14 PRI-523 (PR#1315 review): `CodexHostInstaller.resolvePdHookPath()` only used `createRequire` from the installer package. Resolution succeeded in the dev worktree (workspace-sibling node_modules) and in tests that mock `module`, but the documented end-user flow (`npm install -g @principles/codex-adapter` + `npx create-principles-disciple install --host codex`) dead-ended: the npx cache is not an ancestor of the global npm root, so the adapter was never resolvable even after following the failure nextAction. Fixed by probing `npm root -g` as a fallback with injectable-deps tests covering fallback/preference/fail-loud. Same class: the production consumer path was never the thing under test.
   - 2026-08-11 PR #1298 (CodeRabbit #3758794691): `mvp-config.test.ts` used `content.indexOf('runHostInstallers')` to locate the substring extraction boundary for asserting the `!hasHostFailures` guard. But `runHostInstallers` first appears in a JSDoc comment and function declaration (lines 1105-1114), while the intended `return {` block with `!hasHostFailures` is at line 1322. The `indexOf` matched the wrong occurrence, so the extracted `returnBlock` did NOT contain the actual `!hasHostFailures` guard — the test passed vacuously. Fixed by using `await runHostInstallers(` (function call pattern) as the boundary anchor, which uniquely identifies the call site, not the declaration. Same class as ERR-026 (test environment drifts from production) — the test boundary drifted from the real code structure.
   - 2026-06-25 PRI-467 (PR#1059): mock stubbed `readActivations()` but prod calls `readActivatedPrinciples()` — TypeError catch-and-continue masked it
@@ -825,7 +826,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 107 |
-| Last updated | 2026-08-25 |
+| Last updated | 2026-08-27 |
 | Top category | Schema & Type |
 | Recurring errors | 57 |
 
@@ -846,6 +847,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-25 release-update Phase 2b SPEC review (no Linear issue): the native clean-machine matrix initially ran the repository's TypeScript `build` only, while the release producer requires `openclaw-plugin/dist/bundle.js`, which is emitted by `build:production`. All matrix jobs would therefore have failed before exercising the native asset. Fixed by explicitly running the production plugin bundler before the platform/Node smoke matrix. Prevention: a clean-checkout release workflow must enumerate the exact producer for every required generated artifact; a generic package `build` name is not evidence that production bundle outputs exist.
 
   - 2026-08-25 release-update Phase 2b quality review (no Linear issue): spawning `npm` directly with `execFile` on Windows fails with EINVAL because `npm` resolves to `npm.cmd` (shell shim, not an executable). The release-lock generate/check scripts and the self-contained bundler now spawn npm through `ComSpec /d /s /c` on win32 (same ERR-040 Windows CLI execution family as the PR #1146 pd-shim recurrence). Prevention: on win32 every child-process invocation of an npm-provided binary must go through `process.env.ComSpec`, never the bare command name.
+
+  - 2026-08-27 PR #1413 review (release-update SPEC, no Linear issue): the declared support contract covered 5 OS/architecture targets across Node 22/24/26 (15 combinations), but the so-called full reproducibility workflow exercised only the 5 Node 26 targets and npm publication could proceed independently of it. Fixed by restoring all 15 combinations in a reusable full workflow and making the publish job depend on that workflow, while retaining a single-target quick PR check. Prevention: the publication workflow itself must depend on the complete supported-target matrix; a separately green or manually runnable matrix is not a release gate.
 
 ---
 
