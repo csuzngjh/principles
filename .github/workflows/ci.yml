@@ -5,6 +5,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  # Manual re-trigger: PR-event delivery has proven lossy during platform
+  # incidents; dispatch runs the exact same jobs on any ref.
+  workflow_dispatch:
 
 # A new commit on a PR makes the previous commit's run worthless — cancel it
 # so queued runner capacity goes to the newest HEAD. Main/develop pushes and
