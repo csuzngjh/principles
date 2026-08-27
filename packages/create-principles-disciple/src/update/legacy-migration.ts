@@ -248,19 +248,25 @@ export function migrateLegacyOverlay(input: LegacyMigrationInput): MigrationResu
     });
   };
 
-  ensurePdHomeLayout(paths);
+  // Journal-first ordering (SPEC §8): EVERY transition is appended and
+  // fsynced BEFORE the side effect it describes. A crash between a journal
+  // append and its side effect is always recoverable (re-running the
+  // migration or the recovery rules sees the intent); a crash between a side
+  // effect and its journal append is not (the journal understates reality).
   transition(null, 'planned', 'official legacy migration planned');
+  ensurePdHomeLayout(paths);
 
+  transition('planned', 'staged', 'writing the installer-owned bootstrap manifest');
   fs.writeFileSync(bootstrapManifestPath, `${JSON.stringify({
     bootstrapVersion: input.bootstrapVersion,
     installedAt: now().toISOString(),
   }, null, 2)}\n`);
-  transition('planned', 'staged', 'bootstrap manifest written by the official installer');
 
+  transition('staged', 'probed', 'recording the overlay identity as the generation 1 release');
   fs.mkdirSync(releaseDir, { recursive: true });
   fs.writeFileSync(releaseMetadataPath, `${JSON.stringify(migratedRelease, null, 2)}\n`);
-  transition('staged', 'probed', 'overlay identity recorded as generation 1 release');
 
+  transition('probed', 'activated', 'writing the generation 1 active record');
   writeActiveRecord(activeRecordPath, {
     generation: 1,
     releaseId,
@@ -272,10 +278,9 @@ export function migrateLegacyOverlay(input: LegacyMigrationInput): MigrationResu
   // No previous.json: a freshly migrated installation has exactly ONE slot.
   // Copying the generation-1 record here would let a rollback "succeed" as a
   // no-op onto the same release while reporting a switch.
-  transition('probed', 'activated', 'generation 1 active record written');
 
+  transition('activated', 'confirmed', 'confirming the legacy migration; overlay tree left untouched as read-only diagnostics');
   fs.writeFileSync(installConfigPath, `${JSON.stringify({ channel: 'stable', autoCheck: false }, null, 2)}\n`);
-  transition('activated', 'confirmed', 'legacy migration confirmed; overlay tree left untouched as read-only diagnostics');
 
   appendHistoryEvent(historyPath, {
     at: now().toISOString(),

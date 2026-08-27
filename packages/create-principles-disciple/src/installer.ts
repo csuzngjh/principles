@@ -106,22 +106,27 @@ const CONSOLE_WARMUP_TIME_MS = 6_000;
 
 // 端口范围常量。PD_CONSOLE_PORT_BASE 允许在操作系统保留了大段端口
 // (如 Windows excludedportrange) 的机器上整体平移探测窗口；未设置时
-// 保持历史默认 3100–3199。
-function consolePortBase(): number {
+// 保持历史默认 3100–3199。resolveConsolePortBase() 是唯一 resolved
+// base：安装验证窗口、console 健康检查、autolaunch 扫描、测试全部
+// 消费它——任何新窗口不得再硬编码第二个 base。
+export function resolveConsolePortBase(): number {
   const raw = process.env.PD_CONSOLE_PORT_BASE;
   if (raw === undefined) return 3100;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isSafeInteger(parsed) || parsed < 1024 || parsed > 65000) {
+  // Number() (not parseInt) so '3300.5' is rejected instead of silently
+  // truncating to 3300.
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65000) {
     throw new Error(`PD_CONSOLE_PORT_BASE must be an integer in [1024, 65000], got: ${JSON.stringify(raw)}`);
   }
   return parsed;
 }
-const CONSOLE_PORT_RANGE_MIN = consolePortBase();
+const CONSOLE_PORT_RANGE_MIN = resolveConsolePortBase();
 const CONSOLE_PORT_RANGE_MAX = CONSOLE_PORT_RANGE_MIN + 99;
 
-// Task 8: auto-launch console via `pd console open` after successful install
-const CONSOLE_AUTOLAUNCH_BASE_PORT = 3100;
-const CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT = 20; // 3100..3119 (matches pd console open PORT_FALLBACK_LIMIT)
+// Task 8: auto-launch console via `pd console open` after successful install.
+// Derived from the SAME resolved base as the verification window above.
+const CONSOLE_AUTOLAUNCH_BASE_PORT = CONSOLE_PORT_RANGE_MIN;
+const CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT = 20; // base..base+19 (matches pd console open PORT_FALLBACK_LIMIT)
 const CONSOLE_AUTOLAUNCH_READY_TIMEOUT_MS = 12_000;
 const CONSOLE_AUTOLAUNCH_POLL_INTERVAL_MS = 500;
 
@@ -239,23 +244,10 @@ async function runNpmInstall(cwd: string, componentName = 'npm'): Promise<void> 
 }
 
 /**
- * 重建原生模块
- */
-export async function rebuildNativeModules(cwd: string, componentName: string): Promise<void> {
-  for (const mod of ALLOWED_NATIVE_MODULES) {
-    const modPath = path.join(cwd, 'node_modules', mod);
-    if (!existsSync(modPath)) continue;
-    // better-sqlite3 ships prebuilt binaries (prebuilds/*.node) that
-    // node-gyp-build resolves at require-time — no npm rebuild needed.  The
-    // require-probe in verifyNativeModules below is the actual verification.
-    void cwd;
-    void componentName;
-    void mod;
-  }
-}
-
-/**
- * 验证原生模块
+ * 验证原生模块：better-sqlite3 随发布资产携带 prebuilt 二进制
+ * (prebuilds/*.node)，node-gyp-build 在 require 时解析——无需（也没有）
+ * npm rebuild 步骤。本函数的 require 探针就是唯一验证（历史上存在一个
+ * 名为 rebuildNativeModules 的空壳函数，已删除以避免误导维护者）。
  */
 export function verifyNativeModules(cwd: string, componentName: string): void {
   for (const nativeMod of ALLOWED_NATIVE_MODULES) {
@@ -265,7 +257,7 @@ export function verifyNativeModules(cwd: string, componentName: string): void {
     try {
       execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe' });
     } catch {
-      throw new Error(`${componentName} native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
+      throw new Error(`${componentName} native module ${nativeMod} failed its require probe: the prebuilt binary for this Node.js ABI is missing or incompatible (no rebuild step exists by design). Install the platform release asset matching this OS, architecture, and ABI.`);
     }
   }
 }
@@ -423,7 +415,6 @@ async function prepareComponentDependencies(cwd: string, componentName: string):
   }
 
   await runNpmInstall(cwd, componentName);
-  await rebuildNativeModules(cwd, componentName);
   verifyNativeModules(cwd, componentName);
 }
 
@@ -1054,7 +1045,10 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
   try {
     const npmVersion = execNpm(['view', '@principles/pd-cli', 'version'], undefined, 15_000).trim();
 
-    if (!npmVersion || !/^\d+\.\d+\.\d+/.test(npmVersion)) return;
+    // Fully anchored semver: this value is interpolated into a cmd.exe
+    // command line below, so a registry response carrying shell
+    // metacharacters after a valid-looking prefix must be rejected outright.
+    if (!npmVersion || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(npmVersion)) return;
 
     const localPkgPath = path.join(installedPdCliDir, 'package.json');
     const localPkg = JSON.parse(readFileSync(localPkgPath, 'utf-8')) as { version: string };

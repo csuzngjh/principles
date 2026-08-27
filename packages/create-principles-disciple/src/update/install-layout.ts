@@ -80,14 +80,23 @@ export interface BootstrapManifest {
   readonly installedAt: string;
 }
 
-function readJsonFileIfExists(filePath: string): unknown | undefined {
+function readJsonFileIfExists(filePath: string, label: string): unknown | undefined {
   if (!fs.existsSync(filePath)) return undefined;
-  return JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+  } catch (error) {
+    // A bare SyntaxError would escape every typed reader below; corrupt
+    // installation state fails loud with its own field-tagged error (rc-3).
+    throw new InstallLayoutError(
+      label,
+      `${label} is not valid JSON (${filePath}): ${error instanceof Error ? error.message : String(error)}. Restore it with the official installer; do not guess a partial state.`,
+    );
+  }
 }
 
 /** Strict reader for the installer-owned bootstrap manifest. */
 export function readBootstrapManifest(paths: PdHomePaths): BootstrapManifest | null {
-  const value = readJsonFileIfExists(paths.bootstrapManifestPath);
+  const value = readJsonFileIfExists(paths.bootstrapManifestPath, 'bootstrap.json');
   if (value === undefined) return null;
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new InstallLayoutError('bootstrap', `bootstrap manifest must be a JSON object: ${paths.bootstrapManifestPath}`);
@@ -122,7 +131,7 @@ export interface InstallConfig {
  * loud instead of degrading to guesses.
  */
 export function readInstallConfig(paths: PdHomePaths): InstallConfig {
-  const value = readJsonFileIfExists(paths.installConfigPath);
+  const value = readJsonFileIfExists(paths.installConfigPath, 'install.json');
   if (value === undefined) return { channel: 'stable', autoCheck: false };
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new InstallLayoutError('install.json', `install.json must be a JSON object: ${paths.installConfigPath}`);

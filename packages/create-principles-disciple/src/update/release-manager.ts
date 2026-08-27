@@ -35,6 +35,7 @@ import {
   type InstallConfig,
   type PdHomePaths,
 } from './install-layout.js';
+import { readActiveRecord, TransactionJournalError } from './transaction-journal.js';
 import type { ReleaseChannelName } from './product-identity.js';
 
 export type ReleaseManagerReason =
@@ -42,7 +43,8 @@ export type ReleaseManagerReason =
   | 'bootstrap_not_installed'
   | 'metadata_refresh_failed'
   | 'release_metadata_unavailable'
-  | 'release_metadata_invalid';
+  | 'release_metadata_invalid'
+  | 'active_record_corrupt';
 
 export class ReleaseManagerError extends Error {
   readonly reason: ReleaseManagerReason;
@@ -108,35 +110,42 @@ export interface ReleaseManagerOptions {
   readonly openclawHome?: string;
 }
 
-interface ActiveRecord {
-  readonly generation: number;
-  readonly releaseId: string;
-  readonly productVersion: string;
+/**
+ * Single authority for active.json: the transaction journal's strict reader
+ * (schemaVersion + full field set). This adapter only maps its corruption
+ * error onto the ReleaseManager surface contract — it must never re-parse or
+ * re-validate the file with a second, weaker schema.
+ */
+function readActiveReleaseRecord(paths: PdHomePaths): ReturnType<typeof readActiveRecord> {
+  try {
+    return readActiveRecord(paths.activeRecordPath);
+  } catch (error) {
+    if (error instanceof TransactionJournalError) {
+      throw new ReleaseManagerError(
+        'active_record_corrupt',
+        `active.json is corrupt and must be recovered from the transaction journal: ${paths.activeRecordPath} (${error.message})`,
+        'Run the official installer recovery or an explicit update operation; the last journal-confirmed release is selected automatically.',
+      );
+    }
+    throw error;
+  }
 }
 
-function readActiveRecord(paths: PdHomePaths): ActiveRecord | null {
-  if (!fs.existsSync(paths.activeRecordPath)) return null;
-  const value: unknown = JSON.parse(fs.readFileSync(paths.activeRecordPath, 'utf8')) as unknown;
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+/**
+ * Reads a cached TUF-verified document, mapping corrupt JSON to the
+ * ReleaseManager error contract instead of leaking a bare SyntaxError
+ * (rc-3/rc-9: corrupted required state fails loud with a next action).
+ */
+function parseCachedJson(filePath: string): unknown {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+  } catch (error) {
     throw new ReleaseManagerError(
       'release_metadata_invalid',
-      `active.json is corrupt and must be recovered from the transaction journal: ${paths.activeRecordPath}`,
-      'Run the official installer recovery or an explicit update operation; the last journal-confirmed release is selected automatically.',
+      `A cached verified metadata document is not valid JSON (${filePath}): ${error instanceof Error ? error.message : String(error)}`,
+      'The cached document disagrees with its verified digest chain. Re-run the update check to re-verify and replace it.',
     );
   }
-  const generation: unknown = Reflect.get(value, 'generation');
-  const releaseId: unknown = Reflect.get(value, 'releaseId');
-  const productVersion: unknown = Reflect.get(value, 'productVersion');
-  if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 1
-    || typeof releaseId !== 'string' || releaseId.length === 0
-    || typeof productVersion !== 'string' || productVersion.length === 0) {
-    throw new ReleaseManagerError(
-      'release_metadata_invalid',
-      `active.json is malformed and must be recovered from the transaction journal: ${paths.activeRecordPath}`,
-      'Run the official installer recovery or an explicit update operation; the last journal-confirmed generation is selected automatically.',
-    );
-  }
-  return { generation, releaseId, productVersion };
 }
 
 /**
@@ -157,10 +166,12 @@ export class ReleaseManager {
   inspect(): InstallStatus {
     const installConfig: InstallConfig = readInstallConfig(this.paths);
     const bootstrap: BootstrapManifest | null = readBootstrapManifest(this.paths);
-    const active = readActiveRecord(this.paths);
+    const active = readActiveReleaseRecord(this.paths);
+    // readActiveRecord returns null only when active.json is absent, so the
+    // releases/ skeleton alone distinguishes a pre-activation dual-slot root.
     const layout: InstallationLayout = active !== null
       ? 'dual-slot'
-      : fs.existsSync(this.paths.releasesDir) || fs.existsSync(this.paths.activeRecordPath)
+      : fs.existsSync(this.paths.releasesDir)
         ? 'dual-slot'
         : fs.existsSync(this.legacyOverlayMarker())
           ? 'legacy-overlay'
@@ -300,14 +311,14 @@ export class ReleaseManager {
         'Re-run the update check so the verified channel payload is stored, then retry.',
       );
     }
-    const payload: unknown = JSON.parse(fs.readFileSync(payloadPath, 'utf8')) as unknown;
+    const payload: unknown = parseCachedJson(payloadPath);
     return parseChannelMetadata(payload);
   }
 
   private readActiveReleaseMetadata(releaseId: string): ReleaseMetadata | null {
     const metadataPath = path.join(this.paths.releasesDir, releaseId, 'metadata.json');
     if (!fs.existsSync(metadataPath)) return null;
-    const document: unknown = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as unknown;
+    const document: unknown = parseCachedJson(metadataPath);
     const metadata = parseReleaseMetadata(document);
     verifyReleaseMetadataIdentity(metadata);
     return metadata;
@@ -326,7 +337,7 @@ export class ReleaseManager {
         'This shadow-mode check only evaluates already-verified metadata. Download arrives with the transactional updater.',
       );
     }
-    const document: unknown = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as unknown;
+    const document: unknown = parseCachedJson(metadataPath);
     const metadata = parseReleaseMetadata(document);
     verifyReleaseMetadataIdentity(metadata);
     if (isReleaseMetadataExpired(metadata, now())) {

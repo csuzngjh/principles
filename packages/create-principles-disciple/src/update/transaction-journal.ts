@@ -92,15 +92,12 @@ function parseTransition(line: string, lineNumber: number): JournalTransition {
   ];
   for (const [field, kind] of required) {
     const value = Object.hasOwn(parsed, field) ? parsed[field] : undefined;
-    const {from} = parsed;
-    if (field === 'from') continue;
     if (kind === 'string' && (typeof value !== 'string' || value.length === 0)) {
       throw new TransactionJournalError('journal_field_invalid', `Journal line ${lineNumber}: field "${field}" must be a non-empty string.`);
     }
     if (kind === 'number' && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)) {
       throw new TransactionJournalError('journal_field_invalid', `Journal line ${lineNumber}: field "${field}" must be a positive integer.`);
     }
-    void from;
   }
   const {to} = parsed;
   if (typeof to !== 'string' || !VALID_STATES.has(to)) {
@@ -126,17 +123,51 @@ function parseTransition(line: string, lineNumber: number): JournalTransition {
   };
 }
 
-/** Reads and strictly validates the whole journal (fail loud on any tear). */
-export function readTransactionJournal(journalPath: string): JournalTransition[] {
-  if (!existsSync(journalPath)) return [];
+export interface RecoveryAwareJournalRead {
+  readonly transitions: readonly JournalTransition[];
+  /**
+   * True when the final physical journal record was a torn (unparseable,
+   * unterminated) write — its transition never durably committed and is
+   * EXCLUDED from `transitions`. Physical repair (truncation) belongs to an
+   * explicit recovery operation, never to this reader.
+   */
+  readonly tornTailDetected: boolean;
+}
+
+function readJournalLines(journalPath: string, options: { recoveryAware: boolean }): RecoveryAwareJournalRead {
+  if (!existsSync(journalPath)) return { transitions: [], tornTailDetected: false };
   const raw = readFileSync(journalPath, 'utf8');
+  const segments = raw.split('\n');
+  // A trailing '\n' makes split() yield a final empty segment; every other
+  // segment is a newline-terminated (complete) physical record.
+  const terminated = raw.endsWith('\n');
+  const completeLines = segments.slice(0, -1);
+  const trailingSegment = terminated ? '' : (segments[segments.length - 1] ?? '');
+
   const transitions: JournalTransition[] = [];
   let lineNumber = 0;
-  for (const line of raw.split('\n')) {
+  for (const line of completeLines) {
     lineNumber += 1;
     if (line.trim().length === 0) continue;
     transitions.push(parseTransition(line, lineNumber));
   }
+
+  let tornTailDetected = false;
+  if (trailingSegment.trim().length > 0) {
+    lineNumber += 1;
+    if (options.recoveryAware) {
+      try {
+        transitions.push(parseTransition(trailingSegment, lineNumber));
+      } catch {
+        // Torn tail: unparseable, unterminated final record. Its transition
+        // never durably committed — drop it and flag for the recovery caller.
+        tornTailDetected = true;
+      }
+    } else {
+      transitions.push(parseTransition(trailingSegment, lineNumber));
+    }
+  }
+
   for (let index = 1; index < transitions.length; index += 1) {
     const previous = transitions[index - 1];
     const current = transitions[index];
@@ -154,7 +185,26 @@ export function readTransactionJournal(journalPath: string): JournalTransition[]
       );
     }
   }
-  return transitions;
+  return { transitions, tornTailDetected };
+}
+
+/** Reads and strictly validates the whole journal (fail loud on any tear). */
+export function readTransactionJournal(journalPath: string): readonly JournalTransition[] {
+  return readJournalLines(journalPath, { recoveryAware: false }).transitions;
+}
+
+/**
+ * Recovery-aware journal reader (crash contract, SPEC §8).
+ *
+ * The writer appends `JSON + '\n'` and fsyncs. A crash mid-append can leave a
+ * TORN final record: unparseable JSON without a trailing newline. Such a
+ * record never durably committed, so recovery drops it. Everything else is
+ * strict: a malformed line anywhere else (including a complete-but-invalid
+ * final line that DOES end with a newline) fails loud, because a complete
+ * write with bad content is corruption, not a torn write.
+ */
+export function readTransactionJournalForRecovery(journalPath: string): RecoveryAwareJournalRead {
+  return readJournalLines(journalPath, { recoveryAware: true });
 }
 
 /**
@@ -194,7 +244,23 @@ export function writeActiveRecord(recordPath: string, write: ActiveRecordWrite):
 /** Strict active.json reader; returns null when absent. */
 export function readActiveRecord(recordPath: string): ActiveRecord | null {
   if (!existsSync(recordPath)) return null;
-  const value: unknown = JSON.parse(readFileSync(recordPath, 'utf8')) as unknown;
+  let text: string;
+  try {
+    text = readFileSync(recordPath, 'utf8');
+  } catch (error) {
+    throw new TransactionJournalError('active_record_corrupt', `active.json could not be read (${recordPath}): ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch (error) {
+    // A bare SyntaxError here would escape every ReleaseManager reason
+    // contract; corrupt active state maps to its own stable code (rc-3/rc-9).
+    throw new TransactionJournalError(
+      'active_record_corrupt',
+      `active.json is not valid JSON (${recordPath}): ${error instanceof Error ? error.message : String(error)}. Recovery must consult the transaction journal, never guess from a partial file.`,
+    );
+  }
   if (!isPlainObject(value)) {
     throw new TransactionJournalError('active_record_corrupt', `active.json is not an object: ${recordPath}`);
   }

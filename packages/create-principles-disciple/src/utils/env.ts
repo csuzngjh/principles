@@ -68,14 +68,16 @@ export function checkEnvironment(): EnvCheckResult {
   // win32 上必须经 cmd.exe /c：PATH 里可能只有 node.cmd shim（测试桩、
   // nvm-windows 等场景），CreateProcess 直连会跳过它命中真 node.exe，
   // 让版本门形同虚设。
-  // 注：用 String.match 而非 regex.exec——写门确定性规则会把同块内的
-  // ".exec(" 记号与子进程调用合并判为命令注入（已实测确认的假阳性）。
   const nodeVersion = IS_WIN32
     ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'node', '-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
     : probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
   if (nodeVersion !== null && nodeVersion.length > 0) {
     result.nodeVersion = nodeVersion;
-    const major = Number((/^v?(\d+)/.exec(nodeVersion))?.[1]);
+    // 注：此处刻意用 String.match 并禁用 prefer-regexp-exec——写门确定性
+    // 规则会把同块内的 ".exec(" 记号与子进程调用合并判为命令注入（已
+    // 实测确认的假阳性），而本块必须包含 execFileSync 探测。
+    // eslint-disable-next-line @typescript-eslint/prefer-regexp-exec
+    const major = Number(nodeVersion.match(/^v?(\d+)/)?.[1]);
     result.hasNode = true;
     result.isNodeSupported = Number.isInteger(major) && major >= 22;
   }

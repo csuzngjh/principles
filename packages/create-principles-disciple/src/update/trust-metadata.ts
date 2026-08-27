@@ -197,16 +197,19 @@ export async function downloadTrustedReleasePayload(
     }
     const destinationDirectory = destinationDirOf(options.destinationPath);
     const { mkdirSync, renameSync, existsSync } = await import('node:fs');
-    const { join, dirname } = await import('node:path');
+    const { join } = await import('node:path');
+    const { randomUUID } = await import('node:crypto');
     mkdirSync(destinationDirectory, { recursive: true });
-    const stagingPath = join(destinationDirectory, `.pd-payload-download-${process.pid}-${Date.now()}`);
+    // UUID-named staging path: pid+timestamp collides when two downloads
+    // land in the same millisecond and the verifier would overwrite a
+    // concurrent verified payload.
+    const stagingPath = join(destinationDirectory, `.pd-payload-download-${randomUUID()}`);
     downloaded = await updater.downloadTarget(target, stagingPath);
     if (!existsSync(downloaded)) {
       throw new Error(`verified download did not materialize: ${downloaded}`);
     }
     renameSync(downloaded, options.destinationPath);
     downloaded = undefined;
-    void dirname;
   } catch (error) {
     const causeMessage = error instanceof Error ? error.message : String(error);
     throw new ReleaseTrustError({

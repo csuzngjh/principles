@@ -19,6 +19,7 @@
  */
 
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 
 export class AtomicRecordError extends Error {
@@ -103,7 +104,10 @@ export function writeRecordAtomically(recordPath: string, recordText: string): A
   if (!isDirectory(directory)) {
     throw new AtomicRecordError('atomic_directory_missing', `Record directory does not exist: ${directory}`);
   }
-  const tempPath = join(directory, `.record-${process.pid}-${Date.now()}.tmp`);
+  // UUID-named temp file: pid+timestamp naming collides when two atomic
+  // writes land in the same millisecond, and the 'wx' exclusive flag then
+  // fails the second write spuriously.
+  const tempPath = join(directory, `.record-${randomUUID()}.tmp`);
   let descriptor: number | undefined;
   try {
     descriptor = openSync(tempPath, 'wx');
