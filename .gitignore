@@ -184,3 +184,8 @@ packages/pd-console/playwright/.cache/
 # Brainstorming visual companion (mockups, session state)
 .superpowers/
 .mimosa/
+
+# Cloudflare Pages local dev secrets/logs (never commit)
+packages/website/.dev.vars
+packages/website/.wrangler-dev.log
+packages/website/.wrangler/

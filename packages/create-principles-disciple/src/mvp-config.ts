@@ -359,6 +359,11 @@ export function generateConfigYamlContent(
       principle_receipt_block_copy:  { category: 'quiet', enabled: true },
       principle_receipt_ledger:      { category: 'quiet', enabled: true },
       principle_receipt_self_report: { category: 'quiet', enabled: false },
+      // Anonymous Product Telemetry v1 (PRI-595~603) — maintainer release
+      // gate, INDEPENDENT of user consent (~/.pd/product-telemetry.json).
+      // Export requires this flag AND explicit consent AND production
+      // eligibility. Default off = zero export attempts from any surface.
+      anonymous_product_telemetry:   { category: 'quiet', enabled: false },
       gfi:                { category: 'quiet', enabled: false },
       evolution_worker:   { category: 'quiet', enabled: false },
       empathy_observer:   { category: 'quiet', enabled: false },

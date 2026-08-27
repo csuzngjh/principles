@@ -19,8 +19,12 @@ test.describe('RuleCode Owner live-decision safety journey', () => {
     const shadowReview = page.getByTestId('owner-review-act-rule-shadow-e2e');
     await expect(shadowReview).toBeVisible();
     await expect(shadowReview).toContainText('20');
-    await expect(shadowReview).toContainText('host_liveness_composition: passed');
-    await expect(shadowReview).toContainText('owner_identity_configuration: failed');
+    // PRI-1417 i18n: promotion safety check names/status render localized
+    // (en: "Host Liveness Composition: Passed", zh: "宿主存活性与探针组合: 已通过").
+    await expect(shadowReview).toContainText(/Host Liveness Composition|宿主存活性与探针组合/);
+    await expect(shadowReview).toContainText(/Passed|已通过/);
+    await expect(shadowReview).toContainText(/Owner Identity Configuration|拥有者身份配置/);
+    await expect(shadowReview).toContainText(/Failed|未通过/);
     await expect(shadowReview).toContainText(/Promotion controls are disabled|拥有者决策功能尚未开放/);
 
     const pauseResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/activations/emergency-pause'));

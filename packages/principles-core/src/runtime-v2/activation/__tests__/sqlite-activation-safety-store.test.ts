@@ -332,4 +332,52 @@ describe('SqliteActivationSafetyStore', () => {
     await expect(store.getControlState('activation-1')).resolves.toMatchObject({ enforcement: 'safety_isolated' });
     await expect(store.getControlState('activation-recovery-1')).resolves.toMatchObject({ enforcement: 'eligible' }); connection.close();
   });
+
+  it('commitPromotion rolls back all changes when the activation_decisions INSERT fails (P0-3 rollback)', async () => {
+    const connection = new SqliteConnection(makeWorkspace());
+    seedArtifact(connection);
+    // Insert a shadow activation directly (no promotedAt)
+    const db = connection.getDb();
+    db.prepare(`
+      INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+      VALUES ('activation-1', 'activation-1-key', 'artifact-1', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-1', '2026-08-21T00:01:00.000Z', NULL, NULL)
+    `).run();
+    // Insert matching control row
+    db.prepare(`
+      INSERT INTO activation_control_states (activation_id, enforcement, isolation_decision_id, version, updated_at)
+      VALUES ('activation-1', 'eligible', NULL, 1, '2026-08-21T00:01:00.000Z')
+    `).run();
+
+    // Force every INSERT into activation_decisions to abort the transaction
+    db.prepare(`
+      CREATE TRIGGER force_decision_fail
+      BEFORE INSERT ON activation_decisions
+      BEGIN
+        SELECT RAISE(ABORT, 'forced failure for rollback test');
+      END
+    `).run();
+
+    const store = new SqliteActivationSafetyStore(connection);
+    await expect(store.commitPromotion(promotionCommit())).rejects.toThrow();
+
+    // activation row must not have been promoted
+    const row = db.prepare("SELECT action, promoted_at FROM activations WHERE activation_id = 'activation-1'").get() as { action: string; promoted_at: string | null };
+    expect(row.action).toBe('code_tool_hook_shadow_activate');
+    expect(row.promoted_at).toBeNull();
+
+    // no orphan decision row
+    const decisionCount = (db.prepare("SELECT COUNT(*) AS n FROM activation_decisions WHERE decision_id = 'decision-promote-1'").get() as { n: number }).n;
+    expect(decisionCount).toBe(0);
+
+    // no orphan evidence snapshot (inserted before the failing decision INSERT)
+    const snapshotCount = (db.prepare('SELECT COUNT(*) AS n FROM activation_evidence_snapshots').get() as { n: number }).n;
+    expect(snapshotCount).toBe(0);
+
+    // control state untouched by the aborted transaction
+    const control = db.prepare("SELECT enforcement, version FROM activation_control_states WHERE activation_id = 'activation-1'").get() as { enforcement: string; version: number };
+    expect(control.enforcement).toBe('eligible');
+    expect(control.version).toBe(1);
+
+    connection.close();
+  });
 });

@@ -74,6 +74,8 @@ export { collectOpenClawPromotionChecks } from './openclaw-promotion-checks.js';
 export type { HostLivenessContract } from './openclaw-promotion-checks.js';
 export { summarizeRuleCodeShadowEvents } from './rulecode-shadow-summary.js';
 export type { RuleCodeShadowSummary } from './rulecode-shadow-summary.js';
+export { buildPromotionEvidenceSnapshot, computeArtifactDigest, normalizeOwnerIdentity } from './promotion-evidence-snapshot.js';
+export type { BuildPromotionEvidenceSnapshotInput, PromotionEvidenceOwnerIdentity } from './promotion-evidence-snapshot.js';
 
 export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 

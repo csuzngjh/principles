@@ -10,6 +10,7 @@ import {
   getFeedbackChannelConfig,
   type FeedbackChannelConfig,
 } from './config/pd-config-store.js';
+import { createProductTelemetryService, scheduleProductTelemetryExport } from '@principles/host-runtime';
 import { AuthConfig } from './config/AuthConfig.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
@@ -569,6 +570,17 @@ export async function main(): Promise<void> {
   }
 
   const server = http.createServer(handleRequest(services));
+
+  // Anonymous Product Telemetry v1 (PRI-595~603): one fire-and-forget export
+  // attempt per console startup. The console process is the long-lived PD
+  // surface for Codex-host installations (the pd-hook subprocess is too
+  // short-lived to host async export). All gating (flag + consent +
+  // environment eligibility) happens inside the service; failures are
+  // contained and never affect console behavior.
+  scheduleProductTelemetryExport(
+    createProductTelemetryService({ logger: { info: (m) => console.log(m), warn: (m) => console.warn(m) } }),
+    workspace,
+  );
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[pd-console] Received ${signal}, shutting down...`);

@@ -8,9 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/install-layout && npm run build --workspace=principles-disciple",
-    "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/host-runtime && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts",
-    "lint:fix": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/host-runtime && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts --fix",
+    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=principles-disciple",
+    "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts",
+    "lint:fix": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts --fix",
     "typecheck:openclaw-plugin": "cd packages/openclaw-plugin && npx tsc --noEmit",
     "typecheck:pd-console": "cd packages/pd-console && npx tsc --noEmit",
     "typecheck:pd-companion": "cd packages/pd-companion && npx tsc --noEmit",
@@ -23,7 +23,7 @@
     "check:security-baseline": "node scripts/check-security-baseline.js",
     "test:scripts": "cd scripts && vitest run",
     "test:website": "npm test --workspace=@principles/website",
-    "verify:merge": "npm run check:generated-artifacts && npm run check:error-handbook && npm run check:repo-hygiene && npm run check:runtime-contract && npm run check:docs-structure && npm run check:security-baseline && npm run test:website && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console && npm run typecheck:pd-companion",
+    "verify:merge": "npm run check:generated-artifacts && npm run check:error-handbook && npm run check:repo-hygiene && npm run check:runtime-contract && npm run check:docs-structure && npm run check:security-baseline && npm run build --workspace=@principles/core && npm run test:website && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console && npm run typecheck:pd-companion",
     "verify:publish": "npm run build && cd packages/openclaw-plugin && npm pack --dry-run",
     "pre-commit": "lint-staged",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",

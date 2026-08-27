@@ -1,0 +1,53 @@
+name: Telemetry Retention Cleanup
+
+# Review remediation (PR #1419): the 90-day retention policy is enforced by
+# this daily scheduled cleanup — independent of new telemetry writes, so
+# records expire on time even when no snapshots arrive. The write-time sweep
+# in the collector remains as an opportunistic secondary safeguard.
+#
+# The endpoint computes the cutoff server-side from the shared policy; this
+# workflow only authenticates. Any non-2xx response (or a body without
+# ok:true) FAILS the workflow — retention failures must be visible, never
+# silent.
+
+on:
+  schedule:
+    # UTC 03:30 = Beijing 11:30 (offset from other nightly jobs).
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  cleanup:
+    name: Delete telemetry rows older than 90 days
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST cleanup endpoint (fail on non-2xx or ok != true)
+        env:
+          CLEANUP_TOKEN: ${{ secrets.PRODUCT_TELEMETRY_CLEANUP_TOKEN }}
+          ENDPOINT: https://principles-website.pages.dev/api/product-telemetry/cleanup
+        run: |
+          if [ -z "$CLEANUP_TOKEN" ]; then
+            echo "::error::PRODUCT_TELEMETRY_CLEANUP_TOKEN repository secret is not set"
+            exit 1
+          fi
+          response="$(curl -sS --fail-with-body -X POST "$ENDPOINT" \
+            -H "Authorization: Bearer $CLEANUP_TOKEN" \
+            -H 'content-type: application/json' \
+            -d '{}')" || exit 1
+          echo "cleanup response: $response"
+          printf '%s' "$response" | node -e "
+            let data = '';
+            process.stdin.on('data', (chunk) => { data += chunk; });
+            process.stdin.on('end', () => {
+              let parsed;
+              try { parsed = JSON.parse(data); } catch { parsed = null; }
+              if (!parsed || parsed.ok !== true) {
+                console.error('cleanup endpoint did not report ok:true');
+                process.exit(1);
+              }
+              console.log('retention cleanup ok — deleted ' + parsed.deleted + ' rows, cutoff ' + parsed.cutoff);
+            });
+          "

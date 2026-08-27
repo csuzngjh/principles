@@ -161,4 +161,25 @@ describe('RuleCodeOwnerDecisionService promotion authority', () => {
     }, actor)).resolves.toMatchObject({ ok: true, decision: 'promoted' });
     expect(commitPromotion).toHaveBeenCalledOnce();
   });
+
+  it('returns structured refusal with promotion_commit_failed when commitPromotion throws (P0-3)', async () => {
+    const failingCommit = vi.fn().mockRejectedValue(new Error('SQLite write failed'));
+    const instance = new RuleCodeOwnerDecisionService({
+      ownerLiveDecisionEnabled: () => true,
+      safetyControlsEnabled: () => true,
+      evaluateReadiness: async () => ready,
+      commitPromotion: failingCommit,
+      newDecisionId: () => 'decision-fail',
+      now: () => '2026-08-21T02:01:00.000Z',
+    });
+    const result = await instance.promote(request, actor);
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'promotion_commit_failed',
+      summary: expect.stringContaining('durable safety store'),
+      nextAction: expect.stringContaining('retry'),
+    });
+    expect(result.ok === false && result.summary.includes('SQLite write failed')).toBe(true);
+    expect(failingCommit).toHaveBeenCalledOnce();
+  });
 });
