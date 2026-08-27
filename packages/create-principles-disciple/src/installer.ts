@@ -1063,6 +1063,12 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
       mkdirSync(tmpDir, { recursive: true });
       // Platform dispatch (CodeRabbit review): cmd.exe does not exist on
       // POSIX, where npm is a real executable and can be spawned directly.
+      // The only registry-derived value on this command line is npmVersion,
+      // restricted to a metacharacter-free semver charset by the anchored
+      // check above; tmpDir is the local install root (profile-derived, not
+      // attacker-controlled). CodeQL's js/indirect-command-line-injection
+      // cannot model the regex sanitizer — see the evidence-based dismissal
+      // on alert 431.
       const packArgs = ['pack', `@principles/pd-cli@${npmVersion}`, '--pack-destination', tmpDir];
       if (process.platform === 'win32') {
         execFileSync('cmd.exe', ['/d', '/s', '/c', 'npm', ...packArgs], {

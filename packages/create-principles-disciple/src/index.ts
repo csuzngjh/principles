@@ -270,8 +270,21 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 
   // Test/hermetic-build override: when set, it must point at a COMPLETE
   // self-contained release asset directory (component trees + _release
-  // manifest). Production never sets it.
-  const pluginDir = process.env.PD_INSTALL_PLUGIN_DIR ?? PLUGIN_DIR;
+  // manifest). Production never sets it. The env value is a PATH reaching
+  // install()'s file operations, so it is validated (absolute, no parent
+  // traversal) before use — an unvalidated env path here would be a
+  // path-traversal trust boundary hole even for a test-only override.
+  const pluginDirOverride = process.env.PD_INSTALL_PLUGIN_DIR;
+  if (pluginDirOverride !== undefined
+    && (!path.isAbsolute(pluginDirOverride) || pluginDirOverride.includes('..'))) {
+    console.log(JSON.stringify(buildFailureOutput(
+      'invalid_environment',
+      `PD_INSTALL_PLUGIN_DIR must be an absolute directory path without '..': ${JSON.stringify(pluginDirOverride)}`,
+    ), null, 2));
+    process.exit(1);
+    return;
+  }
+  const pluginDir = pluginDirOverride ?? PLUGIN_DIR;
   const result = await install(installOptions, pluginDir, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
 
   if (jsonMode) {
