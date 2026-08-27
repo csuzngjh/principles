@@ -3,6 +3,8 @@ export {
   validateFeatureFlagRaw,
   computeEffectiveFlags,
   DEFAULT_FEATURE_FLAGS,
+  FEATURE_FLAG_ALIASES,
+  normalizeFeatureFlagOverrides,
 } from './feature-flag-contract.js';
 
 export type {
@@ -12,6 +14,7 @@ export type {
   ValidationResult,
   ValidationResultOk,
   ValidationResultErr,
+  FeatureFlagOverrideNormalization,
 } from './feature-flag-contract.js';
 
 export {
