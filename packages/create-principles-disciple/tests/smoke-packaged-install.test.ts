@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import * as http from 'http';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
@@ -11,24 +11,45 @@ let tarballPath: string;
 let installLayoutTarballPath: string;
 let tempHomeDir: string;
 let tempWorkspaceDir: string;
+// Hermetic self-contained publication (temp), consumed by the CLI test via
+// PD_INSTALL_PLUGIN_DIR; cleaned up in afterAll together with the temp home.
+let hermeticPublicationDir: string;
+let hermeticReleaseRoot: string;
 
-function npmExecSync(args: string[], options: Record<string, unknown> = {}): Buffer {
-  const cmd = ['npm', ...args].join(' ');
-  return execSync(cmd, {
-    ...options,
-    shell: true,
-    env: { ...process.env, ...(options.env as Record<string, string> ?? {}) },
-  });
+// npm is invoked as `node <npm-cli.js> <args>` with argv arrays only — no
+// shell strings, and no bare `npm`/`npm.cmd` spawn (EINVAL on Windows).
+function resolveNpmCliEntry(): string {
+  const nodeDir = path.dirname(process.execPath);
+  const prefixDir = path.dirname(nodeDir);
+  for (const candidate of [
+    // Windows / plain POSIX layout
+    path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(prefixDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    // nvm and most Linux distro layouts keep the global npm under lib/
+    path.join(prefixDir, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ]) {
+    if (fs.existsSync(candidate)) return path.resolve(candidate);
+  }
+  throw new Error(`npm-cli.js not found near ${process.execPath}`);
 }
 
-function npmInstallSync(tarball: string, cwd: string, env?: Record<string, string>): void {
-  execSync(`npm install "${installLayoutTarballPath}" "${tarball}"`, {
-    cwd,
-    shell: true,
-    stdio: 'pipe',
-    env: { ...process.env, ...(env ?? {}) },
-    timeout: 180_000,
+type ExecFileAsync = (file: string, args: readonly string[], options: Record<string, unknown>) => Promise<{ stdout: string; stderr: string }>;
+
+async function loadExecFileAsync(): Promise<ExecFileAsync> {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile);
+  return (file, args, options) => execFileAsync(file, args, options) as Promise<{ stdout: string; stderr: string }>;
+}
+
+async function npmRun(args: readonly string[], options: Record<string, unknown> = {}): Promise<string> {
+  const execFileAsync = await loadExecFileAsync();
+  const npmCli = resolveNpmCliEntry();
+  const { stdout } = await execFileAsync(process.execPath, [npmCli, ...args], {
+    ...options,
+    env: { ...process.env, ...((options.env as Record<string, string>) ?? {}) },
   });
+  return stdout;
 }
 
 function cleanupDir(dir: string): void {
@@ -43,22 +64,52 @@ function getInstalledConsoleDir(homeDir: string): string {
   return path.join(homeDir, '.pd', 'runtime', 'console');
 }
 
-beforeAll(() => {
+// Port discovery happens ASYNC in beforeAll into this pool; test bodies
+// then consume ports synchronously. (Windows reserves arbitrary dynamic
+// ranges — 3101-3200 on the dev machine — so hardcoded windows flake.)
+const discoveredPortPool: number[] = [];
+let consolePortBaseForThisRun = 4100;
+
+async function discoverLoopbackPort(): Promise<number> {
+  const net = require('node:net') as typeof import('node:net');
+  return await new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() => {
+        if (address === null || typeof address === 'string') {
+          reject(new Error('failed to discover a bindable loopback port'));
+          return;
+        }
+        resolve(address.port);
+      });
+    });
+  });
+}
+
+function freeLoopbackPort(): number {
+  const port = discoveredPortPool.shift();
+  if (port === undefined) {
+    throw new Error('port pool exhausted — increase discovery count in beforeAll');
+  }
+  return port;
+}
+
+beforeAll(async () => {
   const installLayoutDir = path.resolve(INSTALLER_DIR, '..', 'install-layout');
-  const installLayoutPackOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
+  const installLayoutPackOutput = await npmRun(['pack', '--pack-destination', TMPDIR], {
     cwd: installLayoutDir,
-    stdio: 'pipe',
     timeout: 120_000,
-  }).toString().trim();
+  });
   const installLayoutTarballName = installLayoutPackOutput.split('\n').map(line => line.trim()).filter(Boolean).at(-1);
   if (!installLayoutTarballName?.endsWith('.tgz')) throw new Error('install-layout npm pack did not produce a tarball');
   installLayoutTarballPath = path.resolve(TMPDIR, installLayoutTarballName);
 
-  const packOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
+  const packOutput = await npmRun(['pack', '--pack-destination', TMPDIR], {
     cwd: INSTALLER_DIR,
-    stdio: 'pipe',
-    timeout: 120_000,
-  }).toString().trim();
+    timeout: 300_000,
+  });
 
   const lines = packOutput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const tarballName = lines[lines.length - 1];
@@ -72,11 +123,36 @@ beforeAll(() => {
     throw new Error(`Tarball not found at ${tarballPath}`);
   }
 
-  tempHomeDir = path.join(TMPDIR, `pd-smoke-home-${Date.now()}`);
-  tempWorkspaceDir = path.join(TMPDIR, `pd-smoke-ws-${Date.now()}`);
-  fs.mkdirSync(tempHomeDir, { recursive: true });
-  fs.mkdirSync(tempWorkspaceDir, { recursive: true });
+  // HERMETIC self-contained materialization: the production builder runs in
+  // an isolated temp publication (staging → stamp → archive → atomic
+  // publish) and NEVER touches the repository source tree. The CLI test
+  // below points the installer at this publication via PD_INSTALL_PLUGIN_DIR.
+  // Pre-discover bindable ports (async) for the console tests, and derive
+  // the installer's console-verify window base from the first one.
+  for (let index = 0; index < 6; index += 1) {
+    discoveredPortPool.push(await discoverLoopbackPort());
+  }
+  consolePortBaseForThisRun = Math.floor((discoveredPortPool[0] ?? 4100) / 100) * 100;
+  // mkdtemp: private unpredictable directories — predictable Date.now()-named
+  // paths in the shared os tmpdir are a symlink-hijack surface
+  // (js/insecure-temporary-file) and collide when two runs share a ms.
+  const releaseTestRoot = fs.mkdtempSync(path.join(TMPDIR, 'pd-packaged-release-'));
+  const publicationDir = path.join(releaseTestRoot, 'publication');
+  const builderEntry = path.resolve(INSTALLER_DIR, 'scripts', 'build-self-contained-release.mjs');
+  if (!builderEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(builderEntry)) {
+    throw new Error(`Builder entry is missing: ${builderEntry}`);
+  }
+  const execFileAsync = await loadExecFileAsync();
+  await execFileAsync(process.execPath, [builderEntry, '--output', publicationDir], {
+    cwd: INSTALLER_DIR,
+    env: { ...process.env, SOURCE_DATE_EPOCH: '1700000000' },
+    timeout: 1_800_000,
+  });
+  hermeticPublicationDir = fs.realpathSync(path.join(publicationDir, 'payload'));
+  hermeticReleaseRoot = releaseTestRoot;
 
+  tempHomeDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-smoke-home-'));
+  tempWorkspaceDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-smoke-ws-'));
   // Create a fake `openclaw` binary on PATH so the installer's readiness
   // check (spec §6.2 — terminate if OpenClaw missing) passes in CI.
   // The real OpenClaw detection logic is covered by env.test.ts BDD tests.
@@ -93,7 +169,7 @@ beforeAll(() => {
   }
   // Prepend fakeBinDir to PATH so checkEnvironment finds the fake openclaw.
   process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH}`;
-}, 180_000);
+}, 600_000);
 
 afterAll(() => {
   if (tarballPath) {
@@ -104,6 +180,7 @@ afterAll(() => {
   }
   if (tempHomeDir) cleanupDir(tempHomeDir);
   if (tempWorkspaceDir) cleanupDir(tempWorkspaceDir);
+  if (hermeticReleaseRoot) cleanupDir(hermeticReleaseRoot);
 }, 120_000);
 
 describe('Real packaged install smoke test', () => {
@@ -117,14 +194,18 @@ describe('Real packaged install smoke test', () => {
     }).toString();
     expect(tarOutput).toContain('core/');
     expect(tarOutput).toContain('install-layout/dist/index.js');
+    expect(tarOutput).toContain('plugin/dist/governance-audit.js');
   }, 60_000);
 
-  it('install to clean temp HOME succeeds', () => {
-    npmInstallSync(tarballPath, tempHomeDir, {
-      HOME: tempHomeDir,
-      USERPROFILE: tempHomeDir,
+  it('install to clean temp HOME succeeds', async () => {
+    await npmRun(['install', installLayoutTarballPath, tarballPath], {
+      cwd: tempHomeDir,
+      timeout: 180_000,
+      env: {
+        HOME: tempHomeDir,
+        USERPROFILE: tempHomeDir,
+      },
     });
-
     const pkgJsonPath = path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'package.json');
     expect(fs.existsSync(pkgJsonPath)).toBe(true);
 
@@ -139,42 +220,70 @@ describe('Real packaged install smoke test', () => {
     expect(pluginPkgJson.devDependencies?.['@principles/host-runtime']).toBeUndefined();
   }, 240_000);
 
-  it('--json install produces parseable JSON with all components verified', () => {
-    const cliEntry = path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'dist', 'index.js');
+  it('production self-contained bundle installs with no npm invocation', async () => {
+    // The real CLI installs from the HERMETIC temp publication via
+    // PD_INSTALL_PLUGIN_DIR — the source package stays read-only throughout
+    // (source-tree immutability, see the closing test).
+    const cliEntry = path.resolve(INSTALLER_DIR, 'dist', 'index.js');
+    if (!cliEntry.startsWith(INSTALLER_DIR + path.sep) || !fs.existsSync(cliEntry)) {
+      throw new Error(`CLI build output is missing: ${cliEntry}`);
+    }
+    const fakeBinDir = path.join(tempHomeDir, 'bin');
+    const npmPoisonMarker = path.join(tempHomeDir, 'npm-was-invoked');
+    const npmPoison = path.join(fakeBinDir, process.platform === 'win32' ? 'npm.cmd' : 'npm');
+    fs.writeFileSync(
+      npmPoison,
+      process.platform === 'win32'
+        ? `@echo off\r\n>"${npmPoisonMarker}" echo invoked\r\nexit /b 97\r\n`
+        : `#!/bin/sh\nprintf invoked > "${npmPoisonMarker}"\nexit 97\n`,
+      'utf-8',
+    );
+    if (process.platform !== 'win32') fs.chmodSync(npmPoison, 0o755);
 
     let stdout = '';
-    let exitCode = 0;
     let stderr = '';
+    const execFileAsync = await loadExecFileAsync();
+    const npmWasInvokedBefore = fs.existsSync(npmPoisonMarker);
     try {
-      const result = execFileSync(process.execPath, [
+      const result = await execFileAsync(process.execPath, [
         cliEntry,
         '--yes',
         '--workspace', tempWorkspaceDir,
         '--json',
       ], {
-        stdio: ['pipe', 'pipe', 'pipe'],
         env: {
           ...process.env,
           HOME: tempHomeDir,
           USERPROFILE: tempHomeDir,
+          // Hermetic plugin source: the real CLI installs from the temp
+          // publication instead of the (un-stamped) source package.
+          PD_INSTALL_PLUGIN_DIR: hermeticPublicationDir,
+          // Steer the installer's console-verify port window away from
+          // OS-reserved ranges (this machine excludes 3101-3200).
+          PD_CONSOLE_PORT_BASE: String(consolePortBaseForThisRun),
           // Skip npm upgrade so we test the bundled pd-cli (built from current
           // repo state) rather than the npm-published version, which may be
           // incompatible with local core changes (e.g., removed exports).
           PD_SKIP_NPM_UPGRADE: '1',
           PD_SKIP_GLOBAL_SHIM: '1',
         },
-        timeout: 180_000,
+        timeout: 600_000,
       });
-      stdout = result.toString();
+      stdout = result.stdout;
     } catch (e: unknown) {
-      const err = e as { status?: number; stdout?: Buffer; stderr?: Buffer };
-      exitCode = err.status ?? 1;
-      stdout = err.stdout?.toString() ?? '';
-      stderr = err.stderr?.toString() ?? '';
+      const err = e as { stdout?: string; stderr?: string; message?: string; code?: unknown; killed?: boolean; signal?: unknown };
+      stdout = err.stdout ?? '';
+      stderr = err.stderr ?? '';
+      if (stdout.trim().length === 0) {
+        throw new Error(`Installer CLI failed without stdout. message=${String(err.message)} code=${String(err.code)} killed=${String(err.killed)} signal=${String(err.signal)} stderr=${stderr.slice(0, 2000)}`);
+      }
     }
+    const npmWasInvoked = fs.existsSync(npmPoisonMarker) || npmWasInvokedBefore;
+    fs.rmSync(npmPoison, { force: true });
+    fs.rmSync(npmPoisonMarker, { force: true });
 
     if (!stdout.trim()) {
-      throw new Error(`No stdout output. exitCode=${exitCode}, stderr=${stderr.slice(0, 2000)}`);
+      throw new Error(`No stdout output. stderr=${stderr.slice(0, 2000)}`);
     }
 
     const parsed: unknown = JSON.parse(stdout);
@@ -182,19 +291,20 @@ describe('Real packaged install smoke test', () => {
     expect(parsed).not.toBeNull();
     if (typeof parsed === 'object' && parsed !== null) {
       const obj = parsed as Record<string, unknown>;
-      if (!obj.success) {
-        throw new Error(`Install failed: reason=${obj.reason}, error=${obj.error}, nextAction=${obj.nextAction}, components=${JSON.stringify(obj.components)}, stderr=${stderr.slice(0, 1000)}`);
+      if (!obj['success']) {
+        throw new Error(`Install failed: reason=${obj['reason']}, error=${obj['error']}, nextAction=${obj['nextAction']}, components=${JSON.stringify(obj['components'])}, stderr=${stderr.slice(0, 1000)}`);
       }
-      expect(obj.success).toBe(true);
-      expect(obj.components).toBeDefined();
-      const components = obj.components as Record<string, unknown>;
-      expect(components.plugin).toBe('verified');
-      expect(['verified', 'verified_local_only']).toContain(components.cli);
-      expect(components.console).toBe('configured');
-      const verification = obj.verification as Record<string, unknown>;
-      expect(verification.storyA).toBe('passed');
+      expect(obj['success']).toBe(true);
+      expect(obj['components']).toBeDefined();
+      const components = obj['components'] as Record<string, unknown>;
+      expect(components['plugin']).toBe('verified');
+      expect(['verified', 'verified_local_only']).toContain(components['cli']);
+      expect(components['console']).toBe('configured');
+      const verification = obj['verification'] as Record<string, unknown>;
+      expect(verification['storyA']).toBe('passed');
     }
-  }, 240_000);
+    expect(npmWasInvoked).toBe(false);
+  }, 600_000);
 
   it('installer demo verification does not pollute the user workspace', () => {
     // P0-1 anti-regression: the installer's Story A verification must run in
@@ -278,7 +388,7 @@ describe('Real packaged install smoke test', () => {
   }, 60_000);
 
   it('tarball ships exactly the approved 5 skills and no legacy skill payload', () => {
-    // P1-4: the installer package must not carry its own (historical,
+    // P1-4: the installer package must not carry its own (historically
     // unread) skill tree, and the bundled plugin must ship exactly the
     // maintainer-approved MVP skill set in both languages.
     const APPROVED_SKILLS = [
@@ -328,7 +438,7 @@ describe('Real packaged install smoke test', () => {
       throw new Error('Console server entry not found at installed location');
     }
 
-    const port = 3200 + Math.floor(Math.random() * 100);
+    const port = freeLoopbackPort();
     const child = spawn(process.execPath, [
       serverEntry,
       '--workspace', tempWorkspaceDir,
@@ -383,52 +493,51 @@ describe('Real packaged install smoke test', () => {
       try { child.kill('SIGKILL'); } catch { /* ignore */ }
     }
 
-    expect(healthOk).toBe(true);
+    expect(healthOk, healthReason).toBe(true);
   }, 60_000);
 
-  it('console refuses --no-auth with non-loopback host', () => {
+  it('console refuses --no-auth with non-loopback host', async () => {
     const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);
     const serverEntry = path.join(installedConsoleDir, 'dist', 'server.js');
     if (!fs.existsSync(serverEntry)) {
       throw new Error('Console server entry not found at installed location');
     }
 
-    const port = 3300 + Math.floor(Math.random() * 100);
-    let exitCode: number | null = null;
-    try {
-      execFileSync(process.execPath, [
-        serverEntry,
-        '--workspace', tempWorkspaceDir,
-        '--port', String(port),
-        '--host', '0.0.0.0',
-        '--no-auth',
-      ], {
-        stdio: 'pipe',
-        env: {
-          ...process.env,
-          HOME: tempHomeDir,
-          USERPROFILE: tempHomeDir,
-        },
-        timeout: 10_000,
-      });
-    } catch (e: unknown) {
-      const err = e as { status?: number };
-      exitCode = err.status ?? 1;
-    }
+    const port = freeLoopbackPort();
+    const execFileAsync = await loadExecFileAsync();
+    const failure = await execFileAsync(process.execPath, [
+      serverEntry,
+      '--workspace', tempWorkspaceDir,
+      '--port', String(port),
+      '--host', '0.0.0.0',
+      '--no-auth',
+    ], {
+      env: {
+        ...process.env,
+        HOME: tempHomeDir,
+        USERPROFILE: tempHomeDir,
+      },
+      timeout: 10_000,
+    }).then(() => undefined, (error: unknown) => error);
 
-    expect(exitCode).not.toBe(0);
-  });
+    // The console must refuse to start; exit code 0 would be the failure.
+    expect(failure).toBeDefined();
+  }, 60_000);
 
-  it('failure injection: missing console triggers rollback', () => {
+  it('failure injection: missing console triggers rollback', async () => {
     const backupHomeDir = path.join(TMPDIR, `pd-smoke-rollback-${Date.now()}`);
     const backupWorkspaceDir = path.join(TMPDIR, `pd-smoke-rollback-ws-${Date.now()}`);
     fs.mkdirSync(backupHomeDir, { recursive: true });
     fs.mkdirSync(backupWorkspaceDir, { recursive: true });
 
     try {
-      npmInstallSync(tarballPath, backupHomeDir, {
-        HOME: backupHomeDir,
-        USERPROFILE: backupHomeDir,
+      await npmRun(['install', installLayoutTarballPath, tarballPath], {
+        cwd: backupHomeDir,
+        timeout: 180_000,
+        env: {
+          HOME: backupHomeDir,
+          USERPROFILE: backupHomeDir,
+        },
       });
 
       const consoleDir = path.join(
@@ -455,7 +564,7 @@ describe('Real packaged install smoke test', () => {
             HOME: backupHomeDir,
             USERPROFILE: backupHomeDir,
             PD_SKIP_NPM_UPGRADE: '1',
-          PD_SKIP_GLOBAL_SHIM: '1',
+            PD_SKIP_GLOBAL_SHIM: '1',
           },
           timeout: 180_000,
         }).toString();
@@ -470,9 +579,9 @@ describe('Real packaged install smoke test', () => {
           const parsed: unknown = JSON.parse(stdout);
           if (typeof parsed === 'object' && parsed !== null) {
             const obj = parsed as Record<string, unknown>;
-            expect(obj.success).toBe(false);
-            expect(obj.reason).toBeDefined();
-            expect(obj.nextAction).toBeDefined();
+            expect(obj['success']).toBe(false);
+            expect(obj['reason']).toBeDefined();
+            expect(obj['nextAction']).toBeDefined();
           }
         } catch {
           // stdout was not JSON, which is fine for error cases
@@ -483,4 +592,29 @@ describe('Real packaged install smoke test', () => {
       cleanupDir(backupWorkspaceDir);
     }
   }, 300_000);
+
+  it('never mutates the repository source tree (hermetic contract)', () => {
+    // Closing guard for source-tree immutability: after every test above —
+    // including the real self-contained build and the CLI install — the
+    // installer package must contain none of the release materialization
+    // artifacts. If this regresses, an interrupted run can strand hundreds
+    // of thousands of ignored files in the repo (observed as 7 GB / 720k
+    // files on the dev machine).
+    for (const pollution of [
+      '_release',
+      'plugin/node_modules',
+      'core/node_modules',
+      'console/node_modules',
+      'pd-cli/node_modules',
+      'host-runtime/node_modules',
+      'install-layout/node_modules',
+      'plugin/package-lock.json',
+      'core/package-lock.json',
+      'console/package-lock.json',
+      'pd-cli/package-lock.json',
+      'host-runtime/package-lock.json',
+    ]) {
+      expect(fs.existsSync(path.join(INSTALLER_DIR, pollution)), `source tree pollution: ${pollution}`).toBe(false);
+    }
+  }, 30_000);
 });

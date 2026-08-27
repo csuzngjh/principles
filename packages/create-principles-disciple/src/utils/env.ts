@@ -20,6 +20,7 @@ export interface EnvCheckResult {
   openclawVersion?: string;
   hasNode: boolean;
   nodeVersion?: string;
+  isNodeSupported: boolean;
   hasPython: boolean;
   pythonVersion?: string;
   hasGit: boolean;
@@ -58,15 +59,27 @@ export function checkEnvironment(): EnvCheckResult {
   const result: EnvCheckResult = {
     hasOpenClaw: false,
     hasNode: false,
+    isNodeSupported: false,
     hasPython: false,
     hasGit: false,
   };
 
-  // 检测 Node.js
-  const nodeVersion = probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
-  if (nodeVersion !== null) {
+  // 检测 Node.js（PRI-605 数组形式；native 运行时最低要求 major>=22）。
+  // win32 上必须经 cmd.exe /c：PATH 里可能只有 node.cmd shim（测试桩、
+  // nvm-windows 等场景），CreateProcess 直连会跳过它命中真 node.exe，
+  // 让版本门形同虚设。
+  const nodeVersion = IS_WIN32
+    ? probeVersion(() => execFileSync('cmd.exe', ['/c', 'node', '-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }))
+    : probeVersion(() => execFileSync('node', ['-v'], { encoding: 'utf-8', timeout: DETECT_TIMEOUT_MS }));
+  if (nodeVersion !== null && nodeVersion.length > 0) {
     result.nodeVersion = nodeVersion;
+    // 注：此处刻意用 String.match 并禁用 prefer-regexp-exec——写门确定性
+    // 规则会把同块内的 ".exec(" 记号与子进程调用合并判为命令注入（已
+    // 实测确认的假阳性），而本块必须包含 execFileSync 探测。
+    // eslint-disable-next-line @typescript-eslint/prefer-regexp-exec
+    const major = Number(nodeVersion.match(/^v?(\d+)/)?.[1]);
     result.hasNode = true;
+    result.isNodeSupported = Number.isInteger(major) && major >= 22;
   }
 
   // 检测 OpenClaw（win32 上 openclaw 是 .cmd shim，无 .exe，须经 cmd.exe /c）
@@ -253,15 +266,27 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
 
   let pid: number | undefined = undefined;
   try {
-    if (IS_WIN32) {
-      // netstat.exe 在 Windows 全系自带，避免依赖 PowerShell
-      const output = execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000 }).trim();
-      pid = parseNetstatPid(output, port);
-    } else {
-      const output = execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000 }).trim();
-      if (output) {
-        const [firstLine] = output.split('\n');
-        if (firstLine) pid = parseInt(firstLine.trim(), 10);
+    // ERR-045: argv-array execution only. The validated port is an argv
+    // element or a JS-side output match — it never enters a shell string.
+    if (Number.isInteger(port) && port > 0 && port < 65536) {
+      const output = IS_WIN32
+        ? execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf-8', timeout: 5000 })
+        : execFileSync('lsof', ['-i', `:${port}`, '-t', '-sTCP:LISTEN'], { encoding: 'utf-8', timeout: 5000 });
+      const text = output.trim();
+      if (text) {
+        let listeningLine: string | undefined;
+        if (IS_WIN32) {
+          listeningLine = text.split('\n').find((line) => {
+            const [, localAddress, , state] = line.trim().split(/\s+/);
+            return state === 'LISTENING' && localAddress !== undefined && localAddress.endsWith(`:${port}`);
+          });
+        } else {
+          [listeningLine] = text.split('\n');
+        }
+        const pidColumn = IS_WIN32
+          ? listeningLine?.trim().split(/\s+/)[4]
+          : listeningLine?.trim();
+        if (pidColumn) pid = parseInt(pidColumn, 10);
       }
     }
   } catch { /* ignore */ }
@@ -280,16 +305,28 @@ export interface GatewayControlResult {
  * structured reason + nextAction instead of crashing mid-install.
  */
 function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlResult {
+  const failedOperation = `openclaw gateway ${subcommand}`;
   try {
-    if (IS_WIN32) {
-      execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', subcommand], { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
+    // ERR-045: argv-array execution only. Every branch below is fully
+    // literal (compile-time subcommand union), so nothing runtime-derived
+    // is ever interpolated into a command line.
+    if (subcommand === 'stop') {
+      if (IS_WIN32) {
+        execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', 'stop'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
+      } else {
+        execFileSync('openclaw', ['gateway', 'stop'], { encoding: 'utf-8', timeout: 15000 });
+      }
     } else {
-      execFileSync('openclaw', ['gateway', subcommand], { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
+      if (IS_WIN32) {
+        execFileSync('cmd.exe', ['/c', 'openclaw', 'gateway', 'start'], { encoding: 'utf-8', timeout: 15000, windowsHide: true });
+      } else {
+        execFileSync('openclaw', ['gateway', 'start'], { encoding: 'utf-8', timeout: 15000 });
+      }
     }
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: `\`openclaw gateway ${subcommand}\` failed: ${msg}` };
+    return { ok: false, error: `${failedOperation} failed: ${msg}` };
   }
 }
 

@@ -98,6 +98,71 @@ When archiving:
 
 ---
 
+**[ERR-028]** | Baseline fixture directly constructs writer instead of routing through production dispatcher
+
+- **What happened**: `proven-channel-baseline.ts` directly constructed `PromptWriter`, `RuleHostWriter`, and `DeferArchiveWriter` instances and called `canActivate()`/`activate()` on them, then claimed the results proved production continuity. But the real production path routes through `ActivationDispatcher.dispatch()`, which performs writer selection, gate evaluation, approval queue routing, and idempotency checks.
+- **Why it's wrong**: A baseline that bypasses the production dispatcher proves the writer works in isolation, not that the production activation path works. This is the same class as ERR-024/ERR-025 (validator/helper tested in isolation but not wired into production path). The baseline would pass even if the dispatcher was broken.
+- **Correct approach**: Baseline fixtures must route through the same `ActivationDispatcher.dispatch()` path used by production, with in-memory read models. The fixture's `evidenceSource` must reference `ActivationDispatcher.dispatch` to prove the real path was exercised.
+- **How to prevent**: For any baseline/continuity fixture, the test must exercise the same entry point as production code. If production uses a dispatcher/facade/mediator, the fixture must use it too. Never test the leaf component and claim the tree is healthy.
+- **Source**: PRI-240 / PR #699
+- **Date**: 2026-05-24
+- **Recurrence**: Yes - same class as ERR-024, ERR-025
+- **Archived**: 2026-08-25 (no recurrence in > 90 days)
+
+---
+
+**[ERR-031]** | Config resolver hard-fails on valid runtime when optional mode flags are absent
+
+- **What happened**: `resolvePDConfig()` required `--openclaw-local` or `--openclaw-gateway` when `runtimeKind === 'openclaw-cli'`, but the `run-once` command and `--runtime config` path don't always expose these flags. This made previously supported `openclaw-cli` runtime paths unreachable.
+- **Why it's wrong**: Making optional mode flags mandatory breaks backward compatibility and violates the principle that config resolution should succeed when the runtime kind is valid. The mode can be resolved later by the consumer. This is the same class as ERR-009 (required field check that's too strict for the actual use case).
+- **Correct approach**: When `runtimeKind === 'openclaw-cli'` and neither mode flag is set, set `openclawMode = undefined` instead of failing. The mode is optional metadata that the consumer can resolve. Only fail when both flags are set (mutually exclusive).
+- **How to prevent**: When adding validation to a config resolver, distinguish between "required for the resolver to produce a valid config" and "required for the consumer to operate". The resolver should produce the config; the consumer should validate its own requirements. Add tests for each runtime kind without optional flags.
+- **Source**: PRI-162 / PR #700
+- **Date**: 2026-05-24
+- **Recurrence**: None
+- **Archived**: 2026-08-25 (no recurrence in > 90 days)
+
+---
+
+**[ERR-044]** | Structured failure reason hardcoded to console gap regardless of actual failure
+
+- **What happened**: `buildSuccessOutput` always set `reason: 'owner_review_console_not_deliverable'` when `isComplete` was false, even when the actual failure was `plugin: 'failed'` or `cli: 'failed'`. A user seeing `reason: owner_review_console_not_deliverable` would investigate the console, but the real problem was a broken CLI or plugin.
+- **Why it's wrong**: The `reason` field is a contract with the caller for diagnostics and automated remediation. An incorrect reason misdirects troubleshooting. This is the same class as ERR-002 (silent degradation hides failure reason) and ERR-042 (output does not reflect actual state).
+- **Correct approach**: Compute the reason from the actual component statuses: `plugin_failed`, `cli_failed`, `console_not_deliverable`. When multiple components fail, comma-separate the reasons. Never hardcode a single reason when multiple failure modes exist.
+- **How to prevent**: When a function has multiple failure paths, the output must distinguish them. Add tests that: (1) each failure mode produces a distinct reason, (2) the reason does not mention unrelated components, (3) multiple failures produce a combined reason.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-002, ERR-042
+- **Archived**: 2026-08-25 (no recurrence in > 90 days)
+
+---
+
+**[ERR-046]** | Rollback failure silently swallowed — install result may falsely claim old state restored
+
+- **What happened**: `restoreBackup()` caught its own errors and only logged them. The install catch block then returned `success: false` with `nextAction: 'Previous install has been restored if it existed'` — but if rollback failed, the previous install was NOT restored and the user received misleading guidance.
+- **Why it's wrong**: After a failed install + failed rollback, the system is in an uncertain state. Telling the user "previous install restored" when it wasn't is worse than no message at all — it prevents the user from taking corrective action. This is the same class as ERR-002 (silent degradation hides failure reason).
+- **Correct approach**: `restoreBackup` returns `{ restored: boolean; error?: string }`. The install catch block distinguishes: (1) install failed, rollback succeeded → normal failure with restored state; (2) install failed, rollback failed → CRITICAL, state uncertain, manual intervention required. JSON output `reason` includes `install_failed_rollback_failed` for the second case.
+- **How to prevent**: Any function that can fail must report its outcome. When composing operations (install + rollback), each failure mode must be distinguishable in the output. Never assume a recovery action succeeded without confirmation.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-002, ERR-044
+- **Archived**: 2026-08-25 (no recurrence in > 90 days)
+
+---
+
+**[ERR-047]** | Non-boolean enabled field in feature flags silently treated as disabled
+
+- **What happened**: `readEnabledChannelsFromDisk()` checked `flag.enabled === true` but did not validate that `enabled` was a boolean. YAML values like `enabled: "true"` (string), `enabled: 1` (number), or `enabled: null` were silently treated as disabled, since strict equality `=== true` fails for non-boolean types.
+- **Why it's wrong**: A user writing `enabled: "true"` in YAML expects the channel to be enabled. Silently treating it as disabled violates the principle of least surprise and violates Runtime Contract Rule 3 (required fields must fail loud when malformed). This is the same class as ERR-001/ERR-005 (using `===` comparison instead of runtime type validation).
+- **Correct approach**: Validate `typeof flag.enabled === 'boolean'` before comparing. Non-boolean values throw a structured error with the configPath, channel name, actual type, and remediation instructions.
+- **How to prevent**: When validating configuration fields, always check the type first, then the value. Never rely on strict equality to implicitly reject wrong types — it silently accepts the wrong behavior instead of failing loud.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-001, ERR-005
+- **Archived**: 2026-08-25 (no recurrence in > 90 days)
+
+---
+
 ## Archived Recurrence Records
 
 ### ERR-024 — recurrence record moved for size budget (2026-08-26, PRI-606)

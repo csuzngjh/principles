@@ -12,10 +12,14 @@ on:
       - '.github/workflows/pd-console-e2e.yml'
   workflow_dispatch:
 
+concurrency:
+  group: pd-console-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:

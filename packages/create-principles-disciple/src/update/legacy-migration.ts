@@ -1,0 +1,317 @@
+/**
+ * Official legacy-overlay migration (SPEC §15 Phase 5).
+ *
+ * ONLY an official installer transaction migrates an existing overlay
+ * installation (~/.openclaw/extensions/principles-disciple) into the
+ * bootstrap + dual-slot layout. The legacy updater must never transform
+ * itself in place. Owner data, workspace config, and governance assets are
+ * preserved untouched; the overlay directory itself is left in place as
+ * read-only legacy diagnostics for a bounded period — never deleted or
+ * rewritten by the migration.
+ *
+ * Dry-run is the default posture (cli-4): the plan describes every resolved
+ * target and the exact step list without touching anything.
+ */
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import { ensurePdHomeLayout, resolvePdHomePaths } from './install-layout.js';
+import { appendJournalTransition, writeActiveRecord, type TransactionState } from './transaction-journal.js';
+import { appendHistoryEvent, classifyDirection } from './update-history.js';
+import { deriveReleaseId } from './release-identity.js';
+import { buildReleaseMetadata } from './release-metadata.js';
+import { parseProductVersion, ProductIdentityError } from './product-identity.js';
+
+/** Every path this migration writes must resolve inside the target ~/.pd root. */
+function assertWithinPdHome(candidate: string, pdHome: string, label: string): string {
+  const resolved = path.resolve(candidate);
+  const root = path.resolve(pdHome);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new ProductIdentityError(label, `Migration write escaped ~/.pd (${root}): ${resolved}`);
+  }
+  return resolved;
+}
+
+export type MigrationRefusalReason =
+  | 'overlay_missing'
+  | 'already_migrated'
+  | 'overlay_manifest_invalid'
+  | 'bootstrap_write_out_of_scope';
+
+export interface MigrationRefusal {
+  readonly migrated: false;
+  readonly dryRun: boolean;
+  readonly reason: MigrationRefusalReason;
+  readonly message: string;
+  readonly nextAction: string;
+}
+
+export interface MigrationStep {
+  readonly description: string;
+  readonly resolvedTarget: string;
+}
+
+export interface MigrationPlan {
+  readonly migrated: true;
+  readonly dryRun: boolean;
+  readonly overlayDir: string;
+  readonly pdHome: string;
+  readonly productVersion: string;
+  readonly releaseId: string;
+  readonly steps: readonly MigrationStep[];
+  readonly historyEventPath: string;
+}
+
+export type MigrationResult = MigrationPlan | MigrationRefusal;
+
+export interface LegacyMigrationInput {
+  readonly homeDir: string;
+  readonly openclawHome: string;
+  /** Only the official installer sets this — a product release may not write the bootstrap. */
+  readonly invokedByOfficialInstaller: boolean;
+  readonly dryRun: boolean;
+  readonly bootstrapVersion: string;
+  readonly transactionId: string;
+  readonly now?: () => Date;
+}
+
+function overlayPluginDir(openclawHome: string): string {
+  return path.join(openclawHome, 'extensions', 'principles-disciple');
+}
+
+function readOverlayProductVersion(overlayDir: string): string {
+  const manifestPath = path.join(overlayDir, 'plugin', 'package.json');
+  if (!fs.existsSync(manifestPath)) {
+    throw new ProductIdentityError('overlay', `The overlay installation has no plugin manifest: ${manifestPath}`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
+  } catch (error) {
+    throw new ProductIdentityError(
+      'overlay',
+      `The overlay plugin manifest is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ProductIdentityError('overlay', 'The overlay plugin manifest is not an object.');
+  }
+  const version: unknown = Reflect.get(value, 'version');
+  return parseProductVersion(version, 'overlay.plugin.version').productVersion;
+}
+
+function overlayComponentDigests(overlayDir: string): { component: string; sha256: string; sizeBytes: number }[] {
+  const digests: { component: string; sha256: string; sizeBytes: number }[] = [];
+  for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout']) {
+    const manifestPath = path.join(overlayDir, component, 'package.json');
+    if (!fs.existsSync(manifestPath)) continue;
+    const bytes = fs.readFileSync(manifestPath);
+    digests.push({
+      component,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      sizeBytes: bytes.length,
+    });
+  }
+  return digests;
+}
+
+/**
+ * Plans (and when dryRun=false, executes) the one-time official migration.
+ * The migration: lays down the bootstrap manifest, derives the overlay's
+ * canonical release identity, records it as generation 1 of the dual-slot
+ * layout, writes install.json defaults, and appends a legacy_migration
+ * history event. The overlay tree itself is never modified.
+ */
+export function migrateLegacyOverlay(input: LegacyMigrationInput): MigrationResult {
+  const now = input.now ?? ((): Date => new Date());
+  const overlayDir = overlayPluginDir(input.openclawHome);
+  const pdHome = path.join(input.homeDir, '.pd');
+  const paths = resolvePdHomePaths(pdHome);
+
+  if (!fs.existsSync(overlayDir)) {
+    return {
+      migrated: false,
+      dryRun: input.dryRun,
+      reason: 'overlay_missing',
+      message: `No legacy overlay installation found at ${overlayDir}.`,
+      nextAction: 'Nothing to migrate. Install PD with the official installer for the new layout.',
+    };
+  }
+  if (fs.existsSync(paths.activeRecordPath)) {
+    return {
+      migrated: false,
+      dryRun: input.dryRun,
+      reason: 'already_migrated',
+      message: `This installation already uses the dual-slot layout (${paths.activeRecordPath} exists).`,
+      nextAction: 'Use the normal update flow; do not re-run the legacy migration.',
+    };
+  }
+  if (!input.invokedByOfficialInstaller) {
+    return {
+      migrated: false,
+      dryRun: input.dryRun,
+      reason: 'bootstrap_write_out_of_scope',
+      message: 'The bootstrap and trust root may only be written by an official installer transaction — a product release or the legacy updater cannot migrate itself in place.',
+      nextAction: 'Re-run the official installer, which performs the migration as part of its own transaction.',
+    };
+  }
+
+  let productVersion: string;
+  let componentDigests: { component: string; sha256: string; sizeBytes: number }[];
+  try {
+    productVersion = readOverlayProductVersion(overlayDir);
+    componentDigests = overlayComponentDigests(overlayDir);
+  } catch (error) {
+    if (error instanceof ProductIdentityError) {
+      return {
+        migrated: false,
+        dryRun: input.dryRun,
+        reason: 'overlay_manifest_invalid',
+        message: error.message,
+        nextAction: 'Reinstall the overlay with the official installer so its manifests are complete, then retry the migration.',
+      };
+    }
+    throw error;
+  }
+
+  // The migrated overlay's release identity is derived from the overlay's own
+  // component digests — canonical identity, not a checkout package.json.
+  const releaseId = deriveReleaseId({
+    productVersion,
+    sourceCommit: '0'.repeat(40),
+    minBootstrapVersion: input.bootstrapVersion,
+    assets: componentDigests.map((digest) => ({
+      platform: `overlay-${digest.component}`,
+      arch: 'x64',
+      nodeAbi: '0',
+      archiveSha256: digest.sha256,
+      archiveSizeBytes: digest.sizeBytes,
+    })),
+  });
+
+  const steps: MigrationStep[] = [
+    { description: 'Create the ~/.pd installation skeleton', resolvedTarget: paths.home },
+    { description: `Write the installer-owned bootstrap manifest (v${input.bootstrapVersion})`, resolvedTarget: paths.bootstrapManifestPath },
+    { description: `Record the overlay release ${productVersion} as generation 1`, resolvedTarget: path.join(paths.releasesDir, releaseId) },
+    { description: 'Write installation defaults (stable channel, automatic checks off)', resolvedTarget: paths.installConfigPath },
+    { description: 'Append the legacy_migration history event (overlay remains read-only)', resolvedTarget: path.join(paths.logsDir, 'history.jsonl') },
+  ];
+
+  if (input.dryRun) {
+    return {
+      migrated: true,
+      dryRun: true,
+      overlayDir,
+      pdHome,
+      productVersion,
+      releaseId,
+      steps,
+      historyEventPath: path.join(paths.logsDir, 'history.jsonl'),
+    };
+  }
+
+  const journalPath = assertWithinPdHome(path.join(paths.transactionsDir, `${input.transactionId}.jsonl`), pdHome, 'journal');
+  const bootstrapManifestPath = assertWithinPdHome(paths.bootstrapManifestPath, pdHome, 'bootstrap');
+  const releaseDir = assertWithinPdHome(path.join(paths.releasesDir, releaseId), pdHome, 'releases');
+  const releaseMetadataPath = assertWithinPdHome(path.join(releaseDir, 'metadata.json'), pdHome, 'release-metadata');
+  const activeRecordPath = assertWithinPdHome(paths.activeRecordPath, pdHome, 'active-record');
+  const installConfigPath = assertWithinPdHome(paths.installConfigPath, pdHome, 'install-config');
+  const historyPath = assertWithinPdHome(path.join(paths.logsDir, 'history.jsonl'), pdHome, 'history');
+
+  // The migrated release's metadata is built through the strict producer so
+  // its releaseId AND canonical metadataDigest close the identity chain —
+  // placeholder digests would fail verifyReleaseMetadataIdentity on the
+  // first future update check.
+  const migratedRelease = buildReleaseMetadata({
+    productVersion,
+    sourceCommit: '0'.repeat(40),
+    minBootstrapVersion: input.bootstrapVersion,
+    publicationSequence: 1,
+    expiresAt: '9999-12-31T00:00:00Z',
+    assets: componentDigests.map((digest) => ({
+      platform: `overlay-${digest.component}`,
+      arch: 'x64',
+      nodeAbi: '0',
+      archiveSha256: digest.sha256,
+      archiveSizeBytes: digest.sizeBytes,
+    })),
+    dataSchemaForwardReadableFrom: productVersion,
+  });
+  if (migratedRelease.releaseId !== releaseId) {
+    throw new ProductIdentityError('releaseId', 'Migration identity derivation diverged between planning and execution.');
+  }
+
+  const transition = (from: TransactionState | null, to: TransactionState, detail: string): void => {
+    appendJournalTransition(journalPath, {
+      at: now().toISOString(),
+      from,
+      to,
+      transactionId: input.transactionId,
+      releaseId,
+      productVersion,
+      releaseMetadataDigest: migratedRelease.metadataDigest,
+      generation: 1,
+      detail,
+    });
+  };
+
+  // Journal-first ordering (SPEC §8): EVERY transition is appended and
+  // fsynced BEFORE the side effect it describes. A crash between a journal
+  // append and its side effect is always recoverable (re-running the
+  // migration or the recovery rules sees the intent); a crash between a side
+  // effect and its journal append is not (the journal understates reality).
+  transition(null, 'planned', 'official legacy migration planned');
+  ensurePdHomeLayout(paths);
+
+  transition('planned', 'staged', 'writing the installer-owned bootstrap manifest');
+  fs.writeFileSync(bootstrapManifestPath, `${JSON.stringify({
+    bootstrapVersion: input.bootstrapVersion,
+    installedAt: now().toISOString(),
+  }, null, 2)}\n`);
+
+  transition('staged', 'probed', 'recording the overlay identity as the generation 1 release');
+  fs.mkdirSync(releaseDir, { recursive: true });
+  fs.writeFileSync(releaseMetadataPath, `${JSON.stringify(migratedRelease, null, 2)}\n`);
+
+  transition('probed', 'activated', 'writing the generation 1 active record');
+  writeActiveRecord(activeRecordPath, {
+    generation: 1,
+    releaseId,
+    releaseMetadataDigest: migratedRelease.metadataDigest,
+    previousReleaseId: null,
+    transactionId: input.transactionId,
+    productVersion,
+  });
+  // No previous.json: a freshly migrated installation has exactly ONE slot.
+  // Copying the generation-1 record here would let a rollback "succeed" as a
+  // no-op onto the same release while reporting a switch.
+
+  transition('activated', 'confirmed', 'confirming the legacy migration; overlay tree left untouched as read-only diagnostics');
+  fs.writeFileSync(installConfigPath, `${JSON.stringify({ channel: 'stable', autoCheck: false }, null, 2)}\n`);
+
+  appendHistoryEvent(historyPath, {
+    at: now().toISOString(),
+    kind: 'legacy_migration',
+    direction: classifyDirection({ kind: 'legacy_migration', releasePublicationSequence: 1, previousPublicationSequence: null }),
+    outcome: 'succeeded',
+    productVersion,
+    releaseId,
+    previousReleaseId: null,
+    previousRemainsActive: false,
+    reason: `Migrated the overlay installation at ${overlayDir} into the dual-slot layout; the overlay tree is preserved read-only.`,
+    nextAction: null,
+    transactionId: input.transactionId,
+  });
+
+  return {
+    migrated: true,
+    dryRun: false,
+    overlayDir,
+    pdHome,
+    productVersion,
+    releaseId,
+    steps,
+    historyEventPath: historyPath,
+  };
+}

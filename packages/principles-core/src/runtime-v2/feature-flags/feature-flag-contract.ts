@@ -122,6 +122,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // MVP-Quiet — opt-in or opt-out via config; enabled value varies per flag
   // Only flags with real consumption paths are registered (PRI-239 constraint)
   { id: 'feedback_channel', category: 'quiet', enabled: true, since: '2026-06-01', description: 'MVP seed feedback channel — privacy-preserving report drafts. PRI-543: flag scope extended to also cover the feedback SUBMIT ladder (ingest relay / gh CLI / mailto / export-file channels + submit endpoints). Flag-off = submit endpoints 403 + submit UI hidden; config `feedback:` segment and channel parameters still available.' },
+  // Commercial update system Phase 3 (SPEC 2026-08-25): ReleaseManager shadow
+  // mode. Read-only inspect/check with legacy-updater decision comparison;
+  // apply/rollback refuse regardless of this flag (activation arrives with
+  // the Phase 4 transaction rollout). Quiet per AGENTS: default off, not
+  // surfaced until Phase 6 cutover.
+  { id: 'release_manager_shadow', category: 'quiet', enabled: false, since: '2026-08-25', description: 'ReleaseManager shadow mode — read-only signed-metadata update checks with legacy-updater comparison diagnostics; no activation' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
   { id: 'evolution_worker', category: 'quiet', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5)' },
   { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },

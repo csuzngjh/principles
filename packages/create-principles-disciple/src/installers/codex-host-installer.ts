@@ -101,6 +101,9 @@ function getPdHookMarkerPath(): string {
  * 3. Fall back to undefined — installer reports the missing dependency.
  */
 function getGlobalNpmRoot(): string | undefined {
+  const legacyNpmEnabled = process.env.PD_ALLOW_LEGACY_NPM_INSTALL === '1'
+    || process.env.PD_ALLOW_LEGACY_NPM_INSTALL === 'true';
+  if (!legacyNpmEnabled) return undefined;
   try {
     const root = execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     return root.length > 0 ? root : undefined;

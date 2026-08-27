@@ -325,6 +325,52 @@ describe('handleUpdateRoute', () => {
   // ── POST /apply ─────────────────────────────────────────────────────
 
   describe('POST /apply', () => {
+    it('refuses a non-advancing package version before backup or file mutation', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ version: '1.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+      } as Response);
+
+      const req = createMockRequest('POST', { mergeStrategy: 'smart', createBackup: true });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; reason?: string } }>(res);
+      expect(body.success).toBe(true);
+      expect(body.data).toMatchObject({ success: false, reason: 'installer_bundle_stale' });
+      expect(fs.copyFileSync).not.toHaveBeenCalled();
+      const history = JSON.parse(fs.readFileSync(path.join(workspaceDir, '.pd', 'update-history.json'), 'utf-8')) as unknown[];
+      expect(history).toEqual([
+        expect.objectContaining({ kind: 'refusal', reason: 'installer_bundle_stale' }),
+      ]);
+    });
+
+    it('refuses an explicit workspace target before backup, download, or file mutation', async () => {
+      const checkoutDir = path.join(workspaceDir, 'checkout-copy');
+      fs.mkdirSync(checkoutDir, { recursive: true });
+      fs.writeFileSync(path.join(checkoutDir, 'package.json'), JSON.stringify({ version: '0.9.0' }));
+
+      const req = createMockRequest('POST', {
+        targetDir: checkoutDir,
+        mergeStrategy: 'smart',
+        createBackup: true,
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; error: string; nextAction?: string }>(res);
+      expect(body).toMatchObject({
+        success: false,
+        error: 'update_target_not_installed',
+        nextAction: expect.any(String),
+      });
+      expect(fs.copyFileSync).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
     it('should apply update with explicit targetDir', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
 
@@ -355,13 +401,8 @@ describe('handleUpdateRoute', () => {
         }
       }) as unknown as typeof execSyncMock);
 
-      // Create a real target dir within extensions (passes path validation)
-      const targetDir = path.join(tmpDir, 'extensions', 'target');
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
-
       const req = createMockRequest('POST', {
-        targetDir,
+        targetDir: pluginDir,
         mergeStrategy: 'smart',
         createBackup: false,
       });
@@ -578,8 +619,8 @@ describe('handleUpdateRoute', () => {
       await handleUpdateRoute(req, res, workspaceDir, '/apply');
 
       expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; message: string }>(res);
-      expect(body.message).toContain('targetDir');
+      const body = parseResponseBody<{ success: boolean; error: string }>(res);
+      expect(body.error).toBe('update_target_not_installed');
     });
   });
 
@@ -686,12 +727,8 @@ describe('handleUpdateRoute', () => {
         json: async () => ({}),
       } as Response);
 
-      const targetDir = path.join(tmpDir, 'extensions', 'target-non-ok');
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
-
       const req = createMockRequest('POST', {
-        targetDir,
+        targetDir: pluginDir,
         mergeStrategy: 'smart',
         createBackup: false,
       });
@@ -934,8 +971,8 @@ describe('handleUpdateRoute', () => {
       await handleUpdateRoute(req, res, workspaceDir, '/apply');
 
       expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; message: string }>(res);
-      expect(body.message).toContain('targetDir');
+      const body = parseResponseBody<{ success: boolean; error: string }>(res);
+      expect(body.error).toBe('update_target_not_installed');
     });
 
     it('should reject absolute path outside workspace', async () => {
@@ -1008,8 +1045,7 @@ describe('handleUpdateRoute', () => {
       }) as unknown as typeof fetch);
 
       // Create a workspace file in target
-      const targetDir = path.join(tmpDir, 'extensions', 'keep-target');
-      fs.mkdirSync(targetDir, { recursive: true });
+      const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original content');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
@@ -1056,8 +1092,7 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      const targetDir = path.join(tmpDir, 'extensions', 'overwrite-target');
-      fs.mkdirSync(targetDir, { recursive: true });
+      const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
@@ -1104,8 +1139,7 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      const targetDir = path.join(tmpDir, 'extensions', 'smart-target');
-      fs.mkdirSync(targetDir, { recursive: true });
+      const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
@@ -1620,6 +1654,64 @@ describe('handleUpdateRoute', () => {
   // ── Full update (/apply-full) — inline tarball download + file copy ──
 
   describe('POST /apply-full', () => {
+    it.each(['1.0.0', '0.9.9'])('refuses a non-advancing stamped release before download (%s)', async (bundledPluginVersion) => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          version: '2.0.0',
+          pd: { bundledPluginVersion },
+          dist: { tarball: 'https://example.com/pkg.tgz' },
+        }),
+      } as Response);
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; reason?: string; requiresRestart: boolean } }>(res);
+      expect(body.success).toBe(true);
+      expect(body.data).toMatchObject({
+        success: false,
+        reason: 'installer_bundle_stale',
+        requiresRestart: false,
+      });
+      expect(execSyncMock).not.toHaveBeenCalled();
+      expect(fs.copyFileSync).not.toHaveBeenCalled();
+    });
+
+    it('cleans staged files when an unstamped legacy installer is not advancing', async () => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      let stagingDir: string | undefined;
+      vi.mocked(fetch).mockImplementationOnce(async () => ({
+        ok: true,
+        json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+      } as Response)).mockImplementationOnce(async () => ({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      } as Response));
+      vi.mocked(execSyncMock).mockImplementation(((command: string, args?: readonly string[]) => {
+        if (command !== 'tar' || !args) return;
+        const targetIndex = args.indexOf('-C');
+        const target = targetIndex >= 0 ? args[targetIndex + 1] : undefined;
+        if (target === undefined) return;
+        stagingDir = target;
+        fs.mkdirSync(path.join(target, 'plugin'), { recursive: true });
+        fs.writeFileSync(path.join(target, 'plugin', 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      }) as unknown as typeof execSyncMock);
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+      expect(body.data).toMatchObject({ success: false, reason: 'installer_bundle_stale' });
+      expect(stagingDir).toBeDefined();
+      expect(fs.existsSync(stagingDir!)).toBe(false);
+      expect(fs.copyFileSync).not.toHaveBeenCalled();
+    });
+
     it('should copy plugin, console, core, pd-cli from installer tarball', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
 

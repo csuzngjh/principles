@@ -48,6 +48,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-reproducibility:
+    name: Verify Full Release Matrix
+    needs: detect
+    if: needs.detect.outputs.matrix != '[]'
+    uses: ./.github/workflows/release-reproducibility-full.yml
+    permissions:
+      contents: read
+
   detect:
     name: Detect Changed Packages
     runs-on: ubuntu-latest
@@ -202,7 +210,7 @@ jobs:
 
   publish:
     name: Publish ${{ matrix.npm_name }}
-    needs: detect
+    needs: [detect, release-reproducibility]
     if: needs.detect.outputs.matrix != '[]'
     strategy:
       matrix:

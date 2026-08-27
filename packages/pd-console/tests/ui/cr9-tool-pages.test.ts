@@ -339,25 +339,29 @@ describe("CR9: runtime validators for tool pages", () => {
 
   describe("validateUpdateHistoryEntry", () => {
     it("accepts valid data", () => {
-      const result = validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026-06-01T00:00:00Z", fromVersion: "1.0.0", toVersion: "1.1.0", success: true });
-      expect(result).toEqual({ id: "upd-1", timestamp: "2026-06-01T00:00:00Z", fromVersion: "1.0.0", toVersion: "1.1.0", success: true });
+      const result = validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026-06-01T00:00:00Z", fromVersion: "1.0.0", toVersion: "1.1.0", success: true, kind: "update" });
+      expect(result).toEqual({ id: "upd-1", timestamp: "2026-06-01T00:00:00Z", fromVersion: "1.0.0", toVersion: "1.1.0", success: true, kind: "update" });
     });
 
     it("rejects null", () => expect(validateUpdateHistoryEntry(null)).toBeNull());
     it("rejects missing fields", () => expect(validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026" })).toBeNull());
     it("rejects wrong types", () => expect(validateUpdateHistoryEntry({ id: 1, timestamp: "2026", fromVersion: "1.0.0", toVersion: "1.1.0", success: true })).toBeNull());
     it("rejects non-boolean success", () => expect(validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026", fromVersion: "1.0.0", toVersion: "1.1.0", success: "yes" })).toBeNull());
+    it("rejects an invented event kind", () => expect(validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026", fromVersion: "1.0.0", toVersion: "1.1.0", success: false, kind: "invented" })).toBeNull());
+    // 'unknown' is a legitimate kind: pre-Phase-0 records carry no operation
+    // and the server route maps them to it (never legacy_migration).
+    it("accepts the explicit unknown kind", () => expect(validateUpdateHistoryEntry({ id: "upd-1", timestamp: "2026", fromVersion: "1.0.0", toVersion: "1.1.0", success: false, kind: "unknown" })).not.toBeNull());
   });
 
   describe("validateUpdateHistory", () => {
     it("accepts valid { updates: [...] } shape", () => {
-      const result = validateUpdateHistory({ updates: [{ id: "upd-1", timestamp: "2026-06-01", fromVersion: "1.0.0", toVersion: "1.1.0", success: true }] });
+      const result = validateUpdateHistory({ updates: [{ id: "upd-1", timestamp: "2026-06-01", fromVersion: "1.0.0", toVersion: "1.1.0", success: true, kind: "update" }] });
       expect(result).not.toBeNull();
       expect(result!.updates).toHaveLength(1);
     });
 
     it("accepts bare array shape (backend contract)", () => {
-      const result = validateUpdateHistory([{ id: "upd-1", timestamp: "2026-06-01", fromVersion: "1.0.0", toVersion: "1.1.0", success: true }]);
+      const result = validateUpdateHistory([{ id: "upd-1", timestamp: "2026-06-01", fromVersion: "1.0.0", toVersion: "1.1.0", success: true, kind: "update" }]);
       expect(result).not.toBeNull();
       expect(result!.updates).toHaveLength(1);
     });

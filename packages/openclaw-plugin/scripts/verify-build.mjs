@@ -19,6 +19,7 @@ const rootDir = join(__dirname, '..');
 // Required paths in dist/
 const requiredPaths = [
   'dist/bundle.js',
+  'dist/governance-audit.js',
   'dist/openclaw.plugin.json',
   'dist/templates',
 ];

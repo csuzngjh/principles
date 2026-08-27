@@ -578,6 +578,27 @@ async function doApplyUpdate(
     const data = rawData as Record<string, unknown>;
     const toVersion = typeof data.version === 'string' ? data.version : undefined;
     if (!toVersion) return { success: false, message: 'Missing version in registry response' };
+    const advancesInstalled =
+      fromVersion !== 'unknown' &&
+      semver.valid(fromVersion) !== null &&
+      semver.valid(toVersion) !== null &&
+      semver.gt(toVersion, fromVersion);
+    if (!advancesInstalled) {
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion,
+        success: false,
+        kind: 'refusal',
+        reason: 'installer_bundle_stale',
+        nextAction: 'Wait for a newer installer release, then retry the update.',
+      });
+      return {
+        success: false,
+        message: 'Installed version would not advance — the update source is stale or malformed.',
+        reason: 'installer_bundle_stale',
+        nextAction: 'Wait for a newer installer release, then retry the update.',
+      };
+    }
     const dist = typeof data.dist === 'object' && data.dist !== null ? (data.dist as Record<string, unknown>) : null;
     const tarball = dist && typeof dist.tarball === 'string' ? dist.tarball : undefined;
     if (!tarball) return { success: false, message: 'Missing tarball URL in registry response' };
@@ -664,6 +685,7 @@ async function doApplyUpdate(
       fromVersion,
       toVersion,
       success: true,
+      kind: 'update',
       backupPath,
     });
 
@@ -725,6 +747,7 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
       fromVersion: 'rolled-back',
       toVersion: readCurrentVersion(targetDir) ?? 'unknown',
       success: true,
+      kind: 'rollback',
       backupPath: backupDir,
     });
 
@@ -849,26 +872,14 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     };
   }
 
-  // 1. Stop gateway (releases native module locks held by the gateway process)
-  const gatewayStatus = layout.hosts.includes('openclaw')
-    ? await checkOpenClawGateway()
-    : { isRunning: false };
   let gatewayWasStopped = false;
-  if (gatewayStatus.isRunning) {
-    const stopRes = stopOpenClawGateway();
-    if (stopRes.ok) gatewayWasStopped = true;
-  }
 
-  // Capture version before changes
+  // Capture installed facts before staging any candidate release.
   const fromVersion = readCurrentVersion(extDir) ?? 'unknown';
   // Capture the installed skill language before the tarball's manifest
   // overwrites it (PR #1332 companion — see reapplySkillLanguage).
   const skillLanguage = detectInstalledSkillLanguage(extDir);
   let tempDir: string | undefined;
-
-  // Heal legacy installs: move old backups out of the extensions dir so
-  // OpenClaw discovery stops reporting a duplicate plugin (see pd-backups.ts).
-  logLegacyBackupMigration('pd-update-full');
 
   try {
     // 2. Fetch installer package info from npm
@@ -876,6 +887,34 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     const rawData: unknown = await response.json();
     if (!isRecord(rawData)) return { success: false, message: 'Invalid registry response', requiresRestart: false };
     const toVersion = typeof rawData.version === 'string' ? rawData.version : undefined;
+    const bundledPluginVersion =
+      isRecord(rawData.pd) && typeof rawData.pd.bundledPluginVersion === 'string'
+        ? rawData.pd.bundledPluginVersion
+        : undefined;
+    if (bundledPluginVersion !== undefined) {
+      const advancesInstalled =
+        fromVersion !== 'unknown' &&
+        semver.valid(fromVersion) !== null &&
+        semver.valid(bundledPluginVersion) !== null &&
+        semver.gt(bundledPluginVersion, fromVersion);
+      if (!advancesInstalled) {
+        appendUpdateHistory(workspaceDir, {
+          fromVersion,
+          toVersion: bundledPluginVersion,
+          success: false,
+          kind: 'refusal',
+          reason: 'installer_bundle_stale',
+          nextAction: 'Wait for a newer installer release, then retry the update.',
+        });
+        return {
+          success: false,
+          message: 'Installed version would not advance — the update source is stale or malformed.',
+          reason: 'installer_bundle_stale',
+          nextAction: 'Wait for a newer installer release, then retry the update.',
+          requiresRestart: false,
+        };
+      }
+    }
     const dist = isRecord(rawData.dist) ? rawData.dist : null;
     const tarball = dist && typeof dist.tarball === 'string' ? dist.tarball : undefined;
     if (!tarball) return { success: false, message: 'Missing tarball URL', requiresRestart: false };
@@ -891,10 +930,56 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1'], { stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
+    // The tarball, not the installer package version, is the release we are
+    // about to activate. Prove it advances the installed plugin BEFORE the
+    // gateway is stopped or any production file is copied.
+    const newPkgPath = path.join(tempDir, 'plugin', 'package.json');
+    const stagedVersion = readCurrentVersion(path.join(tempDir, 'plugin'));
+    const progressed =
+      fromVersion !== 'unknown' &&
+      stagedVersion !== undefined &&
+      semver.valid(fromVersion) !== null &&
+      semver.valid(stagedVersion) !== null &&
+      semver.gt(stagedVersion, fromVersion) &&
+      (bundledPluginVersion === undefined || bundledPluginVersion === stagedVersion);
+    if (!progressed) {
+      if (tempDir && fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: stagedVersion ?? 'unknown',
+        success: false,
+        kind: 'refusal',
+        reason: 'installer_bundle_stale',
+        nextAction: 'Wait for a newer installer release, then retry the update.',
+      });
+      return {
+        success: false,
+        message: 'Installed version would not advance — the update source is stale or malformed.',
+        reason: 'installer_bundle_stale',
+        nextAction: 'Wait for a newer installer release, then retry the update.',
+        requiresRestart: false,
+      };
+    }
+
+    // Only a verified advancing release may cause host interruption or touch
+    // the production installation.
+    const gatewayStatus = layout.hosts.includes('openclaw')
+      ? await checkOpenClawGateway()
+      : { isRunning: false };
+    if (gatewayStatus.isRunning) {
+      const stopRes = stopOpenClawGateway();
+      if (stopRes.ok) gatewayWasStopped = true;
+    }
+
+    // Heal legacy installs only after candidate verification. This writes
+    // outside the release tree, so it must not happen for a refused release.
+    logLegacyBackupMigration('pd-update-full');
+
     // 4. Detect dependency changes (informational — logged but not blocking;
     //    the .js files are still updated; node_modules stays as-is)
     let depsChanged = false;
-    const newPkgPath = path.join(tempDir, 'plugin', 'package.json');
     const oldPkgPath = path.join(extDir, 'package.json');
     if (fs.existsSync(newPkgPath) && fs.existsSync(oldPkgPath)) {
       try {
@@ -942,6 +1027,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
           fromVersion,
           toVersion: 'failed',
           success: false,
+          kind: 'failure',
         });
         return {
           success: false,
@@ -1008,13 +1094,9 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     // false "update available". Detect that and fail loud (rc-9) instead of
     // reporting a false success.
     const newVersion = readCurrentVersion(extDir) ?? toVersion ?? 'unknown';
-    const progressed =
-      fromVersion !== 'unknown' &&
-      semver.valid(fromVersion) !== null &&
-      semver.valid(newVersion) !== null &&
-      semver.gt(newVersion, fromVersion);
+    const installedExpectedRelease = newVersion === stagedVersion;
 
-    if (!progressed) {
+    if (!installedExpectedRelease) {
       // Files were already rewritten to the same (or lower) version. Record a
       // FAILED history entry so the operator sees why, and return a structured
       // error with nextAction.
@@ -1022,6 +1104,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
         fromVersion,
         toVersion: newVersion,
         success: false,
+        kind: 'failure',
       });
       return {
         success: false,
@@ -1038,6 +1121,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       fromVersion,
       toVersion: newVersion,
       success: true,
+      kind: 'update',
     });
 
     return {
@@ -1062,6 +1146,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       fromVersion,
       toVersion: 'failed',
       success: false,
+      kind: 'failure',
     });
 
     if (isLockError) {
@@ -1147,6 +1232,21 @@ export async function handleUpdateRoute(
       }
       // createBackup is a boolean (default false)
       const createBackup = typeof body.createBackup === 'boolean' ? body.createBackup : false;
+
+      // The Console updater owns only the installed PD runtime selected at
+      // process start. A caller-supplied path inside a workspace may be a
+      // development checkout; accepting it lets a registry package overwrite
+      // source files and makes version history describe the wrong product.
+      if (path.resolve(targetDir) !== path.resolve(pluginDir)) {
+        sendError(
+          res,
+          400,
+          'update_target_not_installed',
+          'Updates may only target the installed PD runtime.',
+          { nextAction: 'Run the official installer to repair the installation, then retry from Console.' },
+        );
+        return;
+      }
 
       // Path traversal validation
       if (!validatePathInWorkspace(targetDir, workspaceDir)) {
