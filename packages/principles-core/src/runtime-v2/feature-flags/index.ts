@@ -3,6 +3,8 @@ export {
   validateFeatureFlagRaw,
   computeEffectiveFlags,
   DEFAULT_FEATURE_FLAGS,
+  FEATURE_FLAG_ALIASES,
+  normalizeFeatureFlagOverrides,
 } from './feature-flag-contract.js';
 
 export type {
@@ -12,7 +14,18 @@ export type {
   ValidationResult,
   ValidationResultOk,
   ValidationResultErr,
+  FeatureFlagOverrideNormalization,
 } from './feature-flag-contract.js';
+
+// PRI-610 — lifecycle census (machine-checked by feature-flag-lifecycle.test.ts)
+export {
+  QUIET_FLAG_LIFECYCLE,
+} from './feature-flag-lifecycle.js';
+
+export type {
+  QuietFlagLifecycleDecision,
+  QuietFlagLifecycleEntry,
+} from './feature-flag-lifecycle.js';
 
 export {
   VALID_SURFACE_KINDS,

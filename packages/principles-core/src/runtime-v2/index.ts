@@ -433,12 +433,15 @@ export {
   validateFeatureFlagRaw,
   computeEffectiveFlags,
   DEFAULT_FEATURE_FLAGS,
+  FEATURE_FLAG_ALIASES,
+  normalizeFeatureFlagOverrides,
 } from './feature-flags/index.js';
 
 export type {
   FeatureFlagCategory,
   FeatureFlagDefinition,
   EffectiveFeatureFlags,
+  FeatureFlagOverrideNormalization,
   ValidationResult as FeatureFlagValidationResult,
   ValidationResultOk as FeatureFlagValidationResultOk,
   ValidationResultErr as FeatureFlagValidationResultErr,
