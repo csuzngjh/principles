@@ -187,6 +187,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-101 | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree | PRI-553 |
 | ERR-102 | Optional governance gate conflates disabled/unavailable/loading states and fails open to the legacy path | PRI-553 |
 | ERR-104 | Auth bootstrap redirects overwrite authenticated deep links because splash/onboarding state is not scoped to entry routes | RuleCode Owner Live Decision E2E |
+| ERR-111 | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them | PRI-581 |
 
 ---
 
@@ -226,6 +227,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     - 2026-06-19 PRI-408/PR#972, PRI-431/PR#975: approval/catch paths missing reason+nextAction
     - Earlier PR#699-#966: catch→skip / malformed yaml→[] / false success — every fallback now emits reason+nextAction
   - 2026-08-24 PRI-577 / PR #1407: dual-directory telemetry counted a source before successful enumeration and returned no structured reason when neither source was readable. Fixed by counting only successfully enumerated directories and surfacing `shadow_telemetry_source_unavailable`; regression covers an existing path that is not a readable directory.
+  - 2026-08-28 PR #1435 (CodeRabbit, fixed same PR): the new worktree-integrity guard `checkWorktreeIntegrity()` routed `git ls-files -d` through `gitLines()`, whose catch block converts every query failure (not a repo, unreadable index, maxBuffer) into `[]` — the safety gate would report "Passed" exactly when it could not run (fails open, rc-9). Its test also used a conditional assertion (`if (missingFiles.length > 0)`) that passed on an always-empty result. Fixed by calling `execFileSync` directly and throwing on failure (callers report reason + nextAction, exit nonzero) plus temp-repo tests that create a real missing tracked file and assert the throw on a non-repo cwd.
 
 ---
 
@@ -1643,3 +1645,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: owner-directed task 2026-08-28 (no Linear issue); ClawHub audit 2026-08-26, plugin v1.222.4; remediation PR #1430
 - **Date**: 2026-08-28
 - **Recurrence**: 2026-08-28 PR #1430 self-review — the first root README remediation described telemetry as the only outbound path and still omitted Owner-configured LLM provider calls. Fixed the English and Chinese disclosures and strengthened the disclosure contract test to require the provider-network path explicitly.
+
+---
+
+**[ERR-111]** | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them
+
+- **What happened**: `packages/pd-cli/tests/commands/console-open.test.ts` case `[::1] is accepted and normalized to ::1` hard-fails after an 8s timeout on machines where IPv6 loopback is blocked (PRI-581). Diagnosis on the affected Windows machine (2026-08-28): the IPv6 stack itself was healthy — `::1` address present (DAD Preferred), `::1/128` route present, Node `listen('::1')` succeeded — but `connect('::1')` failed with `EACCES` and `ping ::1` returned "General failure". `EACCES` (WSAEACCES 10013) on a loopback connect is WFP (Windows Filtering Platform) interception, caused by a global TUN VPN's filter driver (a `tun0` interface with the lowest interface metric was present), NOT by missing IPv6 config. The product code was correct: `console-launcher.ts` normalizes `[::1]`→`::1` and the server binds it fine; only the test's environment assumption was wrong.
+- **Why it's wrong**: A test that assumes an optional host capability (IPv6 loopback reachability) converts "capability unavailable on this machine" into a permanent red light. Per-machine environmental failures mask real regressions (wolf-crying effect) and waste diagnosis time — this exact failure was independently re-diagnosed from scratch twice (PRI-581 filing on 2026-08-24; root-cause session on 2026-08-28).
+- **Generalized failure mode**: When a test exercises a capability that is optional or filterable at the OS/network level (IPv6 loopback, specific interface families, firewall-sensitive ports), assistants must probe availability in a `beforeAll`/`beforeEach` and `skip` with an explicit reason when unavailable — never hard-fail on absence. Conversely, when such a test fails with `EACCES`/`General failure` on loopback, suspect filtering drivers (VPN, WFP rules) before suspecting the code or the IP stack; verify with bind-vs-connect asymmetry (bind OK + connect EACCES = filter interception).
+- **Correct approach** (per PRI-581 improvement plan): pre-probe IPv6 loopback availability (e.g. one TCP connect to `::1` on an ephemeral listener) and `ctx.skip()` with a message like `IPv6 loopback unavailable (VPN/WFP filter?)` when the probe fails. Keep the test asserting real behavior when the probe passes.
+- **How to prevent**: In review of any test that binds/connects to `::1`, link-local, or non-default interfaces: ask "what happens on a machine where this is filtered?" If the answer is a timeout/fail rather than a skip, require the probe. Under 30 seconds: grep tests for `'::1'` / `--host` usages and check each for a capability probe.
+- **Regression guard**: (pending PRI-581 fix) the IPv6 test case itself, once converted to probe-and-skip — it must report `skipped` with reason on filtered machines and still pass normally on capable machines.
+- **Related ERRs**: ERR-101 (shared-port environment coupling in E2E), ERR-078 (environment failure misclassification), EP-06
+- **Source**: PRI-581; environment diagnosis 2026-08-28 (Windows + global TUN VPN, WFP EACCES on ::1)
+- **Date**: 2026-08-28
+- **Recurrence**: None
