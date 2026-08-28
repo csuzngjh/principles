@@ -35,7 +35,7 @@ function repoRoot() {
 }
 
 /** True when a custom hooks path is configured (post-checkout worktree setup). */
-function hooksInstalled(root) {
+function hooksInstalled() {
   try {
     const hook = execFileSync('git', ['config', '--get', 'core.hooksPath'], {
       encoding: 'utf8',
@@ -90,7 +90,7 @@ function main() {
   }
 
   // --- 3. Worktree-safe hooks ------------------------------------------------
-  if (hooksInstalled(root)) {
+  if (hooksInstalled()) {
     console.log('[ok] custom hooks path configured.');
   } else {
     console.warn('[WARN] no custom core.hooksPath configured; post-checkout worktree setup may not auto-run.');
