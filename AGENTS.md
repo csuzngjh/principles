@@ -1,294 +1,1303 @@
-# AGENTS.md — OpenAI Codex CLI Instructions
+# AGENTS.md — Principles Disciple Engineering Constitution
 
-## ⚠️ MVP-First Stage — Read First (2026-05-24)
-
-**PD is in MVP-First stage** (ADR-0014). Goal: invite the first real seed customer within 4-6 weeks. **All architectural expansion is paused.** Product boundary: **PD owns owner-reviewed, reversible behavior internalization; it does not own general task execution, general memory, generic tool repair, or autonomous value decisions.**
-
-Read the strategic documents below before creating or reprioritizing an issue, or changing product scope, architecture, roadmap, ADRs, user journeys, surfaced functionality, activation channels, or public product copy:
-
-0. [`PRODUCT_IDENTITY.md`](docs/product/PRODUCT_IDENTITY.md) (canonical product boundary)
-1. [`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`](docs/adr/0014-mvp-first-strategy-and-product-pivot.md) (MVP-First Strategy)
-2. [`docs/plans/2026-05-roadmap/07-mvp-first-pivot.md`](docs/plans/2026-05-roadmap/07-mvp-first-pivot.md) (execution doc)
-3. [`docs/plans/post-mvp-conditional-roadmap.md`](docs/plans/post-mvp-conditional-roadmap.md) (deferred work restart conditions)
-
-For a narrowly scoped implementation, bug fix, test fix, or CI fix inside an already approved issue, do not reload all strategic documents unless the change crosses one of those boundaries. The product boundary above still applies.
-
-If a Linear issue or earlier doc instructs you to implement **Attribution Pipeline / WorkspaceLearningSummary / Probation Window / BALM / LRAS / GAP / MissionScheduler / Trainer / model_training channel / pre-existing Phase 1C or Phase 1D work**, **STOP** and verify against post-mvp-conditional-roadmap.md whether the restart conditions are met. They almost certainly are not.
-
-### MVP Three Questions (mandatory for every new issue)
-
-Before opening a new Linear issue or starting a non-MVP-listed PR, answer all four (referenced by stable ID `mvp-q-*`):
-
-1. **`mvp-q-1-what-if-skip`** — What happens if we DON'T do this? Will anyone bring it up again 30 days from now? If you cannot answer, the issue is rejected.
-2. **`mvp-q-2-how-observed`** — How is it observed? After implementation, how does the user verify it works? UI? CLI command? Log? If there is no observable path, the issue is rejected.
-3. **`mvp-q-3-how-disabled`** — How is it disabled? If after deployment we discover it's wrong, what's the disable path? Feature flag? PR revert? **Anything that requires PR revert MUST ship with a feature flag from day one.**
-4. **`mvp-q-4-emotional-value`** — What emotional value does it deliver? Read [`docs/product/emotional-value.md`](docs/product/emotional-value.md). Which negative emotion does this feature reduce (失控感 / 疲惫感 / 不信任感 / 信息过载)? What positive feeling does it create (安心感 / 掌控感 / 沉淀感 / 清醒感)? If the feature only proves "it works" but cannot explain how it improves the Owner's psychological state, the feature design is incomplete.
-
-### Emotional Value Alignment
-
-[`docs/product/emotional-value.md`](docs/product/emotional-value.md) is PD's canonical emotional-value design guideline. Every agent working on PD features, PRDs, or spec designs MUST read it before writing proposals or code.
-
-Core promise: **把 Owner 面对 Agent 时的失控感、疲惫感、重复纠正感，转化为安心感、掌控感、沉淀感和清醒感。**
-
-Every feature design or PR must include an emotional-value assessment (see emotional-value.md §7). If this section is missing, the PR is incomplete.
-
-### MVP-Core / MVP-Quiet / MVP-Gone Triage
-
-Every PD subsystem falls into one of three buckets (see ADR-0014 §2.4-§2.6):
-
-- **MVP-Core**: required for story A' using the three already implemented activation paths (`prompt`, `defer_archive`, and `code_tool_hook` / RuleHost). Touch with care.
-- **MVP-Quiet**: code remains, but feature flag is **default off** and not surfaced in UI / docs. After 6 months of no activation, becomes MVP-Gone.
-- **MVP-Gone**: deleted or archived to reduce code volume.
-
-**Adding a new feature to MVP-Core REQUIRES maintainer's explicit approval.** Default for unsolicited new code is MVP-Quiet (off + flag-registered).
-
-### Feature Flag Registration
-
-The feature flag registry and production loader contract are in place (`feature-flag-contract.ts`, merged via PRI-239 / PRI-304 / PRI-305; loader covered by `feature-flag-contract.test.ts`). The registry is the single source of truth for which subsystems exist and their default on/off state.
-
-- Do not introduce a new subsystem / hook / writer / reader or expand MVP-Core without explicit maintainer approval.
-- Bug fixes, evidence collection, documentation alignment, synthetic validation, and ADR-0012 legacy retirement/cutover may proceed without inventing an unused flag file.
-- If a proposed new behavior needs runtime disabling, register the flag instead of ad-hoc gating.
-
-Every new or newly surfaced functional subsystem / hook / writer / reader must be registered in `{workspace}/.pd/config.yaml` (the unified config file; the legacy `.pd/feature-flags.yaml` is no longer read by production runtime — ADR-0016) with:
-- `category: core | quiet | gone | legacy_retire`
-- `enabled: true | false` (Quiet = false by default)
-- `since: <YYYY-MM-DD>` (when added)
-
-Registration counts only when the production loader and a test exercise the flag. PRs introducing functional behavior without registration are rejected.
-
-Additionally (PRI-610): every **quiet** flag MUST carry a `QUIET_FLAG_LIFECYCLE` entry in `packages/principles-core/src/runtime-v2/feature-flags/feature-flag-lifecycle.ts` (Purpose / Default / Rollback / Graduation criteria / Retirement criteria / Exit path) in the same PR — `feature-flag-lifecycle.test.ts` fails CI otherwise. See `docs/process/feature-flag-lifecycle-census.md`.
-
-### Anti-pattern Triggers
-
-The following phrases in an issue or PR description are **automatic stop signals** (referenced by stable ID `antipattern-*`). Verify with maintainer before proceeding:
-
-- `antipattern-future-extensibility` — "为未来铺路" / "for future extensibility"
-- `antipattern-completeness` — "为完整性" / "for completeness"
-- `antipattern-new-research` — "AHE 论文又出了新进展" / "based on new research"
-- `antipattern-adr-accepted` — "这个 ADR 当时是 Accepted" / "this ADR was Accepted"
-- `antipattern-review-missing` — "review 时觉得这块缺失" / "during review I noticed X is missing"
-- `antipattern-prep-next-phase` — "为下个 Phase 准备" / "prep for next Phase"
-- `antipattern-core-io` — "在 core 写 I/O 代码" / "writing I/O code in core" — `packages/principles-core/src/` must be pure logic. New I/O belongs in `openclaw-plugin`. If a core file genuinely needs I/O, add it to `packages/principles-core/io-seam-registry.json` (single source of truth that drives both `architecture-regression.test.ts` and `eslint.config.js`, PRI-450/PRI-462).
-
-These are **maintainer-driven completeness anxiety**, not external user signal. PD does not act on them during MVP stage.
+> This file is the canonical engineering policy for AI agents working in the Principles Disciple repository.
+>
+> Tool-specific files such as `CLAUDE.md` and `GEMINI.md` may add tool/environment guidance, but MUST NOT redefine product boundaries, architecture policy, verification policy, stable rule IDs, or PR governance defined here.
 
 ---
 
-## Mandatory Pre-Task Reading
+# 1. Product Boundary — Read First
 
-Before starting ANY coding task on this project, you MUST read `docs/process/error-management/ERROR_PATTERN_INDEX.md`. This compact index maps recurring error patterns to the detailed incidents in `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md`.
+Principles Disciple (PD) is an **Owner-governed behavior internalization system for AI agents**.
 
-Then read the specific handbook entries referenced by the relevant pattern(s). Read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full only when recording a new error, auditing the handbook itself, or when the compact index does not cover the task.
+Canonical product orientation:
 
-### Error Handbook Reading Protocol
+* `docs/product/PRODUCT_IDENTITY.md`
+* `docs/adr/0014-mvp-first-strategy-and-product-pivot.md`
+* `docs/plans/post-mvp-conditional-roadmap.md`
 
-**Default: Index-driven loading**
-1. Read `docs/process/error-management/ERROR_PATTERN_INDEX.md` (compact, ~110 lines).
-2. Match your task to 1-3 EP cards.
-3. Read ONLY the detailed entries referenced by those cards (use `grep -n "ERR-XXX" docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` to locate).
-4. State which ERR entries you considered and how you avoid them.
+PD owns:
 
-**Forbidden: Full-file loading**
-Do NOT read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full unless:
-- You are recording a new error (record-error skill)
-- You are auditing the handbook itself
-- The INDEX does not cover your task AND you have confirmed with the user
+* Owner-relevant behavioral evidence;
+* diagnosis of repeated behavioral patterns;
+* reviewable Principle proposals;
+* Owner approval / rejection / archive decisions;
+* reversible activation;
+* later observation of behavior change.
 
-**Why**: The handbook is 177KB (~44K tokens). Loading it fully consumes ~15% of your context window for marginal benefit — the INDEX already captures all patterns. Full loading degrades your performance on the actual task.
+PD does **not** own:
 
-If a code review catches your error, record it in the handbook and tag the Linear issue with `lesson-learned`.
+* general task execution;
+* general agent orchestration;
+* general-purpose memory;
+* generic tool retry;
+* generic LLM output repair;
+* autonomous value decisions without an Owner.
 
-### Error Handbook Gate
+Do not duplicate capabilities already owned by the host runtime unless repository evidence shows PD must own the responsibility.
 
-Before implementation:
+PD remains **MVP-first** unless the Owner explicitly changes that direction.
 
-1. Read `docs/process/error-management/ERROR_PATTERN_INDEX.md`.
-2. Select the relevant pattern cards for the current task.
-3. Read the detailed `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` entries referenced by those cards.
-4. List the relevant ERR entries for the current task (minimum 3). Reference specific IDs and titles.
-5. State how this PR avoids recurrence of each listed ERR. Write this in your implementation brief.
-6. If fixing a bug: note which known ERR class the bug belongs to.
+For unsolicited adjacent opportunities:
 
-After code review (if a real bug is found):
+> record them as follow-up candidates; do not automatically implement them.
 
-1. **New error class**: Create a new ERR entry in the handbook with full details.
-2. **Recurring error class**: Update the existing entry's Recurrence field with the new date and issue.
-3. Tag the Linear issue with `lesson-learned` label.
-4. If the finding changes a recurring pattern, update `docs/process/error-management/ERROR_PATTERN_INDEX.md`.
-5. Run `npm run check:error-handbook`.
-6. Mention handbook updates in the PR body.
+---
 
-> **Why this matters**: Without the Handbook Gate, agents repeat the same error classes across sessions (ERR-001/ERR-005/ERR-007/ERR-009 all share the "as bypasses validation" pattern, and ERR-015/ERR-018/ERR-019 all share the "stale loop state" pattern). Explicitly naming ERR entries forces the agent to recognize the pattern group, not just the individual bug.
+# 2. Engineering Constitution
 
-## Project Overview
+These principles take precedence over TDD, BDD, Clean Code rules, design patterns, preferred function size, or other implementation methodologies.
 
-**Principles Disciple** — an owner-governed behavior internalization system for AI agents (Node.js/TypeScript monorepo, npm). PD does not own general task execution, memory, tool retries, or broad autonomous self-evolution. Use [`docs/product/PRODUCT_IDENTITY.md`](docs/product/PRODUCT_IDENTITY.md) as the product definition before interpreting older architecture language.
+## P1 — Evidence Over Assumption
 
-## Critical Rules
+Never implement from remembered architecture, stale documentation, issue wording, previous PRs, or SPEC assumptions alone.
 
-1. **Core vs Plugin boundary**: `packages/principles-core/` = pure logic only (no I/O, no fs, no DB, no network). `packages/openclaw-plugin/` = I/O boundary. New pure logic → core. New I/O → plugin.
-2. **FROZEN LEGACY (ADR-0005)**: The deprecated god-classes (`nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, `nocturnal-service.ts`) were deleted in PRI-230. Do NOT recreate them.
-3. **Architecture regression tests**: `packages/principles-core/src/runtime-v2/__tests__/architecture-regression.test.ts` — never skip or delete.
-4. **ADR compliance**: `docs/adr/` — code contradicting an ADR is a bug.
-5. **No `any`**: Use `unknown` for truly unknown types. Strict TypeScript mode.
-6. **No AI merge**: Never use `gh pr merge` or auto-merge PRs. User must merge manually.
-7. **Conventional commits**: `feat()`, `fix()`, `docs()`, `refactor()`, `test()`, `chore()`.
-8. **MANDATORY: Check PR comments first**: When asked to review/fix an existing PR, **FIRST** fetch and read **all PR comments/reviews** before doing ANY work. Retry at least 2 times if GitHub API fails. If no other way, ask user to copy-paste PR comments.
+Verify material facts using the current repository:
 
-## Runtime Contract Rules
+* production code;
+* schemas/types;
+* migrations/stores;
+* production wiring;
+* consumers;
+* tests;
+* configuration;
+* runtime/database evidence when available.
 
-All code that handles untrusted data (parsed JSON, LLM output, DB `diagnosticJson`, artifact metadata) must follow these 9 rules (referenced by stable ID `rc-*`). Each rule maps to real error patterns in the Error Experience Handbook.
+A SPEC expresses intended change.
 
-| # | ID | Rule | Key constraint | ERR ref |
-|---|-----|------|----------------|---------|
-| 1 | `rc-1-treat-as-unknown` | Treat parsed JSON / LLM output / DB `diagnosticJson` / artifact metadata as `unknown` | Never use `any`; require runtime validation before use | ERR-001 |
-| 2 | `rc-2-no-as-bypass` | Do not use `as` to bypass runtime validation | Use `typeof`, `Array.isArray()`, or type guards for runtime checks | ERR-001, ERR-005 |
-| 3 | `rc-3-fail-loud-missing` | Required fields must fail loud when missing or malformed | Use `if (!valid) { error }` pattern, not `if (valid) { skip }` | ERR-009, ERR-010 |
-| 4 | `rc-4-validate-array-elements` | Validate array element types | Use `filter(isString)` or element-wise `typeof` on unknown arrays | ERR-005, ERR-007 |
-| 5 | `rc-5-object-hasown-not-in` | Use `Object.hasOwn()`, not `in`, for untrusted object keys | `in` matches inherited properties (toString, constructor) | ERR-013 |
-| 6 | `rc-6-lineage-consistency` | Lineage and evidence fields must come from the same source; add mismatch tests | sourceTaskId/sourceRunIds/sourcePainId must be internally consistent | ERR-004, ERR-008 |
-| 7 | `rc-7-loop-state-freshness` | Retry/repair loops must distinguish current, next, and recorded state | Get fresh errors each iteration; record with current-iteration data | ERR-015, ERR-018, ERR-019 |
-| 8 | `rc-8-safe-serialization` | Preview and telemetry paths must be bounded and use safe serialization | Use `safeStringifyPreview`; never raw `JSON.stringify` on unknown values | ERR-014, ERR-016, ERR-017 |
-| 9 | `rc-9-no-silent-fallback` | Graceful degradation must include a reason via structured error, notes, telemetry, or logs | Silent fallback = bug. Observability is mandatory. | ERR-002 |
+It does not prove current implementation reality.
 
-**Enforcement**: Code review must check every rule that applies to the changed code. If a rule is N/A, state why.
+---
 
-## CLI / Operator Command Gate
+## P2 — Survey Before Acting
 
-Apply this gate to every change touching `packages/pd-cli/src/commands/**`, CLI registration, remediation commands, queue/run commands, or operator workflows (referenced by stable ID `cli-*`).
+Before substantial implementation, determine:
 
-1. **`cli-1-strict-json`** — JSON mode is strict: `--json` output must be exactly one parseable JSON object on stdout. No banners, headings, explanatory text, or mixed stdout logs.
-2. **`cli-2-exit-stops`** — Exit paths must stop execution: after `process.exit(...)` inside an async handler, immediately `return` or throw. Tests that stub `process.exit` must prove no later DB/ledger/artifact side effects happen.
-3. **`cli-3-negated-flags-parser-tests`** — Negated flags need parser tests: Commander `--no-*` flags must be registered as `--no-name` and read as `opts.name === false`. Add parser-level tests, not only handler tests.
-4. **`cli-4-dry-run-confirm-mutex`** — Dry-run/confirm semantics are mandatory: commands that can mutate state must default to dry-run unless the established command contract says otherwise. `--dry-run` and `--confirm` must be mutually exclusive when both exist.
-5. **`cli-5-failure-no-mutation`** — Failure paths must not mutate state: failed diagnoses, failed validation, unsupported runners, missing input, and non-succeeded upstream stages must not intake, enqueue, write artifacts, update ledger, or create successors.
-6. **`cli-6-output-next-action`** — Operator output needs next action: every degraded/refused/failed CLI result must include a structured reason and next action in JSON output.
-7. **`cli-7-test-wiring`** — Test the real command wiring: when behavior depends on Commander options, add a command-registration or parser test that exercises the actual flags.
+1. Where does the current behavior live?
+2. What is the authoritative source of truth?
+3. Which production path consumes it?
+4. Which tests currently protect it?
+5. Which existing abstraction owns this responsibility?
+6. Is there already another implementation of the proposed mechanism?
+7. What is the smallest verified gap?
 
-## Build & Test
+Do not begin by designing a new subsystem.
+
+Begin by discovering what already exists.
+
+---
+
+## P3 — Minimal Change Surface
+
+Solve the stated problem with the smallest coherent change.
+
+Do not:
+
+* perform unrelated refactors;
+* redesign neighboring systems because they could be cleaner;
+* add infrastructure for hypothetical future work;
+* widen a PR because review discovered adjacent opportunities.
+
+Adjacent improvements become follow-up work unless required for correctness or safety of the current task.
+
+---
+
+## P4 — One Source of Truth
+
+A durable fact must have one authoritative owner.
+
+Do not create an independent second truth for:
+
+* Principle lifecycle;
+* approvals;
+* activation;
+* Owner decisions;
+* RuleCode state;
+* internalization task state;
+* governance facts;
+* configuration;
+* lineage.
+
+Caches, projections, snapshots, read models, analytics and UI state must remain derived.
+
+A read model must not quietly become a write authority.
+
+---
+
+## P5 — Verification First
+
+Before implementation, determine:
+
+> What evidence would convince us that this change is correct?
+
+Choose the verification method based on the task:
+
+* reproducible bug → regression test;
+* pure logic / validator → unit or property test;
+* Owner-visible workflow → BDD / scenario / E2E;
+* SQLite / persistence → integration + round-trip;
+* schema / API → contract test;
+* CLI → real parser/registration test;
+* host integration → production-path integration;
+* cross-package contract → consumer test;
+* security/safety boundary → negative/adversarial test;
+* refactor → characterization + existing contract tests.
+
+TDD and BDD are tools, not universal requirements.
+
+Prefer tests that exercise the real public/production boundary over tests that only exercise internal helpers.
+
+---
+
+## P6 — Deep Modules, Stable Interfaces
+
+Prefer modules that hide substantial complexity behind small, stable semantic interfaces.
+
+Do not equate:
+
+* small functions;
+* many files;
+* many interfaces;
+* many services;
+* many design patterns
+
+with good architecture.
+
+Ask:
+
+> How much behavior does the caller receive for how much interface it must understand?
+
+A useful abstraction increases that leverage.
+
+---
+
+## P7 — No Speculative Abstraction
+
+Do not create interfaces, adapters, factories, registries, providers, strategies, managers, extension points, background processes, feature flags, or new subsystems for hypothetical future requirements.
+
+A seam should represent a real variation axis.
+
+Useful heuristic:
+
+* zero implementation → usually speculative;
+* one implementation → question whether the seam is needed;
+* two materially different implementations → likely real seam.
+
+Do not mechanically delete existing seams without checking consumers, compatibility and ownership.
+
+---
+
+## P8 — Optimize for Future Change
+
+Judge design by whether the next likely change becomes:
+
+* local;
+* predictable;
+* understandable;
+* testable;
+* reversible.
+
+Optimize total system cognitive load, not local stylistic purity.
+
+---
+
+# 3. Truth and Authority Model
+
+Always distinguish **Intent Truth** from **Implementation Truth**.
+
+## 3.1 Intent Truth — what SHOULD happen
+
+Use this order:
+
+1. explicit current Owner instruction;
+2. approved current issue / SPEC acceptance criteria;
+3. `docs/product/PRODUCT_IDENTITY.md`;
+4. applicable non-superseded ADRs and amendments;
+5. active product / behavioral contracts.
+
+An ADR may preserve historical material.
+
+Check:
+
+* status;
+* superseding ADRs;
+* amendments;
+* historical notes.
+
+A conflict with an applicable ADR is a **design-drift signal**, not automatic permission to rewrite code.
+
+## 3.2 Implementation Truth — what DOES happen
+
+Use this order:
+
+1. current production code;
+2. schemas / migrations / stores / types;
+3. production wiring / entry points;
+4. tests exercising the production path;
+5. package/config manifests;
+6. runtime evidence.
+
+Narrative documentation is useful for navigation but is not automatically implementation truth.
+
+## 3.3 Conflict
+
+If Intent Truth and Implementation Truth differ:
+
+do not silently choose one.
+
+Determine whether:
+
+* code is behind the approved design;
+* documentation is stale;
+* an ADR was superseded;
+* the SPEC assumption is wrong;
+* migration is incomplete.
+
+Document material drift in the PR.
+
+---
+
+# 4. Stable MVP Contract IDs
+
+The following IDs are repository-stable interfaces and may be referenced by PR templates, ADRs, SPECs and historical decisions.
+
+Do not casually rename or remove them.
+
+## `mvp-q-1-what-if-skip`
+
+What happens if we do not do this?
+
+For new product scope or a non-listed MVP addition, explain the actual consequence of skipping it.
+
+If there is no concrete consequence or evidence of need, do not implement it.
+
+## `mvp-q-2-how-observed`
+
+How will the Owner or operator observe that it works?
+
+Examples:
+
+* UI behavior;
+* CLI result;
+* persisted fact;
+* runtime event;
+* testable externally visible behavior.
+
+A feature with no meaningful observation path is incomplete.
+
+## `mvp-q-3-how-disabled`
+
+What is the rollback, disable or recovery strategy?
+
+A new feature flag is **not automatically required**.
+
+Prefer:
+
+1. existing controlling mechanism;
+2. existing feature flag;
+3. reversible state/deactivation;
+4. backward-compatible rollback;
+5. new feature flag only when independent runtime disablement adds meaningful risk control.
+
+Do not create feature flags merely because “we may want to turn this off later”.
+
+## `mvp-q-4-emotional-value`
+
+For Owner-facing product behavior, explain:
+
+* what negative emotion is reduced;
+* what positive feeling is created.
+
+Use the emotional-value guide in the private docs:
+
+`$PD_PRIVATE_DOCS_DIR/product/emotional-value.md`
+
+(see §26 Private Docs Access)
+
+For internal engineering work, state:
+
+`N/A — no direct Owner-facing behavior.`
+
+Do not generate ceremonial emotional-value prose.
+
+---
+
+# 5. MVP Scope Triage
+
+Existing subsystems may still use:
+
+* MVP-Core
+* MVP-Quiet
+* MVP-Gone
+
+according to ADR-0014 and current feature-flag policy.
+
+Adding a capability to MVP-Core requires explicit Owner/maintainer approval.
+
+Important:
+
+> Unsolicited new functionality is not automatically implemented as MVP-Quiet.
+
+If the task does not require it, record it as a follow-up rather than adding more dormant code.
+
+---
+
+# 6. Anti-pattern Stable IDs
+
+These IDs remain stable stop/review signals.
+
+They are not lexical bans; they identify reasoning patterns requiring scrutiny.
+
+## `antipattern-future-extensibility`
+
+“For future extensibility.”
+
+Require evidence of a real current variation axis.
+
+## `antipattern-completeness`
+
+“For completeness.”
+
+Completeness without present product value is not sufficient justification.
+
+## `antipattern-new-research`
+
+“New research suggests we should add X.”
+
+Research may inform design but does not establish current PD product need.
+
+## `antipattern-adr-accepted`
+
+“The ADR was Accepted.”
+
+Accepted historical text may have been amended or superseded.
+
+Verify current applicability.
+
+## `antipattern-review-missing`
+
+“During review I noticed X is missing.”
+
+A review observation is not automatically current-task scope.
+
+## `antipattern-prep-next-phase`
+
+“Prepare for the next Phase.”
+
+Do not implement future-phase infrastructure before restart criteria are met.
+
+## `antipattern-core-io`
+
+“Add unregistered or misowned I/O to principles-core.”
+
+Core I/O is not absolutely forbidden, but must belong to an explicitly registered architectural seam.
+
+See:
+
+`packages/principles-core/io-seam-registry.json`
+
+---
+
+# 7. Repository Discovery
+
+Do not rely on a hard-coded package inventory in this file.
+
+At task start:
 
 ```bash
-cd packages/principles-core && npm run build && npm run test
-cd packages/openclaw-plugin && npm run build && npm run test
-npm run lint
+git status
+git log -n 5 --oneline
 ```
 
-## BDD Workflow (AI 助手改代码前)
+Then inspect relevant:
 
-AI 助手在 PD 项目改代码时的新流程:
+* packages;
+* entry points;
+* callers;
+* stores;
+* schemas;
+* configuration;
+* public exports;
+* tests.
 
-1. 读 `docs/specs/features/` 找到受影响的 `.feature` 文件
-2. 读 `.feature` 确认行为契约
-3. 改代码
-4. 跑受影响的 `.feature` 场景(`cd packages/<pkg> && npx vitest run tests/bdd/xxx.steps.ts` 或 `npx playwright test tests/bdd/xxx.steps.ts`)
-5. 如果场景失败,确认是代码 bug 还是 `.feature` 过时
-   - 代码 bug → 修代码
-   - `.feature` 过时 → 跟 Owner 确认后改 `.feature`,并在 PR 说明中记录
-6. PR Pre-Review Gate 的对抗式自检,优先检查 `.feature` 是否都绿
+Use normal search tools freely:
 
-**关键约束**:
-- AI 助手**可以**修改 step definitions(重构真实接口时是必要的)
-- AI 助手**不能降低 `.feature` 的可观察结果**——任何 `.feature` 行为变化必须 Owner-visible,并在 PR 描述说明原因
-- AI 助手**不能**通过删除 `.feature` 文件或加 `@disabled` 标签让测试绿(除非 PR 描述明确说明行为契约被移除/暂停的原因,且 Owner 已确认)
+```bash
+rg "SymbolName"
+rg "new SomeService"
+rg "interface SomePort"
+rg "from '@principles/"
+rg "some_schema_field"
+```
 
-## Linear Workflow
+Useful navigation sources:
 
-1. Read the issue (including comments) BEFORE writing code
-2. Update status to In Progress when you begin
-3. Comment your plan on the issue
-4. Update status to In Review when done
-5. Leave a summary comment
+* `docs/architecture/README.md`
+* `docs/architecture/PD_ARCHITECTURE_OVERVIEW.md`
+* `CONTEXT-MAP.md`
+* package-level `CONTEXT.md`
+* `docs/adr/`
 
-## Error Recording (MANDATORY)
+Verify navigation documents against current repository reality.
 
-**Rule: Any code review that discovers a real issue (bug, type safety violation, architecture violation, logic error) MUST invoke the `record-error` skill before closing the review.**
+---
 
-This applies to:
-- PR reviews (pr-review skill Phase 6.5)
-- Self-review after completing a task
-- Any review where you find an error you (or another AI) made
+# 8. Architectural Placement
 
-The `record-error` skill handles: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
+## 8.1 `@principles/core`
 
-**Do NOT skip this step.** Reasons like "the fix was trivial", "I'm tired", or "I'll do it later" are not acceptable. Without recording, the same class of error will recur across sessions. The Error Experience Handbook is the project's institutional memory.
+Pure domain/runtime logic is preferred.
 
-## PR Pre-Review Gate
+Current architecture also contains explicitly registered I/O seams.
 
-Before handing off a PR (pushing, creating PR, or reporting completion), execute this checklist:
+The registry is:
 
-**PR template (MANDATORY on create)**
-- When creating a PR via `gh pr create`, **first** read `.github/PULL_REQUEST_TEMPLATE.md` and fill out all agent-sections (`agent 填`) before passing `--body`.
-- **Do NOT** pass a custom body without the template structure. `gh pr create` does NOT auto-inject the template — you must read it and compose the body manually.
-- After creation, use `gh pr edit <PR> --body-file <file>` if the body needs correction.
+`packages/principles-core/io-seam-registry.json`
 
-**Review convergence and throughput**
-- The implementation agent performs one adversarial self-review before the first handoff. It must check the applicable Runtime Contract and CLI / Operator gates against the whole diff and fix all in-scope P0/P1/P2 findings together.
-- The first external review is the only full-scope review pass for the PR. It should report all currently visible in-scope P0/P1/P2 findings in one batch.
-- After a fix push, reviewers verify the listed blockers and regression surface only. Do not reopen broad review or request adjacent hardening unless the new change introduces a P0/P1 production or safety regression.
-- A finding blocks the current PR only if it is P0/P1, or a P2 violation of this issue's stated acceptance criteria. Improvements outside that boundary become a follow-up Linear issue and do not delay merge.
-- Group recurring errors by root cause and perform one Error Handbook update per root cause after the fix cycle. Do not create one handbook entry per review comment.
-- Use targeted tests while iterating on review fixes; run the required merge gate once before final handoff. Do not add broad unrelated tests or refactors solely because a neighboring weakness was noticed.
+Rule:
 
-**Self-review/fix loop**
-- A PR is not ready just because code was pushed. It is ready only after the fetch → fix → verify → re-fetch loop has no valid unresolved P0/P1/P2 findings and required checks are green.
-- After every push that addresses review feedback, fetch PR reviews/comments/checks again. Do not ask the user to relay comments unless GitHub API access fails after at least 2 retries.
-- Classify each review comment as: fixed, deferred with reason, duplicate, or misunderstanding with evidence. Put this classification in the PR comment or completion report.
-- If a real bug was found, run the Error Recording workflow before final handoff.
+> No unregistered core I/O.
 
-**Fetch and resolve PR comments**
-- `gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup`
-- `gh api repos/:owner/:repo/pulls/<PR>/comments --paginate`
-- `gh api repos/:owner/:repo/issues/<PR>/comments --paginate`
-- Fetch ALL comments (not just the first page). Retry at least 2 times on API failure.
-- Fix every valid P0/P1/P2 finding. For each handled comment, note the fix.
-- If a comment cannot be fixed, explain why in the PR body.
+Before adding I/O to core:
 
-**Check diff scope**
-- `gh pr diff <PR> --name-only` (or `git diff origin/main --name-only`)
-- Confirm no unrelated files were modified.
-- Confirm no stale-main rollback of already-merged code (see ERR-012).
+1. identify current responsibility ownership;
+2. reuse an existing registered seam where appropriate;
+3. justify any genuinely new seam;
+4. register it in the SSoT;
+5. keep architecture/lint guards green.
 
-**BDD 影响评估**
+Do not use the registry as a loophole for arbitrary infrastructure growth.
 
-- [ ] 本 PR 是否修改了 MVP-Core 用户旅程?如果是,对应 `.feature` 是:
-      - [ ] 保持不变(行为契约未变)
-      - [ ] 更新(行为契约变化,已在 PR 描述说明原因)
-      - [ ] 不适用(说明为什么这条旅程不再适用)
-- [ ] 本 PR 是否新增/修改了 CLI 命令?如果是,cli-1~cli-7 对应 `.feature` 是否更新?
-- [ ] 本 PR 是否触发了 ERR 类?如果是,是否新增了回归 `.feature` scenario?
-- [ ] 本 PR 是否删除了 `.feature` 文件?如果是,是否在 PR 描述说明了"行为契约被移除的原因"?
+## 8.2 Host-specific behavior
 
-**Run tests**
-- `cd packages/principles-core && npm run test`
-- `cd packages/openclaw-plugin && npm run test`
-- `npm run lint` (if available)
-- `npm run verify:merge` (if available)
+Host-specific integration belongs to the relevant host adapter/runtime boundary.
 
-**Final summary**
-Include in the PR body or completion report:
-- Relevant ERR checklist (which ERR entries were considered and how avoided)
-- PR comments handled (total fetched, valid fixed, deferred, duplicates/misunderstandings)
-- Tests run (which commands, what results)
-- For CLI/operator changes: JSON-mode check, exit-path check, flag-wiring tests, and mutation/no-mutation evidence
-- Remaining risk (known issues, skipped coverage, trade-offs)
+Do not assume all host I/O belongs to OpenClaw.
 
-## Key Files
+OpenClaw-specific and Codex-specific behavior have different host boundaries.
 
-- `docs/process/error-management/ERROR_PATTERN_INDEX.md` — Compact error pattern index (READ FIRST)
-- `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` — Detailed error incident log
-- `docs/process/DATA_CLEANUP_GUIDELINES.md` — 数据清理守则（READ BEFORE any cleanup：治理资产保护清单 + 流程硬约束，PRI-568）
-- `docs/architecture/ARCHITECTURE.md` — Full system architecture
-- `docs/adr/` — Architecture Decision Records
-- `CLAUDE.md` — Full project guidance (also applies to you)
+Shared host-neutral behavior should remain in the existing shared owner.
 
-## Private Docs Access
+## 8.3 Legacy architecture
 
-Private docs live in an **independent private git repo** — they are NOT tracked in this repo and are never committed here.
+Do not recreate retired God classes, Nocturnal execution paths, superseded scheduling systems, retired state mechanisms, or deferred post-MVP architecture merely because historical documents still describe them.
 
-- **Location**: `$PD_PRIVATE_DOCS_DIR` (env var) if set, otherwise `~/principles-private/docs` (e.g. `D:/Code/principles-private/docs`)
-- **Read**: read files directly from that path (e.g. `$PD_PRIVATE_DOCS_DIR/agents/domain.md`). There is **no** `docs/.private/` junction anymore.
-- **Search**: private docs are outside this repo tree — `rg`/grep in this repo does NOT cover them. Run searches inside the private docs directory.
-- **Edit rule**: modify private docs **only inside the private repo**, then commit + push there (`git -C <private-repo> ...`). Never create copies of private content inside this repo.
-- **Privacy**: never paste private doc content into public PRs/issues/commit messages — reference paths only.
-- **Verify**: if unsure whether private docs are reachable, run `node scripts/setup-private-docs-symlink.mjs --check` (prints the resolved path, creates nothing).
+---
+
+# 9. Runtime Contract — Stable IDs
+
+Apply this gate when code handles untrusted runtime data such as:
+
+* parsed JSON;
+* LLM output;
+* SQLite/DB rows;
+* diagnostic JSON;
+* artifact metadata;
+* YAML/config input;
+* external host input.
+
+These IDs remain stable.
+
+## `rc-1-treat-as-unknown`
+
+Treat untrusted runtime values as `unknown` until validated.
+
+Never use `any` as a trust-boundary escape hatch.
+
+## `rc-2-no-as-bypass`
+
+Do not use TypeScript `as` assertions to replace runtime validation of untrusted data.
+
+Use actual guards/schema validation.
+
+## `rc-3-fail-loud-missing`
+
+Required fields must fail explicitly when missing or malformed.
+
+Do not silently skip required invalid data.
+
+## `rc-4-validate-array-elements`
+
+Validating “is array” is insufficient.
+
+Validate relevant element types/content.
+
+## `rc-5-object-hasown-not-in`
+
+For untrusted object-key membership checks, prefer:
+
+`Object.hasOwn(...)`
+
+instead of relying on inherited-property behavior of `in`.
+
+## `rc-6-lineage-consistency`
+
+Lineage/evidence identifiers describing the same event/task/run/pain must come from internally consistent authority.
+
+Test mismatch cases.
+
+## `rc-7-loop-state-freshness`
+
+Retry/repair loops must distinguish:
+
+* current state;
+* next state;
+* persisted/recorded state.
+
+Do not reuse stale iteration errors or results.
+
+## `rc-8-safe-serialization`
+
+Unknown values used in previews/logs/telemetry must be serialized safely and with bounded output.
+
+Do not assume raw `JSON.stringify` is safe for arbitrary unknown values.
+
+## `rc-9-no-silent-fallback`
+
+Graceful degradation must be observable.
+
+Include:
+
+* structured reason;
+* notes;
+* telemetry;
+* logs;
+* nextAction
+
+as appropriate.
+
+Silent fallback is a bug when the fallback changes meaningful behavior.
+
+---
+
+# 10. CLI / Operator Contract — Stable IDs
+
+Apply this gate when touching CLI registration, operator workflows or `packages/pd-cli/src/commands/**`.
+
+## `cli-1-strict-json`
+
+`--json` stdout must contain exactly the documented machine-readable JSON result.
+
+No banners or mixed explanatory stdout.
+
+## `cli-2-exit-stops`
+
+Exit paths must actually terminate control flow.
+
+If tests stub `process.exit`, prove no later mutation occurs.
+
+## `cli-3-negated-flags-parser-tests`
+
+Commander `--no-*` behavior requires real parser/registration tests.
+
+## `cli-4-dry-run-confirm-mutex`
+
+Mutating commands must preserve established dry-run / confirmation semantics.
+
+When both flags exist, enforce the intended mutual-exclusion contract.
+
+## `cli-5-failure-no-mutation`
+
+Failed validation, unsupported operations, failed diagnoses and failed upstream stages must not perform forbidden state mutations.
+
+## `cli-6-output-next-action`
+
+Degraded/refused/failed operator results should contain a structured reason and useful next action.
+
+## `cli-7-test-wiring`
+
+When behavior depends on command-line parsing or registration, test actual command wiring, not only handlers.
+
+---
+
+# 11. Engineering Skill Routing
+
+Installed engineering skills are conditional expert workflows, not universal rituals.
+
+Repository policy and verified PD requirements override generic skill advice.
+
+## `codebase-design`
+
+Use when:
+
+* introducing/changing public interfaces;
+* creating adapters;
+* moving responsibilities between modules/packages;
+* designing subsystem boundaries;
+* significant architecture refactoring.
+
+Apply:
+
+### Interface leverage
+
+How much capability does the caller get for how much interface it must understand?
+
+### Deletion test
+
+If the abstraction disappeared, would meaningful complexity disappear too?
+
+If callers could simply import the underlying implementation with no meaningful complexity increase, the abstraction may be shallow.
+
+### Real seam test
+
+Is the variation real now, or hypothetical?
+
+### Interface as test surface
+
+Prefer testing through public module behavior rather than exposing internals only for tests.
+
+## `diagnosing-bugs`
+
+Prefer for non-trivial bugs.
+
+Typical flow:
+
+```text
+reproduce
+→ narrow
+→ hypothesize
+→ collect evidence
+→ identify root cause
+→ fix
+→ regression verify
+```
+
+## `tdd`
+
+Use when red-green-refactor provides a useful feedback loop.
+
+Good candidates:
+
+* reproducible bugs;
+* validators;
+* pure logic;
+* state transitions;
+* bounded vertical slices.
+
+Verification First has higher priority than TDD First.
+
+## `domain-modeling`
+
+Use when domain language, lifecycle semantics, authority, ownership or state meaning changes.
+
+Do not invoke for routine implementation that leaves the domain model unchanged.
+
+## `code-review`
+
+Use before final handoff of substantial implementation.
+
+Review separately:
+
+* Standards correctness
+* Specification correctness
+
+Technically elegant code solving the wrong problem is still wrong.
+
+## `improve-codebase-architecture`
+
+Use for explicit architecture-health work.
+
+Do not use it as permission to widen a normal feature or bug-fix PR.
+
+Preferred flow:
+
+```text
+scan
+→ identify candidates
+→ rank
+→ select one bounded improvement
+→ characterize
+→ refactor
+→ verify
+```
+
+Do not perform repository-wide cleanup automatically.
+
+## Experimental setup skills
+
+Do not automatically introduce repository-wide deep-module enforcement tools or reorganize the monorepo.
+
+Audit first.
+
+Prototype on a bounded area.
+
+Use a separate SPEC/issue for major architecture-tooling changes.
+
+---
+
+# 12. Deep Module Health
+
+When reviewing architecture, look for:
+
+## Shallow module signals
+
+* wrapper with almost no hidden complexity;
+* re-export layer that only redirects imports;
+* public barrel exposing internal helpers;
+* callers coordinating many internal steps manually;
+* interface with one implementation and no real variation;
+* tests importing private helpers because public behavior is hard to exercise;
+* public APIs mirroring implementation details;
+* duplicated orchestration;
+* many tiny modules that must always be understood together.
+
+## Deep module signals
+
+* small semantic interface;
+* substantial hidden implementation;
+* stable public behavior;
+* callers do not need internal sequencing knowledge;
+* internal refactoring does not force widespread caller changes;
+* failures/invariants handled internally;
+* tests can exercise behavior through the boundary.
+
+Do not make every utility deep.
+
+Depth is valuable when it reduces total cognitive complexity.
+
+---
+
+# 13. Complexity Delta Gate
+
+Every non-trivial implementation must report:
+
+```text
+Complexity Delta
+
+New durable source of truth: YES / NO
+New persisted schema/state: YES / NO
+New subsystem/service/background process: YES / NO
+New public abstraction/interface: YES / NO
+New runtime feature flag: YES / NO
+New cross-package dependency: YES / NO
+New host/platform-specific behavior: YES / NO
+New external/network capability: YES / NO
+```
+
+For each `YES`, explain:
+
+1. why the existing owner cannot satisfy the requirement;
+2. what complexity the addition hides;
+3. why a smaller solution is insufficient;
+4. how it is verified;
+5. how it can be removed or rolled back.
+
+Several unexplained `YES` values are an architecture warning.
+
+Prefer a negative Complexity Delta when safely possible.
+
+---
+
+# 14. Error Experience Handbook
+
+Before substantial implementation, read:
+
+`docs/process/error-management/ERROR_PATTERN_INDEX.md`
+
+Use it as retrieval memory.
+
+Do not load the full handbook by default.
+
+Select only materially relevant ERR patterns.
+
+**There is no minimum ERR count.**
+
+Zero relevant ERR entries is valid.
+
+Never manufacture relevance to satisfy a process quota.
+
+Read detailed handbook entries only when selected by the index or needed for investigation.
+
+## Recording Errors
+
+Every real review finding must be classified.
+
+Record/update the Error Experience Handbook when the finding has a reusable engineering root cause, especially:
+
+* escaped production/CI defect;
+* P0/P1 correctness or safety defect;
+* recurring failure class;
+* architectural invariant violation;
+* material P2 likely to recur across tasks.
+
+Do not create long-term institutional-memory entries for:
+
+* trivial typos;
+* immediately corrected local mistakes;
+* purely cosmetic findings;
+* implementation details with no reusable lesson.
+
+When several review comments share one root cause:
+
+> record one root-cause lesson / recurrence.
+
+If the handbook is changed, run its current validation command.
+
+---
+
+# 15. BDD Contract
+
+BDD is a behavioral specification tool, not a universal coding workflow.
+
+Apply it when the task touches:
+
+* MVP-Core Owner journeys;
+* CLI/operator contracts;
+* behavior already covered by `.feature`;
+* Owner-visible behavior where `.feature` is the clearest contract.
+
+When applicable:
+
+1. find/read the relevant `.feature`;
+2. understand its observable behavior;
+3. implement;
+4. run the associated scenario;
+5. determine whether failures are implementation regressions or intentional contract changes.
+
+AI may update step definitions when necessary.
+
+AI must not:
+
+* delete a `.feature`;
+* disable a scenario;
+* lower observable expectations
+
+merely to make tests green.
+
+Intentional behavior-contract changes must be explicit and Owner-visible.
+
+---
+
+# 16. Feature Flags and Rollback
+
+Feature flags are governance assets with lifecycle cost.
+
+New independently switchable runtime behavior needs an explicit rollback strategy.
+
+Prefer:
+
+1. existing owning flag/configuration;
+2. existing deactivation/state mechanism;
+3. backward-compatible rollback;
+4. new feature flag only when independent runtime disablement adds meaningful risk control.
+
+Do not create a flag for every bug fix, refactor, reader or helper.
+
+When a new feature flag is legitimately required:
+
+* use the current feature-flag SSoT;
+* obey category/default rules;
+* update required lifecycle metadata for quiet flags;
+* verify the production loader actually consumes the flag;
+* test flag-off behavior when relevant.
+
+---
+
+# 17. Owner-facing Emotional Value
+
+For:
+
+* Console/UI workflows;
+* governance interactions;
+* approvals;
+* onboarding;
+* surfaced product capabilities;
+* Owner-facing information architecture;
+
+read the emotional-value guide in the private docs:
+
+`$PD_PRIVATE_DOCS_DIR/product/emotional-value.md`
+
+(see §26 Private Docs Access)
+
+Assess:
+
+* uncertainty reduction;
+* cognitive-load reduction;
+* sense of control;
+* clarity of cause/effect;
+* interruption cost;
+* trust.
+
+For internal engineering work:
+
+`Emotional value: N/A — no direct Owner-facing behavior.`
+
+---
+
+# 18. Data Cleanup / Destructive Operations
+
+Before deletion, cleanup, destructive migration, archival or repair that can remove/rewrite governance/user data, read:
+
+`docs/process/DATA_CLEANUP_GUIDELINES.md`
+
+Default to preservation.
+
+Use explicit bounded mutation.
+
+Do not treat destructive cleanup as ordinary refactoring.
+
+---
+
+# 19. Cross-package Contract Changes
+
+When changing:
+
+* shared types;
+* schemas;
+* store contracts;
+* service interfaces;
+* package exports;
+* shared defaults;
+* package names;
+* runtime protocols;
+
+identify all relevant consumers.
+
+A passing core unit test is not sufficient proof for a cross-package contract change.
+
+Verify real consumer paths where practical.
+
+Before adding a public export, ask:
+
+> Does the caller actually need to know this?
+
+---
+
+# 20. Architecture Guard Philosophy
+
+Prefer guards that protect invariants over guards that preserve historical file layout.
+
+Good architecture guards protect:
+
+* dependency direction;
+* unauthorized I/O;
+* source-of-truth boundaries;
+* public/private import seams;
+* schema contracts;
+* package dependency rules;
+* production wiring.
+
+Treat guards based on:
+
+* exact file lists;
+* exact module counts;
+* historical wrappers
+
+as potential migration constraints rather than eternal design truth.
+
+Do not modify architecture guards casually.
+
+If a valid deepening refactor conflicts with a historical structural guard, determine whether the guard protects a true invariant or only old decomposition.
+
+---
+
+# 21. Linear Workflow
+
+For Linear-backed work:
+
+1. read the issue and latest comments before implementation;
+2. verify assumptions against the repository;
+3. set `In Progress`;
+4. record meaningful design decisions/blockers;
+5. implement and verify;
+6. create the PR when requested;
+7. set `In Review`;
+8. leave a concise evidence-based summary.
+
+Do not blindly follow inaccurate SPEC assumptions.
+
+Do not create ceremonial comments with no useful information.
+
+---
+
+# 22. Existing PR Workflow
+
+When asked to review/fix an existing PR:
+
+1. fetch all current reviews/comments;
+2. inspect current diff;
+3. inspect CI/check status;
+4. classify findings;
+5. fix valid in-scope blockers together where practical;
+6. push;
+7. re-fetch reviews/comments/checks;
+8. converge.
+
+Retry GitHub/API access when transient failures occur.
+
+Do not ask the Owner to relay comments unless access genuinely fails.
+
+A current-PR blocker is normally:
+
+* P0;
+* P1;
+* P2 violating explicit acceptance criteria or creating material correctness/safety risk.
+
+Adjacent hardening becomes follow-up work.
+
+---
+
+# 23. PR Creation and Merge
+
+Before creating a PR:
+
+1. read `.github/PULL_REQUEST_TEMPLATE.md`;
+2. preserve its structure;
+3. fill all agent-owned sections;
+4. run adversarial self-review;
+5. verify diff scope;
+6. run required tests;
+7. create the PR.
+
+Never push directly to `main`.
+
+Never use:
+
+* `gh pr merge`;
+* auto-merge;
+* equivalent automatic merge mechanisms.
+
+The Owner performs final merge.
+
+---
+
+# 24. Adversarial Self-review
+
+Before handoff, review the whole diff as if trying to reject it.
+
+Ask:
+
+* Did I implement an assumption instead of repository reality?
+* Did I create a second source of truth?
+* Did I create a speculative seam?
+* Did I introduce a shallow wrapper?
+* Could an existing module have hidden this complexity?
+* Did I expose internals unnecessarily?
+* Did I widen scope?
+* Does production actually call the changed code?
+* Are tests exercising only helpers?
+* Did I miss cross-package consumers?
+* Are failure/degraded paths correct?
+* Did I weaken a contract to make tests pass?
+* Did I revive retired architecture?
+* Did complexity increase more than capability?
+
+Use `code-review` for substantial implementation when available.
+
+Fix valid findings before handoff.
+
+---
+
+# 25. Verification
+
+Use targeted tests during implementation.
+
+Before final handoff run the current canonical merge gate:
+
+```bash
+npm run verify:merge
+```
+
+Also run task-specific tests not covered by that gate.
+
+Do not delete, disable, weaken or rewrite valid tests merely to obtain green CI.
+
+If a failure is confirmed pre-existing/environmental:
+
+* provide evidence;
+* distinguish it from current regressions;
+* document it clearly.
+
+---
+
+# 26. Private Docs Access
+
+PD keeps a separate **private repository** for Owner-sensitive docs:
+governance, domain guides, product emotional-value, plans, ADRs, runbooks,
+quality reports, and other material that must not be published.
+
+Private docs are never copied into the public repository.
+
+**Know it exists — check it when relevant:**
+
+* when a task touches governance, product emotional-value, domain semantics,
+  plans, ADRs, runbooks or quality reports, look for relevant guidance in the
+  private docs and read it;
+* keep the private docs current: when your work changes what those docs
+  describe, update them in the private repo.
+
+**Location (current environment):**
+
+* private repo clone: `D:\Code\principles-private`;
+* docs root: `D:\Code\principles-private\docs`;
+* resolve programmatically with `$PD_PRIVATE_DOCS_DIR` when configured,
+  otherwise the repository's documented fallback location.
+
+Rules:
+
+* read/search private docs from the private repo;
+* do not assume public-repo `rg` includes them;
+* edit private docs only inside the private repo;
+* commit/push private-doc changes there (`git -C <private-repo> ...`);
+* never paste private content into public PRs/issues/commit messages;
+* reference paths only when public discussion needs to acknowledge them.
+
+If availability is uncertain, use the repository's private-doc check script
+(`node scripts/setup-private-docs-symlink.mjs --check`).
+
+---
+
+# 27. Owner Review Card
+
+Every non-trivial completion report must begin with:
+
+```text
+Owner Review Card
+
+1. Problem
+   What real problem was verified?
+
+2. Before
+   What did the system actually do before?
+
+3. After
+   What does it do now?
+
+4. Existing mechanism reused
+   Which existing authority/module/subsystem was extended?
+
+5. Complexity Delta
+   New source of truth:
+   New persisted state:
+   New subsystem:
+   New public abstraction:
+   New feature flag:
+   New cross-package dependency:
+   New host-specific behavior:
+   New external/network capability:
+
+6. Design reason
+   Why is this the smallest coherent solution?
+
+7. Verification
+   What evidence proves the intended behavior?
+
+8. Risk
+   What could still go wrong?
+
+9. Rollback / recovery
+   How can the change be disabled, reverted or repaired?
+
+10. Follow-ups
+    What adjacent issues were deliberately NOT included?
+```
+
+Write this for the Owner.
+
+Do not assume the Owner will inspect implementation code.
+
+---
+
+# 28. Dedicated Architecture Health Work
+
+When explicitly asked to improve architecture, report candidates before implementation.
+
+Use:
+
+```text
+Architecture Candidate
+
+Area:
+Current public interface:
+Hidden complexity:
+Leaked complexity:
+Why this appears shallow:
+Deletion test:
+Real seam or speculative seam:
+Typical files touched per change:
+Test-surface problem:
+Proposed deeper boundary:
+Expected interface reduction:
+Migration risk:
+Product value:
+Recommendation:
+```
+
+Rank:
+
+* HIGH — frequent change + high cognitive cost + clear bounded improvement
+* MEDIUM — useful but not urgent
+* LOW — mostly theoretical cleanliness
+
+Do not refactor LOW-value areas merely because a skill detects them.
+
+---
+
+# 29. Definition of Done
+
+A task is complete only when:
+
+* repository reality was investigated;
+* intended behavior is understood;
+* authoritative state is identified;
+* scope is controlled;
+* speculative abstraction was avoided;
+* Complexity Delta is understood;
+* relevant installed skills were used where valuable;
+* real behavior is verified;
+* production wiring was checked;
+* targeted tests are green;
+* merge gate is green or proven pre-existing failure is documented;
+* PR feedback has converged when applicable;
+* Linear is updated when applicable;
+* PR is created when requested;
+* Owner Review Card is delivered;
+* AI has not merged the PR.
+
+---
+
+# 30. Default Working Loop
+
+```text
+Survey
+↓
+Establish implementation truth
+↓
+Establish intent truth
+↓
+Identify authority and existing owner
+↓
+Define observable acceptance evidence
+↓
+Select relevant engineering skill when useful
+↓
+Design the smallest coherent change
+↓
+Prefer deep existing boundaries over new shallow abstractions
+↓
+Implement
+↓
+Verify through the real interface / production path
+↓
+Measure Complexity Delta
+↓
+Adversarial review
+↓
+Explain the system change to the Owner
+↓
+Create PR / update Linear
+```
+
+When uncertain, prefer:
+
+> fewer concepts
+> fewer public interfaces
+> fewer truth sources
+> fewer speculative seams
+> stronger encapsulation
+> stronger evidence
+
+The goal is not to make PD look architecturally sophisticated.
+
+The goal is to make PD increasingly difficult to misunderstand and increasingly easy to change safely.
