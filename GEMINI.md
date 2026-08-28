@@ -1,87 +1,126 @@
-# GEMINI.md — Gemini CLI Instructions
+# GEMINI.md
 
-## Mandatory Pre-Task Reading
+This file contains Gemini CLI-specific operating guidance for Principles Disciple.
 
-Before starting ANY coding task on this project, you MUST read `docs/process/error-management/ERROR_PATTERN_INDEX.md`. This compact index maps recurring error patterns to the detailed incidents in `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md`.
+The canonical engineering policy is:
 
-Then read the specific handbook entries referenced by the relevant pattern(s). Read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full only when recording a new error, auditing the handbook itself, or when the compact index does not cover the task.
+`AGENTS.md`
 
-If a code review catches your error, record it in the handbook and tag the Linear issue with `lesson-learned`.
+**Read and follow `AGENTS.md` first.**
 
-### Error Handbook Reading Protocol
+Do not duplicate or override its product, architecture, stable rule IDs, Error Experience, verification or PR policy.
 
-**Default: Index-driven loading**
-1. Read `docs/process/error-management/ERROR_PATTERN_INDEX.md` (compact, ~110 lines).
-2. Match your task to 1-3 EP cards.
-3. Read ONLY the detailed entries referenced by those cards (use `grep -n "ERR-XXX" docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` to locate).
-4. State which ERR entries you considered and how you avoid them.
+---
 
-**Forbidden: Full-file loading**
-Do NOT read `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` in full unless:
-- You are recording a new error (record-error skill)
-- You are auditing the handbook itself
-- The INDEX does not cover your task AND you have confirmed with the user
+## 1. Orientation
 
-**Why**: The handbook is 177KB (~44K tokens). Loading it fully consumes ~15% of your context window for marginal benefit — the INDEX already captures all patterns. Full loading degrades your performance on the actual task.
+Before substantial coding inspect:
 
-## Project Overview
+* `AGENTS.md`
+* relevant current production code
+* applicable issue/SPEC
+* relevant ADRs
+* relevant tests
+* `ERROR_PATTERN_INDEX.md`
 
-**Principles Disciple** — evolutionary agent framework (Node.js/TypeScript monorepo, npm).
+Do not rely on old architecture descriptions.
 
-## Critical Rules
+Use normal repository search to find current symbols, callers and consumers.
 
-1. **Core vs Plugin boundary**: `packages/principles-core/` = pure logic only (no I/O, no fs, no DB, no network). `packages/openclaw-plugin/` = I/O boundary. New pure logic → core. New I/O → plugin.
-2. **FROZEN LEGACY (ADR-0005)**: The deprecated god-classes (`nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, `nocturnal-service.ts`) were deleted in PRI-230. Do NOT recreate them.
-3. **Architecture regression tests**: `packages/principles-core/tests/architecture-regression.test.ts` — never skip or delete.
-4. **ADR compliance**: `docs/adr/` — code contradicting an ADR is a bug.
-5. **No `any`**: Use `unknown` for truly unknown types. Strict TypeScript mode.
-6. **No AI merge**: Never auto-merge PRs. User must merge manually.
-7. **Conventional commits**: `feat()`, `fix()`, `docs()`, `refactor()`, `test()`, `chore()`.
+---
 
-## Build & Test
+## 2. Architecture
+
+Follow the ownership and I/O rules in `AGENTS.md`.
+
+In particular:
+
+* do not assume `principles-core` is absolutely I/O-free;
+* do not add unregistered core I/O;
+* do not assume all I/O belongs to OpenClaw;
+* preserve real host boundaries;
+* do not revive retired architecture.
+
+---
+
+## 3. Skills
+
+When installed and relevant, use the engineering skill routing defined by `AGENTS.md`.
+
+Do not invoke architecture/refactoring skills just because nearby code could be cleaner.
+
+---
+
+## 4. Error Experience
+
+Use `ERROR_PATTERN_INDEX.md` as retrieval memory.
+
+Load relevant detailed ERR entries only when needed.
+
+There is no mandatory minimum ERR count.
+
+Classify real review findings and record reusable root-cause lessons according to `AGENTS.md`.
+
+---
+
+## 5. Verification
+
+Choose the test strategy according to `Verification First`.
+
+Use targeted tests during implementation.
+
+Before final handoff:
 
 ```bash
-cd packages/principles-core && npm run build && npm run test
-cd packages/openclaw-plugin && npm run build && npm run test
-npm run lint
+npm run verify:merge
 ```
 
-## Linear Workflow
+Do not weaken tests merely to obtain green CI.
 
-1. Read the issue (including comments) BEFORE writing code
-2. Update status to In Progress when you begin
-3. Comment your plan on the issue
-4. Update status to In Review when done
-5. Leave a summary comment
+---
 
-## Error Recording (MANDATORY)
+## 6. Linear / PR
 
-**Rule: Any code review that discovers a real issue (bug, type safety violation, architecture violation, logic error) MUST invoke the `record-error` skill before closing the review.**
+Read issue state before implementation.
 
-This applies to:
-- PR reviews (pr-review skill Phase 6.5)
-- Self-review after completing a task
-- Any review where you find an error you (or another AI) made
+Keep Linear status current.
 
-The `record-error` skill handles: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
+Read the PR template before PR creation.
 
-**Do NOT skip this step.** Reasons like "the fix was trivial", "I'm tired", or "I'll do it later" are not acceptable. Without recording, the same class of error will recur across sessions. The Error Experience Handbook is the project's institutional memory.
+Never merge PRs.
 
-## Key Files
+Provide the Owner Review Card on substantial completion.
 
-- `docs/process/error-management/ERROR_PATTERN_INDEX.md` — Compact error pattern index (READ FIRST)
-- `docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md` — Detailed error incident log (read entries on demand via INDEX)
-- `docs/architecture/ARCHITECTURE.md` — Full system architecture
-- `docs/adr/` — Architecture Decision Records
-- `CLAUDE.md` — Full project guidance (also applies to you)
+---
 
-## Private Docs Access
+## 7. Private Docs
 
-Private docs live in an **independent private git repo** — they are NOT tracked in this repo and are never committed here.
+PD keeps a separate private repository for Owner-sensitive docs
+(domain guides, product emotional-value, plans, runbooks, quality reports).
 
-- **Location**: `$PD_PRIVATE_DOCS_DIR` (env var) if set, otherwise `~/principles-private/docs` (e.g. `D:/Code/principles-private/docs`)
-- **Read**: read files directly from that path (e.g. `$PD_PRIVATE_DOCS_DIR/agents/domain.md`). There is **no** `docs/.private/` junction anymore.
-- **Search**: private docs are outside this repo tree — `rg`/grep in this repo does NOT cover them. Run searches inside the private docs directory.
-- **Edit rule**: modify private docs **only inside the private repo**, then commit + push there (`git -C <private-repo> ...`). Never create copies of private content inside this repo.
-- **Privacy**: never paste private doc content into public PRs/issues/commit messages — reference paths only.
-- **Verify**: if unsure whether private docs are reachable, run `node scripts/setup-private-docs-symlink.mjs --check` (prints the resolved path, creates nothing).
+Follow `AGENTS.md` §26 Private Docs Access.
+
+Resolve location via `$PD_PRIVATE_DOCS_DIR`
+(current environment: `D:\Code\principles-private\docs`).
+
+Read relevant private docs when the task touches governance, product
+emotional-value, domain semantics, plans or runbooks. Edit them only inside
+the private repo, then commit + push there.
+
+Never expose private-doc content through public repository artifacts.
+
+---
+
+## 8. Default Gemini Working Rule
+
+```text
+Survey
+→ verify
+→ identify authority
+→ choose smallest coherent change
+→ verify real behavior
+→ self-review
+→ explain to Owner
+```
+
+Prefer fewer concepts and stronger evidence over architectural novelty.
