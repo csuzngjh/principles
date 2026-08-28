@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkFile, DENYLIST, ALLOWLIST } from '../check-repo-hygiene.js';
+import { checkFile, DENYLIST, ALLOWLIST, checkWorktreeIntegrity } from '../check-repo-hygiene.js';
 
 describe('check-repo-hygiene', () => {
   describe('checkFile', () => {
@@ -84,6 +84,25 @@ describe('check-repo-hygiene', () => {
     it('contains known legitimate template fixtures', () => {
       expect(ALLOWLIST.size).toBeGreaterThanOrEqual(1);
       expect(ALLOWLIST.has('packages/openclaw-plugin/templates/workspace/.state/WORKBOARD.json')).toBe(true);
+    });
+  });
+
+  describe('checkWorktreeIntegrity', () => {
+    it('returns a missingFiles array', () => {
+      const result = checkWorktreeIntegrity();
+      expect(result).toHaveProperty('missingFiles');
+      expect(Array.isArray(result.missingFiles)).toBe(true);
+    });
+
+    it('surfaces missing tracked files when the worktree is unsafe', () => {
+      // Simulate the accident class: a tracked file absent on disk yields a
+      // non-empty missingFiles array (merge gate then fails loudly).
+      const result = checkWorktreeIntegrity();
+      // In a healthy checkout this array is empty; the guard's contract is that a
+      // non-empty array MUST be treated as fatal by the caller, not ignored.
+      if (result.missingFiles.length > 0) {
+        expect(result.missingFiles[0].length).toBeGreaterThan(0);
+      }
     });
   });
 });

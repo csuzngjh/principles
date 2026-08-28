@@ -21,6 +21,7 @@
     "check:runtime-contract": "node scripts/check-runtime-contract.js",
     "check:docs-structure": "node scripts/check-docs-structure.cjs",
     "check:security-baseline": "node scripts/check-security-baseline.js",
+    "doctor": "node scripts/doctor.mjs",
     "test:scripts": "cd scripts && vitest run",
     "test:website": "npm test --workspace=@principles/website",
     "verify:merge": "npm run check:generated-artifacts && npm run check:error-handbook && npm run check:repo-hygiene && npm run check:runtime-contract && npm run check:docs-structure && npm run check:security-baseline && npm run build --workspace=@principles/core && npm run test:website && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console && npm run typecheck:pd-companion",

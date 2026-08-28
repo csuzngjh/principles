@@ -1131,8 +1131,8 @@ Private docs are never copied into the public repository.
 
 * private repo clone: `D:\Code\principles-private`;
 * docs root: `D:\Code\principles-private\docs`;
-* resolve programmatically with `$PD_PRIVATE_DOCS_DIR` when configured,
-  otherwise the repository's documented fallback location.
+* resolved programmatically with `$PD_PRIVATE_DOCS_DIR` when configured,
+  otherwise it defaults to `~/principles-private/docs`.
 
 Rules:
 
@@ -1143,8 +1143,11 @@ Rules:
 * never paste private content into public PRs/issues/commit messages;
 * reference paths only when public discussion needs to acknowledge them.
 
-If availability is uncertain, use the repository's private-doc check script
-(`node scripts/setup-private-docs-symlink.mjs --check`).
+Private docs are read DIRECTLY from the independent private repo. There is no
+`docs/.private` junction in the public worktree — that model was retired in
+Aug 2026. To verify the private-docs path resolves, run:
+
+`node scripts/setup-private-docs-symlink.mjs --check`
 
 ---
 
