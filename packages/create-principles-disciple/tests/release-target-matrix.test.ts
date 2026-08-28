@@ -138,6 +138,33 @@ describe('native release target matrix', () => {
     // The single-package matrix path carries the same preflight.
     expect(publishWorkflow).toMatch(/"host-runtime" \][\s\S]{0,600}?check_published "@principles\/install-layout"/);
 
+    // Credentials boundary: composite actions cannot read the secrets
+    // context, so the action must declare token inputs and the serial job
+    // must pass them explicitly on every step (review P1 round 3).
+    expect(actionYml).not.toContain('secrets.');
+    expect(actionYml).toMatch(/NODE_AUTH_TOKEN: \$\{\{ inputs\.npm_token \}\}/);
+    expect(actionYml).toMatch(/GITHUB_TOKEN: \$\{\{ inputs\.github_token \}\}/);
+    expect(actionYml).toMatch(/CLAWHUB_TOKEN: \$\{\{ inputs\.clawhub_token \}\}/);
+    const tokenProps = ['npm_token', 'github_token', 'clawhub_token'];
+    for (const prop of tokenProps) {
+      const usages = serialJob.match(new RegExp(`${prop}: \\$\\{\\{ secrets\\.[A-Z_]+ \\}\\}`, 'g')) ?? [];
+      expect(usages).toHaveLength(7);
+    }
+
+    // Common build order (both publish paths) must build install-layout
+    // before host-runtime: a clean `npm ci` leaves install-layout/dist
+    // absent, and host-runtime's tsc imports its types entry — building
+    // host-runtime first fails with TS2307 before any publish runs
+    // (reproduced locally; review P1 round 3).
+    const buildOrder = (text) => {
+      const core = text.indexOf('Build core');
+      const install = text.indexOf('Build install layout');
+      const host = text.indexOf('Build host runtime');
+      return core >= 0 && core < install && install < host;
+    };
+    expect(buildOrder(serialJob)).toBe(true);
+    expect(buildOrder(publishWorkflow.slice(publishWorkflow.indexOf('  publish:'), publishWorkflow.indexOf('  publish-full-product:')))).toBe(true);
+
     // Push-path detection order also puts install-layout before host-runtime.
     expect(publishWorkflow).toMatch(/check_and_add "install-layout"[\s\S]{0,300}?check_and_add "host-runtime"/);
 

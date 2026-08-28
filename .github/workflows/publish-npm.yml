@@ -316,11 +316,15 @@ jobs:
       - name: Build core
         run: npm run build --workspace=@principles/core
 
-      - name: Build host runtime
-        run: npm run build --workspace=@principles/host-runtime
-
+      # install-layout BEFORE host-runtime (same reason as the
+      # publish-full-product job): host-runtime's TypeScript build imports
+      # @principles/install-layout, whose types entry (dist/index.d.ts) does
+      # not exist after a clean `npm ci`.
       - name: Build install layout
         run: npm run build --workspace=@principles/install-layout
+
+      - name: Build host runtime
+        run: npm run build --workspace=@principles/host-runtime
 
       - name: Build target package
         run: |
@@ -712,14 +716,19 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
 
+      # Common builds in dependency order: install-layout BEFORE host-runtime
+      # — host-runtime's TypeScript build imports @principles/install-layout,
+      # whose types entry (dist/index.d.ts) does not exist after a clean
+      # `npm ci`, so building host-runtime first fails with TS2307 before
+      # the publish steps are ever reached (review P1 round 3, 2026-08-28).
       - name: Build core
         run: npm run build --workspace=@principles/core
 
-      - name: Build host runtime
-        run: npm run build --workspace=@principles/host-runtime
-
       - name: Build install layout
         run: npm run build --workspace=@principles/install-layout
+
+      - name: Build host runtime
+        run: npm run build --workspace=@principles/host-runtime
 
       - name: Publish 1/7 @principles/core
         uses: ./.github/actions/publish-npm-package
@@ -727,6 +736,9 @@ jobs:
           pkg_dir: principles-core
           npm_name: '@principles/core'
           version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 2/7 @principles/install-layout
         uses: ./.github/actions/publish-npm-package
@@ -734,6 +746,9 @@ jobs:
           pkg_dir: install-layout
           npm_name: '@principles/install-layout'
           version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 3/7 @principles/host-runtime
         uses: ./.github/actions/publish-npm-package
@@ -741,6 +756,9 @@ jobs:
           pkg_dir: host-runtime
           npm_name: '@principles/host-runtime'
           version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 4/7 @principles/codex-adapter
         uses: ./.github/actions/publish-npm-package
@@ -748,6 +766,9 @@ jobs:
           pkg_dir: codex-adapter
           npm_name: '@principles/codex-adapter'
           version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 5/7 @principles/pd-cli
         uses: ./.github/actions/publish-npm-package
@@ -755,6 +776,9 @@ jobs:
           pkg_dir: pd-cli
           npm_name: '@principles/pd-cli'
           version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 6/7 principles-disciple (plugin)
         uses: ./.github/actions/publish-npm-package
@@ -762,6 +786,9 @@ jobs:
           pkg_dir: openclaw-plugin
           npm_name: 'principles-disciple'
           version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish 7/7 create-principles-disciple (installer)
         uses: ./.github/actions/publish-npm-package
@@ -769,3 +796,6 @@ jobs:
           pkg_dir: create-principles-disciple
           npm_name: 'create-principles-disciple'
           version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
