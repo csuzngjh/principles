@@ -172,15 +172,16 @@ boundary, see the project documentation linked below.
 Principles Disciple is a local-first behavior-governance layer. This section
 describes what this npm package (`principles-disciple`, the OpenClaw plugin)
 actually does, so you can evaluate it before installing. It reflects a
-source audit of the published artifact (PRI-547).
+source audit of the published artifact (PRI-547; updated 2026-08 for the
+optional anonymous product telemetry channel).
 
 ### Local data
 
 Behavior evidence, principles, decision records, and trajectories are stored
 in the user-controlled local workspace (flat files plus SQLite databases
-under the workspace's PD state directories). The core plugin does not send
-product telemetry; network access occurs only when an Owner-configured LLM
-runtime provider is used (see below).
+under the workspace's PD state directories). Governance state never leaves
+your machine. The only outbound data channel is the optional anonymous
+product telemetry described below, which is **off by default**.
 
 ### Agent authority
 
@@ -209,23 +210,73 @@ function. The `/pd-bootstrap` command runs `<tool> --version` probes (rg,
 fd, shellcheck, …) to scan your local development environment; it only runs
 when you invoke it.
 
-### Network access and LLM providers
+### Network access
 
-The core plugin performs no network I/O except through Owner-configured
-provider SDKs. Optional LLM calls happen only when you configure a runtime
-profile: the bundled provider SDKs read their standard credential
-environment variables (AWS/Azure/GCP/OpenAI-style, depending on the chosen
-provider) and call that provider from your machine. Diagnostics, principle
-refinement, and internal agents run through this user-configured provider.
+This plugin makes network requests in exactly two places:
+
+1. **Owner-configured LLM providers.** Optional LLM calls happen only when
+   you configure a runtime profile: the bundled provider SDKs read their
+   standard credential environment variables (AWS/Azure/GCP/OpenAI-style,
+   depending on the chosen provider) and call that provider from your
+   machine. Diagnostics, principle refinement, and internal agents run
+   through this user-configured provider.
+2. **Optional anonymous product telemetry (default: OFF).** One minimized
+   daily snapshot per workspace, sent only after you explicitly opt in —
+   see the next section.
+
 Some antivirus engines flag the bundled provider SDKs'
 environment-variable handling; that is disclosed here rather than
 obfuscated.
 
-### Telemetry
+### Optional anonymous product telemetry
 
-The core OpenClaw plugin does not send product-usage telemetry. PD redacts
-supported sensitive patterns before persistence — including known Windows
-and Unix paths, email addresses, and common token formats — and `/pd-export`
+Default: **OFF**. The plugin makes **no telemetry network request at all**
+unless the `anonymous_product_telemetry` feature flag is enabled AND you
+have run `pd telemetry enable --confirm`. Zero consent = zero telemetry
+network requests; this is enforced by transport-level gate tests, not just
+policy.
+
+When opted in, the plugin sends one small HTTPS POST per workspace per day
+to `https://principles-website.pages.dev/api/product-telemetry/snapshot`
+containing only:
+
+| Field | Content |
+|-------|---------|
+| `schemaVersion`, `consentVersion` | schema constants (`"1"`) |
+| `dailyTelemetryId` | 32-hex identifier that rotates daily and is unlinkable across days and workspaces (derived from a local secret that never leaves your machine) |
+| `bucketDate` | UTC date (`YYYY-MM-DD`) |
+| `pdVersion` | PD version string |
+| `hostKind` | `openclaw` / `codex` / `other` |
+| `milestones` | six `true`/`false`/`null` flags: `initialized`, `painObserved`, `principleObserved`, `activationObserved`, `presenceReceiptObserved`, `effectReceiptObserved` |
+| `reliability` | one `initializationFailed` flag |
+
+**Never sent** (enforced by a strict schema validator and a privacy-guard
+test that rejects unknown or content-bearing fields): conversation content,
+prompts, agent responses, principle or pain text, source code, file or
+workspace paths, file names, repository URLs, usernames, emails, hostnames,
+environment variables, error messages, stack traces, and any stable
+installation or workspace identifier.
+
+Controls (`pd` = the Principles Disciple CLI):
+
+```bash
+pd telemetry status              # consent state, gates, last export status
+pd telemetry preview             # exact outbound payload; nothing is sent
+pd telemetry enable --confirm    # grant consent (required before anything sends)
+pd telemetry disable --confirm   # deny consent and delete the local identity
+pd telemetry reset --confirm     # rotate the identity (unlink future daily IDs)
+```
+
+The `PD_TELEMETRY_DISABLED` environment variable disables telemetry even
+when consent was granted, and export is automatically suppressed in CI,
+test, demo, and development environments. Telemetry failures never block
+or crash the plugin: bounded timeout, at most 5 attempts per workspace per
+day, fire-and-forget scheduling.
+
+### Sensitive-data redaction
+
+PD redacts supported sensitive patterns before persistence — including known
+Windows and Unix paths, email addresses, and common token formats — and `/pd-export`
 redacts by default. This is not a general-purpose PII scrubber: automatic
 redaction does not yet cover phone numbers, credit cards, IP addresses, or
 other unknown PII. Remaining limitations are tracked in the project's
@@ -237,8 +288,9 @@ Other PD components ship as their own packages and have their own
 boundaries: the `create-principles-disciple` installer downloads from the
 npm registry and installs files under `~/.openclaw/`; `pd-console` is a
 local web console that performs npm registry update checks and
-user-initiated feedback submission when you use those features. They are not
-part of this plugin tarball.
+user-initiated feedback submission when you use those features, and its
+startup also schedules the same gated opt-in telemetry export described
+above. They are not part of this plugin tarball.
 
 ## Part of the principles monorepo
 

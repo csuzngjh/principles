@@ -70,7 +70,7 @@ openclaw gateway --force
 - 让危险修改必须先经过你审批的原则约束。
 - 通过本地控制台观察进化状态。
 
-**它安全吗？** 是的。PD 会把规则作为本地沙盒文件写入，并通过 SQLite 追踪一切。所有自主进化都可以被你审查、回滚或禁用。
+**它安全吗？** PD 是 local-first 且可回滚的设计：规则以本地沙盒文件写入，所有状态由本地 SQLite 追踪，所有经你审批的行为变更都可被你审查、回滚或禁用。选择 LLM runtime 后，相关输入会发往 Owner 配置的 LLM provider；除此之外，PD 自行运营的唯一外发数据通道是可选的匿名产品遥测（telemetry）——默认关闭，必须你显式同意后才会发送（见[隐私与可选遥测](#隐私与可选遥测)）。
 
 👉 **详见人类指南:** [`docs/runbooks/USER_GUIDE.md`](docs/runbooks/USER_GUIDE.md)
 
@@ -193,7 +193,15 @@ pd console open --workspace "<path>"
 - 纠正样本；
 - 原则与规则实现状态。
 
-状态数据保存在本地。
+状态数据保存在本地。唯一可选的外发通道见[隐私与可选遥测](#隐私与可选遥测)。
+
+## 隐私与可选遥测
+
+PD 是 local-first 的：原则、证据、决策日志和运行状态都存储在你的本地工作区。如果配置了 LLM runtime，相关输入会从你的机器发往 Owner 配置的 LLM provider。除此之外，产品包含一个**可选的匿名产品遥测**通道，**默认关闭**——除非你显式执行 `pd telemetry enable --confirm`，否则不会发出任何遥测网络请求。
+
+启用后，每个参与的工作区每天发送一份最小化快照（PD 版本、宿主类型、UTC 日期、六个布尔产品里程碑、一个可靠性标志，以及每日轮换、不可跨日关联的标识符），发往 `https://principles-website.pages.dev/api/product-telemetry/snapshot`。绝不发送对话内容、提示词、源代码、原则/痛觉正文、文件路径、仓库地址、用户名、邮箱或任何稳定标识符。
+
+用 `pd telemetry preview` 查看将发送的确切内容；随时可用 `pd telemetry disable --confirm` 或环境变量 `PD_TELEMETRY_DISABLED` 关闭。完整契约见 [docs/architecture/product-telemetry.md](docs/architecture/product-telemetry.md)。
 
 ## 它不是什么
 
