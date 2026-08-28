@@ -245,6 +245,7 @@ export class SqliteTaskStore implements TaskStore {
         t.status,
         t.last_error,
         t.attempt_count,
+        t.max_attempts,
         t.created_at,
         t.diagnostic_json,
         (SELECT MAX(r.started_at) FROM runs r WHERE r.task_id = t.task_id) AS last_attempt_at
@@ -355,6 +356,20 @@ export class SqliteTaskStore implements TaskStore {
       );
     }
 
+    // max_attempts: required positive integer (retry budget; consumers pair it
+    // with attemptCount to detect exhaustion)
+    const maxAttemptsRaw = row.max_attempts;
+    if (
+      typeof maxAttemptsRaw !== 'number' ||
+      !Number.isInteger(maxAttemptsRaw) ||
+      maxAttemptsRaw < 1
+    ) {
+      throw new PDRuntimeError(
+        'storage_unavailable',
+        `Task ${taskId} has invalid max_attempts: expected positive integer, got ${maxAttemptsRaw === null ? 'null' : typeof maxAttemptsRaw}`,
+      );
+    }
+
     const lastError = readNullableStringField(row.last_error, 'last_error', taskId);
     const lastAttemptAt = readNullableStringField(row.last_attempt_at, 'last_attempt_at', taskId);
     const painId = extractPainIdFromDiagnosticJson(row.diagnostic_json, taskId);
@@ -366,6 +381,7 @@ export class SqliteTaskStore implements TaskStore {
       status: statusRaw,
       lastError,
       attemptCount: attemptCountRaw,
+      maxAttempts: maxAttemptsRaw,
       createdAt,
       lastAttemptAt,
     };

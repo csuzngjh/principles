@@ -55,6 +55,7 @@ interface FailedTask {
   status: string;
   lastError: string | null;
   attemptCount: number;
+  maxAttempts: number;
   createdAt: string;
   lastAttemptAt: string | null;
 }
@@ -112,6 +113,7 @@ function validateTask(v: unknown): FailedTask | null {
   const taskKind = readString(v, "taskKind");
   const status = readString(v, "status");
   const attemptCount = readNumber(v, "attemptCount");
+  const maxAttempts = readNumber(v, "maxAttempts");
   const createdAt = readString(v, "createdAt");
   // Required fields — fail loud when missing or wrong type (rc-3)
   if (
@@ -119,6 +121,7 @@ function validateTask(v: unknown): FailedTask | null {
     taskKind === null ||
     status === null ||
     attemptCount === null ||
+    maxAttempts === null ||
     createdAt === null
   ) {
     return null;
@@ -133,6 +136,7 @@ function validateTask(v: unknown): FailedTask | null {
     status,
     lastError,
     attemptCount,
+    maxAttempts,
     createdAt,
     lastAttemptAt,
   };
@@ -167,6 +171,11 @@ function statusToVariant(status: string): "default" | "destructive" | "amber" {
   return "default";
 }
 
+/** A failed task whose retry budget is spent — only a force recovery can requeue it. */
+function isAttemptBudgetExhausted(task: FailedTask): boolean {
+  return task.status === "failed" && task.attemptCount >= task.maxAttempts;
+}
+
 function groupTasksByKind(tasks: FailedTask[]): Map<string, FailedTask[]> {
   const grouped = new Map<string, FailedTask[]>();
   for (const task of tasks) {
@@ -189,6 +198,9 @@ export function FailedTasksPage() {
   const [recoveryEnabled, setRecoveryEnabled] = useState(false);
   const [recoverTarget, setRecoverTarget] = useState<FailedTask | null>(null);
   const [recoverLoading, setRecoverLoading] = useState(false);
+  // Exhausted targets recover with force: the dialog warns first and the
+  // action button becomes 强制恢复 (server refuses force=false for these).
+  const recoverExhausted = recoverTarget !== null && isAttemptBudgetExhausted(recoverTarget);
 
   useEffect(() => {
     let cancelled = false;
@@ -291,7 +303,7 @@ export function FailedTasksPage() {
     if (!recoverTarget || recoverLoading) return;
     setRecoverLoading(true);
     try {
-      const result = await recoverFailedTask(recoverTarget.taskId);
+      const result = await recoverFailedTask(recoverTarget.taskId, undefined, recoverExhausted);
       if (result.success) {
         toast.success(t("pages.failedTasks.recoverSuccess"));
         setRecoverTarget(null);
@@ -393,13 +405,31 @@ export function FailedTasksPage() {
                   <span className="font-medium">{t("pages.failedTasks.recoverConfirmStatus")}:</span>{" "}
                   <span className="font-mono">{recoverTarget?.status ?? "—"}</span>
                 </div>
+                {recoverExhausted && (
+                  <>
+                    <div>
+                      <span className="font-medium">{t("pages.failedTasks.recoverConfirmAttempts")}:</span>{" "}
+                      <span className="font-mono">
+                        {recoverTarget?.attemptCount} / {recoverTarget?.maxAttempts}
+                      </span>
+                    </div>
+                    <div className="text-danger">
+                      {t("pages.failedTasks.recoverExhaustedWarning", {
+                        attempt: recoverTarget?.attemptCount ?? 0,
+                        max: recoverTarget?.maxAttempts ?? 0,
+                      })}
+                    </div>
+                  </>
+                )}
                 <div>
                   <span className="font-medium">{t("pages.failedTasks.recoverConfirmActionLabel")}:</span>{" "}
                   {t("pages.failedTasks.recoverConfirmActionDesc")}
                 </div>
                 <div>
                   <span className="font-medium">{t("pages.failedTasks.recoverConfirmImpactLabel")}:</span>{" "}
-                  {t("pages.failedTasks.recoverConfirmImpactDesc")}
+                  {recoverExhausted
+                    ? t("pages.failedTasks.recoverConfirmForceImpactDesc")
+                    : t("pages.failedTasks.recoverConfirmImpactDesc")}
                 </div>
               </div>
             </AlertDialogDescription>
@@ -419,7 +449,9 @@ export function FailedTasksPage() {
             >
               {recoverLoading
                 ? t("common.loading")
-                : t("pages.failedTasks.recoverConfirmButton")}
+                : recoverExhausted
+                  ? t("pages.failedTasks.recoverConfirmForceButton")
+                  : t("pages.failedTasks.recoverConfirmButton")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

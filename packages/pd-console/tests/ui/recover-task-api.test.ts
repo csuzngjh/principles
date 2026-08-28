@@ -69,6 +69,49 @@ describe('recoverFailedTask (Governance Recovery Actions v1)', () => {
     expect(body.reason).toBeUndefined();
   });
 
+  it('includes force: true in the body when requested and validates forceApplied', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: { taskId: 't4', previousStatus: 'failed', newStatus: 'pending', result: 'recovered', forceApplied: true },
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const { recoverFailedTask } = await import('../../src/ui/api.js');
+    const result = await recoverFailedTask('t4', undefined, true);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.forceApplied).toBe(true);
+
+    const [, calledInit] = mockFetch.mock.calls[0];
+    const body = JSON.parse(calledInit?.body as string);
+    expect(body.force).toBe(true);
+    expect(body.reason).toBeUndefined();
+  });
+
+  it('omits force from the body when not requested', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: { taskId: 't5', previousStatus: 'failed', newStatus: 'pending', result: 'recovered' },
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const { recoverFailedTask } = await import('../../src/ui/api.js');
+    await recoverFailedTask('t5');
+
+    const [, calledInit] = mockFetch.mock.calls[0];
+    const body = JSON.parse(calledInit?.body as string);
+    expect(body.force).toBeUndefined();
+  });
+
   it('surfaces a 403 recovery-disabled error', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: false,

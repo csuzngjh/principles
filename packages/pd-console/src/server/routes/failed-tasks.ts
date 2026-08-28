@@ -139,13 +139,15 @@ function tryParseJson(body: string): unknown {
 
 /**
  * Parse the optional recover request body. Accepts an empty body (reason is
- * optional) or a JSON object with an optional string `reason` field
- * (rc-1/rc-2: parsed value stays `unknown` until Object.hasOwn + typeof
- * checks pass). Returns a discriminated result; `ok === false` carries the
- * bad-request message.
+ * optional) or a JSON object with optional `reason` (string) and `force`
+ * (boolean) fields (rc-1/rc-2: parsed value stays `unknown` until
+ * Object.hasOwn + typeof checks pass). Returns a discriminated result;
+ * `ok === false` carries the bad-request message.
  */
-function parseRecoverBody(body: string): { ok: true; reason?: string } | { ok: false; error: string } {
-  if (body.trim().length === 0) return { ok: true };
+function parseRecoverBody(
+  body: string,
+): { ok: true; reason?: string; force: boolean } | { ok: false; error: string } {
+  if (body.trim().length === 0) return { ok: true, force: false };
   const raw: unknown = tryParseJson(body);
   if (raw === undefined) return { ok: false, error: 'Request body must be valid JSON' };
   if (!isRecord(raw)) return { ok: false, error: 'Request body must be a JSON object' };
@@ -157,8 +159,14 @@ function parseRecoverBody(body: string): { ok: true; reason?: string } | { ok: f
       return { ok: false, error: `reason must be at most ${MAX_REASON_LENGTH} characters` };
     }
   }
+  // Fail loud on a malformed force flag (rc-3): silently coercing "yes" to
+  // false would silently downgrade an Owner-requested force recovery.
+  if (Object.hasOwn(raw, 'force') && typeof raw.force !== 'boolean') {
+    return { ok: false, error: 'force must be a boolean' };
+  }
   const reason = typeof raw.reason === 'string' && raw.reason.length > 0 ? raw.reason : undefined;
-  return { ok: true, reason };
+  const force = raw.force === true;
+  return { ok: true, reason, force };
 }
 
 interface RecoverDispatchOutcome {
@@ -176,37 +184,46 @@ interface RecoverDispatchOutcome {
  * needs_human_review → owner authority reset. A null first result means
  * "missing or not failed"; the second call distinguishes not_found /
  * wrong-status / metadata_invalid. No recovery logic lives here.
+ *
+ * `force` applies only to the failed path: when true, an exhausted task
+ * (attemptCount >= maxAttempts) is reset anyway and its maxAttempts budget
+ * is raised (core raises it by +3). needs_human_review resets ignore it —
+ * the owner authority reset has its own budget semantics.
  */
 async function dispatchRecovery(
   workspaceDir: string,
   taskId: string,
+  force: boolean,
 ): Promise<
-  | { ok: true; result: 'recovered' | 'requeued'; previousStatus: string; newStatus: string }
+  | { ok: true; result: 'recovered' | 'requeued'; previousStatus: string; newStatus: string; forceApplied: boolean }
   | { ok: false; failure: RecoverDispatchOutcome }
 > {
   const { service, close } = await createRecoverySweepService({ workspaceDir });
   try {
     // failed → pending (crash-retry semantics: completionIntent preserved)
     try {
-      const failedResult = await service.recoverFailedTask(taskId);
+      const failedResult = await service.recoverFailedTask(taskId, force);
       if (failedResult) {
         return {
           ok: true,
           result: 'recovered',
           previousStatus: failedResult.previousStatus,
           newStatus: failedResult.newStatus,
+          forceApplied: failedResult.forceApplied,
         };
       }
     } catch (err) {
       if (err instanceof PDRuntimeError && err.category === 'input_invalid') {
-        // attempt budget exhausted; Console v1 does not expose force
+        // Attempt budget exhausted and the request carried no force — either
+        // the client sent force:false or its row snapshot went stale between
+        // list render and click. Backstop; the UI sends force itself.
         return {
           ok: false,
           failure: {
             httpStatus: 409,
             errorCode: 'task_attempts_exhausted',
             message: err.message,
-            nextAction: 'This task exhausted its attempt budget. Recover it with force via CLI: pd runtime recovery failed-tasks --confirm --force',
+            nextAction: 'This task exhausted its attempt budget. Retry with force (force: true), or via CLI: pd runtime recovery failed-tasks --confirm --force',
           },
         };
       }
@@ -221,6 +238,7 @@ async function dispatchRecovery(
         result: 'requeued',
         previousStatus: outcome.previousStatus,
         newStatus: 'pending',
+        forceApplied: false,
       };
     }
     if (outcome.status === 'not_found') {
@@ -418,7 +436,7 @@ export async function handleFailedTasksRoute(
         return;
       }
 
-      let bodyResult: { ok: true; reason?: string } | { ok: false; error: string };
+      let bodyResult: { ok: true; reason?: string; force: boolean } | { ok: false; error: string };
       try {
         const body = await readBody(req);
         bodyResult = parseRecoverBody(body);
@@ -431,7 +449,7 @@ export async function handleFailedTasksRoute(
         return;
       }
 
-      const dispatch = await dispatchRecovery(workspaceDir, taskId);
+      const dispatch = await dispatchRecovery(workspaceDir, taskId, bodyResult.force);
       if (!dispatch.ok) {
         sendError(
           res,
@@ -453,6 +471,7 @@ export async function handleFailedTasksRoute(
           result: dispatch.result,
           operator: 'console',
           reason: bodyResult.reason ?? null,
+          forceApplied: dispatch.forceApplied,
         });
       } catch (auditErr) {
         console.warn('[failed-tasks] recovery audit append failed:', auditErr instanceof Error ? auditErr.message : String(auditErr));
@@ -466,6 +485,7 @@ export async function handleFailedTasksRoute(
         previousStatus: dispatch.previousStatus,
         newStatus: dispatch.newStatus,
         result: dispatch.result,
+        forceApplied: dispatch.forceApplied,
         nextAction: 'Recovery accepted. The task is pending again and will be picked up by the internalization consumer (or advance it manually: pd runtime internalization run-once).',
       });
     } catch (err) {

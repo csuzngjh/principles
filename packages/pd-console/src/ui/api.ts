@@ -712,10 +712,15 @@ async function fetchGovernanceExperience(): Promise<ApiResponse<GovernanceExperi
 
 // Governance Recovery Actions v1: Owner-triggered recovery of a failed /
 // needs_human_review internalization task (failed→pending | needs_human_review→pending).
-async function recoverFailedTask(taskId: string, reason?: string): Promise<ApiResponse<RecoveryResultData>> {
-  const body: Record<string, string> = {};
+// force=true recovers a task whose attempt budget is exhausted (core raises
+// its maxAttempts); it only affects the failed path.
+async function recoverFailedTask(taskId: string, reason?: string, force?: boolean): Promise<ApiResponse<RecoveryResultData>> {
+  const body: Record<string, string | boolean> = {};
   if (reason !== undefined && reason.length > 0) {
     body.reason = reason;
+  }
+  if (force === true) {
+    body.force = true;
   }
   return request<RecoveryResultData>('/api/v1/failed-tasks/' + encodeURIComponent(taskId) + '/recover', {
     method: 'POST',

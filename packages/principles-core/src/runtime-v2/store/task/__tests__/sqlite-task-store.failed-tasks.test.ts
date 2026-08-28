@@ -351,13 +351,14 @@ describe('SqliteTaskStore failed-task observability', () => {
   // ── listFailedTasks: field correctness ─────────────────────────────────────
 
   describe('listFailedTasks — field correctness', () => {
-    it('returns correct lastError (PDErrorCategory) and attemptCount', async () => {
+    it('returns correct lastError (PDErrorCategory), attemptCount and maxAttempts', async () => {
       await store.createTask(
         makeTaskInput({
           taskId: 't-fields',
           status: 'failed',
           lastError: 'capability_missing',
           attemptCount: 3,
+          maxAttempts: 3,
         }),
       );
       const results = await store.listFailedTasks();
@@ -366,6 +367,9 @@ describe('SqliteTaskStore failed-task observability', () => {
       if (!found) return;
       expect(found.lastError).toBe('capability_missing');
       expect(found.attemptCount).toBe(3);
+      // maxAttempts must round-trip so consumers can detect exhaustion
+      // (attemptCount >= maxAttempts) without a per-row detail fetch
+      expect(found.maxAttempts).toBe(3);
       expect(found.taskKind).toBe('diagnostician');
       expect(found.createdAt).toBeTruthy();
     });

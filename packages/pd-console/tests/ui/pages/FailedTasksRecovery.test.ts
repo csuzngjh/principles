@@ -91,6 +91,21 @@ describe('FailedTasksPage recovery (Governance Recovery Actions v1)', () => {
     expect(focusSource).toContain('pendingHumanReviewCount');
   });
 
+  it('Given FailedTasksPage, When parsed, Then exhausted tasks are recovered with force (force recovery wiring)', () => {
+    // Exhaustion is derived from the row's attempt budget, not guessed
+    expect(pageSource).toContain('isAttemptBudgetExhausted');
+    // The handler forwards the force flag into the API call
+    expect(pageSource).toContain('recoverFailedTask(recoverTarget.taskId, undefined, recoverExhausted)');
+    // The dialog surfaces the exhaustion warning and the force action label
+    expect(pageSource).toContain('recoverExhaustedWarning');
+    expect(pageSource).toContain('recoverConfirmForceButton');
+    expect(pageSource).toContain('recoverConfirmForceImpactDesc');
+    // The API wrapper sends force in the POST body only when requested
+    expect(apiSource).toContain('body.force = true');
+    // The response validator accepts forceApplied
+    expect(validatorsSource).toContain('forceApplied');
+  });
+
   it('Given i18n keys, When checked, Then recovery keys exist in en + zh with parity (EP-11)', () => {
     const enFailed = getNestedRecord(enJson, ['pages', 'failedTasks']);
     const zhFailed = getNestedRecord(zhJson, ['pages', 'failedTasks']);
@@ -102,6 +117,10 @@ describe('FailedTasksPage recovery (Governance Recovery Actions v1)', () => {
       'recoverConfirmActionDesc',
       'recoverConfirmImpactLabel',
       'recoverConfirmImpactDesc',
+      'recoverConfirmAttempts',
+      'recoverExhaustedWarning',
+      'recoverConfirmForceButton',
+      'recoverConfirmForceImpactDesc',
       'recoverConfirmButton',
       'recoverSuccess',
       'recoverFailed',
