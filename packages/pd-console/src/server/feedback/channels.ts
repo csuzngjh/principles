@@ -9,6 +9,7 @@
 //
 // Probing results are cached per (channel,url-or-repo) for 60s to avoid
 // hammering the relay /shelling out to gh on every list/via fetch.
+import type { FeedbackChannelStatus } from '../../shared/feedback-contract.js';
 
 import type * as childProcessNS from 'node:child_process';
 import type * as fsNS from 'node:fs';
@@ -20,14 +21,10 @@ import { detectGithubCli } from './github-adapter.js';
 
 type ExecFileFn = typeof childProcessNS.execFile;
 
-export interface ChannelStatus {
-  id: 'ingest' | 'github' | 'email' | 'file';
-  available: boolean;
-  /** Human-readable reason when unavailable. */
-  reason?: string;
-  /** Concrete next action the user can take (rc-9). */
-  nextAction?: string;
-}
+// PRI-613: the channel-status wire contract derives from the shared
+// Schema→Static authority (src/shared/feedback-contract.ts). The server builds
+// it; the UI validates against the same schema — drift is CI-detectable.
+export type ChannelStatus = FeedbackChannelStatus;
 
 export interface ChannelsResult {
   ok: true;

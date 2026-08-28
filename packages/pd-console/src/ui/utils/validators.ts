@@ -10,6 +10,21 @@
  */
 import type { GovernanceExperienceSnapshot, OwnerGovernanceView } from '@principles/core/runtime-v2';
 
+// PRI-613: feedback submit-ladder data shapes derive from the canonical shared
+// schema contract via `import type` ONLY — a runtime import would bundle
+// @sinclair/typebox into the browser (~850KB, measured; SPEC §10.5 stop
+// condition). The runtime const FEEDBACK_CHANNEL_IDS lives in a separate
+// dependency-free module so browser code can check channel IDs safely.
+import { FEEDBACK_CHANNEL_IDS } from '../../shared/feedback-channel-ids.js';
+import type { FeedbackChannelId } from '../../shared/feedback-channel-ids.js';
+import type {
+  FeedbackChannelStatus,
+  FeedbackChannelsData,
+  FeedbackSubmitResult,
+} from '../../shared/feedback-contract.js';
+
+export type { FeedbackChannelId, FeedbackChannelStatus, FeedbackChannelsData, FeedbackSubmitResult };
+
 // ── Primitive guards ──────────────────────────────────────────────────────────
 
 function isString(v: unknown): v is string {
@@ -371,55 +386,43 @@ export function validateDeleteEnvelope(v: unknown): DeleteEnvelopeData | null {
   return { deleted: v.deleted };
 }
 
-// ── Feedback submit-ladder validators (Slice 3, spec §8) ──────────────────────
+// ── Feedback submit-ladder validators (Slice 3, spec §8; PRI-613 pilot) ─────
+//
+// Types come from the shared schema contract (import type above). The field
+// checks below are the browser-safe mirror, machine-locked to the schema by
+// tests/integration/feedback-contract.test.ts — an accept/reject equivalence
+// matrix over the schemas fails CI when either side drifts.
 
-export type FeedbackChannelId = 'ingest' | 'github' | 'email' | 'file';
+/** Legacy UI alias for the shared contract type. */
+export type FeedbackChannelStatusData = FeedbackChannelStatus;
+/** Legacy UI alias for the shared contract type. */
+export type FeedbackSubmitResultData = FeedbackSubmitResult;
 
-export interface FeedbackChannelStatusData {
-  id: FeedbackChannelId;
-  available: boolean;
-  reason?: string;
-  nextAction?: string;
+function isValidChannelStatus(item: Record<string, unknown>): FeedbackChannelStatus | null {
+  if (!Object.hasOwn(item, 'id') || !isString(item.id) || !(FEEDBACK_CHANNEL_IDS as readonly string[]).includes(item.id)) return null;
+  if (!Object.hasOwn(item, 'available') || !isBoolean(item.available)) return null;
+  const reason = readNullableString(item, 'reason');
+  const nextAction = readNullableString(item, 'nextAction');
+  if (!reason.valid || !nextAction.valid) return null;
+  const status: FeedbackChannelStatus = { id: item.id as FeedbackChannelId, available: item.available };
+  if (reason.value !== null) status.reason = reason.value;
+  if (nextAction.value !== null) status.nextAction = nextAction.value;
+  return status;
 }
-
-export interface FeedbackChannelsData {
-  channels: FeedbackChannelStatusData[];
-}
-
-const CHANNEL_IDS: readonly string[] = ['ingest', 'github', 'email', 'file'];
 
 export function validateFeedbackChannels(v: unknown): FeedbackChannelsData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'channels') || !Array.isArray(v.channels)) return null;
-  const channels: FeedbackChannelStatusData[] = [];
+  // Per-item leniency preserved: invalid channel entries are skipped, the
+  // envelope is not rejected (legacy behavior — a bad single probe must not
+  // hide the other channels).
+  const channels: FeedbackChannelStatus[] = [];
   for (const item of v.channels) {
     if (!isObject(item)) continue;
-    if (!Object.hasOwn(item, 'id') || !isString(item.id) || !CHANNEL_IDS.includes(item.id)) continue;
-    if (!Object.hasOwn(item, 'available') || !isBoolean(item.available)) continue;
-    const status: FeedbackChannelStatusData = {
-      id: item.id as FeedbackChannelId,
-      available: item.available,
-    };
-    const reason = readNullableString(item, 'reason');
-    const nextAction = readNullableString(item, 'nextAction');
-    if (!reason.valid) return null;
-    if (!nextAction.valid) return null;
-    if (reason.value !== null) status.reason = reason.value;
-    if (nextAction.value !== null) status.nextAction = nextAction.value;
-    channels.push(status);
+    const status = isValidChannelStatus(item);
+    if (status !== null) channels.push(status);
   }
   return { channels };
-}
-
-export interface FeedbackSubmitResultData {
-  ok: boolean;
-  alreadySubmitted: boolean;
-  status: string;
-  submittedVia?: string;
-  trackingId?: string;
-  externalUrl?: string;
-  writeBackFailed?: boolean;
-  nextAction?: string;
 }
 
 export function validateFeedbackSubmitResult(v: unknown): FeedbackSubmitResultData | null {

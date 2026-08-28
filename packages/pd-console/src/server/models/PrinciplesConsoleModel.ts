@@ -3,7 +3,9 @@ import * as fs from 'fs';
 import { classifyPrinciples, filterOwnerActionable } from './PrincipleClassifier.js';
 import { updatePrinciple } from '@principles/core/principle-tree-ledger';
 
-export type PrincipleStatus = 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
+import type { PrincipleStatus } from '@principles/core/runtime-v2';
+
+export type { PrincipleStatus };
 export type PrinciplePriority = 'P0' | 'P1' | 'P2';
 export type PrincipleScope = 'general' | 'domain';
 export type PrincipleEvaluability = 'manual_only' | 'deterministic' | 'weak_heuristic';
