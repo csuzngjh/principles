@@ -91,13 +91,11 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-007 | Non-string evidenceRefs silently skipped instead of rejected in validator | PRI-192 |
 | ERR-008 | Missing lineage field validation allows agent to return trace with wrong attribution | PRI-192 |
 | ERR-009 | Validator silently skips missing/malformed required array fields instead of failing loud | PRI-192 |
-| ERR-010 | Falsy evaluator return silently passes validation instead of recording failure | PRI-172 |
 | ERR-013 | `in` operator OR direct indexing on a plain object leaks inherited Object.prototype members (`__proto__`, `constructor`, `toString`) — use `Object.hasOwn` for key checks AND to guard lookup-table value reads | PRI-201 |
 | ERR-037 | UI action buttons gated only by `status`, ignoring backend actionability field | PRI-244 |
 | ERR-038 | Read-only GET paths create writable SqliteConnection; readonly breaks fresh workspace | PRI-244 |
 | ERR-039 | Test `filter(isRecord)` silently discards malformed items; `if (isRecord)` skips assertions | PRI-244 |
 | ERR-014 | `formatValidationErrorEntry` string values not truncated — evidence pack unbounded | PRI-200 |
-| ERR-015 | Repair loop uses stale schema errors across attempts — reduced repair effectiveness | PRI-200 |
 | ERR-016 | maxRepairAttempts not hard-capped — { maxRepairAttempts: 999 } runs 999 calls | PRI-200 |
 | ERR-017 | JSON.stringify on unknown values can throw (BigInt, circular) — preview paths crash | PRI-200 |
 | ERR-018 | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors | PRI-200 |
@@ -138,6 +136,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
 | ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
 | ERR-108 | Governance derivation implemented from the implementer's audit-delta narrative instead of clause-by-clause against the normative spec — precedence order and evidence gates drifted | PRI-584 / PR #1409 |
+| ERR-110 | Published security disclosure contradicts shipped code — network capability landed without updating the README that denied it | ClawHub audit 2026-08-26 / PR #1430 |
 
 ---
 
@@ -432,16 +431,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-06-23 PR#1026: 4 review `as`-bypass violations (`(err as Error)`, `this.token as string`, etc.)
   - Earlier recurrences (PR#680-#966): same silent-skip pattern across `parseInt` w/o NaN check, `?.trim()||undefined`, `?? 'fallback'` defaulting, `if(output){assert}`. See git history.
 
-**[ERR-010]** | Falsy evaluator return silently passes validation instead of recording failure
-
-- **What happened**: In `evaluateInRefinerSandbox`, the code used `if (result)` to guard validation, meaning a null/undefined return from `evaluateCode` was treated as a pass (no failure recorded).
-- **Why it's wrong**: A null/undefined evaluator result is a validation failure — the evaluator failed to produce a decision. Silently passing it violates the invariant that every case must have an explicit pass/fail outcome. Same class as ERR-001/ERR-005/ERR-007/ERR-009 where falsy/invalid values bypass validation.
-- **Correct approach**: Use `if (!result)` to record a `validation_failed` failure for null/undefined results, then `continue`. Only proceed to `validateCaseDecision` when `result` is truthy.
-- **How to prevent**: When writing validation logic, always handle the falsy/null/undefined case explicitly as a failure. Never use `if (value)` to skip validation — use `if (!value)` to record failure.
-- **Source**: PRI-172
-- **Date**: 2026-05-20
-- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007, ERR-009
-
 **[ERR-011]** | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades
 
 - **What happened**: `runtime-canary.ts`, `runtime-diagnostics-export.ts`, and `runtime-recovery.ts` directly imported and instantiated `RuntimeStateManager` from the Store layer, bypassing the Read Model / Service facade boundary established by ADR-0001. Additionally, `createInternalizationQueueReadModel` did not support a `readonly` option, forcing read-only CLI commands (canary, diagnostics-export) to open writable database connections.
@@ -496,18 +485,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — same class as ERR-001/ERR-005 (type-specific branches bypass validation).
   - 2026-08-16 PRI-531 (PR #1328 review): `auto_correct_applied` ledger digest embedded raw `original`/`applied` values via JSON.stringify with no bound — a correction on a large field (e.g. file content) would bloat the row unbounded. Fixed with `.slice(0, 200)` on the digest (rc-8).
   - 2026-06-18 PRI-428 (PR #966): `demo-rule-compiler.ts` used `JSON.stringify(result).slice(0, 100)` on `unknown` — raw stringify can throw on circular refs. Fixed with `safeStringifyPreview(result)` (BigInt-safe, circular-ref-safe, bounded).
-
----
-
-**[ERR-015]** | Repair loop uses stale schema errors across attempts — reduced repair effectiveness
-
-- **What happened**: In `attemptStructuredOutputRepair()`, the repair loop always passed the original `schemaErrors` to `formatRepairPrompt()` for every attempt, even after the candidate output had changed. When `maxRepairAttempts > 1`, the second and subsequent repair prompts would contain errors from the original output, not the current candidate. This reduces repair effectiveness because the LLM is asked to fix errors that may no longer exist while missing new errors introduced by the previous repair attempt.
-- **Why it's wrong**: The repair loop updates `invalidOutput` to `candidateWithLineage` after each failed attempt, but the prompt still references the original errors. This means the LLM gets a misleading prompt — "fix these errors" — when the actual errors have changed. The `callbacks.schemaErrors` callback was available to get fresh errors but was only used for the `repairAttempts` record, not for the next prompt.
-- **Correct approach**: Track `currentErrors` as a mutable variable initialized from `schemaErrors`. After each failed attempt, if `callbacks.schemaErrors` is available, refresh `currentErrors` with the latest errors from the failed candidate. Pass `currentErrors` to `formatRepairPrompt()` on each iteration.
-- **How to prevent**: When implementing a retry/repair loop that re-prompts an LLM, always refresh the error context from the latest attempt before building the next prompt. Never assume the errors are static across iterations. Add a test with `maxRepairAttempts > 1` and `callbacks.schemaErrors` returning different errors on each call to verify the prompt uses updated errors.
-- **Source**: PRI-200 / PR #665 (CodeRabbit review)
-- **Date**: 2026-05-21
-- **Recurrence**: No
 
 ---
 
@@ -826,8 +803,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 109 |
-| Last updated | 2026-08-27 |
+| Total lessons | 108 |
+| Last updated | 2026-08-28 |
 | Top category | Schema & Type |
 | Recurring errors | 57 |
 
@@ -1645,4 +1622,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-106 (binary fold over multi-state), ERR-009 (definite-wrong-value fallback family), ERR-002 (silent degradation without reason)
 - **Source**: PR #1419 review round 4
 - **Date**: 2026-08-26
+- **Recurrence**: None
+
+---
+
+**[ERR-110]** | Published security disclosure contradicts shipped code — a network-capable subsystem landed without updating the README that explicitly denied it
+
+- **What happened**: PR #1419 shipped the consent-gated anonymous product telemetry exporter (HTTPS POST to `principles-website.pages.dev`) inlined into the openclaw-plugin `dist/bundle.js`, but did not update `packages/openclaw-plugin/README.md` — npm-auto-included in every tarball and the surface ClawHub's audit reads — which still stated "The core plugin does not send product telemetry" and "The core plugin performs no network I/O except through Owner-configured provider SDKs". The root READMEs likewise carried "State is stored locally." / "Is it safe? Yes." with zero telemetry mention. ClawHub's audit of the published plugin surfaced the capability (static `suspicious.env_credential_access`, Critical); the telemetry code itself was verified sound (default-off flag, consent-before-network, strict 8-field schema), but the shipped README's absolute denial turned a benign-capability finding into a user-facing trust contradiction.
+- **Why it's wrong**: Disclosure is part of the published artifact's contract. Shipping a boundary-crossing capability while the artifact's own security section explicitly denies it is worse than not documenting at all: it converts "undisclosed capability" into "demonstrably false claim", and every other absolute claim in that section becomes unreliable to users and external auditors. Source-tree tests stayed green because nothing read the disclosure.
+- **Generalized failure mode**: When a PR adds or changes any capability that crosses a security/privacy boundary (network egress, environment-variable reads, new data flow out of the machine), assistants must update EVERY disclosure surface describing that boundary (published package README, root README, manifest copy) in the same PR and lock it with a regression test, otherwise the published artifact claims things its code refutes and external audits or users catch the lie.
+- **Correct approach**: PR #1430 — rewrote the plugin README "Security & data boundaries" section (enumerate both network paths, full telemetry contract: default OFF, consent, exact payload, never-sent list, endpoint, controls, kill switch), fixed root README EN/ZH framing, added `verify-build.mjs` publish-time disclosure markers gate (runs in `prepack`) and `disclosure-contract.test.ts` regression lock.
+- **How to prevent**: In review of any diff that touches `fetch`/`http`/network SDK/env-read capability in a shipped package: grep that package's README + the root README for absolute privacy/network claims ("does not send", "no network I/O", "local only", "stays local") in the same review pass. If the capability set changed, the disclosure diff must be in the same PR.
+- **Regression guard**: `packages/openclaw-plugin/tests/disclosure-contract.test.ts` (positive markers + negative stale-claim assertions across plugin README, root README EN/ZH, skill scope) plus the `verify-build.mjs` disclosure gate that runs in `prepack` (build:production).
+- **Related ERRs**: ERR-040 (published artifact missing components — same EP-06 "artifact ≠ source" family, mirror direction: false claim vs missing file), ERR-032 (docs contradict ADR — internal docs vs published disclosure), EP-06
+- **Source**: owner-directed task 2026-08-28 (no Linear issue); ClawHub audit 2026-08-26, plugin v1.222.4; remediation PR #1430
+- **Date**: 2026-08-28
 - **Recurrence**: None
