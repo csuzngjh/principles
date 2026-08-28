@@ -201,6 +201,12 @@ export function FailedTasksPage() {
   // Exhausted targets recover with force: the dialog warns first and the
   // action button becomes 强制恢复 (server refuses force=false for these).
   const recoverExhausted = recoverTarget !== null && isAttemptBudgetExhausted(recoverTarget);
+  let recoverConfirmLabel = t("pages.failedTasks.recoverConfirmButton");
+  if (recoverLoading) {
+    recoverConfirmLabel = t("common.loading");
+  } else if (recoverExhausted) {
+    recoverConfirmLabel = t("pages.failedTasks.recoverConfirmForceButton");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -447,11 +453,7 @@ export function FailedTasksPage() {
                 void handleRecoverConfirmed();
               }}
             >
-              {recoverLoading
-                ? t("common.loading")
-                : recoverExhausted
-                  ? t("pages.failedTasks.recoverConfirmForceButton")
-                  : t("pages.failedTasks.recoverConfirmButton")}
+              {recoverConfirmLabel}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
