@@ -351,13 +351,14 @@ describe('SqliteTaskStore failed-task observability', () => {
   // ── listFailedTasks: field correctness ─────────────────────────────────────
 
   describe('listFailedTasks — field correctness', () => {
-    it('returns correct lastError (PDErrorCategory) and attemptCount', async () => {
+    it('returns correct lastError (PDErrorCategory), attemptCount and maxAttempts', async () => {
       await store.createTask(
         makeTaskInput({
           taskId: 't-fields',
           status: 'failed',
           lastError: 'capability_missing',
           attemptCount: 3,
+          maxAttempts: 3,
         }),
       );
       const results = await store.listFailedTasks();
@@ -366,6 +367,9 @@ describe('SqliteTaskStore failed-task observability', () => {
       if (!found) return;
       expect(found.lastError).toBe('capability_missing');
       expect(found.attemptCount).toBe(3);
+      // maxAttempts must round-trip so consumers can detect exhaustion
+      // (attemptCount >= maxAttempts) without a per-row detail fetch
+      expect(found.maxAttempts).toBe(3);
       expect(found.taskKind).toBe('diagnostician');
       expect(found.createdAt).toBeTruthy();
     });
@@ -377,6 +381,21 @@ describe('SqliteTaskStore failed-task observability', () => {
       expect(found).toBeDefined();
       if (!found) return;
       expect(found.lastError).toBeNull();
+    });
+
+    it('throws storage_unavailable for a corrupted max_attempts column (rc-3 fail loud)', async () => {
+      await store.createTask(
+        makeTaskInput({ taskId: 't-corrupt-max', status: 'failed', attemptCount: 1, maxAttempts: 3 }),
+      );
+      // Corrupt the row below the TaskRecordSchema bound (minimum: 1) the way
+      // only an external write/damaged DB could — the store's own createTask
+      // validates. prepare/run avoids raw SQL string concatenation.
+      connection.getDb()
+        .prepare('UPDATE tasks SET max_attempts = 0 WHERE task_id = ?')
+        .run('t-corrupt-max');
+      // Exhaustion detection (attemptCount >= maxAttempts) must never run on
+      // a budget that violates the schema — fail loud instead.
+      await expect(store.listFailedTasks()).rejects.toThrow(/invalid max_attempts/);
     });
   });
 

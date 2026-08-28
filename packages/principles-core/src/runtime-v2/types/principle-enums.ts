@@ -4,19 +4,21 @@
  */
 import { Type } from '@sinclair/typebox';
 
-export type PrincipleStatus =
-  | 'candidate'
-  | 'active'
-  | 'archived'
-  | 'deprecated'
-  | 'probation';
+// PRI-612: canonical PrincipleStatus authority. Every other representation
+// (EvolutionPrincipleStatus, console models, Sets/validators) must DERIVE from
+// PRINCIPLE_STATUSES — never re-type the literals.
+export const PRINCIPLE_STATUSES = [
+  'candidate',
+  'active',
+  'archived',
+  'deprecated',
+  'probation',
+] as const;
+
+export type PrincipleStatus = (typeof PRINCIPLE_STATUSES)[number];
 
 export const PrincipleStatusSchema = Type.Union([
-  Type.Literal('candidate'),
-  Type.Literal('active'),
-  Type.Literal('archived'),
-  Type.Literal('deprecated'),
-  Type.Literal('probation'),
+  ...PRINCIPLE_STATUSES.map((status) => Type.Literal(status)),
 ]);
 
 export type PrinciplePriority = 'P0' | 'P1' | 'P2';

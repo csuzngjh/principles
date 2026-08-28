@@ -38,6 +38,12 @@ export interface RecoveryActionRecord {
   operator: string | null;
   /** Optional owner-supplied reason (bounded free text) */
   reason: string | null;
+  /**
+   * True when the recovery bypassed an exhausted attempt budget
+   * (recoverFailedTask force path). Absent on records written before this
+   * field existed and on non-forced recoveries.
+   */
+  forceApplied?: boolean;
   createdAt: string;
   result: RecoveryActionResult;
 }
@@ -48,6 +54,7 @@ export interface AppendRecoveryActionInput {
   result: RecoveryActionResult;
   operator?: string;
   reason?: string | null;
+  forceApplied?: boolean;
 }
 
 // ── Validation ─────────────────────────────────────────────────────────────────
@@ -103,6 +110,9 @@ export function appendRecoveryAction(
     previousStatus: input.previousStatus,
     operator: input.operator ?? null,
     reason: normalizeReason(input.reason ?? null),
+    // Omitted (not false) so records of ordinary recoveries stay identical to
+    // the pre-force field set — old readers and line diffs don't see noise.
+    ...(input.forceApplied === true ? { forceApplied: true as const } : {}),
     createdAt: new Date().toISOString(),
     result: input.result,
   };
@@ -123,6 +133,9 @@ function isRecoveryActionRecord(value: unknown): value is RecoveryActionRecord {
     Object.hasOwn(rec, 'previousStatus') && typeof rec.previousStatus === 'string' &&
     Object.hasOwn(rec, 'operator') && (rec.operator === null || typeof rec.operator === 'string') &&
     Object.hasOwn(rec, 'reason') && (rec.reason === null || typeof rec.reason === 'string') &&
+    // forceApplied is optional (legacy records predate it): absent is fine,
+    // present-but-non-boolean means the line is malformed (rc-3).
+    (!Object.hasOwn(rec, 'forceApplied') || typeof rec.forceApplied === 'boolean') &&
     Object.hasOwn(rec, 'createdAt') && typeof rec.createdAt === 'string' &&
     Object.hasOwn(rec, 'result') && typeof rec.result === 'string' && VALID_RESULTS.has(rec.result)
   );
