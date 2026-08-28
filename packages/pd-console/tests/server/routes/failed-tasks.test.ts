@@ -619,7 +619,7 @@ describe('handleFailedTasksRoute', () => {
       expect(audit[0]?.reason).toBe('Owner approved retry after reviewing failure');
     });
 
-    it('409 task_attempts_exhausted (no force from Console v1) leaves the row untouched', async () => {
+    it('409 task_attempts_exhausted without force leaves the row untouched', async () => {
       await seedTask({ taskId: 'exhausted-task', status: 'failed', attemptCount: 3, maxAttempts: 3 });
 
       const req = createMockPostRequest('/api/v1/failed-tasks/exhausted-task/recover', '{}');
@@ -637,6 +637,116 @@ describe('handleFailedTasksRoute', () => {
       const row = await stateManager.getTask('exhausted-task');
       expect(row?.status).toBe('failed');
       expect(listRecoveryActions(workspaceDir)).toEqual([]);
+    });
+
+    it('force: true recovers an exhausted task, raises maxAttempts, and audits forceApplied', async () => {
+      await seedTask({ taskId: 'exhausted-force-task', status: 'failed', attemptCount: 3, maxAttempts: 3 });
+
+      const req = createMockPostRequest(
+        '/api/v1/failed-tasks/exhausted-force-task/recover',
+        JSON.stringify({ force: true }),
+      );
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/exhausted-force-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ taskId: string; previousStatus: string; newStatus: string; result: string; forceApplied: boolean }>(res);
+      expect(data.taskId).toBe('exhausted-force-task');
+      expect(data.previousStatus).toBe('failed');
+      expect(data.newStatus).toBe('pending');
+      expect(data.result).toBe('recovered');
+      expect(data.forceApplied).toBe(true);
+
+      // Core force semantics: attempt budget reset, budget raised by +3 (3 → 6)
+      const row = await stateManager.getTask('exhausted-force-task');
+      expect(row?.status).toBe('pending');
+      expect(row?.attemptCount).toBe(0);
+      expect(row?.maxAttempts).toBe(6);
+
+      const audit = listRecoveryActions(workspaceDir, { taskId: 'exhausted-force-task' });
+      expect(audit.length).toBe(1);
+      expect(audit[0]?.result).toBe('recovered');
+      expect(audit[0]?.forceApplied).toBe(true);
+    });
+
+    it('explicit force: false is refused like an omitted force (409, row untouched)', async () => {
+      await seedTask({ taskId: 'exhausted-noforce-task', status: 'failed', attemptCount: 3, maxAttempts: 3 });
+
+      const req = createMockPostRequest(
+        '/api/v1/failed-tasks/exhausted-noforce-task/recover',
+        JSON.stringify({ force: false }),
+      );
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/exhausted-noforce-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(409);
+      const body = errorEnvelope(res) as { success: false; error: string };
+      expect(body.error).toBe('task_attempts_exhausted');
+      const row = await stateManager.getTask('exhausted-noforce-task');
+      expect(row?.status).toBe('failed');
+      expect(row?.attemptCount).toBe(3);
+      expect(listRecoveryActions(workspaceDir)).toEqual([]);
+    });
+
+    it('400 when force is not a boolean (rc-3 fail loud, no silent coercion)', async () => {
+      await seedTask({ taskId: 'force-type-task', status: 'failed', attemptCount: 3, maxAttempts: 3 });
+
+      for (const badForce of ['"yes"', 'null', '1']) {
+        const req = createMockPostRequest(
+          '/api/v1/failed-tasks/force-type-task/recover',
+          `{"force": ${badForce}}`,
+        );
+        const res = createMockResponse();
+        await handleFailedTasksRoute(req, res, {
+          workspaceDir,
+          subPath: '/force-type-task/recover',
+          featureFlags: RECOVERY_FLAGS,
+        });
+
+        expect(res.statusCode).toBe(400);
+        const body = errorEnvelope(res) as { success: false; error: string; message?: string };
+        expect(body.error).toBe('bad_request');
+        expect(body.message).toBe('force must be a boolean');
+      }
+
+      const row = await stateManager.getTask('force-type-task');
+      expect(row?.status).toBe('failed');
+      expect(listRecoveryActions(workspaceDir)).toEqual([]);
+    });
+
+    it('force is ignored for needs_human_review (owner reset path, forceApplied false)', async () => {
+      await seedTask({ taskId: 'review-force-task', status: 'needs_human_review', attemptCount: 2, maxAttempts: 3 });
+
+      const req = createMockPostRequest(
+        '/api/v1/failed-tasks/review-force-task/recover',
+        JSON.stringify({ force: true }),
+      );
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/review-force-task/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ result: string; forceApplied: boolean; newStatus: string }>(res);
+      expect(data.result).toBe('requeued');
+      expect(data.forceApplied).toBe(false);
+      expect(data.newStatus).toBe('pending');
+
+      const audit = listRecoveryActions(workspaceDir, { taskId: 'review-force-task' });
+      expect(audit.length).toBe(1);
+      expect(audit[0]?.result).toBe('requeued');
+      // Non-forced recoveries omit the field entirely (writer only emits it when true)
+      expect(audit[0]?.forceApplied).toBeUndefined();
     });
 
     it('recovers needs_human_review → pending, clears completionIntent/runnerDecision, audits requeued', async () => {

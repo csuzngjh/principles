@@ -28,6 +28,8 @@ export interface FailedTaskSummary {
   status: 'failed' | 'needs_human_review';
   lastError: string | null;
   attemptCount: number;
+  /** Retry budget for this task; with attemptCount it lets consumers detect an exhausted task (attemptCount >= maxAttempts). */
+  maxAttempts: number;
   createdAt: string;
   lastAttemptAt: string | null;
 }

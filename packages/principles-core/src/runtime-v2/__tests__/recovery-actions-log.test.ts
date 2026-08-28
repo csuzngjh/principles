@@ -126,4 +126,52 @@ describe('RecoveryActionsLog', () => {
     expect(records[0]?.taskId).toBe('t-good');
     expect(records[0]?.actionId).toBe(good.actionId);
   });
+
+  // ── forceApplied (Console force recovery) ──────────────────────────────────
+
+  it('writes forceApplied only when true and round-trips it through the reader', () => {
+    const forced = appendRecoveryAction(tmpDir, {
+      taskId: 't-force',
+      previousStatus: 'failed',
+      result: 'recovered',
+      operator: 'console',
+      forceApplied: true,
+    });
+    expect(forced.forceApplied).toBe(true);
+    const plain = appendRecoveryAction(tmpDir, {
+      taskId: 't-plain',
+      previousStatus: 'failed',
+      result: 'recovered',
+      operator: 'console',
+      forceApplied: false,
+    });
+    // Non-forced recoveries omit the field entirely (kept identical to the
+    // pre-force field set)
+    expect('forceApplied' in plain).toBe(false);
+
+    const records = listRecoveryActions(tmpDir);
+    expect(records.length).toBe(2);
+    expect(records.find((r) => r.taskId === 't-force')?.forceApplied).toBe(true);
+    expect(records.find((r) => r.taskId === 't-plain')?.forceApplied).toBeUndefined();
+  });
+
+  it('reader tolerates legacy records without forceApplied and skips malformed ones (backward compat)', () => {
+    const stateDir = path.join(tmpDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    const logPath = path.join(stateDir, 'recovery_actions.jsonl');
+    fs.appendFileSync(
+      logPath,
+      [
+        // Legacy pre-force record: no forceApplied field
+        JSON.stringify({ actionId: 'legacy-1', taskId: 't-legacy', action: 'recover', previousStatus: 'failed', operator: 'console', reason: null, createdAt: '2026-08-20T00:00:00.000Z', result: 'recovered' }) + '\n',
+        // forceApplied present but non-boolean → malformed, skipped
+        JSON.stringify({ actionId: 'bad-1', taskId: 't-bad', action: 'recover', previousStatus: 'failed', operator: 'console', reason: null, forceApplied: 'yes', createdAt: '2026-08-20T00:00:00.000Z', result: 'recovered' }) + '\n',
+      ].join(''),
+      'utf-8',
+    );
+    const records = listRecoveryActions(tmpDir);
+    expect(records.length).toBe(1);
+    expect(records[0]?.taskId).toBe('t-legacy');
+    expect(records[0]?.forceApplied).toBeUndefined();
+  });
 });

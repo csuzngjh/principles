@@ -918,6 +918,8 @@ export interface RecoveryResultData {
   newStatus: string;
   /** 'recovered' (failed→pending) | 'requeued' (needs_human_review→pending) */
   result: string;
+  /** True when the recovery force-reset an exhausted attempt budget */
+  forceApplied?: boolean;
   nextAction?: string;
 }
 
@@ -933,6 +935,10 @@ export function validateRecoveryResult(v: unknown): RecoveryResultData | null {
     newStatus: v.newStatus,
     result: v.result,
   };
+  if (Object.hasOwn(v, 'forceApplied')) {
+    if (!isBoolean(v.forceApplied)) return null;
+    result.forceApplied = v.forceApplied;
+  }
   if (Object.hasOwn(v, 'nextAction')) {
     if (!isString(v.nextAction)) return null;
     result.nextAction = v.nextAction;
