@@ -1,6 +1,6 @@
 # Codex Governance Closure SPEC
 
-- **Status:** Draft / implementation blocked
+- **Status:** Draft / implementation blocked — rev 2 applies review-round-1 contract fixes (G2 split into G2A + R1, canonical pain identity compatibility contract, consumer-flag authority contract, promotion-tail durability, rate-limit compatibility rule)
 - **Date:** 2026-08-28
 - **Extends:** `docs/architecture/CODEX_CLI_ADAPTER_SPEC.md`
 - **Architecture authority:** ADR-0020, including the 2026-08-13 amendment
@@ -9,7 +9,7 @@
 
 ## 1. Decision
 
-Subject to the three authorization gates in §3, complete the Codex integration
+Subject to the authorization gates in §3, complete the Codex integration
 for the same Owner-governed loop already owned by PD:
 
 ```text
@@ -65,8 +65,14 @@ conversation” is false in the current implementation.
 ## 3. Authorization and go/no-go gates
 
 No production implementation issue may be created from later sections until every
-gate is GO. Read-only contract-probe and decision-record work is allowed. A failed
-gate changes this SPEC; it is not an implementation detail.
+pre-implementation gate (G0, G1, G2A) is GO. Read-only contract-probe and
+decision-record work is allowed. A failed gate changes this SPEC; it is not an
+implementation detail.
+
+Gates are split by what they can honestly verify: G0, G1, and G2A are
+decision-and-evidence gates that precede implementation; R1 is a rollout gate
+verified against the implemented system. No pre-implementation gate requires
+production implementation to exist before implementation is authorized.
 
 ### G0 — Owner MVP exception
 
@@ -104,14 +110,32 @@ event and minimum version are recorded in the ADR amendment. If no released
 event provides a flushed transcript tail, the design is NO-GO; scanning unrelated
 home-directory sessions is not an accepted fallback.
 
-### G2 — Data policy
+### G2A — Data policy approval
 
 The Owner must approve an explicit opt-in disclosure covering visible user and
 assistant content, the limits in §11, local storage, promotion, recovery, disable,
 archive, and deletion behavior.
 
-Completion criterion: setup presents the disclosure before enabling ingestion;
-decline leaves the flag off and all existing prompt/tool governance working.
+Completion criterion: the disclosure text and the data-policy decisions above are
+Owner-approved and the approval identifies this SPEC revision. This gate is
+decision-only — like Slice 0, it freezes policy and disclosure text; it does not
+require the implemented setup experience to exist.
+
+### R1 — Consent UX verification (rollout gate)
+
+R1 is verified against the implemented system and never blocks Slice 0. It must
+be GO before any release that allows ingestion to be enabled through setup, and
+before the §17 default-on decision. Required evidence, on the installed setup
+path:
+
+1. setup presents the G2A-approved disclosure before ingestion can be enabled;
+2. declining leaves `codex_conversation_ingestion` off and all existing
+   prompt/RuleHost/tool governance working unchanged;
+3. declining never opens or reads the transcript;
+4. upgrade never enables ingestion and never bypasses consent implicitly.
+
+Completion criterion: executable BDD/E2E scenarios prove all four behaviors and
+are recorded against this SPEC revision.
 
 ## 4. Goals
 
@@ -342,9 +366,40 @@ silently.
 Concurrent fresh hook subprocesses use SQLite transactions and uniqueness/CAS,
 not process memory. Replayed hooks, batches, process restarts, forks, and
 crash-before-task-link must create no duplicate turn, tool call, pain, or task.
-Canonical pain ID remains the diagnosis-task dedup authority and is derived from
-the logical observation identity plus the versioned admission rule, never from a
-random trace ID.
+Canonical pain ID remains the diagnosis-task dedup authority and is deterministic,
+never a random trace ID.
+
+### Canonical pain identity compatibility contract
+
+Canonical pain identity has exactly one authority: the existing production pain
+canonicalization — the content-derived canonical ID in
+`production-pain-evidence.ts`, deduplicated through the unique
+`pain_events.canonical_pain_id` index — together with the admission path that
+owns correction-pain creation in the PD runtime. The host-observation layer
+contributes a normalized admission input to that authority; it never derives a
+second, parallel pain identity. This clause deliberately replaces the current
+correction-path practice of minting `correction_<traceId>` random IDs
+(`signal-collector-host.ts` `routeStrong`): a trace ID may survive as a
+non-identity correlation field, but never as dedup identity.
+
+Observation identity and pain identity are different keys with a mapping, never
+equated:
+
+- the Logical Observation Key (§6) deduplicates transcript/live observations and
+  carries lineage;
+- the canonical pain ID deduplicates admission and diagnosis tasks;
+- detection and admission run exactly once per logical observation (§12), so a
+  transcript replay of an already-admitted live event is an observation-level
+  no-op and cannot mint a second pain.
+
+When admission runs for an event that was never admitted live (for example, the
+legacy async hook was skipped), the host-observation module must feed the same
+normalized fields the live path would have produced (workspace, session, turn,
+tool, source, params, result, error, exit code) into the existing derivation, so
+the resulting canonical pain equals what the live path would have produced for
+the same tool call. §19 requires a compatibility test proving that a legacy live
+`PostToolUse` pain plus a transcript replay of the same tool call produce exactly
+one canonical pain and one pending Diagnostician task.
 
 ## 11. Bounded data and promotion policy
 
@@ -360,6 +415,15 @@ Conversation ingestion is explicit opt-in and uses a hybrid policy:
 - source identity, checkpoint, counts, degradation, and tombstone facts may
   remain after unpromoted content expires, but they contain no message text;
 - no UI or CLI offers session replay, full-text search, or bulk transcript export.
+
+The promotion window cannot complete atomically at admission: the "next completed
+assistant turn" does not exist yet when a pain is admitted. Admission therefore
+records a durable pending promotion tail (pain ID, rollout identity, trigger
+turn/item identity) in the same transaction that promotes the preceding window.
+The next completed assistant turn for that rollout satisfies and clears the
+pending tail. Crash, restart, and the reconciliation pass (§13) must complete or
+explicitly report a stale pending tail; a silently dropped tail is a defect,
+because diagnosis reads promoted evidence only (§14).
 
 Pruning runs on bounded ingestion/catch-up maintenance, not on the prompt or
 before-tool critical decision. It never deletes Owner decisions or the governance
@@ -378,7 +442,8 @@ user turn passes exactly once through the existing synchronous high-precision
 correction detector after agent-to-agent traffic is excluded. The detector and
 admission semantics are extracted from the OpenClaw-only wrapper into the
 host-observation module; OpenClaw and Codex use the same keyword store, rule
-version, score, admission gate, provenance semantics, and rate-limit authority.
+version, score, admission gate, and provenance semantics. Rate limiting follows
+the compatibility rule below rather than an unconditional shared authority.
 
 Required outcomes:
 
@@ -389,10 +454,21 @@ Required outcomes:
 - no signal → no pain and no diagnosis task;
 - duplicate delivery → no repeated detection or rate-limit consumption.
 
-Codex subprocesses must not use process-local fire-and-forget work or an
-in-memory rate-limit bucket as correctness authority. The rate-limit bucket is
-persisted transactionally in `trajectory.db`, keyed by Workspace, root session,
-rule version, and time window; OpenClaw and Codex consume the same authority.
+Codex admission correctness must not depend on process-local fire-and-forget work
+or an in-memory rate-limit bucket: every Codex hook is a fresh subprocess, so
+process-local state is dead on entry (ADR-0020). Correctness therefore must not
+depend on process-local rate limiting. The correction detector's STRONG
+per-session rate-limit bucket is persisted transactionally in `trajectory.db`
+for Codex admission, keyed by Workspace, root session, rule version, and time
+window. Cross-host rate-limit convergence is required only for rules whose
+admission semantics depend on a shared quota; it is not, by itself, a Slice B
+requirement. OpenClaw's existing in-memory correction rate limit and the
+tool-pain cooldown keep their current behavior — including the Codex cooldown
+inactivity ADR-0020 explicitly accepted with canonical pain idempotency as the
+guard. This SPEC does not reverse ADR-0020's persistence rejection for the
+tool-pain cooldown; a future shared-quota authority, if evidence requires one,
+is a separate ADR amendment recorded at G0.
+
 Admission and the durable submission of a pending Diagnostician task are awaited
 before the hook returns; LLM diagnosis itself is never awaited. Failure leaves an
 observable retryable pain/dead-letter state.
@@ -413,8 +489,9 @@ For each admitted pain:
 
 Because trajectory and Runtime V2 use separate SQLite stores, the operation
 cannot be one transaction. The host-observation module exposes one idempotent
-reconciliation pass for admitted pains lacking a task link. The Companion worker
-and CLI call that same pass; neither implements its own reconciliation logic.
+reconciliation pass for admitted pains lacking a task link and for promotion
+windows lacking their completed tail (§11). The Companion worker and CLI call
+that same pass; neither implements its own reconciliation logic.
 
 Automatic mode adds one real background responsibility. After G0, Companion is
 the unique lifecycle Owner:
@@ -422,15 +499,29 @@ the unique lifecycle Owner:
 - it discovers opted-in Workspaces from the canonical install manifest;
 - it starts at most one worker per canonical Workspace path;
 - the worker acquires the existing Runtime V2 lease before running a task;
-- it first catches up transcript lag, then reconciles pain-to-task links, then
-  leases `diagnostician`; downstream validated candidates continue through the
-  existing full-chain consumer semantics;
+- it first catches up transcript lag, then reconciles pain-to-task links and
+  pending promotion tails, then leases `diagnostician`; downstream validated
+  candidates continue through the existing full-chain consumer semantics;
 - expired leases use the existing recovery sweep;
 - provider outage produces existing retry/needs-attention state;
 - Companion exit, Workspace removal, ingestion disable, or consumer pause stops
   new leases without mutating evidence or Owner decisions;
 - multi-Workspace state is keyed by canonical Workspace path, never a module-level
   singleton value.
+
+`internalization_auto_consumer` is elevated from an OpenClaw service switch to
+the Workspace internalization execution authority: one flag ID, one definition in
+the existing feature-flag contract, two consumers. With the flag false, the
+OpenClaw auto-consumer stops leasing (unchanged existing behavior) and the
+Companion worker stops leasing `diagnostician` and downstream runner tasks. The
+pause is an execution pause, not an evidence freeze: transcript catch-up (gated
+by `codex_conversation_ingestion`, not by this flag) and the idempotent
+reconciliation pass continue, because they create no new LLM execution, and
+manual CLI diagnosis and `run-once` remain allowed as explicit Owner actions.
+The three controls form a documented ladder, not interchangeable toggles:
+`codex_conversation_ingestion = false` stops transcript reads;
+`internalization_auto_consumer = false` stops automatic task execution;
+`host.codex = false` stops all Codex PD host behavior.
 
 The current OpenClaw auto-consumer cannot simply be relabeled: it excludes
 `diagnostician` and has an OpenClaw lifecycle interface. Implementation may
@@ -531,12 +622,13 @@ Flag-off means no transcript open/read, no new Codex user/assistant observation,
 and no Codex conversation-signal detection. Existing prompt injection, RuleHost,
 and current tool evidence remain byte-for-byte compatible.
 
-Promotion to default-on requires G0–G2, all acceptance criteria, installed-bundle
+Promotion to default-on requires G0, G1, G2A, and R1, all acceptance criteria, installed-bundle
 tests, real-session E2E, one release of opt-in dogfood with no privacy/lineage P1,
 and an explicit Owner decision. Retirement is considered after one further stable
 default-on release; the decision is recorded rather than inferred from time.
 
-The existing `internalization_auto_consumer` pause remains the execution rollback;
+The existing `internalization_auto_consumer` pause remains the execution rollback
+under the consumer contract in §13;
 no Codex-specific consumer flag is added. Rollback order is ingestion flag,
 consumer pause, then `host.codex` only if all Codex governance must stop.
 
@@ -564,7 +656,8 @@ registration/dispatch and include:
 5. a high-confidence Owner correction creates one canonical pain and one pending
    Diagnostician task;
 6. ordinary non-signal conversation creates no pain;
-7. tool failure uses the same admission and task-dedup authority;
+7. tool failure uses the same admission and task-dedup authority; live and
+   transcript delivery of one tool call resolves to one canonical pain (§10);
 8. the selected `TURN_COMPLETE` path captures the final assistant turn or exposes
    lag that the worker catches up within 60 seconds;
 9. hidden/system content and raw paths are absent from DB, logs, stdout, and
@@ -576,11 +669,13 @@ registration/dispatch and include:
 13. diagnosis yields an evidence-linked candidate or explicit `needs_evidence`;
 14. Owner approval affects a later Codex prompt or RuleHost decision;
 15. flag-off, consumer pause, uninstall, and legacy migration are reversible;
-16. OpenClaw and Codex share a Workspace without evidence contamination.
+16. OpenClaw and Codex share a Workspace without evidence contamination;
+17. setup consent follows R1: the disclosure is presented, declining leaves all
+    governance intact, and declining causes no transcript read.
 
 The work is complete only when:
 
-- G0–G2 are GO;
+- G0, G1, and G2A are GO, and R1 is GO before rollout;
 - the correction-to-pain scenario proves the real production detector, not a
   pre-seeded admitted pain;
 - the final-turn scenario proves the selected real host event;
@@ -598,7 +693,7 @@ The work is complete only when:
 | Host contract drift    | Official-source pin plus minimum/current on-device fixtures and a fail-loud mismatch test.                   |
 | Parser/path trust      | Property/adversarial tests, symlink/junction/replacement cases, configured Codex home, post-read size check. |
 | Identity               | Fork/subagent/root-session fixtures and logical-vs-physical key mismatch tests.                              |
-| Idempotency            | Repeated live hook, transcript, batch, concurrent subprocess, restart, and crash-before-link tests.          |
+| Idempotency            | Repeated live hook, transcript, batch, concurrent subprocess, restart, crash-before-link, crash-before-promotion-tail, and live+transcript same-canonical-pain tests.        |
 | Data boundary          | 32-turn/7-day pruning, promotion window, tombstone, disable, archive, and protected-asset negatives.         |
 | Signal closure         | Real correction and non-signal controls through production detection/admission.                              |
 | Worker lifecycle       | Singleton/lease, multi-Workspace, crash, pause, uninstall, provider recovery, and Companion absence.         |
@@ -613,7 +708,8 @@ claimed production mechanism is removed or bypassed.
 
 ### Slice 0 — Decision evidence
 
-- complete G0–G2;
+- complete G0, G1, and G2A (decision-only: policy approval plus the frozen
+  disclosure text; R1 is verified later against the implementation);
 - run the Codex contract probe;
 - select and record `TURN_COMPLETE`, supported versions, identities, roots, and
   time budgets;
@@ -655,6 +751,7 @@ running in a hook. This slice is the point automatic closure becomes truthful.
 ### Slice D — Owner loop and rollout
 
 - extend existing evidence/health/review surfaces;
+- implement setup consent UX and produce passing R1 evidence before rollout;
 - run BDD and installed real Codex E2E;
 - retire new legacy hook registrations and verify migration;
 - make an explicit default-on or remain-opt-in decision.
@@ -763,12 +860,15 @@ turning that reassurance into surveillance anxiety or an Owner-facing log stream
 
 After G0 approval:
 
-1. amend ADR-0020 §10.3 and the public/private post-MVP roadmap;
+1. amend ADR-0020 §10.3 and the public/private post-MVP roadmap, and record the
+   §12 rate-limit compatibility decision (OpenClaw cooldowns unchanged; persisted
+   STRONG bucket for Codex admission) so the ADR's persistence rejection is not
+   silently drifted;
 2. add the Owner-readable BDD feature before changing observable behavior;
 3. update architecture navigation, Codex operator docs, and privacy disclosure;
 4. update private governance/product guidance without copying private content into
    the public repository;
 5. create a separate implementation plan and independently grabbable issues.
 
-Until G0–G2 are GO, this SPEC does not authorize MVP-Core expansion, transcript
+Until G0, G1, and G2A are GO, this SPEC does not authorize MVP-Core expansion, transcript
 collection, schema mutation, or background-runtime changes.
