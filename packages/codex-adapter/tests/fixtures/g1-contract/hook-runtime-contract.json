@@ -1,0 +1,82 @@
+{
+  "$comment": "G1 hook runtime contract — SOURCE-DERIVED evidence, pinned from the official openai/codex checkout (post-0.150 codex-rs, cross-checked against on-device 0.150.1 and 0.148.0 behavior). Each entry names the source file it was verified against. This file is the executable-evidence anchor for SPEC G1 item 5 (timeout/stdout/unknown-field/concurrency) and item 6/7 (rotation, roots); it complements the on-device probe fixtures, which alone cannot cover macOS/Linux roots or Codex-internal runtime behavior.",
+  "version": "1.0.0",
+  "verifiedAgainst": {
+    "source": "official openai/codex checkout, codex-rs (post rust-v0.150.1)",
+    "onDevice": ["0.150.1", "0.148.0"]
+  },
+  "hookTimeout": {
+    "source": "codex-rs/hooks/src/engine/discovery.rs normalize_command_hook + codex-rs/hooks/src/events/session_end.rs SESSION_END_DEFAULT_TIMEOUT_SEC/SESSION_END_MAX_TIMEOUT_SEC",
+    "defaultTimeoutSec": 600,
+    "minimumTimeoutSec": 1,
+    "sessionEnd": { "defaultSec": 1, "maxSec": 3, "clampedWhenExceeded": true },
+    "consequence": "SessionEnd must never be used for transcript work; Stop (600s class) is the turn-complete worker."
+  },
+  "hookConcurrency": {
+    "source": "codex-rs/hooks/src/engine/command_runner.rs MAX_CONCURRENT_ASYNC_HOOKS + events/session_end.rs teardown note",
+    "maxConcurrentAsyncHooks": 8,
+    "syncHooksBlockTurnLoop": true,
+    "sessionEndCancelsUnfinishedAsyncHooks": true,
+    "consequence": "PD runs sync hooks only; the hook must finish admission + durable enqueue and never await an LLM."
+  },
+  "stdoutContract": {
+    "source": "codex-rs/hooks/schema/generated/*.command.{input,output}.schema.json (additionalProperties:false) + codex-rs/hooks/src/schema.rs #[serde(deny_unknown_fields)] on *OutputWire + codex-rs/hooks/src/engine/output_parser.rs parse_json",
+    "inputSide": "every hook input schema sets additionalProperties:false — Codex never sends unknown top-level fields",
+    "outputSide": "every hook output wire struct denies unknown fields; an unknown field makes Codex fail the whole hook run (sync control handlers report 'hook returned invalid ... JSON output')",
+    "emptyStdout": "empty/whitespace stdout is a legal no-op: parse_completed treats it as Completed (stop.rs trimmed_stdout.is_empty branch) — proven on-device by the probe hook exiting with empty stdout",
+    "consequence": "the PD encoder must emit only schema-known fields; PD-side whitelist enforcement must fail loud before Codex would"
+  },
+  "officialOutputSchemas": {
+    "$comment": "frozen from codex-rs/hooks/schema/generated, used by the encoder contract test; top-level and hookSpecificOutput properties with additionalProperties:false",
+    "PreToolUse": {
+      "topLevel": ["continue", "decision", "hookSpecificOutput", "reason", "stopReason", "suppressOutput", "systemMessage"],
+      "hookSpecific": ["additionalContext", "hookEventName", "permissionDecision", "permissionDecisionReason", "updatedInput"],
+      "permissionDecisionEnum": ["allow", "deny", "ask"],
+      "hookEventNameConst": "PreToolUse"
+    },
+    "PostToolUse": {
+      "topLevel": ["continue", "decision", "hookSpecificOutput", "reason", "stopReason", "suppressOutput", "systemMessage"],
+      "hookSpecific": ["additionalContext", "hookEventName"],
+      "hookEventNameConst": "PostToolUse"
+    },
+    "UserPromptSubmit": {
+      "topLevel": ["continue", "decision", "hookSpecificOutput", "reason", "stopReason", "suppressOutput", "systemMessage"],
+      "hookSpecific": ["additionalContext", "hookEventName"],
+      "hookEventNameConst": "UserPromptSubmit"
+    },
+    "SessionStart": {
+      "topLevel": ["continue", "decision", "hookSpecificOutput", "reason", "stopReason", "suppressOutput", "systemMessage"],
+      "hookSpecific": ["additionalContext", "hookEventName"],
+      "hookEventNameConst": "SessionStart"
+    },
+    "Stop": {
+      "$comment": "Stop has NO hookSpecificOutput; its output is the universal field set only. PD emits empty stdout on Stop.",
+      "topLevel": ["continue", "decision", "reason", "stopReason", "suppressOutput", "systemMessage"]
+    }
+  },
+  "sessionRoots": {
+    "source": "codex-rs/utils/home-dir/src/lib.rs find_codex_home + codex-rs/core/src/config/mod.rs find_codex_home docs + on-device path shapes",
+    "layout": "<codex-home>/sessions/YYYY/MM/DD/rollout-<UTC-timestamp-dash-separated>-<rollout-uuid>.jsonl",
+    "configuredHome": {
+      "rule": "CODEX_HOME env var, when set and non-empty, MUST already exist and be a directory; the path is canonicalized before use; missing path or file path is a fatal error",
+      "verifiedOnDeviceWindows": "C:\\Users\\<user>\\.codex"
+    },
+    "defaultHome": {
+      "rule": "when CODEX_HOME is unset, the home directory comes from the dirs crate home_dir(): Windows %USERPROFILE%, macOS $HOME, Linux $HOME (passwd fallback); codex home = <home>/.codex",
+      "perOs": {
+        "windows": { "home": "%USERPROFILE%", "codexHome": "%USERPROFILE%\\.codex" },
+        "macos": { "home": "$HOME", "codexHome": "$HOME/.codex" },
+        "linux": { "home": "$HOME (passwd database fallback)", "codexHome": "$HOME/.codex" }
+      },
+      "note": "the default branch does NOT verify the directory exists; the configured branch does"
+    },
+    "evidenceClass": "Windows shapes are on-device evidence; the resolution RULES are source-pinned and OS-generic (single find_codex_home implementation, no per-OS branching beyond home_dir()). macOS/Linux on-device probes remain a rollout-support follow-up recorded in the G1 report."
+  },
+  "transcriptLifetime": {
+    "source": "codex-rs/rollout/src/recorder.rs (RolloutCmd::AddItems/Persist/Flush, single writer task, append semantics) + codex-rs/core/src/thread_rollout_truncation.rs",
+    "rotation": "none — one rollout file per rollout identity, opened append-only for the file's lifetime; no size-based or time-based rotation mechanism exists in codex-rs/rollout",
+    "archive": "closed rollouts stay in place under sessions/YYYY/MM/DD; the archived_sessions directory observed on-device is a Desktop-app user archive copy, not a writer mechanism",
+    "effectiveHistoryRewrite": "compaction appends a `compacted` record (replacement_history); rollback appends a ThreadRolledBack marker (num_turns) — both are RECORDS appended to the same file, never file rewrites; a decoder must interpret them for logical history while physical ordinals stay append-only",
+    "consequence": "checkpoint + tail handling never needs to track file replacement/rotation; only growth, compacted/ThreadRolledBack interpretation, and incomplete tail retry."
+  }
+}
