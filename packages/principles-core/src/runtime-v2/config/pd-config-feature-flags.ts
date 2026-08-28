@@ -9,7 +9,6 @@
 import {
   type EffectivePdConfig,
   type FeatureCategory,
-  VALID_FEATURE_CATEGORIES,
   DANGEROUS_KEYS,
 } from './pd-config-types.js';
 import { DEFAULT_FEATURE_FLAGS } from './pd-config-defaults.js';
@@ -95,17 +94,10 @@ export function computeFeatureFlagsFromConfig(effective: EffectivePdConfig): Fea
         enabled: userEntry.enabled,
       };
     } else {
-      // Unknown flag — accept as-is
-      if (!VALID_FEATURE_CATEGORIES.includes(userEntry.category)) {
-        warnings.push(`feature '${id}': invalid category '${userEntry.category}', ignored`);
-        continue;
-      }
-      flags[id] = {
-        id,
-        category: userEntry.category,
-        enabled: userEntry.enabled,
-      };
-      warnings.push(`feature '${id}': unknown flag accepted`);
+      // PRI-609: unknown flags are NOT effective capabilities. A config key
+      // that no production consumer reads must never appear enabled in the
+      // effective flag map — diagnose it and move on.
+      warnings.push(`feature '${id}': unknown flag ignored (not a registered capability)`);
     }
   }
 

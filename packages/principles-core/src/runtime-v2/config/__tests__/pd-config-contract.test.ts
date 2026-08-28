@@ -530,15 +530,39 @@ describe('Scenario 7: Feature flags from new config contract', () => {
     expect(nn(flags.flags.gfi).enabled).toBe(true);
   });
 
-  it('unknown flags are accepted with warning', () => {
+  it('unknown flags are diagnosed but never become effective capabilities (PRI-609)', () => {
     const raw = makeValidConfig();
     raw.features.custom_flag = { category: 'quiet', enabled: true };
     const result = validatePdConfig(raw);
     if (!result.ok) throw new Error('Expected ok');
     const effective = computeEffectivePdConfig(result.value);
     const flags = computeFeatureFlagsFromConfig(effective);
-    expect(nn(flags.flags.custom_flag).enabled).toBe(true);
-    expect(flags.warnings.some(w => w.includes('unknown flag'))).toBe(true);
+    expect(Object.hasOwn(flags.flags, 'custom_flag')).toBe(false);
+    expect(effective.warnings.some(w => w.includes("feature 'custom_flag': unknown flag ignored"))).toBe(true);
+  });
+
+  it('snake_case alias config controls the canonical flag the production consumer reads (PRI-609)', () => {
+    const raw = makeValidConfig();
+    raw.features.pain_evidence_admission = { category: 'quiet', enabled: false };
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error('Expected ok');
+    const effective = computeEffectivePdConfig(result.value);
+    const flags = computeFeatureFlagsFromConfig(effective);
+    expect(Object.hasOwn(flags.flags, 'pain_evidence_admission')).toBe(false);
+    expect(nn(flags.flags.painEvidenceAdmission).enabled).toBe(false);
+    expect(effective.warnings.some(w => w.includes('pain_evidence_admission'))).toBe(false);
+  });
+
+  it('canonical + alias configured with different values is a non-silent conflict; canonical wins (PRI-609)', () => {
+    const raw = makeValidConfig();
+    raw.features.painEvidenceAdmission = { category: 'quiet', enabled: true };
+    raw.features.pain_evidence_admission = { category: 'quiet', enabled: false };
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error('Expected ok');
+    const effective = computeEffectivePdConfig(result.value);
+    const flags = computeFeatureFlagsFromConfig(effective);
+    expect(nn(flags.flags.painEvidenceAdmission).enabled).toBe(true);
+    expect(effective.warnings.some(w => w.includes("feature 'painEvidenceAdmission': conflicting values"))).toBe(true);
   });
 });
 
