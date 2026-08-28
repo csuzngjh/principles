@@ -57,6 +57,8 @@ Every new or newly surfaced functional subsystem / hook / writer / reader must b
 
 Registration counts only when the production loader and a test exercise the flag. PRs introducing functional behavior without registration are rejected.
 
+Additionally (PRI-610): every **quiet** flag MUST carry a `QUIET_FLAG_LIFECYCLE` entry in `packages/principles-core/src/runtime-v2/feature-flags/feature-flag-lifecycle.ts` (Purpose / Default / Rollback / Graduation criteria / Retirement criteria / Exit path) in the same PR — `feature-flag-lifecycle.test.ts` fails CI otherwise. See `docs/process/feature-flag-lifecycle-census.md`.
+
 ### Anti-pattern Triggers
 
 The following phrases in an issue or PR description are **automatic stop signals** (referenced by stable ID `antipattern-*`). Verify with maintainer before proceeding:

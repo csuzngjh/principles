@@ -17,6 +17,16 @@ export type {
   FeatureFlagOverrideNormalization,
 } from './feature-flag-contract.js';
 
+// PRI-610 — lifecycle census (machine-checked by feature-flag-lifecycle.test.ts)
+export {
+  QUIET_FLAG_LIFECYCLE,
+} from './feature-flag-lifecycle.js';
+
+export type {
+  QuietFlagLifecycleDecision,
+  QuietFlagLifecycleEntry,
+} from './feature-flag-lifecycle.js';
+
 export {
   VALID_SURFACE_KINDS,
   VALID_MVP_CATEGORIES,
