@@ -291,7 +291,6 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
   it('default mode is dry-run', async () => {
     const dreamerTask = makeSucceededTask('dreamer-default', 'dreamer');
     mockDryRunListTasks([dreamerTask]);
-    process.on('unhandledRejection', (e) => console.error('UNHANDLED:', e));
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-default',
