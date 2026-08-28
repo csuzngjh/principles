@@ -1552,7 +1552,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-089 (incomplete branch coverage when fixing — sibling-branch flavor of the same EP-02 group), ERR-025 (tests prove isolated helper behavior, not production path), ERR-088 (non-unique assertion signals — same EP-09 verify-the-right-thing group).
 - **Source**: PR #1341 (self-review, GitHub issue #1337)
 - **Date**: 2026-08-17
-- **Recurrence**: None
+- **Recurrence**: Yes
+  - 2026-08-28 PRI-615 / PR #1432 (self-review round 1): a new fail-loud guard branch (`max_attempts` validation in `sqlite-task-store.rowToFailedTaskSummary`) shipped with only the happy path covered — the throw block's 2 lines were flagged by the codecov patch comment (the gate itself passed at 91.67%, but the uncovered-branch pattern recurred). Unlike the original incident the branch is NOT contract-impossible (a corrupted DB column reaches it), so the fix was the "add a test per branch" arm of the rule: a corrupt-row regression that writes `max_attempts = 0` below the `TaskRecordSchema` bound via a bound `UPDATE` and asserts `listFailedTasks` throws. Lesson flavor: fail-loud validation guards are legitimate branches, but each one must ship with a corrupt-input regression in the same PR — "the sibling guard was also uncovered" is the file's existing convention, not a license.
 
 ---
 
