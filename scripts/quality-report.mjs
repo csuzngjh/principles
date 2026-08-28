@@ -87,7 +87,7 @@ function printHelp() {
 
 Options:
   --month YYYY-MM   Report month (default: current month)
-  --output <path>   Custom output path (default: docs/.private/quality-reports/YYYY-MM.md)
+  --output <path>   Custom output path (default: $PD_PRIVATE_DOCS_DIR/quality-reports/YYYY-MM.md, or ~/principles-private/docs/quality-reports/YYYY-MM.md)
   --help, -h        Show this help
 `);
 }
