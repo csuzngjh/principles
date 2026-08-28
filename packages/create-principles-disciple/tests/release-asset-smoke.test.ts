@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extract as extractTar } from 'tar';
+import { isReleaseReadPathContained } from './release-containment';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
 const COMPONENT_NAMES = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'];
@@ -27,7 +28,12 @@ if (providedPublication !== undefined) {
 }
 const buildPublicationInternally = providedPublication === undefined;
 const internalPublicationDir = path.join(root, 'asset');
-const publicationDir = buildPublicationInternally ? internalPublicationDir : providedPublication;
+// Canonicalize the CI-provided directory: on Windows it arrives with mixed
+// separators (`D:\a\_temp/pd-publication-two`), which never lexically
+// matches the resolved read paths below (see release-containment.ts).
+const publicationDir = buildPublicationInternally
+  ? internalPublicationDir
+  : path.resolve(providedPublication);
 const assetDir = path.join(root, 'extracted');
 const homeDir = path.join(root, 'home');
 const workspaceDir = path.join(root, 'workspace');
@@ -67,8 +73,7 @@ beforeAll(async () => {
   const publishedArchive = path.resolve(path.join(publicationDir, 'asset.tar'));
   const publishedDigestSidecar = path.resolve(path.join(publicationDir, 'asset.tar.sha256'));
   for (const readPath of [publishedArchive, publishedDigestSidecar]) {
-    const contained = allowedRoots.some((allowedRoot) => readPath === allowedRoot || readPath.startsWith(allowedRoot + path.sep));
-    if (!contained) {
+    if (!isReleaseReadPathContained(readPath, allowedRoots)) {
       throw new Error(`Refusing to read outside the allowed roots: ${readPath}`);
     }
   }
@@ -109,13 +114,13 @@ describe('production self-contained release asset', () => {
     const tamperedArchive = path.resolve(path.join(root, 'tampered.tar'));
     const digestSidecar = path.resolve(path.join(publicationDir, 'asset.tar.sha256'));
     // Both read paths stay inside the allowed roots by construction; assert
-    // it explicitly before reading (containment inline, no helper). The
-    // allowed set matches beforeAll: the CI-provided publication lives
-    // OUTSIDE the test root, so it must be included when present.
+    // it explicitly before reading. The allowed set matches beforeAll: the
+    // CI-provided publication lives OUTSIDE the test root, so it must be
+    // included when present. isReleaseReadPathContained canonicalizes both
+    // sides (mixed-separator env input, see release-containment.ts).
     const allowedRoots = buildPublicationInternally ? [root] : [root, publicationDir];
     for (const readPath of [tamperedArchive, digestSidecar]) {
-      const contained = allowedRoots.some((allowedRoot) => readPath === allowedRoot || readPath.startsWith(allowedRoot + path.sep));
-      expect(contained, readPath).toBe(true);
+      expect(isReleaseReadPathContained(readPath, allowedRoots), readPath).toBe(true);
     }
     fs.copyFileSync(path.join(publicationDir, 'asset.tar'), tamperedArchive);
     fs.appendFileSync(tamperedArchive, 'tampered');

@@ -5,8 +5,11 @@ appId: party.principles.disciple.companion
 productName: PD Companion
 directories:
   output: release
-# The companion has NO runtime npm dependencies (electron + builder are
-# devDependencies), so the installer stays minimal: compiled main + lib + icon.
+# Runtime dependency: @principles/install-layout (real runtime import from
+# src/main + src/lib — the single install-directory truth, never duplicated
+# here). electron-builder auto-includes production node_modules alongside the
+# explicit file list; scripts/verify-package.mjs fails the build if the
+# install-layout executable JS is missing from the packaged app.asar.
 files:
   - dist/**/*
   - assets/**/*
