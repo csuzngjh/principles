@@ -29,9 +29,8 @@ event.
 
 | File | Source run | What it proves |
 | --- | --- | --- |
-| `normal-tool-final-turn.jsonl` | A | Ordinary turn: user `user.text` message, commentary + `final_answer` assistant messages, `custom_tool_call`/`_output` pair, `event_msg:item_completed` bridge, turn linkage |
+| `normal-tool-final-turn.jsonl` | A (+ later resume C) | Ordinary turn: user `user.text` message, commentary + `final_answer` assistant messages, `custom_tool_call`/`_output` pair, `event_msg:item_completed` bridge, turn linkage. Run C resumed this same rollout, so the file also carries the appended second turn — that append is the resume evidence |
 | `fork.jsonl` | B (fork of A) | New session id + `forked_from_id`; ordinals continue from the parent, inherited records are not copied |
-| `resume-append.jsonl` | C (resume of A) | Same rollout file/session id, second turn appended after resume |
 | `subagent-parent.jsonl` / `subagent-child.jsonl` | D | Subagent rollout: `thread_source: "subagent"`, `source.subagent.thread_spawn` lineage, ordinals restart at 0, `session_meta.session_id` equals the **parent** thread id while the filename uuid is the agent id |
 | `min-version-0.148.0.jsonl` | E | Minimum-version transcript structure |
 | `compacted-marker.jsonl` | real desktop archive | `compacted` record shape with `replacement_history` (all message texts replaced) |

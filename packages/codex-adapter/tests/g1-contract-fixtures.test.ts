@@ -126,7 +126,9 @@ describe('G1 lineage contracts', () => {
   });
 
   it('resume appends a second turn to the same rollout and session', () => {
-    const resumed = readTranscript('transcripts/resume-append.jsonl');
+    // Run C (codex exec resume) wrote into run A's rollout file; the fixture
+    // therefore carries two genuine user.text turns with distinct turn ids.
+    const resumed = readTranscript('transcripts/normal-tool-final-turn.jsonl');
     expect(payloadOf(resumed[0]).session_id).toBe(baseSessionId);
     const userTurns = resumed.filter((r) => {
       const p = payloadOf(r);
@@ -189,7 +191,7 @@ describe('G1 transcript failure modes are distinguishable', () => {
 
 describe('G1 fixtures exclude hidden and host-injected content', () => {
   const transcriptFiles = [
-    'normal-tool-final-turn.jsonl', 'fork.jsonl', 'resume-append.jsonl',
+    'normal-tool-final-turn.jsonl', 'fork.jsonl',
     'subagent-parent.jsonl', 'subagent-child.jsonl', 'min-version-0.148.0.jsonl',
   ];
   for (const file of transcriptFiles) {
