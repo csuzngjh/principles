@@ -630,9 +630,11 @@ export function updateDefaultRuntime(
 
 // ── Principles Output Language (PRI-332 P1-1) ─────────────────────────────
 
-/** Valid values for principles.outputLanguage in config.yaml */
-export const VALID_OUTPUT_LANGUAGES = ['zh-CN', 'en'] as const;
-export type OutputLanguage = typeof VALID_OUTPUT_LANGUAGES[number];
+// PRI-611: the output-language contract derives from the canonical core
+// authority (runtime-v2/language-directive.ts). Do NOT re-declare the value
+// list or default here — a drift guard test fails on local re-declaration.
+import { VALID_OUTPUT_LANGUAGES, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
+import type { OutputLanguage } from '@principles/core/runtime-v2';
 
 function isValidOutputLanguage(value: unknown): value is OutputLanguage {
   return typeof value === 'string' && (VALID_OUTPUT_LANGUAGES as readonly string[]).includes(value);
@@ -653,9 +655,6 @@ export interface OutputLanguageResultErr {
 }
 
 export type OutputLanguageResult = OutputLanguageResultOk | OutputLanguageResultErr;
-
-/** Default output language when not configured. */
-const DEFAULT_OUTPUT_LANGUAGE: OutputLanguage = 'zh-CN';
 
 /**
  * Read principles.outputLanguage from config.yaml.

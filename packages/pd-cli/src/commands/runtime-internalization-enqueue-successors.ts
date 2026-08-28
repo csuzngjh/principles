@@ -4,8 +4,9 @@ import {
   InternalizationOrchestrator,
   isPeerRunnerKind,
   hydratePITaskRecord,
+  PD_TASK_STATUSES,
 } from '@principles/core/runtime-v2';
-import type { CommitNextTaskResult } from '@principles/core/runtime-v2';
+import type { CommitNextTaskResult, PDTaskStatus } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface EnqueueSuccessorsOptions {
@@ -236,7 +237,7 @@ interface SuccessorIndexEntry {
 async function buildSuccessorIndex(
   stateManager: RuntimeStateManager,
 ): Promise<Map<string, SuccessorIndexEntry>> {
-  const allStatuses: ('pending' | 'retry_wait' | 'succeeded' | 'leased' | 'failed' | 'needs_human_review')[] = ['pending', 'retry_wait', 'succeeded', 'leased', 'failed', 'needs_human_review'];
+  const allStatuses: PDTaskStatus[] = [...PD_TASK_STATUSES];
   const index = new Map<string, SuccessorIndexEntry>();
   const results = await Promise.all(
     allStatuses.map(status => stateManager.listTasks({ status })),

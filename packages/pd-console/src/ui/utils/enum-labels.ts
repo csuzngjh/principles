@@ -96,7 +96,6 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'evolution_worker': '进化工作器',
     'empathy_observer': '共情观察器',
     'painEvidenceAdmission': '痛点证据准入',
-    'pain_evidence_admission': '痛点证据准入',
     'diagnostician_async_cli': '诊断器异步 CLI',
     'diagnostician_core_grounding': '诊断器核心锚定',
     'internalization_core_grounding': '内化核心锚定',

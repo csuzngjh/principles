@@ -29,6 +29,7 @@ import {
   getDefaultPdConfig,
 } from './pd-config-defaults.js';
 import { resolveProfile } from './pd-profile-constants.js';
+import { normalizeFeatureFlagOverrides } from '../feature-flags/feature-flag-contract.js';
 
 function resolveContextInjection(
   userPartial: PartialContextInjectionConfig | undefined,
@@ -65,11 +66,19 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
   const warnings: string[] = [];
   const featuresChangedFromDefault: string[] = [];
 
+  // PRI-609: normalize alias IDs onto canonical IDs before merging so a
+  // snake_case config key controls the runtime flag its camelCase production
+  // consumer reads, and canonical/alias conflicts are reported (never silent).
+  const { normalized: userFeatures, warnings: aliasWarnings } = normalizeFeatureFlagOverrides(
+    userConfig.features,
+  );
+  warnings.push(...aliasWarnings);
+
   // Merge features: user overrides for known flags, defaults for missing
   const features: Record<string, FeatureFlagEntry> = {};
   for (const [flagId, defaultEntry] of Object.entries(DEFAULT_FEATURE_FLAGS)) {
-    if (Object.hasOwn(userConfig.features, flagId)) {
-      const userEntry = userConfig.features[flagId];
+    if (Object.hasOwn(userFeatures, flagId)) {
+      const userEntry = userFeatures[flagId] as FeatureFlagEntry | undefined;
       if (!userEntry) {
         features[flagId] = { ...defaultEntry };
         continue;
@@ -101,13 +110,14 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     }
   }
 
-  // Add user-only features (not in defaults)
-  for (const [flagId, userEntry] of Object.entries(userConfig.features)) {
+  // User-only features (not in defaults) are NOT effective capabilities.
+  // PRI-609: an unknown key used to be inserted into the effective config
+  // ("unknown flag accepted as-is"), letting a config key look valid while no
+  // production consumer reads it. Unknown keys now produce a diagnostic only.
+  for (const flagId of Object.keys(userFeatures)) {
     if (DANGEROUS_KEYS.has(flagId)) continue;
     if (!Object.hasOwn(features, flagId)) {
-      featuresChangedFromDefault.push(flagId);
-      features[flagId] = { ...userEntry };
-      warnings.push(`feature '${flagId}': unknown flag accepted as-is`);
+      warnings.push(`feature '${flagId}': unknown flag ignored (not a registered capability)`);
     }
   }
 

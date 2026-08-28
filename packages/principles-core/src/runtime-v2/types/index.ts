@@ -15,6 +15,7 @@ export type {
 } from './principle-enums.js';
 
 export {
+  PRINCIPLE_STATUSES,
   PrincipleStatusSchema,
   PrinciplePrioritySchema,
   PrincipleScopeSchema,
