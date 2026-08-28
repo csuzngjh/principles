@@ -1,0 +1,35 @@
+{
+  "generatedAt": "2026-08-28T14:07:45.019Z",
+  "probeWorkspace": "D:/tmp/pd-g1-probe/ws (temporary, git-init empty repo)",
+  "hookConfig": "user-layer ~/.codex/hooks.json, command hooks, --dangerously-bypass-hook-trust",
+  "versions": {
+    "current": {
+      "cli": "0.150.1",
+      "os": "Windows 10.0.26200 x64",
+      "node": "v26.7.0"
+    },
+    "minimum": {
+      "cli": "0.148.0 (via npx @openai/codex@0.148.0)"
+    }
+  },
+  "runs": {
+    "A": "current version, one tool turn + final turn",
+    "B": "fork of A session",
+    "C": "resume of A session (same rollout file, appended turn)",
+    "D": "spawn_agent subagent (parent + child rollouts, SubagentStop)",
+    "E": "minimum version 0.148.0, tool turn + final turn"
+  },
+  "sanitization": [
+    "username path segments replaced with <user>",
+    "probe workspace path replaced with D:\\ws\\probe",
+    "session_meta.base_instructions / git / context_window dropped (host system prompt)",
+    "world_state and inter_agent_communication_metadata records dropped",
+    "response_item:reasoning records dropped (hidden reasoning, stored encrypted by Codex)",
+    "developer/system role messages dropped",
+    "user-role records whose content_item_kinds[0] != user.text had text replaced (host-injected context)",
+    "turn_context.collaboration_mode dropped (contains developer_instructions)",
+    "oversized tool outputs truncated; token_count event records dropped",
+    "malformed-line.jsonl and incomplete-tail.jsonl are documented mutations of run A",
+    "compacted-marker.jsonl structure copied from a real archive; all message texts replaced"
+  ]
+}

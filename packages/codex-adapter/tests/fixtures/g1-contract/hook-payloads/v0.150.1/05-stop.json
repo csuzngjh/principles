@@ -1,0 +1,11 @@
+{
+  "session_id": "01a048ae-b2a5-71a1-9faf-0226980f98ff",
+  "turn_id": "01a048ae-b344-7eb2-804b-a2fa34302fb3",
+  "transcript_path": "C:\\Users\\<user>.codex\\sessions\\2026\\08\\28\\rollout-2026-08-28T22-03-23-01a048ae-b2a5-71a1-9faf-0226980f98ff.jsonl",
+  "cwd": "D:\\ws\\probe",
+  "hook_event_name": "Stop",
+  "model": "gpt-5.6-sol",
+  "permission_mode": "bypassPermissions",
+  "stop_hook_active": false,
+  "last_assistant_message": "FIXTURE-A-DONE"
+}

@@ -1,0 +1,14 @@
+{
+  "session_id": "01a048af-f372-7c33-87be-e1c8b2633c9a",
+  "turn_id": "01a048b0-2fcc-7200-a8bb-5ea795d245ee",
+  "transcript_path": "C:\\Users\\<user>.codex\\sessions\\2026\\08\\28\\rollout-2026-08-28T22-04-45-01a048af-f372-7c33-87be-e1c8b2633c9a.jsonl",
+  "agent_transcript_path": "C:\\Users\\<user>.codex\\sessions\\2026\\08\\28\\rollout-2026-08-28T22-05-01-01a048b0-2f1a-7b61-a630-fdfe2d3eedfe.jsonl",
+  "cwd": "D:\\ws\\probe",
+  "hook_event_name": "SubagentStop",
+  "model": "gpt-5.6-sol",
+  "permission_mode": "bypassPermissions",
+  "stop_hook_active": false,
+  "agent_id": "01a048b0-2f1a-7b61-a630-fdfe2d3eedfe",
+  "agent_type": "default",
+  "last_assistant_message": "SUBFIX"
+}
