@@ -70,7 +70,7 @@ Install Principles Disciple if you want to:
 - review and activate durable behavioral guidance or enforcement;
 - observe and roll back changes to agent behavior through a local console.
 
-**Is it safe?** Yes. PD writes rules as local sandbox files and tracks everything via SQLite. All owner-approved behavior changes can be inspected, rolled back, or disabled by you.
+**Is it safe?** PD is local-first and reversible by design: rules are written as local sandbox files, everything is tracked in local SQLite, and all owner-approved behavior changes can be inspected, rolled back, or disabled by you. The only outbound data channel is an optional anonymous product telemetry feature — off by default and requiring your explicit consent (see [Privacy & optional telemetry](#privacy--optional-telemetry)).
 
 👉 **See human guide:** [`docs/runbooks/USER_GUIDE.md`](docs/runbooks/USER_GUIDE.md)
 
@@ -191,7 +191,15 @@ The console can show:
 - correction samples;
 - principle and implementation status.
 
-State is stored locally.
+State is stored locally. See [Privacy & optional telemetry](#privacy--optional-telemetry) for the exact boundaries of the one optional outbound channel.
+
+## Privacy & optional telemetry
+
+PD is local-first: principles, evidence, decision logs, and runtime state stay in your local workspace. The product includes an **optional anonymous product telemetry** channel that is **off by default** — no telemetry network request is made unless you explicitly run `pd telemetry enable --confirm`.
+
+When enabled, each participating workspace sends one minimized snapshot per day (PD version, host kind, UTC date, six boolean product milestones, one reliability flag, and a daily-rotating unlinkable identifier) to `https://principles-website.pages.dev/api/product-telemetry/snapshot`. Conversation content, prompts, source code, principle/pain text, file paths, repository URLs, usernames, emails, and stable identifiers are never sent.
+
+Inspect the exact payload with `pd telemetry preview`; disable at any time with `pd telemetry disable --confirm` or the `PD_TELEMETRY_DISABLED` environment variable. Full contract: [docs/architecture/product-telemetry.md](docs/architecture/product-telemetry.md).
 
 ## Using Codex / OpenAI with PD
 

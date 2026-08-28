@@ -1,6 +1,6 @@
 ---
 name: pd-mentor
-description: Interactive command guidance and scenario-based recommendations for using Principles Disciple itself. TRIGGER CONDITIONS: (1) The user explicitly asks about Principles Disciple / PD usage, commands, configuration, or workflows (2) The user explicitly asks to use PD built-in capabilities for a governance goal. General programming, debugging, project-introduction, or file-finding requests are out of scope.
+description: Interactive command guidance and scenario-based recommendations for using Principles Disciple itself, including PD-guided workspace cleaning and routine maintenance. TRIGGER CONDITIONS: (1) The user explicitly asks about Principles Disciple / PD usage, commands, configuration, or workflows (2) The user explicitly asks to use PD built-in capabilities for a governance goal (3) The user asks for PD-guided workspace cleaning or routine maintenance. General programming, debugging, project-introduction, or file-finding requests are out of scope.
 disable-model-invocation: true
 ---
 
