@@ -75,6 +75,7 @@ describe('root READMEs — local-first framing must disclose the optional outbou
     expect(rootReadmeEn).toContain('off by default');
     expect(rootReadmeEn).toContain('pd telemetry enable --confirm');
     expect(rootReadmeEn).toContain('pd telemetry disable --confirm');
+    expect(rootReadmeEn).toContain('Owner-configured LLM provider');
   });
 
   it('README_ZH.md mentions the telemetry endpoint, default-off state, and consent command', () => {
@@ -82,6 +83,7 @@ describe('root READMEs — local-first framing must disclose the optional outbou
     expect(rootReadmeZh).toContain('默认关闭');
     expect(rootReadmeZh).toContain('pd telemetry enable --confirm');
     expect(rootReadmeZh).toContain('pd telemetry disable --confirm');
+    expect(rootReadmeZh).toContain('Owner 配置的 LLM provider');
   });
 
   it('neither root README claims unconditional local-only storage', () => {
