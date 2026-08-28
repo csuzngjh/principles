@@ -63,4 +63,119 @@ describe('native release target matrix', () => {
       expect(quickWorkflow).toContain(`- '${payloadPath}'`);
     }
   });
+
+  it('publishes full-product serially in one job whose step order is the dependency order', () => {
+    const publishWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'publish-npm.yml'), 'utf8');
+    const actionYml = fs.readFileSync(path.join(repoRoot, '.github', 'actions', 'publish-npm-package', 'action.yml'), 'utf8');
+
+    // The dispatch choice list keeps every single-package option and adds
+    // full-product (default unchanged).
+    expect(publishWorkflow).toMatch(/type: choice\s+options:\s+[\s\S]*- full-product/);
+    expect(publishWorkflow).toMatch(/- principles-disciple\s+[\s\S]*- '@principles\/core'/);
+    expect(publishWorkflow).toMatch(/default: 'principles-disciple'/);
+
+    // --- The REAL execution order: the publish-full-product job's step
+    // sequence. A single job runs steps strictly in order and a failed
+    // step stops the job, so upstream publish failures block every
+    // downstream package — unlike matrix entries, whose declaration order
+    // is NOT an execution guarantee (max-parallel only caps concurrency;
+    // review P1 round 2, 2026-08-28).
+    const serialStart = publishWorkflow.indexOf('publish-full-product:');
+    if (serialStart < 0) {
+      throw new Error('publish-npm.yml is missing the publish-full-product job');
+    }
+    const serialBodyStart = publishWorkflow.indexOf('\n', serialStart) + 1;
+    const serialRest = publishWorkflow.slice(serialBodyStart);
+    const nextJobOffset = serialRest.search(/^[a-zA-Z][a-zA-Z0-9-]*:$/m);
+    const serialJob = nextJobOffset >= 0 ? serialRest.slice(0, nextJobOffset) : serialRest;
+
+    expect(serialJob).toMatch(/if: needs\.detect\.outputs\.is_full_product == 'true'/);
+    // One job, no matrix scheduling: the steps themselves are the order.
+    expect(serialJob).not.toContain('strategy:');
+    expect(serialJob).not.toMatch(/^\s*max-parallel:/m);
+    // Upstream failure blocks downstream: plain sequential steps with no
+    // error tolerance and no always/failure overrides.
+    expect(serialJob).not.toContain('continue-on-error');
+    expect(serialJob).not.toMatch(/if:\s*(always|failure)\(\)/);
+    const serialUsages = serialJob.match(/uses: \.\/\.github\/actions\/publish-npm-package/g) ?? [];
+    expect(serialUsages).toHaveLength(7);
+
+    const order = [...serialJob.matchAll(/pkg_dir: ([a-z-]+)\n/g)].map((match) => match[1] ?? '');
+    expect(order).toEqual([
+      'principles-core',
+      'install-layout',
+      'host-runtime',
+      'codex-adapter',
+      'pd-cli',
+      'openclaw-plugin',
+      'create-principles-disciple',
+    ]);
+    const at = (name: string): number => order.indexOf(name);
+    // install-layout precedes host-runtime: host-runtime declares an EXACT
+    // runtime dependency on @principles/install-layout@0.1.0 (currently
+    // unpublished on npm), so publishing host-runtime first would ship a
+    // package whose dependency cannot resolve.
+    expect(at('install-layout')).toBeLessThan(at('host-runtime'));
+    expect(at('host-runtime')).toBeLessThan(at('codex-adapter'));
+    expect(at('codex-adapter')).toBeLessThan(at('pd-cli'));
+    expect(at('pd-cli')).toBeLessThan(at('openclaw-plugin'));
+    // The installer re-bundles the freshly published plugin (lockstep), so
+    // it must publish last.
+    expect(at('openclaw-plugin')).toBeLessThan(at('create-principles-disciple'));
+
+    // The matrix publish job no longer serves full-product runs: it stays
+    // for single-package dispatch / push / schedule only.
+    expect(publishWorkflow).toMatch(/publish:\s*[\s\S]{0,900}?if: needs\.detect\.outputs\.matrix != '\[\]' && needs\.detect\.outputs\.is_full_product != 'true'/);
+    // detect emits the gate for both dispatch shapes and non-dispatch paths.
+    expect(publishWorkflow).toContain('is_full_product=$IS_FULL');
+    expect(publishWorkflow).toContain('is_full_product=false');
+    expect(publishWorkflow).toMatch(/outputs:\s*[\s\S]{0,200}?is_full_product: \$\{\{ steps\.detect\.outputs\.is_full_product \}\}/);
+
+    // The shared publish action gives host-runtime its own registry
+    // preflight for the exact install-layout dependency (fail loud with a
+    // next action instead of publishing an uninstallable package).
+    expect(actionYml).toMatch(/host-runtime\)[\s\S]{0,600}?check_published "@principles\/install-layout"/);
+    // The single-package matrix path carries the same preflight.
+    expect(publishWorkflow).toMatch(/"host-runtime" \][\s\S]{0,600}?check_published "@principles\/install-layout"/);
+
+    // Credentials boundary: composite actions cannot read the secrets
+    // context, so the action must declare token inputs and the serial job
+    // must pass them explicitly on every step (review P1 round 3).
+    expect(actionYml).not.toContain('secrets.');
+    expect(actionYml).toMatch(/NODE_AUTH_TOKEN: \$\{\{ inputs\.npm_token \}\}/);
+    expect(actionYml).toMatch(/GITHUB_TOKEN: \$\{\{ inputs\.github_token \}\}/);
+    expect(actionYml).toMatch(/CLAWHUB_TOKEN: \$\{\{ inputs\.clawhub_token \}\}/);
+    const tokenProps = ['npm_token', 'github_token', 'clawhub_token'];
+    for (const prop of tokenProps) {
+      const usages = serialJob.match(new RegExp(`${prop}: \\$\\{\\{ secrets\\.[A-Z_]+ \\}\\}`, 'g')) ?? [];
+      expect(usages).toHaveLength(7);
+    }
+
+    // Common build order (both publish paths) must build install-layout
+    // before host-runtime: a clean `npm ci` leaves install-layout/dist
+    // absent, and host-runtime's tsc imports its types entry — building
+    // host-runtime first fails with TS2307 before any publish runs
+    // (reproduced locally; review P1 round 3).
+    const buildOrder = (text) => {
+      const core = text.indexOf('Build core');
+      const install = text.indexOf('Build install layout');
+      const host = text.indexOf('Build host runtime');
+      return core >= 0 && core < install && install < host;
+    };
+    expect(buildOrder(serialJob)).toBe(true);
+    expect(buildOrder(publishWorkflow.slice(publishWorkflow.indexOf('  publish:'), publishWorkflow.indexOf('  publish-full-product:')))).toBe(true);
+
+    // Push-path detection order also puts install-layout before host-runtime.
+    expect(publishWorkflow).toMatch(/check_and_add "install-layout"[\s\S]{0,300}?check_and_add "host-runtime"/);
+
+    // One release train = one full-matrix verification: the reusable
+    // full-matrix workflow is referenced exactly once.
+    const fullMatrixReference = 'uses: ./.github/workflows/release-reproducibility-full.yml';
+    const fullMatrixUses = publishWorkflow.split(fullMatrixReference).length - 1;
+    expect(fullMatrixUses).toBe(1);
+
+    // Single-package dispatch semantics survive: the plugin lockstep case
+    // still pairs openclaw-plugin with create-principles-disciple.
+    expect(publishWorkflow).toMatch(/"principles-disciple"\)[\s\S]*openclaw-plugin[\s\S]*create-principles-disciple/);
+  });
 });

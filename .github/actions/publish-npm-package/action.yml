@@ -1,0 +1,446 @@
+name: Publish one npm package
+description: >-
+  Shared per-package publish logic for the full-product release train in
+  publish-npm.yml. One job calls this action SEVEN times as sequential
+  steps in dependency order — the step order IS the execution order, and a
+  failed step stops the job, so an upstream publish failure blocks every
+  downstream package (no matrix scheduling involved). The caller job MUST
+  grant permissions contents:write and id-token:write, and MUST have run
+  checkout (fetch-depth: 0), setup-node (registry-url), npm ci, and the
+  common core/host-runtime/install-layout builds before invoking.
+inputs:
+  pkg_dir:
+    description: 'Workspace directory under packages/ (e.g. principles-core)'
+    required: true
+    type: string
+  npm_name:
+    description: 'npm package name (e.g. @principles/core)'
+    required: true
+    type: string
+  version_bump:
+    description: 'auto | patch | minor | major'
+    required: true
+    type: string
+  npm_token:
+    description: 'npm registry token (composite actions cannot read the secrets context — the caller must pass it)'
+    required: true
+    type: string
+  github_token:
+    description: 'GitHub token for the plugin release step (passed in by the caller)'
+    required: false
+    type: string
+    default: ''
+  clawhub_token:
+    description: 'ClawHub marketplace token; empty skips the sync (passed in by the caller)'
+    required: false
+    type: string
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Get npm latest version
+      id: npm-version
+      shell: bash
+      run: |
+        NPM_VERSION=$(npm view "${{ inputs.npm_name }}" version 2>/dev/null || echo "0.0.0")
+        echo "npm_version=$NPM_VERSION" >> "$GITHUB_OUTPUT"
+        echo "Latest npm version of ${{ inputs.npm_name }}: $NPM_VERSION"
+
+    - name: Analyze commits for version bump
+      id: analyze
+      if: ${{ github.event_name == 'push' || inputs.version_bump == 'auto' }}
+      shell: bash
+      run: |
+        NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
+        LAST_TAG="v$NPM_VERSION"
+
+        if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
+          COMMITS=$(git log "$LAST_TAG..HEAD" --oneline)
+        else
+          COMMITS=$(git log -10 --oneline)
+        fi
+
+        echo "Commits since npm v$NPM_VERSION:"
+        echo "$COMMITS"
+
+        BUMP="patch"
+
+        if echo "$COMMITS" | grep -qE "^[a-f0-9]+ (feat|feature)(\(.+\))?!:"; then
+          BUMP="major"
+        elif echo "$COMMITS" | grep -qE "^[a-f0-9]+ .+!:"; then
+          BUMP="major"
+        elif echo "$COMMITS" | grep -qE "^[a-f0-9]+ (feat|feature)(\(.+\))?:"; then
+          BUMP="minor"
+        fi
+
+        echo "Detected version bump: $BUMP"
+        echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+
+    - name: Verify registry dependencies are published
+      # Publish-order safety net: a package whose runtime dependency is
+      # absent from the registry breaks `npm install` for every consumer.
+      # The retry loop tolerates registry propagation lag from a package
+      # published moments earlier in the release train.
+      shell: bash
+      run: |
+        check_published() {
+          local PKG="$1"
+          for attempt in 1 2 3 4 5; do
+            if npm view "$PKG" version >/dev/null 2>&1; then
+              echo "$PKG is published on the registry (lookup attempt $attempt)."
+              return 0
+            fi
+            echo "Attempt $attempt/5: $PKG not yet visible on the registry; waiting 15s..."
+            sleep 15
+          done
+          echo "::error::$PKG is not published. ${{ inputs.npm_name }} depends on it — publishing now would make 'npm install ${{ inputs.npm_name }}' fail dependency resolution. Publish $PKG first, then retry this package."
+          exit 1
+        }
+        case "${{ inputs.pkg_dir }}" in
+          host-runtime)
+            # host-runtime declares an EXACT runtime dependency on
+            # @principles/install-layout@0.1.0 — it must exist on the
+            # registry BEFORE host-runtime publishes (review P1 fix,
+            # 2026-08-28).
+            check_published "@principles/install-layout"
+            ;;
+          codex-adapter)
+            check_published "@principles/host-runtime"
+            ;;
+          pd-cli)
+            check_published "@principles/host-runtime"
+            check_published "@principles/codex-adapter"
+            check_published "@principles/install-layout"
+            ;;
+          create-principles-disciple)
+            check_published "@principles/host-runtime"
+            check_published "@principles/install-layout"
+            ;;
+        esac
+
+    - name: Build target package
+      shell: bash
+      run: |
+        PKG_DIR="${{ inputs.pkg_dir }}"
+        if [ "$PKG_DIR" = "openclaw-plugin" ]; then
+          npm run build --workspace=principles-disciple
+        elif [ "$PKG_DIR" = "pd-cli" ]; then
+          # pd-cli imports types from principles-disciple — build it first
+          # (same ordering the create-principles-disciple branch uses).
+          npm run build --workspace=principles-disciple
+          npm run build --workspace=@principles/pd-cli
+        elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
+          # esbuild first (cleans dist, produces bundle.js), then tsc --emitDeclarationOnly
+          # (adds .d.ts without overwriting esbuild's .js output). Both needed: pd-cli
+          # imports types from principles-disciple, bundle-plugin.mjs needs bundle.js.
+          npm run build:production --workspace=principles-disciple
+          npm run build:types --workspace=principles-disciple
+          npm run build --workspace=@principles/pd-cli
+          npm run build --workspace=@principles/pd-console
+          cd packages/create-principles-disciple && npm run build
+        elif [ "$PKG_DIR" = "host-runtime" ]; then
+          npm run build --workspace=@principles/host-runtime
+        elif [ "$PKG_DIR" = "install-layout" ]; then
+          npm run build --workspace=@principles/install-layout
+        elif [ "$PKG_DIR" = "codex-adapter" ]; then
+          npm run build --workspace=@principles/codex-adapter
+        fi
+
+    - name: Verify package dry-run
+      shell: bash
+      run: |
+        set -o pipefail
+        cd "packages/${{ inputs.pkg_dir }}"
+        npm pack --dry-run 2>&1 | head -50
+
+    - name: Determine version bump type
+      id: bump
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.version_bump }}" != "auto" ]; then
+          echo "type=${{ inputs.version_bump }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "type=${{ steps.analyze.outputs.bump || 'patch' }}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Bump version
+      id: version
+      shell: bash
+      run: |
+        cd "packages/${{ inputs.pkg_dir }}"
+        BUMP="${{ steps.bump.outputs.type }}"
+        NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
+        LOCAL_VERSION=$(node -p "require('./package.json').version")
+
+        echo "Version check:"
+        echo "  - npm latest: $NPM_VERSION"
+        echo "  - local: $LOCAL_VERSION"
+
+        if [ "$NPM_VERSION" = "0.0.0" ]; then
+          echo "Package not yet published on npm — using local version $LOCAL_VERSION"
+          echo "version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "old_version=$NPM_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Bumped: new package at $LOCAL_VERSION"
+        else
+          if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
+            echo "Local version ($LOCAL_VERSION) differs from npm ($NPM_VERSION)"
+            echo "Resetting to npm version before bump..."
+            npm version "$NPM_VERSION" --no-git-tag-version
+          else
+            echo "Local version ($LOCAL_VERSION) matches npm ($NPM_VERSION)"
+          fi
+
+          # --no-git-tag-version: only update package.json. Do NOT let
+          # `npm version` create a git commit or a v$VERSION tag here —
+          # the "Create Git tag and push" step below owns tag creation
+          # (tag-only release; we no longer push to main). Letting npm
+          # version create the tag would collide with `git tag -a` below
+          # (same name) and would also require git identity on the
+          # runner, which is not reliably set.
+          npm version "$BUMP" --no-git-tag-version
+
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "old_version=$NPM_VERSION" >> "$GITHUB_OUTPUT"
+
+          echo "Bumped: $NPM_VERSION -> $NEW_VERSION"
+        fi
+
+    - name: Sync version to all files
+      if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
+      shell: bash
+      run: |
+        VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
+        echo "Syncing version $VERSION to all files..."
+
+        PLUGIN_JSON="packages/openclaw-plugin/openclaw.plugin.json"
+        if [ -f "$PLUGIN_JSON" ]; then
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$PLUGIN_JSON"
+          echo "Synced: $PLUGIN_JSON"
+        fi
+
+        DIST_PLUGIN_JSON="packages/openclaw-plugin/dist/openclaw.plugin.json"
+        if [ -f "$DIST_PLUGIN_JSON" ]; then
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$DIST_PLUGIN_JSON"
+          echo "Synced: $DIST_PLUGIN_JSON"
+        fi
+
+        ROOT_PKG="package.json"
+        if [ -f "$ROOT_PKG" ]; then
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$ROOT_PKG"
+          echo "Synced: $ROOT_PKG"
+        fi
+
+        README="README.md"
+        if [ -f "$README" ]; then
+          sed -i "s/(v[0-9]\+\.[0-9]\+\.[0-9]\+)/(v$VERSION)/g" "$README"
+          echo "Synced: $README"
+        fi
+
+        README_ZH="README_ZH.md"
+        if [ -f "$README_ZH" ]; then
+          sed -i "s/(v[0-9]\+\.[0-9]\+\.[0-9]\+)/(v$VERSION)/g" "$README_ZH"
+          echo "Synced: $README_ZH"
+        fi
+
+        echo "All files synced to version $VERSION"
+
+    - name: Generate changelog
+      id: changelog
+      shell: bash
+      run: |
+        NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
+        LAST_TAG="v$NPM_VERSION"
+
+        if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
+          COMMITS=$(git log "$LAST_TAG..HEAD" --pretty=format:"- %s (%h)" --no-merges)
+        else
+          COMMITS=$(git log -20 --pretty=format:"- %s (%h)" --no-merges)
+        fi
+
+        FEATURES=$(echo "$COMMITS" | grep -E "^- feat" || true)
+        FIXES=$(echo "$COMMITS" | grep -E "^- fix" || true)
+        OTHER=$(echo "$COMMITS" | grep -vE "^- (feat|fix)" || true)
+
+        CHANGELOG="## What's Changed\n\n"
+
+        if [ -n "$FEATURES" ]; then
+          CHANGELOG+="### Features\n$FEATURES\n\n"
+        fi
+
+        if [ -n "$FIXES" ]; then
+          CHANGELOG+="### Bug Fixes\n$FIXES\n\n"
+        fi
+
+        if [ -n "$OTHER" ]; then
+          CHANGELOG+="### Other Changes\n$OTHER\n\n"
+        fi
+
+        CHANGELOG+="\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LAST_TAG}...v${{ steps.version.outputs.version }}"
+
+        echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
+        echo -e "$CHANGELOG" >> "$GITHUB_OUTPUT"
+        echo "EOF" >> "$GITHUB_OUTPUT"
+
+    - name: Publish to npm
+      shell: bash
+      run: |
+        cd "packages/${{ inputs.pkg_dir }}"
+        npm publish --provenance --access public
+      env:
+        NODE_AUTH_TOKEN: ${{ inputs.npm_token }}
+
+    - name: Create Git tag and push
+      if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
+      shell: bash
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        OLD_VERSION="${{ steps.version.outputs.old_version }}"
+
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        # Tag the release on the current HEAD (the commit that triggered
+        # this workflow run). We intentionally do NOT `git commit --amend`
+        # the trigger commit nor `git push origin HEAD:main --force-with-lease`:
+        # main is branch-protected (no force-push, requires PR + "Verify
+        # Merge Gate" status check), so any direct push to refs/heads/main
+        # is rejected with GH006, which has made this job fail on every
+        # main push since the branch protection was enabled.
+        #
+        # Tag refs (refs/tags/*) are NOT covered by branch protection, and
+        # this job already has `permissions: contents: write`, so pushing
+        # the tag succeeds. The version-sync file edits made earlier in
+        # this job (openclaw.plugin.json, README, root package.json) stay
+        # in the runner working tree and are not written back to main;
+        # that is acceptable because the next publish run's "Bump version"
+        # step resets the local version to the npm version via
+        # `npm version $NPM_VERSION --no-git-tag-version` before bumping.
+        git tag -a "v$VERSION" -m "Release v$VERSION"
+        git push origin "v$VERSION"
+        echo "Created and pushed tag: v$VERSION (from npm v$OLD_VERSION)"
+
+    - name: Create GitHub Release
+      if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
+      uses: softprops/action-gh-release@v3
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        name: Release v${{ steps.version.outputs.version }}
+        body: ${{ steps.changelog.outputs.changelog }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+
+    - name: Sync to ClawHub marketplace
+      # The ClawHub marketplace does NOT auto-sync from npm (no trusted
+      # publisher configured), so without this step the marketplace stays
+      # stale after every release. Runs after npm publish + release so a
+      # marketplace failure never blocks the primary npm channel.
+      #
+      # Timeout fallback (known issue: server-side inspection of this
+      # ~470-file package exceeds the CLI's 120s upload timeout, and the
+      # CLI's built-in 5x-retry then races and hangs):
+      #   1. best-effort patch the freshly installed CLI's upload timeout
+      #      up to 600s (same patch we verified locally);
+      #   2. bound every attempt with an outer `timeout` guard +
+      #      --wait-timeout, and retry once;
+      #   3. success is judged by `clawhub package inspect` seeing the
+      #      version, not by the publish command's exit code alone;
+      #   4. if both attempts fail, degrade to a warning + manual
+      #      fallback instructions instead of failing the release.
+      if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
+      continue-on-error: true
+      timeout-minutes: 25
+      env:
+        CLAWHUB_TOKEN: ${{ inputs.clawhub_token }}
+      shell: bash
+      run: |
+        set -u
+
+        if [ -z "${CLAWHUB_TOKEN:-}" ]; then
+          echo "::warning::CLAWHUB_TOKEN secret is not set — skipping ClawHub marketplace sync. Add the secret (ClawHub API token) to enable it."
+          exit 0
+        fi
+
+        # CI auth: the CLI reads its token from a global config file,
+        # overridable via CLAWHUB_CONFIG_PATH.
+        CFG_DIR="$(mktemp -d)"
+        printf '{\n  "registry": "https://clawhub.ai",\n  "token": "%s"\n}\n' "$CLAWHUB_TOKEN" > "$CFG_DIR/config.json"
+        chmod 600 "$CFG_DIR/config.json"
+        export CLAWHUB_CONFIG_PATH="$CFG_DIR/config.json"
+
+        npm install -g clawhub@latest
+        clawhub -V  # note: this CLI exposes -V/--cli-version, not --version
+
+        # Best-effort: raise the CLI's upload timeout (120s in published
+        # builds) to 600s. Non-fatal — the outer timeout guard below
+        # covers the case where the patch pattern does not match.
+        GLOBAL_HTTP_JS="$(npm root -g)/clawhub/dist/http.js"
+        if [ -f "$GLOBAL_HTTP_JS" ] && grep -q "UPLOAD_TIMEOUT_MS" "$GLOBAL_HTTP_JS"; then
+          sed -i -E 's/(UPLOAD_TIMEOUT_MS = )[0-9_]+/\1600_000/' "$GLOBAL_HTTP_JS" || true
+          grep -n "UPLOAD_TIMEOUT_MS =" "$GLOBAL_HTTP_JS" | head -1
+        fi
+
+        VERSION="$(node -p "require('./packages/openclaw-plugin/package.json').version")"
+        SRC="packages/openclaw-plugin"
+        echo "Publishing ClawHub marketplace version: $VERSION"
+
+        attempt() {
+          local N="$1"
+          echo "--- ClawHub publish attempt $N ---"
+          # Outer hard bound: upload (<=600s patched) + wait for scan.
+          timeout 480 clawhub package publish "$SRC" --version "$VERSION" --wait --wait-timeout 240 || true
+          # Judge success by the version being visible on the marketplace,
+          # not by the publish exit code (a --wait-timeout expiry can
+          # outlive a successful upload while the scan is still pending).
+          if clawhub package inspect "principles-disciple" --version "$VERSION" >/dev/null 2>&1; then
+            echo "::notice::ClawHub marketplace shows v$VERSION (attempt $N)."
+            return 0
+          fi
+          echo "v$VERSION not visible on ClawHub yet (attempt $N)."
+          return 1
+        }
+
+        if attempt 1; then
+          echo "ClawHub marketplace sync succeeded."
+          exit 0
+        fi
+
+        echo "Attempt 1 failed — waiting 30s before retry..."
+        sleep 30
+        if attempt 2; then
+          echo "ClawHub marketplace sync succeeded on retry."
+          exit 0
+        fi
+
+        {
+          echo "## ⚠️ ClawHub marketplace sync failed"
+          echo ""
+          echo "npm \`${VERSION}\` published successfully; the ClawHub upload timed out twice."
+          echo "The package may still appear later (server-side scan can be slow)."
+          echo ""
+          echo "Manual fallback (on a machine with ClawHub CLI login):"
+          echo '```bash'
+          echo "cd packages/openclaw-plugin"
+          echo "clawhub package publish . --version ${VERSION} --wait"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        echo "::warning::ClawHub marketplace sync failed for v${VERSION} — npm publish succeeded. See step summary for the manual fallback command."
+        exit 1
+
+    - name: Summary
+      shell: bash
+      run: |
+        echo "## Release Summary" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Package | \`${{ inputs.npm_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Directory | \`packages/${{ inputs.pkg_dir }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Version | \`v${{ steps.version.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Bump Type | \`${{ steps.bump.outputs.type }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Trigger | \`${{ github.event_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "Published to npm and GitHub" >> "$GITHUB_STEP_SUMMARY"
