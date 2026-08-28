@@ -39,6 +39,13 @@ jobs:
       - name: Package NSIS installer
         run: npm run dist --workspace=@principles/pd-companion
 
+      # Fail the build if the packaged app.asar lacks the runtime dependency
+      # (@principles/install-layout) or its Electron main entry cannot resolve
+      # it — checking only that the setup.exe file exists let a broken package
+      # through to end users (0.1.1 gap; see scripts/verify-package.mjs).
+      - name: Verify packaged app contains runtime dependency
+        run: npm run verify-package --workspace=@principles/pd-companion
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

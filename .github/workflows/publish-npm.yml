@@ -9,6 +9,12 @@ on:
         default: 'principles-disciple'
         type: choice
         options:
+          # full-product: one release train — the full release matrix runs
+          # ONCE and all 7 packages publish in dependency order (matrix
+          # max-parallel: 1) inside this single workflow run. Replaces the
+          # old pattern of 7 manual dispatches, each re-running the full
+          # cross-platform matrix.
+          - full-product
           - principles-disciple
           - '@principles/core'
           - '@principles/pd-cli'
@@ -72,6 +78,19 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             INPUT="${{ github.event.inputs.package }}"
             case "$INPUT" in
+              "full-product")
+                # Single release train: publish every package in dependency
+                # order in ONE run. The publish matrix is sequential
+                # (max-parallel: 1) so each entry lands on the registry
+                # before its dependents run their pre-publish registry
+                # checks. Order (dependency-first like the push path, with
+                # pd-cli before the plugin so its registry deps are all
+                # fresh): core → host-runtime → install-layout →
+                # codex-adapter → pd-cli → principles-disciple (plugin) →
+                # create-principles-disciple (installer re-bundles the
+                # freshly published plugin — lockstep preserved).
+                echo 'matrix=[{"pkg_dir":"principles-core","npm_name":"@principles/core"},{"pkg_dir":"host-runtime","npm_name":"@principles/host-runtime"},{"pkg_dir":"install-layout","npm_name":"@principles/install-layout"},{"pkg_dir":"codex-adapter","npm_name":"@principles/codex-adapter"},{"pkg_dir":"pd-cli","npm_name":"@principles/pd-cli"},{"pkg_dir":"openclaw-plugin","npm_name":"principles-disciple"},{"pkg_dir":"create-principles-disciple","npm_name":"create-principles-disciple"}]' >> $GITHUB_OUTPUT
+                ;;
               "principles-disciple")
                 # Lockstep (mirrors the push-path rule below): the installer
                 # bundles the plugin, so publishing the plugin alone leaves

@@ -43,6 +43,10 @@ packages/*/*.tgz
 node_modules/
 dist/
 
+# PD Companion electron-builder output (NSIS installers, win-unpacked).
+# Scoped to pd-companion: create-principles-disciple/release-locks is tracked.
+packages/pd-companion/release*/
+
 # TypeScript build artifacts
 **/tsconfig.tsbuildinfo
 

@@ -1,6 +1,6 @@
 {
   "name": "@principles/pd-companion",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "PD Companion — Windows desktop tray app that launches and supervises the PD Console server (PRI-526).",
@@ -9,10 +9,14 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "verify-package": "node scripts/verify-package.mjs"
+  },
+  "dependencies": {
+    "@principles/install-layout": "0.1.0"
   },
   "devDependencies": {
-    "@principles/install-layout": "0.1.0",
+    "@electron/asar": "3.4.1",
     "electron": "39.8.10",
     "electron-builder": "^26.0.12",
     "typescript": "^7.0.2",
