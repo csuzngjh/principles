@@ -63,4 +63,59 @@ describe('native release target matrix', () => {
       expect(quickWorkflow).toContain(`- '${payloadPath}'`);
     }
   });
+
+  it('offers a full-product release train that runs the full matrix once and publishes in dependency order', () => {
+    const publishWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'publish-npm.yml'), 'utf8');
+
+    // The dispatch choice list keeps every single-package option and adds
+    // full-product (default unchanged).
+    expect(publishWorkflow).toMatch(/type: choice\s+options:\s+[\s\S]*- full-product/);
+    expect(publishWorkflow).toMatch(/- principles-disciple\s+[\s\S]*- '@principles\/core'/);
+    expect(publishWorkflow).toMatch(/default: 'principles-disciple'/);
+
+    // Extract the full-product matrix JSON from the dispatch case and pin
+    // the exact dependency-ordered publish sequence. Plain string slicing
+    // (the workflow is line-oriented; the matrix= payload is single-line
+    // JSON ending at the first ] after it).
+    const caseStart = publishWorkflow.indexOf('"full-product")');
+    const matrixMarker = 'matrix=';
+    const matrixStart = publishWorkflow.indexOf(matrixMarker, caseStart);
+    const matrixEnd = publishWorkflow.indexOf(']', matrixStart);
+    if (caseStart < 0 || matrixStart < 0 || matrixEnd < 0) {
+      throw new Error('publish-npm.yml full-product case no longer emits a matrix= JSON entry');
+    }
+    const matrix: unknown = JSON.parse(publishWorkflow.slice(matrixStart + matrixMarker.length, matrixEnd + 1));
+    expect(Array.isArray(matrix)).toBe(true);
+    const entries = matrix as Array<Record<string, unknown>>;
+    const order = entries.map((entry) => entry.npm_name);
+    expect(order).toEqual([
+      '@principles/core',
+      '@principles/host-runtime',
+      '@principles/install-layout',
+      '@principles/codex-adapter',
+      '@principles/pd-cli',
+      'principles-disciple',
+      'create-principles-disciple',
+    ]);
+    // Registry-dependency order: pd-cli depends on host-runtime, codex-adapter
+    // and install-layout; the installer re-bundles the freshly published
+    // plugin (lockstep), so it must publish last.
+    expect(order.indexOf('@principles/pd-cli')).toBeGreaterThan(order.indexOf('@principles/host-runtime'));
+    expect(order.indexOf('@principles/pd-cli')).toBeGreaterThan(order.indexOf('@principles/codex-adapter'));
+    expect(order.indexOf('@principles/pd-cli')).toBeGreaterThan(order.indexOf('@principles/install-layout'));
+    expect(order.indexOf('create-principles-disciple')).toBeGreaterThan(order.indexOf('principles-disciple'));
+    expect(entries).toHaveLength(7);
+
+    // One release train = one full-matrix verification: the reusable
+    // full-matrix workflow is referenced exactly once (jobs:), and the
+    // publish matrix stays sequential so dependencies publish in order.
+    const fullMatrixReference = 'uses: ./.github/workflows/release-reproducibility-full.yml';
+    const fullMatrixUses = publishWorkflow.split(fullMatrixReference).length - 1;
+    expect(fullMatrixUses).toBe(1);
+    expect(publishWorkflow).toMatch(/publish:[\s\S]*?strategy:\s*[\s\S]*max-parallel: 1/);
+
+    // Single-package dispatch semantics survive: the plugin lockstep case
+    // still pairs openclaw-plugin with create-principles-disciple.
+    expect(publishWorkflow).toMatch(/"principles-disciple"\)[\s\S]*openclaw-plugin[\s\S]*create-principles-disciple/);
+  });
 });
