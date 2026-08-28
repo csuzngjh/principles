@@ -804,7 +804,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 109 |
+| Total lessons | 108 |
 | Last updated | 2026-08-28 |
 | Top category | Schema & Type |
 | Recurring errors | 58 |
