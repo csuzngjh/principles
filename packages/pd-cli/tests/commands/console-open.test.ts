@@ -826,15 +826,22 @@ describe('CLI command wiring (pd console open)', () => {
       }
     });
 
-    it('[::1] is accepted and normalized to ::1 (not refused)', () => {
+    it('[::1] is accepted and normalized to ::1 (not refused)', async (ctx) => {
+      // PRI-581 / ERR-111: IPv6 loopback is an optional host capability — a
+      // global TUN VPN / WFP filter driver can silently block ::1 connections
+      // (bind succeeds, connect returns EACCES) while the IPv6 stack itself is
+      // healthy. Probe-and-skip instead of hard-failing for 8s on such hosts.
+      if (!(await isIpv6LoopbackUsable())) {
+        ctx.skip({ reason: 'IPv6 loopback (::1) is filtered on this machine (VPN/WFP filter driver? — see ERR-111 / PRI-581)' });
+        return;
+      }
       // May spawn a long-lived server, use timeout.
       const out = runPd(['console', 'open', '--workspace', tmp, '--host', '[::1]', '--json', '--no-browser'], workspaceRoot, 8_000);
       if (out.trim() === '') {
         // The CLI was still in its 15s ready-poll when execFileSync timed out.
-        // Known environment limitation: on Windows hosts where IPv6 loopback
-        // connections are refused (EACCES), the health probe on ::1 never
-        // succeeds. CI (Linux) is unaffected.
-        throw new Error('CLI produced no JSON within 8s — ::1 health probe never succeeded (IPv6 loopback may be blocked on this machine)');
+        // The capability probe above passed, so this is a genuine failure —
+        // the health probe on ::1 never succeeded despite ::1 being reachable.
+        throw new Error('CLI produced no JSON within 8s — ::1 health probe never succeeded (IPv6 loopback probe passed; this is a real failure)');
       }
       const parsed = JSON.parse(out);
       // Should NOT be refused — [::1] is loopback
@@ -860,6 +867,49 @@ describe('CLI command wiring (pd console open)', () => {
     }, 10_000);
   });
 });
+
+/**
+ * Probe whether IPv6 loopback (::1) is actually usable on this machine.
+ * Mirrors the production path (TCP connect), not ICMP ping: on hosts where a
+ * VPN/WFP filter driver intercepts ::1 (bind OK + connect EACCES — ERR-111 /
+ * PRI-581), the console health probe on ::1 can never succeed, so the CLI
+ * test above must skip rather than hard-fail for environmental reasons.
+ */
+function isIpv6LoopbackUsable(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      server.close();
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), 1_500);
+    server.once('error', () => {
+      clearTimeout(timer);
+      finish(false);
+    });
+    server.listen(0, '::1', () => {
+      const addr = server.address();
+      const port = addr !== null && typeof addr === 'object' ? addr.port : 0;
+      if (port === 0) {
+        clearTimeout(timer);
+        finish(false);
+        return;
+      }
+      const socket = net.connect({ port, host: '::1' }, () => {
+        socket.destroy();
+        clearTimeout(timer);
+        finish(true);
+      });
+      socket.once('error', () => {
+        clearTimeout(timer);
+        finish(false);
+      });
+    });
+  });
+}
 
 function runPd(args: string[], cwd: string, timeoutMs?: number): string {
   try {
