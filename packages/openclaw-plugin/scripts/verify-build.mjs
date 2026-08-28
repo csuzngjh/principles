@@ -7,7 +7,7 @@
  * Exit: 0 on success, 1 on failure
  */
 
-import { existsSync, readdirSync, statSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -140,6 +140,47 @@ for (const lang of ['zh', 'en']) {
     hasError = true;
   } else {
     console.log(`✅ ${lang} skills: exactly the ${publishable.length} approved pd-* skills (dist/templates/langs/${lang}/skills/)`);
+  }
+}
+
+// 4. Privacy & network disclosure contract (ClawHub audit remediation
+// 2026-08): npm auto-includes the package-root README.md in every tarball,
+// and that README is what ClawHub's audit surfaces to users. The published
+// artifact must disclose the optional telemetry channel (endpoint, default
+// OFF, consent gate, controls) and must NOT carry absolute "never sends /
+// no network I/O" claims that the shipped opt-in telemetry code contradicts.
+const DISCLOSURE_REQUIRED_MARKERS = [
+  'https://principles-website.pages.dev/api/product-telemetry/snapshot',
+  'pd telemetry enable --confirm',
+  'pd telemetry disable',
+  'pd telemetry preview',
+  'PD_TELEMETRY_DISABLED',
+  'Default: **OFF**',
+];
+const DISCLOSURE_STALE_CLAIMS = [
+  'does not send product telemetry',
+  'performs no network I/O except',
+];
+{
+  const readmePath = join(rootDir, 'README.md');
+  if (!existsSync(readmePath)) {
+    console.error('❌ Missing package README.md (npm-included disclosure surface)');
+    hasError = true;
+  } else {
+    const readme = readFileSync(readmePath, 'utf8');
+    const missingMarkers = DISCLOSURE_REQUIRED_MARKERS.filter((m) => !readme.includes(m));
+    const staleClaims = DISCLOSURE_STALE_CLAIMS.filter((c) => readme.includes(c));
+    if (missingMarkers.length > 0) {
+      console.error(`❌ README.md is missing required privacy-disclosure markers: ${missingMarkers.join(' | ')}`);
+      hasError = true;
+    }
+    if (staleClaims.length > 0) {
+      console.error(`❌ README.md still contains stale absolute claims that contradict the opt-in telemetry code: ${staleClaims.join(' | ')}`);
+      hasError = true;
+    }
+    if (missingMarkers.length === 0 && staleClaims.length === 0) {
+      console.log('✅ README.md carries the telemetry privacy/network disclosure contract');
+    }
   }
 }
 

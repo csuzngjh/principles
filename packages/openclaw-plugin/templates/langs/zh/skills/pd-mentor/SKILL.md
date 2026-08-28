@@ -1,6 +1,6 @@
 ---
 name: pd-mentor
-description: 交互式命令引导和场景化推荐，帮助用户理解和使用 Principles Disciple 本身。TRIGGER CONDITIONS: (1) 用户明确询问 Principles Disciple / PD 的用法、命令、配置或工作流 (2) 用户明确要求使用 PD 内置能力完成当前治理目标。一般编程、调试、项目介绍、文件查找请求不属于本技能。
+description: 交互式命令引导和场景化推荐，帮助用户理解和使用 Principles Disciple 本身，包括 PD 引导的工作区清理与健康检查等日常维护。TRIGGER CONDITIONS: (1) 用户明确询问 Principles Disciple / PD 的用法、命令、配置或工作流 (2) 用户明确要求使用 PD 内置能力完成当前治理目标 (3) 用户要求 PD 引导的工作区清理或日常维护。一般编程、调试、项目介绍、文件查找请求不属于本技能。
 disable-model-invocation: true
 ---
 
