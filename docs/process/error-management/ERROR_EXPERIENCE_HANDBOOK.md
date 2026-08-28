@@ -467,6 +467,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-201 / PR #663 (Codex review, variant A); PRI-480 / PR #1089 (CodeRabbit review, variant B)
 - **Date**: 2026-05-21 (variant A); 2026-06-28 (variant B)
 - **Recurrence**: Yes — same class as ERR-001/ERR-005/ERR-007 where runtime semantics bypass validation intent.
+  - 2026-08-28 PRI-609 / PR #1423 review: `enabledOfOverride()` read an inherited `enabled` property from an alias override object, allowing prototype data to override the registered flag. Fixed with an `Object.hasOwn()` guard and an `Object.create({ enabled: true })` regression test.
   - 2026-08-13 PRI-523 C1.3 self-review: the first shared PostToolUse enrichment validator used direct property reads after only checking that the value was object-like, so inherited enrichment fields could be treated as host-owned facts. Fixed by reading own data descriptors only and adding a regression where an inherited event ID cannot deduplicate two distinct canonical events.
   - 2026-06-28 PRI-480 (PR #1089) variant B: `canonicalizeToolKind()` lookup-table indexing returned `Object.prototype` for `__proto__` — fixed with `Object.hasOwn` guard
   - 2026-06-14 PRI-394 (PR #926): SQLite INSERT guessed column names — same trust-boundary pattern on DB schema
@@ -806,7 +807,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 108 |
 | Last updated | 2026-08-28 |
 | Top category | Schema & Type |
-| Recurring errors | 57 |
+| Recurring errors | 58 |
 
 ---
 
@@ -1141,6 +1142,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
   - 2026-07-17 PRI-518 self-review: a new cross-SQLite E2E test called `RuntimeStateManager.close()` in `afterEach` without `await`. Fixed before handoff by making the hook async and awaiting close before removing the temporary workspace.
   - 2026-08-13 PRI-523: a registration-test timer could mutate real home config. Mocked the writer, authorized the fake config, cleaned timers, and isolated packed-bundle HOME.
+  - 2026-08-28 PRI-612 / PR #1426 review: a pd-cli test registered a process-wide `unhandledRejection` listener and never removed it, leaking debug behavior into later tests in the same worker. Fixed by removing the listener; the focused suite now proves the intended rejection behavior without global instrumentation.
   - 2026-08-13 PRI-523 C1.3 self-review (corrected classification, consolidated): the OpenClaw host-owned diagnosis continuation must remain best-effort so the PostToolUse hook returns after durable shared SQLite persistence, but the first implementation used bare `void emitPainDetectedEvent(...)` with no lifecycle-owned rejection handling or test drain. The first corrective scheduler still allowed a never-settling continuation to keep the pending set and lifecycle drain open forever. Fixed with an explicit scheduler that attaches immediate resolution/rejection handlers, enforces a finite 30-second timeout, emits bounded reason/nextAction, clears its timer on every terminal path, removes settled or timed-out promises, and exposes a test-only drain. Rejected and never-settling continuation regressions prove observability and bounded cleanup without extending hook latency; the original promise remains rejection-observed even if it settles after the timeout.
 
 ---
@@ -1362,6 +1364,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
 - **Recurrence**: 2026-08-13 PRI-523 C1.1 spec review: the production OpenClaw BDD seeded a Runtime V2 activation only, then asserted its unique text appeared once. That signal could not exercise or prove the legacy/Runtime V2 overlap branch, so the test stayed green while shared exclusion metadata misreported `all_deduped_against_legacy` as `no_validated_activations`. Fixed by seeding the identical ID/text in the real legacy probation reducer and Runtime V2 SQLite, asserting one combined prompt occurrence, absence of a duplicate Runtime V2 directive, and the persisted exact skip reason/next action. 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
+
+  - 2026-08-28 PRI-614 / PR #1428 review: the gateway recovery test counted a restart but did not prove it happened after the tar step failed, so an early or unrelated restart produced the same signal. Fixed with strict call-order assertions and a negative-control run that fails when the ordering predicate is inverted.
 
   - 2026-08-20 PRI-553: governance BDD treated non-empty body text as proof the SPA was ready. That signal was true before the initial `#/focus` redirect settled, so the delayed redirect could overwrite detail navigation; fixed by waiting for the canonical focus URL and then asserting the detail URL.
 
@@ -1637,4 +1641,4 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-040 (published artifact missing components — same EP-06 "artifact ≠ source" family, mirror direction: false claim vs missing file), ERR-032 (docs contradict ADR — internal docs vs published disclosure), EP-06
 - **Source**: owner-directed task 2026-08-28 (no Linear issue); ClawHub audit 2026-08-26, plugin v1.222.4; remediation PR #1430
 - **Date**: 2026-08-28
-- **Recurrence**: None
+- **Recurrence**: 2026-08-28 PR #1430 self-review — the first root README remediation described telemetry as the only outbound path and still omitted Owner-configured LLM provider calls. Fixed the English and Chinese disclosures and strengthened the disclosure contract test to require the provider-network path explicitly.
