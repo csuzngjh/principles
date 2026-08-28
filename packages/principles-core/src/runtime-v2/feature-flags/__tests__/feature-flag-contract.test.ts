@@ -482,6 +482,17 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(result.warnings.some(w => w.includes('conflicting values'))).toBe(false);
   });
 
+  it('PRI-609: inherited enabled values never satisfy alias conflict checks', () => {
+    const inheritedOnly = Object.create({ enabled: true }) as Record<string, unknown>;
+    const result = computeEffectiveFlags(
+      { painEvidenceAdmission: { enabled: true }, pain_evidence_admission: inheritedOnly },
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/config.yaml',
+    );
+    expect(result.flags.painEvidenceAdmission?.enabled).toBe(true);
+    expect(result.warnings.some(w => w.includes('conflicting values'))).toBe(true);
+  });
+
   it('PRI-609: unknown flag never becomes an effective capability', () => {
     const result = computeEffectiveFlags(
       { totally_unknown_flag: { enabled: true } },

@@ -33,8 +33,13 @@ export interface FeatureFlagOverrideNormalization {
 }
 
 function enabledOfOverride(value: unknown): boolean | undefined {
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    const {enabled} = (value as Record<string, unknown>);
+  if (
+    value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.hasOwn(value, 'enabled')
+  ) {
+    const { enabled } = value as Record<string, unknown>;
     if (typeof enabled === 'boolean') return enabled;
   }
   return undefined;
