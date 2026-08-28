@@ -10,10 +10,12 @@ on:
         type: choice
         options:
           # full-product: one release train — the full release matrix runs
-          # ONCE and all 7 packages publish in dependency order (matrix
-          # max-parallel: 1) inside this single workflow run. Replaces the
-          # old pattern of 7 manual dispatches, each re-running the full
-          # cross-platform matrix.
+          # ONCE and the publish-full-product job publishes all 7 packages
+          # as SEQUENTIAL STEPS in dependency order inside a single job
+          # (step order = execution order; a failed step stops the job, so
+          # an upstream publish failure blocks every downstream package).
+          # Replaces the old pattern of 7 manual dispatches, each re-running
+          # the full cross-platform matrix.
           - full-product
           - principles-disciple
           - '@principles/core'
@@ -67,6 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.detect.outputs.matrix }}
+      is_full_product: ${{ steps.detect.outputs.is_full_product }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -77,19 +80,21 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             INPUT="${{ github.event.inputs.package }}"
+            IS_FULL="false"
             case "$INPUT" in
               "full-product")
-                # Single release train: publish every package in dependency
-                # order in ONE run. The publish matrix is sequential
-                # (max-parallel: 1) so each entry lands on the registry
-                # before its dependents run their pre-publish registry
-                # checks. Order (dependency-first like the push path, with
-                # pd-cli before the plugin so its registry deps are all
-                # fresh): core → host-runtime → install-layout →
-                # codex-adapter → pd-cli → principles-disciple (plugin) →
-                # create-principles-disciple (installer re-bundles the
-                # freshly published plugin — lockstep preserved).
-                echo 'matrix=[{"pkg_dir":"principles-core","npm_name":"@principles/core"},{"pkg_dir":"host-runtime","npm_name":"@principles/host-runtime"},{"pkg_dir":"install-layout","npm_name":"@principles/install-layout"},{"pkg_dir":"codex-adapter","npm_name":"@principles/codex-adapter"},{"pkg_dir":"pd-cli","npm_name":"@principles/pd-cli"},{"pkg_dir":"openclaw-plugin","npm_name":"principles-disciple"},{"pkg_dir":"create-principles-disciple","npm_name":"create-principles-disciple"}]' >> $GITHUB_OUTPUT
+                # Single release train: the full-matrix gate opens once and
+                # the publish-full-product job publishes every package as
+                # SEQUENTIAL STEPS in one job — the authoritative order
+                # lives in that job's step sequence (no matrix scheduling).
+                # This matrix value only feeds the release-reproducibility
+                # non-empty gate and run summaries; it mirrors the same
+                # dependency order: core -> install-layout -> host-runtime
+                # (exact dep on install-layout@0.1.0) -> codex-adapter ->
+                # pd-cli -> plugin -> installer (re-bundles the fresh
+                # plugin; lockstep preserved).
+                echo 'matrix=[{"pkg_dir":"principles-core","npm_name":"@principles/core"},{"pkg_dir":"install-layout","npm_name":"@principles/install-layout"},{"pkg_dir":"host-runtime","npm_name":"@principles/host-runtime"},{"pkg_dir":"codex-adapter","npm_name":"@principles/codex-adapter"},{"pkg_dir":"pd-cli","npm_name":"@principles/pd-cli"},{"pkg_dir":"openclaw-plugin","npm_name":"principles-disciple"},{"pkg_dir":"create-principles-disciple","npm_name":"create-principles-disciple"}]' >> $GITHUB_OUTPUT
+                IS_FULL="true"
                 ;;
               "principles-disciple")
                 # Lockstep (mirrors the push-path rule below): the installer
@@ -122,8 +127,12 @@ jobs:
                 exit 1
                 ;;
             esac
+            echo "is_full_product=$IS_FULL" >> $GITHUB_OUTPUT
             exit 0
           fi
+
+          # Not a dispatch (push / schedule): never the full-product train.
+          echo "is_full_product=false" >> $GITHUB_OUTPUT
 
           # Weekly schedule: publish principles-disciple + create-principles-disciple
           # so users get the latest pd-console/core/cli via Web UI full update.
@@ -175,13 +184,17 @@ jobs:
           }
 
           check_and_add "principles-core" "@principles/core"
-          # Dependency-first order (matrix runs sequentially, max-parallel: 1):
-          # host-runtime must exist on the registry before codex-adapter/pd-cli
-          # (both declare it as a dependency), and codex-adapter before pd-cli.
-          # A consumer running `npm install -g @principles/codex-adapter` (or
-          # pd-cli) fails dependency resolution if a declared dep is missing.
-          check_and_add "host-runtime" "@principles/host-runtime"
+          # Dependency-first order: install-layout before host-runtime
+          # (host-runtime declares an EXACT runtime dep on
+          # @principles/install-layout@0.1.0, so a push that changes both
+          # must land install-layout first), host-runtime before
+          # codex-adapter/pd-cli (both declare it as a dependency), and
+          # codex-adapter before pd-cli. A consumer running
+          # `npm install -g @principles/codex-adapter` (or pd-cli) fails
+          # dependency resolution if a declared dep is missing; each
+          # package's publish step also re-verifies via registry preflight.
           check_and_add "install-layout" "@principles/install-layout"
+          check_and_add "host-runtime" "@principles/host-runtime"
           check_and_add "codex-adapter" "@principles/codex-adapter"
           check_and_add "openclaw-plugin" "principles-disciple"
           check_and_add "pd-cli" "@principles/pd-cli"
@@ -230,7 +243,13 @@ jobs:
   publish:
     name: Publish ${{ matrix.npm_name }}
     needs: [detect, release-reproducibility]
-    if: needs.detect.outputs.matrix != '[]'
+    # Single-package dispatch / push / schedule path ONLY. The full-product
+    # release train publishes via the sequential publish-full-product job
+    # below (step order = dependency order); max-parallel: 1 here limits
+    # concurrent runners, it does NOT order matrix entries — ordering on
+    # this path is advisory (best-effort declaration order) with each
+    # package's registry preflight as the hard guard.
+    if: needs.detect.outputs.matrix != '[]' && needs.detect.outputs.is_full_product != 'true'
     strategy:
       matrix:
         include: ${{ fromJson(needs.detect.outputs.matrix) }}
@@ -331,13 +350,16 @@ jobs:
           fi
 
       - name: Verify registry dependencies are published
-        # codex-adapter and pd-cli declare @principles/host-runtime (and pd-cli
-        # also @principles/codex-adapter) as runtime dependencies. Publishing
-        # them while a dependency is absent from the registry breaks
-        # `npm install -g` for every consumer. The retry loop tolerates
-        # registry propagation lag from a sibling matrix entry that published
-        # moments earlier (matrix is sequential, dependency-first).
-        if: matrix.pkg_dir == 'codex-adapter' || matrix.pkg_dir == 'pd-cli' || matrix.pkg_dir == 'create-principles-disciple'
+        # host-runtime declares an EXACT runtime dependency on
+        # @principles/install-layout@0.1.0; codex-adapter and pd-cli declare
+        # @principles/host-runtime (and pd-cli also @principles/codex-adapter,
+        # create-principles-disciple @principles/install-layout) as runtime
+        # dependencies. Publishing while a dependency is absent from the
+        # registry breaks `npm install -g` for every consumer. The retry
+        # loop tolerates registry propagation lag from a package published
+        # moments earlier (declaration order above + registry preflight
+        # here are the guards on this path).
+        if: matrix.pkg_dir == 'host-runtime' || matrix.pkg_dir == 'codex-adapter' || matrix.pkg_dir == 'pd-cli' || matrix.pkg_dir == 'create-principles-disciple'
         run: |
           check_published() {
             local PKG="$1"
@@ -352,12 +374,17 @@ jobs:
             echo "::error::$PKG is not published. ${{ matrix.npm_name }} depends on it — publishing now would make 'npm install -g ${{ matrix.npm_name }}' fail dependency resolution. Publish $PKG first (workflow_dispatch: $PKG), then retry this package."
             exit 1
           }
-          check_published "@principles/host-runtime"
-          if [ "${{ matrix.pkg_dir }}" = "pd-cli" ]; then
-            check_published "@principles/codex-adapter"
-          fi
-          if [ "${{ matrix.pkg_dir }}" = "pd-cli" ] || [ "${{ matrix.pkg_dir }}" = "create-principles-disciple" ]; then
+          if [ "${{ matrix.pkg_dir }}" = "host-runtime" ]; then
+            # Exact runtime dep — install-layout must be on the registry first.
             check_published "@principles/install-layout"
+          else
+            check_published "@principles/host-runtime"
+            if [ "${{ matrix.pkg_dir }}" = "pd-cli" ]; then
+              check_published "@principles/codex-adapter"
+            fi
+            if [ "${{ matrix.pkg_dir }}" = "pd-cli" ] || [ "${{ matrix.pkg_dir }}" = "create-principles-disciple" ]; then
+              check_published "@principles/install-layout"
+            fi
           fi
 
       - name: Verify package dry-run
@@ -647,3 +674,98 @@ jobs:
           echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Published to npm and GitHub" >> $GITHUB_STEP_SUMMARY
+
+  publish-full-product:
+    name: Publish full product (release train)
+    needs: [detect, release-reproducibility]
+    if: needs.detect.outputs.is_full_product == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      # ONE job, SEVEN sequential steps: the step order below IS the
+      # dependency order. GitHub runs job steps strictly in sequence and a
+      # failed step stops the job, so an upstream publish failure blocks
+      # every downstream package — no matrix scheduling is involved
+      # (max-parallel limits concurrent runners, it does not order matrix
+      # entries; review P1 #1439 round 2, 2026-08-28). install-layout
+      # precedes host-runtime because host-runtime declares an EXACT
+      # runtime dependency on @principles/install-layout@0.1.0. The
+      # installer runs LAST so it re-bundles the freshly published plugin
+      # (lockstep preserved). Each step re-verifies its registry
+      # dependencies before publishing (see the shared action).
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
+
+      - name: Build core
+        run: npm run build --workspace=@principles/core
+
+      - name: Build host runtime
+        run: npm run build --workspace=@principles/host-runtime
+
+      - name: Build install layout
+        run: npm run build --workspace=@principles/install-layout
+
+      - name: Publish 1/7 @principles/core
+        uses: ./.github/actions/publish-npm-package
+        with:
+          pkg_dir: principles-core
+          npm_name: '@principles/core'
+          version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+
+      - name: Publish 2/7 @principles/install-layout
+        uses: ./.github/actions/publish-npm-package
+        with:
+          pkg_dir: install-layout
+          npm_name: '@principles/install-layout'
+          version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+
+      - name: Publish 3/7 @principles/host-runtime
+        uses: ./.github/actions/publish-npm-package
+        with:
+          pkg_dir: host-runtime
+          npm_name: '@principles/host-runtime'
+          version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+
+      - name: Publish 4/7 @principles/codex-adapter
+        uses: ./.github/actions/publish-npm-package
+        with:
+          pkg_dir: codex-adapter
+          npm_name: '@principles/codex-adapter'
+          version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+
+      - name: Publish 5/7 @principles/pd-cli
+        uses: ./.github/actions/publish-npm-package
+        with:
+          pkg_dir: pd-cli
+          npm_name: '@principles/pd-cli'
+          version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+
+      - name: Publish 6/7 principles-disciple (plugin)
+        uses: ./.github/actions/publish-npm-package
+        with:
+          pkg_dir: openclaw-plugin
+          npm_name: 'principles-disciple'
+          version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
+
+      - name: Publish 7/7 create-principles-disciple (installer)
+        uses: ./.github/actions/publish-npm-package
+        with:
+          pkg_dir: create-principles-disciple
+          npm_name: 'create-principles-disciple'
+          version_bump: ${{ github.event.inputs.version_bump || 'auto' }}
