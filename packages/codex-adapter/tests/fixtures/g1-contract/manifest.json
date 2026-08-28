@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-08-28T14:07:45.019Z",
-  "probeWorkspace": "D:/tmp/pd-g1-probe/ws (temporary, git-init empty repo)",
+  "generatedAt": "2026-08-28T14:53:03.376Z",
+  "probeWorkspace": "temporary probe workspace (git-init empty repo, removed after capture; sanitized as D:\\ws\\probe in fixtures)",
   "hookConfig": "user-layer ~/.codex/hooks.json, command hooks, --dangerously-bypass-hook-trust",
   "versions": {
     "current": {

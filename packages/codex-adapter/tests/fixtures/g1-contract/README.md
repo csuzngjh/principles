@@ -37,6 +37,17 @@ event.
 | `malformed-line.jsonl` | mutation of A | Permanently invalid middle line (documented transformation) |
 | `incomplete-tail.jsonl` | mutation of A | Final line cut mid-JSON, no trailing newline (retryable tail) |
 
+### `hook-runtime-contract.json`
+
+Source-derived runtime contract (SPEC G1 items 5–7 that on-device probing
+cannot cover by itself): hook timeout budgets, concurrency limits, the
+`deny_unknown_fields` stdout contract with the frozen official output
+schemas, session-root resolution rules for Windows/macOS/Linux (default and
+configured `CODEX_HOME`), and the append-only/no-rotation transcript
+lifetime (including `compacted` and `ThreadRolledBack` markers). Each entry
+carries its official source reference. Executed by
+`tests/g1-host-runtime-contract.test.ts`.
+
 ## Tool identity: two id spaces joined by one bridge
 
 The live hook's `tool_use_id` (for the shell tool: `exec-<uuid>`, reported as
@@ -58,7 +69,8 @@ Any live-hook ↔ transcript tool correlation must go through the
 All fixtures were produced by a generator that removed or replaced every
 class of content the SPEC excludes from governance observation:
 
-- username path segments (`<user>`), probe workspace path (`D:\ws\probe`);
+- username path segments (`<user>`), probe workspace path (`D:\ws\probe`,
+  including its `file:///D:/ws/probe` URI form);
 - `session_meta.base_instructions` (host system prompt), `git`,
   `context_window`;
 - `world_state`, `inter_agent_communication_metadata` records;
@@ -75,8 +87,12 @@ The fixture sessions themselves used synthetic probe prompts
 
 ## Consumer contract
 
-`tests/g1-contract-fixtures.test.ts` validates the frozen invariants
+`tests/g1-contract-fixtures.test.ts` and
+`tests/g1-host-runtime-contract.test.ts` validate the frozen invariants
 (payload field sets, Stop↔transcript final-message agreement, fork/subagent
-lineage, malformed/incomplete-tail distinguishability). Slice A's decoder
-tests must build on these same fixtures; changing a fixture requires
-re-running the on-device probe and recording it in the G1 report.
+lineage, malformed/incomplete-tail distinguishability, runtime contracts).
+They pin the contract **as frozen in this repository**; they do not
+automatically detect a future upstream Codex change — upstream drift
+detection requires re-running the probe (fixtures must be regenerated and
+the G1 report updated) plus the Slice A supported-version guard. Slice A's
+decoder tests must build on these same fixtures.

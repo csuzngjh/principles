@@ -135,10 +135,20 @@ authenticated Codex hook itself provides):
   exit code) — the same facts the existing tool-evidence path already
   captures.
 
-**PD never reads or stores:** hidden reasoning or chain-of-thought (Codex
-stores reasoning encrypted; PD skips those records entirely), system or
-developer prompts, host-injected environment/skills/plugin context, secrets,
-approval tokens, environment snapshots.
+**PD never projects, stores, logs, or sends** (records that exist in the
+transcript and are identified and skipped during parsing — parsing must see
+them to skip them, so the honest boundary is projection, not literal
+reading): hidden reasoning or chain-of-thought (Codex stores reasoning
+encrypted; PD drops those records before any persistence), system or
+developer prompts, host-injected environment/skills/plugin context, approval
+tokens, environment snapshots.
+
+**Secrets:** allowed content (visible user text, sanitized tool facts) passes
+through the existing evidence sanitizer (sensitive-key detection plus
+common token-pattern redaction) before persistence. This is a strong
+practical filter, not a mathematical guarantee: a secret that looks like
+ordinary visible text cannot be recognized as one. The disclosure below
+states this honestly.
 
 **Retention bounds:**
 
@@ -171,13 +181,13 @@ cleanup commands. Uninstall never deletes evidence silently.
 > ### Principles Disciple — 对话观察与治理闭环（Codex）
 >
 > **开启后 PD 会读取什么？**
-> 只读取本工作区内 Codex 明确提供给 PD 的会话记录（transcript）中的可见内容：你发出的消息、助手的可见回复、以及工具调用的名称/输入/结果（用于识别反复出现的问题）。不会读取助手的隐藏思考过程（Codex 以加密形式保存，PD 直接跳过）、系统提示词、环境上下文或任何密钥。
+> 读取本工作区内 Codex 明确提供给 PD 的会话记录（transcript）。进入治理观察的只有可见内容：你发出的消息、助手的可见回复、以及工具调用的名称/输入/结果（用于识别反复出现的问题）。记录中同时存在的隐藏思考过程（Codex 以加密形式保存）、系统/开发者提示词、宿主注入的环境上下文，会在解析时被识别并丢弃——不会被保存、不会进入日志、不会发送给诊断模型。
 >
 > **为什么读取？**
-> 为了让 PD 在 Codex 上完成它承诺的闭环：把你反复纠正的地方变成一条可审查的原则候选——你需要先看到证据，再决定是否采纳。不读取对话，PD 就只能管工具，学不到纠正。
+> 为了让 PD 在 Codex 上完成它承诺的闭环：把你反复纠正的地方变成一条可审查的原则候选——你需要先看到证据，再决定是否采纳。不解析对话，PD 就只能管工具，学不到纠正。
 >
 > **保存多少、多久？**
-> 每个会话只保留最近 32 条可见消息、最多 7 天（先到期先删除）。当某个问题被正式立为 pain 时，才会把它的前 12 条消息 + 触发点 + 助手的下一条完整回复升级为长期治理证据，按现有治理数据的生命周期管理。
+> 每个会话只保留最近 32 条可见消息、最多 7 天（先到期先删除）。当某个问题被正式立为 pain 时，才会把它的前 12 条消息 + 触发点 + 助手的下一条完整回复升级为长期治理证据，按现有治理数据的生命周期管理。保存的工具证据在落盘前会经过既有的敏感字段与常见密钥格式脱敏；但请注意：如果一段密钥看起来就像普通文字，任何过滤器都无法识别它——请不要让 PD 观察包含此类内容的会话。
 >
 > **数据会离开本机吗？**
 > 观察数据本身只存在本机工作区。被升级为治理证据的对话片段，会像现有诊断流程一样发送给你配置的 LLM API 做诊断——这是唯一的外发路径，与 OpenClaw 上的现有行为一致。产品遥测不包含任何消息内容或会话标识。
