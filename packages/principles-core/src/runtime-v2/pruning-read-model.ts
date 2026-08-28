@@ -21,7 +21,9 @@ import { DEFAULT_L1_HARD_CAP, validateL1CapConfig } from './l1-hard-cap.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
-export type PrincipleStatus = 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
+import type { PrincipleStatus } from './types/principle-enums.js';
+
+export type { PrincipleStatus };
 export type PruningRiskLevel = 'none' | 'watch' | 'review';
 
 export interface PrinciplePruningSignal {

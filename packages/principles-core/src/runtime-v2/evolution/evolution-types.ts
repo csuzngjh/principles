@@ -202,7 +202,9 @@ export interface TierPromotionEvent {
 
 // ===== Evolution Loop Schema =====
 
-export type EvolutionPrincipleStatus = 'candidate' | 'probation' | 'active' | 'deprecated' | 'archived';
+import type { PrincipleStatus } from '../types/principle-enums.js';
+// PRI-612: derived from the canonical PrincipleStatus authority — same 5 states.
+export type EvolutionPrincipleStatus = PrincipleStatus;
 
 export type PrincipleEvaluatorLevel = 'deterministic' | 'weak_heuristic' | 'manual_only';
 

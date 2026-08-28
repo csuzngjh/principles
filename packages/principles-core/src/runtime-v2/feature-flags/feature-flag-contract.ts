@@ -10,6 +10,103 @@ export type FeatureFlagCategory = (typeof VALID_CATEGORIES)[number];
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+// ── Flag identity aliases (PRI-609) ─────────────────────────────────────────
+//
+// One canonical runtime identity per behavior. Snake_case IDs that were
+// historically registered as independent flags are now compatibility aliases
+// only: they normalize onto the canonical camelCase ID BEFORE effective-flag
+// computation, so a config key can never look valid while the production
+// consumer (which reads the canonical ID) ignores it.
+//
+// Alias keys MUST NOT appear in DEFAULT_FEATURE_FLAGS — an alias is not a
+// capability. Adding an entry here requires the canonical ID to be registered.
+export const FEATURE_FLAG_ALIASES: Readonly<Record<string, string>> = {
+  pain_evidence_admission: 'painEvidenceAdmission',
+  pain_evidence_admission_default: 'painEvidenceAdmissionDefault',
+};
+
+export interface FeatureFlagOverrideNormalization {
+  /** User override map re-keyed onto canonical IDs. */
+  normalized: Record<string, unknown>;
+  /** Non-silent diagnostics for alias conflicts (canonical wins, never silently). */
+  warnings: string[];
+}
+
+function enabledOfOverride(value: unknown): boolean | undefined {
+  if (
+    value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.hasOwn(value, 'enabled')
+  ) {
+    const { enabled } = value as Record<string, unknown>;
+    if (typeof enabled === 'boolean') return enabled;
+  }
+  return undefined;
+}
+
+/**
+ * Normalize user flag overrides onto canonical IDs (PRI-609).
+ *
+ * - Alias keys are re-keyed to their canonical ID.
+ * - When both the canonical ID and an alias are configured with DIFFERENT
+ *   enabled values, the conflict is reported as a warning and the canonical
+ *   entry wins — the outcome is deterministic and observable, never silent.
+ * - Dangerous keys are dropped here so every downstream consumer inherits the
+ *   same rejection.
+ */
+export function normalizeFeatureFlagOverrides(
+  userFlags: Record<string, unknown>,
+): FeatureFlagOverrideNormalization {
+  const normalized: Record<string, unknown> = {};
+  const warnings: string[] = [];
+
+  // Dangerous keys are rejected observably (same warning text the legacy
+  // computeEffectiveFlags filter emitted) and never reach the normalized map.
+  for (const key of Object.keys(userFlags)) {
+    if (DANGEROUS_KEYS.has(key)) {
+      warnings.push(`flag '${key}': dangerous key rejected`);
+    }
+  }
+
+  // Pass 1: canonical keys occupy their slot first so an alias can never
+  // override them, regardless of key iteration order.
+  for (const key of Object.keys(userFlags)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
+    if (!Object.hasOwn(FEATURE_FLAG_ALIASES, key)) {
+      normalized[key] = userFlags[key];
+    }
+  }
+
+  // Pass 2: alias keys fill the canonical slot only when the raw canonical
+  // key is absent.
+  for (const key of Object.keys(userFlags)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
+    const aliasTarget = Object.hasOwn(FEATURE_FLAG_ALIASES, key)
+      ? FEATURE_FLAG_ALIASES[key]
+      : undefined;
+    if (aliasTarget !== undefined && !Object.hasOwn(userFlags, aliasTarget)) {
+      normalized[aliasTarget] = userFlags[key];
+    }
+  }
+
+  // Pass 3: canonical + alias both configured → differing enabled values are
+  // an explicit conflict (canonical wins, observably).
+  for (const [alias, canonical] of Object.entries(FEATURE_FLAG_ALIASES)) {
+    if (Object.hasOwn(userFlags, alias) && Object.hasOwn(userFlags, canonical)) {
+      const aliasEnabled = enabledOfOverride(userFlags[alias]);
+      const canonicalEnabled = enabledOfOverride(userFlags[canonical]);
+      if (aliasEnabled !== canonicalEnabled) {
+        warnings.push(
+          `feature '${canonical}': conflicting values for canonical ID and alias '${alias}' — canonical value used (enabled=${String(canonicalEnabled)})`,
+        );
+      }
+    }
+  }
+
+  return { normalized, warnings };
+}
+
 export interface FeatureFlagDefinition {
   id: string;
   category: FeatureFlagCategory;
@@ -134,14 +231,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
   // is now the primary admission gate. Roll back = set painEvidenceAdmissionDefault to false.
   { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate.' },
-  // PRI-404: snake_case alias for painEvidenceAdmission — config.yaml uses snake_case convention;
-  // registering both avoids "unknown flag accepted" warning while production code references camelCase key
-  { id: 'pain_evidence_admission', category: 'quiet', enabled: true, since: '2026-06-15', description: 'Snake-case alias for painEvidenceAdmission — same functionality, matches config.yaml key convention. PRI-454: default-on.' },
+  // PRI-404/PRI-609: the snake_case IDs `pain_evidence_admission` and
+  // `pain_evidence_admission_default` are no longer registered as independent
+  // capabilities — see FEATURE_FLAG_ALIASES above.
   // PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B owns admission.
   // When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated on all paths.
   { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B (TriggerController) owns admission. When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated.' },
-  // PRI-454: snake_case alias for painEvidenceAdmissionDefault
-  { id: 'pain_evidence_admission_default', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: Snake-case alias for painEvidenceAdmissionDefault — global kill switch, matches config.yaml key convention' },
   { id: 'diagnostician_async_cli', category: 'quiet', enabled: false, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background. Default: false until orchestrator exists.' },
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
   { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders (dreamer, philosopher, scribe)' },
@@ -293,12 +388,18 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
 ];
 
 export function computeEffectiveFlags(
-  userFlags: Record<string, unknown>,
+  userFlagsInput: Record<string, unknown>,
   defaults: FeatureFlagDefinition[],
   configPath: string,
 ): EffectiveFeatureFlags {
   const warnings: string[] = [];
   const flags: Record<string, FeatureFlagDefinition> = {};
+
+  // PRI-609: normalize alias IDs onto canonical IDs before any computation so
+  // a snake_case config key controls the same runtime flag its camelCase
+  // production consumer reads.
+  const { normalized: userFlags, warnings: aliasWarnings } = normalizeFeatureFlagOverrides(userFlagsInput);
+  warnings.push(...aliasWarnings);
 
   const safeKeys = Object.keys(userFlags).filter(key => {
     if (DANGEROUS_KEYS.has(key)) {

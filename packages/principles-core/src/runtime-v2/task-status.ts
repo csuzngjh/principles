@@ -19,22 +19,33 @@ import { PDErrorCategorySchema } from './error-categories.js';
 // ── Task Status ──
 
 /**
- * The canonical task status model for PD Runtime v2.
+ * The canonical task status model for PD Runtime v2 (PRI-612 authority).
  *
  * State transitions:
  *   pending → leased → succeeded
  *                     → retry_wait → pending (via lease expiry recovery)
  *                     → failed
+ *                     → needs_human_review (owner-attention terminal until recovered)
  */
+export const PD_TASK_STATUSES = [
+  'pending',
+  'leased',
+  'succeeded',
+  'retry_wait',
+  'failed',
+  'needs_human_review',
+] as const;
+
+export type PDTaskStatus = (typeof PD_TASK_STATUSES)[number];
+
 export const PDTaskStatusSchema = Type.Union([
-  Type.Literal('pending'),
-  Type.Literal('leased'),
-  Type.Literal('succeeded'),
-  Type.Literal('retry_wait'),
-  Type.Literal('failed'),
-  Type.Literal('needs_human_review'),
+  ...PD_TASK_STATUSES.map((status) => Type.Literal(status)),
 ]);
-export type PDTaskStatus = Static<typeof PDTaskStatusSchema>;
+
+/** Runtime guard for untrusted status strings (DB rows, API payloads). */
+export function isPDTaskStatus(value: unknown): value is PDTaskStatus {
+  return typeof value === 'string' && (PD_TASK_STATUSES as readonly string[]).includes(value);
+}
 
 // ── Task Record ──
 
