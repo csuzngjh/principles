@@ -164,11 +164,16 @@ For issue-backed work:
 
 ## 8. Private Docs
 
-Private docs are stored outside the public repository.
+PD keeps a separate private repository for Owner-sensitive docs
+(domain guides, product emotional-value, plans, runbooks, quality reports).
+It is never copied into the public repository.
 
-Follow the private-doc policy in `AGENTS.md`.
-
-Never paste private content into public PRs/issues/commits.
+* canonical policy: `AGENTS.md` §26 Private Docs Access;
+* resolve location: `$PD_PRIVATE_DOCS_DIR` (current environment: `D:\Code\principles-private\docs`);
+* read relevant private docs when a task touches governance, product
+  emotional-value, domain semantics, plans or runbooks;
+* edit only inside the private repo, then commit + push there;
+* never paste private content into public PRs/issues/commits.
 
 ---
 

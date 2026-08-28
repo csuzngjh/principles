@@ -95,9 +95,17 @@ Provide the Owner Review Card on substantial completion.
 
 ## 7. Private Docs
 
-Private docs are stored in a separate repository.
+PD keeps a separate private repository for Owner-sensitive docs
+(domain guides, product emotional-value, plans, runbooks, quality reports).
 
-Follow `AGENTS.md`.
+Follow `AGENTS.md` §26 Private Docs Access.
+
+Resolve location via `$PD_PRIVATE_DOCS_DIR`
+(current environment: `D:\Code\principles-private\docs`).
+
+Read relevant private docs when the task touches governance, product
+emotional-value, domain semantics, plans or runbooks. Edit them only inside
+the private repo, then commit + push there.
 
 Never expose private-doc content through public repository artifacts.
 

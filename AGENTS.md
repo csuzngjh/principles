@@ -308,9 +308,11 @@ For Owner-facing product behavior, explain:
 * what negative emotion is reduced;
 * what positive feeling is created.
 
-Use:
+Use the emotional-value guide in the private docs:
 
-`docs/product/emotional-value.md`
+`$PD_PRIVATE_DOCS_DIR/product/emotional-value.md`
+
+(see §26 Private Docs Access)
 
 For internal engineering work, state:
 
@@ -902,9 +904,11 @@ For:
 * surfaced product capabilities;
 * Owner-facing information architecture;
 
-read:
+read the emotional-value guide in the private docs:
 
-`docs/product/emotional-value.md`
+`$PD_PRIVATE_DOCS_DIR/product/emotional-value.md`
+
+(see §26 Private Docs Access)
 
 Assess:
 
@@ -1109,23 +1113,38 @@ If a failure is confirmed pre-existing/environmental:
 
 # 26. Private Docs Access
 
-Private docs live in a separate private repository and must never be copied into the public repository.
+PD keeps a separate **private repository** for Owner-sensitive docs:
+governance, domain guides, product emotional-value, plans, ADRs, runbooks,
+quality reports, and other material that must not be published.
 
-Resolve location using:
+Private docs are never copied into the public repository.
 
-* `$PD_PRIVATE_DOCS_DIR` if configured;
-* otherwise the repository's documented fallback location.
+**Know it exists — check it when relevant:**
+
+* when a task touches governance, product emotional-value, domain semantics,
+  plans, ADRs, runbooks or quality reports, look for relevant guidance in the
+  private docs and read it;
+* keep the private docs current: when your work changes what those docs
+  describe, update them in the private repo.
+
+**Location (current environment):**
+
+* private repo clone: `D:\Code\principles-private`;
+* docs root: `D:\Code\principles-private\docs`;
+* resolve programmatically with `$PD_PRIVATE_DOCS_DIR` when configured,
+  otherwise the repository's documented fallback location.
 
 Rules:
 
 * read/search private docs from the private repo;
 * do not assume public-repo `rg` includes them;
-* edit private docs only in the private repo;
-* commit/push private-doc changes there;
+* edit private docs only inside the private repo;
+* commit/push private-doc changes there (`git -C <private-repo> ...`);
 * never paste private content into public PRs/issues/commit messages;
 * reference paths only when public discussion needs to acknowledge them.
 
-If availability is uncertain, use the repository's private-doc check script.
+If availability is uncertain, use the repository's private-doc check script
+(`node scripts/setup-private-docs-symlink.mjs --check`).
 
 ---
 
