@@ -82,7 +82,7 @@ export type {
 export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetryPolicySchema, AgentSpecSchema } from './agent-spec.js';
 export { SchemaVersionRefSchema, RuntimeV2SchemaVersionSchema } from './schema-version.js';
 export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';
-export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema } from './task-status.js';
+export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema, PD_TASK_STATUSES, isPDTaskStatus } from './task-status.js';
 export { RuntimeSelectionCriteriaSchema } from './runtime-selector.js';
 // Context payload schemas (Phase 2)
 export { HistoryQueryEntrySchema, TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema, HistoryQueryResultSchema, DiagnosisTargetSchema, ContextPayloadSchema, DiagnosticianContextPayloadSchema, ToolCallEntrySchema, PainContextSchema, FullTracePayloadSchema, FullTracePayloadV2Schema, TraceSourceRefSchema, TraceTimelineEntrySchema, TraceEventKindSchema, SourceRefKindSchema, validateFullTracePayload, sanitizeFullTracePayload, buildFullTraceTimeline, buildSourceRefs, checkFullTracePayloadSchema, TRACE_EVENT_KINDS, SOURCE_REF_KINDS } from './context-payload.js';
@@ -98,7 +98,7 @@ export type { GoldenTraceCandidateDecision, GoldenTraceCandidateBuilderInput, Go
 // Diagnostician output schemas (Phase 2)
 export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, RecommendationKindSchema, DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema, DiagnosticianInvocationInputSchema } from './diagnostician-output.js';
 // Principle tree types schemas
-export { PrincipleStatusSchema, PrinciplePrioritySchema, PrincipleScopeSchema, PrincipleEvaluabilitySchema, RuleStatusSchema, RuleTypeSchema, ImplementationLifecycleStateSchema, ImplementationTypeSchema, SampleClassificationSchema, PrincipleSchema, RuleSchema, ImplementationSchema, PrincipleDependencySchema, PrincipleValueMetricsSchema, PrincipleEventTypeSchema, PrincipleLifecycleEventSchema, PrincipleTreeStoreSchema, EvidenceChainStateSchema, EvidenceChainRecordSchema, EvidenceChainResponseSchema } from './types/index.js';
+export { PRINCIPLE_STATUSES, PrincipleStatusSchema, PrinciplePrioritySchema, PrincipleScopeSchema, PrincipleEvaluabilitySchema, RuleStatusSchema, RuleTypeSchema, ImplementationLifecycleStateSchema, ImplementationTypeSchema, SampleClassificationSchema, PrincipleSchema, RuleSchema, ImplementationSchema, PrincipleDependencySchema, PrincipleValueMetricsSchema, PrincipleEventTypeSchema, PrincipleLifecycleEventSchema, PrincipleTreeStoreSchema, EvidenceChainStateSchema, EvidenceChainRecordSchema, EvidenceChainResponseSchema } from './types/index.js';
 // Hygiene types schemas
 export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-types.js';
 // Runtime summary types schemas

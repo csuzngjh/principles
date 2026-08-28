@@ -7,6 +7,9 @@ import {
   SqliteConnection,
   isPDErrorCategory,
   parsePITaskMetadata,
+  PD_TASK_STATUSES,
+  PRINCIPLE_STATUSES,
+  isPDTaskStatus,
 } from '@principles/core/runtime-v2';
 import type {
   ActivationFact,
@@ -25,10 +28,9 @@ import type {
 export const GOVERNANCE_TASK_KINDS = new Set([
   'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer',
 ]);
-export const GOVERNANCE_TASK_STATUSES = new Set([
-  'pending', 'leased', 'succeeded', 'retry_wait', 'failed', 'needs_human_review',
-]);
-const PRINCIPLE_STATES = new Set(['candidate', 'active', 'archived', 'deprecated', 'probation']);
+// PRI-612: both status sets derive from the canonical core authorities.
+export const GOVERNANCE_TASK_STATUSES = new Set<string>(PD_TASK_STATUSES);
+const PRINCIPLE_STATES = new Set<string>(PRINCIPLE_STATUSES);
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const MAX_LINEAGE_NODES = 500;
 
@@ -532,7 +534,7 @@ export class GovernanceProjectionCollector {
       return null;
     }
     if (taskKind !== 'dreamer' && taskKind !== 'philosopher' && taskKind !== 'scribe' && taskKind !== 'artificer' && taskKind !== 'evaluator' && taskKind !== 'rollout_reviewer') return null;
-    if (status !== 'pending' && status !== 'leased' && status !== 'succeeded' && status !== 'retry_wait' && status !== 'failed' && status !== 'needs_human_review') return null;
+    if (!isPDTaskStatus(status)) return null;
     const result: ValidTaskRow = { taskId, taskKind, status, createdAt, updatedAt, attemptCount, maxAttempts, channel, dependencyTaskIds: metadata.dependencyTaskIds };
     const leaseExpiresAt = readOwnString(row, 'lease_expires_at');
     if (leaseExpiresAt !== undefined) {
