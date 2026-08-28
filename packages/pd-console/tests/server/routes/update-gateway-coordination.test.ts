@@ -168,11 +168,13 @@ describe('PRI-614 Gate A: gateway coordination during POST /apply', () => {
 
     const stopIndex = execLog.findIndex((c) => c.cmd === 'openclaw' && c.args?.[1] === 'stop');
     const tarIndex = execLog.findIndex((c) => c.cmd === 'tar');
+    const startIndex = execLog.findIndex((c) => c.cmd === 'openclaw' && c.args?.[1] === 'start');
 
     expect(gatewayCalls('stop'), 'gateway stop must be issued when the gateway is running').toBe(1);
     expect(tarIndex, 'the apply flow must reach tar extraction').toBeGreaterThanOrEqual(0);
     expect(stopIndex, 'gateway stop must precede the first file mutation (tar extract)').toBeLessThan(tarIndex);
     expect(gatewayCalls('start'), 'gateway restart must run after the update finishes').toBe(1);
+    expect(startIndex, 'gateway restart must follow the update mutation').toBeGreaterThan(tarIndex);
   });
 
   it('restarts the gateway even when the update fails mid-apply (finally semantics)', async () => {
@@ -187,6 +189,9 @@ describe('PRI-614 Gate A: gateway coordination during POST /apply', () => {
     expect(bodyOf(res).data.success).toBe(false);
     expect(gatewayCalls('stop')).toBe(1);
     expect(gatewayCalls('start'), 'gateway restart MUST still run after a failed apply').toBe(1);
+    const failedTarIndex = execLog.findIndex((c) => c.cmd === 'tar');
+    const restartIndex = execLog.findIndex((c) => c.cmd === 'openclaw' && c.args?.[1] === 'start');
+    expect(restartIndex, 'gateway restart must follow the failed mutation attempt').toBeGreaterThan(failedTarIndex);
   });
 
   it('spawns no gateway commands when the gateway is not running', async () => {
