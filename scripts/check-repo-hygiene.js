@@ -186,6 +186,33 @@ export function checkLargeFiles(stagedFiles) {
 }
 
 /**
+ * Worktree file integrity check — ERR-002 (fail loud).
+ *
+ * Detects the large-scale accident class we hit: tracked files present in the
+ * index but absent on disk (`git ls-files -d`). This is the regression guard
+ * that surfaces "N tracked files vanished" style incidents at the merge gate
+ * instead of letting them pass silently. Also invoked by `npm run doctor`.
+ *
+ * Returns `{ missingFiles: string[] }`; an empty array means healthy.
+ *
+ * Unlike the gitLines() helper above (which intentionally swallows failures for
+ * informational queries), this guard MUST distinguish "query completed, nothing
+ * missing" from "query could not run". A swallowed failure here would make the
+ * merge gate silently pass in exactly the states we are guarding against, so a
+ * failed `git ls-files -d` throws and the caller reports it (rc-9: no silent
+ * fallback). Optional `cwd` lets tests run the check in an isolated repo.
+ */
+export function checkWorktreeIntegrity({ cwd } = {}) {
+  const output = execFileSync('git', ['ls-files', '-d'], {
+    encoding: 'utf8',
+    maxBuffer: 10 * 1024 * 1024,
+    ...(cwd ? { cwd } : {}),
+  });
+  const trimmed = output.trim();
+  return { missingFiles: trimmed.length === 0 ? [] : trimmed.split(/\r?\n/u) };
+}
+
+/**
  * Main entry point.
  */
 function main() {
@@ -206,6 +233,37 @@ function main() {
   if (mode === 'staged' && files.length > 0) {
     const largeViolations = checkLargeFiles(files);
     violations.push(...largeViolations);
+  }
+
+  // 3. Worktree integrity — fail loud on missing tracked files (all/merge mode).
+  //    Guards against "N tracked files vanished from disk" accidents: the index
+  //    still lists them, so a normal commit would silently break the tree.
+  if (mode === 'all') {
+    let missingFiles;
+    try {
+      ({ missingFiles } = checkWorktreeIntegrity());
+    } catch (error) {
+      console.error('[REPO HYGIENE] Failed - worktree integrity query did not complete\n');
+      console.error(`Reason: ${error.message}`);
+      console.error('\nNext action: verify git works in this checkout (git status), then re-run.');
+      process.exit(1);
+    }
+    if (missingFiles.length > 0) {
+      console.error(`[REPO HYGIENE] Failed - ${missingFiles.length} tracked files are missing from disk\n`);
+      console.error('Reason: Files are present in the git index but absent on disk.');
+      console.error('Sample of missing paths:');
+      for (const file of missingFiles.slice(0, 20)) {
+        console.error(`  - ${file}`);
+      }
+      if (missingFiles.length > 20) {
+        console.error(`  …and ${missingFiles.length - 20} more`);
+      }
+      console.error('\nNext action: restore from the index (writes real files, never deletes):');
+      console.error('  git restore <path>        # restore specific paths');
+      console.error('  git restore -- packages/  # restore a whole tree');
+      console.error('\nFull diagnosis entrypoint: npm run doctor');
+      process.exit(1);
+    }
   }
 
   if (violations.length > 0) {

@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { checkFile, DENYLIST, ALLOWLIST } from '../check-repo-hygiene.js';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { checkFile, DENYLIST, ALLOWLIST, checkWorktreeIntegrity } from '../check-repo-hygiene.js';
+
+/** Create an isolated git repo so integrity tests never depend on this checkout. */
+function makeTempRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'pd-integrity-'));
+  execFileSync('git', ['init', '--quiet'], { cwd: dir, stdio: 'ignore' });
+  return dir;
+}
 
 describe('check-repo-hygiene', () => {
   describe('checkFile', () => {
@@ -84,6 +95,50 @@ describe('check-repo-hygiene', () => {
     it('contains known legitimate template fixtures', () => {
       expect(ALLOWLIST.size).toBeGreaterThanOrEqual(1);
       expect(ALLOWLIST.has('packages/openclaw-plugin/templates/workspace/.state/WORKBOARD.json')).toBe(true);
+    });
+  });
+
+  describe('checkWorktreeIntegrity', () => {
+    it('returns a missingFiles array', () => {
+      const result = checkWorktreeIntegrity();
+      expect(result).toHaveProperty('missingFiles');
+      expect(Array.isArray(result.missingFiles)).toBe(true);
+    });
+
+    it('returns an empty array for a healthy worktree', () => {
+      const dir = makeTempRepo();
+      try {
+        writeFileSync(join(dir, 'tracked.txt'), 'data');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: dir, stdio: 'ignore' });
+        const result = checkWorktreeIntegrity({ cwd: dir });
+        expect(result.missingFiles).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('surfaces a tracked file deleted from disk', () => {
+      const dir = makeTempRepo();
+      try {
+        writeFileSync(join(dir, 'tracked.txt'), 'data');
+        execFileSync('git', ['add', 'tracked.txt'], { cwd: dir, stdio: 'ignore' });
+        unlinkSync(join(dir, 'tracked.txt'));
+        const result = checkWorktreeIntegrity({ cwd: dir });
+        expect(result.missingFiles).toContain('tracked.txt');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('throws when the git query cannot run (no silent fallback)', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'pd-integrity-nogit-'));
+      try {
+        // Empty temp dir: not a git repository, so ls-files must fail loudly
+        // instead of silently reporting "no missing files".
+        expect(() => checkWorktreeIntegrity({ cwd: dir })).toThrow();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 });

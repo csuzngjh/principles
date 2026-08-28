@@ -872,6 +872,9 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     };
   }
 
+  // gatewayWasStopped records whether we had to stop an OpenClaw gateway to
+  // release native module locks. It is only ever set after candidate
+  // verification, in the host-aware stop below.
   let gatewayWasStopped = false;
 
   // Capture installed facts before staging any candidate release.
