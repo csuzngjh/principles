@@ -55,7 +55,15 @@ function main() {
   console.log(`[doctor] Diagnosing worktree: ${root}\n`);
 
   // --- 1. Tracked files present in the index but missing on disk ------------
-  const { missingFiles } = checkWorktreeIntegrity();
+  let missingFiles;
+  try {
+    ({ missingFiles } = checkWorktreeIntegrity());
+  } catch (error) {
+    console.error('[FAIL] Worktree integrity query did not complete.');
+    console.error(`Reason: ${error.message}`);
+    console.error('Next action: verify git works in this checkout (git status), then re-run npm run doctor.');
+    process.exit(1);
+  }
   if (missingFiles.length > 0) {
     console.error(`[FAIL] ${missingFiles.length} tracked files are missing from disk:`);
     for (const f of missingFiles.slice(0, 20)) console.error(`  - ${f}`);

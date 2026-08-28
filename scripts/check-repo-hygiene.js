@@ -194,9 +194,22 @@ export function checkLargeFiles(stagedFiles) {
  * instead of letting them pass silently. Also invoked by `npm run doctor`.
  *
  * Returns `{ missingFiles: string[] }`; an empty array means healthy.
+ *
+ * Unlike the gitLines() helper above (which intentionally swallows failures for
+ * informational queries), this guard MUST distinguish "query completed, nothing
+ * missing" from "query could not run". A swallowed failure here would make the
+ * merge gate silently pass in exactly the states we are guarding against, so a
+ * failed `git ls-files -d` throws and the caller reports it (rc-9: no silent
+ * fallback). Optional `cwd` lets tests run the check in an isolated repo.
  */
-export function checkWorktreeIntegrity() {
-  return { missingFiles: gitLines(['ls-files', '-d']) };
+export function checkWorktreeIntegrity({ cwd } = {}) {
+  const output = execFileSync('git', ['ls-files', '-d'], {
+    encoding: 'utf8',
+    maxBuffer: 10 * 1024 * 1024,
+    ...(cwd ? { cwd } : {}),
+  });
+  const trimmed = output.trim();
+  return { missingFiles: trimmed.length === 0 ? [] : trimmed.split(/\r?\n/u) };
 }
 
 /**
@@ -226,7 +239,15 @@ function main() {
   //    Guards against "N tracked files vanished from disk" accidents: the index
   //    still lists them, so a normal commit would silently break the tree.
   if (mode === 'all') {
-    const { missingFiles } = checkWorktreeIntegrity();
+    let missingFiles;
+    try {
+      ({ missingFiles } = checkWorktreeIntegrity());
+    } catch (error) {
+      console.error('[REPO HYGIENE] Failed - worktree integrity query did not complete\n');
+      console.error(`Reason: ${error.message}`);
+      console.error('\nNext action: verify git works in this checkout (git status), then re-run.');
+      process.exit(1);
+    }
     if (missingFiles.length > 0) {
       console.error(`[REPO HYGIENE] Failed - ${missingFiles.length} tracked files are missing from disk\n`);
       console.error('Reason: Files are present in the git index but absent on disk.');
