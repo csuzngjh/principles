@@ -168,6 +168,15 @@
           "monitor": "Nothing to do — PD will surface the next decision here.",
           "none": "Nothing to do right now."
         },
+        "ownerGuide": {
+          "title": "Set the Owner identity",
+          "intro": "Copy the command below and run it in the shell that launches OpenClaw and the PD Console (replace <owner-id> and <credential-id> with your own IDs), then restart both.",
+          "cmdPowerShell": "PowerShell (Windows)",
+          "cmdBash": "bash (macOS / Linux)",
+          "copy": "Copy",
+          "copied": "Copied",
+          "docLink": "Configuration guide and verification →"
+        },
         "activity": {
           "needsDecision": "{{count}} decision(s) waiting",
           "needsRecovery": "{{count}} item(s) need recovery",

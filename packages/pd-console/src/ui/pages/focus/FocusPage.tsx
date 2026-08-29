@@ -195,6 +195,48 @@ function getDegradedNextActionText(
   return text === i18nKey ? code : text;
 }
 
+// ── Owner identity configure guide (PRI-578 PR-3-B) ──────────────────────────
+// Show a copyable command + doc link whenever the snapshot reports the Owner
+// identity as missing — regardless of which issue owns the headline (recovery /
+// degraded can outrank setup_required on busy workspaces). Guidance only: no
+// persistence, no new write path (host env vars remain the single source).
+
+export interface OwnerConfigureCommand {
+  /** i18n key for the shell label, e.g. "pages.focus.experience.ownerGuide.cmdPowerShell". */
+  labelKey: string;
+  /** Exact multi-line command to set both variables in that shell. */
+  command: string;
+}
+
+export interface OwnerConfigureGuide {
+  docUrl: string;
+  commands: readonly OwnerConfigureCommand[];
+}
+
+export const OWNER_CONFIGURE_DOC_URL =
+  "https://github.com/csuzngjh/principles/blob/main/docs/runbooks/ops/owner-identity-configuration.md";
+
+export const OWNER_CONFIGURE_COMMANDS: readonly OwnerConfigureCommand[] = [
+  {
+    labelKey: "pages.focus.experience.ownerGuide.cmdPowerShell",
+    command:
+      "[Environment]::SetEnvironmentVariable('PD_OWNER_ID', '<owner-id>', 'User')\n[Environment]::SetEnvironmentVariable('PD_OWNER_CREDENTIAL_ID', '<credential-id>', 'User')",
+  },
+  {
+    labelKey: "pages.focus.experience.ownerGuide.cmdBash",
+    command:
+      "echo 'export PD_OWNER_ID=\"<owner-id>\"' >> ~/.bashrc\necho 'export PD_OWNER_CREDENTIAL_ID=\"<credential-id>\"' >> ~/.bashrc\nsource ~/.bashrc",
+  },
+];
+
+/** Returns the configure guide when the Owner identity is missing, else null. */
+export function deriveOwnerConfigureGuide(
+  ownerIdentityConfiguration: string | undefined,
+): OwnerConfigureGuide | null {
+  if (ownerIdentityConfiguration !== "missing") return null;
+  return { docUrl: OWNER_CONFIGURE_DOC_URL, commands: OWNER_CONFIGURE_COMMANDS };
+}
+
 // ── Channel label helper ─────────────────────────────────────────────────────
 
 function getChannelLabel(channel: string, t: (key: string) => string): string {
@@ -809,6 +851,7 @@ const EXPERIENCE_ENVIRONMENT: Record<WorkspaceEnvironment | "unknown", string> =
 
 function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSnapshot }) {
   const { t } = useTranslation();
+  const [copiedCommandIdx, setCopiedCommandIdx] = useState<number | null>(null);
   const attention = EXPERIENCE_ATTENTION[snapshot.summary.primaryAttention];
   const categoryOf = (category: GovernanceActivityCategorySummary["category"]) =>
     snapshot.activity.categories.find(entry => entry.category === category);
@@ -821,6 +864,7 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
   const rulecodeAction = actionOf("rulecode_owner_decision");
   const pauseAction = actionOf("emergency_pause");
   const firstIssue = snapshot.dataQuality.issueGroups[0];
+  const ownerGuide = deriveOwnerConfigureGuide(snapshot.readiness.ownerIdentityConfiguration);
   return (
     <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]" data-testid="experience-summary">
       <div className="flex items-center gap-2 mb-1">
@@ -857,6 +901,50 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
         {t(`pages.focus.experience.readiness.rulecode.${rulecodeAction?.status === "blocked" ? "blocked" : "ready"}`)}
         {t(`pages.focus.experience.readiness.pause.${pauseAction?.observedAuthority === "break_glass" ? "breakGlass" : "owner"}`)}
       </div>
+      {ownerGuide !== null && (
+        <div className="mt-3 border border-line rounded-[6px] bg-panel px-3 py-2.5" data-testid="owner-configure-guide">
+          <div className="text-[13px] font-medium">{t("pages.focus.experience.ownerGuide.title")}</div>
+          <div className="mt-0.5 text-[12px] text-ink-3 leading-relaxed">{t("pages.focus.experience.ownerGuide.intro")}</div>
+          <div className="mt-2 space-y-2">
+            {ownerGuide.commands.map((cmd, idx) => (
+              <div key={cmd.labelKey} className="border border-line rounded-[4px] overflow-hidden bg-surface">
+                <div className="flex items-center justify-between px-2.5 py-1">
+                  <span className="font-mono text-[11px] uppercase text-ink-3">{t(cmd.labelKey)}</span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(cmd.command);
+                        setCopiedCommandIdx(idx);
+                        setTimeout(() => setCopiedCommandIdx(null), 2000);
+                      } catch (error) {
+                        // clipboard unavailable — keep the command visible as fallback
+                        console.warn("Owner configure command copy failed.", error);
+                      }
+                    }}
+                    className="font-mono text-[11px] text-gov hover:text-gov-2"
+                  >
+                    {copiedCommandIdx === idx
+                      ? t("pages.focus.experience.ownerGuide.copied")
+                      : t("pages.focus.experience.ownerGuide.copy")}
+                  </button>
+                </div>
+                <pre className="px-2.5 pb-2 pt-0.5 text-[11px] font-mono text-ink-2 leading-relaxed overflow-x-auto whitespace-pre-wrap">
+                  {cmd.command}
+                </pre>
+              </div>
+            ))}
+          </div>
+          <a
+            href={ownerGuide.docUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 inline-block text-[12px] text-gov underline hover:text-gov-2"
+          >
+            {t("pages.focus.experience.ownerGuide.docLink")}
+          </a>
+        </div>
+      )}
       <div className="mt-1 text-[12px] text-ink-4" data-testid="experience-trust">
         {t(EXPERIENCE_ENVIRONMENT[snapshot.trustContext.environmentContext.environment])}
         {" · "}
