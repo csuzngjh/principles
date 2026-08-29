@@ -32,6 +32,7 @@ import {
 } from '../utils/pd-backups.js';
 import { ActivationCompatibilityReadModel } from '@principles/core/runtime-v2';
 import { getInstallLayoutPaths, resolveInstallLayout, type InstallHost } from '@principles/install-layout';
+import { collectFileDepLinkSpecs } from '../utils/update-links.js';
 
 /**
  * Legacy rule contract preflight (2026-08-19): refuse to swap the runtime
@@ -793,17 +794,29 @@ function depsMeaningfullyChanged(
 }
 
 /**
- * Create the node_modules/@principles/host-runtime resolution links for the
- * installed console and pd-cli packages, if missing.
+ * Create the node_modules resolution links for the installed components, if
+ * missing.
  *
  * Mirrors installer.ts syncPdCli: junction on Windows (no elevation needed),
  * relative symlink elsewhere. Fresh installs get these links via npm install
- * (the bundled package.json rewrites the dep to file:../host-runtime); the
- * full update deliberately skips npm install, so it must create them itself.
- * Without the link, the updated console dist — which statically imports
- * @principles/host-runtime since 2026-08-21 (41cf97ee5) — crashes at startup
- * with ERR_MODULE_NOT_FOUND on installs created before the installer bundled
- * host-runtime (PRI-561).
+ * (the bundled package.json rewrites internal deps to file:../<component>);
+ * the full update deliberately skips npm install, so it must create them
+ * itself. Without a link, updated dists crash at startup with
+ * ERR_MODULE_NOT_FOUND (host-runtime: PRI-561, 2026-08-21).
+ *
+ * Two sources, both fail-closed on creation errors:
+ *   1. the explicit link list below (known-critical links: a missing one
+ *      means the updated console cannot start);
+ *   2. a data-driven pass that derives links from EACH deployed component's
+ *      declared `file:` dependencies. This is what makes the updater immune
+ *      to the generation gap: the running console executes update logic from
+ *      its own dist (one generation behind the components it installs), so a
+ *      hardcoded list goes stale the moment a release adds a new internal
+ *      dependency — observed 2026-08-29 when the 1.221.2 console updated
+ *      hosts to 1.222.5 but could not know about the newly introduced
+ *      install-layout component, leaving
+ *      host-runtime/node_modules/@principles/install-layout missing and
+ *      every pd-cli runtime command failing with ERR_MODULE_NOT_FOUND.
  *
  * Returns undefined on success, or an error message (rc-9: observable, never
  * silent — a missing link means the updated console cannot start).
@@ -819,6 +832,35 @@ function ensureRuntimeResolutionLinks(layout: UpdateLayout): string | undefined 
     { linkPath: path.join(layout.hostRuntimeDir, 'node_modules', '@principles', 'install-layout'), target: layout.installLayoutDir },
     { linkPath: path.join(layout.consoleDir, 'node_modules', 'principles-disciple'), target: layout.pluginDir },
   ];
+  // Data-driven pass: derive links from each deployed component's declared
+  // `file:` dependencies so newly introduced internal dependencies are
+  // linked without requiring a console-generation change first.
+  const componentDirs = [layout.consoleDir, layout.pdCliDir, layout.hostRuntimeDir, layout.installLayoutDir, layout.pluginDir];
+  const readComponentDependencies = (componentDir: string): Record<string, string> => {
+    try {
+      const pkgPath = path.join(componentDir, 'package.json');
+      if (!fs.existsSync(pkgPath)) return {};
+      const parsed: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (typeof parsed !== 'object' || parsed === null) return {};
+      const deps = (parsed as Record<string, unknown>).dependencies;
+      if (typeof deps !== 'object' || deps === null) return {};
+      const out: Record<string, string> = {};
+      for (const [name, ref] of Object.entries(deps as Record<string, unknown>)) {
+        if (typeof ref === 'string') out[name] = ref;
+      }
+      return out;
+    } catch {
+      // rc-9: an unreadable manifest degrades to "no derived links" — the
+      // explicit list above still covers the known-critical links.
+      return {};
+    }
+  };
+  const fileDepSpecs = collectFileDepLinkSpecs(componentDirs, readComponentDependencies, (dir) => fs.existsSync(dir));
+  for (const spec of fileDepSpecs) {
+    if (!links.some((existing) => existing.linkPath === spec.linkPath)) {
+      links.push(spec);
+    }
+  }
   for (const { linkPath, target } of links) {
     if (!fs.existsSync(target)) continue;
     if (fs.existsSync(linkPath)) continue;
