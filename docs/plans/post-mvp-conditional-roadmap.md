@@ -612,3 +612,43 @@ The following work remains subject to external evidence and is not authorized by
 **估时**: Phase 0 约 2-3 天（可立即做）；Phase 1 约 1 周；Phase 2 约 1 周（验证后另计）
 
 **关联**: SPEC `2026-08-22-principle-working-set-selector-spec.md`；§1 Attribution Pipeline（共享外部信号条件）；ADR-0014 §2.5
+
+---
+
+## 24. Codex Governance Closure — 对话观察治理闭环（Slices A–D + R1）
+
+> **Source**: `docs/superpowers/specs/2026-08-28-codex-governance-closure-spec.md` rev 2（PR #1437，merge `00eabfc7`）；G0+G2A decision package（PR #1440，merge `9af500d2`）；G1 probe report `docs/architecture/CODEX_G1_CONTRACT_PROBE_REPORT.md`
+> **Added**: 2026-08-29（Owner 批准于 2026-08-28）
+> **Linear**: [PRI-617](https://linear.app/principlesdisciple/issue/PRI-617) / [PRI-618](https://linear.app/principlesdisciple/issue/PRI-618) / [PRI-619](https://linear.app/principlesdisciple/issue/PRI-619) / [PRI-620](https://linear.app/principlesdisciple/issue/PRI-620)（`mvp-exception`）
+> **Status**: **Active by explicit Owner exception — 仅限冻结 SPEC 定义的窄闭环**
+
+### 24.1 Exception record
+
+外部信号重启条件未满足。Owner 于 2026-08-28 以原话「允许，我认为这个是要获得高质量的原则必须付出的代价」显式批准 bounded Codex conversation ingestion MVP exception，批准绑定 SPEC rev 2 与 G0/G2A decision package（逐字记录：Linear PRI-617 评论 `26ebf355`、PRI-619 评论 `63e9f9c4`）。ADR 权威修订见 ADR-0020 §11。
+
+### 24.2 Active scope（冻结 SPEC 的 Slice 划分）
+
+- Slice A — Host Observation Interface & Bounded Storage
+- Slice B — Signal Admission, Canonical Pain & Diagnostician Continuation
+- Slice C — Companion Worker & Recovery
+- Slice D — Owner Experience & Governance Closure
+- R1 — Consent UX Verification / Installed Rollout Gate
+
+边界与控制（不可在实施中扩张）：ingestion 只读 authenticated Workspace hook 明确提供的 transcript；unpromoted 保留 ≤ 32 visible turns/rollout 且 ≤ 7 天；promotion ≤ 12 preceding turns + trigger + next completed assistant turn；`codex_conversation_ingestion` quiet flag 默认 off；consent 按 G2A 冻结披露文本（Slice D 呈现、R1 验证）；canonical pain 唯一 authority 不变（`production-pain-evidence.ts` + `pain_events.canonical_pain_id`）；OpenClaw cooldown 语义不变（ADR-0020 §11.3 兼容决策）。
+
+### 24.3 Still Hold / 明确未被本例外批准
+
+- general Codex memory pipeline —— §18.2 保持 Hold：本例外只授权其依赖的窄 Companion worker，不解锁 Memory 两阶段流水线本身；
+- §19 长跑服务替代（PRI-521）的其余范围 —— 不因此重启；
+- generic long-running daemon platform / 第二个长期服务体系；
+- arbitrary transcript scanning（含 `$CODEX_HOME/sessions` 全盘扫描/猜最新 session）；
+- session replay / full-text search / bulk transcript export 产品形态；
+- 任何自动 Owner approval。
+
+### 24.4 Rollback
+
+运行时三层：`codex_conversation_ingestion = false`（即时停止读取 transcript）→ `internalization_auto_consumer = false`（暂停自动执行）→ `host.codex = false`（Codex 全停）。文档层回滚 = revert 本条目与 ADR-0020 §11（均无 runtime 行为）。
+
+### 24.5 关联
+
+ADR-0020 §11；`docs/architecture/CODEX_G1_CONTRACT_PROBE_REPORT.md`；`docs/superpowers/specs/2026-08-28-codex-governance-closure-g0-g2a-decision.md`；SPEC §20（delivery slices）；SPEC §3（gates）
