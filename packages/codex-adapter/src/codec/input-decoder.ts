@@ -4,6 +4,7 @@ export const CODEX_EVENT_PRE_TOOL_USE = 'PreToolUse';
 export const CODEX_EVENT_POST_TOOL_USE = 'PostToolUse';
 export const CODEX_EVENT_USER_PROMPT_SUBMIT = 'UserPromptSubmit';
 export const CODEX_EVENT_SESSION_START = 'SessionStart';
+export const CODEX_EVENT_STOP = 'Stop';
 export const CODEX_EVENT_SESSION_END = 'SessionEnd';
 
 const EVENT_KINDS = new Map<string, HostEventKind>([
@@ -11,6 +12,7 @@ const EVENT_KINDS = new Map<string, HostEventKind>([
   [CODEX_EVENT_POST_TOOL_USE, 'after_tool_call'],
   [CODEX_EVENT_USER_PROMPT_SUBMIT, 'before_prompt_build'],
   [CODEX_EVENT_SESSION_START, 'session_start'],
+  [CODEX_EVENT_STOP, 'turn_complete'],
 ]);
 
 export class CodexDecoderError extends Error {
@@ -64,7 +66,7 @@ export function decodeCodexInput(raw: unknown): HostEvent {
   if (!isRecord(raw)) throw new CodexDecoderError('stdin payload is not a JSON object', 'Run this executable only as a Codex command hook.');
   const eventName = requiredString(raw, 'hook_event_name');
   const kind = EVENT_KINDS.get(eventName);
-  if (!kind) throw new CodexDecoderError(`unknown hook_event_name "${eventName}"`, 'Configure only PreToolUse, PostToolUse, UserPromptSubmit, or SessionStart.');
+  if (!kind) throw new CodexDecoderError(`unknown hook_event_name "${eventName}"`, 'Configure only PreToolUse, PostToolUse, UserPromptSubmit, SessionStart, or Stop.');
   const common = validateCommon(raw, kind !== 'session_start');
   let context: HostEventContext;
   let rawPayload: unknown = raw;
@@ -77,6 +79,15 @@ export function decodeCodexInput(raw: unknown): HostEvent {
     rawPayload = { toolInput: { toolName, params: toolInput } };
   } else if (kind === 'before_prompt_build') {
     context = { ...common, promptContent: requiredString(raw, 'prompt') };
+  } else if (kind === 'turn_complete') {
+    // Stop is the G1-verified turn-complete event (probe report §2). Its
+    // payload carries stop_hook_active (required boolean); PD consumes the
+    // already-flushed transcript, never last_assistant_message directly.
+    const stopHookActive = own(raw, 'stop_hook_active');
+    if (typeof stopHookActive !== 'boolean') {
+      throw new CodexDecoderError('missing or malformed required field "stop_hook_active"', 'Use the exact codex-cli 0.148.0 stop_hook_active field.');
+    }
+    context = { ...common };
   } else {
     context = { ...common, source: requiredString(raw, 'source') };
   }
