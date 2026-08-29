@@ -171,6 +171,7 @@
         "ownerGuide": {
           "title": "设置拥有者身份",
           "intro": "复制以下命令，在启动 OpenClaw 与 PD 控制台的 shell 中执行（把 <owner-id> 与 <credential-id> 换成你自己的 ID），然后重启两者。",
+          "tokenAuthHint": "还需要启用 Console token 认证（--token 或 PD_CONSOLE_TOKEN）——这是 Owner 身份成立的必要条件；若尚未启用，请按配置文档完成该步骤。",
           "cmdPowerShell": "PowerShell（Windows）",
           "cmdBash": "bash（macOS / Linux）",
           "copy": "复制",

@@ -171,6 +171,7 @@
         "ownerGuide": {
           "title": "Set the Owner identity",
           "intro": "Copy the command below and run it in the shell that launches OpenClaw and the PD Console (replace <owner-id> and <credential-id> with your own IDs), then restart both.",
+          "tokenAuthHint": "Console token authentication (--token or PD_CONSOLE_TOKEN) is also required for the identity to take effect; if not enabled yet, complete that step per the configuration guide.",
           "cmdPowerShell": "PowerShell (Windows)",
           "cmdBash": "bash (macOS / Linux)",
           "copy": "Copy",

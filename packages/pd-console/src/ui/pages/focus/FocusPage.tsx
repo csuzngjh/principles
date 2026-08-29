@@ -935,6 +935,9 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
               </div>
             ))}
           </div>
+          <p className="mt-2 text-[12px] text-amber leading-relaxed" data-testid="owner-guide-token-auth-hint">
+            {t("pages.focus.experience.ownerGuide.tokenAuthHint")}
+          </p>
           <a
             href={ownerGuide.docUrl}
             target="_blank"
