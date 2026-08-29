@@ -97,10 +97,27 @@ export function extractJsonObjects(text: string): Record<string, unknown>[] {
     } catch { /* not a complete object */ }
   }
 
+  // Track string/escape state: a `}` inside a JSON string value must not
+  // terminate the span early (CodeRabbit round on PRI-621).
   let depth = 0;
   let start = -1;
+  let inString = false;
+  let escaped = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString && ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
     if (ch === '{') {
       if (depth === 0) start = i;
       depth++;
@@ -159,7 +176,10 @@ export function selectBestJsonObject(
       bestSize = size;
     }
   }
-  return best;
+  // CodeRabbit round: when NOTHING matches any required key, fall back to
+  // the first candidate (legacy semantics) instead of letting the size/
+  // key-count tie-breaker promote an unrelated fragment.
+  return bestScore > 0 ? best : candidates[0] ?? null;
 }
 
 /**

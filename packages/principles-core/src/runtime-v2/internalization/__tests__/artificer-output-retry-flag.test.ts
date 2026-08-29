@@ -94,8 +94,28 @@ describe('ArtificerRunner permanentErrorCategories — `artificer_output_retry` 
     expect(runner.permanentErrorCategories.has('output_invalid')).toBe(true);
   });
 
-  it('output_invalid is retriable when flag is ON (registry default since PRI-621 graduation)', () => {
+  it('output_invalid is retriable when flag is ON (explicit effective config)', () => {
     const runner = makeRunner(makeEffectiveConfig(true));
+    expect(runner.permanentErrorCategories.has('output_invalid')).toBe(false);
+  });
+
+  it('output_invalid is retriable under the plain registry-default config (PRI-621 graduation)', () => {
+    // No flag override at all: getDefaultPdConfig() derives from the
+    // feature-flag contract, so this proves the registry default (ON) —
+    // not just an explicit effectiveConfig.
+    const base = getDefaultPdConfig();
+    const runner = makeRunner({
+      config: { ...base },
+      source: 'user_config',
+      warnings: [],
+      featuresChangedFromDefault: [],
+      resolvedProfile: resolveProfile({}),
+      resolvedContextInjection: {
+        thinkingOs: false,
+        projectFocus: 'off',
+        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
+      },
+    });
     expect(runner.permanentErrorCategories.has('output_invalid')).toBe(false);
   });
 

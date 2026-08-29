@@ -256,6 +256,24 @@ describe('extractJsonObjects', () => {
     const result = extractJsonObjects(input);
     expect(result).toEqual([{ ok: true }]);
   });
+
+  it('CodeRabbit: braces inside JSON string values do not terminate the span early', () => {
+    const input = '{"summary":"literal }"} {"taskId":"t1"}';
+    const result = extractJsonObjects(input);
+    expect(result).toEqual([
+      { summary: 'literal }' },
+      { taskId: 't1' },
+    ]);
+  });
+
+  it('CodeRabbit: escaped quotes inside strings are honored while scanning', () => {
+    const input = '{"msg":"ends with escaped \\" and brace }"} {"after":1}';
+    const result = extractJsonObjects(input);
+    expect(result).toEqual([
+      { msg: 'ends with escaped " and brace }' },
+      { after: 1 },
+    ]);
+  });
 });
 
 describe('selectBestJsonObject', () => {
@@ -280,6 +298,13 @@ describe('selectBestJsonObject', () => {
     const first = { a: 1 };
     const second = { b: 2 };
     expect(selectBestJsonObject([first, second], undefined)).toBe(first);
+  });
+
+  it('CodeRabbit: falls back to the FIRST candidate when all candidates score zero', () => {
+    // Zero-score tie-breaking must not promote an unrelated fragment.
+    const first = { a: 1 };
+    const second = { b: 2, c: 3 };
+    expect(selectBestJsonObject([first, second], ['taskId'])).toBe(first);
   });
 
   it('returns null for an empty candidate list', () => {
