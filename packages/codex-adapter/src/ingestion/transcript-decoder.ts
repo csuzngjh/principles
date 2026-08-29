@@ -65,13 +65,15 @@ export class TranscriptReplacedError extends Error {
 }
 
 function identityMatches(opened: fs.Stats, expected: TranscriptExpectedIdentity): boolean {
-  // dev/ino identity is authoritative where the platform reports a
-  // Number-safe inode; otherwise fall back to size+mtime, which still
-  // detects any replacement or rewrite between validation and open.
-  if (opened.ino !== 0 && expected.ino !== 0 && Number.isSafeInteger(opened.ino) && expected.dev !== 0) {
-    return opened.ino === expected.ino && opened.dev === expected.dev;
-  }
-  return opened.size === expected.size && opened.mtimeMs === expected.mtimeMs;
+  // Full-fingerprint match: inode identity AND size AND mtime must ALL hold.
+  // ino alone is insufficient — filesystems commonly reuse the just-freed
+  // inode for a delete+recreate replacement (caught exactly this way on the
+  // CI Linux runner). A false refusal is the safe direction: the hook
+  // degrades observably and the next Stop revalidates and retries.
+  const sameInode = opened.ino !== 0 && expected.ino !== 0 && Number.isSafeInteger(opened.ino) && expected.dev !== 0
+    && opened.ino === expected.ino && opened.dev === expected.dev;
+  const sameFingerprint = opened.size === expected.size && opened.mtimeMs === expected.mtimeMs;
+  return sameInode && sameFingerprint;
 }
 
 export function createNodeTranscriptPort(): TranscriptPort {
