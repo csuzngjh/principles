@@ -52,12 +52,18 @@ export interface RepairConfig {
   readonly schemaJson?: string;
   /** Maximum characters of the serialized schema. Default: 8000. */
   readonly maxSchemaJsonChars?: number;
+  /**
+   * Required top-level keys of the schema (PRI-621 RC3) — used to select the
+   * intended object out of multi-object repair responses. Optional fallback:
+   * when absent, keys are parsed defensively from schemaJson.
+   */
+  readonly requiredKeys?: readonly string[];
   /** Internal override for jitter between repair attempts (PRI-271 A3). Set to 0 to disable. */
   readonly _testJitterMs?: number;
 }
 
 /** Sensible defaults for repair configuration. */
-export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput' | 'schemaSummary' | 'schemaJson' | '_testJitterMs'>> = {
+export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput' | 'schemaSummary' | 'schemaJson' | 'requiredKeys' | '_testJitterMs'>> = {
   maxRepairAttempts: 3,
   maxErrorsInPrompt: 10,
   maxErrorChars: 200,
@@ -254,11 +260,11 @@ export async function attemptStructuredOutputRepair<T>(
 
   const errorSummary = `${currentErrors.length} errors: ${currentErrors.slice(0, 3).map(e => e.path).join(', ')}`;
 
-  // PRI-621 RC3: required top-level keys parsed (defensively) from the
-  // serialized schema the adapter supplies — used to select the right object
-  // out of multi-object repair responses.
-  let repairRequiredKeys: readonly string[] | undefined;
-  if (cfg.schemaJson) {
+  // PRI-621 RC3: required top-level keys — the adapter passes them directly
+  // when it has the TypeBox schema; parsing them out of schemaJson is only a
+  // fallback for callers that supply the serialized schema alone.
+  let repairRequiredKeys = cfg.requiredKeys;
+  if (repairRequiredKeys === undefined && cfg.schemaJson) {
     try {
       const parsedSchema: unknown = JSON.parse(cfg.schemaJson);
       if (typeof parsedSchema === 'object' && parsedSchema !== null && !Array.isArray(parsedSchema)) {

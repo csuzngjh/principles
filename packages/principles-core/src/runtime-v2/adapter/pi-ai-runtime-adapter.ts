@@ -1,7 +1,7 @@
 /**
  * PiAiRuntimeAdapter — PDRuntimeAdapter implementation for direct LLM completion.
  *
- * Uses @mariozechner/pi-ai to call LLM providers directly, bypassing the OpenClaw CLI.
+ * Uses @earendil-works/pi-ai (compat facade) to call LLM providers directly, bypassing the OpenClaw CLI.
  * Solves the m8-03 UAT blocker where the main agent takes >300s.
  *
  * One-shot run: startRun() calls pi-ai complete(), blocks until LLM responds,
@@ -19,7 +19,7 @@ import type { KnownProvider, Context, UserMessage, AssistantMessage, Model, Simp
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
-import { extractJsonObject, extractJsonObjectForSchema, extractJsonObjects } from './json-extractor.js';
+import { extractJsonObject, extractJsonObjectForSchema, extractJsonObjects, selectBestJsonObject } from './json-extractor.js';
 import { resolveOutputSchema } from './output-schema-registry.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
@@ -144,11 +144,14 @@ function resolveModel(provider: string, modelId: string, baseUrl?: string) {
   // Catalog-first: a custom endpoint relaying a catalog-known model keeps the
   // catalog's metadata (reasoning/maxTokens/compat) with only the transport
   // (provider name + baseUrl) overridden. getModel is a Map lookup per
-  // provider, so scanning the registry is cheap.
+  // provider, so scanning the registry is cheap. Guard: only openai-completions
+  // catalog entries are adopted — a custom baseUrl is assumed OpenAI-compatible,
+  // and reusing e.g. an anthropic-messages entry against it would send the
+  // wrong protocol.
   for (const catalogProvider of knownProviders) {
     // @ts-expect-error — runtime strings from config are acceptable against the literal-typed signature
     const catalogModel = getModel(catalogProvider, modelId);
-    if (catalogModel) {
+    if (catalogModel && catalogModel.api === 'openai-completions') {
       return { ...catalogModel, provider, baseUrl };
     }
   }
@@ -610,9 +613,16 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       const schemaSummary = (schema && schemaRef) ? deriveSchemaSummary(schema) : undefined;
       // PRI-621 RC2: full serialized schema for the repair loop — the summary
       // alone leaves nested enums/constraints invisible to the repair LLM.
-      const schemaJson = (schema && schemaRef)
-        ? JSON.stringify(typeboxToOpenAIJsonSchema(schema))
-        : undefined;
+      // Serialization is defensive: if it ever fails, the repair loop falls
+      // back to the summary instead of losing the repair path entirely.
+      let schemaJson: string | undefined;
+      if (schema && schemaRef) {
+        try {
+          schemaJson = JSON.stringify(typeboxToOpenAIJsonSchema(schema));
+        } catch {
+          schemaJson = undefined;
+        }
+      }
 
       // ── Path 1: Tool calling (PRI-271 B2) ──
       if (strategy === 'tool_call_first' && schema && schemaRef) {
@@ -646,10 +656,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         // of whichever balanced brace came first.
         const extractionCandidates = extractJsonObjects(text);
         const requiredKeys = schemaRequiredKeys(schema);
-        let parsedOutput = extractJsonObjectForSchema(text, requiredKeys);
+        let parsedOutput = selectBestJsonObject(extractionCandidates, requiredKeys);
         const extractionCandidateCount = extractionCandidates.length;
+        // Classic truncation signature: the selected object carries NONE of
+        // the schema's required top-level keys.
         const truncationSuspected = requiredKeys !== undefined
-          && extractionCandidateCount > 1
           && parsedOutput !== null
           && !requiredKeys.some((key) => Object.hasOwn(parsedOutput as Record<string, unknown>, key));
 
@@ -718,6 +729,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               originalOutput,
               schemaSummary,
               schemaJson,
+              requiredKeys,
               maxRepairAttempts: this.config.maxRepairAttempts,
             },
           );

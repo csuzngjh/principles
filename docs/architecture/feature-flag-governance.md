@@ -77,7 +77,7 @@ flag（quiet/off，gate 服务启动）与 `internalAgents.empathyObserver.enabl
 | core flag 应急关闭可观测 | computeEffectiveFlags core 分支 warning | 显式 disable 记录在 warnings |
 | registry↔surface registry 对账 | evolution-worker-slimming.test.ts (PRI-294) | evolution_worker/empathy_observer/gone 组 |
 | **registry↔installer 模板对账** | installer-config-parity.test.ts（本任务新增） | installer 全部 17 条 features |
-| 默认值毕业状态锁定 | feature-flag-contract.test.ts PRI-571 块 | 4 个毕业 flag 默认开+quiet+可关 |
+| 默认值毕业状态锁定 | feature-flag-contract.test.ts PRI-571 块 + PRI-621 块 | 5 个毕业 flag 默认开+quiet+可关 |
 
 ## 5. 明确不做（Non-goal）
 
