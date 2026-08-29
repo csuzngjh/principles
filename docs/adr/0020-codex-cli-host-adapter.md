@@ -6,8 +6,8 @@
 > **Context**: MVP-First (ADR-0014), Codex CLI adapter scoping (PRI-278~282, PRI-521, PRI-522)
 > **Supersedes**: None (refines ADR-0014 §2.3 activation channels)
 > **Related SPEC**: [`docs/architecture/CODEX_CLI_ADAPTER_SPEC.md`](../architecture/CODEX_CLI_ADAPTER_SPEC.md) v4.1
-> **Amended**: 2026-08-13 — PRI-523 owner-approved MVP exception; see §10
-> **Active reading rule**: Where §10 conflicts with earlier text, §10 controls. In particular, §§2.2-2.4, Alternative E, the "OpenClaw stays unchanged" consequence in §5, the old scope statement in §7, and the OpenClaw/shared-runtime items in §8 are retained only as 2026-08-11 decision history, not current implementation instructions.
+> **Amended**: 2026-08-13 — PRI-523 owner-approved MVP exception; see §10. 2026-08-29 — Codex Governance Closure owner-approved MVP exception; see §11
+> **Active reading rule**: Where §10 conflicts with earlier text, §10 controls. In particular, §§2.2-2.4, Alternative E, the "OpenClaw stays unchanged" consequence in §5, the old scope statement in §7, and the OpenClaw/shared-runtime items in §8 are retained only as 2026-08-11 decision history, not current implementation instructions. §11 (2026-08-29) controls additionally where it conflicts: the §10.3 deferrals narrowed by §11.1 and the §10.5.1 table name corrected by §11.5.
 
 ## 1. Context
 
@@ -321,7 +321,7 @@ Rollback is also exact: setting `host.codex.enabled: false` in the Workspace `.p
 
 This is accepted fail-open behavior, not a defect, because two stronger guards remain in force:
 
-1. **`canonical_pain_id` idempotency** — `production-pain-evidence.ts:261` derives a stable hash from `workspace + session + toolName + errorHash` and queries `pain_signals` before insert. A duplicate canonical id sets `duplicate = true` and the pain record is not re-created, even when the in-memory cooldown has expired (or was never populated).
+1. **`canonical_pain_id` idempotency** — `production-pain-evidence.ts:261` derives a stable hash from `workspace + session + toolName + errorHash` and queries `pain_signals` before insert *(2026-08-29 correction, §11.5: the production table is `pain_events`; the idempotency behavior described here remains accurate)*. A duplicate canonical id sets `duplicate = true` and the pain record is not re-created, even when the in-memory cooldown has expired (or was never populated).
 2. **Conservative collection direction** — pain capture is fail-open by design (prefer recording extra evidence to silently dropping it). Trajectory rows may be written more than once for the same errorHash within 15 minutes on Codex, but this does not produce duplicate pain records, duplicate diagnostic tasks, or owner-visible noise.
 
 Persisting cooldown to SQLite was considered and rejected: it would add I/O on the hot pain path, diverge from OpenClaw's in-memory cooldown (creating a dual-track state), and contradict the shared-runtime goal of one orchestration path. If future evidence shows trajectory volume becoming a problem on Codex, a follow-up issue may add a bounded trajectory dedup query; that is not required for MVP acceptance.
@@ -363,3 +363,84 @@ then the legacy OpenClaw extension layout is read with a structured migration
 instruction. Companion and `pd console` never move files implicitly; migration
 and rollback are explicit installer operations. This keeps the common runtime
 single-sourced while preserving existing OpenClaw installs.
+
+---
+
+## 11. Amendment (2026-08-29): Codex Governance Closure — Owner MVP Exception
+
+> **Status of amendment**: Accepted (explicit Owner-approved `mvp-exception`)
+> **Authority**: Owner decision recorded verbatim on 2026-08-28 in Linear
+> [PRI-617](https://linear.app/principlesdisciple/issue/PRI-617) (G0) and
+> [PRI-619](https://linear.app/principlesdisciple/issue/PRI-619) (G2A), against
+> Codex Governance Closure SPEC rev 2
+> (`docs/superpowers/specs/2026-08-28-codex-governance-closure-spec.md`, merged
+> as PR #1437, `00eabfc7`) and the G0+G2A decision package
+> (`docs/superpowers/specs/2026-08-28-codex-governance-closure-g0-g2a-decision.md`,
+> merged as PR #1440, `9af500d2`). Owner wording:
+> 「允许，我认为这个是要获得高质量的原则必须付出的代价」.
+> **Supersedes within this ADR**: only the two §10.3 deferrals narrowed in
+> §11.1 and the §10.5.1 table-name wording corrected in §11.5. All other §10
+> content — including the 2026-08-14 tool-pain cooldown persistence rejection —
+> stands unchanged.
+
+### 11.1 §10.3 exception record
+
+The 2026-08-28 Owner MVP exception (recorded against SPEC rev 2) narrows two
+deferrals for the Codex host:
+
+- (a) cross-session continuation is satisfied by one Companion-owned,
+  Workspace-scoped diagnosis worker whose only background responsibilities
+  are transcript catch-up, reconciliation, and Diagnostician leasing;
+- (b) this worker is not a general daemon platform and adds no second
+  long-running service.
+
+All other §10.3 deferrals stand: outbound host runtimes that make PD drive
+Codex or another agent, schedulers and background daemons beyond that one
+worker, general memory, tool repair/retry, autonomous value decisions,
+advanced Skill/MCP parity, and public-directory publication.
+
+### 11.2 Codex conversation ingestion authorization
+
+Bounded ingestion per SPEC §11 under the `codex_conversation_ingestion` quiet
+flag (default off), gated additionally by the G2A-approved consent disclosure.
+Codex remains the host-conversation authority; PD never builds a session
+replay, search, export, or general memory product. Only the transcript
+explicitly provided by the authenticated Workspace hook may be read; scanning
+`$CODEX_HOME/sessions` to guess a "latest session" is forbidden. The G1 probe
+(`docs/architecture/CODEX_G1_CONTRACT_PROBE_REPORT.md`: `Stop` as the
+turn-complete event with an already-flushed transcript at hook-invocation
+time, plus path containment) is the contract baseline: minimum supported
+Codex 0.148.0, verified on-device at 0.150.1. Unsupported or newer-unknown
+Codex versions must degrade explicitly with a next action (rerun the contract
+probe / update fixtures); they must not keep consuming an unknown schema by
+guessing fields.
+
+### 11.3 Rate-limit compatibility decision (records deliberate drift from the 2026-08-14 clarification)
+
+The 2026-08-14 cooldown clarification rejected SQLite persistence for the
+**tool-pain cooldown**, and that rejection stands unchanged — OpenClaw's and
+Codex's tool-pain cooldown behavior is not modified by this exception. The
+STRONG **correction-detector** rate-limit bucket is a different mechanism
+(`signal-collector-host.ts`), and for Codex admission only it moves to a
+transactional `trajectory.db` bucket keyed by Workspace, root session, rule
+version, and time window, because fresh-subprocess hooks make process-local
+state dead state. Recording this distinction prevents the two mechanisms from
+being silently conflated.
+
+### 11.4 Canonical pain identity
+
+The single canonical pain authority is the existing content-derived
+`production-pain-evidence.ts` derivation with the unique
+`pain_events.canonical_pain_id` index. The correction path's current
+`correction_<traceId>` random ids (`signal-collector-host.ts` `routeStrong`)
+are declared legacy behavior to be converged in Slice B of the SPEC; a trace
+id may remain a correlation field but is never dedup identity. Observation
+identity and pain identity are different keys (SPEC §6/§10) and are never
+equated.
+
+### 11.5 Stale wording correction in §10.5.1
+
+§10.5.1 item 1 says the code "queries `pain_signals`"; production code
+queries **`pain_events`** (verified against `production-pain-evidence.ts` at
+merge `00eabfc7`). This amendment corrects the table name without changing
+the described idempotency behavior, which remains accurate.

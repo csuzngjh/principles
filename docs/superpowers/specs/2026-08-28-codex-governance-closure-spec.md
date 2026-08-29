@@ -1,9 +1,9 @@
 # Codex Governance Closure SPEC
 
-- **Status:** Draft / implementation blocked — rev 2 applies review-round-1 contract fixes (G2 split into G2A + R1, canonical pain identity compatibility contract, consumer-flag authority contract, promotion-tail durability, rate-limit compatibility rule)
+- **Status:** rev 2 (contract frozen) — pre-implementation gates closed 2026-08-29: G0 GO (Owner MVP exception; ADR-0020 §11 + roadmap §24), G1 GO (probe report + frozen fixtures), G2A GO (data policy + frozen disclosure approved; decision package Status: APPROVED). R1 remains a rollout gate. Production implementation starts only after PRI-620 records gate convergence. Rev 2 applies review-round-1 contract fixes (G2 split into G2A + R1, canonical pain identity compatibility contract, consumer-flag authority contract, promotion-tail durability, rate-limit compatibility rule)
 - **Date:** 2026-08-28
 - **Extends:** `docs/architecture/CODEX_CLI_ADAPTER_SPEC.md`
-- **Architecture authority:** ADR-0020, including the 2026-08-13 amendment
+- **Architecture authority:** ADR-0020, including the 2026-08-13 and 2026-08-29 amendments
 - **Product authority:** `docs/product/PRODUCT_IDENTITY.md`
 - **Required before implementation:** explicit Owner MVP exception, ADR/roadmap amendment, and a passing Slice 0 Codex contract probe
 

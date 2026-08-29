@@ -1,7 +1,10 @@
 # Codex Governance Closure — G0 + G2A Owner Decision Package
 
-- **Status:** PROPOSED — awaiting explicit Owner approval. Nothing in this
-  document is an approved decision yet.
+- **Status:** APPROVED — the Owner approved both decisions on 2026-08-28
+  (verbatim record in the approval record at the end of this document). The
+  approved post-approval actions (ADR-0020 §11 amendment, roadmap `mvp-exception`
+  entry, this document's APPROVED status) were applied to the repository in the
+  2026-08-29 Gate Closure change.
 - **Date prepared:** 2026-08-28
 - **SPEC revision this decision identifies:** `docs/superpowers/specs/2026-08-28-codex-governance-closure-spec.md` rev 2 (merged as PR #1437, merge commit `00eabfc7`)
 - **Evidence:** G1 probe report `docs/architecture/CODEX_G1_CONTRACT_PROBE_REPORT.md` (G1 = GO);
@@ -110,14 +113,14 @@ remain Hold outside the narrow worker defined here.
 
 ## G0 completion checklist (post-approval)
 
-- [ ] Owner approval recorded (Linear PRI-617 comment or GitHub, identifying
-      SPEC rev 2 and this document);
-- [ ] ADR-0020 amendment applied as proposed above;
-- [ ] roadmap entry recorded as Active per §0 rule 1;
-- [ ] traceability: SPEC rev 2 ↔ this document ↔ approval record linked.
+- [x] Owner approval recorded (Linear PRI-617 comment `26ebf355`, 2026-08-28,
+      identifying SPEC rev 2, PR #1437/#1440, and this document);
+- [x] ADR-0020 amendment applied as proposed above (ADR-0020 §11, 2026-08-29);
+- [x] roadmap entry recorded as Active per §0 rule 1 (roadmap §24, 2026-08-29);
+- [x] traceability: SPEC rev 2 ↔ this document ↔ approval record linked (see
+      the approval record below and Linear PRI-617/PRI-619/PRI-620).
 
-**Until that approval exists: G0 = AWAITING OWNER APPROVAL. No production
-implementation work is authorized.**
+Approval exists since 2026-08-28; applied 2026-08-29. **G0 = GO.**
 
 ---
 
@@ -204,23 +207,40 @@ language SSoT is this document.)*
 
 ## G2A completion checklist (post-approval)
 
-- [ ] Owner approves the data policy and the disclosure text above, recorded
-      against SPEC rev 2 (Linear PRI-619 or GitHub);
-- [ ] this document's status changes from PROPOSED to APPROVED with the
-      approval reference;
+- [x] Owner approves the data policy and the disclosure text above, recorded
+      against SPEC rev 2 (Linear PRI-619 comment `63e9f9c4`, 2026-08-28);
+- [x] this document's status changes from PROPOSED to APPROVED with the
+      approval reference (2026-08-29 Gate Closure change);
 - [ ] Slice D implements setup consent using this frozen text; R1 verifies it
-      on the installed path.
+      on the installed path. (Deliberately open — this item tracks the
+      implementation slices, not this decision gate.)
 
-**Until that approval exists: G2A = AWAITING OWNER APPROVAL. The disclosure
-text above is frozen for review and must not be weakened during
-implementation without a new Owner decision.**
+Approval exists since 2026-08-28; applied 2026-08-29. **G2A = GO.** The
+disclosure text above remains frozen and must not be weakened during
+implementation without a new Owner decision.
 
 ---
 
-## Approval record (to be filled by the Owner or on the Owner's recorded instruction)
+## Approval record
 
 ```text
-G0 decision: APPROVED / REJECTED   — date, channel, exact wording:
-G2A decision: APPROVED / REJECTED  — date, channel, exact wording:
+G0 decision:  APPROVED — 2026-08-28, Owner conversation, recorded verbatim on
+  Linear PRI-617 comment 26ebf355 (2026-08-28T15:23:12Z):
+  「允许，我认为这个是要获得高质量的原则必须付出的代价」
+  Interpretation recorded for audit in the same comment (bounded Codex
+  conversation-ingestion MVP exception, Companion-owned Workspace diagnosis
+  worker, Codex durable STRONG-correction rate-limit state, default-off
+  codex_conversation_ingestion flag, subject to the frozen scope/non-goals
+  and privacy boundaries of this document).
+G2A decision: APPROVED — 2026-08-28, same Owner conversation, recorded verbatim
+  on Linear PRI-619 comment 63e9f9c4 (2026-08-28T15:23:21Z), same wording;
+  audit interpretation in the same comment (frozen retention/promotion limits,
+  hidden/system-context exclusion from governance projection, default-off /
+  disable-no-read semantics, disclosed promoted-evidence → configured LLM API
+  diagnosis path).
 SPEC revision identified: rev 2 (PR #1437, merge 00eabfc7)
+Decision package merged as: PR #1440 (merge 9af500d2)
+Applied: 2026-08-29 Gate Closure change — ADR-0020 §11 amendment + roadmap
+  §24 mvp-exception record + this document's APPROVED status + SPEC status
+  update. Gate convergence: Linear PRI-620.
 ```
