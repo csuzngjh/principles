@@ -1062,6 +1062,78 @@ The Owner performs final merge.
 
 ---
 
+# 23A. Multi-Agent Git Governance — Stable IDs
+
+PD runs multiple AI agents concurrently against one repository. These IDs are
+repository-stable rules for that mode. Tool-specific prompts MUST NOT override
+them. Tooling lives in `scripts/dev/` and is wired into `lefthook.yml`
+(`worktree-guard`, pre-commit and pre-push); the guard is judge-only.
+
+## `git-1-worktree-per-task`
+
+Every write-type AI task works in its own Git worktree. A branch alone is NOT
+a concurrency boundary — two agents sharing one checkout corrupt each other's
+working files. Create with:
+
+```bash
+npm run dev:worktree -- PRI-123 some-task
+```
+
+which bases the new worktree + `ai/<task>-<slug>` branch on the latest
+`origin/main` (never a possibly-stale local `main`).
+
+## `git-2-one-writer-per-worktree`
+
+One worktree/branch has at most ONE implementation writer at a time. A second
+agent may review (read-only) or open its own follow-up worktree/branch; it
+must never write into a worktree it does not own.
+
+## `git-3-primary-worktree-readonly`
+
+The primary checkout (first entry of `git worktree list`, the one owning
+`.git`) is the repository control plane: fetch, inspect, create/remove
+worktrees, read-only investigation. AI agents must not implement, commit, or
+push feature branches there. The pre-commit/pre-push guard fails closed in the
+primary checkout; the only override is the human-only emergency env
+`PD_DEV_WORKTREE_ALLOW_PRIMARY=1`, which AI agents must NEVER set.
+
+## `git-4-no-unknown-work-destruction`
+
+Uncommitted files, unknown branches, unknown worktrees, and stashes must be
+treated as someone else's work. Never run `git reset --hard`, `git clean -fdx`,
+`git checkout -- .`, or `git restore .` to "clean up" state you did not create.
+Evidence Over Assumption applies to the Git working area.
+
+## `git-5-no-shared-stash`
+
+Stashes are shared across all worktrees of a repository, so in multi-agent
+mode they cause ownership confusion. AI agents must not rely on
+`git stash`/`stash pop`/`stash drop` for task switching; save WIP as a commit
+in your own worktree instead.
+
+## `git-6-force-with-lease-only`
+
+Never `git push --force`. When a remote branch must be rewritten, first
+`git fetch origin`, then `git push --force-with-lease`.
+
+## `git-7-refresh-before-merge`
+
+When several PRs land in sequence, each PR must be refreshed onto the new
+`origin/main` and re-verified before it is treated as a merge candidate.
+Green CI against a stale base is not merge evidence.
+
+## `git-8-cleanup-after-merge`
+
+A task worktree may only be removed when its PR is merged/closed AND the
+worktree is clean. Cleanup must be junction-safe (`git worktree remove`, never
+recursive deletes — ERR-098) and must refuse dirty or unmerged state:
+
+```bash
+npm run dev:worktree:cleanup -- ai/PRI-123-some-task --delete-branch
+```
+
+---
+
 # 24. Adversarial Self-review
 
 Before handoff, review the whole diff as if trying to reject it.
