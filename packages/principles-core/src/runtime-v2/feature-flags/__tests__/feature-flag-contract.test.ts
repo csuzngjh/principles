@@ -250,8 +250,11 @@ describe('computeEffectiveFlags', () => {
       // Governance Recovery v1 (2026-08-24 owner decision): default-on
       if (flag.id === 'failed_task_recovery_console') continue;
       // PRI-571 graduation (2026-08-24): validated capabilities promoted to
-      // the default experience; see PRI-571_DEFAULT_ON_FLAGS below.
+      // the default experience; see PRI_571_DEFAULT_ON_FLAGS below.
       if (PRI_571_DEFAULT_ON_FLAGS.includes(flag.id)) continue;
+      // PRI-621 graduation (2026-08-29): artificer output_invalid retry
+      // aligned with every other peer runner; see PRI-621 test block below.
+      if (flag.id === 'artificer_output_retry') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -275,6 +278,23 @@ describe('computeEffectiveFlags', () => {
       );
       expect(result.flags[id]?.enabled, `graduated flag ${id} must remain disableable via config`).toBe(false);
     }
+  });
+
+  it('PRI-621: artificer_output_retry graduates to default-on while staying quiet (rollback = config override)', () => {
+    const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    const flag = result.flags.artificer_output_retry;
+    expect(flag, 'flag must stay registered').toBeDefined();
+    expect(flag?.enabled, 'graduated flag should default on').toBe(true);
+    expect(flag?.category, 'stays quiet — rollback path is a config override').toBe('quiet');
+  });
+
+  it('PRI-621: artificer_output_retry remains disableable via explicit config override', () => {
+    const result = computeEffectiveFlags(
+      { artificer_output_retry: { enabled: false, since: '2026-08-29' } },
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/feature-flags.yaml',
+    );
+    expect(result.flags.artificer_output_retry?.enabled).toBe(false);
   });
 
   it('enables every approved MVP-Core flag after the RuleCode rollout gate', () => {

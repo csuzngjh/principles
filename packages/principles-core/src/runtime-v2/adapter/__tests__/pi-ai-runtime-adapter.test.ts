@@ -1816,14 +1816,14 @@ describe('PiAiRuntimeAdapter', () => {
       expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
     });
 
-    it('completeWithRetry passes maxTokens=4096 by default', async () => {
+    it('completeWithRetry omits maxTokens by default (PRI-621: pi-ai native model ceiling)', async () => {
       mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
 
       const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
       await adapter.startRun(makeStartRunInput());
 
       const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
-      expect(options.maxTokens).toBe(4096);
+      expect(options.maxTokens).toBeUndefined();
     });
 
     it('completeWithRetry uses config.maxTokens override when provided', async () => {
@@ -1836,24 +1836,81 @@ describe('PiAiRuntimeAdapter', () => {
       expect(options.maxTokens).toBe(8192);
     });
 
-    it('completeWithRetry uses 16K default for deepseek reasoning provider', async () => {
+    it('completeWithRetry omits maxTokens for deepseek too — provider-name heuristic retired (PRI-621)', async () => {
       mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
 
       const adapter = makeAdapter({ outputPathStrategy: 'free_form_only', provider: 'deepseek', model: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com' });
       await adapter.startRun(makeStartRunInput());
 
       const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
-      expect(options.maxTokens).toBe(16000);
+      expect(options.maxTokens).toBeUndefined();
     });
 
-    it('completeWithRetry keeps 4096 default for non-deepseek provider', async () => {
+    it('PRI-621: custom provider relaying a catalog-known model keeps catalog metadata (catalog-first resolveModel)', async () => {
+      // Bai relay serving deepseek-v4-flash: the catalog entry (reasoning
+      // model, 384K output ceiling) must survive with only transport fields
+      // overridden — the old hardcoded fallback misclassified it as
+      // non-reasoning with a 32K ceiling and fed the RC0 budget bug.
+      mockGetModel.mockImplementation((_provider: unknown, id: unknown) =>
+        id === 'deepseek-v4-flash'
+          ? {
+              id: 'deepseek-v4-flash',
+              name: 'DeepSeek V4 Flash',
+              api: 'openai-completions',
+              provider: 'deepseek',
+              baseUrl: 'https://api.deepseek.com',
+              reasoning: true,
+              input: ['text'],
+              cost: { input: 0.14, output: 0.28, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 1_000_000,
+              maxTokens: 384_000,
+            }
+          : undefined,
+      );
       mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
 
-      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only', provider: 'openai', model: 'gpt-4o' });
+      const adapter = makeAdapter({ provider: 'Bai', model: 'deepseek-v4-flash', baseUrl: 'https://api.b.ai/v1', outputPathStrategy: 'free_form_only' });
       await adapter.startRun(makeStartRunInput());
 
-      const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
-      expect(options.maxTokens).toBe(4096);
+      const [model] = mockComplete.mock.calls[0] as [{ provider: string; baseUrl: string; reasoning: boolean; maxTokens: number }, unknown, unknown];
+      expect(model.provider).toBe('Bai');
+      expect(model.baseUrl).toBe('https://api.b.ai/v1');
+      expect(model.reasoning).toBe(true);
+      expect(model.maxTokens).toBe(384_000);
+    });
+
+    it('PRI-621: custom provider with unknown model id falls back to conservative hardcoded metadata', async () => {
+      mockGetModel.mockReturnValue(undefined);
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ provider: 'Bai', model: 'totally-unknown-model', baseUrl: 'https://api.b.ai/v1', outputPathStrategy: 'free_form_only' });
+      await adapter.startRun(makeStartRunInput());
+
+      const [model] = mockComplete.mock.calls[0] as [{ reasoning: boolean; maxTokens: number }, unknown, unknown];
+      expect(model.reasoning).toBe(false);
+      expect(model.maxTokens).toBe(32_000);
+    });
+
+    it('PRI-621: built-in provider with unknown model id fails loud (runtime_unavailable)', async () => {
+      mockGetModel.mockReturnValue(undefined);
+
+      const adapter = makeAdapter({ provider: 'openai', model: 'gpt-not-a-model' });
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({ category: 'runtime_unavailable' });
+    });
+
+    it('PRI-621 RC3: schema-aware extraction picks the full object over an earlier inner fragment', async () => {
+      // Recurrence of 2026-08-28: the answer contained a small lineage
+      // fragment BEFORE the complete output; first-object extraction kept
+      // validating the fragment ("all required properties undefined") and
+      // the repair loop fixed the wrong object.
+      const response = `Here is the trace reference {"diagnosisId":"diag-fragment-1"} and the complete output below:\n${JSON.stringify(VALID_DIAGNOSIS)}`;
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(response));
+
+      const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
+      const handle = await adapter.startRun(makeStartRunInput({ outputSchemaRef: 'diagnostician-output-v1' }));
+      const output = await adapter.fetchOutput(handle.runId);
+
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
     });
 
     it('mixed content: text + thinking → prefers text content (regression)', async () => {

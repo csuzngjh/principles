@@ -206,11 +206,11 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     retirementCriteria: 'Repair loop becomes unconditional part of the consumer contract',
   },
   artificer_output_retry: {
-    decision: 'KEEP_QUIET',
+    decision: 'GRADUATE',
     consumers: ['openclaw-plugin internaliz* artificer runner', 'pd-cli rulehost-pipeline runner'],
-    evidence: 'Codex E2E Issue 2 (2026-08-20): retry output_invalid instead of permanent fail; default-off pending validation',
-    decided: '2026-08-27',
-    graduationCriteria: 'Codex-host artificer runs show output_invalid retry improves completion without masking real failures',
+    evidence: 'Flag graduated to default-on 2026-08-29 (PRI-621). Live 2026-08-28 evidence: 5/6 internalization chains dead-ended at artificer output_invalid (permanent, no retry) while dreamer recovered from the SAME error category via the base retry policy (task 48371236 dreamer: attempt 1 output_invalid → attempt 2 succeeded); Codex E2E Issue 2 (2026-08-20) originally validated the retry semantics. Retry is bounded by task.maxAttempts=3, so real failures still surface.',
+    decided: '2026-08-29',
+    graduationCriteria: 'Executed: retry improves completion without masking real failures — dreamer same-category self-heal observed live; artificer chains recover instead of dead-ending (PRI-621 recovery plan)',
     retirementCriteria: 'Codex host output contract fixed upstream (submit_rulecode reliable) — retry unnecessary',
   },
   artifact_summary_redundancy: {

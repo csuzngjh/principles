@@ -523,7 +523,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When a loop accumulates per-iteration records, never compute the record data outside the loop or reuse a pre-loop snapshot. Always derive record data from the current iteration's state. Add tests with `maxRepairAttempts > 1` where `callbacks.schemaErrors` returns different errors on each call.
 - **Source**: PRI-200 / PR #665
 - **Date**: 2026-05-21
-- **Recurrence**: Yes - same class as ERR-015 where loop state was not refreshed per iteration
+- **Recurrence**: Yes - same class as ERR-015 where loop state was not refreshed per iteration. 2026-08-29 PRI-621: the repair prompt itself starved the loop of state — it carried only a top-level schema summary (deriveSchemaSummary), leaving nested enums/minItems invisible, so the repair LLM guessed (`kind:"tool_call"`, `expectedDecision:"approve"`, 1 case instead of minItems 2) and failed all attempts on live artificer chains. Fixed: formatRepairPrompt carries the complete serialized schema (`schemaJson`, REPAIR_PROMPT_VERSION v2).
 
 ---
 
@@ -1088,7 +1088,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: (1) Any orchestrator that calls `runner.run()` must handle all three terminal statuses: `succeeded`, `retried`, `failed`. (2) Tests for orchestrators must include a `retried` → retry → `succeeded` scenario. (3) Never use `status !== "succeeded"` as a failure check — explicitly check `status === "failed" || status === "max_attempts_exceeded"`. (4) Never reset `attemptCount` on `retry_wait` tasks.
 - **Source**: PRI-405
 - **Date**: 2026-06-16
-- **Recurrence**: First occurrence (EP-05 Loop State Freshness + EP-02 Production Path Wiring)
+- **Recurrence**: First occurrence (EP-05 Loop State Freshness + EP-02 Production Path Wiring). 2026-08-29 PRI-621, retry-asymmetry form: `artificer_output_retry` flag-off put `output_invalid` in ArtificerRunner.permanentErrorCategories, making artificer the only peer runner whose output_invalid never retried — 5/6 live internalization chains dead-ended while dreamer self-healed the SAME error category via the base retry policy. Graduated the flag to default-on (quiet rollback retained).
 [ERR-067]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-067
 
 **[ERR-068]** | Used the wrong package manager (pnpm) in a repo whose CI runs `npm ci`, leaving `package-lock.json` out of sync

@@ -42,9 +42,16 @@ export interface OutputEvidencePack {
   readonly validationErrors: readonly OutputValidationErrorEntry[];
   readonly repairAttempts: readonly OutputRepairAttempt[];
   readonly finalFailureReason: OutputFailureKind;
+  /** PRI-621 RC3: complete JSON objects found in the answer (diagnostic). */
+  readonly extractionCandidateCount?: number;
+  /** PRI-621 RC3: selected object matched none of the schema's required keys. */
+  readonly truncationSuspected?: true;
 }
 
-export const REPAIR_PROMPT_VERSION = '1';
+// v2 (PRI-621 RC2): repair prompt carries the complete JSON Schema
+// (schemaJson, bounded by maxSchemaJsonChars) instead of a top-level-only
+// summary, so the repair LLM can fix nested enum/constraint violations.
+export const REPAIR_PROMPT_VERSION = '2';
 
 export const MAX_REPAIR_ATTEMPTS = 3;
 
