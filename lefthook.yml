@@ -4,6 +4,11 @@
 pre-commit:
   parallel: true
   commands:
+    worktree-guard:
+      # Single authority for safe-write-clone judgement (AGENTS.md §23A):
+      # protected branch / detached HEAD / unsafe git state / primary
+      # checkout all fail closed. Judge-only — never mutates anything.
+      run: node scripts/dev/check-dev-worktree.mjs
     lint:
       glob: "*.ts"
       run: npx eslint --fix {staged_files}
@@ -14,8 +19,10 @@ pre-commit:
 pre-push:
   parallel: false
   commands:
-    protect-main:
-      run: node scripts/protect-branch.cjs
+    worktree-guard:
+      # Same guard as pre-commit (see AGENTS.md §23A) — also replaces the old
+      # protect-branch.cjs main/master push block, which it subsumes.
+      run: node scripts/dev/check-dev-worktree.mjs
     verify-merge:
       # Canonical merge gate. Keep this in sync with the required CI check.
       run: npm run verify:merge
