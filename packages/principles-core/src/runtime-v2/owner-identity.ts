@@ -14,9 +14,18 @@
  * (pd-config-store.ts) and is auto-redacted in any log/config echo path —
  * expected defense in depth, do not "fix".
  *
- * Partial env (only one of the two vars set) falls through to the file:
- * a complete identity requires both fields, matching the `configured`
- * semantics in resolveOwnerConfigSnapshot.
+ * The env override is an ATOMIC PAIR (ADR-0022 review): if either
+ * PD_OWNER_ID or PD_OWNER_CREDENTIAL_ID is set (even to empty/whitespace)
+ * without the other being set and non-empty, resolution FAILS CLOSED —
+ * source 'invalid_env', no ownerId/credentialId, and the file is NOT read.
+ * Reason: ops may be mid-migration to a different Owner while an old file
+ * identity still sits on disk; silently continuing under the old identity is
+ * an authority-attribution bug (rc-9), not a config fallback.
+ *
+ * File reads distinguish "absent" (ENOENT — a valid not-registered state)
+ * from any other filesystem failure (EACCES, EISDIR, EPERM, I/O): a read
+ * failure is surfaced as a diagnosable error and never interpreted as
+ * "Owner not registered".
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -32,12 +41,18 @@ export interface OwnerIdentityRecord {
   registeredAt: string;
 }
 
-export type OwnerIdentitySource = 'env' | 'file' | 'none';
+export type OwnerIdentitySource = 'env' | 'file' | 'none' | 'invalid_env';
 
 export interface OwnerIdentityResolved {
   ownerId: string | null;
   credentialId: string | null;
   source: OwnerIdentitySource;
+  /**
+   * Machine-readable failure reason. Present when source is 'invalid_env'
+   * (partial/empty env override) or when the registration file could not be
+   * read (non-ENOENT filesystem failure). Never contains identity values.
+   */
+  error?: string;
 }
 
 export type OwnerIdentityFileResult =
@@ -74,16 +89,24 @@ function parseOwnerIdentityRecord(raw: unknown): { record?: OwnerIdentityRecord;
 }
 
 /**
- * Read ~/.pd/owner.json. Absent file => { record: null } (valid "not
- * registered" state). Malformed content => { record: null, error }.
+ * Read ~/.pd/owner.json. Absent file (ENOENT) => { record: null } — a valid
+ * "not registered" state. Malformed content => { record: null, error }. Any
+ * other filesystem failure (EACCES, EISDIR, EPERM, I/O) => { record: null,
+ * error: 'owner_identity_read_failed: <code>' } — it must never be
+ * interpreted as "Owner not registered".
  */
 export function readOwnerIdentityFile(homeDir: string): { record: OwnerIdentityRecord | null; error?: string } {
   const filePath = ownerIdentityFilePath(homeDir);
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return { record: null };
+  } catch (error) {
+    const { code } = error as { code?: string };
+    if (code === 'ENOENT') return { record: null };
+    return {
+      record: null,
+      error: `owner_identity_read_failed: ${typeof code === 'string' && code.length > 0 ? code : 'unreadable'}`,
+    };
   }
   let parsed: unknown;
   try {
@@ -151,20 +174,39 @@ export function deleteOwnerIdentityFile(homeDir: string): OwnerIdentityDeleteRes
 }
 
 /**
- * Resolve the Owner identity: env (both vars set) > ~/.pd/owner.json > none.
+ * Resolve the Owner identity — the atomic-pair truth table (ADR-0022):
+ *
+ *   A. neither env key set                 -> ~/.pd/owner.json (or none)
+ *   B. both keys set and non-empty (trim)  -> env
+ *   C/D/E. anything else where at least    -> INVALID (fail-closed):
+ *          one key is explicitly set          no file fallback, no identity
  */
 export function resolveOwnerIdentity(
   env: Record<string, string | undefined>,
   homeDir: string,
 ): OwnerIdentityResolved {
-  const envOwnerId = env.PD_OWNER_ID?.trim();
-  const envCredentialId = env.PD_OWNER_CREDENTIAL_ID?.trim();
-  if (envOwnerId && envCredentialId) {
-    return { ownerId: envOwnerId, credentialId: envCredentialId, source: 'env' };
+  const envOwnerIdSet = Object.hasOwn(env, 'PD_OWNER_ID');
+  const envCredentialIdSet = Object.hasOwn(env, 'PD_OWNER_CREDENTIAL_ID');
+  if (envOwnerIdSet || envCredentialIdSet) {
+    const envOwnerId = env.PD_OWNER_ID?.trim() ?? '';
+    const envCredentialId = env.PD_OWNER_CREDENTIAL_ID?.trim() ?? '';
+    if (envOwnerId && envCredentialId) {
+      return { ownerId: envOwnerId, credentialId: envCredentialId, source: 'env' };
+    }
+    return {
+      ownerId: null,
+      credentialId: null,
+      source: 'invalid_env',
+      error: 'owner_identity_invalid_env: PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID must be set together, both non-empty, to use the env override',
+    };
   }
   const file = readOwnerIdentityFile(homeDir);
   if (file.record !== null) {
     return { ownerId: file.record.ownerId, credentialId: file.record.credentialId, source: 'file' };
   }
-  return { ownerId: null, credentialId: null, source: 'none' };
+  // A file read failure must not masquerade as a clean "not registered":
+  // surface the reason, resolve no identity.
+  return file.error !== undefined
+    ? { ownerId: null, credentialId: null, source: 'none', error: file.error }
+    : { ownerId: null, credentialId: null, source: 'none' };
 }

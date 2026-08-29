@@ -482,7 +482,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // ADR-0022 (PRI-578): /api/v1/owner-identity — GET status, POST register, DELETE unregister
       if (urlPath === '/api/v1/owner-identity' || urlPath.startsWith('/api/v1/owner-identity/')) {
         const subPath = urlPath.slice('/api/v1/owner-identity'.length);
-        asyncHandler(() => handleOwnerIdentityRoute(req, res, defaultOwnerIdentityHomeDir(), subPath))(req, res);
+        asyncHandler(() => handleOwnerIdentityRoute(req, res, defaultOwnerIdentityHomeDir(), subPath, services.authConfig))(req, res);
         return;
       }
 

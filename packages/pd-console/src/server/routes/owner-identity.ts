@@ -3,11 +3,18 @@
  * registration (ADR-0022, PRI-578).
  *
  * - GET    resolved identity (env > ~/.pd/owner.json > none) + file record
+ *          + governance readiness (canonical resolveOwnerConfigSnapshot)
  * - POST   register: write ~/.pd/owner.json (identifiers only, no secrets)
  * - DELETE unregister: delete ~/.pd/owner.json (idempotent)
  *
+ * Registration (where the identity comes from) and governance readiness
+ * (whether Owner governance actions can execute) are DIFFERENT facts: the
+ * latter additionally requires Console token authentication and is derived
+ * ONLY by resolveOwnerConfigSnapshot — never re-derived in the UI.
+ *
  * Env vars remain the highest-priority source; file registration is the
- * install-level fallback. Registration takes effect immediately (the resolver
+ * install-level fallback; a partial env pair is invalid and fails closed
+ * (no file fallback). Registration takes effect immediately (the resolver
  * reads the file per call); env-var changes still require a process restart.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -18,8 +25,10 @@ import {
   deleteOwnerIdentityFile,
   type OwnerIdentityResolved,
   type OwnerIdentityRecord,
+  type OwnerConfigSnapshot,
 } from '@principles/core/runtime-v2';
 import { sendSuccess, sendError, sendBadRequest, sendMethodNotAllowed } from '../utils/response.js';
+import { resolveOwnerConfigSnapshot } from './governance.js';
 
 const MAX_BODY_SIZE = 16 * 1024;
 
@@ -39,6 +48,8 @@ export interface OwnerIdentityRouteView {
   resolved: OwnerIdentityResolved;
   fileRecord: OwnerIdentityRecord | null;
   fileError?: string;
+  /** Canonical governance readiness — the same derivation the governance experience uses. */
+  governance: OwnerConfigSnapshot;
 }
 
 /* eslint-disable @typescript-eslint/max-params */
@@ -47,6 +58,7 @@ export async function handleOwnerIdentityRoute(
   res: ServerResponse,
   homeDir: string,
   subPath: string,
+  authConfig: { isEnabled(): boolean },
 ): Promise<void> {
   if (subPath !== '' && subPath !== '/') {
     sendError(res, 404, 'not_found', 'Unknown owner identity endpoint.', { nextAction: 'Use GET / POST / DELETE /api/v1/owner-identity.' });
@@ -57,10 +69,12 @@ export async function handleOwnerIdentityRoute(
 
   if (method === 'GET') {
     const file = readOwnerIdentityFile(homeDir);
+    const resolved = resolveOwnerIdentity(process.env, homeDir);
     const view: OwnerIdentityRouteView = {
-      resolved: resolveOwnerIdentity(process.env, homeDir),
+      resolved,
       fileRecord: file.record,
       ...(file.error === undefined ? {} : { fileError: file.error }),
+      governance: resolveOwnerConfigSnapshot(authConfig, resolved),
     };
     sendSuccess(res, view);
     return;
@@ -82,7 +96,12 @@ export async function handleOwnerIdentityRoute(
       sendBadRequest(res, result.error);
       return;
     }
-    sendSuccess(res, { record: result.record, source: 'file' as const });
+    const resolved = resolveOwnerIdentity(process.env, homeDir);
+    sendSuccess(res, {
+      record: result.record,
+      source: 'file' as const,
+      governance: resolveOwnerConfigSnapshot(authConfig, resolved),
+    });
     return;
   }
 
@@ -92,7 +111,12 @@ export async function handleOwnerIdentityRoute(
       sendError(res, 500, 'owner_identity_delete_failed', result.error);
       return;
     }
-    sendSuccess(res, { ok: true, source: 'none' as const });
+    const resolved = resolveOwnerIdentity(process.env, homeDir);
+    sendSuccess(res, {
+      ok: true,
+      source: 'none' as const,
+      governance: resolveOwnerConfigSnapshot(authConfig, resolved),
+    });
     return;
   }
 

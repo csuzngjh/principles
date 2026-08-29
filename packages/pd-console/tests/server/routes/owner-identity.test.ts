@@ -27,6 +27,10 @@ function tempHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'pd-owner-route-'));
 }
 
+function authConfig(enabled: boolean): { isEnabled(): boolean } {
+  return { isEnabled: () => enabled };
+}
+
 function createMockRequest(method: string, body?: unknown): IncomingMessage {
   const req = { method } as unknown as IncomingMessage;
   if (body !== undefined) {
@@ -65,6 +69,15 @@ function parseBody<T>(res: ServerResponse): T {
   return JSON.parse((res as unknown as { _body: string })._body) as T;
 }
 
+interface RouteData {
+  resolved: { source: string; ownerId: string | null; credentialId: string | null; error?: string };
+  fileRecord: { ownerId: string } | null;
+  fileError?: string;
+  governance: { authenticationMode: string; ownerIdentityConfiguration: string };
+  source?: string;
+  ok?: boolean;
+}
+
 describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -73,28 +86,52 @@ describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
   it('GET: none when neither env nor file is present', async () => {
     const home = tempHome();
     const res = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '');
+    await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '', authConfig(false));
     expect(res.statusCode).toBe(200);
-    const data = parseBody<{ data: { resolved: { source: string }; fileRecord: unknown } }>(res).data;
+    const data = parseBody<{ data: RouteData }>(res).data;
     expect(data.resolved.source).toBe('none');
     expect(data.fileRecord).toBeNull();
+    expect(data.governance).toEqual({ authenticationMode: 'no_auth', ownerIdentityConfiguration: 'missing' });
   });
 
-  it('POST registers, then GET reports file source with the record', async () => {
+  it('POST registers, then GET reports file source with the record and readiness', async () => {
     const home = tempHome();
     const postRes = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('POST', { ownerId: 'alice', credentialId: 'cred-1' }), postRes, home, '');
+    await handleOwnerIdentityRoute(
+      createMockRequest('POST', { ownerId: 'alice', credentialId: 'cred-1' }),
+      postRes,
+      home,
+      '',
+      authConfig(true),
+    );
     expect(postRes.statusCode).toBe(200);
-    expect(parseBody<{ data: { source: string } }>(postRes).data.source).toBe('file');
+    const postData = parseBody<{ data: RouteData }>(postRes).data;
+    expect(postData.source).toBe('file');
+    expect(postData.governance).toEqual({ authenticationMode: 'authenticated', ownerIdentityConfiguration: 'configured' });
 
     const getRes = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('GET'), getRes, home, '');
-    const data = parseBody<{
-      data: { resolved: { source: string; ownerId: string | null }; fileRecord: { ownerId: string } | null };
-    }>(getRes).data;
+    await handleOwnerIdentityRoute(createMockRequest('GET'), getRes, home, '', authConfig(true));
+    const data = parseBody<{ data: RouteData }>(getRes).data;
     expect(data.resolved.source).toBe('file');
     expect(data.resolved.ownerId).toBe('alice');
     expect(data.fileRecord?.ownerId).toBe('alice');
+    expect(data.governance).toEqual({ authenticationMode: 'authenticated', ownerIdentityConfiguration: 'configured' });
+  });
+
+  it('GET: file registration + token auth disabled → registration exists but governance is NOT configured', async () => {
+    const home = tempHome();
+    await handleOwnerIdentityRoute(
+      createMockRequest('POST', { ownerId: 'alice', credentialId: 'c' }),
+      createMockResponse(),
+      home,
+      '',
+      authConfig(false),
+    );
+    const res = createMockResponse();
+    await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '', authConfig(false));
+    const data = parseBody<{ data: RouteData }>(res).data;
+    expect(data.resolved.source).toBe('file');
+    expect(data.governance).toEqual({ authenticationMode: 'no_auth', ownerIdentityConfiguration: 'missing' });
   });
 
   it('env wins over the file in GET (highest precedence)', async () => {
@@ -106,47 +143,73 @@ describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
       createMockResponse(),
       home,
       '',
+      authConfig(true),
     );
     const res = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '');
-    const data = parseBody<{ data: { resolved: { source: string; ownerId: string | null } } }>(res).data;
+    await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '', authConfig(true));
+    const data = parseBody<{ data: RouteData }>(res).data;
     expect(data.resolved.source).toBe('env');
     expect(data.resolved.ownerId).toBe('env-owner');
+  });
+
+  it('GET: partial env pair over a valid file → fail-closed invalid_env, no file identity, governance missing', async () => {
+    vi.stubEnv('PD_OWNER_ID', 'env-owner');
+    const home = tempHome();
+    await handleOwnerIdentityRoute(
+      createMockRequest('POST', { ownerId: 'file-owner', credentialId: 'file-cred' }),
+      createMockResponse(),
+      home,
+      '',
+      authConfig(true),
+    );
+    const res = createMockResponse();
+    await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '', authConfig(true));
+    const data = parseBody<{ data: RouteData }>(res).data;
+    expect(data.resolved.source).toBe('invalid_env');
+    expect(data.resolved.ownerId).toBeNull();
+    expect(data.resolved.credentialId).toBeNull();
+    expect(data.resolved.error).toContain('owner_identity_invalid_env');
+    // The stale file Owner must NOT leak through as the effective identity.
+    expect(data.fileRecord?.ownerId).toBe('file-owner');
+    expect(data.governance).toEqual({ authenticationMode: 'authenticated', ownerIdentityConfiguration: 'missing' });
   });
 
   it('POST rejects empty input with 400', async () => {
     const home = tempHome();
     const res = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('POST', { ownerId: '', credentialId: '' }), res, home, '');
+    await handleOwnerIdentityRoute(createMockRequest('POST', { ownerId: '', credentialId: '' }), res, home, '', authConfig(false));
     expect(res.statusCode).toBe(400);
   });
 
-  it('DELETE unregisters and is idempotent', async () => {
+  it('DELETE unregisters, is idempotent, and reports post-delete readiness', async () => {
     const home = tempHome();
     await handleOwnerIdentityRoute(
       createMockRequest('POST', { ownerId: 'alice', credentialId: 'c' }),
       createMockResponse(),
       home,
       '',
+      authConfig(false),
     );
     const del1 = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('DELETE'), del1, home, '');
+    await handleOwnerIdentityRoute(createMockRequest('DELETE'), del1, home, '', authConfig(false));
     expect(del1.statusCode).toBe(200);
-    expect(parseBody<{ data: { ok: boolean } }>(del1).data.ok).toBe(true);
+    const del1Data = parseBody<{ data: RouteData }>(del1).data;
+    expect(del1Data.ok).toBe(true);
+    expect(del1Data.governance).toEqual({ authenticationMode: 'no_auth', ownerIdentityConfiguration: 'missing' });
 
     const del2 = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('DELETE'), del2, home, '');
+    await handleOwnerIdentityRoute(createMockRequest('DELETE'), del2, home, '', authConfig(false));
     expect(del2.statusCode).toBe(200);
 
     const getRes = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('GET'), getRes, home, '');
-    expect(parseBody<{ data: { resolved: { source: string } } }>(getRes).data.resolved.source).toBe('none');
+    await handleOwnerIdentityRoute(createMockRequest('GET'), getRes, home, '', authConfig(false));
+    expect(parseBody<{ data: RouteData }>(getRes).data.resolved.source).toBe('none');
   });
 
   it('rejects unknown subpaths with 404', async () => {
     const home = tempHome();
     const res = createMockResponse();
-    await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '/nope');
+    await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '/nope', authConfig(false));
     expect(res.statusCode).toBe(404);
   });
 });

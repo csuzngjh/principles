@@ -480,24 +480,77 @@ export function SettingsPage() {
             <div className="text-ink-4 text-[12px]">{t("pages.settings.ownerIdentity.loading")}</div>
           ) : (
             <>
+              {/* Registration = where the identity comes from. Never conflated
+                  with governance readiness below (ADR-0022 review). */}
               <div className="flex items-center gap-2 text-[13px] mb-2" data-testid="owner-identity-status">
                 <span
                   className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
-                    ownerIdentity.resolved.source === "none" ? "bg-amber text-ink" : "bg-green text-ink"
+                    ownerIdentity.resolved.source === "none"
+                      ? "bg-amber text-ink"
+                      : ownerIdentity.resolved.source === "invalid_env"
+                        ? "bg-danger text-paper"
+                        : "bg-green text-ink"
                   }`}
                   role="status"
                 >
                   {ownerIdentity.resolved.source === "none"
                     ? t("pages.settings.ownerIdentity.statusMissing")
-                    : t("pages.settings.ownerIdentity.statusConfigured")}
+                    : ownerIdentity.resolved.source === "invalid_env"
+                      ? t("pages.settings.ownerIdentity.statusInvalid")
+                      : t("pages.settings.ownerIdentity.statusConfigured")}
                 </span>
                 <span className="text-ink-3 text-[12px]">
                   {ownerIdentity.resolved.source === "env" && t("pages.settings.ownerIdentity.sourceEnv")}
                   {ownerIdentity.resolved.source === "file" && t("pages.settings.ownerIdentity.sourceFile")}
+                  {ownerIdentity.resolved.source === "invalid_env" && t("pages.settings.ownerIdentity.sourceInvalid")}
                   {ownerIdentity.resolved.source === "none" && t("pages.settings.ownerIdentity.sourceNone")}
                 </span>
               </div>
-              {ownerIdentity.fileRecord !== null && (
+              {/* Governance readiness — derived ONLY from the canonical
+                  resolveOwnerConfigSnapshot fields delivered by the API. */}
+              <div
+                className="flex items-center gap-2 text-[13px] mb-2"
+                data-testid="owner-governance-readiness"
+                data-ready={ownerIdentity.governance.ownerIdentityConfiguration === "configured" ? "true" : "false"}
+              >
+                <span
+                  className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+                    ownerIdentity.governance.ownerIdentityConfiguration === "configured" ? "bg-green text-ink" : "bg-amber text-ink"
+                  }`}
+                  role="status"
+                >
+                  {ownerIdentity.governance.ownerIdentityConfiguration === "configured"
+                    ? t("pages.settings.ownerIdentity.governanceReady")
+                    : t("pages.settings.ownerIdentity.governanceNotReady")}
+                </span>
+                {ownerIdentity.governance.ownerIdentityConfiguration !== "configured" && (
+                  <span className="text-ink-3 text-[12px]">
+                    {ownerIdentity.governance.authenticationMode === "no_auth"
+                      ? t("pages.settings.ownerIdentity.governanceReasonTokenAuth")
+                      : t("pages.settings.ownerIdentity.governanceReasonIdentity")}
+                  </span>
+                )}
+              </div>
+              {ownerIdentity.governance.ownerIdentityConfiguration !== "configured" &&
+                ownerIdentity.governance.authenticationMode === "no_auth" && (
+                  <div className="text-ink-4 text-[12px] mb-3" data-testid="owner-governance-next-action">
+                    {t("pages.settings.ownerIdentity.governanceNextActionTokenAuth")}
+                  </div>
+                )}
+              {ownerIdentity.resolved.error !== undefined && (
+                <div className="text-danger text-[12px] mb-3" data-testid="owner-identity-error">
+                  {ownerIdentity.resolved.error}
+                </div>
+              )}
+              {ownerIdentity.resolved.source === "invalid_env" && (
+                <div className="text-ink-4 text-[12px] mb-3" data-testid="owner-identity-invalid-env-hint">
+                  {t("pages.settings.ownerIdentity.invalidEnvHint")}
+                </div>
+              )}
+              {/* The file record is only meaningful as the EFFECTIVE identity
+                  when resolution actually came from the file — never display it
+                  as active under an invalid env override. */}
+              {ownerIdentity.resolved.source === "file" && ownerIdentity.fileRecord !== null && (
                 <div className="text-ink-4 text-[12px] mb-3 font-mono">
                   {t("pages.settings.ownerIdentity.ownerIdLabel")}: {ownerIdentity.fileRecord.ownerId} ·{" "}
                   {t("pages.settings.ownerIdentity.registeredAt")} {ownerIdentity.fileRecord.registeredAt.slice(0, 10)}
