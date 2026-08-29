@@ -139,30 +139,39 @@ beforeAll(async () => {
 // handle locks) degrades to a loud warning instead of failing the gate.
 afterAll(() => {
   timePhase('cleanup', () => {
-    cleanupReleaseSmokeRoot(root, { log: (message) => console.warn(message) });
+    cleanupReleaseSmokeRoot(root, {
+      log: (message) => console.warn(message),
+      // Ephemeral CI runners discard the machine (and the temp root) when
+      // the job ends; measured cost of the recursive delete there was 30+
+      // minutes on windows-2025 + Node 22 until the job timeout killed it
+      // (run 33239467277) — pure hygiene loss with zero correctness value.
+      skip: process.env.CI === 'true' && process.platform === 'win32',
+    });
   });
 }, 300_000);
 
 describe('production self-contained release asset', () => {
   it('rejects a tampered published archive before extraction', async () => {
-    const tamperedArchive = path.resolve(path.join(root, 'tampered.tar'));
-    const digestSidecar = path.resolve(path.join(publicationDir, 'asset.tar.sha256'));
-    // Both read paths stay inside the allowed roots by construction; assert
-    // it explicitly before reading. The allowed set matches beforeAll: the
-    // CI-provided publication lives OUTSIDE the test root, so it must be
-    // included when present. isReleaseReadPathContained canonicalizes both
-    // sides (mixed-separator env input, see release-containment.ts).
-    const allowedRoots = buildPublicationInternally ? [root] : [root, publicationDir];
-    for (const readPath of [tamperedArchive, digestSidecar]) {
-      expect(isReleaseReadPathContained(readPath, allowedRoots), readPath).toBe(true);
-    }
-    fs.copyFileSync(path.join(publicationDir, 'asset.tar'), tamperedArchive);
-    fs.appendFileSync(tamperedArchive, 'tampered');
+    await timePhaseAsync('tamper-check', async () => {
+      const tamperedArchive = path.resolve(path.join(root, 'tampered.tar'));
+      const digestSidecar = path.resolve(path.join(publicationDir, 'asset.tar.sha256'));
+      // Both read paths stay inside the allowed roots by construction; assert
+      // it explicitly before reading. The allowed set matches beforeAll: the
+      // CI-provided publication lives OUTSIDE the test root, so it must be
+      // included when present. isReleaseReadPathContained canonicalizes both
+      // sides (mixed-separator env input, see release-containment.ts).
+      const allowedRoots = buildPublicationInternally ? [root] : [root, publicationDir];
+      for (const readPath of [tamperedArchive, digestSidecar]) {
+        expect(isReleaseReadPathContained(readPath, allowedRoots), readPath).toBe(true);
+      }
+      fs.copyFileSync(path.join(publicationDir, 'asset.tar'), tamperedArchive);
+      fs.appendFileSync(tamperedArchive, 'tampered');
 
-    // The truncated copy must fail the detached-digest check — the negative
-    // control for the beforeAll verification.
-    const expectedDigest = fs.readFileSync(digestSidecar, 'utf8').trim();
-    await expect(sha256File(tamperedArchive)).resolves.not.toBe(expectedDigest);
+      // The truncated copy must fail the detached-digest check — the negative
+      // control for the beforeAll verification.
+      const expectedDigest = fs.readFileSync(digestSidecar, 'utf8').trim();
+      await expect(sha256File(tamperedArchive)).resolves.not.toBe(expectedDigest);
+    });
   }, 600_000);
 
   it('preserves source component identity without consulting registry state', () => {
