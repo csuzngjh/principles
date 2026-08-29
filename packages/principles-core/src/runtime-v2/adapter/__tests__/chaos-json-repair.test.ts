@@ -609,7 +609,7 @@ describe('Chaos 12: Telemetry and evidence pack completeness', () => {
 
     expect(result.repairAttempts).toHaveLength(1);
     expect(result.repairAttempts[0]?.schemaRef).toBe('chaos-test-output-v1');
-    expect(result.repairAttempts[0]?.repairPromptVersion).toBe('1');
+    expect(result.repairAttempts[0]?.repairPromptVersion).toBe('2'); // v2 = PRI-621 full-schema repair prompt
   });
 
   it('12c: repairSummary contains structured failure information', async () => {

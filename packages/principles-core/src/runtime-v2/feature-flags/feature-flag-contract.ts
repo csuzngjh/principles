@@ -290,11 +290,15 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Issue 2 (Codex E2E): artificer pipeline fails with `output_invalid` when the
   // LLM returns malformed output instead of calling submit_rulecode. `output_invalid`
   // is in ArtificerRunner.permanentErrorCategories → immediate permanent failure,
-  // no fallback. This quiet flag (default off) moves `output_invalid` OUT of
+  // no fallback. This quiet flag moves `output_invalid` OUT of
   // permanentErrorCategories so the base runner's retry policy (bounded by
-  // task.maxAttempts) retries it instead of failing permanently. Flag-off =
-  // legacy behavior: output_invalid is permanent. Roll back = set enabled: false.
-  { id: 'artificer_output_retry', category: 'quiet', enabled: false, since: '2026-08-20', description: 'Issue 2: retry Artificer `output_invalid` (malformed LLM output, e.g. missed submit_rulecode) via the base retry policy (max 3 attempts) instead of permanent failure. Default off; flag-off = output_invalid permanent (legacy).' },
+  // task.maxAttempts) retries it instead of failing permanently.
+  // GRADUATED default-on 2026-08-29 (PRI-621): every other peer runner already
+  // retries output_invalid; artificer was the sole permanent-failure outlier,
+  // dead-ending 5/6 internalization chains on one malformed LLM response.
+  // Flag-off = legacy behavior: output_invalid is permanent. Roll back = set
+  // enabled: false in .pd/config.yaml (quiet category keeps the override path).
+  { id: 'artificer_output_retry', category: 'quiet', enabled: true, since: '2026-08-20', description: 'Issue 2/PRI-621: retry Artificer `output_invalid` (malformed LLM output, e.g. missed submit_rulecode) via the base retry policy (max 3 attempts) instead of permanent failure. Graduated default-on 2026-08-29 — aligns artificer with every other peer runner; flag-off reverts output_invalid to permanent (legacy).' },
   // Internalization progressive disclosure — Layer 0 (design §6.1, §8, PR 1).
   // Writer-side ArtifactSummary + PredecessorSummaryRef envelope, merged into
   // contentJson for all 8 SummaryRunnerKind stages. Default off; flag-off =

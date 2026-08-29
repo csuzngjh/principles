@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractJsonObject, repairMalformedJson } from '../json-extractor.js';
+import { extractJsonObject, extractJsonObjects, selectBestJsonObject, extractJsonObjectForSchema, repairMalformedJson } from '../json-extractor.js';
 
 describe('extractJsonObject', () => {
   it('parses pure JSON object', () => {
@@ -230,5 +230,72 @@ describe('repairMalformedJson', () => {
     expect(result?.diagnosisId).toBe('diag-1');
     expect(result?.rootCause).toContain('primary');
     expect(result?.confidence).toBe(0.8);
+  });
+});
+
+// ── PRI-621 RC3: multi-candidate collection + schema-aware selection ────────
+
+describe('extractJsonObjects', () => {
+  it('collects every top-level object (fenced first, then brace-scanned)', () => {
+    const input = 'Fragment {"a":1} prose {"taskId":"t1","score":0.5} more text';
+    const result = extractJsonObjects(input);
+    expect(result).toEqual([{ a: 1 }, { taskId: 't1', score: 0.5 }]);
+  });
+
+  it('includes fenced content as the first candidate', () => {
+    const input = '```\n{"fenced":true}\n```\nand loose {"loose":true}';
+    const result = extractJsonObjects(input);
+    // Fenced content leads; the brace scan also sees the fenced object again
+    // (duplicate by design — scoring treats duplicates identically).
+    expect(result[0]).toEqual({ fenced: true });
+    expect(result).toContainEqual({ loose: true });
+  });
+
+  it('skips unparseable spans', () => {
+    const input = '{not json} {"ok":true}';
+    const result = extractJsonObjects(input);
+    expect(result).toEqual([{ ok: true }]);
+  });
+});
+
+describe('selectBestJsonObject', () => {
+  const required = ['taskId', 'implementationCode', 'goldenTraceCases'] as const;
+
+  it('prefers the candidate with more required keys even when it appears later (PRI-621 recurrence)', () => {
+    // 2026-08-28 recurrence: inner lineage fragment parsed first, complete
+    // artificer output came after — first-object extraction validated the fragment.
+    const fragment = { scribeArtifactId: 'pi-art-scribe-x', dreamerArtifactId: 'pi-art-dreamer-y' };
+    const complete = { taskId: 't1', implementationCode: 'function evaluate(){}', goldenTraceCases: [{}, {}] };
+    const selected = selectBestJsonObject([fragment, complete], required);
+    expect(selected).toBe(complete);
+  });
+
+  it('breaks ties toward more own keys, then larger size', () => {
+    const small = { taskId: 't1' };
+    const large = { taskId: 't1', extra: 'x'.repeat(50) };
+    expect(selectBestJsonObject([small, large], ['taskId'])).toBe(large);
+  });
+
+  it('returns the first candidate when no required keys are known (legacy semantics)', () => {
+    const first = { a: 1 };
+    const second = { b: 2 };
+    expect(selectBestJsonObject([first, second], undefined)).toBe(first);
+  });
+
+  it('returns null for an empty candidate list', () => {
+    expect(selectBestJsonObject([], ['taskId'])).toBeNull();
+  });
+});
+
+describe('extractJsonObjectForSchema', () => {
+  it('extracts the schema-matching object out of a multi-object answer', () => {
+    const input = 'trace {"scribeArtifactId":"x"}\nfinal {"taskId":"t1","implementationCode":"code","goldenTraceCases":[{},{}]}';
+    const result = extractJsonObjectForSchema(input, ['taskId', 'implementationCode', 'goldenTraceCases']);
+    expect(result).toMatchObject({ taskId: 't1' });
+  });
+
+  it('degrades to first-object behavior without required keys', () => {
+    const input = '{"first":true} {"second":true}';
+    expect(extractJsonObjectForSchema(input, undefined)).toEqual({ first: true });
   });
 });

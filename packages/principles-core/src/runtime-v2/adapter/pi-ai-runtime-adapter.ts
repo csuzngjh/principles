@@ -19,7 +19,7 @@ import type { KnownProvider, Context, UserMessage, AssistantMessage, Model, Simp
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
-import { extractJsonObject } from './json-extractor.js';
+import { extractJsonObject, extractJsonObjectForSchema, extractJsonObjects } from './json-extractor.js';
 import { resolveOutputSchema } from './output-schema-registry.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
@@ -82,9 +82,10 @@ export interface PiAiRuntimeAdapterConfig {
   /** Maximum repair attempts for structured output repair loop (PRI-271 A1). Default: 3. */
   maxRepairAttempts?: number;
   /**
-   * Maximum completion tokens for LLM response (BUG-007a).
-   * Prevents reasoning models from spending entire budget on thinking tokens.
-   * Default: 4096. Set to 0 or undefined to omit (use model default).
+   * Explicit profile-level completion budget override (PRI-621).
+   * When unset, the budget is delegated to pi-ai's native defaulting
+   * (`min(model.maxTokens, 32000)` + thinking-budget management) instead of
+   * a PD-side heuristic cap.
    */
   maxTokens?: number;
   /**
@@ -102,17 +103,33 @@ export interface PiAiRuntimeAdapterConfig {
 /**
  * Resolve a pi-ai Model from dynamic config values.
  *
- * For built-in providers (openrouter, anthropic, etc.), uses getModel().
- * For custom providers (e.g., xiaomi-coding with custom baseUrl), creates
- * a Model<Api> object directly. This enables pi-ai to call OpenAI-compatible
- * endpoints that aren't in pi-ai's built-in provider registry.
+ * Catalog-first resolution (PRI-621):
+ * 1. Built-in provider (no baseUrl) — getModel(), fail loud when the model id
+ *    is unknown to the catalog (getModel returns undefined; downstream
+ *    resolveApiProvider would TypeError on an undefined Model).
+ * 2. Custom provider with baseUrl — look the model id up across ALL built-in
+ *    provider catalogs. A hit means the endpoint serves a catalog-known model
+ *    (e.g. Bai relaying deepseek-v4-flash), so reuse the catalog metadata
+ *    (reasoning, contextWindow, maxTokens, compat, thinkingFormat) and only
+ *    override provider (keep the configured name for auth/telemetry) and
+ *    baseUrl. This prevents hardcoded fallback metadata from silently
+ *    misclassifying reasoning models.
+ * 3. Unknown model id anywhere — conservative hardcoded fallback (unchanged).
  */
 function resolveModel(provider: string, modelId: string, baseUrl?: string) {
   const knownProviders = getProviders();
   if (knownProviders.includes(provider as KnownProvider) && !baseUrl) {
     // Built-in provider — use getModel()
     // @ts-expect-error — getModel requires literal model ID types; runtime strings from config are acceptable
-    return getModel(provider as KnownProvider, modelId);
+    const builtin = getModel(provider as KnownProvider, modelId);
+    if (!builtin) {
+      throw new PDRuntimeError(
+        'runtime_unavailable',
+        `Model '${modelId}' is not in the pi-ai catalog for provider '${provider}'. ` +
+        `Check the model id, or configure a baseUrl to use a custom OpenAI-compatible endpoint.`,
+      );
+    }
+    return builtin;
   }
 
   // Custom provider — baseUrl is required
@@ -124,7 +141,19 @@ function resolveModel(provider: string, modelId: string, baseUrl?: string) {
     );
   }
 
-  // Custom provider with baseUrl — construct Model object directly
+  // Catalog-first: a custom endpoint relaying a catalog-known model keeps the
+  // catalog's metadata (reasoning/maxTokens/compat) with only the transport
+  // (provider name + baseUrl) overridden. getModel is a Map lookup per
+  // provider, so scanning the registry is cheap.
+  for (const catalogProvider of knownProviders) {
+    // @ts-expect-error — runtime strings from config are acceptable against the literal-typed signature
+    const catalogModel = getModel(catalogProvider, modelId);
+    if (catalogModel) {
+      return { ...catalogModel, provider, baseUrl };
+    }
+  }
+
+  // Unknown model id — construct a conservative Model object directly
   // Default to openai-completions API for custom OpenAI-compatible endpoints
   const model: Model<'openai-completions'> = {
     id: modelId,
@@ -152,6 +181,20 @@ function resolveModel(provider: string, modelId: string, baseUrl?: string) {
     },
   };
   return model;
+}
+
+/**
+ * Required top-level keys of a registry TypeBox object schema, for
+ * schema-aware JSON candidate selection (PRI-621 RC3). Registry schemas are
+ * internal trusted definitions (not untrusted runtime data), so a plain
+ * structural read is sufficient — no schema validation needed here.
+ */
+function schemaRequiredKeys(schema: TSchema | undefined): readonly string[] | undefined {
+  if (!schema || typeof schema !== 'object' || !Object.hasOwn(schema, 'required')) return undefined;
+  const { required } = schema as { required?: unknown };
+  if (!Array.isArray(required)) return undefined;
+  const keys = required.filter((k): k is string => typeof k === 'string');
+  return keys.length > 0 ? keys : undefined;
 }
 
 /**
@@ -353,29 +396,18 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   /**
    * Resolve the effective max_tokens budget for LLM calls.
    *
-   * Priority:
-   *   1. Explicit profile config (maxTokens in .pd/config.yaml) — always wins.
-   *   2. Reasoning-capable models default to a larger budget (16K) because
-   *      chain-of-thought (reasoning_content) and the final answer (content)
-   *      SHARE the same max_tokens budget. A 4096 cap leaves reasoning models
-   *      (e.g. DeepSeek V4 Flash) with an empty final answer after spending
-   *      the whole budget on thinking — which breaks structured JSON output
-   *      extraction and all downstream repair mechanisms.
-   *   3. Non-reasoning models keep the historical 4096 default.
-   *
-   * BUG-007a still applies: the cap prevents runaway thinking, it just starts
-   * from a value that actually fits thinking + JSON output.
+   * PRI-621: pass through ONLY the explicit profile config. When unset, the
+   * budget is left to pi-ai's native defaulting — `options.maxTokens ??
+   * min(model.maxTokens, 32000)` with thinking-budget management that keeps
+   * answer tokens available when chain-of-thought shares the ceiling. The old
+   * heuristic (forced 4096, or 16K when `/deepseek/i` matched the PROVIDER
+   * name) misfired on relays (provider "Bai" serving deepseek-v4-flash got
+   * the 4096 cap that BUG-007a was written to prevent) and bypassed pi-ai's
+   * catalog metadata entirely. Catalog-first resolveModel() now supplies the
+   * correct per-model ceiling, so the heuristic is retired.
    */
-  private resolveMaxTokens(): number {
-    // 1. Explicit profile config always wins.
-    if (this.config.maxTokens !== undefined) return this.config.maxTokens;
-    // 2. Known reasoning providers need a larger budget: chain-of-thought
-    //    (reasoning_content) and the final answer (content) share max_tokens,
-    //    so 4096 can be exhausted by thinking alone, yielding empty content
-    //    that breaks JSON extraction. DeepSeek V4 is the canonical case.
-    if (/deepseek/i.test(this.config.provider)) return 16_000;
-    // 3. Everything else keeps the historical 4096 default (BUG-007a cap).
-    return 4096;
+  private resolveMaxTokens(): number | undefined {
+    return this.config.maxTokens;
   }
 
   async getCapabilities(): Promise<RuntimeCapabilities> {
@@ -576,6 +608,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
       let validatedOutput: unknown = undefined;
       const schemaSummary = (schema && schemaRef) ? deriveSchemaSummary(schema) : undefined;
+      // PRI-621 RC2: full serialized schema for the repair loop — the summary
+      // alone leaves nested enums/constraints invisible to the repair LLM.
+      const schemaJson = (schema && schemaRef)
+        ? JSON.stringify(typeboxToOpenAIJsonSchema(schema))
+        : undefined;
 
       // ── Path 1: Tool calling (PRI-271 B2) ──
       if (strategy === 'tool_call_first' && schema && schemaRef) {
@@ -603,7 +640,18 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       if (!validatedOutput) {
         const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs, timeoutSource, input, runId });
         const text = extractAssistantTextOrThrow(response, signal);
-        let parsedOutput = extractJsonObject(text);
+        // PRI-621 RC3: schema-aware selection — when the answer contains
+        // several complete objects (truncated outer answer + parseable inner
+        // fragment), pick the one matching the schema's required keys instead
+        // of whichever balanced brace came first.
+        const extractionCandidates = extractJsonObjects(text);
+        const requiredKeys = schemaRequiredKeys(schema);
+        let parsedOutput = extractJsonObjectForSchema(text, requiredKeys);
+        const extractionCandidateCount = extractionCandidates.length;
+        const truncationSuspected = requiredKeys !== undefined
+          && extractionCandidateCount > 1
+          && parsedOutput !== null
+          && !requiredKeys.some((key) => Object.hasOwn(parsedOutput as Record<string, unknown>, key));
 
         if (!parsedOutput) {
           this.eventEmitter.emitTelemetry({
@@ -669,6 +717,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               schemaRef: schemaRef ?? 'unknown',
               originalOutput,
               schemaSummary,
+              schemaJson,
               maxRepairAttempts: this.config.maxRepairAttempts,
             },
           );
@@ -702,6 +751,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               validationErrors: validationErrorEntries,
               repairAttempts: repairResult.repairAttempts,
               finalFailureReason: 'repair_exhausted',
+              // PRI-621 RC3 diagnostics: how many complete objects the answer
+              // contained, and whether the selected one matches none of the
+              // schema's required keys (classic truncation signature).
+              extractionCandidateCount,
+              truncationSuspected: truncationSuspected || undefined,
             };
 
             this.eventEmitter.emitTelemetry({
@@ -1044,7 +1098,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       const response = await completeSimple(params.model, params.baseContext, completeOptions);
       const text = extractAssistantTextOrThrow(response, params.signal);
 
-      const parsed = extractJsonObject(text);
+      // PRI-621 RC3: schema-aware selection (same rationale as Path 3).
+      const parsed = extractJsonObjectForSchema(text, schemaRequiredKeys(params.schema));
       if (!parsed) {
         return { success: false, fallbackReason: 'json_parse_failed' };
       }
@@ -1219,7 +1274,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           apiKey: options.apiKey,
           timeoutMs: currentTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
-          maxTokens: this.resolveMaxTokens(), // BUG-007a: prevent reasoning models from exhausting budget
+          maxTokens: this.resolveMaxTokens(), // PRI-621: undefined = pi-ai native model ceiling
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
           completeOptions.reasoning = this.config.reasoning;

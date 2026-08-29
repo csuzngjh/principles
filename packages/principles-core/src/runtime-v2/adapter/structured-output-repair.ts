@@ -43,16 +43,26 @@ export interface RepairConfig {
   readonly originalOutput?: Record<string, unknown>;
   /** Human-readable schema summary to include in repair prompt (PRI-271 A2). */
   readonly schemaSummary?: string;
+  /**
+   * Complete JSON Schema (serialized) to include in the repair prompt
+   * (PRI-621 RC2). Preferred over schemaSummary when present: the summary
+   * only lists top-level field names, which left the repair LLM guessing
+   * nested enums/constraints and failing all attempts.
+   */
+  readonly schemaJson?: string;
+  /** Maximum characters of the serialized schema. Default: 8000. */
+  readonly maxSchemaJsonChars?: number;
   /** Internal override for jitter between repair attempts (PRI-271 A3). Set to 0 to disable. */
   readonly _testJitterMs?: number;
 }
 
 /** Sensible defaults for repair configuration. */
-export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput' | 'schemaSummary' | '_testJitterMs'>> = {
+export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput' | 'schemaSummary' | 'schemaJson' | '_testJitterMs'>> = {
   maxRepairAttempts: 3,
   maxErrorsInPrompt: 10,
   maxErrorChars: 200,
   maxRawOutputChars: 2000,
+  maxSchemaJsonChars: 8000,
 } as const;
 
 /** Result of a repair attempt. */
@@ -82,7 +92,7 @@ export interface RepairCallbacks {
 
 // Re-export from json-extractor so callers can use a single import path
 export { extractJsonObject } from './json-extractor.js';
-import { extractJsonObject } from './json-extractor.js';
+import { extractJsonObjectForSchema } from './json-extractor.js';
 import type { TSchema } from '@sinclair/typebox';
 
 /**
@@ -176,15 +186,25 @@ export function formatRepairPrompt(
     ? [`SCHEMA REF: ${cfg.schemaRef}`, '']
     : [];
 
-  const schemaSummaryBlock = cfg.schemaSummary
-    ? ['EXPECTED SCHEMA:', cfg.schemaSummary, '']
-    : [];
+  // PRI-621 RC2: the complete schema (bounded) beats the top-level-only
+  // summary — the repair LLM needs nested enums/constraints to fix errors
+  // instead of guessing them. Summary remains the fallback.
+  let schemaBlock: string[] = [];
+  if (cfg.schemaJson) {
+    let schemaText = cfg.schemaJson;
+    if (schemaText.length > cfg.maxSchemaJsonChars) {
+      schemaText = `${schemaText.slice(0, cfg.maxSchemaJsonChars)}\n...[truncated]`;
+    }
+    schemaBlock = ['EXPECTED SCHEMA (complete JSON Schema — the output MUST conform):', schemaText, ''];
+  } else if (cfg.schemaSummary) {
+    schemaBlock = ['EXPECTED SCHEMA:', cfg.schemaSummary, ''];
+  }
 
   return [
     'This is a schema validation repair loop. Your previous JSON output still has errors. Fix ALL remaining errors and return the complete corrected JSON object.',
     '',
     ...schemaRefLine,
-    ...schemaSummaryBlock,
+    ...schemaBlock,
     'PREVIOUS OUTPUT:',
     rawJson,
     '',
@@ -234,6 +254,23 @@ export async function attemptStructuredOutputRepair<T>(
 
   const errorSummary = `${currentErrors.length} errors: ${currentErrors.slice(0, 3).map(e => e.path).join(', ')}`;
 
+  // PRI-621 RC3: required top-level keys parsed (defensively) from the
+  // serialized schema the adapter supplies — used to select the right object
+  // out of multi-object repair responses.
+  let repairRequiredKeys: readonly string[] | undefined;
+  if (cfg.schemaJson) {
+    try {
+      const parsedSchema: unknown = JSON.parse(cfg.schemaJson);
+      if (typeof parsedSchema === 'object' && parsedSchema !== null && !Array.isArray(parsedSchema)) {
+        const { required } = parsedSchema as { required?: unknown };
+        if (Array.isArray(required)) {
+          const keys = required.filter((k): k is string => typeof k === 'string');
+          repairRequiredKeys = keys.length > 0 ? keys : undefined;
+        }
+      }
+    } catch { /* unparseable schemaJson — fall back to first-object extraction */ }
+  }
+
   for (let attempt = 0; attempt < cfg.maxRepairAttempts; attempt++) {
     const attemptValidationErrors = buildValidationErrorEntries(currentErrors);
     const prompt = formatRepairPrompt(invalidOutput, currentErrors, cfg);
@@ -273,7 +310,10 @@ export async function attemptStructuredOutputRepair<T>(
       continue;
     }
 
-    const repairedCandidate = extractJsonObject(rawResponse);
+    // PRI-621 RC3: schema-aware selection — the repair response may echo the
+    // PREVIOUS OUTPUT fragment plus the corrected object; pick by required
+    // keys derived from cfg.schemaJson when available.
+    const repairedCandidate = extractJsonObjectForSchema(rawResponse, repairRequiredKeys);
     if (!repairedCandidate) {
       repairAttempts.push({
         schemaRef: cfg.schemaRef ?? 'unknown',
