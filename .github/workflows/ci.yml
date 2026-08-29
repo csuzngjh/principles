@@ -20,6 +20,49 @@ permissions:
   contents: read
 
 jobs:
+  # CI Impact Resolver — SHADOW MODE (CI Governance SPEC §9).
+  # Computes and REPORTS the predicted verification scopes for this PR but
+  # does not gate or skip anything: every job below still runs exactly as
+  # before. The prediction lands in the Step Summary and as an artifact so
+  # shadow evaluation can later compare predictions against real outcomes
+  # (false-negative hunting) before any enforcement PR exists.
+  impact:
+    name: CI Impact (Shadow)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          # Full history so the base SHA of the PR event is reachable.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+
+      - name: Compute CI impact (SHADOW — nothing is skipped)
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE="$(git rev-parse HEAD~1)"
+          fi
+          if [ -z "$HEAD" ]; then
+            HEAD="$(git rev-parse HEAD)"
+          fi
+          echo "base=$BASE head=$HEAD"
+          node scripts/ci/impact.mjs --base "$BASE" --head "$HEAD" --format json > impact.json
+          node scripts/ci/impact.mjs --base "$BASE" --head "$HEAD" --format markdown >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload impact prediction (shadow evidence)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.0.1
+        with:
+          name: ci-impact-${{ github.sha }}
+          path: impact.json
+          retention-days: 30
+
   verify-merge:
     name: Verify Merge Gate
     runs-on: ubuntu-latest
