@@ -249,6 +249,9 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'failed_tasks_observability') continue;
       // Governance Recovery v1 (2026-08-24 owner decision): default-on
       if (flag.id === 'failed_task_recovery_console') continue;
+      // Governance Experience Snapshot v1.5.1 (2026-08-29 graduation): validated
+      // on live workspace (endpoint 200 + real snapshot), flipped default-on
+      if (flag.id === 'governance_experience_v1') continue;
       // PRI-571 graduation (2026-08-24): validated capabilities promoted to
       // the default experience; see PRI_571_DEFAULT_ON_FLAGS below.
       if (PRI_571_DEFAULT_ON_FLAGS.includes(flag.id)) continue;
@@ -615,14 +618,15 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     expect(flag.description).toContain('recovery');
   });
 
-  it('PRI-584~587: governance_experience_v1 is registered as quiet, default-off', () => {
+  it('PRI-584~587: governance_experience_v1 is registered as quiet, default-on (graduated)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'governance_experience_v1');
     expect(flag).toBeDefined();
     if (!flag) throw new Error('governance_experience_v1 flag not found');
     expect(flag.category).toBe('quiet');
-    // Default off: read-only experience snapshot; flag-off = endpoint 403 before
-    // any DB access and legacy Console Focus behavior preserved.
-    expect(flag.enabled).toBe(false);
+    // Default on per graduation (2026-08-29, live-workspace validated); disable
+    // via .pd/config.yaml features.governance_experience_v1.enabled: false
+    // (flag-off = endpoint 403 before any DB access, legacy Focus preserved).
+    expect(flag.enabled).toBe(true);
     expect(flag.since).toBe('2026-08-24');
     expect(flag.description).toContain('read-only');
   });
