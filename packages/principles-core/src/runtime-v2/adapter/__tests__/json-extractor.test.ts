@@ -274,6 +274,20 @@ describe('extractJsonObjects', () => {
       { after: 1 },
     ]);
   });
+
+  it('review round 2 (P1): prose with an unbalanced quote before the JSON must not poison the scan', () => {
+    // LLM free-text noise: an unmatched `"` at depth 0 must not flip the
+    // scanner into string mode before the real candidate begins.
+    const input = 'Here is the "final answer: {"taskId":"t1","score":1}';
+    const result = extractJsonObjects(input);
+    expect(result).toEqual([{ taskId: 't1', score: 1 }]);
+  });
+
+  it('review round 2 (P1): a stray closing brace at depth 0 is ignored', () => {
+    const input = '} explanation... {"taskId":"t1"}';
+    const result = extractJsonObjects(input);
+    expect(result).toEqual([{ taskId: 't1' }]);
+  });
 });
 
 describe('selectBestJsonObject', () => {

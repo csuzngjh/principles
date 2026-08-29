@@ -97,14 +97,27 @@ export function extractJsonObjects(text: string): Record<string, unknown>[] {
     } catch { /* not a complete object */ }
   }
 
-  // Track string/escape state: a `}` inside a JSON string value must not
-  // terminate the span early (CodeRabbit round on PRI-621).
+  // PRI-621 review round 2 (P1): quote/escape state is tracked ONLY inside a
+  // JSON candidate (depth > 0). LLM free text routinely contains unbalanced
+  // quotes and stray `}` before the real JSON — tracking them at depth 0
+  // permanently misaligns the scanner and drops the real candidate.
   let depth = 0;
   let start = -1;
   let inString = false;
   let escaped = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
+    if (depth === 0) {
+      // Outside any candidate: prose, stray quotes, and unbalanced `}` are
+      // all noise — only a `{` opens a candidate.
+      if (ch === '{') {
+        start = i;
+        depth = 1;
+        inString = false;
+        escaped = false;
+      }
+      continue;
+    }
     if (escaped) {
       escaped = false;
       continue;
@@ -119,11 +132,10 @@ export function extractJsonObjects(text: string): Record<string, unknown>[] {
     }
     if (inString) continue;
     if (ch === '{') {
-      if (depth === 0) start = i;
       depth++;
     } else if (ch === '}') {
       depth--;
-      if (depth === 0 && start >= 0) {
+      if (depth === 0) {
         try {
           const parsed = JSON.parse(text.slice(start, i + 1));
           if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
