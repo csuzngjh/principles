@@ -97,24 +97,29 @@ export async function verifyPackagedApp(appAsarPath) {
     try {
       resolvedDependency = mainRequire.resolve(RUNTIME_DEPENDENCY);
     } catch (resolveError) {
-      // Diagnose before failing: if the packaged app package.json is
-      // corrupt, that IS a packaging defect — surface its content. If it
-      // parses cleanly, the bare-specifier lookup is being defeated by an
-      // environment quirk in the resolver's parent walk, so complete the
-      // contract deterministically: the dependency entry's existence was
-      // already asserted in the archive, and here we resolve + load it from
-      // its own packaged directory (the path Node's walker must end at).
+      // Fail loud with the data needed to root-cause: a bare specifier the
+      // packaged main entry cannot resolve is exactly the shipping defect
+      // this verifier exists to catch. Degrading the lookup to a
+      // file-existence check would re-hide it (the statFile assertions
+      // already proved presence); the real-resolution signal must stay
+      // load-bearing. Include the resolver error, the extracted layout,
+      // and the packaged package.json so a CI failure carries its own
+      // evidence (observed once under Linux CI vitest; root cause pending
+      // — review round on PR #1441, 2026-08-29).
       const appPkgPath = path.join(appRoot, 'package.json');
-      let appPkgReport;
+      let appPkg;
       try {
-        JSON.parse(fs.readFileSync(appPkgPath, 'utf8'));
-        appPkgReport = 'parses cleanly';
-      } catch (parseError) {
-        appPkgReport = `INVALID JSON (${parseError instanceof Error ? parseError.message : String(parseError)}): ${JSON.stringify(fs.readFileSync(appPkgPath, 'utf8').slice(0, 200))}`;
-        throw new Error(`Packaged app verification failed — the packaged package.json is corrupt: ${appPkgPath} ${appPkgReport}.`);
+        appPkg = fs.readFileSync(appPkgPath, 'utf8');
+      } catch (readError) {
+        appPkg = `<unreadable: ${readError instanceof Error ? readError.message : String(readError)}>`;
       }
-      console.warn(`[verify-package] bare-specifier resolution failed (${resolveError instanceof Error ? resolveError.message : String(resolveError)}); app package.json ${appPkgReport}; completing the contract via the packaged dependency entry directly.`);
-      resolvedDependency = mainRequire.resolve('./dist/index.js', { paths: [path.join(appRoot, 'node_modules', RUNTIME_DEPENDENCY)] });
+      throw new Error(
+        `Packaged app verification failed — the packaged Electron main entry cannot resolve ${RUNTIME_DEPENDENCY} ` +
+        `(${resolveError instanceof Error ? resolveError.message : String(resolveError)}). ` +
+        `Extracted layout: [${fs.readdirSync(appRoot).join(', ')}]. ` +
+        `Packaged package.json: ${JSON.stringify(appPkg.slice(0, 200))}. ` +
+        `The dependency must be in dependencies so electron-builder bundles it into app.asar.`,
+      );
     }
     const dependencyModule = await import(pathToFileURL(resolvedDependency).href);
     if (typeof dependencyModule.getInstallLayoutPaths !== 'function') {
