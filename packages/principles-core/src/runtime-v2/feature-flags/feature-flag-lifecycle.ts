@@ -294,11 +294,11 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     retirementCriteria: 'Attribution persistence direction descoped',
   },
   governance_experience_v1: {
-    decision: 'KEEP_QUIET',
+    decision: 'GRADUATE',
     consumers: ['pd-console/src/server/routes/governance* experience endpoint', 'pd-console Focus page'],
-    evidence: 'Governance Experience Snapshot v1.5.1 (PRI-584~587, PR #1409 merged, flag default-off); explains-only design (ERR-102 guard)',
-    decided: '2026-08-27',
-    graduationCriteria: 'Focus-page experience validated as clearer than legacy Focus view on live workspace',
+    evidence: 'Governance Experience Snapshot v1.5.1 (PRI-584~587, PR #1409 merged); validated on live workspace 2026-08-29 (action-0): flag probe true with user_config, endpoint 200 returning real snapshot (ownerIdentityConfiguration=missing, rulecode_owner_decision=blocked/owner_identity_missing with nextAction configure_owner); explains-only design (ERR-102 guard)',
+    decided: '2026-08-29',
+    graduationCriteria: 'MET — graduated default-on 2026-08-29 after live-workspace validation (flag probe true, endpoint 200 + real snapshot)',
     retirementCriteria: 'Legacy Focus view deleted (snapshot becomes the only experience) or feature descoped',
   },
   anonymous_product_telemetry: {
