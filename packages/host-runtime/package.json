@@ -34,5 +34,9 @@
     "vite": "^8.0.16",
     "vitest": "^4.1.10"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csuzngjh/principles.git"
+  },
   "license": "MIT"
 }
