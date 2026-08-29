@@ -97,7 +97,11 @@ Owner 是**人的身份**，不是某个工作区的属性：
 
 ## 6. 评审结论（2026-08-29 Owner 确认，ADR 由 Proposed → Accepted）
 
+> **决策证据**：2026-08-29 与 Owner 的评审对话中，Owner 对下列四项逐一明确确认（对话记录为唯一证据来源；本 ADR 的 Accepted 状态由该证据支撑，非由 AI 自行标记）。
+
 1. ✅ `credentialId` 按**标识符（非密钥）**处理，允许明文落盘（符合 ADR-0016 §2.3「存引用不存值」先例）；密钥值保持 env-only。
 2. ✅ **安装级**作用域 `~/.pd/owner.json`（Owner 是人的身份，非工作区属性）。
 3. ✅ 单一解析器 + 文档化优先级链**不违反 P4**（收敛即加固）。
 4. ✅ MVP 只做控制台 Settings 入口；不做 `pd owner` CLI 命令。
+
+> 工程原则（本次评审确立）：**Agent 可以起草 Proposed ADR，但不能自行把涉及 Owner 决策的 ADR 标记为 Accepted；Accepted 必须引用真实 Owner decision evidence。**
