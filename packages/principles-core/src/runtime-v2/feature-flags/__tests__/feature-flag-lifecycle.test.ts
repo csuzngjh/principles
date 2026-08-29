@@ -81,6 +81,15 @@ describe('PRI-610 feature flag lifecycle census', () => {
           entry.graduationCriteria.toUpperCase().includes('MET') || entry.evidence.includes('graduated'),
           `${id}: GRADUATE rows must record executed graduation evidence, not a future intent (use KEEP_QUIET until validated)`,
         ).toBe(true);
+        // 'decided' is the decision date (field contract). For an executed
+        // graduation the decision IS the graduation, so the decided date must
+        // be corroborated by the executed-graduation record itself (criteria
+        // or evidence) — the ledger cannot claim a decision date that its own
+        // graduation evidence does not support.
+        expect(
+          entry.graduationCriteria.includes(entry.decided) || entry.evidence.includes(entry.decided),
+          `${id}: GRADUATE decided date '${entry.decided}' must appear in the executed graduation record (graduationCriteria or evidence)`,
+        ).toBe(true);
       }
     }
   });
