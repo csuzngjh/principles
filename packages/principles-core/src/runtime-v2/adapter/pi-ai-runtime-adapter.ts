@@ -14,8 +14,12 @@
  *   Missing apiKeyEnv → runtime_unavailable
  *   Retries exhausted → execution_failed
  */
-import { getModel, getProviders, completeSimple } from '@mariozechner/pi-ai';
-import type { KnownProvider, Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions } from '@mariozechner/pi-ai';
+// PRI-621 PR2: migrated @mariozechner/pi-ai 0.73.1 → @earendil-works/pi-ai 0.84.2.
+// Values come from the /compat facade (getModel is the builtin-catalog read;
+// completeSimple unchanged); types come from the root — the root `types.ts`
+// remains the unified Model/Context/Message contract in 0.84.
+import { getModel, getProviders, completeSimple } from '@earendil-works/pi-ai/compat';
+import type { Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
@@ -117,11 +121,13 @@ export interface PiAiRuntimeAdapterConfig {
  * 3. Unknown model id anywhere — conservative hardcoded fallback (unchanged).
  */
 function resolveModel(provider: string, modelId: string, baseUrl?: string) {
-  const knownProviders = getProviders();
-  if (knownProviders.includes(provider as KnownProvider) && !baseUrl) {
+  // 0.84: getProviders() returns only built-in catalog providers
+  // (BuiltinProvider[]); dynamic providers are not part of the static catalog.
+  const knownProviders = getProviders() as readonly string[];
+  if (knownProviders.includes(provider) && !baseUrl) {
     // Built-in provider — use getModel()
-    // @ts-expect-error — getModel requires literal model ID types; runtime strings from config are acceptable
-    const builtin = getModel(provider as KnownProvider, modelId);
+    // @ts-expect-error — getModel requires literal provider/model ID types; runtime strings from config are acceptable
+    const builtin = getModel(provider, modelId);
     if (!builtin) {
       throw new PDRuntimeError(
         'runtime_unavailable',

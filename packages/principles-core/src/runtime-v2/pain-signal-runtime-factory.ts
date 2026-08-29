@@ -34,8 +34,7 @@ import { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-lo
 import { SqliteSourceTraceLocator } from './store/trajectory/sqlite-source-trace-locator.js';
 import { OpenClawCliRuntimeAdapter } from './adapter/openclaw-cli-runtime-adapter.js';
 import { PiAiRuntimeAdapter } from './adapter/pi-ai-runtime-adapter.js';
-import { getProviders } from '@mariozechner/pi-ai';
-import type { KnownProvider } from '@mariozechner/pi-ai';
+import { getProviders } from '@earendil-works/pi-ai/compat';
 import { storeEmitter } from './store/event-emitter.js';
 import type { TelemetryEvent } from '../telemetry-event.js';
 import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
@@ -286,8 +285,9 @@ export function validateRuntimeConfig(config: RuntimeConfig): void {
 
     // Non-built-in providers require baseUrl
     if (config.provider) {
-      const knownProviders = getProviders();
-      if (!knownProviders.includes(config.provider as KnownProvider) && !config.baseUrl) {
+      // 0.84: getProviders() returns only built-in catalog providers.
+      const knownProviders = getProviders() as readonly string[];
+      if (!knownProviders.includes(config.provider) && !config.baseUrl) {
         missing.push('baseUrl');
       }
     }

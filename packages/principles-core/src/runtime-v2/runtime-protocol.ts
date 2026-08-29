@@ -21,7 +21,7 @@ export const RuntimeKindSchema = Type.Union([
   Type.Literal('gemini-cli'),
   Type.Literal('local-worker'),
   Type.Literal('test-double'),
-  Type.Literal('pi-ai'), // M9: direct LLM completion via @mariozechner/pi-ai
+  Type.Literal('pi-ai'), // M9: direct LLM completion via @earendil-works/pi-ai
   Type.Literal('pi-ai-l2'), // PRI-419: multi-turn agent loop via pi-agent-core (L2)
 ]);
  

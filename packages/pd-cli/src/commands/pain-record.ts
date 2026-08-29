@@ -147,7 +147,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
         // is intentional: it suppresses TS2307 when absent and is silently ignored when present.
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        const { getProviders } = await import('@mariozechner/pi-ai');
+        const { getProviders } = await import('@earendil-works/pi-ai/compat');
         const knownProviders = getProviders() as readonly string[];
         if (!knownProviders.includes(config.provider) && !config.baseUrl) {
           missing.push('baseUrl');

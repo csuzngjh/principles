@@ -95,8 +95,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.84.1",
-    "@earendil-works/pi-ai": "^0.84.1",
-    "@mariozechner/pi-ai": "^0.73.1",
+    "@earendil-works/pi-ai": "^0.84.2",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^13.0.3",
     "js-yaml": "^4.1.1",

@@ -11,7 +11,7 @@
  *   D4: Lineage fields protected via preserveLineageFields() after extraction
  *   PRI-284: Generic builder for all runners, not just diagnostician
  */
-import type { Tool } from '@mariozechner/pi-ai';
+import type { Tool } from '@earendil-works/pi-ai';
 import type { TSchema } from '@sinclair/typebox';
 import type { SchemaPromptAdapter } from '../schema-prompt-adapter.js';
 
