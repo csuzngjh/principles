@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extract as extractTar } from 'tar';
 import { isReleaseReadPathContained } from './release-containment';
+import { cleanupReleaseSmokeRoot } from './release-smoke-cleanup';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
 const COMPONENT_NAMES = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'];
@@ -47,6 +48,28 @@ async function sha256File(filePath: string): Promise<string> {
   return hash.digest('hex');
 }
 
+// Phase timing: CI previously had no visibility into which smoke stage
+// consumed the job budget (the full-matrix timeout cancelled Windows jobs
+// mid-smoke with no diagnostics). Logs go to stdout in a fixed
+// `[release-smoke] <phase>: Ns` shape; values are durations only.
+function timePhase<T>(phase: string, run: () => T): T {
+  const startedAt = Date.now();
+  try {
+    return run();
+  } finally {
+    console.log(`[release-smoke] ${phase}: ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+  }
+}
+
+async function timePhaseAsync<T>(phase: string, run: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await run();
+  } finally {
+    console.log(`[release-smoke] ${phase}: ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+  }
+}
+
 beforeAll(async () => {
   if (buildPublicationInternally) {
     const before = COMPONENT_NAMES.filter(name => fs.existsSync(path.join(INSTALLER_DIR, name, 'node_modules')));
@@ -59,11 +82,11 @@ beforeAll(async () => {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
-    await execFileAsync(process.execPath, [builderEntry, '--output', internalPublicationDir], {
+    await timePhaseAsync('internal-build', () => execFileAsync(process.execPath, [builderEntry, '--output', internalPublicationDir], {
       cwd: INSTALLER_DIR,
       env: { ...process.env, SOURCE_DATE_EPOCH: '1700000000' },
       timeout: 600_000,
-    });
+    }));
     expect(COMPONENT_NAMES.filter(name => fs.existsSync(path.join(INSTALLER_DIR, name, 'node_modules')))).toEqual(before);
   }
   // Verify the published archive against its detached digest with the
@@ -77,22 +100,26 @@ beforeAll(async () => {
       throw new Error(`Refusing to read outside the allowed roots: ${readPath}`);
     }
   }
-  const expectedDigest = fs.readFileSync(publishedDigestSidecar, 'utf8').trim();
-  if (!/^[a-f0-9]{64}$/.test(expectedDigest) || await sha256File(publishedArchive) !== expectedDigest) {
-    throw new Error('Release archive digest mismatch');
-  }
-  fs.mkdirSync(assetDir);
-  extractTar({
-    cwd: assetDir,
-    file: publishedArchive,
-    preservePaths: false,
-    strict: true,
-    sync: true,
-    onentry: (entry) => {
-      expect(path.isAbsolute(entry.path)).toBe(false);
-      expect(entry.path.split('/')).not.toContain('..');
-      expect(['SymbolicLink', 'Link']).not.toContain(entry.type);
-    },
+  await timePhaseAsync('digest-verify', async () => {
+    const expectedDigest = fs.readFileSync(publishedDigestSidecar, 'utf8').trim();
+    if (!/^[a-f0-9]{64}$/.test(expectedDigest) || await sha256File(publishedArchive) !== expectedDigest) {
+      throw new Error('Release archive digest mismatch');
+    }
+  });
+  timePhase('extract', () => {
+    fs.mkdirSync(assetDir);
+    extractTar({
+      cwd: assetDir,
+      file: publishedArchive,
+      preservePaths: false,
+      strict: true,
+      sync: true,
+      onentry: (entry) => {
+        expect(path.isAbsolute(entry.path)).toBe(false);
+        expect(entry.path.split('/')).not.toContain('..');
+        expect(['SymbolicLink', 'Link']).not.toContain(entry.type);
+      },
+    });
   });
   fs.mkdirSync(homeDir, { recursive: true });
   fs.mkdirSync(workspaceDir, { recursive: true });
@@ -107,7 +134,14 @@ beforeAll(async () => {
   }
 }, 1_800_000);
 
-afterAll(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }), 300_000);
+// Cleanup is hygiene, not correctness: it runs strictly after every
+// assertion has completed, so a leftover temp dir (Windows AV/indexer
+// handle locks) degrades to a loud warning instead of failing the gate.
+afterAll(() => {
+  timePhase('cleanup', () => {
+    cleanupReleaseSmokeRoot(root, { log: (message) => console.warn(message) });
+  });
+}, 300_000);
 
 describe('production self-contained release asset', () => {
   it('rejects a tampered published archive before extraction', async () => {
@@ -142,14 +176,16 @@ describe('production self-contained release asset', () => {
   });
 
   it('contains no symlinks after build-only npm links are removed', () => {
-    const visit = (directory: string): void => {
-      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-        const entryPath = path.join(directory, entry.name);
-        expect(fs.lstatSync(entryPath).isSymbolicLink(), entryPath).toBe(false);
-        if (entry.isDirectory()) visit(entryPath);
-      }
-    };
-    visit(assetDir);
+    timePhase('symlink-scan', () => {
+      const visit = (directory: string): void => {
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          const entryPath = path.join(directory, entry.name);
+          expect(fs.lstatSync(entryPath).isSymbolicLink(), entryPath).toBe(false);
+          if (entry.isDirectory()) visit(entryPath);
+        }
+      };
+      visit(assetDir);
+    });
   }, 30_000);
 
   it('installs from pipeline output without invoking npm', async () => {
@@ -165,7 +201,7 @@ describe('production self-contained release asset', () => {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
-    const { stdout } = await execFileAsync(
+    const { stdout } = await timePhaseAsync('installer-run', () => execFileAsync(
       process.execPath,
       ['--input-type=module', '--eval', runner, workspaceDir, assetDir],
       {
@@ -173,7 +209,7 @@ describe('production self-contained release asset', () => {
         timeout: 600_000,
         maxBuffer: 16 * 1024 * 1024,
       },
-    );
+    ));
     const markerIndex = stdout.lastIndexOf(resultMarker);
     expect(markerIndex).toBeGreaterThanOrEqual(0);
     // The JSON output may be followed by autolaunch text (console open
