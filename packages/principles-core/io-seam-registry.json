@@ -77,6 +77,13 @@
       "files": [
         "runtime-v2/activation/__tests__/helpers.ts"
       ]
+    },
+    {
+      "name": "owner-identity",
+      "description": "Install-level Owner identity registration file (~/.pd/owner.json) per ADR-0022 (PRI-578). Lives in core so pd-console and pd-cli share the single resolver (env > file > none) with one tested implementation.",
+      "files": [
+        "runtime-v2/owner-identity.ts"
+      ]
     }
   ]
 }

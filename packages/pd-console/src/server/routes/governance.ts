@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { GovernanceConsoleModel } from '../models/GovernanceConsoleModel.js';
 import { GovernanceExperienceCollector } from '../models/GovernanceExperienceCollector.js';
-import type { OwnerConfigSnapshot } from '@principles/core/runtime-v2';
+import type { OwnerConfigSnapshot, OwnerIdentityResolved } from '@principles/core/runtime-v2';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
 const models = new Map<string, GovernanceConsoleModel>();
@@ -38,13 +38,14 @@ export interface GovernanceExperienceContext {
  * PD_OWNER_ID + PD_OWNER_CREDENTIAL_ID) — the two must stay in sync; the route
  * tests lock the mapping.
  */
-export function resolveOwnerConfigSnapshot(authConfig: { isEnabled(): boolean }): OwnerConfigSnapshot {
+export function resolveOwnerConfigSnapshot(
+  authConfig: { isEnabled(): boolean },
+  identity: OwnerIdentityResolved,
+): OwnerConfigSnapshot {
   const authEnabled = authConfig.isEnabled();
-  const ownerId = process.env.PD_OWNER_ID?.trim();
-  const credentialId = process.env.PD_OWNER_CREDENTIAL_ID?.trim();
   return {
     authenticationMode: authEnabled ? 'authenticated' : 'no_auth',
-    ownerIdentityConfiguration: authEnabled && ownerId && credentialId ? 'configured' : 'missing',
+    ownerIdentityConfiguration: authEnabled && identity.ownerId && identity.credentialId ? 'configured' : 'missing',
   };
 }
 

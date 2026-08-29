@@ -2673,3 +2673,113 @@ export function validateIntentVersions(v: unknown): IntentVersionData | null {
   if (versions === null) return null;
   return { versions };
 }
+
+// ── Owner identity (ADR-0022 / PRI-578) ──────────────────────────────────────
+
+export interface OwnerIdentityResolvedData {
+  ownerId: string | null;
+  credentialId: string | null;
+  source: 'env' | 'file' | 'none' | 'invalid_env';
+  /** Machine-readable reason (partial env pair, unreadable file). No identity values. */
+  error?: string;
+}
+
+export interface OwnerIdentityRecordData {
+  schemaVersion: number;
+  ownerId: string;
+  credentialId: string;
+  registeredAt: string;
+}
+
+/** Canonical governance readiness — mirrors core OwnerConfigSnapshot. */
+export interface OwnerGovernanceReadinessData {
+  authenticationMode: 'authenticated' | 'no_auth';
+  ownerIdentityConfiguration: 'configured' | 'missing';
+}
+
+function parseOwnerGovernanceReadiness(v: unknown): OwnerGovernanceReadinessData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'authenticationMode') || (v.authenticationMode !== 'authenticated' && v.authenticationMode !== 'no_auth')) return null;
+  if (!Object.hasOwn(v, 'ownerIdentityConfiguration') || (v.ownerIdentityConfiguration !== 'configured' && v.ownerIdentityConfiguration !== 'missing')) return null;
+  return { authenticationMode: v.authenticationMode, ownerIdentityConfiguration: v.ownerIdentityConfiguration };
+}
+
+export interface OwnerIdentityViewData {
+  resolved: OwnerIdentityResolvedData;
+  fileRecord: OwnerIdentityRecordData | null;
+  fileError?: string;
+  governance: OwnerGovernanceReadinessData;
+}
+
+function parseOwnerIdentityRecordData(v: unknown): OwnerIdentityRecordData | null {
+  if (v === undefined || v === null) return null;
+  if (!isObject(v)) return null;
+  const rec = v;
+  if (!Object.hasOwn(rec, 'schemaVersion') || !isNumber(rec.schemaVersion)) return null;
+  if (!Object.hasOwn(rec, 'ownerId') || !isString(rec.ownerId)) return null;
+  if (!Object.hasOwn(rec, 'credentialId') || !isString(rec.credentialId)) return null;
+  if (!Object.hasOwn(rec, 'registeredAt') || !isString(rec.registeredAt)) return null;
+  return { schemaVersion: rec.schemaVersion, ownerId: rec.ownerId, credentialId: rec.credentialId, registeredAt: rec.registeredAt };
+}
+
+export function validateOwnerIdentityView(v: unknown): OwnerIdentityViewData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'resolved') || !isObject(v.resolved)) return null;
+  const r = v.resolved;
+  if (!Object.hasOwn(r, 'ownerId') || (r.ownerId !== null && !isString(r.ownerId))) return null;
+  if (!Object.hasOwn(r, 'credentialId') || (r.credentialId !== null && !isString(r.credentialId))) return null;
+  if (!Object.hasOwn(r, 'source') || (r.source !== 'env' && r.source !== 'file' && r.source !== 'none' && r.source !== 'invalid_env')) return null;
+  const governance = parseOwnerGovernanceReadiness(v.governance);
+  if (governance === null) return null;
+  const out: OwnerIdentityViewData = {
+    resolved: {
+      ownerId: r.ownerId,
+      credentialId: r.credentialId,
+      source: r.source,
+      ...(Object.hasOwn(r, 'error') && isString(r.error) ? { error: r.error } : {}),
+    },
+    fileRecord: parseOwnerIdentityRecordData(v.fileRecord),
+    governance,
+  };
+  if (Object.hasOwn(v, 'fileError') && isString(v.fileError)) out.fileError = v.fileError;
+  return out;
+}
+
+export interface OwnerIdentityRegisterData {
+  record: OwnerIdentityRecordData;
+  source: 'file';
+  governance: OwnerGovernanceReadinessData;
+}
+
+export function validateOwnerIdentityRegister(v: unknown): OwnerIdentityRegisterData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'source') || v.source !== 'file') return null;
+  if (!Object.hasOwn(v, 'record') || !isObject(v.record)) return null;
+  const rec = v.record;
+  if (!Object.hasOwn(rec, 'schemaVersion') || !isNumber(rec.schemaVersion)) return null;
+  if (!Object.hasOwn(rec, 'ownerId') || !isString(rec.ownerId)) return null;
+  if (!Object.hasOwn(rec, 'credentialId') || !isString(rec.credentialId)) return null;
+  if (!Object.hasOwn(rec, 'registeredAt') || !isString(rec.registeredAt)) return null;
+  const governance = parseOwnerGovernanceReadiness(v.governance);
+  if (governance === null) return null;
+  return {
+    source: 'file',
+    record: { schemaVersion: rec.schemaVersion, ownerId: rec.ownerId, credentialId: rec.credentialId, registeredAt: rec.registeredAt },
+    governance,
+  };
+}
+
+export interface OwnerIdentityUnregisterData {
+  ok: boolean;
+  source: 'none';
+  governance: OwnerGovernanceReadinessData;
+}
+
+export function validateOwnerIdentityUnregister(v: unknown): OwnerIdentityUnregisterData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'ok') || !isBoolean(v.ok) || v.ok !== true) return null;
+  if (!Object.hasOwn(v, 'source') || v.source !== 'none') return null;
+  const governance = parseOwnerGovernanceReadiness(v.governance);
+  if (governance === null) return null;
+  return { ok: true, source: 'none', governance };
+}

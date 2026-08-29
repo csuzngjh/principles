@@ -134,28 +134,23 @@ describe('PRI-585 GET /api/v1/governance/experience — flag contract (SPEC §14
 });
 
 describe('PRI-584 resolveOwnerConfigSnapshot — authority evidence (SPEC §6)', () => {
-  it('no-auth → no_auth + missing identity regardless of env vars', () => {
-    vi.stubEnv('PD_OWNER_ID', 'owner-1');
-    vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'cred-1');
-    expect(resolveOwnerConfigSnapshot({ isEnabled: () => false })).toEqual({
+  it('no-auth → no_auth + missing identity even with a complete identity', () => {
+    // Identity present but the auth gate is off: identity is not honored.
+    expect(resolveOwnerConfigSnapshot({ isEnabled: () => false }, { ownerId: 'owner-1', credentialId: 'cred-1', source: 'env' })).toEqual({
       authenticationMode: 'no_auth',
       ownerIdentityConfiguration: 'missing',
     });
   });
 
-  it('auth enabled + both env vars → configured owner identity', () => {
-    vi.stubEnv('PD_OWNER_ID', 'owner-1');
-    vi.stubEnv('PD_OWNER_CREDENTIAL_ID', 'cred-1');
-    expect(resolveOwnerConfigSnapshot({ isEnabled: () => true })).toEqual({
+  it('auth enabled + both identity fields → configured owner identity', () => {
+    expect(resolveOwnerConfigSnapshot({ isEnabled: () => true }, { ownerId: 'owner-1', credentialId: 'cred-1', source: 'env' })).toEqual({
       authenticationMode: 'authenticated',
       ownerIdentityConfiguration: 'configured',
     });
   });
 
   it('auth enabled + missing credential → missing identity (matches server/index.ts authority wiring)', () => {
-    vi.stubEnv('PD_OWNER_ID', 'owner-1');
-    vi.stubEnv('PD_OWNER_CREDENTIAL_ID', '');
-    expect(resolveOwnerConfigSnapshot({ isEnabled: () => true })).toEqual({
+    expect(resolveOwnerConfigSnapshot({ isEnabled: () => true }, { ownerId: 'owner-1', credentialId: null, source: 'none' })).toEqual({
       authenticationMode: 'authenticated',
       ownerIdentityConfiguration: 'missing',
     });
