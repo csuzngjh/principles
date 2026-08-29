@@ -10,6 +10,7 @@ import {
   getFeedbackChannelConfig,
   type FeedbackChannelConfig,
 } from './config/pd-config-store.js';
+import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime-v2';
 import { createProductTelemetryService, scheduleProductTelemetryExport } from '@principles/host-runtime';
 import { AuthConfig } from './config/AuthConfig.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
@@ -28,6 +29,7 @@ import { handleActivationsRoute, disposeActivationsModels } from './routes/activ
 import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
 import { handleGovernanceRoute, handleGovernanceExperienceRoute, resolveOwnerConfigSnapshot, disposeGovernanceModels } from './routes/governance.js';
+import { handleOwnerIdentityRoute } from './routes/owner-identity.js';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
 import { handleIntentRoute, disposeIntentModels } from './routes/intent.js';
 import { handleIntentDecisionsRoute, disposeIntentDecisionModels } from './routes/intent-decisions.js';
@@ -465,10 +467,10 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // CR8: GET /api/v1/activations
       if (urlPath === '/api/v1/activations' || urlPath.startsWith('/api/v1/activations/')) {
         const subPath = urlPath.slice('/api/v1/activations'.length);
-        const ownerId = process.env.PD_OWNER_ID?.trim();
-        const credentialId = process.env.PD_OWNER_CREDENTIAL_ID?.trim();
-        const ownerActor = services.authConfig.isEnabled() && ownerId && credentialId
-          ? { principal: { kind: 'configured_owner' as const, ownerId }, authentication: { method: 'console_token' as const, credentialId } }
+        // ADR-0022 (PRI-578): single resolver — env > ~/.pd/owner.json > none
+        const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
+        const ownerActor = services.authConfig.isEnabled() && identity.ownerId && identity.credentialId
+          ? { principal: { kind: 'configured_owner' as const, ownerId: identity.ownerId }, authentication: { method: 'console_token' as const, credentialId: identity.credentialId } }
           : null;
         asyncHandler(() => handleActivationsRoute(req, res, services.workspaceDir, subPath, {
           ownerActor,
@@ -477,12 +479,19 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
+      // ADR-0022 (PRI-578): /api/v1/owner-identity — GET status, POST register, DELETE unregister
+      if (urlPath === '/api/v1/owner-identity' || urlPath.startsWith('/api/v1/owner-identity/')) {
+        const subPath = urlPath.slice('/api/v1/owner-identity'.length);
+        asyncHandler(() => handleOwnerIdentityRoute(req, res, defaultOwnerIdentityHomeDir(), subPath))(req, res);
+        return;
+      }
+
       // PRI-585: GET /api/v1/governance/experience (flag-gated read-only snapshot)
       if (urlPath === '/api/v1/governance/experience') {
         asyncHandler(() => handleGovernanceExperienceRoute(req, res, {
           workspaceDir: services.workspaceDir,
           featureFlags: services.feedbackFlags,
-          ownerConfig: resolveOwnerConfigSnapshot(services.authConfig),
+          ownerConfig: resolveOwnerConfigSnapshot(services.authConfig, resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir())),
         }))(req, res);
         return;
       }

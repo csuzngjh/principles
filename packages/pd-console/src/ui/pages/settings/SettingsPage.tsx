@@ -17,8 +17,11 @@ import {
   updateOutputLanguage,
   fetchConfigSummary,
   patchFeatureFlag,
+  fetchOwnerIdentity,
+  registerOwnerIdentity,
+  unregisterOwnerIdentity,
 } from "../../api.js";
-import type { WorkspaceEntry } from "../../api.js";
+import type { WorkspaceEntry, OwnerIdentityViewData } from "../../api.js";
 import { resetOnboardingState } from "../../utils/onboarding-state.js";
 
 // ── Runtime validators (H section / ERR-001/005/009/013) ─────────────────────
@@ -114,6 +117,12 @@ export function SettingsPage() {
   // Auth token state
   const [tokenInput, setTokenInput] = useState("");
 
+  // ADR-0022 (PRI-578): Owner identity registration state
+  const [ownerIdentity, setOwnerIdentity] = useState<OwnerIdentityViewData | null>(null);
+  const [ownerIdInput, setOwnerIdInput] = useState("");
+  const [credentialIdInput, setCredentialIdInput] = useState("");
+  const [ownerActionPending, setOwnerActionPending] = useState(false);
+
   // Workspace state
   const [workspaces, setWorkspaces] = useState<WorkspaceEntry[]>([]);
   const [addName, setAddName] = useState("");
@@ -166,6 +175,13 @@ export function SettingsPage() {
     }
     // Non-fatal: if language load fails, keep default zh-CN
 
+    // ADR-0022 (PRI-578): Load owner identity status
+    const ownerResult = await fetchOwnerIdentity();
+    if (ownerResult.success && ownerResult.data) {
+      setOwnerIdentity(ownerResult.data);
+    }
+    // Non-fatal: failures keep the section collapsed to its loading state
+
     setLoadingState("loaded");
   }, []);
 
@@ -193,6 +209,47 @@ export function SettingsPage() {
   }, [t]);
 
   useEffect(() => { void loadOnboardingFlag(); }, [loadOnboardingFlag]);
+
+  // ── ADR-0022 (PRI-578): owner identity handlers ─────────────────────────
+
+  const handleRegisterOwner = useCallback(async () => {
+    if (ownerIdInput.trim().length === 0 || credentialIdInput.trim().length === 0) {
+      toast.error(t("pages.settings.ownerIdentity.required"));
+      return;
+    }
+    setOwnerActionPending(true);
+    try {
+      const result = await registerOwnerIdentity(ownerIdInput.trim(), credentialIdInput.trim());
+      if (!result.success) {
+        toast.error(t("pages.settings.ownerIdentity.operationFailed"));
+        return;
+      }
+      const refresh = await fetchOwnerIdentity();
+      if (refresh.success && refresh.data) setOwnerIdentity(refresh.data);
+      setOwnerIdInput("");
+      setCredentialIdInput("");
+      toast.success(t("pages.settings.ownerIdentity.registered"));
+    } finally {
+      setOwnerActionPending(false);
+    }
+  }, [ownerIdInput, credentialIdInput, t]);
+
+  const handleUnregisterOwner = useCallback(async () => {
+    setOwnerActionPending(true);
+    try {
+      const result = await unregisterOwnerIdentity();
+      if (!result.success) {
+        toast.error(t("pages.settings.ownerIdentity.operationFailed"));
+        return;
+      }
+      const refresh = await fetchOwnerIdentity();
+      if (refresh.success && refresh.data) setOwnerIdentity(refresh.data);
+      toast.success(t("pages.settings.ownerIdentity.unregistered"));
+    } finally {
+      setOwnerActionPending(false);
+    }
+  }, [t]);
+
 
   // ── Auth token handlers ────────────────────────────────────────────────
 
@@ -407,6 +464,102 @@ export function SettingsPage() {
               {t("pages.settings.tokenSessionOnly")}
             </span>
           </div>
+        </div>
+      </section>
+
+      {/* ADR-0022 (PRI-578): Owner identity */}
+      <section className="mb-8" aria-labelledby="section-owner-identity">
+        <SectionTitle id="section-owner-identity">
+          {t("pages.settings.ownerIdentity.title")}
+        </SectionTitle>
+        <div className="bg-panel border border-line rounded-[6px] p-5">
+          <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+            {t("pages.settings.ownerIdentity.intro")}
+          </p>
+          {ownerIdentity === null ? (
+            <div className="text-ink-4 text-[12px]">{t("pages.settings.ownerIdentity.loading")}</div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 text-[13px] mb-2" data-testid="owner-identity-status">
+                <span
+                  className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+                    ownerIdentity.resolved.source === "none" ? "bg-amber text-ink" : "bg-green text-ink"
+                  }`}
+                  role="status"
+                >
+                  {ownerIdentity.resolved.source === "none"
+                    ? t("pages.settings.ownerIdentity.statusMissing")
+                    : t("pages.settings.ownerIdentity.statusConfigured")}
+                </span>
+                <span className="text-ink-3 text-[12px]">
+                  {ownerIdentity.resolved.source === "env" && t("pages.settings.ownerIdentity.sourceEnv")}
+                  {ownerIdentity.resolved.source === "file" && t("pages.settings.ownerIdentity.sourceFile")}
+                  {ownerIdentity.resolved.source === "none" && t("pages.settings.ownerIdentity.sourceNone")}
+                </span>
+              </div>
+              {ownerIdentity.fileRecord !== null && (
+                <div className="text-ink-4 text-[12px] mb-3 font-mono">
+                  {t("pages.settings.ownerIdentity.ownerIdLabel")}: {ownerIdentity.fileRecord.ownerId} ·{" "}
+                  {t("pages.settings.ownerIdentity.registeredAt")} {ownerIdentity.fileRecord.registeredAt.slice(0, 10)}
+                </div>
+              )}
+              {ownerIdentity.fileError !== undefined && (
+                <div className="text-danger text-[12px] mb-3" data-testid="owner-identity-file-error">
+                  {ownerIdentity.fileError}
+                </div>
+              )}
+              {ownerIdentity.resolved.source === "env" ? (
+                <div className="text-ink-4 text-[12px]">{t("pages.settings.ownerIdentity.envHint")}</div>
+              ) : (
+                <div className="mt-3">
+                  <label htmlFor="owner-id-input" className="block text-sm font-medium text-ink mb-1">
+                    {t("pages.settings.ownerIdentity.ownerIdLabel")}
+                  </label>
+                  <input
+                    id="owner-id-input"
+                    type="text"
+                    value={ownerIdInput}
+                    onChange={(e) => setOwnerIdInput(e.target.value)}
+                    disabled={ownerActionPending}
+                    placeholder="owner-alice"
+                    className="w-full border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov disabled:opacity-50"
+                  />
+                  <label htmlFor="credential-id-input" className="block text-sm font-medium text-ink mt-3 mb-1">
+                    {t("pages.settings.ownerIdentity.credentialIdLabel")}
+                  </label>
+                  <input
+                    id="credential-id-input"
+                    type="text"
+                    value={credentialIdInput}
+                    onChange={(e) => setCredentialIdInput(e.target.value)}
+                    disabled={ownerActionPending}
+                    placeholder="cred-..."
+                    className="w-full border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov disabled:opacity-50"
+                  />
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={handleRegisterOwner}
+                      disabled={ownerActionPending}
+                      className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                    >
+                      {t("pages.settings.ownerIdentity.register")}
+                    </button>
+                    {ownerIdentity.resolved.source === "file" && (
+                      <button
+                        type="button"
+                        onClick={handleUnregisterOwner}
+                        disabled={ownerActionPending}
+                        className="border border-line text-ink-3 rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {t("pages.settings.ownerIdentity.unregister")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </section>
 

@@ -2673,3 +2673,75 @@ export function validateIntentVersions(v: unknown): IntentVersionData | null {
   if (versions === null) return null;
   return { versions };
 }
+
+// ── Owner identity (ADR-0022 / PRI-578) ──────────────────────────────────────
+
+export interface OwnerIdentityResolvedData {
+  ownerId: string | null;
+  credentialId: string | null;
+  source: 'env' | 'file' | 'none';
+}
+
+export interface OwnerIdentityRecordData {
+  schemaVersion: number;
+  ownerId: string;
+  credentialId: string;
+  registeredAt: string;
+}
+
+export interface OwnerIdentityViewData {
+  resolved: OwnerIdentityResolvedData;
+  fileRecord: OwnerIdentityRecordData | null;
+  fileError?: string;
+}
+
+export function validateOwnerIdentityView(v: unknown): OwnerIdentityViewData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'resolved') || !isObject(v.resolved)) return null;
+  const r = v.resolved;
+  if (!Object.hasOwn(r, 'ownerId') || (r.ownerId !== null && !isString(r.ownerId))) return null;
+  if (!Object.hasOwn(r, 'credentialId') || (r.credentialId !== null && !isString(r.credentialId))) return null;
+  if (!Object.hasOwn(r, 'source') || (r.source !== 'env' && r.source !== 'file' && r.source !== 'none')) return null;
+  let fileRecord: OwnerIdentityRecordData | null = null;
+  if (v.fileRecord !== undefined && v.fileRecord !== null) {
+    if (!isObject(v.fileRecord)) return null;
+    const rec = v.fileRecord;
+    if (!Object.hasOwn(rec, 'schemaVersion') || !isNumber(rec.schemaVersion)) return null;
+    if (!Object.hasOwn(rec, 'ownerId') || !isString(rec.ownerId)) return null;
+    if (!Object.hasOwn(rec, 'credentialId') || !isString(rec.credentialId)) return null;
+    if (!Object.hasOwn(rec, 'registeredAt') || !isString(rec.registeredAt)) return null;
+    fileRecord = { schemaVersion: rec.schemaVersion, ownerId: rec.ownerId, credentialId: rec.credentialId, registeredAt: rec.registeredAt };
+  }
+  const out: OwnerIdentityViewData = { resolved: { ownerId: r.ownerId, credentialId: r.credentialId, source: r.source }, fileRecord };
+  if (Object.hasOwn(v, 'fileError') && isString(v.fileError)) out.fileError = v.fileError;
+  return out;
+}
+
+export interface OwnerIdentityRegisterData {
+  record: OwnerIdentityRecordData;
+  source: 'file';
+}
+
+export function validateOwnerIdentityRegister(v: unknown): OwnerIdentityRegisterData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'source') || v.source !== 'file') return null;
+  if (!Object.hasOwn(v, 'record') || !isObject(v.record)) return null;
+  const rec = v.record;
+  if (!Object.hasOwn(rec, 'schemaVersion') || !isNumber(rec.schemaVersion)) return null;
+  if (!Object.hasOwn(rec, 'ownerId') || !isString(rec.ownerId)) return null;
+  if (!Object.hasOwn(rec, 'credentialId') || !isString(rec.credentialId)) return null;
+  if (!Object.hasOwn(rec, 'registeredAt') || !isString(rec.registeredAt)) return null;
+  return { source: 'file', record: { schemaVersion: rec.schemaVersion, ownerId: rec.ownerId, credentialId: rec.credentialId, registeredAt: rec.registeredAt } };
+}
+
+export interface OwnerIdentityUnregisterData {
+  ok: boolean;
+  source: 'none';
+}
+
+export function validateOwnerIdentityUnregister(v: unknown): OwnerIdentityUnregisterData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'ok') || !isBoolean(v.ok) || v.ok !== true) return null;
+  if (!Object.hasOwn(v, 'source') || v.source !== 'none') return null;
+  return { ok: true, source: 'none' };
+}
