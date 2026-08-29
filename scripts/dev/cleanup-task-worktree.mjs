@@ -1,8 +1,15 @@
 // Safely remove a completed task worktree (AGENTS.md §23A, git-8-cleanup-after-merge).
 //
-// Never destroys unknown work (git-4): a dirty worktree, an unverifiable
-// merge state, or the primary checkout all cause a refusal — this tool never
+// Never destroys unknown work (git-4): a dirty worktree, an unproven task
+// branch, or the primary checkout all cause a refusal — this tool never
 // resets, cleans, stashes, or force-deletes anything with unreviewed content.
+//
+// Completion proof (git-8): BOTH worktree removal and branch deletion require
+// proving the task branch is an ancestor of origin/main. A clean-but-unmerged
+// worktree is REFUSED — removing it would destroy another agent's active
+// working directory even though no code would be lost. Squash-merged and
+// closed-without-merge branches cannot be proven via ancestry and fail closed
+// on purpose; remove those manually after confirming.
 //
 // Usage:
 //   node scripts/dev/cleanup-task-worktree.mjs <branch-or-path> [--delete-branch] [--json]
@@ -10,10 +17,7 @@
 //
 // <branch-or-path>  worktree path, or the name of the branch checked out in
 //                   the target worktree (e.g. ai/PRI-123-some-task)
-// --delete-branch   also delete the task branch, but ONLY after proving it is
-//                   merged into origin/main (merge ancestry — the authority).
-//                   Squash-merged branches fail this proof on purpose; delete
-//                   those manually after confirming the squash merge.
+// --delete-branch   also delete the task branch (same completion proof).
 //
 // Removal uses `git worktree remove` (junction/reparse-point safe — ERR-098);
 // a single retry with one --force is allowed ONLY after the porcelain-clean
@@ -87,28 +91,39 @@ async function main() {
     fail(args, 'Refusing to remove the PRIMARY worktree (' + primary.path + ').', 'The primary checkout is the repository control plane.');
   }
 
-  // Prove merge state BEFORE any mutation (fail loud, nothing destroyed).
-  let mergedIntoMain = null; // null = unknown, true/false = proven
-  if (args.deleteBranch) {
-    if (!branchExists) {
-      fail(args, "--delete-branch given but branch '" + branchName + "' does not exist.", null);
-    }
-    const mainSha = (await runGit(['rev-parse', '--verify', 'origin/main^{commit}'], { cwd, allowFailure: true }))?.trim();
-    if (!mainSha) {
-      fail(args, '--delete-branch requires a resolvable origin/main (to prove the branch is merged).', 'git fetch origin, or delete the branch manually after confirming merge state.');
-    }
-    const ancestry = await runGit(['merge-base', '--is-ancestor', branchName, 'origin/main'], { cwd, allowFailure: true });
-    mergedIntoMain = ancestry !== null;
-    if (!mergedIntoMain) {
-      fail(
-        args,
-        "Branch '" + branchName + "' is NOT an ancestor of origin/main — not provably merged.",
-        'If it was squash-merged, confirm manually and delete with git branch -D. Otherwise the work may be unmerged.'
-      );
-    }
+  // Completion proof BEFORE any mutation (fail loud, nothing destroyed).
+  // Protects BOTH the worktree removal below and the branch deletion —
+  // git-8 requires merged/closed + clean for the whole cleanup, not just
+  // for the branch delete.
+  const notes = [];
+  const refreshed = await runGit(['fetch', 'origin', '--prune'], { cwd, allowFailure: true });
+  if (refreshed === null) {
+    notes.push('origin refresh failed — merge proof uses the cached origin/main (run git fetch origin and retry for a fresh verdict)');
+  }
+  const mainSha = (await runGit(['rev-parse', '--verify', 'origin/main^{commit}'], { cwd, allowFailure: true }))?.trim();
+  if (!mainSha) {
+    fail(
+      args,
+      'Merge completion proof requires a resolvable origin/main.',
+      'git fetch origin and retry, or remove the worktree manually after confirming its PR is merged/closed.'
+    );
+  }
+  if (!branchExists) {
+    fail(
+      args,
+      "Branch '" + branchName + "' does not exist — cannot prove the task completed via merge ancestry.",
+      'If this worktree is truly done, remove it manually: git worktree remove ' + (target ? target.path : '<worktree-path>')
+    );
+  }
+  const ancestry = await runGit(['merge-base', '--is-ancestor', branchName, 'origin/main'], { cwd, allowFailure: true });
+  if (ancestry === null) {
+    fail(
+      args,
+      "Branch '" + branchName + "' is NOT an ancestor of origin/main — cannot prove the task completed. Worktree was not removed.",
+      'Confirm the PR is closed/squash-merged, then remove manually: git worktree remove ' + (target ? target.path : '<worktree-path>')
+    );
   }
 
-  const notes = [];
   let removedWorktree = null;
   if (target) {
     const status = await runGit(['status', '--porcelain'], { cwd: target.path, allowFailure: true });

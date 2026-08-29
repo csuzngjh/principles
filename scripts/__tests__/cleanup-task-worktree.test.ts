@@ -106,6 +106,27 @@ describe('cleanup-task-worktree', () => {
     expect(branchSha.trim().length).toBeGreaterThan(0);
   }, 120_000);
 
+  it('REFUSES to remove a CLEAN worktree whose branch is not merged, even WITHOUT --delete-branch (git-8 completion contract)', async () => {
+    // The exact hazard the completion contract exists for: agent A committed
+    // its work (porcelain-clean) but the PR is not merged; a second agent
+    // running cleanup without --delete-branch must NOT destroy agent A's
+    // active working directory.
+    const { wt, branch } = await makeTask('unmerged-clean');
+
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--json'], { cwd: primary });
+    expect(r.code).toBe(1);
+    const out = JSON.parse(r.stdout) as { error: string; nextAction: string };
+    expect(out.error).toContain('NOT an ancestor');
+    expect(out.error).toContain('Worktree was not removed');
+    expect(out.nextAction).toContain('squash-merged');
+    // Non-destruction negative controls: worktree, its committed content and
+    // the branch all survive the refused cleanup.
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(fs.readFileSync(path.join(wt, 'unmerged-clean.txt'), 'utf-8')).toBe('x\n');
+    const branchSha = await git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch);
+    expect(branchSha.trim().length).toBeGreaterThan(0);
+  }, 120_000);
+
   it('REFUSES to remove the primary checkout', async () => {
     const r = await runDevScript('cleanup-task-worktree.mjs', [primary, '--json'], { cwd: primary });
     expect(r.code).toBe(1);
