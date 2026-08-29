@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+import type { HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { CodexHooksHostAdapter } from './host-adapter.js';
@@ -27,7 +28,7 @@ function errorMessage(error: unknown): string {
 // enabled — the flag gate below happens BEFORE any transcript path
 // validation or filesystem I/O, so flag-off means the transcript boundary
 // receives zero calls (SPEC §10 hard privacy invariant).
-function runConversationIngestion(args: { rawPayload: unknown; kind: string; workspaceDir: string; env: EnvMap }): string[] {
+function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; env: EnvMap }): string[] {
   const { rawPayload, kind, workspaceDir, env } = args;
   if (kind !== 'turn_complete' && kind !== 'before_prompt_build' && kind !== 'after_tool_call') return [];
   const diagnostics: string[] = [];

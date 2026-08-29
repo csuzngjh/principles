@@ -600,7 +600,7 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
               last_degradation_reason = excluded.last_degradation_reason, last_degradation_ordinal = excluded.last_degradation_ordinal, updated_at = excluded.updated_at`)
           .run(input.checkpoint.hostKind, input.checkpoint.rolloutIdentity, byteOffset, input.checkpoint.lastOrdinal,
             input.checkpoint.cliVersion ?? null, input.checkpoint.rootSessionId, input.checkpoint.incompleteTail ? 1 : 0,
-            lastDegradation?.reason ?? null, lastDegradation?.ordinal, now);
+            lastDegradation?.reason ?? null, lastDegradation?.ordinal ?? null, now);
       }
 
       // Marker semantics: compaction replaces logical history (tombstone every

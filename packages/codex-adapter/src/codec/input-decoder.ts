@@ -1,4 +1,12 @@
 import type { HostEvent, HostEventContext, HostEventKind } from '@principles/core/host';
+import { CODEX_INGESTION_MIN_VERSION } from '../ingestion/codex-version.js';
+
+// Two contract baselines coexist deliberately (G1 probe report §9): the
+// four pre-ingestion events pin their payload contract to codex-cli 0.147.0,
+// while the Stop / ingestion-side fields follow the ingestion baseline
+// (CODEX_INGESTION_MIN_VERSION = 0.148.0). Each message names the baseline
+// that defines it — never mix them.
+const FOUR_EVENT_CONTRACT_VERSION = '0.147.0';
 
 export const CODEX_EVENT_PRE_TOOL_USE = 'PreToolUse';
 export const CODEX_EVENT_POST_TOOL_USE = 'PostToolUse';
@@ -33,13 +41,13 @@ function own(value: Record<string, unknown>, key: string): unknown {
 function requiredString(value: Record<string, unknown>, key: string): string {
   const candidate = own(value, key);
   if (typeof candidate !== 'string' || candidate.trim().length === 0) {
-    throw new CodexDecoderError(`missing or malformed required field "${key}"`, `Use the exact codex-cli 0.147.0 ${key} field.`);
+    throw new CodexDecoderError(`missing or malformed required field "${key}"`, `Use the exact codex-cli ${FOUR_EVENT_CONTRACT_VERSION} ${key} field.`);
   }
   return candidate;
 }
 
 function requiredNullableString(value: Record<string, unknown>, key: string): string | null {
-  if (!Object.hasOwn(value, key)) throw new CodexDecoderError(`missing required field "${key}"`, `Use the exact codex-cli 0.147.0 ${key} field.`);
+  if (!Object.hasOwn(value, key)) throw new CodexDecoderError(`missing required field "${key}"`, `Use the exact codex-cli ${FOUR_EVENT_CONTRACT_VERSION} ${key} field.`);
   const candidate = own(value, key);
   if (candidate !== null && typeof candidate !== 'string') {
     throw new CodexDecoderError(`malformed required field "${key}"`, `${key} must be a string or null.`);
@@ -48,7 +56,7 @@ function requiredNullableString(value: Record<string, unknown>, key: string): st
 }
 
 function requiredUnknown(value: Record<string, unknown>, key: string): unknown {
-  if (!Object.hasOwn(value, key)) throw new CodexDecoderError(`missing required field "${key}"`, `Use the exact codex-cli 0.147.0 ${key} field.`);
+  if (!Object.hasOwn(value, key)) throw new CodexDecoderError(`missing required field "${key}"`, `Use the exact codex-cli ${FOUR_EVENT_CONTRACT_VERSION} ${key} field.`);
   return own(value, key);
 }
 
@@ -85,7 +93,7 @@ export function decodeCodexInput(raw: unknown): HostEvent {
     // already-flushed transcript, never last_assistant_message directly.
     const stopHookActive = own(raw, 'stop_hook_active');
     if (typeof stopHookActive !== 'boolean') {
-      throw new CodexDecoderError('missing or malformed required field "stop_hook_active"', 'Use the exact codex-cli 0.148.0 stop_hook_active field.');
+      throw new CodexDecoderError('missing or malformed required field "stop_hook_active"', `Use the exact codex-cli ${CODEX_INGESTION_MIN_VERSION} stop_hook_active field.`);
     }
     context = { ...common };
   } else {
