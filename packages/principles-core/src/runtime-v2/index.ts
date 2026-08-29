@@ -44,6 +44,18 @@ export { GOVERNANCE_EXPERIENCE_ITEMS_LIMIT, GOVERNANCE_EXPERIENCE_ISSUE_GROUPS_L
 // Receipt evidence coverage disclosure contract (PRI-590)
 export { RECEIPT_RETENTION_POLICY_DAYS } from './receipt-coverage.js';
 export type { ReceiptSourceStatus, ReceiptValidationStatus, ReceiptEvidenceCoverage } from './receipt-coverage.js';
+// Owner identity registration (ADR-0022, PRI-578) — env > ~/.pd/owner.json > none
+export {
+  OWNER_IDENTITY_SCHEMA_VERSION,
+  OWNER_IDENTITY_FILE_NAME,
+  resolveOwnerIdentity,
+  readOwnerIdentityFile,
+  writeOwnerIdentityFile,
+  deleteOwnerIdentityFile,
+  ownerIdentityFilePath,
+  defaultOwnerIdentityHomeDir,
+} from './owner-identity.js';
+export type { OwnerIdentityRecord, OwnerIdentitySource, OwnerIdentityResolved, OwnerIdentityFileResult, OwnerIdentityDeleteResult } from './owner-identity.js';
 // Anonymous Product Telemetry v1 (PRI-595~603) — pure contract, no I/O.
 // Durable-fact readers and the HTTPS exporter live in @principles/host-runtime.
 export {
@@ -318,6 +330,9 @@ export type { OpenClawCliRuntimeAdapterOptions } from './adapter/openclaw-cli-ru
 // PiAiRuntimeAdapter (M9)
 export { PiAiRuntimeAdapter } from './adapter/index.js';
 export type { PiAiRuntimeAdapterConfig } from './adapter/pi-ai-runtime-adapter.js';
+// PRI-621 PR2 review: core capability wrapper so cross-package callers query
+// the pi-ai builtin catalog without declaring pi-ai themselves (EP-06).
+export { builtinPiAiProviderIds, isBuiltinPiAiProvider } from './adapter/pi-ai-catalog.js';
 
 // PrincipleTreeLedgerAdapter (M8)
 export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';

@@ -25,6 +25,7 @@ import {
   summarizeRuleCodeShadowEvents,
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
+import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime-v2';
 import type {
   ActivationDecision,
   PIArtifactSnapshot,
@@ -500,8 +501,9 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
   try {
     const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
     const flags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
-    const ownerId = process.env.PD_OWNER_ID?.trim();
-    const credentialId = process.env.PD_OWNER_CREDENTIAL_ID?.trim();
+    // ADR-0022 (PRI-578): single resolver — env > ~/.pd/owner.json > none
+    const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
+    const { ownerId, credentialId } = identity;
     const consoleToken = process.env.PD_CONSOLE_TOKEN?.trim();
     const operatorId = process.env.USERNAME?.trim() || process.env.USER?.trim();
     const actor = ownerId && credentialId && consoleToken

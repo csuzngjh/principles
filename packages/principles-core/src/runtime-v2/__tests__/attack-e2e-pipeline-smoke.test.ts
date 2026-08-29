@@ -52,7 +52,7 @@ import type { TaskRecord } from '../task-status.js';
 import { SqliteConnection } from '../store/sqlite-connection.js';
 import type { RetryPolicy } from '../store/lifecycle/retry-policy.js';
 
-vi.mock('@mariozechner/pi-ai', () => ({
+vi.mock('@earendil-works/pi-ai/compat', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai']),
   complete: vi.fn(),

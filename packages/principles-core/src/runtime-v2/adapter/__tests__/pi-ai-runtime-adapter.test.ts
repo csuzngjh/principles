@@ -10,8 +10,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PDRuntimeError } from '../../error-categories.js';
 
-// Mock @mariozechner/pi-ai at module level
-vi.mock('@mariozechner/pi-ai', () => ({
+// Mock @earendil-works/pi-ai/compat (value facade used by the adapter) at module level
+vi.mock('@earendil-works/pi-ai/compat', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai', 'google']),
   completeSimple: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('../../store/event-emitter.js', () => ({
   storeEmitter: { emitTelemetry: vi.fn() },
 }));
 
-import { getModel, completeSimple } from '@mariozechner/pi-ai';
+import { getModel, completeSimple } from '@earendil-works/pi-ai/compat';
 import { storeEmitter } from '../../store/event-emitter.js';
 import { PiAiRuntimeAdapter } from '../pi-ai-runtime-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
