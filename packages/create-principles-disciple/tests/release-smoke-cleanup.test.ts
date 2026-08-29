@@ -12,7 +12,7 @@ describe('release smoke cleanup helper', () => {
         calls.push({ path, options });
       },
     });
-    expect(result).toEqual({ removed: true });
+    expect(result).toEqual({ removed: true, skipped: false });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.path).toBe('C:/tmp/smoke-root');
     expect(calls[0]?.options).toEqual({ recursive: true, force: true, maxRetries: 30, retryDelay: 500 });
@@ -26,18 +26,34 @@ describe('release smoke cleanup helper', () => {
       },
       log: (message) => warnings.push(message),
     });
-    expect(result).toEqual({ removed: false });
+    expect(result).toEqual({ removed: false, skipped: false });
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('[release-smoke] cleanup');
     expect(warnings[0]).toContain('EPERM');
     expect(warnings[0]).toContain('non-blocking');
   });
 
+  it('skips entirely on an ephemeral runner without touching the filesystem', () => {
+    const warnings: string[] = [];
+    let removeCalled = false;
+    const result = cleanupReleaseSmokeRoot('C:/tmp/ephemeral-root', {
+      skip: true,
+      remove: () => {
+        removeCalled = true;
+      },
+      log: (message) => warnings.push(message),
+    });
+    expect(result).toEqual({ removed: false, skipped: true });
+    expect(removeCalled).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('skipped');
+  });
+
   it('removes a real temp directory through the default fs path', () => {
     const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-cleanup-helper-'));
     fs.writeFileSync(path.join(root, 'payload.txt'), 'x');
     const result = cleanupReleaseSmokeRoot(root);
-    expect(result).toEqual({ removed: true });
+    expect(result).toEqual({ removed: true, skipped: false });
     expect(fs.existsSync(root)).toBe(false);
   });
 });
