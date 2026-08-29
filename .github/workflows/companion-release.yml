@@ -33,8 +33,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # install-layout BEFORE companion: the companion imports
+      # @principles/install-layout at build time, and its dist output
+      # (types + executable JS) does not exist after a clean `npm ci` —
+      # building the companion first fails with TS2307, and electron-builder
+      # would pack the dependency without its executable JS (caught live by
+      # the verify-packaged-app step, 2026-08-28).
       - name: Build companion
-        run: npm run build --workspace=@principles/pd-companion
+        run: |
+          npm run build --workspace=@principles/install-layout
+          npm run build --workspace=@principles/pd-companion
 
       - name: Package NSIS installer
         run: npm run dist --workspace=@principles/pd-companion
