@@ -101,6 +101,54 @@ describe('formatRepairPrompt', () => {
     const errorLine = prompt.split('\n').find(l => l.includes('/test')) ?? '';
     expect(errorLine.length).toBeLessThan(500);
   });
+
+  // ── PRI-621 RC2: complete schema in the repair prompt ──
+
+  it('PRI-621: includes the complete serialized schema (nested enums, minItems) when schemaJson is provided', () => {
+    const schemaJson = JSON.stringify({
+      type: 'object',
+      required: ['taskId', 'goldenTraceCases'],
+      properties: {
+        taskId: { type: 'string' },
+        goldenTraceCases: {
+          type: 'array',
+          minItems: 2,
+          items: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', enum: ['positive', 'negative'] },
+              expectedDecision: { type: 'string', enum: ['allow', 'block', 'propose_correction'] },
+            },
+          },
+        },
+      },
+    });
+    const prompt = formatRepairPrompt(SAMPLE_INVALID_JSON, SAMPLE_ERRORS, { schemaJson });
+
+    // The repair LLM must see the nested constraints it previously had to guess.
+    expect(prompt).toContain('complete JSON Schema');
+    expect(prompt).toContain('"minItems":2');
+    expect(prompt).toContain('positive');
+    expect(prompt).toContain('propose_correction');
+    // The top-level-only summary block must NOT also appear (schemaJson wins).
+    expect(prompt).not.toContain('EXPECTED SCHEMA:\n  ');
+  });
+
+  it('PRI-621: falls back to schemaSummary when schemaJson is absent', () => {
+    const prompt = formatRepairPrompt(SAMPLE_INVALID_JSON, SAMPLE_ERRORS, { schemaSummary: '  taskId: string (required)' });
+
+    expect(prompt).toContain('EXPECTED SCHEMA:');
+    expect(prompt).toContain('taskId: string (required)');
+    expect(prompt).not.toContain('complete JSON Schema');
+  });
+
+  it('PRI-621: truncates oversized schemaJson at maxSchemaJsonChars', () => {
+    const schemaJson = JSON.stringify({ type: 'object', properties: { big: { type: 'string', description: 'x'.repeat(20_000) } } });
+    const prompt = formatRepairPrompt({}, SAMPLE_ERRORS, { schemaJson, maxSchemaJsonChars: 500 });
+
+    expect(prompt).toContain('...[truncated]');
+    expect(prompt.length).toBeLessThan(2_000);
+  });
 });
 
 // ── attemptStructuredOutputRepair ──
@@ -287,7 +335,7 @@ describe('attemptStructuredOutputRepair', () => {
     expect(result.repairAttempts[0]?.schemaRef).toBe('diagnostician-output-v1');
     expect(result.repairAttempts[0]?.attempt).toBe(1);
     expect(result.repairAttempts[0]?.repaired).toBe(true);
-    expect(result.repairAttempts[0]?.repairPromptVersion).toBe('1');
+    expect(result.repairAttempts[0]?.repairPromptVersion).toBe('2'); // v2 = PRI-621 full-schema repair prompt
   });
 
   it('repairAttempts records failed attempts (PRI-200)', async () => {

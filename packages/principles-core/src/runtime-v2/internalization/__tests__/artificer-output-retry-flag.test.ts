@@ -1,16 +1,16 @@
 /**
- * Issue 2 (Codex E2E): Artificer `output_invalid` retry/fallback flag.
+ * Issue 2 (Codex E2E) / PRI-621 graduation: Artificer `output_invalid` retry flag.
  *
- * The `artificer_output_retry` feature flag (quiet, default OFF) controls
- * whether `output_invalid` (malformed LLM output, e.g. the LLM never calls
- * submit_rulecode) is treated as a permanent error (legacy — immediate
- * failure, no retry) or as a retriable error (base retry policy, bounded by
- * task.maxAttempts).
+ * The `artificer_output_retry` feature flag (quiet, default ON since the
+ * 2026-08-29 PRI-621 graduation) controls whether `output_invalid`
+ * (malformed LLM output, e.g. the LLM never calls submit_rulecode) is
+ * treated as a permanent error (legacy — immediate failure, no retry) or as
+ * a retriable error (base retry policy, bounded by task.maxAttempts).
  *
  * Acceptance criteria:
  *   1. No effectiveConfig → `output_invalid` stays permanent (legacy).
- *   2. effectiveConfig + flag OFF → `output_invalid` stays permanent (legacy,
- *      default). Keeps Codex/OpenClaw behavior identical out of the box.
+ *   2. effectiveConfig + flag OFF → `output_invalid` stays permanent
+ *      (explicit config override — the rollback path).
  *   3. effectiveConfig + flag ON → `output_invalid` is NOT permanent
  *      (retriable via base runner retry policy).
  *
@@ -89,13 +89,33 @@ describe('ArtificerRunner permanentErrorCategories — `artificer_output_retry` 
     expect(runner.permanentErrorCategories.has('output_invalid')).toBe(true);
   });
 
-  it('output_invalid is permanent when flag is OFF (default — both hosts identical)', () => {
+  it('output_invalid is permanent when flag is OFF (explicit config override — rollback path)', () => {
     const runner = makeRunner(makeEffectiveConfig(false));
     expect(runner.permanentErrorCategories.has('output_invalid')).toBe(true);
   });
 
-  it('output_invalid is retriable when flag is ON', () => {
+  it('output_invalid is retriable when flag is ON (explicit effective config)', () => {
     const runner = makeRunner(makeEffectiveConfig(true));
+    expect(runner.permanentErrorCategories.has('output_invalid')).toBe(false);
+  });
+
+  it('output_invalid is retriable under the plain registry-default config (PRI-621 graduation)', () => {
+    // No flag override at all: getDefaultPdConfig() derives from the
+    // feature-flag contract, so this proves the registry default (ON) —
+    // not just an explicit effectiveConfig.
+    const base = getDefaultPdConfig();
+    const runner = makeRunner({
+      config: { ...base },
+      source: 'user_config',
+      warnings: [],
+      featuresChangedFromDefault: [],
+      resolvedProfile: resolveProfile({}),
+      resolvedContextInjection: {
+        thinkingOs: false,
+        projectFocus: 'off',
+        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
+      },
+    });
     expect(runner.permanentErrorCategories.has('output_invalid')).toBe(false);
   });
 

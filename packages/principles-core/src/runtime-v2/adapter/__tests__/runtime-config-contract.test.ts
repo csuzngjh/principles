@@ -34,13 +34,14 @@ vi.mock('../../store/event-emitter.js', () => ({
   storeEmitter: { emitTelemetry: vi.fn() },
 }));
 
-import { complete, completeSimple } from '@mariozechner/pi-ai';
+import { complete, completeSimple, getModel } from '@mariozechner/pi-ai';
 import { storeEmitter } from '../../store/event-emitter.js';
 import { PiAiRuntimeAdapter } from '../pi-ai-runtime-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 
 const mockComplete = complete as ReturnType<typeof vi.fn>;
 const mockCompleteSimple = completeSimple as ReturnType<typeof vi.fn>;
+const mockGetModel = getModel as ReturnType<typeof vi.fn>;
 const mockEmitTelemetry = storeEmitter.emitTelemetry as ReturnType<typeof vi.fn>;
 
 const VALID_DIAGNOSIS = {
@@ -122,6 +123,9 @@ describe('Runtime Config Contract (PRI-103)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.TEST_API_KEY = 'test-key-123';
+    // resolveModel fails loud on unknown catalog ids (PRI-621) — give the
+    // default fixture model a catalog entry like the sibling adapter tests.
+    mockGetModel.mockReturnValue({ id: 'anthropic/claude-sonnet-4' });
     mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
     mockCompleteSimple.mockResolvedValue(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
   });
@@ -254,8 +258,6 @@ describe('Runtime Config Contract (PRI-103)', () => {
 
   describe('provider/model resolution', () => {
     it('built-in provider uses getModel() for provider+model resolution', async () => {
-      const { getModel } = await import('@mariozechner/pi-ai');
-      const mockGetModel = getModel as ReturnType<typeof vi.fn>;
       mockGetModel.mockReturnValue({ id: 'anthropic/claude-sonnet-4' });
 
       const adapter = makeAdapter({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4' });
@@ -264,10 +266,7 @@ describe('Runtime Config Contract (PRI-103)', () => {
       expect(mockGetModel).toHaveBeenCalledWith('openrouter', 'anthropic/claude-sonnet-4');
     });
 
-    it('custom provider with baseUrl bypasses getModel() and constructs Model directly', async () => {
-      const { getModel } = await import('@mariozechner/pi-ai');
-      const mockGetModel = getModel as ReturnType<typeof vi.fn>;
-
+    it('custom provider with catalog-known model looks the model up (PRI-621 catalog-first)', async () => {
       const adapter = makeAdapter({
         provider: 'custom-llm',
         model: 'custom-model-v1',
@@ -275,7 +274,8 @@ describe('Runtime Config Contract (PRI-103)', () => {
       });
       await adapter.startRun(makeStartRunInput({ outputSchemaRef: undefined }));
 
-      // getModel should NOT be called for custom providers
+      // PRI-621: the catalog scan calls getModel with built-in provider names
+      // — never with the custom provider name (it is not a known provider).
       expect(mockGetModel).not.toHaveBeenCalledWith('custom-llm', 'custom-model-v1');
     });
 

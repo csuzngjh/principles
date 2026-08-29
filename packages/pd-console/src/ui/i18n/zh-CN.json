@@ -168,6 +168,16 @@
           "monitor": "暂无需操作——下一个决策出现时 PD 会在这里提示。",
           "none": "当前无需操作。"
         },
+        "ownerGuide": {
+          "title": "设置拥有者身份",
+          "intro": "复制以下命令，在启动 OpenClaw 与 PD 控制台的 shell 中执行（把 <owner-id> 与 <credential-id> 换成你自己的 ID），然后重启两者。",
+          "tokenAuthHint": "还需要启用控制台令牌认证（--token 或 PD_CONSOLE_TOKEN）——这是拥有者身份成立的必要条件；若尚未启用，请按配置文档完成该步骤。",
+          "cmdPowerShell": "PowerShell（Windows）",
+          "cmdBash": "bash（macOS / Linux）",
+          "copy": "复制",
+          "copied": "已复制",
+          "docLink": "查看配置说明与验证方法 →"
+        },
         "activity": {
           "needsDecision": "{{count}} 项决策待处理",
           "needsRecovery": "{{count}} 项需要恢复",
@@ -600,6 +610,7 @@
           "process": "当前阶段",
           "automation": "自动化状态",
           "nextAction": "下一步安全动作",
+          "nextActionLabel": "建议操作：",
           "blockers": "需要关注",
           "uncertainty": "证据不确定性",
           "provenance": "规范证据引用",
