@@ -600,6 +600,7 @@
           "process": "Current stage",
           "automation": "Automation",
           "nextAction": "Next safe action",
+          "nextActionLabel": "Next action:",
           "blockers": "Needs attention",
           "uncertainty": "Evidence uncertainty",
           "provenance": "Canonical evidence references",
