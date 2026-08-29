@@ -65,15 +65,20 @@ export class TranscriptReplacedError extends Error {
 }
 
 function identityMatches(opened: fs.Stats, expected: TranscriptExpectedIdentity): boolean {
-  // Full-fingerprint match: inode identity AND size AND mtime must ALL hold.
-  // ino alone is insufficient — filesystems commonly reuse the just-freed
-  // inode for a delete+recreate replacement (caught exactly this way on the
-  // CI Linux runner). A false refusal is the safe direction: the hook
-  // degrades observably and the next Stop revalidates and retries.
-  const sameInode = opened.ino !== 0 && expected.ino !== 0 && Number.isSafeInteger(opened.ino) && expected.dev !== 0
-    && opened.ino === expected.ino && opened.dev === expected.dev;
-  const sameFingerprint = opened.size === expected.size && opened.mtimeMs === expected.mtimeMs;
-  return sameInode && sameFingerprint;
+  // Size+mtime fingerprint must ALWAYS hold. When the platform reports a
+  // Number-safe inode on both sides, the inode must match too (it is what
+  // catches delete+recreate replacements whose inode got reused on Linux CI
+  // with a same-ms write; a same-size same-ms recreate remains outside the
+  // threat model for an append-only host-owned file). On platforms whose
+  // ino exceeds Number.MAX_SAFE_INTEGER (Windows file IDs), the inode is not
+  // reliably comparable and the fingerprint alone decides. A false refusal
+  // is the safe direction: the hook degrades observably and the next Stop
+  // revalidates and retries.
+  if (opened.size !== expected.size || opened.mtimeMs !== expected.mtimeMs) return false;
+  const comparableIno = expected.ino !== 0 && expected.dev !== 0
+    && opened.ino !== 0 && Number.isSafeInteger(expected.ino) && Number.isSafeInteger(opened.ino);
+  if (comparableIno) return opened.ino === expected.ino && opened.dev === expected.dev;
+  return true;
 }
 
 export function createNodeTranscriptPort(): TranscriptPort {
