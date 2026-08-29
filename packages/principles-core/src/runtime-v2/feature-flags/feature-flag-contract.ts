@@ -380,6 +380,15 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Flag-off = zero export attempts from any surface. Roll back = set
   // enabled: false in .pd/config.yaml.
   { id: 'anonymous_product_telemetry', category: 'quiet', enabled: false, since: '2026-08-26', description: 'Anonymous Product Telemetry v1 — opt-in daily boolean-milestone snapshot (initialized/pain/principle/activation/receipt presence+effect), daily unlinkable IDs, zero content collection. Default off; export also requires explicit consent (pd telemetry enable) + production eligibility.' },
+  // Codex Governance Closure Slice A (PRI-622; SPEC rev 2 §17, ADR-0020 §11.2).
+  // Gates ONLY bounded conversation ingestion for the Codex host: reading the
+  // transcript the authenticated hook itself supplies, projecting visible
+  // user/assistant/tool facts into governance_observations in trajectory.db.
+  // Default off; flag-off = the Codex hook never opens or reads any transcript
+  // (zero filesystem calls at the transcript boundary) and no observations are
+  // written — prompt injection, RuleHost, and existing tool evidence are
+  // unchanged. Broader Codex kill switch remains host.codex.
+  { id: 'codex_conversation_ingestion', category: 'quiet', enabled: false, since: '2026-08-29', description: 'Codex Governance Closure Slice A — bounded governance-observation ingestion from the authenticated Codex Stop-hook transcript (visible user/assistant/tool facts only, ≤32 turns/≤7 days operational window, promotion substrate). Default off; flag-off = zero transcript reads, no observation writes, existing Codex behavior unchanged.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },

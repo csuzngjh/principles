@@ -2,10 +2,12 @@
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+import type { HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
+import { ingestCodexConversation } from './ingestion/ingestion.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface PdHookResult { stdout: unknown; exitCode: number; stderr: string[] }
@@ -19,6 +21,30 @@ function diagnostic(reason: string, nextAction: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, MAX_DIAGNOSTIC) : 'unknown_error';
+}
+
+// Bounded governance-observation ingestion (Codex Governance Closure Slice
+// A). Runs only when BOTH host.codex and codex_conversation_ingestion are
+// enabled — the flag gate below happens BEFORE any transcript path
+// validation or filesystem I/O, so flag-off means the transcript boundary
+// receives zero calls (SPEC §10 hard privacy invariant).
+function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; env: EnvMap }): string[] {
+  const { rawPayload, kind, workspaceDir, env } = args;
+  if (kind !== 'turn_complete' && kind !== 'before_prompt_build' && kind !== 'after_tool_call') return [];
+  const diagnostics: string[] = [];
+  try {
+    const outcome = ingestCodexConversation(rawPayload, kind, { workspaceDir, env });
+    if (outcome.status === 'degraded') {
+      diagnostics.push(diagnostic(outcome.reason, outcome.nextAction));
+    } else {
+      for (const warning of outcome.warnings.slice(0, 2)) {
+        diagnostics.push(diagnostic(warning, 'Inspect PD Workspace governance-observation state; ingestion continued.'));
+      }
+    }
+  } catch (error) {
+    diagnostics.push(diagnostic(`codex_ingestion_unexpected:${errorMessage(error)}`, 'Retry the next Codex turn; if it repeats, inspect PD stderr and the Workspace trajectory database.'));
+  }
+  return diagnostics;
 }
 
 export async function processHookInvocation(rawStdin: string, _env: EnvMap = process.env, cwd = process.cwd()): Promise<PdHookResult> {
@@ -51,6 +77,21 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   if (flags['host.codex']?.enabled !== true) {
     return { stdout: {}, exitCode: 0, stderr: [diagnostic('host.codex_disabled', 'Set features.host.codex.enabled=true in the selected Workspace to enable PD.')] };
   }
+  const ingestionEnabled = flags.codex_conversation_ingestion?.enabled === true;
+
+  if (event.kind === 'turn_complete') {
+    // Stop is the turn-complete ingestion trigger (G1 §2): no dispatch route,
+    // and Codex's Stop output schema has no hookSpecificOutput — the neutral
+    // result is exactly `{}` on stdout (runtime contract: "PD emits empty
+    // stdout on Stop"). Flag-off preserves the zero-transcript-read invariant
+    // and emits ONE bounded structured feature_disabled fact per completed
+    // turn on stderr — never stdout, and never on the per-tool events (that
+    // would be per-event noise).
+    const stderr = ingestionEnabled
+      ? runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
+      : [diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
+    return { stdout: {}, exitCode: 0, stderr };
+  }
 
   try {
     if (event.kind === 'session_start') {
@@ -58,8 +99,11 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
       return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: [] };
     }
+    const ingestionDiagnostics = ingestionEnabled
+      ? runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
+      : [];
     const result = await createProductionHostRuntime().dispatch(event);
-    const stderr = (result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.'));
+    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;
