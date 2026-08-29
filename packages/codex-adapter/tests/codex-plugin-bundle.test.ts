@@ -120,8 +120,14 @@ describe('hooks/hooks.json wiring', () => {
     expect(Object.keys(config)).toEqual(['hooks']);
   });
 
-  it('registers exactly the four MVP-Core events', () => {
-    expect(Object.keys(hooks).sort()).toEqual(['PostToolUse', 'PreToolUse', 'SessionStart', 'UserPromptSubmit']);
+  it('registers exactly the four MVP-Core events plus Stop (Slice A ingestion trigger)', () => {
+    // Stop was added by Codex Governance Closure Slice A (PRI-622; G1 probe
+    // report §2: Stop is the turn-complete event; SPEC §8 forbids registering
+    // SessionEnd for the same purpose). Its work is gated by the default-off
+    // codex_conversation_ingestion flag inside pd-hook.
+    expect(Object.keys(hooks).sort()).toEqual(['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
+    expect(hooks.Stop[0].matcher).toBeUndefined();
+    expect(hooks.Stop[0].hooks[0].async).toBeUndefined();
   });
 
   it('routes every event through the wrapper with quoted ${PLUGIN_ROOT} and NO commandWindows', () => {

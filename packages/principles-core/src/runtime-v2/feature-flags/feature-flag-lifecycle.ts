@@ -309,4 +309,12 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Maintainer flips release gate after dogfood period (consent UX + data quality validated)',
     retirementCriteria: 'Telemetry program cancelled — delete exporter + flag',
   },
+  codex_conversation_ingestion: {
+    decision: 'KEEP_QUIET',
+    consumers: ['codex-adapter/src/pd-hook.ts ingestion gate', 'codex-adapter/src/ingestion/*', 'host-runtime/src/governance-observation-store.ts'],
+    evidence: 'Codex Governance Closure Slice A (PRI-622; SPEC rev 2 §17, Owner MVP exception ADR-0020 §11 / G0 decision package APPROVED 2026-08-29); default-off opt-in, privacy boundary = flag-off means zero transcript filesystem reads (test-spied)',
+    decided: '2026-08-29',
+    graduationCriteria: 'Slices A–D complete + R1 consent UX verified on installed path + opt-in dogfood release with no privacy/lineage P1 + explicit Owner default-on decision (SPEC §17)',
+    retirementCriteria: 'Codex conversation ingestion descoped, or graduated and observability confirms stable default-on (flag collapses into host.codex contract)',
+  },
 };

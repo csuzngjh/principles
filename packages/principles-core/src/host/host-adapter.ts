@@ -35,6 +35,7 @@ export type HostEventKind =
   | 'after_tool_call' // Codex PostToolUse / OpenClaw after_tool_call
   | 'before_prompt_build' // Codex UserPromptSubmit / OpenClaw before_prompt_build
   | 'session_start' // Codex SessionStart / OpenClaw lifecycle start
+  | 'turn_complete' // Codex Stop (G1-verified turn-complete event; ingestion trigger, not a dispatch route)
   | 'session_end'; // Codex SessionEnd / OpenClaw lifecycle end (deferred to post-MVP)
 
 export const HOST_EVENT_KINDS: readonly HostEventKind[] = [
@@ -42,6 +43,7 @@ export const HOST_EVENT_KINDS: readonly HostEventKind[] = [
   'after_tool_call',
   'before_prompt_build',
   'session_start',
+  'turn_complete',
   'session_end',
 ] as const;
 

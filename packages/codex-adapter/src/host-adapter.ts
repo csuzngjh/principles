@@ -33,7 +33,11 @@ const SUBSCRIBED_EVENTS: readonly HostEventKind[] = [
   'after_tool_call',
   'before_prompt_build',
   'session_start',
-  // 'session_end' deferred to post-MVP
+  // Stop = turn_complete is the G1-verified turn-complete event (probe
+  // report §2); it drives bounded governance-observation ingestion, not a
+  // dispatch route. session_end stays deferred (SPEC §8: never register both
+  // Stop and SessionEnd for turn completion).
+  'turn_complete',
 ];
 
 export class CodexHooksHostAdapter implements HostAdapter {
