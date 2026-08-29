@@ -166,9 +166,13 @@ describe('impact resolver — package semantics', () => {
     expect(out.scopes.companion).toBe(false); // companion depends only on install-layout
     expect(out.scopes.installer).toBe(false);
     expect(out.scopes.perf).toBe(true);
-    // Core changes do NOT force release evidence (publish-npm only forces the
-    // installer lockstep for direct plugin/console changes).
-    expect(out.scopes.release).toBe(false);
+    // Core is a DIRECT component of the self-contained release asset
+    // (build-release-asset.mjs REQUIRED_COMPONENTS) — a core change is
+    // release-verification-relevant even though publish-npm's lockstep rule
+    // does not republish the installer for core-only merges (publish
+    // selection and artifact impact are different questions).
+    expect(out.scopes.release).toBe(true);
+    expect(out.reasons.release).toContain('component');
   }, 60_000);
 
   it('plugin change → plugin + consumers + release lockstep overlay', async () => {
@@ -178,16 +182,16 @@ describe('impact resolver — package semantics', () => {
     expect(out.scopes.cli).toBe(true);
     expect(out.scopes.console).toBe(true);
     expect(out.scopes.release).toBe(true);
-    expect(out.reasons.release).toContain('lockstep');
+    expect(out.reasons.release).toContain('asset');
   }, 60_000);
 
-  it('console-only change → console + release overlay (console ships only in the installer), installer package tests NOT claimed', async () => {
+  it('console-only change → console scope + release-asset impact, installer package tests NOT claimed', async () => {
     const head = await commit({ 'packages/pd-console/src/change.ts': 'export const x = 1;\n' }, 'console');
     const out = await impact('HEAD~1', head);
     expect(out.scopes.console).toBe(true);
     expect(out.scopes.installer).toBe(false);
     expect(out.scopes.release).toBe(true);
-    expect(out.reasons.release).toContain('bundle');
+    expect(out.reasons.release).toContain('asset');
   }, 60_000);
 
   it('cli-only change → cli scope only', async () => {
@@ -196,7 +200,8 @@ describe('impact resolver — package semantics', () => {
     expect(out.scopes.cli).toBe(true);
     expect(out.affectedPackages).toEqual(['@principles/pd-cli']);
     expect(out.scopes.core).toBe(false);
-    expect(out.scopes.release).toBe(false);
+    // pd-cli is itself a release asset component.
+    expect(out.scopes.release).toBe(true);
   }, 60_000);
 
   it('host-runtime change → runtime consumers', async () => {
@@ -208,6 +213,8 @@ describe('impact resolver — package semantics', () => {
     expect(out.scopes.cli).toBe(true);
     expect(out.scopes.console).toBe(true);
     expect(out.scopes.core).toBe(false);
+    // host-runtime is a release asset component.
+    expect(out.scopes.release).toBe(true);
   }, 60_000);
 
   it('codex-adapter change → adapter + cli', async () => {
@@ -216,6 +223,9 @@ describe('impact resolver — package semantics', () => {
     expect(out.scopes.codexAdapter).toBe(true);
     expect(out.scopes.cli).toBe(true);
     expect(out.scopes.plugin).toBe(false);
+    // codex-adapter reaches the asset through pd-cli's bundled node_modules.
+    expect(out.scopes.release).toBe(true);
+    expect(out.reasons.release).toContain('transitive');
   }, 60_000);
 
   it('install-layout change → layout consumers incl. installer → release evidence', async () => {
@@ -232,6 +242,18 @@ describe('impact resolver — package semantics', () => {
     const head = await commit({ 'packages/pd-companion/src/change.ts': 'export const x = 1;\n' }, 'companion');
     const out = await impact('HEAD~1', head);
     expect(out.affectedPackages).toEqual(['@principles/pd-companion']);
+  }, 60_000);
+
+  it('website-only and companion-only changes do NOT claim release evidence (release boundary negative control)', async () => {
+    const webHead = await commit({ 'packages/website/src/change.ts': 'export const x = 1;\n' }, 'website-rel');
+    const web = await impact('HEAD~1', webHead);
+    expect(web.scopes.website).toBe(true);
+    expect(web.scopes.release).toBe(false);
+
+    const compHead = await commit({ 'packages/pd-companion/src/change.ts': 'export const x = 2;\n' }, 'companion-rel');
+    const comp = await impact('HEAD~1', compHead);
+    expect(comp.scopes.companion).toBe(true);
+    expect(comp.scopes.release).toBe(false);
   }, 60_000);
 
   it('installer source change → installer + release', async () => {
@@ -290,6 +312,8 @@ describe('impact resolver — conservative root rules', () => {
     expect(out.scopes.repo).toBe(true);
     expect(out.scopes.core).toBe(true);
     expect(out.scopes.cli).toBe(true);
+    // Broad changes reach release inputs — conservative by construction.
+    expect(out.scopes.release).toBe(true);
   }, 60_000);
 
   it('shared scripts/ tooling change → broad', async () => {

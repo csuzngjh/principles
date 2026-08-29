@@ -1,21 +1,26 @@
-// CI Impact Resolver — the single semantic authority for "what does this
-// change affect?" (CI Governance SPEC §7). SHADOW MODE in this PR: it
-// computes and reports only; no CI job conditions consume it yet.
+// CI Impact Resolver — semantic authority CANDIDATE for "what does this
+// change affect?" (CI Governance SPEC §7). SHADOW MODE: it computes and
+// reports only; no CI job conditions consume it yet. It becomes the single
+// source of truth only when the existing per-workflow path filters
+// (pd-console-e2e.yml, release-reproducibility.yml, publish-npm detect)
+// migrate to consume it.
 //
 // Inputs : --base <sha> --head <sha>   (or IMPACT_BASE / IMPACT_HEAD env)
 //          --repo <path>               (default: cwd)
 //          --format json|markdown      (default: markdown)
 //
 // The package graph is built from the REAL workspace manifests
-// (packages/*/package.json) — no hand-maintained second graph. Only two
-// semantic overlays exist, each with repository evidence:
-//   * pd-console → installer release evidence (the console UI ships ONLY
-//     inside the create-principles-disciple bundle — bundle-plugin.mjs
-//     copies packages/pd-console into the installer's console/ output;
-//     publish-npm's detect job forces an installer republish on console
-//     changes for exactly this reason).
-//   * openclaw-plugin → installer release evidence (update-channel lockstep,
-//     publish-npm detect: any plugin publish must republish the installer).
+// (packages/*/package.json) — no hand-maintained second graph.
+//
+// The `release` scope answers the RELEASE-VERIFICATION question ("could this
+// change alter the self-contained release artifact or its construction?"),
+// NOT the publish-selection question (which npm packages a main merge should
+// republish/lockstep — that is publish-npm detect's job and would migrate
+// here later under separate publication semantics). Evidence: the asset is
+// built from six workspace components — build-release-asset.mjs
+// REQUIRED_COMPONENTS (plugin, console, core, pd-cli, host-runtime,
+// install-layout) — mirrored by release-asset-smoke COMPONENT_NAMES and the
+// release-locks/ tree.
 //
 // Conservative defaults: unknown/root-level changes BROADEN impact
 // (repo scope → every package scope). Never "unknown → skip".
@@ -64,6 +69,24 @@ const RELEASE_PATHS = [
   /^packages\/create-principles-disciple\/release-locks\//,
   /^\.github\/workflows\/(publish-npm|release-reproducibility|release-reproducibility-full|companion-release)\.yml$/,
 ];
+
+// Direct components of the self-contained release asset + the release
+// construction itself — verbatim from build-release-asset.mjs
+// REQUIRED_COMPONENTS ('plugin', 'console', 'core', 'pd-cli', 'host-runtime',
+// 'install-layout') plus the installer package. codex-adapter is included
+// because it is bundled into pd-cli's node_modules inside the asset (pd-cli
+// declares it as a runtime dependency). pd-companion and website are NOT
+// part of the asset (separate delivery surfaces).
+const RELEASE_ASSET_REACHABLE_DIRS = new Set([
+  'openclaw-plugin',
+  'pd-console',
+  'principles-core',
+  'pd-cli',
+  'host-runtime',
+  'install-layout',
+  'create-principles-disciple',
+  'codex-adapter',
+]);
 
 function parseArgs(argv) {
   const args = { base: process.env.IMPACT_BASE || null, head: process.env.IMPACT_HEAD || null, repo: process.cwd(), format: 'markdown' };
@@ -208,22 +231,32 @@ export async function computeImpact({ base, head, repo }) {
   scopes.perf = scopes.core;
   if (scopes.perf) reasons.perf = 'benchmark job targets principles-core';
 
-  // Release evidence scope.
+  // Release-verification impact: could this change alter the self-contained
+  // release asset or its construction? Component reachability over the real
+  // workspace graph (broad changes reach everything → release), plus
+  // release-construction surfaces. Deliberately conservative.
   scopes.release =
-    scopes.installer ||
+    [...affectedDirs].some((d) => RELEASE_ASSET_REACHABLE_DIRS.has(d)) ||
     changedFiles.some((f) => RELEASE_PATHS.some((re) => re.test(f))) ||
-    changedFiles.includes('package-lock.json') ||
-    changedDirs.has('pd-console') ||
-    changedDirs.has('openclaw-plugin');
+    changedFiles.includes('package-lock.json');
   if (scopes.release) {
     const releaseReasons = [];
-    if (changedDirs.has('create-principles-disciple')) releaseReasons.push('installer package changed');
-    if (changedDirs.has('openclaw-plugin')) releaseReasons.push('plugin → installer lockstep (publish-npm detect rule)');
-    if (changedDirs.has('pd-console')) releaseReasons.push('console ships only inside the installer bundle (bundle-plugin.mjs)');
+    if (broad) {
+      releaseReasons.push('broad/root-level change treated as reaching release inputs');
+    } else {
+      for (const dir of changedDirs) {
+        if (RELEASE_ASSET_REACHABLE_DIRS.has(dir)) {
+          releaseReasons.push('packages/' + dir + ' is a release asset component (build-release-asset.mjs REQUIRED_COMPONENTS)');
+        }
+      }
+      const transitive = [...affectedDirs].filter((d) => RELEASE_ASSET_REACHABLE_DIRS.has(d) && !changedDirs.has(d));
+      if (transitive.length > 0) {
+        releaseReasons.push('transitive release-asset reach via: ' + transitive.map((d) => 'packages/' + d).join(', '));
+      }
+    }
     if (changedFiles.includes('package-lock.json')) releaseReasons.push('root lockfile changed');
     const wf = changedFiles.filter((f) => RELEASE_PATHS.some((re) => re.test(f)));
     if (wf.length > 0) releaseReasons.push('release workflow changed (' + wf[0] + ')');
-    if (releaseReasons.length === 0 && scopes.installer) releaseReasons.push('installer affected via dependency graph');
     reasons.release = releaseReasons.join('; ');
   }
 
