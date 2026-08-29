@@ -351,7 +351,10 @@ runs:
       #      fallback instructions instead of failing the release.
       if: ${{ inputs.pkg_dir == 'openclaw-plugin' }}
       continue-on-error: true
-      timeout-minutes: 25
+      # NOTE: composite action steps do NOT support step-level
+      # timeout-minutes (workflow-only key — first full-product run failed
+      # manifest load here). The script bounds itself instead: each clawhub
+      # attempt is wrapped in `timeout 480` with --wait-timeout 240.
       env:
         CLAWHUB_TOKEN: ${{ inputs.clawhub_token }}
       shell: bash
