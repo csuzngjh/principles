@@ -1,6 +1,6 @@
 # ADR-0022: Owner Identity Registration — Env-First, File-Fallback (`~/.pd/owner.json`)
 
-> **Status**: Proposed（待 Owner 评审）
+> **Status**: Accepted（2026-08-29 Owner 评审通过，§6 四个问题全部确认）
 > **Date**: 2026-08-29
 > **Decider**: Owner
 > **Context**: PRI-578 — Owner 身份目前只能通过两个未文档化的环境变量配置，没有任何登记入口
@@ -57,7 +57,7 @@ Owner 是**人的身份**，不是某个工作区的属性：
 ### 2.4 登记表面
 
 - 控制台 Settings 新增「拥有者身份」区块：登记/注销，展示当前来源（env / file / none）与生效优先级；提交后**需重启控制台生效**（env 仍最高，UI 需说明）。
-- 可选：`pd owner register` CLI 命令。
+- MVP 不做 `pd owner` CLI 命令（Owner 评审决定，2026-08-29）；`pd doctor` 检查项留待 PR-4。
 
 ### 2.5 不新增 feature flag
 
@@ -95,9 +95,9 @@ Owner 是**人的身份**，不是某个工作区的属性：
 - 不新增 feature flag。
 - 范围外：`pd doctor` 加 Owner 检查项（PR-4，单独）；文档落地（PR-3-B 已交付 runbook）。
 
-## 6. 待评审问题
+## 6. 评审结论（2026-08-29 Owner 确认，ADR 由 Proposed → Accepted）
 
-1. **确认**：`credentialId` 按"标识符（非密钥）"处理、允许明文落盘——我判断符合 ADR-0016 §2.3 的"存引用不存值"先例；备选方案是只存环境变量名引用（失去展示价值）。
-2. **确认**：安装级作用域（我的推荐）。
-3. **确认**：单一解析器 + 文档化优先级链不违反 P4（我的评估：收敛即加固）。
-4. MVP 是否只需控制台 Settings 入口，还是 `pd owner` CLI 命令也需要。
+1. ✅ `credentialId` 按**标识符（非密钥）**处理，允许明文落盘（符合 ADR-0016 §2.3「存引用不存值」先例）；密钥值保持 env-only。
+2. ✅ **安装级**作用域 `~/.pd/owner.json`（Owner 是人的身份，非工作区属性）。
+3. ✅ 单一解析器 + 文档化优先级链**不违反 P4**（收敛即加固）。
+4. ✅ MVP 只做控制台 Settings 入口；不做 `pd owner` CLI 命令。
