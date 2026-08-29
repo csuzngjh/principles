@@ -367,9 +367,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // governance experience: batch collector reuses the existing projection
   // (deriveOwnerGovernanceView) once per workspace; GET /api/v1/governance/experience
   // serves one snapshot; Console Focus consumes it when enabled. Explains only —
-  // never authorizes (ERR-102). Default off; flag-off = endpoint 403 before any
-  // DB access and Console keeps the legacy Focus experience unchanged.
-  { id: 'governance_experience_v1', category: 'quiet', enabled: false, since: '2026-08-24', description: 'Governance Experience Snapshot v1.5.1 — read-only workspace governance experience (batch projection + GET /api/v1/governance/experience + Console Focus integration). Default off; flag-off = endpoint 403 (no DB access) and legacy Focus behavior preserved.' },
+  // never authorizes (ERR-102). Default on (graduated 2026-08-29 after live-workspace
+  // validation); disable via .pd/config.yaml features.governance_experience_v1.enabled: false
+  // (flag-off = endpoint 403 before any DB access, legacy Focus experience unchanged).
+  { id: 'governance_experience_v1', category: 'quiet', enabled: true, since: '2026-08-24', description: 'Governance Experience Snapshot v1.5.1 — read-only workspace governance experience (batch projection + GET /api/v1/governance/experience + Console Focus integration). Default on (graduated 2026-08-29); flag-off via config = endpoint 403 (no DB access) and legacy Focus behavior preserved.' },
   // Anonymous Product Telemetry v1 (PRI-595~603, "Collect signals, not users").
   // Maintainer release gate — INDEPENDENT of user consent (which lives in
   // ~/.pd/product-telemetry.json and must ALSO be 'granted'). Export requires
