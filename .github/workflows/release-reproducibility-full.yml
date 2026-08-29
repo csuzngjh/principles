@@ -21,7 +21,14 @@ jobs:
         runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025]
         node: ['22.22.2', '24.12.0', '26.7.0']
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # 60 min: Windows runners need well beyond 30 min for npm ci + all
+    # workspace builds + the double-build byte comparison + the smoke
+    # install. Multiple Windows/macOS-Intel matrix jobs were cancelled by
+    # this job-level timeout at exactly the 30-minute boundary while inside
+    # the smoke step (run evidence in the PR) — with no failure logs, which
+    # read as mystery cancellations. Keep a timeout (never remove it); only
+    # raise it to cover the measured real duration.
+    timeout-minutes: 60
     env:
       SOURCE_DATE_EPOCH: '1700000000'
     steps:
