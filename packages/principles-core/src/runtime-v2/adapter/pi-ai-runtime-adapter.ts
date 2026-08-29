@@ -18,7 +18,8 @@
 // Values come from the /compat facade (getModel is the builtin-catalog read;
 // completeSimple unchanged); types come from the root — the root `types.ts`
 // remains the unified Model/Context/Message contract in 0.84.
-import { getModel, getProviders, completeSimple } from '@earendil-works/pi-ai/compat';
+import { getModel, completeSimple } from '@earendil-works/pi-ai/compat';
+import { builtinPiAiProviderIds } from './pi-ai-catalog.js';
 import type { Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
@@ -121,9 +122,7 @@ export interface PiAiRuntimeAdapterConfig {
  * 3. Unknown model id anywhere — conservative hardcoded fallback (unchanged).
  */
 function resolveModel(provider: string, modelId: string, baseUrl?: string) {
-  // 0.84: getProviders() returns only built-in catalog providers
-  // (BuiltinProvider[]); dynamic providers are not part of the static catalog.
-  const knownProviders = getProviders() as readonly string[];
+  const knownProviders = builtinPiAiProviderIds();
   if (knownProviders.includes(provider) && !baseUrl) {
     // Built-in provider — use getModel()
     // @ts-expect-error — getModel requires literal provider/model ID types; runtime strings from config are acceptable
