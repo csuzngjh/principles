@@ -144,20 +144,10 @@ function checkPdLocalReadiness(
     };
   }
 
-  // Reasoning-model guidance: chain-of-thought (reasoning_content) and the
-  // final answer share the same max_tokens budget. If a known reasoning
-  // provider (e.g. DeepSeek) is used without an explicit maxTokens, the
-  // adapter falls back to a larger default (16K), but we surface a hint so
-  // operators know the budget is tunable via .pd/config.yaml.
-  const reasoningProvider = /deepseek/i.test(profile.provider);
-  if (reasoningProvider && profile.maxTokens === undefined) {
-    return {
-      readiness: 'ready',
-      reason: `pi-ai profile ready. NOTE: '${profile.provider}' is a reasoning model — thinking tokens share the max_tokens budget. Consider setting maxTokens in .pd/config.yaml (default: 16000) to avoid truncated JSON output on complex diagnoses.`,
-      nextAction: 'Optional: add maxTokens (e.g. 16000) to the pi-ai runtime profile in .pd/config.yaml',
-    };
-  }
-
+  // PRI-621: the deepseek-specific reasoning-model hint is retired — the
+  // adapter no longer applies a provider-name heuristic budget. Without an
+  // explicit maxTokens, pi-ai's native defaulting picks the model's catalog
+  // ceiling, which already accounts for reasoning models.
   return { readiness: 'ready' };
 }
 

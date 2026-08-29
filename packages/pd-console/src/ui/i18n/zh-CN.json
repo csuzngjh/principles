@@ -610,6 +610,7 @@
           "process": "当前阶段",
           "automation": "自动化状态",
           "nextAction": "下一步安全动作",
+          "nextActionLabel": "建议操作：",
           "blockers": "需要关注",
           "uncertainty": "证据不确定性",
           "provenance": "规范证据引用",

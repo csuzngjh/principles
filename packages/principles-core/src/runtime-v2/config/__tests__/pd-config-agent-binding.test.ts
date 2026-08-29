@@ -481,10 +481,10 @@ describe('checkAgentRuntimeReadiness', () => {
     expect(resultUnset.reason).toContain('not set');
   });
 
-  it('returns ready with reasoning-model guidance for deepseek without explicit maxTokens', () => {
-    // Reasoning providers (e.g. DeepSeek) share the max_tokens budget between
-    // chain-of-thought and final answer; the readiness check surfaces a hint
-    // when maxTokens is not explicitly configured.
+  it('returns plain ready for deepseek without explicit maxTokens — heuristic hint retired (PRI-621)', () => {
+    // The provider-name reasoning-model hint was removed with the heuristic
+    // budget: without explicit maxTokens, pi-ai's native defaulting picks the
+    // model's catalog ceiling, so no guidance is needed.
     const result = checkAgentRuntimeReadiness(
       {
         type: 'pi-ai',
@@ -495,13 +495,12 @@ describe('checkAgentRuntimeReadiness', () => {
       (name) => name === 'DEEPSEEK_API_KEY' ? 'sk-ds-test-key' : undefined,
     );
     expect(result.readiness).toBe('ready');
-    expect(result.reason).toContain('reasoning model');
-    expect(result.reason).toContain('maxTokens');
+    expect(result.reason).toBeUndefined();
   });
 
-  it('returns ready WITHOUT reasoning-model hint when deepseek has explicit maxTokens', () => {
-    // When maxTokens is explicitly configured, the guidance branch is skipped
-    // and the plain ready result is returned.
+  it('returns plain ready for deepseek with explicit maxTokens', () => {
+    // When maxTokens is explicitly configured, the value threads through to
+    // the adapter unchanged and readiness stays a plain ready result.
     const result = checkAgentRuntimeReadiness(
       {
         type: 'pi-ai',

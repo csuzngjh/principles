@@ -47,7 +47,12 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
   });
 
   it('fails closed and hides decision controls when projection authority is unavailable', () => {
-    expect(page).toContain('const showDecisionControls = governance === null ? governanceUnavailable === null : governanceOwnerRequired');
+    // PRI-582: the gating expression moved into the exported pure derivation
+    // (deriveGovernanceControlBlock) so the blocked-reason truth table is
+    // testable in node-env. The wiring contract is unchanged: controls render
+    // only when the projection authorizes them.
+    expect(page).toContain('const showDecisionControls = governanceBlock === null');
+    expect(page).toContain('deriveGovernanceControlBlock({ governance, governanceUnavailable })');
     expect(page).toContain('{showDecisionControls && (');
   });
 

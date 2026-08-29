@@ -75,6 +75,139 @@ export function extractJsonObject(text: string): Record<string, unknown> | null 
 }
 
 /**
+ * Collect every top-level balanced JSON object in the text (fenced content
+ * first, then all brace-scanned candidates in order). PRI-621 RC3: a single
+ * free-form LLM answer can contain several complete objects — e.g. an
+ * outer truncated answer plus an inner lineage fragment that happens to
+ * parse. First-object extraction kept validating the wrong fragment.
+ */
+export function extractJsonObjects(text: string): Record<string, unknown>[] {
+  const candidates: Record<string, unknown>[] = [];
+
+  // String.match intentionally (RegExp#exec triggers a Mimosa write-gate
+  // false positive on the `.exec(` token; match() is equivalent here).
+  // eslint-disable-next-line @typescript-eslint/prefer-regexp-exec
+  const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenced?.[1]) {
+    try {
+      const parsed = JSON.parse(fenced[1].trim());
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        candidates.push(parsed);
+      }
+    } catch { /* not a complete object */ }
+  }
+
+  // PRI-621 review round 2 (P1): quote/escape state is tracked ONLY inside a
+  // JSON candidate (depth > 0). LLM free text routinely contains unbalanced
+  // quotes and stray `}` before the real JSON — tracking them at depth 0
+  // permanently misaligns the scanner and drops the real candidate.
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (depth === 0) {
+      // Outside any candidate: prose, stray quotes, and unbalanced `}` are
+      // all noise — only a `{` opens a candidate.
+      if (ch === '{') {
+        start = i;
+        depth = 1;
+        inString = false;
+        escaped = false;
+      }
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString && ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        try {
+          const parsed = JSON.parse(text.slice(start, i + 1));
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            candidates.push(parsed);
+          }
+        } catch { /* skip unparseable span */ }
+        start = -1;
+      }
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Pick the candidate most likely to be the intended structured output,
+ * scored by how many of the schema's required top-level keys it carries.
+ * PRI-621 RC3: lineage fragments like {"scribeArtifactId":...} score 0
+ * against a schema requiring taskId/implementationCode/etc., so the real
+ * (later, larger) object wins even when a smaller fragment appears first.
+ * Ties break toward more own keys, then larger serialized size. Without
+ * requiredKeys (or when nothing scores), behavior degrades to the first
+ * candidate — identical to legacy extractJsonObject semantics.
+ */
+export function selectBestJsonObject(
+  candidates: readonly Record<string, unknown>[],
+  requiredKeys?: readonly string[],
+): Record<string, unknown> | null {
+  if (candidates.length === 0) return null;
+  if (!requiredKeys || requiredKeys.length === 0) return candidates[0] ?? null;
+
+  let best: Record<string, unknown> | null = null;
+  let bestScore = -1;
+  let bestKeyCount = -1;
+  let bestSize = -1;
+  for (const candidate of candidates) {
+    let score = 0;
+    for (const key of requiredKeys) {
+      if (Object.hasOwn(candidate, key)) score++;
+    }
+    const keyCount = Object.keys(candidate).length;
+    const size = JSON.stringify(candidate)?.length ?? 0;
+    if (
+      score > bestScore
+      || (score === bestScore && keyCount > bestKeyCount)
+      || (score === bestScore && keyCount === bestKeyCount && size > bestSize)
+    ) {
+      best = candidate;
+      bestScore = score;
+      bestKeyCount = keyCount;
+      bestSize = size;
+    }
+  }
+  // CodeRabbit round: when NOTHING matches any required key, fall back to
+  // the first candidate (legacy semantics) instead of letting the size/
+  // key-count tie-breaker promote an unrelated fragment.
+  return bestScore > 0 ? best : candidates[0] ?? null;
+}
+
+/**
+ * Schema-aware extraction (PRI-621 RC3): collect all object candidates and
+ * return the one that best matches the schema's required top-level keys.
+ * Falls back to legacy first-object behavior when no keys are known.
+ */
+export function extractJsonObjectForSchema(
+  text: string,
+  requiredKeys?: readonly string[],
+): Record<string, unknown> | null {
+  const candidates = extractJsonObjects(text);
+  return selectBestJsonObject(candidates, requiredKeys);
+}
+
+/**
  * Attempt syntactic repair of malformed JSON where string values contain
  * unescaped double quotes (a common LLM output error).
  *

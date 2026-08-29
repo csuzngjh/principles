@@ -129,6 +129,56 @@ export function getReceiptPresentation(effectCount: number): {
     : { headlineKey: 'principles.detail.receipts.headlinePresence', showZeroEffectExplanation: true };
 }
 
+// ── Governance control gating (PRI-582) ─────────────────────────────────────
+// The governance projection is the authority for rendering Owner decision
+// controls. When it cannot authorize them, the controls must not silently
+// vanish: every blocked path carries a reason and, when known, a next action
+// (ERR-002). The blocked reason is derived here as a pure function so the
+// truth table is testable without mounting the component (UI tests run in
+// node-env, no jsdom).
+export type GovernanceControlBlock =
+  | { source: 'server'; reason: string; nextAction?: string }
+  | { source: 'i18n'; reasonKey: string; nextActionKey?: string };
+
+export const GOVERNANCE_BLOCK_I18N_KEYS = {
+  recoveryReason: 'principles.detail.governance.reason.recovery_required',
+  recoveryNextAction: 'principles.detail.governance.next.inspect_recovery',
+  noDecisionReason: 'principles.detail.governance.actionsNotAuthorized',
+  nextActionLabel: 'principles.detail.governance.nextActionLabel',
+} as const;
+
+/**
+ * Returns `null` when decision controls may render; otherwise the reason they
+ * must stay hidden.
+ */
+export function deriveGovernanceControlBlock(input: {
+  governance: { attention: { primary: 'none' | 'owner_required' | 'recovery_required' } } | null;
+  governanceUnavailable: { reason: string; nextAction?: string } | null;
+}): GovernanceControlBlock | null {
+  const { governance, governanceUnavailable } = input;
+
+  if (governance === null) {
+    // Flag-off keeps the pre-projection experience: controls stay available and
+    // no blocked notice is shown (ERR-102: disabled ≠ unavailable).
+    if (governanceUnavailable === null) return null;
+    return governanceUnavailable.nextAction === undefined
+      ? { source: 'server', reason: governanceUnavailable.reason }
+      : { source: 'server', reason: governanceUnavailable.reason, nextAction: governanceUnavailable.nextAction };
+  }
+
+  if (governance.attention.primary === 'owner_required') return null;
+
+  if (governance.attention.primary === 'recovery_required') {
+    return {
+      source: 'i18n',
+      reasonKey: GOVERNANCE_BLOCK_I18N_KEYS.recoveryReason,
+      nextActionKey: GOVERNANCE_BLOCK_I18N_KEYS.recoveryNextAction,
+    };
+  }
+
+  return { source: 'i18n', reasonKey: GOVERNANCE_BLOCK_I18N_KEYS.noDecisionReason };
+}
+
 export function PrincipleDetailPage() {
   const { t, i18n } = useTranslation("pages");
   const { id } = useParams<{ id: string }>();
@@ -256,13 +306,22 @@ export function PrincipleDetailPage() {
       isActionable = true;
     }
   }
-  const governanceOwnerRequired = governance !== null && governance.attention.primary === 'owner_required';
-  const showDecisionControls = governance === null ? governanceUnavailable === null : governanceOwnerRequired;
+  // PRI-582: the projection authorizes the decision controls. When it cannot,
+  // controls are hidden together with a truthful reason instead of the generic
+  // “no Owner decision is required” copy, which inverted the real cause.
+  const governanceBlock = deriveGovernanceControlBlock({ governance, governanceUnavailable });
+  const showDecisionControls = governanceBlock === null;
   if (!showDecisionControls) {
     isActionable = false;
-    reasonKey = 'principles.detail.governance.actionsNotAuthorized';
-    defaultReason = 'No current Owner decision is required.';
   }
+  const governanceBlockedNextAction =
+    governanceBlock === null
+      ? undefined
+      : governanceBlock.source === 'server'
+        ? governanceBlock.nextAction
+        : governanceBlock.nextActionKey === undefined
+          ? undefined
+          : t(governanceBlock.nextActionKey);
 
   const handleApprove = () => {
     if (!isActionable) return;
@@ -1021,6 +1080,32 @@ export function PrincipleDetailPage() {
             </div>
           </div>
         )}
+        </div>
+      )}
+
+      {/* PRI-582: decision controls are hidden when the governance projection
+          cannot authorize them. Explain why instead of removing the section
+          silently (ERR-002: every degraded path carries reason + nextAction). */}
+      {governanceBlock !== null && (
+        <div className="border-t border-line pt-6 mt-6" data-testid="governance-decision-blocked">
+          <SectionTitle>{t("principles.detail.decisionTitle", { defaultValue: "决策操作" })}</SectionTitle>
+          <p
+            className="text-danger text-[13px] mt-3 font-mono"
+            data-testid="governance-decision-blocked-reason"
+          >
+            {governanceBlock.source === 'server'
+              ? governanceBlock.reason
+              : t(governanceBlock.reasonKey)}
+          </p>
+          {governanceBlockedNextAction !== undefined && (
+            <p
+              className="text-ink-3 text-[13px] mt-1 font-mono"
+              data-testid="governance-decision-blocked-next-action"
+            >
+              <span className="font-medium">{t(GOVERNANCE_BLOCK_I18N_KEYS.nextActionLabel)}</span>{" "}
+              {governanceBlockedNextAction}
+            </p>
+          )}
         </div>
       )}
       </div>

@@ -82,10 +82,13 @@ export async function verifyPackagedApp(appAsarPath) {
 
   // Resolution check: extract and resolve from the packaged main entry —
   // the same lookup Electron performs through its asar transparent-FS layer.
+  // The app is extracted into an "app" SUBDIRECTORY so the resolver's
+  // parent-directory package.json walk never leaves the packaged layout.
   const extractedRoot = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-companion-verify-'));
+  const appRoot = path.join(extractedRoot, 'app');
   try {
-    asar.extractAll(appAsarPath, extractedRoot);
-    const extractedMain = path.join(extractedRoot, ...MAIN_ENTRY.split('/'));
+    asar.extractAll(appAsarPath, appRoot);
+    const extractedMain = path.join(appRoot, ...MAIN_ENTRY.split('/'));
     if (!fs.existsSync(extractedMain)) {
       throw new Error(`Packaged app verification failed — main entry did not extract: ${extractedMain}.`);
     }
@@ -93,9 +96,29 @@ export async function verifyPackagedApp(appAsarPath) {
     let resolvedDependency;
     try {
       resolvedDependency = mainRequire.resolve(RUNTIME_DEPENDENCY);
-    } catch (error) {
+    } catch (resolveError) {
+      // Fail loud with the data needed to root-cause: a bare specifier the
+      // packaged main entry cannot resolve is exactly the shipping defect
+      // this verifier exists to catch. Degrading the lookup to a
+      // file-existence check would re-hide it (the statFile assertions
+      // already proved presence); the real-resolution signal must stay
+      // load-bearing. Include the resolver error, the extracted layout,
+      // and the packaged package.json so a CI failure carries its own
+      // evidence (observed once under Linux CI vitest; root cause pending
+      // — review round on PR #1441, 2026-08-29).
+      const appPkgPath = path.join(appRoot, 'package.json');
+      let appPkg;
+      try {
+        appPkg = fs.readFileSync(appPkgPath, 'utf8');
+      } catch (readError) {
+        appPkg = `<unreadable: ${readError instanceof Error ? readError.message : String(readError)}>`;
+      }
       throw new Error(
-        `Packaged app verification failed — the packaged Electron main entry cannot resolve ${RUNTIME_DEPENDENCY} (${error instanceof Error ? error.message : String(error)}). The dependency must be in dependencies so electron-builder bundles it into app.asar.`,
+        `Packaged app verification failed — the packaged Electron main entry cannot resolve ${RUNTIME_DEPENDENCY} ` +
+        `(${resolveError instanceof Error ? resolveError.message : String(resolveError)}). ` +
+        `Extracted layout: [${fs.readdirSync(appRoot).join(', ')}]. ` +
+        `Packaged package.json: ${JSON.stringify(appPkg.slice(0, 200))}. ` +
+        `The dependency must be in dependencies so electron-builder bundles it into app.asar.`,
       );
     }
     const dependencyModule = await import(pathToFileURL(resolvedDependency).href);
