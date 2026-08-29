@@ -94,10 +94,15 @@ export interface L2AgentLoopAdapterConfig {
 }
 
 /**
- * Resolve a pi-ai Model from provider/model/baseUrl config (mirrors PiAiRuntimeAdapter's
- * internal resolveModel — duplicated here because L2 imports from the @earendil-works scope
- * while L1 uses @mariozechner; the two scopes must not cross-import). Built-in providers use
- * getModel(); custom OpenAI-compatible endpoints construct a Model object directly.
+ * Resolve a pi-ai Model from provider/model/baseUrl config (L2 variant of
+ * PiAiRuntimeAdapter's internal resolveModel — kept separate because L2 runs
+ * on a streaming agent loop rather than one-shot completeSimple; both now live
+ * on the single @earendil-works scope, so the historical "no cross-import"
+ * reason for full duplication is gone and a dedupe is planned as PR3 follow-up).
+ * Deliberately NOT catalog-first: L2's strict Model<string> return shape and
+ * its streaming loop semantics are untested against borrowed catalog entries.
+ * Built-in providers use getModel(); custom OpenAI-compatible endpoints
+ * construct a Model object directly.
  */
 export function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Model<string> {
   const knownProviders = getProviders();

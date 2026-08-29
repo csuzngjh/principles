@@ -56,8 +56,16 @@ import {
   validateGovernanceExperienceSnapshot,
   validateRuleCodeOwnerReview,
   validateRuleCodeMutation,
+  validateOwnerIdentityView,
+  validateOwnerIdentityRegister,
+  validateOwnerIdentityUnregister,
 } from "./utils/validators.js";
 import type { GovernanceExperienceSnapshot, OwnerGovernanceView } from '@principles/core/runtime-v2';
+import type {
+  OwnerIdentityViewData,
+  OwnerIdentityRegisterData,
+  OwnerIdentityUnregisterData,
+} from "./utils/validators.js";
 import type {
   FeedbackReportData,
   FeedbackDraftSummaryData,
@@ -574,6 +582,34 @@ async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse
       body: JSON.stringify({ defaultRuntime }),
     },
     validateDefaultRuntimeUpdate,
+  );
+}
+
+// ── Owner identity (ADR-0022 / PRI-578) ──────────────────────────────────────
+
+export async function fetchOwnerIdentity(): Promise<ApiResponse<OwnerIdentityViewData>> {
+  return request<OwnerIdentityViewData>('/api/v1/owner-identity', undefined, validateOwnerIdentityView);
+}
+
+export async function registerOwnerIdentity(
+  ownerId: string,
+  credentialId: string,
+): Promise<ApiResponse<OwnerIdentityRegisterData>> {
+  return request<OwnerIdentityRegisterData>(
+    '/api/v1/owner-identity',
+    {
+      method: 'POST',
+      body: JSON.stringify({ ownerId, credentialId }),
+    },
+    validateOwnerIdentityRegister,
+  );
+}
+
+export async function unregisterOwnerIdentity(): Promise<ApiResponse<OwnerIdentityUnregisterData>> {
+  return request<OwnerIdentityUnregisterData>(
+    '/api/v1/owner-identity',
+    { method: 'DELETE' },
+    validateOwnerIdentityUnregister,
   );
 }
 
@@ -1104,6 +1140,7 @@ export type { RedactedFeatureSummaryData as RedactedFeatureSummary } from "./uti
 export type { RedactedAgentSummaryData as RedactedAgentSummary } from "./utils/validators.js";
 export type { UpdateHistoryEntryData as UpdateHistoryEntry } from "./utils/validators.js";
 export type { ReadinessStatus } from "./utils/validators.js";
+export type { OwnerIdentityViewData, OwnerIdentityRegisterData, OwnerIdentityUnregisterData } from "./utils/validators.js";
 export type { ConfigSource } from "./utils/validators.js";
 
 // PrincipleDetail and PrincipleDetailData are deeply nested types
