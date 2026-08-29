@@ -54,10 +54,28 @@ describe('Stop decode contract (G1 §2: Stop is the turn-complete event)', () =>
 });
 
 describe('pd-hook Stop behavior', () => {
-  it('Stop with flag off and no transcript returns neutral {} with no diagnostics', async () => {
+  it('Stop with flag off keeps zero reads and emits ONE structured feature_disabled fact (PR #1455 review P2)', async () => {
     const root = workspace(false);
     const result = await processHookInvocation(stopPayload(root), {}, root);
-    expect(result).toEqual({ stdout: {}, exitCode: 0, stderr: [] });
+    expect(result.stdout).toEqual({});
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toHaveLength(1);
+    expect(result.stderr[0]).toContain('reason=feature_disabled');
+    expect(result.stderr[0]).toContain('codex_conversation_ingestion.enabled=true');
+  });
+
+  it('flag off on the per-tool/prompt events stays fully quiet (no per-event noise, PR #1455 review P2)', async () => {
+    const root = workspace(false);
+    const promptResult = await processHookInvocation(JSON.stringify({ session_id: 's', turn_id: 't', transcript_path: null, cwd: root, hook_event_name: 'UserPromptSubmit', model: 'm', permission_mode: 'default', prompt: 'hi' }), {}, root);
+    expect(promptResult.stderr).toEqual([]);
+    // PostToolUse dispatches the (unrelated) tool-evidence runtime, which may
+    // warn about the bare fixture's store — the noise contract under test is
+    // that ingestion adds NO diagnostics of its own.
+    const toolResult = await processHookInvocation(JSON.stringify({ session_id: 's', turn_id: 't', transcript_path: null, cwd: root, hook_event_name: 'PostToolUse', model: 'm', permission_mode: 'default', tool_name: 'Bash', tool_input: {}, tool_response: {}, tool_use_id: 'c1' }), {}, root);
+    for (const line of toolResult.stderr) {
+      expect(line).not.toContain('feature_disabled');
+      expect(line).not.toContain('codex_ingestion');
+    }
   });
 
   it('Stop with flag on but transcript_path null degrades observably as transcript_unavailable', async () => {

@@ -25,7 +25,16 @@ afterEach(() => {
 
 const NOW = new Date('2026-08-29T12:00:00.000Z');
 
+// Transcript observations default to a monotonic source order (byte-offset
+// model) in seed-call sequence; tests that need a specific order pass an
+// explicit recordByteStart. Live-source observations get none unless one is
+// forced — mirroring the real hook, where only the transcript replay
+// positions a row.
+let sourceCursor = 0;
+
 function observation(overrides: Partial<GovernanceObservationInput> & { logicalObservationKey: string; kind: GovernanceObservationInput['kind']; hostTurnId: string }): GovernanceObservationInput {
+  const source = overrides.source ?? 'transcript';
+  const autoOrder = source === 'transcript' && overrides.recordByteStart === undefined ? (sourceCursor += 100) : undefined;
   return {
     hostKind: 'codex',
     rolloutIdentity: 'rollout-uuid-1',
@@ -33,9 +42,10 @@ function observation(overrides: Partial<GovernanceObservationInput> & { logicalO
     hostTurnId: overrides.hostTurnId,
     kind: overrides.kind,
     logicalObservationKey: overrides.logicalObservationKey,
-    source: 'transcript',
+    source,
     completeness: 'complete',
     observedAt: NOW.toISOString(),
+    ...(autoOrder !== undefined ? { recordByteStart: autoOrder, recordOrdinal: autoOrder / 100 } : {}),
     ...overrides,
   };
 }
@@ -43,6 +53,10 @@ function observation(overrides: Partial<GovernanceObservationInput> & { logicalO
 function ingest(input: Parameters<typeof ingestGovernanceObservations>[0]) {
   return ingestGovernanceObservations({ ...input, workspaceDir: input.workspaceDir ?? workspaceDir, now: input.now ?? NOW });
 }
+
+beforeEach(() => {
+  sourceCursor = 0;
+});
 
 describe('governance observation store — schema and idempotency', () => {
   it('creates the governance tables in an existing trajectory.db and reports versioned state', () => {
@@ -366,5 +380,162 @@ describe('checkpoint durability', () => {
     if (!listed.ok) throw new Error('list failed');
     expect(listed.observations[0]?.visibleText).toContain('___REDACTED___');
     expect(listed.observations[0]?.visibleText).not.toContain('sk-abcdefghijklmnopqrstuvwxyz123456');
+  });
+
+  it('oversized tool facts stay bounded AND remain valid JSON (PR #1455 review P2)', () => {
+    // The sanitizer bounds each string and each object's key count, so the
+    // realistic way to exceed the column bound is DEPTH: 50-key objects
+    // nested inside a 50-key object. The stored column must stay parseable.
+    const wideFacts: Record<string, Record<string, string>> = {};
+    for (let group = 0; group < 50; group += 1) {
+      const section: Record<string, string> = {};
+      for (let index = 0; index < 50; index += 1) {
+        section[`field_${index}`] = `value-${index}-${'y'.repeat(180)}`;
+      }
+      wideFacts[`group_${group}`] = section;
+    }
+    expect(ingest({ observations: [observation({
+      kind: 'tool_call',
+      hostTurnId: 't1',
+      logicalObservationKey: 'codex|rollout-uuid-1|exec-big',
+      toolUseId: 'exec-big',
+      toolFacts: { toolName: 'Bash', exitCode: 0, outputs: wideFacts },
+    })] })).toMatchObject({ ok: true, inserted: 1 });
+    const listed = listGovernanceObservations({ workspaceDir });
+    if (!listed.ok) throw new Error('list failed');
+    const stored = listed.observations[0]?.sanitizedToolFactsJson;
+    expect(stored).not.toBeNull();
+    expect(stored.length).toBeLessThanOrEqual(8000);
+    let parsed: unknown;
+    expect(() => { parsed = JSON.parse(stored); }).not.toThrow();
+    expect((parsed as { truncated?: boolean }).truncated).toBe(true);
+    expect(typeof (parsed as { preview?: string }).preview).toBe('string');
+  });
+});
+
+describe('transcript source order (PR #1455 review P1 regression)', () => {
+  const R = 'rollout-uuid-1';
+  const key = (turn: string, suffix: string) => `codex|${R}|${turn}|${suffix}`;
+
+  it('live-first then history catch-up: retention follows transcript source order, not insertion id', () => {
+    // Step 1 — the CURRENT turn (t50) is observed live BEFORE any transcript
+    // data exists: it gets the LOWEST insertion id and no source order.
+    expect(ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 't50', logicalObservationKey: key('t50', 'user'), visibleText: 'live current turn', source: 'live_hook' })] })).toMatchObject({ ok: true, inserted: 1 });
+
+    // Step 2 — catch-up ingests OLDER history (t20..t49, byte orders 20k..49k)
+    // and the current turn's replay, all INSERTED AFTER the live row.
+    const history: GovernanceObservationInput[] = [];
+    for (let turn = 20; turn <= 49; turn += 1) {
+      history.push(observation({ kind: 'user_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'user'), visibleText: `history ${turn}`, recordByteStart: turn * 1000, recordOrdinal: turn }));
+      history.push(observation({ kind: 'assistant_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'msg'), assistantItemId: `msg-${turn}`, phase: 'final_answer', visibleText: `answer ${turn}`, recordByteStart: turn * 1000 + 500, recordOrdinal: turn }));
+    }
+    history.push(observation({ kind: 'user_turn', hostTurnId: 't50', logicalObservationKey: key('t50', 'user'), visibleText: 'live current turn', recordByteStart: 50_000, recordOrdinal: 50 }));
+    history.push(observation({ kind: 'assistant_turn', hostTurnId: 't50', logicalObservationKey: key('t50', 'msg'), assistantItemId: 'msg-50', phase: 'final_answer', visibleText: 'answer 50', recordByteStart: 50_500, recordOrdinal: 50 }));
+    expect(ingest({ observations: history })).toMatchObject({ ok: true });
+
+    // Step 3 — three NEWER turns arrive; the 32-turn bound must expire the
+    // oldest turns BY SOURCE ORDER (t20, t21), never the live row (id=1).
+    const newer: GovernanceObservationInput[] = [];
+    for (const turn of [51, 52, 53]) {
+      newer.push(observation({ kind: 'user_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'user'), visibleText: `newer ${turn}`, recordByteStart: turn * 1000, recordOrdinal: turn }));
+      newer.push(observation({ kind: 'assistant_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'msg'), assistantItemId: `msg-${turn}`, phase: 'final_answer', visibleText: `answer ${turn}`, recordByteStart: turn * 1000 + 500, recordOrdinal: turn }));
+    }
+    expect(ingest({ observations: newer })).toMatchObject({ ok: true });
+
+    const listed = listGovernanceObservations({ workspaceDir });
+    if (!listed.ok) throw new Error('list failed');
+    const t50user = listed.observations.find((row) => row.logicalKey === key('t50', 'user'));
+    expect(t50user?.retentionClass).toBe('operational');
+    expect(t50user?.visibleText).toBe('live current turn');
+    expect(t50user?.sourceOrder).toBe(50_000);
+    expect(t50user?.id).toBe(1); // the by-id trap: lowest insertion id, newest transcript position
+    expect(listed.observations.find((row) => row.logicalKey === key('t20', 'user'))?.retentionClass).toBe('expired');
+    expect(listed.observations.find((row) => row.logicalKey === key('t49', 'user'))?.retentionClass).toBe('operational');
+  });
+
+  it('rollback tombstones the newest turns BY SOURCE ORDER (live row id=1 is newest, not oldest)', () => {
+    expect(ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 't50', logicalObservationKey: key('t50', 'user'), visibleText: 'live current', source: 'live_hook' })] })).toMatchObject({ ok: true });
+    const catchUp: GovernanceObservationInput[] = [];
+    for (const turn of [48, 49]) {
+      catchUp.push(observation({ kind: 'user_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'user'), visibleText: `history ${turn}`, recordByteStart: turn * 1000, recordOrdinal: turn }));
+      catchUp.push(observation({ kind: 'assistant_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'msg'), assistantItemId: `msg-${turn}`, phase: 'final_answer', visibleText: `answer ${turn}`, recordByteStart: turn * 1000 + 500, recordOrdinal: turn }));
+    }
+    catchUp.push(observation({ kind: 'user_turn', hostTurnId: 't50', logicalObservationKey: key('t50', 'user'), visibleText: 'live current', recordByteStart: 50_000, recordOrdinal: 50 }));
+    catchUp.push(observation({ kind: 'assistant_turn', hostTurnId: 't50', logicalObservationKey: key('t50', 'msg'), assistantItemId: 'msg-50', phase: 'final_answer', visibleText: 'answer 50', recordByteStart: 50_500, recordOrdinal: 50 }));
+    expect(ingest({ observations: catchUp })).toMatchObject({ ok: true });
+
+    const result = ingest({
+      rollout: { hostKind: 'codex', rolloutIdentity: R, rootSessionId: 'root-session-1' },
+      observations: [],
+      rollbackTurns: [2],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toContain('rollback_marker_applied:2');
+    const listed = listGovernanceObservations({ workspaceDir });
+    if (!listed.ok) throw new Error('list failed');
+    // Last 2 turns by SOURCE order = t50, t49 — the by-id ordering would have
+    // hit t49 and t48 (the live row has the lowest id).
+    expect(listed.observations.find((row) => row.logicalKey === key('t50', 'user'))?.retentionClass).toBe('rolled_back');
+    expect(listed.observations.find((row) => row.logicalKey === key('t49', 'user'))?.retentionClass).toBe('rolled_back');
+    expect(listed.observations.find((row) => row.logicalKey === key('t48', 'user'))?.retentionClass).toBe('operational');
+  });
+
+  it('promotion window and next-assistant resolution follow transcript source order', () => {
+    // Live trigger first (id=1, no source order yet).
+    expect(ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 't9', logicalObservationKey: key('t9', 'user'), visibleText: 'live trigger', source: 'live_hook' })] })).toMatchObject({ ok: true });
+    // Catch-up: t1..t8 (orders 100..800), the trigger's replay (900), the
+    // trigger's own assistant (950), and a LATER turn t10 (1000/1100).
+    const catchUp: GovernanceObservationInput[] = [];
+    for (let turn = 1; turn <= 8; turn += 1) {
+      catchUp.push(observation({ kind: 'user_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'user'), visibleText: `history ${turn}`, recordByteStart: turn * 100, recordOrdinal: turn }));
+      catchUp.push(observation({ kind: 'assistant_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'msg'), assistantItemId: `msg-${turn}`, phase: 'final_answer', visibleText: `answer ${turn}`, recordByteStart: turn * 100 + 50, recordOrdinal: turn }));
+    }
+    catchUp.push(observation({ kind: 'user_turn', hostTurnId: 't9', logicalObservationKey: key('t9', 'user'), visibleText: 'live trigger', recordByteStart: 900, recordOrdinal: 9 }));
+    catchUp.push(observation({ kind: 'assistant_turn', hostTurnId: 't9', logicalObservationKey: key('t9', 'msg'), assistantItemId: 'msg-9', phase: 'final_answer', visibleText: 'answer 9', recordByteStart: 950, recordOrdinal: 9 }));
+    catchUp.push(observation({ kind: 'user_turn', hostTurnId: 't10', logicalObservationKey: key('t10', 'user'), visibleText: 'later turn', recordByteStart: 1000, recordOrdinal: 10 }));
+    catchUp.push(observation({ kind: 'assistant_turn', hostTurnId: 't10', logicalObservationKey: key('t10', 'msg'), assistantItemId: 'msg-10', phase: 'final_answer', visibleText: 'answer 10', recordByteStart: 1100, recordOrdinal: 10 }));
+    expect(ingest({ observations: catchUp })).toMatchObject({ ok: true });
+
+    const result = promoteGovernanceEvidence({ workspaceDir, hostKind: 'codex', rolloutIdentity: R, triggerLogicalKey: key('t9', 'user'), painRef: 'pain-order-1', now: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('promotion failed');
+    // By-id ordering would place the live row (id=1) FIRST: an empty preceding
+    // window. Source ordering promotes all 8 preceding turns (16 rows).
+    expect(result.tailState).toBe('completed');
+    expect(result.promoted).toBe(16 + 1 + 1);
+    const listed = listGovernanceObservations({ workspaceDir });
+    if (!listed.ok) throw new Error('list failed');
+    // The next assistant is t9's OWN answer (source 950), never t10's (1100).
+    expect(listed.observations.find((row) => row.logicalKey === key('t9', 'msg'))?.promotionRef).toBe('pain-order-1');
+    expect(listed.observations.find((row) => row.logicalKey === key('t10', 'user'))?.retentionClass).toBe('operational');
+    expect(listed.observations.find((row) => row.logicalKey === key('t10', 'msg'))?.retentionClass).toBe('operational');
+  });
+
+  it('a live trigger promoted BEFORE its transcript replay leaves a pending tail that completes with the correct next assistant', () => {
+    expect(ingest({ observations: [observation({ kind: 'user_turn', hostTurnId: 't9', logicalObservationKey: key('t9', 'user'), visibleText: 'live trigger', source: 'live_hook' })] })).toMatchObject({ ok: true });
+    // Promotion before replay: trigger has no source order — pending tail.
+    const first = promoteGovernanceEvidence({ workspaceDir, hostKind: 'codex', rolloutIdentity: R, triggerLogicalKey: key('t9', 'user'), painRef: 'pain-order-2', now: NOW });
+    expect(first.ok && first.tailState).toBe('pending');
+    // Catch-up enriches the trigger (900) and delivers assistants; the tail
+    // must resolve to t9's own answer (950), not a later turn's.
+    const catchUp: GovernanceObservationInput[] = [];
+    for (let turn = 1; turn <= 8; turn += 1) {
+      catchUp.push(observation({ kind: 'user_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'user'), visibleText: `history ${turn}`, recordByteStart: turn * 100, recordOrdinal: turn }));
+      catchUp.push(observation({ kind: 'assistant_turn', hostTurnId: `t${turn}`, logicalObservationKey: key(`t${turn}`, 'msg'), assistantItemId: `msg-${turn}`, phase: 'final_answer', visibleText: `answer ${turn}`, recordByteStart: turn * 100 + 50, recordOrdinal: turn }));
+    }
+    catchUp.push(observation({ kind: 'user_turn', hostTurnId: 't9', logicalObservationKey: key('t9', 'user'), visibleText: 'live trigger', recordByteStart: 900, recordOrdinal: 9 }));
+    catchUp.push(observation({ kind: 'assistant_turn', hostTurnId: 't9', logicalObservationKey: key('t9', 'msg'), assistantItemId: 'msg-9', phase: 'final_answer', visibleText: 'answer 9', recordByteStart: 950, recordOrdinal: 9 }));
+    catchUp.push(observation({ kind: 'assistant_turn', hostTurnId: 't10', logicalObservationKey: key('t10', 'msg'), assistantItemId: 'msg-10', phase: 'final_answer', visibleText: 'answer 10', recordByteStart: 1100, recordOrdinal: 10 }));
+    expect(ingest({ observations: catchUp })).toMatchObject({ ok: true });
+    const listed = listGovernanceObservations({ workspaceDir });
+    if (!listed.ok) throw new Error('list failed');
+    expect(listed.observations.find((row) => row.logicalKey === key('t9', 'msg'))?.promotionRef).toBe('pain-order-2');
+    expect(listed.observations.find((row) => row.logicalKey === key('t10', 'msg'))?.retentionClass).toBe('operational');
+    // Replay the same delivery: exactly-once (no additional promotions).
+    const replay = promoteGovernanceEvidence({ workspaceDir, hostKind: 'codex', rolloutIdentity: R, triggerLogicalKey: key('t9', 'user'), painRef: 'pain-order-2', now: NOW });
+    expect(replay.ok && replay.tailState).toBe('completed');
+    const listedAgain = listGovernanceObservations({ workspaceDir });
+    if (!listedAgain.ok) throw new Error('list failed');
+    expect(listedAgain.observations.filter((row) => row.promotionRef === 'pain-order-2').length).toBe(2); // trigger + its own answer
   });
 });

@@ -35,7 +35,7 @@ export const GOVERNANCE_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const GOVERNANCE_PROMOTION_PRECEDING_TURNS = 12;
 export const GOVERNANCE_PENDING_TAIL_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 
-const GOVERNANCE_OBSERVATION_SCHEMA_VERSION = 1;
+const GOVERNANCE_OBSERVATION_SCHEMA_VERSION = 2;
 const MAX_TEXT_BOUND = 200; // matches MAX_EVIDENCE_VALUE_CHARS; guards stored identity fields
 const MAX_JSON_COLUMN = 8_000;
 
@@ -59,8 +59,17 @@ export interface GovernanceObservationInput {
   readonly logicalObservationKey: string;
   /** Physical replay identity: `host|rollout|ordinal` (SPEC §6). */
   readonly transcriptRecordKey?: string;
-  /** Byte offset of the source record start — used to stop checkpoint advance on conflict. */
+  /**
+   * Byte offset of the source record start — the durable transcript SOURCE
+   * ORDER (records are append-only, so byte position is strictly increasing
+   * within one rollout). All before/after/last-N/next-assistant logic orders
+   * by this value, never by the SQLite insertion id: a live hook row is
+   * inserted BEFORE the older history that a later catch-up ingests, so
+   * insertion order is not transcript order (PR #1455 review P1).
+   */
   readonly recordByteStart?: number;
+  /** Per-rollout physical record ordinal (G1 §4) — tiebreaker/telemetry alongside the byte order. */
+  readonly recordOrdinal?: number;
 
   readonly assistantItemId?: string;
   /** assistant phase: 'commentary' | 'final_answer' (assistant_turn only). */
@@ -125,6 +134,8 @@ export interface GovernanceObservationRecord {
   readonly kind: GovernanceObservationKind;
   readonly logicalKey: string;
   readonly transcriptRecordKey: string | null;
+  readonly sourceOrder: number | null;
+  readonly sourceOrdinal: number | null;
   readonly assistantItemId: string | null;
   readonly phase: string | null;
   readonly toolUseId: string | null;
@@ -172,7 +183,18 @@ function safeJson(value: unknown): string | null {
   try {
     const text = JSON.stringify(value);
     if (typeof text !== 'string') return null;
-    return text.length > MAX_JSON_COLUMN ? `${text.slice(0, MAX_JSON_COLUMN - 3)}...` : text;
+    if (text.length <= MAX_JSON_COLUMN) return text;
+    // Truncating a serialized JSON document mid-value yields INVALID JSON.
+    // Keep the column bound while staying parseable: store an ESCAPED
+    // fragment inside a small wrapper object, shrinking until the wrapper
+    // itself fits (escaping can expand the fragment, so verify each round).
+    let keep = text.length;
+    while (keep > 0) {
+      keep = Math.max(0, keep - Math.max(200, Math.floor(keep / 4)));
+      const wrapped = JSON.stringify({ truncated: true, preview: text.slice(0, keep) });
+      if (wrapped.length <= MAX_JSON_COLUMN) return wrapped;
+    }
+    return '{"truncated":true,"preview":""}';
   } catch {
     return null;
   }
@@ -202,6 +224,8 @@ const CREATE_STATEMENTS = [
     kind TEXT NOT NULL,
     logical_key TEXT NOT NULL,
     transcript_record_key TEXT,
+    source_order INTEGER,
+    source_ordinal INTEGER,
     assistant_item_id TEXT,
     phase TEXT,
     tool_use_id TEXT,
@@ -217,6 +241,8 @@ const CREATE_STATEMENTS = [
     expired_at TEXT,
     UNIQUE(logical_key)
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_governance_observations_source_order
+     ON governance_observations(rollout_row_id, source_order)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_governance_observations_physical
      ON governance_observations(transcript_record_key) WHERE transcript_record_key IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_governance_observations_rollout_turn
@@ -253,9 +279,23 @@ const CREATE_STATEMENTS = [
      ON governance_pending_promotion_tails(state, created_at)`,
 ];
 
+/** Column additions after v1 (dev databases created before the source-order fix). */
+const V2_ADDED_COLUMNS = [
+  { table: 'governance_observations', name: 'source_order', type: 'INTEGER' },
+  { table: 'governance_observations', name: 'source_ordinal', type: 'INTEGER' },
+];
+
 function ensureGovernanceObservationSchema(db: Database.Database): void {
   db.transaction(() => {
     for (const statement of CREATE_STATEMENTS) db.exec(statement);
+    for (const column of V2_ADDED_COLUMNS) {
+      try {
+        db.exec(`ALTER TABLE ${column.table} ADD COLUMN ${column.name} ${column.type}`);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes('duplicate column name')) throw error;
+      }
+    }
     const row = db.prepare('SELECT version FROM governance_observation_schema_version LIMIT 1').get();
     const current = isRecord(row) ? own(row, 'version') : undefined;
     if (typeof current !== 'number') {
@@ -328,10 +368,11 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
     const sanitizedText = input.visibleText !== undefined ? sanitizeString(input.visibleText, workspaceDir) : null;
     const facts = input.toolFacts !== undefined ? safeJson({ facts: sanitizeValue(input.toolFacts, 0, workspaceDir) }) : null;
     db.prepare(`INSERT INTO governance_observations
-      (rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key, transcript_record_key, assistant_item_id, phase, tool_use_id, transcript_tool_call_id, visible_text, sanitized_tool_facts_json, source, completeness, retention_class, observed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'operational', ?)`)
+      (rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key, transcript_record_key, source_order, source_ordinal, assistant_item_id, phase, tool_use_id, transcript_tool_call_id, visible_text, sanitized_tool_facts_json, source, completeness, retention_class, observed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'operational', ?)`)
       .run(rolloutRowId, input.hostKind, input.rolloutIdentity, input.rootSessionId, input.hostTurnId, input.kind, input.logicalObservationKey,
-        input.transcriptRecordKey ?? null, boundedString(input.assistantItemId, MAX_TEXT_BOUND), boundedString(input.phase, MAX_TEXT_BOUND) ?? null,
+        input.transcriptRecordKey ?? null, input.recordByteStart ?? null, input.recordOrdinal ?? null,
+        boundedString(input.assistantItemId, MAX_TEXT_BOUND), boundedString(input.phase, MAX_TEXT_BOUND) ?? null,
         boundedString(input.toolUseId, MAX_TEXT_BOUND), boundedString(input.transcriptToolCallId, MAX_TEXT_BOUND),
         sanitizedText, facts, input.source, input.completeness, input.observedAt);
     return { disposition: 'inserted' };
@@ -364,6 +405,11 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
     }
   };
   fill('transcript_record_key', input.transcriptRecordKey ?? null);
+  // Transcript replay enriches the live row with its real transcript position
+  // (PR #1455 review P1): all ordering logic reads source_order, so a live row
+  // must gain it the moment the transcript catch-up converges the same event.
+  fill('source_order', input.recordByteStart);
+  fill('source_ordinal', input.recordOrdinal);
   fill('assistant_item_id', boundedString(input.assistantItemId, MAX_TEXT_BOUND));
   fill('phase', boundedString(input.phase, MAX_TEXT_BOUND));
   fill('tool_use_id', boundedString(input.toolUseId, MAX_TEXT_BOUND));
@@ -395,28 +441,53 @@ function expireRows(db: Database.Database, ids: readonly number[], expiry: { now
   }
 }
 
+/**
+ * Canonical turn order for one rollout, oldest → newest:
+ *   1. turns with transcript source order, ascending by MIN(source_order)
+ *      (byte offsets are append-only within a rollout — G1 §4/§6);
+ *   2. then live-only turns (no transcript evidence yet — the hook observed
+ *      them but the Stop replay has not converged them), in observation
+ *      arrival order. Insertion id is used ONLY as the tiebreak among rows
+ *      that have no transcript order; it is never a transcript order.
+ *
+ * Every before/after/last-N/next-assistant decision MUST go through this
+ * ordering: a live hook row is INSERTED before the older history a later
+ * catch-up ingests, so insertion id alone misorders the rollout.
+ */
+interface TurnOrderRow { hostTurnId: string; turnOrder: number | null }
+
+function listTurnsInSourceOrder(db: Database.Database, rolloutRowId: number): TurnOrderRow[] {
+  const rows = db.prepare(`SELECT host_turn_id, MIN(source_order) AS turn_order, MIN(id) AS arrival
+    FROM governance_observations
+    WHERE rollout_row_id = ? AND retention_class = 'operational'
+    GROUP BY host_turn_id
+    ORDER BY (MIN(source_order) IS NULL) ASC, MIN(source_order) ASC, MIN(id) ASC`).all(rolloutRowId);
+  return rows.map((row) => ({
+    hostTurnId: String(rowField(row, 'host_turn_id')),
+    turnOrder: typeof rowField(row, 'turn_order') === 'number' ? (rowField(row, 'turn_order') as number) : null,
+  }));
+}
+
+function turnObservationIds(db: Database.Database, rolloutRowId: number, hostTurnId: string): number[] {
+  const rows = db.prepare("SELECT id FROM governance_observations WHERE rollout_row_id = ? AND host_turn_id = ? AND retention_class = 'operational'")
+    .all(rolloutRowId, hostTurnId);
+  return rows.map((row) => Number(rowField(row, 'id'))).filter((id) => Number.isInteger(id));
+}
+
 function pruneRetention(db: Database.Database, rolloutRowId: number | null, now: Date): void {
   const nowIso = now.toISOString();
   // Age bound: global, bounded single statements over the retention index.
   db.prepare(`UPDATE governance_observations SET visible_text = NULL, sanitized_tool_facts_json = NULL, retention_class = 'expired', expired_at = ?
     WHERE retention_class = 'operational' AND observed_at < ?`)
     .run(nowIso, new Date(now.getTime() - GOVERNANCE_RETENTION_MAX_AGE_MS).toISOString());
-  // Turn bound: per ingested rollout, keep the latest N conversational turns.
+  // Turn bound: per ingested rollout, keep the latest N conversational turns
+  // in canonical source order (live-only turns count as newest).
   if (rolloutRowId === null) return;
-  const rows = db.prepare(`SELECT host_turn_id, MIN(id) AS first_id FROM governance_observations
-    WHERE rollout_row_id = ? AND retention_class = 'operational'
-    GROUP BY host_turn_id ORDER BY first_id DESC`).all(rolloutRowId);
-  if (rows.length <= GOVERNANCE_RETENTION_MAX_TURNS) return;
+  const turns = listTurnsInSourceOrder(db, rolloutRowId);
+  if (turns.length <= GOVERNANCE_RETENTION_MAX_TURNS) return;
   const expiredIds: number[] = [];
-  for (const row of rows.slice(GOVERNANCE_RETENTION_MAX_TURNS)) {
-    const turnId = rowField(row, 'host_turn_id');
-    if (typeof turnId !== 'string') continue;
-    const obsRows = db.prepare('SELECT id FROM governance_observations WHERE rollout_row_id = ? AND host_turn_id = ? AND retention_class = ?')
-      .all(rolloutRowId, turnId, 'operational');
-    for (const obsRow of obsRows) {
-      const id = rowField(obsRow, 'id');
-      if (typeof id === 'number') expiredIds.push(id);
-    }
+  for (const turn of turns.slice(0, turns.length - GOVERNANCE_RETENTION_MAX_TURNS)) {
+    expiredIds.push(...turnObservationIds(db, rolloutRowId, turn.hostTurnId));
   }
   expireRows(db, expiredIds, { now: nowIso, klass: 'expired' });
 }
@@ -427,14 +498,15 @@ function completePendingTails(db: Database.Database, rolloutRowId: number, now: 
   for (const tail of pending) {
     const triggerKey = rowField(tail, 'trigger_logical_key');
     if (typeof triggerKey !== 'string') continue;
-    const triggerRow = db.prepare('SELECT id FROM governance_observations WHERE logical_key = ?').get(triggerKey);
-    const triggerId = rowField(triggerRow, 'id');
-    if (typeof triggerId !== 'number') continue;
+    const triggerRow = db.prepare('SELECT * FROM governance_observations WHERE logical_key = ?').get(triggerKey);
+    if (!isRecord(triggerRow)) continue;
+    const triggerOrder = rowField(triggerRow, 'source_order');
+    if (typeof triggerOrder !== 'number') continue; // not yet positioned by the transcript replay
     // The next completed assistant turn: the earliest final-answer assistant
-    // observation that physically follows the trigger in this rollout.
+    // observation AFTER the trigger in transcript source order.
     const next = db.prepare(`SELECT id FROM governance_observations
-      WHERE rollout_row_id = ? AND kind = 'assistant_turn' AND phase = 'final_answer' AND completeness = 'complete' AND id > ?
-      ORDER BY id LIMIT 1`).get(rolloutRowId, triggerId);
+      WHERE rollout_row_id = ? AND kind = 'assistant_turn' AND phase = 'final_answer' AND completeness = 'complete' AND source_order > ?
+      ORDER BY source_order LIMIT 1`).get(rolloutRowId, triggerOrder);
     const nextId = rowField(next, 'id');
     if (typeof nextId !== 'number') continue;
     db.prepare("UPDATE governance_observations SET retention_class = 'promoted', promoted_at = ?, promotion_ref = COALESCE(promotion_ref, ?) WHERE id = ? AND retention_class != 'promoted'")
@@ -544,17 +616,12 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
         let rolledBackTurns = 0;
         for (const markerTurns of input.rollbackTurns) {
           if (typeof markerTurns !== 'number' || markerTurns <= 0) continue;
-          const turns = db.prepare(`SELECT host_turn_id, MIN(id) AS first_id FROM governance_observations
-            WHERE rollout_row_id = ? AND retention_class = 'operational' GROUP BY host_turn_id ORDER BY first_id DESC LIMIT ?`)
-            .all(rolloutRowId, markerTurns);
+          // The LAST N logical turns in canonical source order (live-only
+          // turns are the newest; replayed turns order by transcript bytes).
+          const turns = listTurnsInSourceOrder(db, rolloutRowId).slice(-markerTurns);
           const ids: number[] = [];
           for (const turn of turns) {
-            const turnId = rowField(turn, 'host_turn_id');
-            if (typeof turnId !== 'string') continue;
-            for (const obsRow of db.prepare('SELECT id FROM governance_observations WHERE rollout_row_id = ? AND host_turn_id = ? AND retention_class = ?').all(rolloutRowId, turnId, 'operational')) {
-              const id = rowField(obsRow, 'id');
-              if (typeof id === 'number') ids.push(id);
-            }
+            ids.push(...turnObservationIds(db, rolloutRowId, turn.hostTurnId));
           }
           expireRows(db, ids, { now, klass: 'rolled_back' });
           rolledBackTurns += markerTurns;
@@ -647,6 +714,8 @@ export function listGovernanceObservations(input: ListGovernanceObservationsInpu
       kind: rowField(row, 'kind') as GovernanceObservationKind,
       logicalKey: String(rowField(row, 'logical_key')),
       transcriptRecordKey: typeof rowField(row, 'transcript_record_key') === 'string' ? (rowField(row, 'transcript_record_key') as string) : null,
+      sourceOrder: typeof rowField(row, 'source_order') === 'number' ? (rowField(row, 'source_order') as number) : null,
+      sourceOrdinal: typeof rowField(row, 'source_ordinal') === 'number' ? (rowField(row, 'source_ordinal') as number) : null,
       assistantItemId: typeof rowField(row, 'assistant_item_id') === 'string' ? (rowField(row, 'assistant_item_id') as string) : null,
       phase: typeof rowField(row, 'phase') === 'string' ? (rowField(row, 'phase') as string) : null,
       toolUseId: typeof rowField(row, 'tool_use_id') === 'string' ? (rowField(row, 'tool_use_id') as string) : null,
@@ -709,6 +778,7 @@ export function promoteGovernanceEvidence(input: PromoteGovernanceEvidenceInput)
       const triggerRow = db.prepare('SELECT * FROM governance_observations WHERE logical_key = ? AND rollout_row_id = ?').get(input.triggerLogicalKey, rolloutRowId);
       if (!isRecord(triggerRow)) throw new PromotionMissingError('trigger_not_found', 'the triggering observation must be ingested before promotion');
       const triggerId = rowField(triggerRow, 'id');
+      const triggerOrder = typeof rowField(triggerRow, 'source_order') === 'number' ? (rowField(triggerRow, 'source_order') as number) : null;
 
       const promoteIds = (ids: readonly number[]) => {
         for (const id of ids) {
@@ -718,32 +788,38 @@ export function promoteGovernanceEvidence(input: PromoteGovernanceEvidenceInput)
         }
       };
 
-      // ≤12 preceding visible turns: turn groups strictly before the trigger's
-      // own turn, newest first, operational rows only (expired bodies are gone).
-      const turns = db.prepare(`SELECT host_turn_id, MIN(id) AS first_id FROM governance_observations
-        WHERE rollout_row_id = ? AND retention_class = 'operational' GROUP BY host_turn_id ORDER BY first_id ASC`).all(rolloutRowId);
+      // ≤12 preceding visible turns: the turns immediately BEFORE the
+      // trigger's own turn in canonical source order (transcript byte order;
+      // a live trigger not yet replayed positions after everything observed
+      // so far, which is exactly its real position — nothing newer exists).
+      const turns = listTurnsInSourceOrder(db, rolloutRowId);
       const triggerTurnIndex = turns.findIndex((turn) => {
         const ids = db.prepare('SELECT id FROM governance_observations WHERE rollout_row_id = ? AND host_turn_id = ? AND logical_key = ?')
-          .all(rolloutRowId, rowField(turn, 'host_turn_id'), input.triggerLogicalKey);
+          .all(rolloutRowId, turn.hostTurnId, input.triggerLogicalKey);
         return ids.length > 0;
       });
-      const preceding = triggerTurnIndex > 0 ? turns.slice(Math.max(0, triggerTurnIndex - GOVERNANCE_PROMOTION_PRECEDING_TURNS), triggerTurnIndex) : [];
+      const precedingStart = triggerTurnIndex > 0 ? Math.max(0, triggerTurnIndex - GOVERNANCE_PROMOTION_PRECEDING_TURNS) : -1;
+      const preceding = triggerTurnIndex > 0 ? turns.slice(precedingStart, triggerTurnIndex) : [];
       for (const turn of preceding) {
-        const turnId = rowField(turn, 'host_turn_id');
-        if (typeof turnId !== 'string') continue;
-        const rows = db.prepare("SELECT id FROM governance_observations WHERE rollout_row_id = ? AND host_turn_id = ? AND retention_class = 'operational'").all(rolloutRowId, turnId);
-        promoteIds(rows.map((row) => Number(rowField(row, 'id'))).filter((id) => Number.isInteger(id)));
+        promoteIds(turnObservationIds(db, rolloutRowId, turn.hostTurnId));
       }
       promoteIds([Number(triggerId)]);
 
-      const next = db.prepare(`SELECT id FROM governance_observations
-        WHERE rollout_row_id = ? AND kind = 'assistant_turn' AND phase = 'final_answer' AND completeness = 'complete' AND id > ?
-        ORDER BY id LIMIT 1`).get(rolloutRowId, triggerId);
-      const nextId = rowField(next, 'id');
-      if (typeof nextId === 'number') {
-        promoteIds([nextId]);
-        tailState = 'completed';
-      } else {
+      if (triggerOrder !== null) {
+        // Next completed assistant turn: the earliest final-answer assistant
+        // AFTER the trigger in transcript source order. When the trigger has
+        // no transcript position yet, the durable pending tail below resolves
+        // once the replay enriches it (completePendingTails re-checks).
+        const next = db.prepare(`SELECT id FROM governance_observations
+          WHERE rollout_row_id = ? AND kind = 'assistant_turn' AND phase = 'final_answer' AND completeness = 'complete' AND source_order > ?
+          ORDER BY source_order LIMIT 1`).get(rolloutRowId, triggerOrder);
+        const nextId = rowField(next, 'id');
+        if (typeof nextId === 'number') {
+          promoteIds([nextId]);
+          tailState = 'completed';
+        }
+      }
+      if (tailState !== 'completed') {
         db.prepare(`INSERT INTO governance_pending_promotion_tails (rollout_row_id, host_kind, rollout_identity, trigger_logical_key, pain_ref, state, created_at)
           VALUES (?, ?, ?, ?, ?, 'pending', ?)`)
           .run(rolloutRowId, input.hostKind, input.rolloutIdentity, input.triggerLogicalKey, input.painRef, now);

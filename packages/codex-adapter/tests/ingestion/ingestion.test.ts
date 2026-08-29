@@ -332,11 +332,15 @@ describe('hard privacy invariant: flag-off means zero transcript reads (SPEC §1
 
       const calls: string[] = [];
       setCodexTranscriptPortForTest({
-        read: (canonicalPath: string) => { calls.push(canonicalPath); return { text: '', fileSize: 0 }; },
+        read: (canonicalPath: string) => { calls.push(canonicalPath); return { bytes: Buffer.alloc(0), fileSize: 0 }; },
       });
       const payload = JSON.stringify({ ...stopPayload(), cwd: flagOffWorkspace });
       const result = await processHookInvocation(payload, { CODEX_HOME: codexHome }, flagOffWorkspace);
-      expect(result).toEqual({ stdout: {}, exitCode: 0, stderr: [] });
+      expect(result.stdout).toEqual({});
+      expect(result.exitCode).toBe(0);
+      // Non-noisy structured fact: exactly one bounded line, Stop-only.
+      expect(result.stderr).toHaveLength(1);
+      expect(result.stderr[0]).toContain('reason=feature_disabled');
       expect(calls).toEqual([]);
       // No observation side effects either.
       const listed = listGovernanceObservations({ workspaceDir: flagOffWorkspace });
@@ -361,25 +365,69 @@ describe('hard privacy invariant: flag-off means zero transcript reads (SPEC §1
       fs.writeFileSync(path.join(flagOnWorkspace, '.pd', 'config.yaml'), JSON.stringify(config));
 
       const calls: string[] = [];
+      const identities: Array<unknown> = [];
+      const fixtureBytes = readFileSync(transcriptPath);
       setCodexTranscriptPortForTest({
-        read: (canonicalPath: string) => {
-          calls.push(canonicalPath);
-          const bytes = readFileSync(canonicalPath);
-          return { bytes, fileSize: bytes.length };
+        read: (request: { canonicalPath: string; expectedIdentity?: { dev: number; ino: number; size: number; mtimeMs: number } }) => {
+          const observedPath: string = request.canonicalPath;
+          calls.push(observedPath);
+          identities.push(request.expectedIdentity);
+          return { bytes: fixtureBytes, fileSize: fixtureBytes.length };
         },
       });
       const payload = JSON.stringify({ ...stopPayload(), cwd: flagOnWorkspace });
       const result = await processHookInvocation(payload, { CODEX_HOME: codexHome }, flagOnWorkspace);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toEqual({}); // Stop: no hookSpecificOutput — empty stdout contract
-      const { realpathSync } = await import('node:fs');
+      const { realpathSync, statSync } = await import('node:fs');
       const expectedCanonical = (() => { try { return realpathSync.native(transcriptPath); } catch { return realpathSync(transcriptPath); } })();
       expect(calls).toEqual([expectedCanonical]);
+      // The orchestrator forwards the validator's captured identity to the
+      // read boundary (post-open revalidation contract, PR #1455 review P1).
+      const forwarded = identities[0] as { dev: number; ino: number; size: number; mtimeMs: number };
+      expect(forwarded).toBeDefined();
+      const currentStats = statSync(expectedCanonical);
+      expect(forwarded.size).toBe(currentStats.size);
+      expect(forwarded.ino).toBe(Number(currentStats.ino));
       const listed = listGovernanceObservations({ workspaceDir: flagOnWorkspace });
       if (!listed.ok) throw new Error('list failed');
       expect(listed.observations.length).toBe(6);
     } finally {
       fs.rmSync(flagOnWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a transcript replaced after validation with a structured transcript_replaced degradation (post-open TOCTOU, PR #1455 review P1)', async () => {
+    const { processHookInvocation } = await import('../../src/pd-hook.js');
+    const { getDefaultPdConfig } = await import('@principles/core/runtime-v2');
+    const { TranscriptReplacedError } = await import('../../src/ingestion/transcript-decoder.js');
+    const swappedWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-swap-'));
+    try {
+      fs.mkdirSync(path.join(swappedWorkspace, '.pd'), { recursive: true });
+      fs.mkdirSync(path.join(swappedWorkspace, '.state'), { recursive: true });
+      fs.writeFileSync(path.join(swappedWorkspace, '.state', 'trajectory.db'), '');
+      const config = getDefaultPdConfig();
+      config.features['host.codex'].enabled = true;
+      config.features['codex_conversation_ingestion'] = { category: 'quiet', enabled: true };
+      fs.writeFileSync(path.join(swappedWorkspace, '.pd', 'config.yaml'), JSON.stringify(config));
+
+      // A port that simulates the raced window: by the time it opens the file,
+      // the object behind the path is NOT the one the validator approved.
+      setCodexTranscriptPortForTest({
+        read: () => { throw new TranscriptReplacedError(); },
+      });
+      const payload = JSON.stringify({ ...stopPayload(), cwd: swappedWorkspace });
+      const result = await processHookInvocation(payload, { CODEX_HOME: codexHome }, swappedWorkspace);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toEqual({});
+      expect(result.stderr[0]).toContain('reason=transcript_replaced');
+      expect(result.stderr[0]).toContain('nextAction=');
+      const listed = listGovernanceObservations({ workspaceDir: swappedWorkspace });
+      if (!listed.ok) throw new Error('list failed');
+      expect(listed.observations).toHaveLength(0); // zero bytes were ingested from the unproven object
+    } finally {
+      setCodexTranscriptPortForTest(null);
+      fs.rmSync(swappedWorkspace, { recursive: true, force: true });
     }
   });
 });

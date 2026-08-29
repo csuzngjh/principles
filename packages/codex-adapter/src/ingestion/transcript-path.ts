@@ -17,8 +17,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { canonicalizePath } from './codex-home.js';
 
+/**
+ * File identity captured at validation time. The open/read seam re-proves
+ * the opened object still has this identity BEFORE any byte is read — the
+ * G1 §7 / SPEC §9 post-open revalidation that closes the validate→open
+ * TOCTOU window (path replacement, symlink swap).
+ */
+export interface TranscriptFileIdentity {
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
 export type TranscriptPathValidation =
-  | { ok: true; canonicalPath: string; rolloutIdentity: string }
+  | { ok: true; canonicalPath: string; rolloutIdentity: string; identity: TranscriptFileIdentity }
   | { ok: false; reason: 'transcript_path_invalid' | 'transcript_path_outside_codex_home'; nextAction: string };
 
 const UUID_HEX = /^[0-9a-fA-F]+$/;
@@ -87,5 +100,6 @@ export function validateCodexTranscriptPath(transcriptPath: string, codexHome: s
   if (!stats.isFile()) {
     return { ok: false, reason: 'transcript_path_invalid', nextAction: 'the transcript path is not a regular file.' };
   }
-  return { ok: true, canonicalPath, rolloutIdentity: rolloutIdentity.toLowerCase() };
+  const identity: TranscriptFileIdentity = { dev: stats.dev, ino: Number(stats.ino), size: stats.size, mtimeMs: stats.mtimeMs };
+  return { ok: true, canonicalPath, rolloutIdentity: rolloutIdentity.toLowerCase(), identity };
 }

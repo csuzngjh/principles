@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { validateCodexTranscriptPath } from '../../src/ingestion/transcript-path.js';
 import { canonicalizePath } from '../../src/ingestion/codex-home.js';
+import { createNodeTranscriptPort, TranscriptReplacedError } from '../../src/ingestion/transcript-decoder.js';
 
 const dirs: string[] = [];
 function tempDir(): string {
@@ -57,7 +57,14 @@ describe('transcript path authorization (SPEC §11 — no scanning, authenticate
     const home = tempDir();
     const file = transcriptFile(home);
     const result = validateCodexTranscriptPath(file, home);
-    expect(result).toEqual({ ok: true, canonicalPath: canonicalizePath(file), rolloutIdentity: UUID });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('validation failed');
+    expect(result.canonicalPath).toBe(canonicalizePath(file));
+    expect(result.rolloutIdentity).toBe(UUID);
+    // Identity for the post-open revalidation contract (SPEC §9).
+    const stats = fs.statSync(file);
+    expect(result.identity.size).toBe(stats.size);
+    expect(result.identity.ino).toBe(Number(stats.ino));
   });
 
   it('rejects a relative path', () => {
@@ -138,5 +145,34 @@ describe('transcript path authorization (SPEC §11 — no scanning, authenticate
       // tmpdir is already long-form and the regression is covered elsewhere).
       expect(shortFirst.ok && shortFirst.canonicalPath).toBe(longFirst.ok ? longFirst.canonicalPath : undefined);
     }
+  });
+
+  it('exposes a file identity that the open/read seam can re-prove post-open (PR #1455 review P1: TOCTOU replacement)', () => {
+    const home = tempDir();
+    const file = transcriptFile(home);
+    const validation = validateCodexTranscriptPath(file, home);
+    expect(validation.ok).toBe(true);
+    if (!validation.ok) throw new Error('validation failed');
+
+    // Deterministic replay of the raced validate→open window: replace the
+    // object behind the approved path (delete + recreate with different
+    // content), then make the port re-prove the STALE identity. Same code
+    // path a real symlink-swap race would hit; dev/ino or size+mtime both
+    // must detect it.
+    fs.rmSync(file, { force: true });
+    fs.writeFileSync(file, '{"ordinal":99999,"much":"longer content than before"}\n');
+
+    const port = createNodeTranscriptPort();
+    expect(() => port.read({ canonicalPath: validation.canonicalPath, offset: 0, maxBytes: 1024 * 1024, expectedIdentity: validation.identity })).toThrow(TranscriptReplacedError);
+    // The live identity (re-captured after replacement) passes — the guard
+    // rejects stale identities, not the file itself.
+    const revalidated = validateCodexTranscriptPath(file, home);
+    expect(revalidated.ok).toBe(true);
+    if (!revalidated.ok) throw new Error('revalidation failed');
+    const reread = port.read({ canonicalPath: revalidated.canonicalPath, offset: 0, maxBytes: 1024 * 1024, expectedIdentity: revalidated.identity });
+    expect(reread.bytes.length).toBeGreaterThan(0);
+    // A read WITHOUT an expected identity stays allowed (defensive core loop;
+    // production always forwards the identity).
+    expect(port.read({ canonicalPath: validation.canonicalPath, offset: 0, maxBytes: 1024 }).bytes.length).toBeGreaterThan(0);
   });
 });

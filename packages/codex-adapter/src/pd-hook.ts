@@ -82,10 +82,13 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // Stop is the turn-complete ingestion trigger (G1 §2): no dispatch route,
     // and Codex's Stop output schema has no hookSpecificOutput — the neutral
     // result is exactly `{}` on stdout (runtime contract: "PD emits empty
-    // stdout on Stop").
+    // stdout on Stop"). Flag-off preserves the zero-transcript-read invariant
+    // and emits ONE bounded structured feature_disabled fact per completed
+    // turn on stderr — never stdout, and never on the per-tool events (that
+    // would be per-event noise).
     const stderr = ingestionEnabled
       ? runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
-      : [];
+      : [diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
     return { stdout: {}, exitCode: 0, stderr };
   }
 

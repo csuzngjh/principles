@@ -34,18 +34,61 @@ export interface TranscriptReadResult {
   readonly fileSize: number;
 }
 
+/** Identity the validator captured pre-open; the port must re-prove it post-open (SPEC §9 TOCTOU). */
+export interface TranscriptExpectedIdentity {
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
+/** Arguments for one bounded transcript window read. */
+export interface TranscriptReadRequest {
+  readonly canonicalPath: string;
+  readonly offset: number;
+  readonly maxBytes: number;
+  /** Pre-open identity from the validator; the port re-proves it post-open. */
+  readonly expectedIdentity?: TranscriptExpectedIdentity;
+}
+
 /** Filesystem boundary for the transcript read — injectable so tests can spy. */
 export interface TranscriptPort {
-  read(canonicalPath: string, offset: number, maxBytes: number): TranscriptReadResult;
+  read(request: TranscriptReadRequest): TranscriptReadResult;
+}
+
+/** Thrown by the port when the opened object is not the validated one (replacement/TOCTOU). */
+export class TranscriptReplacedError extends Error {
+  constructor() {
+    super('transcript_replaced_after_validation');
+    this.name = 'TranscriptReplacedError';
+  }
+}
+
+function identityMatches(opened: fs.Stats, expected: TranscriptExpectedIdentity): boolean {
+  // dev/ino identity is authoritative where the platform reports a
+  // Number-safe inode; otherwise fall back to size+mtime, which still
+  // detects any replacement or rewrite between validation and open.
+  if (opened.ino !== 0 && expected.ino !== 0 && Number.isSafeInteger(opened.ino) && expected.dev !== 0) {
+    return opened.ino === expected.ino && opened.dev === expected.dev;
+  }
+  return opened.size === expected.size && opened.mtimeMs === expected.mtimeMs;
 }
 
 export function createNodeTranscriptPort(): TranscriptPort {
   return {
-    read(canonicalPath: string, offset: number, maxBytes: number): TranscriptReadResult {
+    read({ canonicalPath, offset, maxBytes, expectedIdentity }: TranscriptReadRequest): TranscriptReadResult {
       const fd = fs.openSync(canonicalPath, 'r');
       try {
+        // Post-open revalidation (G1 §7 / SPEC §9): fstat the OPEN OBJECT —
+        // not the path — and re-prove it is the regular file the validator
+        // approved, still at the expected identity. A path swapped between
+        // validation and open (replacement/symlink TOCTOU) is refused before
+        // a single byte is read.
         const stats = fs.fstatSync(fd);
         if (!stats.isFile()) throw new Error('transcript_is_not_regular_file');
+        if (expectedIdentity !== undefined && !identityMatches(stats, expectedIdentity)) {
+          throw new TranscriptReplacedError();
+        }
         const length = Math.max(0, Math.min(maxBytes, stats.size - offset));
         if (length === 0) return { bytes: Buffer.alloc(0), fileSize: stats.size };
         const buffer = Buffer.alloc(length);
@@ -260,6 +303,7 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
         kind: 'user_turn',
         logicalObservationKey: `codex|${context.rolloutIdentity}|${turnId}|user`,
         transcriptRecordKey: `codex|${context.rolloutIdentity}|${ordinal}`,
+        recordOrdinal: ordinal,
         recordByteStart,
         visibleText: text ?? undefined,
         source: 'transcript',
@@ -294,6 +338,7 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
           kind: 'user_turn',
           logicalObservationKey: `codex|${context.rolloutIdentity}|${turnId}|user`,
           transcriptRecordKey: `codex|${context.rolloutIdentity}|${ordinal}`,
+        recordOrdinal: ordinal,
           recordByteStart,
           visibleText: text ?? undefined,
           source: 'transcript',
@@ -321,6 +366,7 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
           kind: 'assistant_turn',
           logicalObservationKey: `codex|${context.rolloutIdentity}|${turnId}|${itemId}`,
           transcriptRecordKey: `codex|${context.rolloutIdentity}|${ordinal}`,
+        recordOrdinal: ordinal,
           recordByteStart,
           assistantItemId: itemId,
           phase: typeof phase === 'string' ? phase : undefined,
@@ -351,6 +397,7 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
           kind: 'tool_call',
           logicalObservationKey: `codex|${context.rolloutIdentity}|${toolUseId}`,
           transcriptRecordKey: `codex|${context.rolloutIdentity}|${ordinal}`,
+        recordOrdinal: ordinal,
           recordByteStart,
           toolUseId,
           transcriptToolCallId: paired?.callId ?? undefined,

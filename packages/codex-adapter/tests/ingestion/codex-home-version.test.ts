@@ -48,12 +48,15 @@ describe('Codex home resolution (G1 §7 source-pinned rules)', () => {
 
   it('CODEX_HOME missing or pointing at a file degrades explicitly (Codex fatal-error contract)', () => {
     expect(resolveCodexHome({ CODEX_HOME: path.join(os.tmpdir(), 'pd-codex-home-does-not-exist') })).toMatchObject({ ok: false });
-    const file = path.join(os.tmpdir(), `pd-codex-home-file-${Date.now()}`);
-    fs.writeFileSync(file, 'x');
+    // Private mkdtemp directory; the "file" case writes INSIDE it, never a
+    // predictable name in the shared temp root (CodeQL insecure-temp-file).
+    const privateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-home-file-'));
     try {
+      const file = path.join(privateDir, 'not-a-directory');
+      fs.writeFileSync(file, 'x');
       expect(resolveCodexHome({ CODEX_HOME: file })).toMatchObject({ ok: false, reason: 'codex_home_not_directory' });
     } finally {
-      fs.rmSync(file, { force: true });
+      fs.rmSync(privateDir, { recursive: true, force: true });
     }
   });
 

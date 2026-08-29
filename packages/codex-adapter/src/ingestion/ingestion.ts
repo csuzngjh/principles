@@ -28,7 +28,7 @@ import {
 import { resolveCodexHome } from './codex-home.js';
 import { validateCodexTranscriptPath } from './transcript-path.js';
 import { classifyCodexVersion, CODEX_VERSION_NEXT_ACTION } from './codex-version.js';
-import { decodeTranscriptWindow, createNodeTranscriptPort, CODEX_INGESTION_MAX_BATCH_BYTES, type TranscriptPort } from './transcript-decoder.js';
+import { decodeTranscriptWindow, createNodeTranscriptPort, CODEX_INGESTION_MAX_BATCH_BYTES, TranscriptReplacedError, type TranscriptExpectedIdentity, type TranscriptPort } from './transcript-decoder.js';
 
 export interface CodexIngestionOptions {
   readonly workspaceDir: string;
@@ -149,6 +149,7 @@ function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: L
 interface TranscriptDeltaArgs {
   readonly fields: PayloadFields;
   readonly canonicalPath: string;
+  readonly identity: TranscriptExpectedIdentity;
   readonly rolloutIdentity: string;
   readonly workspaceDir: string;
   readonly env: { CODEX_HOME?: string | undefined };
@@ -156,7 +157,7 @@ interface TranscriptDeltaArgs {
   readonly port: TranscriptPort;
 }
 
-function ingestTranscriptDelta({ fields, canonicalPath, rolloutIdentity, workspaceDir, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
+function ingestTranscriptDelta({ fields, canonicalPath, identity, rolloutIdentity, workspaceDir, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
   const checkpoint = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity });
   if (checkpoint !== null && !('byteOffset' in checkpoint) && 'ok' in checkpoint && checkpoint.ok === false) {
     return { status: 'degraded', reason: checkpoint.reason, nextAction: checkpoint.nextAction, warnings: [] };
@@ -166,8 +167,13 @@ function ingestTranscriptDelta({ fields, canonicalPath, rolloutIdentity, workspa
 
   let window;
   try {
-    window = port.read(canonicalPath, offset, CODEX_INGESTION_MAX_BATCH_BYTES);
+    // Post-open revalidation (SPEC §9): the port must prove the opened
+    // object still carries the identity the validator approved.
+    window = port.read({ canonicalPath, offset, maxBytes: CODEX_INGESTION_MAX_BATCH_BYTES, expectedIdentity: identity });
   } catch (error) {
+    if (error instanceof TranscriptReplacedError) {
+      return { status: 'degraded', reason: 'transcript_replaced', nextAction: 'the transcript changed identity after validation (replacement or symlink swap); refusing to read — the next Stop revalidates the current file.', warnings: [] };
+    }
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { status: 'degraded', reason: `transcript_read_failed:${detail}`, nextAction: 'verify the transcript file still exists and is a regular file inside the Codex sessions root.', warnings: [] };
   }
@@ -292,6 +298,7 @@ export function ingestCodexConversation(rawPayload: unknown, kind: HostEventKind
   return ingestTranscriptDelta({
     fields,
     canonicalPath: validated.canonicalPath,
+    identity: validated.identity,
     rolloutIdentity: validated.rolloutIdentity,
     workspaceDir: options.workspaceDir,
     env: options.env ?? {},
