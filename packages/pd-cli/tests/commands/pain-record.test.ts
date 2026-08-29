@@ -55,6 +55,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     agentId: 'main',
   }),
   isRuntimeConfigError: vi.fn().mockReturnValue(false),
+  isBuiltinPiAiProvider: vi.fn().mockReturnValue(true),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   isFeatureEnabled: vi.fn().mockReturnValue(false),
 }));
@@ -76,6 +77,7 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
 }));
 
 import { handlePainRecord } from '../../src/commands/pain-record.js';
+import { isBuiltinPiAiProvider } from '@principles/core/runtime-v2';
 import type { PainToPrincipleOutput, PainToPrincipleInput, FailureCategory } from '@principles/core/runtime-v2';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -475,6 +477,30 @@ describe('pd pain record', () => {
     expect(errorSpy).not.toHaveBeenCalled();
 
     logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // 9. PRI-621 PR2: the provider catalog is queried through @principles/core.
+  // A provider outside the builtin pi-ai catalog without baseUrl is reported
+  // as missing configuration — it must not be silently accepted.
+  it('reports baseUrl as missing configuration for a non-builtin provider', async () => {
+    mockRecordPainResult = makeFailedResult({
+      failureCategory: 'config_missing' as FailureCategory,
+      message: 'provider not in builtin catalog',
+    });
+    vi.mocked(isBuiltinPiAiProvider).mockReturnValue(false);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain' });
+
+    const printed = errorSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(printed).toContain('Missing configuration:');
+    expect(printed).toContain('- baseUrl');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    vi.mocked(isBuiltinPiAiProvider).mockReturnValue(true);
     errorSpy.mockRestore();
     exitSpy.mockRestore();
   });

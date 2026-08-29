@@ -21,8 +21,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock @mariozechner/pi-ai
-vi.mock('@mariozechner/pi-ai', () => ({
+// Mock @earendil-works/pi-ai/compat
+vi.mock('@earendil-works/pi-ai/compat', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai', 'google']),
   complete: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock('../../store/event-emitter.js', () => ({
   storeEmitter: { emitTelemetry: vi.fn() },
 }));
 
-import { complete, completeSimple, getModel } from '@mariozechner/pi-ai';
+import { complete, completeSimple, getModel } from '@earendil-works/pi-ai/compat';
 import { storeEmitter } from '../../store/event-emitter.js';
 import { PiAiRuntimeAdapter } from '../pi-ai-runtime-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
