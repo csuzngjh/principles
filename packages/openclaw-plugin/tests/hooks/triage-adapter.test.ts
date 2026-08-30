@@ -27,7 +27,7 @@ import {
 
 describe('resolveSourceKind: tool failure path', () => {
   it('maps pain tool to agent_on_owner_request with openclaw_context_bound', () => {
-    const obs: RawObservation = { observedAt: 't', toolName: 'pain', failureSource: 'tool_failure', provenance: 'openclaw_context_bound' };
+    const obs: RawObservation = { observedAt: 't', toolName: 'pain', failureSource: 'tool_failure', provenance: 'host_context_bound' };
     expect(resolveSourceKind(obs)).toBe('agent_on_owner_request');
   });
 
@@ -37,7 +37,7 @@ describe('resolveSourceKind: tool failure path', () => {
   });
 
   it('maps skill:pain to agent_on_owner_request with openclaw_context_bound', () => {
-    expect(resolveSourceKind({ observedAt: 't', toolName: 'skill:pain', failureSource: 'tool_failure', provenance: 'openclaw_context_bound' })).toBe('agent_on_owner_request');
+    expect(resolveSourceKind({ observedAt: 't', toolName: 'skill:pain', failureSource: 'tool_failure', provenance: 'host_context_bound' })).toBe('agent_on_owner_request');
   });
 
   it('maps dispatch_error to dispatch_error', () => {
@@ -156,8 +156,8 @@ describe('buildToolFailureObservation', () => {
   });
 
   it('preserves provenance', () => {
-    const obs = buildToolFailureObservation({ toolName: 'pain', error: 'fail', exitCode: 1, provenance: 'openclaw_context_bound' });
-    expect(obs.provenance).toBe('openclaw_context_bound');
+    const obs = buildToolFailureObservation({ toolName: 'pain', error: 'fail', exitCode: 1, provenance: 'host_context_bound' });
+    expect(obs.provenance).toBe('host_context_bound');
     expect(resolveSourceKind(obs)).toBe('agent_on_owner_request');
   });
 });

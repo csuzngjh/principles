@@ -3,17 +3,38 @@ import {
   evaluateAdmission,
   evaluateCandidateAdmissions,
   evaluateCandidateAdmissionFromRecord,
+  normalizePainProvenance,
   ADMISSION_CONFIDENCE_THRESHOLD,
 } from '../admission-gate.js';
 import type { AdmissionGateInput } from '../admission-gate.js';
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+
+describe('normalizePainProvenance (SPEC §12 read-side normalization)', () => {
+  it('accepts the current provenance values unchanged', () => {
+    expect(normalizePainProvenance('host_context_bound')).toBe('host_context_bound');
+    expect(normalizePainProvenance('owner_reported_no_host_trace')).toBe('owner_reported_no_host_trace');
+    expect(normalizePainProvenance('automatic_hook')).toBe('automatic_hook');
+  });
+
+  it('normalizes the legacy openclaw_context_bound spelling to host_context_bound', () => {
+    expect(normalizePainProvenance('openclaw_context_bound')).toBe('host_context_bound');
+  });
+
+  it('returns undefined for unknown or malformed values instead of guessing', () => {
+    expect(normalizePainProvenance('openai_context_bound')).toBeUndefined();
+    expect(normalizePainProvenance('')).toBeUndefined();
+    expect(normalizePainProvenance(123)).toBeUndefined();
+    expect(normalizePainProvenance(null)).toBeUndefined();
+    expect(normalizePainProvenance(undefined)).toBeUndefined();
+  });
+});
 
 const makeInput = (overrides: Partial<AdmissionGateInput> = {}): AdmissionGateInput => ({
   recommendationKind: 'principle',
   confidence: 0.8,
   evidenceCount: 2,
   inputEvidenceCount: 2,
-  provenance: 'openclaw_context_bound',
+  provenance: 'host_context_bound',
   ...overrides,
 });
 
@@ -106,7 +127,7 @@ describe('evaluateCandidateAdmissions', () => {
       { candidateId: 'c-3', recommendationKind: 'rule' as const },
     ];
     const output = makeDiagnosticianOutput({ confidence: 0.8 });
-    const results = evaluateCandidateAdmissions(candidates, output, { provenance: 'openclaw_context_bound', inputEvidenceCount: 2 });
+    const results = evaluateCandidateAdmissions(candidates, output, { provenance: 'host_context_bound', inputEvidenceCount: 2 });
 
     expect(results).toHaveLength(3);
     const admitted = results.find((r) => r.candidateId === 'c-1');
@@ -248,7 +269,7 @@ describe('PRI-345: input-evidence hard gate', () => {
         { sourceRef: 'fabricated-3', note: 'not real evidence' },
       ],
     });
-    const results = evaluateCandidateAdmissions(candidates, output, { provenance: 'openclaw_context_bound', inputEvidenceCount: 0 });
+    const results = evaluateCandidateAdmissions(candidates, output, { provenance: 'host_context_bound', inputEvidenceCount: 0 });
 
     expect(results).toHaveLength(1);
     expect(results[0]?.admission.decision).toBe('needs_evidence');
@@ -268,7 +289,7 @@ describe('PRI-345: input-evidence hard gate', () => {
   // 用例 C（owner 手动豁免 — 非 owner provenance 被拦）
   it('gates openclaw_context_bound when inputEvidenceCount=0', () => {
     const result = evaluateAdmission(
-      makeInput({ inputEvidenceCount: 0, provenance: 'openclaw_context_bound', confidence: 0.9, evidenceCount: 3 }),
+      makeInput({ inputEvidenceCount: 0, provenance: 'host_context_bound', confidence: 0.9, evidenceCount: 3 }),
     );
     expect(result.decision).toBe('needs_evidence');
     expect(result.reason).toBe('input_evidence_empty');
@@ -286,7 +307,7 @@ describe('PRI-345: input-evidence hard gate', () => {
   // Defer still takes priority over input evidence gate
   it('defer priority over input_evidence_empty', () => {
     const result = evaluateAdmission(
-      makeInput({ recommendationKind: 'defer', inputEvidenceCount: 0, provenance: 'openclaw_context_bound' }),
+      makeInput({ recommendationKind: 'defer', inputEvidenceCount: 0, provenance: 'host_context_bound' }),
     );
     expect(result.decision).toBe('deferred');
     expect(result.reason).toBe('recommendation_kind_defer_not_actionable');

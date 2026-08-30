@@ -19,9 +19,9 @@
  * | Site                     | painId format                    | provenance                | evidence | traceId |
  * |--------------------------|----------------------------------|---------------------------|----------|---------|
  * | after-tool-call-helpers  | pain_${ts}_${hash.slice(0,8)}    | 'automatic_hook'          | yes      | yes     |
- * | prompt.ts (GFI)          | empathy_gfi_${ts}                | 'openclaw_context_bound'  | yes      | no      |
- * | prompt.ts (observer)     | empathy_gfi_${ts}                | 'openclaw_context_bound'  | yes      | no      |
- * | llm.ts                   | llm_${ts}                        | 'openclaw_context_bound'  | yes      | no      |
+ * | prompt.ts (GFI)          | empathy_gfi_${ts}                | 'host_context_bound'  | yes      | no      |
+ * | prompt.ts (observer)     | empathy_gfi_${ts}                | 'host_context_bound'  | yes      | no      |
+ * | llm.ts                   | llm_${ts}                        | 'host_context_bound'  | yes      | no      |
  * | gate-block-helper        | gate_${ts}_${random}             | MISSING                   | MISSING  | MISSING |
  *
  * ERR refs:
@@ -147,7 +147,7 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
     });
 
     it('sets provenance to "openclaw_context_bound"', () => {
-      expect(source).toMatch(/provenance:\s*'openclaw_context_bound'/);
+      expect(source).toMatch(/provenance:\s*'host_context_bound'/);
     });
 
     it('sets painType to "user_frustration" (as const)', () => {

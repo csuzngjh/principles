@@ -13,6 +13,8 @@ import {
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 
 const WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace']);
+/** Shared with the governance admission path so both gate tool failures identically. */
+export const PRODUCTION_WRITE_TOOLS: ReadonlySet<string> = WRITE_TOOLS;
 const MAX_PREVIEW = 500;
 const PAIN_COOLDOWN_WINDOW_MS = 15 * 60 * 1000;
 const cooldowns = new Map<string, number>();
@@ -45,6 +47,17 @@ interface NormalizedOutcome {
   result: unknown;
 }
 
+/** Structural input accepted by the canonical derivations (HostEvent satisfies it without a cast). */
+export interface ProductionToolEventFields {
+  workspaceDir: string;
+  sessionId: string;
+  turnId?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  toolOutput?: unknown;
+  source: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -54,8 +67,9 @@ function field(value: unknown, key: string): unknown {
   return Object.getOwnPropertyDescriptor(value, key)?.value;
 }
 
-function normalizeOutcome(event: HostEvent): NormalizedOutcome {
-  const envelope = event.context.toolOutput;
+function normalizeOutcome(event: Pick<HostEvent, 'context'> | ProductionToolEventFields): NormalizedOutcome {
+  const context = 'context' in event ? event.context : event;
+  const envelope = context.toolOutput;
   const result = field(envelope, 'result') ?? envelope;
   const errorValue = field(envelope, 'error');
   const resultExit = field(result, 'exitCode');
@@ -68,7 +82,7 @@ function normalizeOutcome(event: HostEvent): NormalizedOutcome {
     exitCode,
     ...(error ? { error: error.slice(0, MAX_PREVIEW) } : {}),
     ...(typeof durationValue === 'number' && Number.isFinite(durationValue) && durationValue >= 0 ? { durationMs: durationValue } : {}),
-    params: event.context.toolInput ?? {},
+    params: context.toolInput ?? {},
     result,
   };
 }
@@ -132,17 +146,28 @@ function preview(value: unknown): string | null {
   }
 }
 
-function ids(input: { event: HostEvent; outcome: NormalizedOutcome; sanitizedParams: Record<string, unknown>; canonicalEventId?: string }): { eventId: string; painId: string } {
-  const { event, outcome, sanitizedParams, canonicalEventId } = input;
+interface IdentityInput {
+  workspaceDir: string;
+  sessionId: string;
+  turnId?: string;
+  toolName?: string;
+  source: string;
+  canonicalEventId?: string;
+  outcome: NormalizedOutcome;
+  sanitizedParams: Record<string, unknown>;
+}
+
+function ids(input: IdentityInput): { eventId: string; painId: string } {
+  const { outcome, sanitizedParams, canonicalEventId } = input;
   const canonical = stable({
-    workspaceDir: path.resolve(event.context.workspaceDir),
-    sessionId: event.context.sessionId,
-    turnId: event.context.turnId ?? null,
-    toolName: event.context.toolName,
-    source: event.source,
+    workspaceDir: path.resolve(input.workspaceDir),
+    sessionId: input.sessionId,
+    turnId: input.turnId ?? null,
+    toolName: input.toolName,
+    source: input.source,
     suppliedEventId: canonicalEventId ?? null,
     params: sanitizedParams,
-    result: sanitizeValue(outcome.result, 0, event.context.workspaceDir),
+    result: sanitizeValue(outcome.result, 0, input.workspaceDir),
     error: outcome.error ?? null,
     exitCode: outcome.exitCode,
     failure: outcome.failure,
@@ -150,6 +175,74 @@ function ids(input: { event: HostEvent; outcome: NormalizedOutcome; sanitizedPar
   const digest = createHash('sha256').update(canonical).digest('hex');
   return { eventId: `host_${digest}`, painId: `pain_host_${digest}` };
 }
+
+export interface DerivedToolPainIdentity {
+  eventId: string;
+  painId: string;
+  outcome: NormalizedOutcome;
+  sanitizedParams: Record<string, unknown>;
+  paramsJson: string;
+  resultPreview: string | null;
+}
+
+/**
+ * The canonical tool-pain identity derivation, exposed for the governance
+ * admission path (Codex Governance Closure SPEC §10): the same normalized
+ * fields fed to the live production handler derive the same deterministic
+ * `pain_host_<sha256>` id, so live and observation-delivered admissions of one
+ * tool call converge on one canonical pain.
+ */
+export function deriveProductionToolPainIdentity(fields: ProductionToolEventFields & { canonicalEventId?: string }): DerivedToolPainIdentity {
+  const outcome = normalizeOutcome(fields);
+  const sanitizedParams = sanitizeToolParams(outcome.params, fields.workspaceDir);
+  const { eventId, painId } = ids({
+    workspaceDir: fields.workspaceDir,
+    sessionId: fields.sessionId,
+    ...(fields.turnId !== undefined ? { turnId: fields.turnId } : {}),
+    ...(fields.toolName !== undefined ? { toolName: fields.toolName } : {}),
+    source: fields.source,
+    ...(fields.canonicalEventId !== undefined ? { canonicalEventId: fields.canonicalEventId } : {}),
+    outcome,
+    sanitizedParams,
+  });
+  return {
+    eventId,
+    painId,
+    outcome,
+    sanitizedParams,
+    paramsJson: stable(sanitizedParams),
+    resultPreview: preview({ eventId, result: sanitizeValue(outcome.result, 0, fields.workspaceDir) }),
+  };
+}
+
+/**
+ * The canonical correction-pain identity derivation (SPEC §10/§12): deterministic,
+ * content-derived, retry-safe — replacing the legacy random `correction_<traceId>`
+ * ids. The identity is scoped by a stable OCCURRENCE identity supplied by the
+ * host (Codex hostTurnId / OpenClaw per-session turn index), so:
+ *   - a retry / live+transcript replay of the SAME real occurrence → same pain;
+ *   - the same correction text in a LATER real turn → a NEW pain occurrence.
+ * The raw text participates only in the in-memory hash — it is never persisted
+ * (the persistence boundary sanitizes it; see governance-signal-admission).
+ */
+export function deriveProductionCorrectionPainIdentity(fields: {
+  workspaceDir: string;
+  sessionId: string;
+  /** Stable occurrence identity of the real correction event (host turn id / per-session turn index). */
+  occurrenceId: string;
+  text: string;
+}): { eventId: string; painId: string } {
+  const canonical = stable({
+    workspaceDir: path.resolve(fields.workspaceDir),
+    sessionId: fields.sessionId,
+    occurrenceId: fields.occurrenceId,
+    source: 'user_correction',
+    text: fields.text,
+  });
+  const digest = createHash('sha256').update(canonical).digest('hex');
+  return { eventId: `host_${digest}`, painId: `pain_host_${digest}` };
+}
+
 
 const REQUIRED_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   sessions: { session_id: 'TEXT', started_at: 'TEXT', updated_at: 'TEXT' },
@@ -259,7 +352,16 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     const triage = evaluateTriage({ sourceKind, score: painScore, consecutiveErrors: enrichment.consecutiveErrors, isRisky });
     const trigger = evaluateTriggerController({ triageResult: triage, isOwnerManual: false, isCooldownActive: cooldownActive, isValid: true, score: painScore, sessionId: event.context.sessionId });
     const admitted = outcome.failure && WRITE_TOOLS.has(toolName) && trigger.shouldCreateDiagnosticTask;
-    const { eventId, painId } = ids({ event, outcome, sanitizedParams, ...(enrichment.eventId ? { canonicalEventId: enrichment.eventId } : {}) });
+    const { eventId, painId } = ids({
+      workspaceDir: event.context.workspaceDir,
+      sessionId: event.context.sessionId,
+      ...(event.context.turnId !== undefined ? { turnId: event.context.turnId } : {}),
+      ...(toolName !== undefined ? { toolName } : {}),
+      source: event.source,
+      ...(enrichment.eventId ? { canonicalEventId: enrichment.eventId } : {}),
+      outcome,
+      sanitizedParams,
+    });
     const createdAt = new Date().toISOString();
     const paramsJson = stable(sanitizedParams);
     const resultPreview = preview({ eventId, result: sanitizeValue(outcome.result, 0, event.context.workspaceDir) });
@@ -323,3 +425,4 @@ export function resetProductionPainCooldownForTest(): void {
 export function productionPainCooldownEntryCountForTest(): number {
   return cooldowns.size;
 }
+export { hasCanonicalSchema as hasProductionPainSchema };

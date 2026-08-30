@@ -45,11 +45,11 @@ describe('resolveSourceKind: per-kind mapping', () => {
   });
 
   it("pain tool + openclaw_context_bound → agent_on_owner_request", () => {
-    expect(resolveSourceKind(obs({ toolName: 'pain', provenance: 'openclaw_context_bound' }))).toBe('agent_on_owner_request');
+    expect(resolveSourceKind(obs({ toolName: 'pain', provenance: 'host_context_bound' }))).toBe('agent_on_owner_request');
   });
 
   it("skill:pain + openclaw_context_bound → agent_on_owner_request", () => {
-    expect(resolveSourceKind(obs({ toolName: 'skill:pain', provenance: 'openclaw_context_bound' }))).toBe('agent_on_owner_request');
+    expect(resolveSourceKind(obs({ toolName: 'skill:pain', provenance: 'host_context_bound' }))).toBe('agent_on_owner_request');
   });
 
   it('pain tool without openclaw_context_bound → owner_reported', () => {

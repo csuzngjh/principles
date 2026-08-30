@@ -63,6 +63,7 @@ export interface PainToPrincipleInput {
   taskId?: string;
   traceId?: string;
   provenance?: PainProvenance;
+  hostKind?: PainDetectedData['hostKind'];
   evidence?: PainEvidenceEntry[];
   recordObservability?: boolean;
 }
@@ -136,6 +137,7 @@ export class PainToPrincipleService {
       taskId,
       traceId: input.traceId,
       provenance: input.provenance,
+      hostKind: input.hostKind,
       evidence: input.evidence,
     };
 

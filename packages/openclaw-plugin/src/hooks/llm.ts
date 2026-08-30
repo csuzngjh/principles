@@ -352,7 +352,8 @@ export function handleLlmOutput(
                             score: painScore,
                             sessionId: ctx.sessionId || 'unknown',
                             agentId: ctx.agentId,
-                            provenance: 'openclaw_context_bound',
+                            provenance: 'host_context_bound',
+                            hostKind: 'openclaw',
                             evidence,
                         },
                     }, { recordObservability: false });
@@ -389,7 +390,8 @@ export function handleLlmOutput(
                         score: painScore,
                         sessionId: ctx.sessionId || 'unknown',
                         agentId: ctx.agentId,
-                        provenance: 'openclaw_context_bound',
+                        provenance: 'host_context_bound',
+                        hostKind: 'openclaw',
                         evidence,
                     },
                 }, { recordObservability: false });

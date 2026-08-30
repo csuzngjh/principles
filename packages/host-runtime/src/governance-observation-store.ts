@@ -306,6 +306,16 @@ function ensureGovernanceObservationSchema(db: Database.Database): void {
   })();
 }
 
+/**
+ * Shared with the sibling governance-signal-admission module (Slice B): both
+ * modules own separate governance_* tables in the same trajectory.db, and the
+ * admission/reconciliation paths read observation-owned tables (promotion
+ * tails). One open must make the whole governance schema ready.
+ */
+export function ensureGovernanceSchema(db: Database.Database): void {
+  ensureGovernanceObservationSchema(db);
+}
+
 interface OpenStoreResult {
   db: Database.Database;
   close(): void;

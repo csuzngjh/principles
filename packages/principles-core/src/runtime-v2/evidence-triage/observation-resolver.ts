@@ -77,7 +77,7 @@ export interface RawObservation {
   /** Whether this was a manual CLI entry */
   readonly isManualEntry?: boolean;
   /** Provenance: how trustworthy and context-bound is the observation */
-  readonly provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
+  readonly provenance?: 'host_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
 
   // ── Subagent Fields ───────────────────────────────────────────────────
   /** Whether this observation came from a subagent error */
@@ -145,9 +145,9 @@ export function resolveSourceKind(observation: RawObservation): SourceKind {
   // Priority 5: Manual pain tool
   if (toolName === 'pain' || toolName === 'skill:pain') {
     // Match resolveSourceKindFromToolFailure behavior:
-    // openclaw_context_bound → agent_on_owner_request
+    // host context bound (incl. legacy openclaw_context_bound) → agent_on_owner_request
     // other provenance or undefined → owner_reported
-    if (observation.provenance === 'openclaw_context_bound') {
+    if (observation.provenance === 'host_context_bound') {
       return 'agent_on_owner_request';
     }
     return 'owner_reported';

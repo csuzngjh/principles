@@ -25,7 +25,7 @@ describe('resolveSourceKind: agent_on_owner_request', () => {
       observedAt: new Date().toISOString(),
       toolName: 'pain',
       failureSource: 'tool_failure',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
     };
     expect(resolveSourceKind(obs)).toBe('agent_on_owner_request');
   });
@@ -35,7 +35,7 @@ describe('resolveSourceKind: agent_on_owner_request', () => {
       observedAt: new Date().toISOString(),
       toolName: 'skill:pain',
       failureSource: 'tool_failure',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
     };
     expect(resolveSourceKind(obs)).toBe('agent_on_owner_request');
   });

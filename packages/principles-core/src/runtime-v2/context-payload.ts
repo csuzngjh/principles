@@ -125,10 +125,12 @@ export const DiagnosisTargetSchema = Type.Object({
   painId: Type.Optional(Type.String({ minLength: 1 })),
   sessionIdHint: Type.Optional(Type.String({ minLength: 1 })),
   provenance: Type.Optional(Type.Union([
-    Type.Literal('openclaw_context_bound'),
+    Type.Literal('host_context_bound'),
     Type.Literal('owner_reported_no_host_trace'),
     Type.Literal('automatic_hook'),
   ])),
+  /** Codex Governance Closure SPEC §14: the diagnosis target names the evidence host. */
+  hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex')])),
   provenanceReason: Type.Optional(Type.String()),
   traceAvailability: Type.Optional(Type.Union([
     Type.Literal('available'),

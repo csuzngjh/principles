@@ -110,10 +110,75 @@ describe('SignalCollectorHost.detectSync', () => {
     // 异步,等微任务
     await flushAsync();
     expect(emitPainDetectedEvent).toHaveBeenCalled();
-    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { type: string; data: { source: string; score?: number; reason?: string } };
+    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { type: string; data: { source: string; score?: number; reason?: string; painId?: string; provenance?: string; hostKind?: string } };
     expect(callArg.type).toBe('pain_detected');
     expect(callArg.data.source).toBe('user_correction');
     expect(callArg.data.score).toBe(70);
+    // Codex Governance Closure Slice B convergence (ADR-0020 §11.4): the
+    // correction pain id is the content-derived canonical id from the single
+    // pain identity authority — never a random `correction_<traceId>`.
+    expect(callArg.data.painId).toMatch(/^pain_host_[0-9a-f]{64}$/);
+    expect(callArg.data.provenance).toBe('host_context_bound');
+    expect(callArg.data.hostKind).toBe('openclaw');
+  });
+
+  // ══ P1-3 (review round): correction OCCURRENCE identity ═══════════════════
+  // Same real occurrence retry → SAME canonical pain; same text in a later
+  // real turn → NEW pain occurrence (the "principle didn't take" signal must
+  // not be swallowed by permanent dedup).
+
+  it('P1-3 same occurrence retry (same session, same turnIndex) → same canonical pain id', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    host.detectSync('这是错的', 'sess-occ', 'user', { turnIndex: 10 });
+    await flushAsync();
+    const firstId = (vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { data: { painId: string } }).data.painId;
+    expect(firstId).toMatch(/^pain_host_[0-9a-f]{64}$/);
+    // Retry of the same occurrence (same turnIndex) → identical id.
+    vi.clearAllMocks();
+    host.detectSync('这是错的', 'sess-occ', 'user', { turnIndex: 10 });
+    await flushAsync();
+    const retryId = (vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { data: { painId: string } }).data.painId;
+    expect(retryId).toBe(firstId);
+  });
+
+  it('P1-3 same text in a LATER real turn → NEW pain occurrence', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    host.detectSync('这是错的', 'sess-occ2', 'user', { turnIndex: 10 });
+    await flushAsync();
+    const firstId = (vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { data: { painId: string } }).data.painId;
+    // The owner corrects the SAME mistake again at turn 37 — a real recurrence,
+    // not a retry: must produce a DIFFERENT canonical pain.
+    vi.clearAllMocks();
+    host.detectSync('这是错的', 'sess-occ2', 'user', { turnIndex: 37 });
+    await flushAsync();
+    const secondId = (vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { data: { painId: string } }).data.painId;
+    expect(secondId).not.toBe(firstId);
+  });
+
+  it('P1-3 async LLM-confirmed path preserves the occurrence identity', async () => {
+    const wctx = makeMockWctx();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({ is_feedback: true, type: 'correction', confidence: 0.9, reason: '明确纠错' }),
+    });
+    host.detectSync('这个不对', 'sess-async-occ', 'user', { turnIndex: 21 });
+    await flushAsync();
+    const confirmedId = (vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { data: { painId: string } }).data.painId;
+    // Same occurrence through the async path again → same id.
+    vi.clearAllMocks();
+    host.detectSync('这个不对', 'sess-async-occ', 'user', { turnIndex: 21 });
+    await flushAsync();
+    const retryId = (vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { data: { painId: string } }).data.painId;
+    expect(retryId).toBe(confirmedId);
+    // A different turn of the same text → different id.
+    vi.clearAllMocks();
+    host.detectSync('这个不对', 'sess-async-occ', 'user', { turnIndex: 22 });
+    await flushAsync();
+    const laterId = (vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { data: { painId: string } }).data.painId;
+    expect(laterId).not.toBe(confirmedId);
   });
 
   it('ambiguous term → writes user_turns correctionDetected=false, no immediate STRONG emit', () => {

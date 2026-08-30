@@ -980,7 +980,7 @@ describe('SqliteContextAssembler', () => {
       source: 'pain',
       severity: 'severe',
       sessionIdHint: sessionId,
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       provenanceReason: 'Pain reported from an OpenClaw host session',
     });
     const task = makeDiagnosticianTask({
@@ -1001,7 +1001,7 @@ describe('SqliteContextAssembler', () => {
 
       const payload = await f.assembler.assemble(task.taskId);
 
-      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+      expect(payload.diagnosisTarget.provenance).toBe('host_context_bound');
       expect(payload.diagnosisTarget.traceAvailability).toBe('available');
       expect(payload.fullTrace).not.toBeNull();
     } finally { cleanupFixture(f); }
@@ -1014,7 +1014,7 @@ describe('SqliteContextAssembler', () => {
       source: 'pain',
       severity: 'severe',
       sessionIdHint: 'sess-missing',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       provenanceReason: 'Pain reported from an OpenClaw host session',
     });
     const task = makeDiagnosticianTask({
@@ -1029,10 +1029,37 @@ describe('SqliteContextAssembler', () => {
     try {
       const payload = await f.assembler.assemble(task.taskId);
 
-      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+      expect(payload.diagnosisTarget.provenance).toBe('host_context_bound');
       expect(payload.diagnosisTarget.traceAvailability).toBe('unavailable_with_reason');
       expect(payload.diagnosisTarget.traceUnavailableDetail).toBeDefined();
       expect(payload.diagnosisTarget.traceUnavailableDetail?.reason).toContain('source trace could not be resolved');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('normalizes the legacy openclaw_context_bound provenance on read (SPEC §12)', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-prov-legacy',
+      reasonSummary: 'Legacy spelling row',
+      source: 'pain',
+      severity: 'severe',
+      sessionIdHint: 'sess-legacy',
+      provenance: 'openclaw_context_bound',
+    });
+    const legacyTask = makeDiagnosticianTask({
+      taskId: 'task_diag_prov_legacy',
+      sourcePainId: 'pain-prov-legacy',
+      sessionIdHint: 'sess-legacy',
+      reasonSummary: 'Legacy spelling row',
+    });
+    const legacyWithDj = { ...legacyTask, diagnosticJson: dj };
+    const tasks = new Map([[legacyWithDj.taskId, legacyWithDj]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      const payload = await f.assembler.assemble(legacyTask.taskId);
+      // The persisted legacy spelling is normalized at the read boundary —
+      // no history rewrite, no unknown-value guessing.
+      expect(payload.diagnosisTarget.provenance).toBe('host_context_bound');
+      expect(payload.diagnosisTarget.traceAvailability).toBe('unavailable_with_reason');
     } finally { cleanupFixture(f); }
   });
 
@@ -1161,7 +1188,7 @@ describe('SqliteContextAssembler', () => {
   });
 
   it('ignores inherited properties from prototype chain in diagnosticJson', async () => {
-    const dj = '{"sourcePainId":"own-pain-id","reasonSummary":"own-reason","provenance":"openclaw_context_bound"}';
+    const dj = '{"sourcePainId":"own-pain-id","reasonSummary":"own-reason","provenance":"host_context_bound"}';
     const task = makeDiagnosticianTask({
       taskId: 'task_inherited_props',
     });
@@ -1173,7 +1200,7 @@ describe('SqliteContextAssembler', () => {
 
       expect(payload.diagnosisTarget.painId).toBe('own-pain-id');
       expect(payload.diagnosisTarget.reasonSummary).toBe('own-reason');
-      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+      expect(payload.diagnosisTarget.provenance).toBe('host_context_bound');
     } finally { cleanupFixture(f); }
   });
 
@@ -1228,7 +1255,7 @@ describe('SqliteContextAssembler', () => {
       source: 'pain',
       severity: 'moderate',
       sessionIdHint: 'sess-wsdir',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       provenanceReason: 'Pain reported from an OpenClaw host session',
       workspaceDir: realWorkspaceDir,
     });
@@ -1483,7 +1510,7 @@ describe('SqliteContextAssembler', () => {
       source: 'pain',
       severity: 'severe',
       sessionIdHint: sessionId,
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       provenanceReason: 'Pain reported from an OpenClaw host session',
       workspaceDir: '/real/workspace/path',
     });
@@ -1518,7 +1545,7 @@ describe('SqliteContextAssembler', () => {
 
       // Core assertion: fullTrace is NOT null (PRI-349 workspaceDir fix enables cascade)
       expect(payload.fullTrace).not.toBeNull();
-      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+      expect(payload.diagnosisTarget.provenance).toBe('host_context_bound');
       expect(payload.diagnosisTarget.traceAvailability).toBe('available');
       // Validate fullTrace structure
       const ft = payload.fullTrace;

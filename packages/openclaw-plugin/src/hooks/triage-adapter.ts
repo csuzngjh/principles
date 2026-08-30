@@ -56,7 +56,7 @@ export function evaluateEvidenceTriage(
   score: number,
   options?: {
     isUnsafeHighConfidence?: boolean;
-    provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
+    provenance?: 'host_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
     consecutiveErrors?: number;
     isRisky?: boolean;
   },

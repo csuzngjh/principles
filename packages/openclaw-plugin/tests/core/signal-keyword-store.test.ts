@@ -38,7 +38,14 @@ import type { CorrectionKeywordStore } from '@principles/core/runtime-v2';
  */
 
 function makeTempStateDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'pd-signal-kw-'));
+  // Production layout: the keyword store lives at `{workspace}/.state/` (the
+  // shared host-neutral store resolves the state dir from the workspace dir).
+  // Keep the mock faithful to that layout so the delegation wrapper exercises
+  // the real path derivation.
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-signal-kw-'));
+  const stateDir = path.join(workspace, '.state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  return stateDir;
 }
 
 function makeStore(keywords: CorrectionKeywordStore['keywords']): CorrectionKeywordStore {

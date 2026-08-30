@@ -264,7 +264,7 @@ describe('PRI-357: Golden-path diagnostician E2E (real SQLite, no mock of assemb
       expect(payload.diagnosisTarget.source).toBe('pain');
       expect(payload.diagnosisTarget.severity).toBe('severe');
       // provenance must be set (openclaw_context_bound since we have sessionId)
-      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+      expect(payload.diagnosisTarget.provenance).toBe('host_context_bound');
       // sessionIdHint must propagate from diagnosticJson
       expect(payload.diagnosisTarget.sessionIdHint).toBe(GOLDEN_SESSION_ID);
     } finally {

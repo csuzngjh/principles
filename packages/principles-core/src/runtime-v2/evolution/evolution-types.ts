@@ -314,7 +314,8 @@ export interface EvolutionPainDetectedData {
   agentId?: string;
   taskId?: string;
   traceId?: string;
-  provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
+  provenance?: 'host_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
+  hostKind?: 'openclaw' | 'codex';
   evidence?: PainEvidenceEntry[];
 }
 
@@ -657,10 +658,12 @@ export const EvolutionPainDetectedDataSchema = Type.Object({
   taskId: Type.Optional(Type.String()),
   traceId: Type.Optional(Type.String()),
   provenance: Type.Optional(Type.Union([
-    Type.Literal('openclaw_context_bound'),
+    Type.Literal('host_context_bound'),
     Type.Literal('owner_reported_no_host_trace'),
     Type.Literal('automatic_hook'),
+    Type.Literal('openclaw_context_bound'),
   ])),
+  hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex')])),
 });
 export type EvolutionPainDetectedDataTB = Static<typeof EvolutionPainDetectedDataSchema>;
 

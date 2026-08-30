@@ -34,7 +34,7 @@ import { PDRuntimeError } from '../../error-categories.js';
 import { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '../../pain-signal-bridge.js';
 import { sanitizeString } from '../../evidence-sanitizer.js';
 
-const PAIN_PROVENANCE_VALUES = ['openclaw_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const;
+const PAIN_PROVENANCE_VALUES = ['host_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -42,6 +42,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isPainProvenance(value: unknown): value is (typeof PAIN_PROVENANCE_VALUES)[number] {
   return typeof value === 'string' && (PAIN_PROVENANCE_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * Read-side provenance normalization (SPEC §12): persisted diagnosticJson may
+ * carry the legacy `openclaw_context_bound` spelling; normalize to the current
+ * value without rewriting history.
+ */
+function normalizedProvenance(dt: DiagnosticianTaskRecord): (typeof PAIN_PROVENANCE_VALUES)[number] | undefined {
+  if (isPainProvenance(dt.provenance)) return dt.provenance;
+  if (dt.provenance === 'openclaw_context_bound') return 'host_context_bound';
+  return undefined;
 }
 
 // ── SqliteContextAssembler ──
@@ -99,7 +110,8 @@ export class SqliteContextAssembler implements ContextAssembler {
       severity: dt.severity || undefined,
       painId: dt.sourcePainId || undefined,
       sessionIdHint: dt.sessionIdHint || undefined,
-      provenance: dt.provenance || undefined,
+      provenance: normalizedProvenance(dt) || undefined,
+      hostKind: dt.hostKind,
       provenanceReason: dt.provenanceReason || undefined,
       evidence: dt.evidence,
     };
@@ -154,12 +166,12 @@ export class SqliteContextAssembler implements ContextAssembler {
     if (diagnosisTarget.traceAvailability === undefined) {
       if (fullTrace !== null) {
         diagnosisTarget.traceAvailability = 'available';
-      } else if (dt.provenance === 'openclaw_context_bound') {
+      } else if (dt.provenance === 'openclaw_context_bound' || dt.provenance === 'host_context_bound') {
         diagnosisTarget.traceAvailability = 'unavailable_with_reason';
         if (!diagnosisTarget.traceUnavailableDetail) {
           diagnosisTarget.traceUnavailableDetail = {
             reason: 'Context-bound pain but source trace could not be resolved',
-            nextAction: 'Check sessionIdHint matches an active OpenClaw session with recorded trajectory',
+            nextAction: 'Check sessionIdHint matches an active host session with recorded trajectory',
           };
         }
       } else if (dt.provenance === 'automatic_hook' || dt.provenance === 'owner_reported_no_host_trace') {
@@ -402,7 +414,13 @@ export class SqliteContextAssembler implements ContextAssembler {
             sessionIdHint: SqliteContextAssembler.extractStringField(parsed, 'sessionIdHint'),
             agentIdHint: SqliteContextAssembler.extractStringField(parsed, 'agentIdHint'),
             workspaceDir: SqliteContextAssembler.extractStringField(parsed, 'workspaceDir'),
-            provenance: Object.hasOwn(parsed, 'provenance') && isPainProvenance(parsed.provenance) ? parsed.provenance : undefined,
+            provenance: Object.hasOwn(parsed, 'provenance') && (isPainProvenance(parsed.provenance) || parsed.provenance === 'openclaw_context_bound')
+              ? (isPainProvenance(parsed.provenance) ? parsed.provenance : 'host_context_bound')
+              : undefined,
+            hostKind: SqliteContextAssembler.extractStringField(parsed, 'hostKind') === 'openclaw'
+              || SqliteContextAssembler.extractStringField(parsed, 'hostKind') === 'codex'
+              ? SqliteContextAssembler.extractStringField(parsed, 'hostKind') as 'openclaw' | 'codex'
+              : undefined,
             provenanceReason: SqliteContextAssembler.extractStringField(parsed, 'provenanceReason'),
             evidence: SqliteContextAssembler.extractEvidence(parsed),
           };
@@ -429,6 +447,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       sessionIdHint: extra.sessionIdHint ?? (base as DiagnosticianTaskRecord).sessionIdHint,
       agentIdHint: extra.agentIdHint ?? (base as DiagnosticianTaskRecord).agentIdHint,
       provenance: extra.provenance,
+      hostKind: extra.hostKind,
       provenanceReason: extra.provenanceReason,
       evidence: extra.evidence,
     };

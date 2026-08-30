@@ -29,6 +29,11 @@ import {
   type SignalCollectorConfig,
   type SignalCollectorOutput,
 } from '@principles/core/runtime-v2';
+import {
+  GOVERNANCE_STRONG_PAIN_SCORE,
+  GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,
+  deriveProductionCorrectionPainIdentity,
+} from '@principles/host-runtime';
 import { createHash } from 'node:crypto';
 import { emitPainDetectedEvent } from '../hooks/pain.js';
 import { trackFriction } from './session-tracker.js';
@@ -49,8 +54,10 @@ export const DEFAULT_SIGNAL_CONFIG: SignalCollectorConfig = {
   enableLlmStage: true,
   llmTimeoutMs: 30_000,
   promptTemplate: '',
-  strongPainScore: 70,
-  strongRateLimitPerHour: 5,
+  // Shared with the host-neutral governance admission constants (SPEC §12):
+  // one score/rate-limit truth for OpenClaw and Codex.
+  strongPainScore: GOVERNANCE_STRONG_PAIN_SCORE,
+  strongRateLimitPerHour: GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,
 };
 
 /**
@@ -95,6 +102,8 @@ interface PendingSignal {
   output: SignalCollectorOutput;   // Stage1 待 LLM 确认的候选 (needsLlmConfirmation=true)
   sessionId: string;
   text: string;
+  /** Stable occurrence identity for correction dedup (ADR-0020 §11.4). */
+  occurrenceId: string;
   traceId: string;
   /** Stage1 扫描时的词库快照(异步路径复用同一份,避免检测期间词库漂移) */
   storeSnapshot: UnifiedKeywordStore;
@@ -187,18 +196,19 @@ export class SignalCollectorHost {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_TRAJECTORY_FAIL', `recordUserTurn threw: ${String(e)}`);
     }
 
-    // 4. 高精度短语命中 (high, STRONG) → 直接走 STRONG 分流 (同步)
+    // 5. 高精度短语命中 (high, STRONG) → 直接走 STRONG 分流 (同步)
     if (output.isSignal && output.strength === 'STRONG' && output.matchedPrecision === 'high') {
-      this.routeStrong(output, sessionId);
+      this.routeStrong(output, sessionId, userMessage, this.resolveOccurrenceId(sessionId, userMessage, options));
       return;
     }
 
-    // 5. 普通歧义词 / 未命中 → 入队异步 LLM 确认 (不阻塞 prompt hook)
+    // 6. 普通歧义词 / 未命中 → 入队异步 LLM 确认 (不阻塞 prompt hook)
     if (output.needsLlmConfirmation) {
       const pending: PendingSignal = {
         output,
         sessionId,
         text: userMessage,
+        occurrenceId: this.resolveOccurrenceId(sessionId, userMessage, options),
         traceId: createTraceId(),
         storeSnapshot: store,
       };
@@ -267,7 +277,7 @@ export class SignalCollectorHost {
 
     // 3. 按 strength 分流
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
-      this.routeStrong(confirmed, pending.sessionId);
+      this.routeStrong(confirmed, pending.sessionId, pending.text, pending.occurrenceId);
     } else if (confirmed.isSignal && confirmed.strength === 'WEAK') {
       this.routeWeak(confirmed, pending.sessionId);
     }
@@ -275,10 +285,33 @@ export class SignalCollectorHost {
   }
 
   /**
+   * Stable occurrence identity for correction dedup (ADR-0020 §11.4): the real
+   * per-session turn index when the caller supplies one (parity with
+   * recordUserTurn), otherwise a content-derived legacy fallback. The fallback
+   * is a degradation — never silent (rc-9).
+   */
+  private resolveOccurrenceId(
+    sessionId: string,
+    userMessage: string,
+    options?: { referencesAssistantTurnId?: number | null; turnIndex?: number },
+  ): string {
+    if (options?.turnIndex !== undefined) {
+      return String(options.turnIndex);
+    }
+    SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_OCCURRENCE_ID_LEGACY',
+      'turnIndex not provided; correction occurrence identity degraded to content hash');
+    return 'legacy:' + createHash('sha256').update(sessionId + ':' + userMessage).digest('hex').slice(0, 16);
+  }
+
+  /**
    * STRONG 分流 → emitPainDetectedEvent (修断裂 ③)。
    * 带 STRONG rate limit 门控 (spec §7.2):单 session 每小时上限 strongRateLimitPerHour。
+   *
+   * Codex Governance Closure Slice B 收敛 (ADR-0020 §11.4):pain id 走
+   * production-pain-evidence 的内容派生 canonicalization(同一 pain identity
+   * 权威),不再铸造随机 `correction_<traceId>`;trace id 降级为 correlation 字段。
    */
-  private routeStrong(output: SignalCollectorOutput, sessionId: string): void {
+  private routeStrong(output: SignalCollectorOutput, sessionId: string, text: string, occurrenceId: string): void {
     if (!this.tryConsumeRateLimit(sessionId)) {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_STRONG_RATE_LIMITED',
         'STRONG signal suppressed by rate limit');  // 不记录 sessionId(隐私,CodeRabbit #2)
@@ -290,6 +323,17 @@ export class SignalCollectorHost {
         ? `User correction detected: ${output.matchedTerms.join(', ')}`
         : 'User correction detected');
 
+    // 内容派生 canonical pain id:同一 workspace+session 的同一 occurrence
+    // (turnIndex / legacy 内容哈希)重试/重投递只会得到同一个 id,由
+    // pain_events.canonical_pain_id 唯一索引兜底;同一段文本的后续真实 turn
+    // 因 occurrenceId 不同而成为新的 pain。
+    const { painId } = deriveProductionCorrectionPainIdentity({
+      workspaceDir: this.wctx.workspaceDir,
+      sessionId,
+      occurrenceId,
+      text,
+    });
+
     // emitPainDetectedEvent 是 async,但同步路径不能 await (会阻塞 prompt hook)。
     // 这里 fire-and-forget,失败 catch (不 throw,不阻断用户消息处理)。
     void emitPainDetectedEvent(
@@ -298,14 +342,16 @@ export class SignalCollectorHost {
         ts: new Date().toISOString(),
         type: 'pain_detected',
         data: {
-          painId: `correction_${createTraceId()}`,  // 唯一 ID,避免同毫秒碰撞(CodeRabbit #3)
+          painId,
           painType: 'user_frustration',
           source: 'user_correction',          // Layer 2 强信号 (spec §6.1)
           reason,
           score: this.config.strongPainScore, // STRONG_PAIN_SCORE 默认 70
           sessionId,
           agentId: 'main',
-          provenance: 'openclaw_context_bound',
+          traceId: createTraceId(),           // correlation only — never dedup identity (ADR-0020 §11.4)
+          provenance: 'host_context_bound',
+          hostKind: 'openclaw',
           evidence: [
             { sourceRef: 'signal_collector', note: output.evidence.excerpt },
           ],

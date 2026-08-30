@@ -181,7 +181,7 @@ interface BridgeWithPrivate {
   buildExistingResult(input: { painId: string; taskId: string }): Promise<PainSignalBridgeResult>;
 }
 
-const PROVENANCE: PainProvenance = 'openclaw_context_bound';
+const PROVENANCE: PainProvenance = 'host_context_bound';
 
 // ── onDiagnosisComplete() characterization ───────────────────────────────────
 

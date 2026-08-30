@@ -172,6 +172,7 @@ export async function emitPainDetectedEvent(
         taskId: painData.taskId,
         traceId: painData.traceId,
         provenance: painData.provenance,
+        hostKind: painData.hostKind,
         evidence: painData.evidence,
         recordObservability: recordObs,
       });
@@ -549,7 +550,8 @@ function handleManualPain(
           sessionId,
           traceId,
           agentId: ctx.agentId,
-          provenance: (sessionId && sessionId !== 'unknown') ? 'openclaw_context_bound' : 'owner_reported_no_host_trace',
+          provenance: (sessionId && sessionId !== 'unknown') ? 'host_context_bound' : 'owner_reported_no_host_trace',
+          hostKind: 'openclaw',
           evidence: buildTrajectoryEvidence(wctx, sessionId),
         },
       }, { recordObservability: false });
@@ -612,7 +614,8 @@ function handleManualPain(
         sessionId,
         traceId,
         agentId: ctx.agentId,
-        provenance: (sessionId && sessionId !== 'unknown') ? 'openclaw_context_bound' : 'owner_reported_no_host_trace',
+        provenance: (sessionId && sessionId !== 'unknown') ? 'host_context_bound' : 'owner_reported_no_host_trace',
+        hostKind: 'openclaw',
         evidence: buildTrajectoryEvidence(wctx, sessionId),
       },
     }, { recordObservability: false });

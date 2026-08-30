@@ -30,7 +30,7 @@ describe('isOwnerExplicitManual', () => {
   });
 
   it('returns false for openclaw_context_bound provenance', () => {
-    expect(isOwnerExplicitManual('openclaw_context_bound')).toBe(false);
+    expect(isOwnerExplicitManual('host_context_bound')).toBe(false);
   });
 
   it('returns false for automatic_hook provenance', () => {
@@ -47,7 +47,7 @@ describe('isOwnerExplicitManual', () => {
 
   it('is strict — only owner_reported_no_host_trace returns true', () => {
     const allProvenances: (PainProvenance | undefined)[] = [
-      'openclaw_context_bound',
+      'host_context_bound',
       'automatic_hook',
       undefined,
     ];
