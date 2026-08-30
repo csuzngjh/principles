@@ -37,10 +37,11 @@ import {
   type OwnerDecisionFactStore,
 } from '../owner-review.js';
 import { applyOwnerResolution, sanitizeOwnerInstruction } from '../owner-resolution-service.js';
-import { buildRepairRevisionCauseId, resolveRolloutRevisionTarget } from '../revision-reopen.js';
+import { buildRepairRevisionCauseId, reopenTaskForRevision, resolveRolloutRevisionTarget } from '../revision-reopen.js';
 import { decideInternalizationTransition, transitionInputFromTask } from '../internalization-transition-decision.js';
 import { ownerRetryNeedsHumanReviewTask } from '../owner-retry.js';
 import { DefaultEvaluatorValidator } from '../evaluator-output.js';
+import { deriveRequirementLedger } from '../evaluator-prompt-builder.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import { MemoryTaskStore } from '../../store/task/memory-task-store.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -220,7 +221,7 @@ describe('PRI-629 metadata: humanReviewContext + ownerResolutions round-trip', (
     const bad: OwnerResolutionRecord = {
       resolutionId: '', reviewKey: 'odk_k', action: 'accept_current', status: 'pending',
       ownerId: 'o', decidedAt: 't', sourceRunId: RUN_ID, sourceArtifactId: ARTIFACT_ID,
-      sourceArtifactHash: 'h', revisionEpoch: 0, machineDecision: 'needs_revision',
+      sourceArtifactHash: 'h', revisionEpoch: 0, machineDecision: 'needs_revision' as const,
     };
     const json = serializePITaskMetadata(baseMeta({ ownerResolutions: [bad] }));
     expect(parsePITaskMetadata(json)).toBeNull();
@@ -498,6 +499,51 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     expect(evalPi?.ownerResolutions?.[0]?.status).toBe('applied');
   });
 
+  it('P1 review: action outside allowedActions → not_decision_capable (server-side enforcement)', async () => {
+    // hard gate 失败 → capability 只允许 revise_once/reject_current
+    const gateStore = makeArtifactStoreWithDecisionArtifact({
+      taskId: EVAL_ID,
+      sourceArtificerArtifactId: 'pi-art-artificer-old',
+      evaluation: {
+        decision: 'needs_revision', summary: 's', score: 0.7,
+        strengths: [], concerns: ['c'], requiredChanges: ['fix'],
+      },
+      sourceTrace: { artificerArtifactId: 'pi-art-artificer-old' },
+      risks: [], generatedAt: 't',
+      adversarialResult: { passed: false, failedCases: [] },
+    });
+    const task = evaluatorNhrTask();
+    const sm = makeInMemoryStateManager([task, artificerTaskWithPayload(2)], gateStore);
+    const factStore: OwnerDecisionFactStore = {
+      getTask: (id) => sm.getTask(id),
+      listArtifactsBySourceTask: async (id) => (await gateStore.listBySourceTaskId(id)).map((a) => ({
+        artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
+      })),
+    };
+    const facts = await collectOwnerDecisionFacts(factStore, EVAL_ID);
+    const cap = deriveOwnerDecisionCapability(facts!);
+    expect(cap.allowedActions).not.toContain('accept_current');
+    const hash = facts!.decisionArtifact!.contentHash;
+    const outcome = await applyOwnerResolution(
+      { stateManager: sm as never, now: () => '2026-08-30T02:00:00.000Z' },
+      {
+        taskId: EVAL_ID,
+        request: {
+          action: 'accept_current', reviewKey: cap.reviewKey!,
+          expectedRevisionEpoch: 0, expectedSourceRunId: RUN_ID,
+          expectedSourceArtifactId: ARTIFACT_ID, expectedSourceArtifactHash: hash,
+        },
+        identity,
+      },
+    );
+    expect(outcome.status).toBe('not_decision_capable');
+    if (outcome.status === 'not_decision_capable') {
+      expect(outcome.blockers.some((b) => b.startsWith('action_not_permitted:'))).toBe(true);
+    }
+    // 任务未被重启
+    expect((await sm.getTask(EVAL_ID))?.status).toBe('needs_human_review');
+  });
+
   it('sanitizeOwnerInstruction bounds and strips control characters (§13)', () => {
     expect(sanitizeOwnerInstruction(undefined)).toBeUndefined();
     expect(sanitizeOwnerInstruction('   ')).toBeUndefined();
@@ -520,6 +566,43 @@ describe('PRI-629 Recover guard (SPEC §17/INV-06)', () => {
     });
     // 任务未被改动
     expect((await sm.getTask(EVAL_ID))?.status).toBe('needs_human_review');
+  });
+
+  it('P0 review: applied-only resolution + recovery NHR → Recover allowed (technical retry)', async () => {
+    const artifacts = makeArtifactStoreWithDecisionArtifact();
+    const appliedRes = {
+      resolutionId: 'ores_applied', reviewKey: 'odk_prev', action: 'accept_current' as const, status: 'applied' as const,
+      ownerId: 'o', decidedAt: 't', appliedAt: 't', sourceRunId: RUN_ID, sourceArtifactId: ARTIFACT_ID,
+      sourceArtifactHash: 'h', revisionEpoch: 0, machineDecision: 'needs_revision' as const,
+    };
+    const task = evaluatorNhrTask({ meta: baseMeta({
+      runnerDecision: 'needs_revision',
+      humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.rolloutDispatchNotWired),
+      ownerResolutions: [appliedRes],
+    }) });
+    const sm = makeInMemoryStateManager([task, artificerTaskWithPayload(2)], artifacts);
+    const outcome = await ownerRetryNeedsHumanReviewTask(sm as never, EVAL_ID);
+    expect(outcome.status).toBe('requeued');
+  });
+
+  it('P0 review: pending resolution + recovery NHR → Recover still refused (runner will apply)', async () => {
+    const artifacts = makeArtifactStoreWithDecisionArtifact();
+    const pendingRes = {
+      resolutionId: 'ores_pending', reviewKey: 'odk_prev', action: 'accept_current' as const, status: 'pending' as const,
+      ownerId: 'o', decidedAt: 't', sourceRunId: RUN_ID, sourceArtifactId: ARTIFACT_ID,
+      sourceArtifactHash: 'h', revisionEpoch: 0, machineDecision: 'needs_revision' as const,
+    };
+    const task = evaluatorNhrTask({ meta: baseMeta({
+      runnerDecision: 'needs_revision',
+      humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.rolloutDispatchNotWired),
+      ownerResolutions: [pendingRes],
+    }) });
+    const sm = makeInMemoryStateManager([task, artificerTaskWithPayload(2)], artifacts);
+    const outcome = await ownerRetryNeedsHumanReviewTask(sm as never, EVAL_ID);
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status === 'rejected') {
+      expect(outcome.reason).toBe('owner_decision_required');
+    }
   });
 
   it('ambiguous legacy (no decision facts) → recover remains allowed', async () => {
@@ -602,6 +685,69 @@ describe('PRI-629 transition arbitration consumes effective decision (§8)', () 
   });
 });
 
+describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, terminal residue)', () => {
+  it('same revisionCauseId on a terminal task → true no-op (revisionCount unchanged)', async () => {
+    // 模拟双写中断残留: metadata 已写 causeId/revisionCount,但 status 仍是 terminal
+    const crashed = {
+      ...artificerTaskWithPayload(2),
+      status: 'succeeded' as const,
+      diagnosticJson: createPITaskDiagnosticJson(baseMeta({
+        dependencyTaskIds: [SCRIBE_ID],
+        revisionCount: 1,
+        revisionCauseId: 'owner-res-ores_x',
+        repairPayload: budgetExhaustedRepairPayload(),
+      })),
+    };
+    const store = new MemoryTaskStore();
+    void store.createTask({ ...crashed });
+    const sm = {
+      async getTask(id: string) { return store.getTask(id); },
+      async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+      async updateTask(id: string, patch: Record<string, unknown>) { return store.updateTask(id, patch as never); },
+    };
+    const outcome = await reopenTaskForRevision(sm as never, ARTIFER_ID, {
+      revisionCauseId: 'owner-res-ores_x',
+      reason: 'owner_revise_once',
+    });
+    expect(outcome.ok).toBe(true);
+    const after = hydratePITaskRecord((await store.getTask(ARTIFER_ID))!);
+    expect(after?.revisionCount).toBe(1); // 不再 +1
+    expect(after?.revisionCauseId).toBe('owner-res-ores_x');
+  });
+
+  it('reopen is a SINGLE task-row mutation (status+attemptCount+metadata together)', async () => {
+    const store = new MemoryTaskStore();
+    void store.createTask({ ...artificerTaskWithPayload(2) });
+    const writes: Array<Record<string, unknown>> = [];
+    const sm = {
+      async getTask(id: string) { return store.getTask(id); },
+      async updateTaskDiagnosticJson(id: string, json: string) {
+        writes.push({ op: 'diagnostic_only' });
+        await store.updateTask(id, { diagnosticJson: json });
+      },
+      async updateTask(id: string, patch: Record<string, unknown>) {
+        writes.push(patch);
+        return store.updateTask(id, patch as never);
+      },
+    };
+    await reopenTaskForRevision(sm as never, ARTIFER_ID, {
+      revisionCauseId: 'owner-res-ores_y',
+      reason: 'owner_revise_once',
+    });
+    // 不允许"只写 metadata"的中间态 mutation
+    expect(writes.some((w) => 'op' in w)).toBe(false);
+    const mutating = writes.filter((w) => !('op' in w));
+    expect(mutating).toHaveLength(1);
+    const single = mutating[0]!;
+    expect(single.status).toBe('pending');
+    expect(single.attemptCount).toBe(0);
+    expect(typeof single.diagnosticJson).toBe('string');
+    const after = hydratePITaskRecord((await store.getTask(ARTIFER_ID))!);
+    expect(after?.status).toBe('pending');
+    expect(after?.revisionCount).toBe(1);
+  });
+});
+
 // ── N. rollout revision target routing (shared implementation) ────────────────
 
 describe('PRI-629 resolveRolloutRevisionTarget (§18 routing)', () => {
@@ -618,6 +764,46 @@ describe('PRI-629 resolveRolloutRevisionTarget (§18 routing)', () => {
     const getTask = async (id: string): Promise<TaskRecord | null> => allTasks.find((t) => t.taskId === id) ?? null;
     expect(await resolveRolloutRevisionTarget(getTask, 'rollout-1', 'code_tool_hook')).toEqual({ taskId: ARTIFER_ID, kind: 'artificer' });
     expect(await resolveRolloutRevisionTarget(getTask, 'rollout-1', 'prompt')).toEqual({ taskId: SCRIBE_ID, kind: 'scribe' });
+  });
+});
+
+describe('PRI-630 P1 review: deriveRequirementLedger (stable requirement identity across rounds)', () => {
+  it('round with echoed ledger: open items keep ids; non-exact restatement becomes new entry', () => {
+    const ledger = deriveRequirementLedger(
+      [
+        { id: 'req-1', statement: 'A', status: 'resolved' },
+        { id: 'req-2', statement: 'B', status: 'still_open' },
+      ],
+      ['B (reworded)', 'new blocker C'],
+    );
+    // 核心: req-2 保留原 id 与原 statement (身份不漂移);非精确改述作为
+    // 新条目 (可预测 — 文本模糊匹配在 LLM 改述上不可靠)
+    expect(ledger).toEqual([
+      { id: 'req-2', statement: 'B', status: 'still_open' },
+      { id: 'req-3', statement: 'B (reworded)', status: 'new' },
+      { id: 'req-4', statement: 'new blocker C', status: 'new' },
+    ]);
+  });
+
+  it('regressed items keep ids too; exact-duplicate restatements are not re-added', () => {
+    const ledger = deriveRequirementLedger(
+      [
+        { id: 'req-2', statement: 'fix timeout', status: 'regressed' },
+        { id: 'req-5', statement: 'add retry', status: 'still_open' },
+      ],
+      ['fix timeout', 'add retry backoff'],
+    );
+    expect(ledger.map((e) => e.id)).toEqual(['req-2', 'req-5', 'req-6']);
+    expect(ledger[2]).toEqual({ id: 'req-6', statement: 'add retry backoff', status: 'new' });
+    // 'fix timeout' 精确重复 carried → 不再作为新条目
+    expect(ledger.some((e) => e.statement === 'fix timeout' && e.status === 'new')).toBe(false);
+  });
+
+  it('no ledger (first repair round): sequential numbering from requiredChanges', () => {
+    expect(deriveRequirementLedger(undefined, ['X', 'Y'])).toEqual([
+      { id: 'req-1', statement: 'X', status: 'new' },
+      { id: 'req-2', statement: 'Y', status: 'new' },
+    ]);
   });
 });
 
@@ -652,6 +838,47 @@ describe('PRI-630 evaluator convergence invariants', () => {
     };
     const result = await validator.validate(withStatuses, EVAL_ID);
     expect(result.valid).toBe(true);
+  });
+
+  it('P1 review: repair round without priorRequirementStatuses → rejected when convergence context provided', async () => {
+    const result = await validator.validate(baseOutput('needs_revision', ['fix']), EVAL_ID, undefined, {
+      expectedRequirementIds: ['req-1', 'req-2'],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('; ')).toContain('priorRequirementStatuses');
+  });
+
+  it('P1 review: partial coverage of expected requirement ids → rejected', async () => {
+    const out = {
+      ...baseOutput('needs_revision', ['fix']),
+      evaluation: {
+        ...baseOutput('needs_revision', ['fix']).evaluation,
+        priorRequirementStatuses: [{ id: 'req-1', status: 'resolved' as const }],
+      },
+    };
+    const result = await validator.validate(out, EVAL_ID, undefined, {
+      expectedRequirementIds: ['req-1', 'req-2'],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('; ')).toContain('req-2');
+  });
+
+  it('P1 review: full coverage of expected ids → valid; first round (no convergence) unaffected', async () => {
+    const out = {
+      ...baseOutput('needs_revision', ['fix']),
+      evaluation: {
+        ...baseOutput('needs_revision', ['fix']).evaluation,
+        priorRequirementStatuses: [
+          { id: 'req-1', status: 'resolved' as const },
+          { id: 'req-2', status: 'still_open' as const },
+        ],
+      },
+    };
+    expect((await validator.validate(out, EVAL_ID, undefined, {
+      expectedRequirementIds: ['req-1', 'req-2'],
+    })).valid).toBe(true);
+    // 第一轮: 未提供 convergence 上下文 → 无 priorRequirementStatuses 也合法
+    expect((await validator.validate(baseOutput('needs_revision', ['fix']), EVAL_ID)).valid).toBe(true);
   });
 
   it('malformed priorRequirementStatuses rejected (rc-1/rc-4)', async () => {

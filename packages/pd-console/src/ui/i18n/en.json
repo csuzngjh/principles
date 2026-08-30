@@ -284,7 +284,11 @@
         "resolved": "Resolution recorded.",
         "staleError": "The facts of this item changed (a new evaluation may exist). Your decision was NOT applied — refresh and decide again.",
         "alreadyResolved": "This decision was already handled; no repeat action needed.",
-        "actionFailed": "Action failed, please retry later."
+        "actionFailed": "Action failed, please retry later.",
+        "approvalHint": "The deployment approval for this principle is still waiting in the approval queue.",
+        "rulecodeHint": "This rule is in shadow activation and needs a decision in activation management.",
+        "goApprovalsCta": "Go to deployment approvals",
+        "goActivationCta": "Go to activation management"
       }
     },
     "pain": {

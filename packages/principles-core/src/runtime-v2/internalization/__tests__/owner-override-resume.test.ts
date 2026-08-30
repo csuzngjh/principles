@@ -288,6 +288,19 @@ describe('PRI-629 rollout owner override resume (INV-08)', () => {
     expect((await h.stateManager.getTask(ROLLOUT_ID))?.status).toBe('succeeded');
   });
 
+  it('P0 review: accept downstream dispatch refusal → recovery NHR but resolution APPLIED (no dead-end)', async () => {
+    const h = rolloutHarness(resolution('accept_current', 'approve_rollout', 'pending'), 'refused');
+    const result = await h.runner.run(ROLLOUT_ID);
+    expect(result.status).toBe('succeeded');
+    expect(h.startRun).not.toHaveBeenCalled();
+    // 任务进入 recovery 类 NHR (dispatch 拒绝是技术故障)
+    const after = hydratePITaskRecord((await h.stateManager.getTask(ROLLOUT_ID))!);
+    expect(after?.status).toBe('needs_human_review');
+    expect(after?.humanReviewContext?.reasonCode).toContain('rollout_dispatch');
+    // P0 核心: Owner 裁决已被执行 — resolution 必须标 applied,不得停留 pending
+    expect(after?.ownerResolutions?.[0]?.status).toBe('applied');
+  });
+
   it('reject_current: no dispatch, terminal, machine verdict preserved', async () => {
     const h = rolloutHarness(resolution('reject_current', 'reject', 'pending'), 'activated');
     const result = await h.runner.run(ROLLOUT_ID);

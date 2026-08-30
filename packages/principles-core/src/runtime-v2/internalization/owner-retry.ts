@@ -21,7 +21,7 @@ import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } 
 import {
   collectOwnerDecisionFacts,
   deriveOwnerDecisionCapability,
-  findOwnerResolutionForCurrentEpoch,
+  findPendingOwnerResolutionForCurrentEpoch,
 } from './owner-review.js';
 import { factStoreFromStateManager } from './owner-resolution-service.js';
 
@@ -84,7 +84,11 @@ export async function ownerRetryNeedsHumanReviewTask(
   const facts = await collectOwnerDecisionFacts(factStoreFromStateManager(stateManager), taskId);
   if (facts) {
     const capability = deriveOwnerDecisionCapability(facts);
-    if (capability.eligible || findOwnerResolutionForCurrentEpoch(facts.task)) {
+    // P0 评审修复: 只拒 pending resolution（等待 runner 应用，此时 Recover
+    // 会与之竞争）。applied resolution 的下游 recovery NHR 必须保持 Recover
+    // 出口——resume 门会基于 applied override 确定性重放，否则任务死胡同
+    // （Focus 不显示决策、Recover 又被拒）。
+    if (capability.eligible || findPendingOwnerResolutionForCurrentEpoch(facts.task)) {
       return {
         status: 'rejected',
         taskKind: task.taskKind,

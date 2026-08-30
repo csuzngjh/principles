@@ -77,6 +77,15 @@ export interface EvaluatorEvaluation {
   readonly requiredChanges: readonly string[];
   /** PRI-630: 上轮需求的逐条核销 (仅有上轮上下文时合法;首轮省略) */
   readonly priorRequirementStatuses?: readonly PriorRequirementStatusEntry[];
+  /**
+   * PRI-630 P1 评审修复: 输入需求的 ledger echo ({id, statement, status}) —
+   * 下一轮上下文的身份载体,保证 requirement id 跨轮稳定。
+   */
+  readonly requirementLedger?: readonly {
+    readonly id: string;
+    readonly statement: string;
+    readonly status: PriorRequirementStatus;
+  }[];
 }
 
 export interface EvaluatorSourceTrace {
@@ -149,6 +158,16 @@ export const PriorRequirementStatusEntrySchema = Type.Object({
   ]),
 });
 
+export const RequirementLedgerEntrySchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  statement: Type.String({ minLength: 1 }),
+  status: Type.Union([
+    Type.Literal('resolved'),
+    Type.Literal('still_open'),
+    Type.Literal('regressed'),
+  ]),
+});
+
 export const EvaluatorEvaluationSchema = Type.Object({
   decision: Type.Union([
     Type.Literal('approved'),
@@ -161,6 +180,7 @@ export const EvaluatorEvaluationSchema = Type.Object({
   concerns: Type.Array(Type.String()),
   requiredChanges: Type.Array(Type.String()),
   priorRequirementStatuses: Type.Optional(Type.Array(PriorRequirementStatusEntrySchema)),
+  requirementLedger: Type.Optional(Type.Array(RequirementLedgerEntrySchema)),
 });
 
 export const EvaluatorSourceTraceSchema = Type.Object({
@@ -357,12 +377,17 @@ export function isEvaluatorOutputV2(output: unknown): output is EvaluatorOutputV
 }
 
 export interface EvaluatorValidator {
-  validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string): Promise<EvaluatorValidationResult>;
+  validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string, convergence?: EvaluatorConvergenceContext): Promise<EvaluatorValidationResult>;
+}
+
+export interface EvaluatorConvergenceContext {
+  /** 修复轮 (previousEvaluation 存在) 必须逐条核销的 requirement ids */
+  readonly expectedRequirementIds?: readonly string[];
 }
 
 export class DefaultEvaluatorValidator implements EvaluatorValidator {
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string): Promise<EvaluatorValidationResult> {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this, @typescript-eslint/max-params -- 4th param is the PRI-630 convergence context (mirrors EvaluatorValidator interface); a params object would break existing call sites
+  async validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string, convergence?: EvaluatorConvergenceContext): Promise<EvaluatorValidationResult> {
     const errors: string[] = [];
 
     if (!isRecord(output)) {
@@ -421,6 +446,29 @@ export class DefaultEvaluatorValidator implements EvaluatorValidator {
           }
         }
       }
+      // PRI-630 P1 评审修复: requirementLedger 结构校验 (id/statement 非空,
+      // status 枚举;『new』是上下文构建侧的状态,evaluator 输出不含)
+      if (Object.hasOwn(ev, 'requirementLedger') && ev.requirementLedger !== undefined) {
+        if (!Array.isArray(ev.requirementLedger)) {
+          errors.push('evaluation.requirementLedger must be an array');
+        } else {
+          for (const entry of ev.requirementLedger) {
+            if (!isRecord(entry)) {
+              errors.push('evaluation.requirementLedger entries must be objects');
+              break;
+            }
+            if (typeof entry.id !== 'string' || entry.id.trim() === '') {
+              errors.push('evaluation.requirementLedger entries must have non-empty id');
+            }
+            if (typeof entry.statement !== 'string' || entry.statement.trim() === '') {
+              errors.push('evaluation.requirementLedger entries must have non-empty statement');
+            }
+            if (entry.status !== 'resolved' && entry.status !== 'still_open' && entry.status !== 'regressed') {
+              errors.push(`evaluation.requirementLedger status must be resolved/still_open/regressed, got ${String(entry.status)}`);
+            }
+          }
+        }
+      }
     }
 
     if (!Object.hasOwn(output, 'sourceTrace') || !isRecord(output.sourceTrace)) {
@@ -471,6 +519,27 @@ export class DefaultEvaluatorValidator implements EvaluatorValidator {
     }
     if (Object.hasOwn(output, 'adversarialResult')) {
       errors.push(...validateAdversarialResult(output.adversarialResult));
+    }
+
+    // PRI-630 P1 评审修复: 修复轮必须逐条核销上轮全部 requirement ids —
+    // 不再仅靠 prompt 约束,runner 把上下文 ids 传入做完整覆盖校验。
+    const expectedIds = convergence?.expectedRequirementIds;
+    if (expectedIds && expectedIds.length > 0) {
+      const ev = (isRecord(output) && isRecord(output.evaluation)) ? output.evaluation : undefined;
+      const statuses = ev && Array.isArray(ev.priorRequirementStatuses) ? ev.priorRequirementStatuses : undefined;
+      if (!statuses) {
+        errors.push('evaluation.priorRequirementStatuses is required in a repair round (previous evaluation context was provided)');
+      } else {
+        const covered = new Set<string>();
+        for (const entry of statuses) {
+          if (isRecord(entry) && typeof entry.id === 'string') covered.add(entry.id);
+        }
+        for (const id of expectedIds) {
+          if (!covered.has(id)) {
+            errors.push(`evaluation.priorRequirementStatuses must cover prior requirement id ${id} (missing)`);
+          }
+        }
+      }
     }
 
     return errors.length > 0

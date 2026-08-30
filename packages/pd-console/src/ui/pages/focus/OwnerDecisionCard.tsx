@@ -7,6 +7,7 @@
  * durable facts — stale → 409,由本组件以可理解文案呈现并触发刷新。
  */
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { resolveOwnerDecision } from "../../api.js";
@@ -184,11 +185,34 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
           )}
         </>
       ) : (
-        <p className="mt-2 text-ink-4 text-[12px]">
-          {item.kind === "activation_approval"
-            ? t("pages.focus.ownerDecision.approvalHint")
-            : t("pages.focus.ownerDecision.rulecodeHint")}
-        </p>
+        <div className="mt-2">
+          <p className="text-ink-4 text-[12px] mb-2">
+            {item.kind === "activation_approval"
+              ? t("pages.focus.ownerDecision.approvalHint")
+              : t("pages.focus.ownerDecision.rulecodeHint")}
+          </p>
+          {/* P1 评审修复: 真实 CTA — 不再只渲染提示 (否则出现"有决策但不能处理") */}
+          {item.kind === "activation_approval" ? (
+            <button
+              type="button"
+              onClick={() => {
+                document.getElementById("section-pending")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+              data-testid={`go-approvals-${item.taskId}`}
+              className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors"
+            >
+              {t("pages.focus.ownerDecision.goApprovalsCta")}
+            </button>
+          ) : (
+            <Link
+              to="/activation"
+              data-testid={`go-activation-${item.taskId}`}
+              className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors"
+            >
+              {t("pages.focus.ownerDecision.goActivationCta")}
+            </Link>
+          )}
+        </div>
       )}
     </article>
   );

@@ -44,7 +44,7 @@ import {
   computeArtifactContentHash,
   type OwnerOverrideResumePlan,
 } from './owner-review.js';
-import { EvaluatorPromptBuilder, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
+import { EvaluatorPromptBuilder, deriveRequirementLedger, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
 import { reconcileLineageEcho, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -604,7 +604,22 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     };
     const concerns = toStringArray(ev.concerns, 10);
     const requiredChanges = toStringArray(ev.requiredChanges, 10);
-    const requirements = requiredChanges.map((statement, i) => ({ id: `req-${i + 1}`, statement }));
+    // PRI-630 P1 评审修复: 需求身份跨轮稳定 — 上轮 echo 的 requirementLedger
+    // (若有) 中 still_open/regressed 条目保留原 id 与原 statement;本轮
+    // requiredChanges 的非重述项作为新需求从最大序号递增。无 ledger 时
+    // (首个修复轮) 退回顺序编号。
+    let prevLedger: { id: string; statement: string; status: string }[] | undefined;
+    if (Array.isArray(ev.requirementLedger)) {
+      prevLedger = [];
+      for (const entry of ev.requirementLedger) {
+        if (entry === null || typeof entry !== 'object') continue;
+        const rec = entry as { id?: unknown; statement?: unknown; status?: unknown };
+        if (typeof rec.id !== 'string' || typeof rec.statement !== 'string') continue;
+        if (rec.status !== 'resolved' && rec.status !== 'still_open' && rec.status !== 'regressed') continue;
+        prevLedger.push({ id: rec.id, statement: rec.statement, status: rec.status });
+      }
+    }
+    const requirements = deriveRequirementLedger(prevLedger, requiredChanges);
     // 修复说明: 当前 (被修复) artificer artifact 的声明性摘要 — 有界提取
     let repairSummary: string | undefined;
     try {
@@ -673,7 +688,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   async validateOutput(output: unknown, taskId: string, context: EvaluatorContext): Promise<PeerRunnerValidationResult> {
-    const result = await this.validator.validate(output, taskId, context.sourceArtificerArtifactId ?? undefined);
+    // PRI-630 P1 评审修复: 修复轮把上轮 requirement ids 传入做完整覆盖校验
+    // (缺 priorRequirementStatuses 或漏 id → output_invalid),不再仅靠 prompt。
+    const convergence = context.previousEvaluation
+      ? { expectedRequirementIds: context.previousEvaluation.requirements.map((r) => r.id) }
+      : undefined;
+    const result = await this.validator.validate(output, taskId, context.sourceArtificerArtifactId ?? undefined, convergence);
 
     // Trust-boundary: validator is an injected dependency returning `string | undefined`
     // for errorCategory. We must not `as`-cast; validate at runtime (ERR-001, ERR-005).
@@ -1402,6 +1422,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       decisionOverride: overrideDecision === 'approved' ? 'approved' : 'rejected',
     });
     if (effectResult.kind === 'human_review') {
+      // P0 评审修复: 与 rollout 对称——override 驱动的 effects 落入 recovery
+      // NHR 时,Owner 裁决已被执行,resolution 标 applied (否则 pending 残留
+      // + Recover guard 拒绝 = 死胡同)。applied 后 Recover 放行,resume 门
+      // 确定性重放。
+      await markOwnerResolutionApplied({
+        updateDiagnosticJson: (tid: string, json: string) => this.stateManager.updateTaskDiagnosticJson(tid, json),
+        getTask: (tid: string) => this.stateManager.getTask(tid),
+        taskId,
+        resolutionId: resolution.resolutionId,
+        appliedAt: new Date().toISOString(),
+      });
       return effectResult.result;
     }
     await this.markCompletionIntentAppliedOrThrow(taskId);

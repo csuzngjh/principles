@@ -341,6 +341,24 @@ export function findOwnerResolutionForCurrentEpoch(piTask: PITaskRecord): OwnerR
   return latest;
 }
 
+/**
+ * P0 评审修复: 当前 epoch 内是否有 **pending**（等待 runner 应用）的 resolution。
+ * Recover guard 只拒 pending——applied resolution 表示裁决已被执行（即使下游
+ * 治理转移因技术原因落在 recovery NHR），此时 Recover 是合法的技术重试出口
+ * （resume 门会基于 applied override 确定性重放，不重问 LLM）。
+ */
+export function findPendingOwnerResolutionForCurrentEpoch(piTask: PITaskRecord): OwnerResolutionRecord | null {
+  const epoch = piTask.revisionCount ?? 0;
+  const resolutions = piTask.ownerResolutions;
+  if (!resolutions) return null;
+  let latest: OwnerResolutionRecord | null = null;
+  for (const r of resolutions) {
+    if (r.revisionEpoch !== epoch || r.status !== 'pending') continue;
+    if (!latest || r.decidedAt > latest.decidedAt) latest = r;
+  }
+  return latest;
+}
+
 /** 当前 epoch 内最新 applied verdict override（accept/reject）— resolver 的输入。 */
 export function findAppliedVerdictOverrideResolution(piTask: PITaskRecord): OwnerResolutionRecord | null {
   const epoch = piTask.revisionCount ?? 0;

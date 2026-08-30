@@ -273,6 +273,15 @@ export async function applyOwnerResolution(
   if (!capability.eligible && !existingForEpoch) {
     return { status: 'not_decision_capable', blockers: capability.blockers };
   }
+  // P1 评审修复 (SPEC §9): 服务端强制 allowedActions——UI 隐藏不够,直接调
+  // API 也不得提交 allowedActions 之外的动作 (治理状态完整性)。幂等重放
+  // (已存在同 reviewKey resolution) 不受此限——重复同一动作仍返回 resolved。
+  if (!existingForEpoch && !capability.allowedActions.includes(request.action)) {
+    return {
+      status: 'not_decision_capable',
+      blockers: [`action_not_permitted:${request.action}`],
+    };
+  }
 
   // 2) Stale 防护 (SPEC §6/§28): 服务端重读 durable facts,逐字段比对请求的
   //    expected* 断言 + 重算 reviewKey。任一变化 → 409 stale — Owner 只能

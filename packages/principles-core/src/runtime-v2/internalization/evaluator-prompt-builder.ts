@@ -41,6 +41,59 @@ export interface PreviousEvaluationContext {
   readonly repairSummary?: string;
 }
 
+/**
+ * PRI-630 P1 评审修复: 跨轮稳定的需求身份。
+ *
+ * 每轮 evaluator 在输出中 echo `evaluation.requirementLedger`
+ * ({id, statement, status} 覆盖其输入 requirements 的每一条)。下一轮的
+ * 上下文由此构建: still_open/regressed 的条目 **保留原 id 与原 statement**；
+ * 本轮 requiredChanges 中与 carried 陈述不同（规范化比较）的条目作为新
+ * 需求，id 从既有最大序号递增——修复此前"每轮把上轮 requiredChanges 重新
+ * 编号成 req-1..req-N"导致的身份漂移。
+ */
+export interface RequirementLedgerEntry {
+  readonly id: string;
+  readonly statement: string;
+  readonly status: 'resolved' | 'still_open' | 'regressed' | 'new';
+}
+
+function normalizeStatement(s: string): string {
+  return s.replace(/\s+/gu, ' ').trim().toLowerCase();
+}
+
+export function deriveRequirementLedger(
+  previousLedger: readonly { id: string; statement: string; status: string }[] | undefined,
+  requiredChanges: readonly string[],
+): RequirementLedgerEntry[] {
+  if (!previousLedger || previousLedger.length === 0) {
+    return requiredChanges.map((statement, i) => ({
+      id: `req-${i + 1}`,
+      statement,
+      status: 'new' as const,
+    }));
+  }
+  const carried = previousLedger
+    .filter((e) => e.status === 'still_open' || e.status === 'regressed')
+    .map((e) => ({ id: e.id, statement: e.statement, status: e.status as 'still_open' | 'regressed' }));
+  const carriedStatements = carried.map((e) => normalizeStatement(e.statement));
+  let maxSeq = 0;
+  for (const e of previousLedger) {
+    const m = /^req-(\d+)$/u.exec(e.id);
+    if (m) maxSeq = Math.max(maxSeq, Number.parseInt(m[1] ?? '0', 10));
+  }
+  // 去重只做规范化精确匹配 (可预测;文本模糊匹配在 LLM 改述上不可靠——
+  // 改述会产生一条重复的新条目,但 **不破坏身份稳定性**: 原 id 仍在 ledger
+  // 中且 evaluator 被指示按 still_open/regressed 构建新合同)。
+  const carriedSet = new Set(carriedStatements);
+  const fresh: RequirementLedgerEntry[] = [];
+  for (const statement of requiredChanges) {
+    if (carriedSet.has(normalizeStatement(statement))) continue;
+    maxSeq += 1;
+    fresh.push({ id: `req-${maxSeq}`, statement, status: 'new' });
+  }
+  return [...carried, ...fresh];
+}
+
 export interface HostToolCatalogFacts {
   readonly readOnlyTools: readonly string[];
   readonly writeTools: readonly string[];
@@ -78,7 +131,7 @@ When evaluating whether the dreamer's decision dimensions are covered in the scr
 These criteria apply identically to Stage 1 and Stage 2.
 
 CONVERGENCE CONTRACT (PRI-630 — applies whenever input.previousEvaluation is present):
-1. input.previousEvaluation.requirements lists the PRIOR round's review contract with stable ids (req-1..req-N). You MUST first verify each prior requirement against the CURRENT artifact state (not your memory of it), then emit evaluation.priorRequirementStatuses: an array of { id, status } where status is "resolved" | "still_open" | "regressed".
+1. input.previousEvaluation.requirements lists the PRIOR round's review contract with stable ids (req-1..req-N). You MUST first verify each prior requirement against the CURRENT artifact state (not your memory of it), then emit BOTH evaluation.priorRequirementStatuses ({ id, status } with status "resolved" | "still_open" | "regressed") AND evaluation.requirementLedger ({ id, statement, status } — an ECHO of every input requirement with its id, its statement AS GIVEN IN THE INPUT, and the status you assigned; never renumber or restate the ids).
 2. requiredChanges in THIS round MUST be built from requirements you marked still_open or regressed, plus — only if genuinely necessary — newly discovered blockers. A newly discovered blocker MUST include: the concrete evidence found in the current artifact, the blocking reason, and why it was not detectable in the previous round. If you cannot state that evidence, the item MUST go to concerns instead of requiredChanges.
 3. Do NOT re-introduce a requirement that the artifact already satisfies. Before listing any required change, check the current artifact content (goldenTraceCases, implementationCode, summaries) for an item that already covers it. Demanding something that is already present is a review defect.
 4. If every prior requirement is resolved, no new evidenced blocker exists, and no Part A dimension fails, you MUST set decision to "approved" — do not invent new open-ended polish requirements.
@@ -118,6 +171,7 @@ CONSTRAINTS:
 - evaluation.concerns MUST be an array of strings (can be empty)
 - evaluation.requiredChanges MUST be an array of strings; when decision is "needs_revision" it MUST contain at least one item (a revision demand without an actionable change is an invalid verdict)
 - evaluation.priorRequirementStatuses is REQUIRED when input.previousEvaluation is present: an array of { id, status } covering EVERY prior requirement id, where status is one of resolved, still_open, regressed; omit the field entirely on the first round (no prior evaluation)
+- evaluation.requirementLedger is REQUIRED under the same condition: an array of { id, statement, status } echoing EVERY input requirement (same ids and statements as given; status one of resolved, still_open, regressed); omit entirely on the first round
 - sourceArtificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId (non-empty string)
 - sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId
 - sourceTrace.scribeArtifactId is optional — include only if available from artificer artifact
@@ -129,7 +183,7 @@ CONSTRAINTS:
 - adversarialCases (when present) MUST be an array of 3-5 objects; omit entirely when passive review fails
 `;
 
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v2';
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v3';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this

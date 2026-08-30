@@ -66,12 +66,15 @@ export async function reopenTaskForRevision(
   if (!piTask) {
     return { ok: false, reason: 'invalid_task_metadata' };
   }
+  // P1 评审修复 (crash-window idempotency): 同一 causeKey 的重放对 **任何**
+  // 状态都是真 no-op——不再局限于 pending/retry_wait。此前 metadata+status
+  // 是两次写,两写之间 crash 会留下 "terminal 状态 + 已写 causeId" 的残留,
+  // 重放会再递增 revisionCount (破坏一次点击 = 一个 revision epoch)。
+  // 单行原子写 + 全状态同因 no-op 双保险。
+  if (options?.revisionCauseId && piTask.revisionCauseId === options.revisionCauseId) {
+    return { ok: true, reason: 'idempotent_replay_same_revision' };
+  }
   if (rawTask.status === 'pending' || rawTask.status === 'retry_wait') {
-    // P0-4 幂等: 同一 causeKey 重放 → 真 no-op (revisionCount 不再递增,
-    // 防止 consumer 重复周期烧穿 revision budget)
-    if (options?.revisionCauseId && piTask.revisionCauseId === options.revisionCauseId) {
-      return { ok: true, reason: 'idempotent_replay_same_revision' };
-    }
     // 不同 causeKey / 无 causeKey — 更新依赖/反馈后继续 (保证 revision 输入最新)
   } else if (rawTask.status !== 'succeeded' && rawTask.status !== 'needs_human_review') {
     return { ok: false, reason: `task_in_flight_${rawTask.status}` };
@@ -103,8 +106,10 @@ export async function reopenTaskForRevision(
     merged.inputArtifactRefs = [];
   }
 
-  await stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+  // P1 评审修复: 单次 task-row mutation——metadata + status + attemptCount
+  // 一个 UPDATE 落库,消除 "metadata 已写但 status 未翻" 的 crash 窗口。
   await stateManager.updateTask(taskId, {
+    diagnosticJson: createPITaskDiagnosticJson(merged),
     status: 'pending',
     attemptCount: 0,
   });

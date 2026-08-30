@@ -284,7 +284,11 @@
         "resolved": "裁决已记录。",
         "staleError": "该事项的事实已变化（可能有新的评估结果）。未执行你的决定，请刷新后重新裁决。",
         "alreadyResolved": "该决策已被处理过，无需重复操作。",
-        "actionFailed": "操作失败，请稍后重试。"
+        "actionFailed": "操作失败，请稍后重试。",
+        "approvalHint": "该原则的部署审批仍在审批队列中等待处理。",
+        "rulecodeHint": "该规则处于影子激活期，需要在激活管理中裁决。",
+        "goApprovalsCta": "前往部署审批",
+        "goActivationCta": "前往激活管理"
       }
     },
     "pain": {

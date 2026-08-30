@@ -1243,8 +1243,19 @@ export class RolloutReviewerRunner {
       overrideDecision === 'approve_rollout' ? 'approve_rollout' : 'reject',
     );
     if (effect.kind === 'human_review') {
-      // override 后效果仍进 NHR (如 candidate unresolved / dispatch refused) —
-      // 属 recovery 类,保守返回 succeeded-shaped 结果,任务留在 needs_human_review
+      // P0 评审修复: override 后效果仍进 NHR (candidate unresolved / dispatch
+      // refused) 属 recovery 类技术故障——但 Owner 裁决 **已被执行**,resolution
+      // 必须标 applied。若停留 pending,任务将死胡同: Focus 不再显示决策
+      // (recovery 原因),Recover 又被 guard 拒绝 (存在 resolution)。
+      // 标 applied 后: 现在及未来 Recover 放行 (只拒 pending),resume 门会
+      // 基于 applied override 确定性重放 dispatch,不重问 LLM。
+      await markOwnerResolutionApplied({
+        updateDiagnosticJson: (tid: string, json: string) => this.stateManager.updateTaskDiagnosticJson(tid, json),
+        getTask: (tid: string) => this.stateManager.getTask(tid),
+        taskId,
+        resolutionId: resolution.resolutionId,
+        appliedAt: new Date().toISOString(),
+      });
       this.phase = RunnerPhase.Completed;
       return RolloutReviewerRunner.buildResumeResult({
         taskId, runId: resolution.sourceRunId, artifactId, resultRef, output,
