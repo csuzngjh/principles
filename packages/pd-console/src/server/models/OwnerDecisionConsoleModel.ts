@@ -74,11 +74,8 @@ function rowToTaskRecord(row: Record<string, unknown>): TaskRecord | null {
     maxAttempts: typeof row.max_attempts === 'number' ? row.max_attempts : 3,
     createdAt: typeof row.created_at === 'string' ? row.created_at : '',
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
-    ...(typeof row.last_error === 'string' ? { lastError: row.last_error } : {}),
-    ...(typeof row.input_ref === 'string' ? { inputRef: row.input_ref } : {}),
-    ...(typeof row.result_ref === 'string' ? { resultRef: row.result_ref } : {}),
-    ...(typeof row.lease_owner === 'string' ? { leaseOwner: row.lease_owner } : {}),
-    ...(typeof row.lease_expires_at === 'string' ? { leaseExpiresAt: row.lease_expires_at } : {}),
+    // lastError (PDErrorCategory 联合) 与 lease/input/result 列为事实收集器
+    // 不需要的字段 — 不映射 (避免对未校验枚举的 as 断言)。
     ...(typeof row.diagnostic_json === 'string' ? { diagnosticJson: row.diagnostic_json } : {}),
   };
 }
