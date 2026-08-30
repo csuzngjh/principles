@@ -57,6 +57,17 @@ export interface EvaluatorAdversarialResult {
   readonly failedCases: readonly AdversarialFailedCase[];
 }
 
+/**
+ * PRI-630 收敛契约: 第二轮及之后,评估器必须对上轮 review contract 的每个
+ * 稳定需求 id 裁定 resolved / still_open / regressed。
+ */
+export type PriorRequirementStatus = 'resolved' | 'still_open' | 'regressed';
+
+export interface PriorRequirementStatusEntry {
+  readonly id: string;
+  readonly status: PriorRequirementStatus;
+}
+
 export interface EvaluatorEvaluation {
   readonly decision: 'approved' | 'needs_revision' | 'rejected';
   readonly summary: string;
@@ -64,6 +75,8 @@ export interface EvaluatorEvaluation {
   readonly strengths: readonly string[];
   readonly concerns: readonly string[];
   readonly requiredChanges: readonly string[];
+  /** PRI-630: 上轮需求的逐条核销 (仅有上轮上下文时合法;首轮省略) */
+  readonly priorRequirementStatuses?: readonly PriorRequirementStatusEntry[];
 }
 
 export interface EvaluatorSourceTrace {
@@ -127,6 +140,15 @@ export interface EvaluatorOutputV2 extends EvaluatorOutputV1 {
 
 export const EVALUATOR_DECISIONS = ['approved', 'needs_revision', 'rejected'] as const;
 
+export const PriorRequirementStatusEntrySchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  status: Type.Union([
+    Type.Literal('resolved'),
+    Type.Literal('still_open'),
+    Type.Literal('regressed'),
+  ]),
+});
+
 export const EvaluatorEvaluationSchema = Type.Object({
   decision: Type.Union([
     Type.Literal('approved'),
@@ -138,6 +160,7 @@ export const EvaluatorEvaluationSchema = Type.Object({
   strengths: Type.Array(Type.String()),
   concerns: Type.Array(Type.String()),
   requiredChanges: Type.Array(Type.String()),
+  priorRequirementStatuses: Type.Optional(Type.Array(PriorRequirementStatusEntrySchema)),
 });
 
 export const EvaluatorSourceTraceSchema = Type.Object({
@@ -374,6 +397,30 @@ export class DefaultEvaluatorValidator implements EvaluatorValidator {
       else if (!ev.concerns.every((e: unknown) => typeof e === 'string')) errors.push('evaluation.concerns must be an array of strings');
       if (!Object.hasOwn(ev, 'requiredChanges') || !Array.isArray(ev.requiredChanges)) errors.push('evaluation.requiredChanges must be an array');
       else if (!ev.requiredChanges.every((e: unknown) => typeof e === 'string')) errors.push('evaluation.requiredChanges must be an array of strings');
+      // PRI-630 (SPEC §18.4) schema invariant: needs_revision 必须携带至少一条
+      // 可执行修改 — 空清单的 revision 判定是裁决与依据脱节 (链 48371236 轮3)。
+      else if (ev.decision === 'needs_revision' && ev.requiredChanges.length === 0) {
+        errors.push('evaluation.requiredChanges must be non-empty when decision is needs_revision (PRI-630 convergence invariant)');
+      }
+      // PRI-630 (SPEC §18.2): 上轮需求核销 — 结构校验 + id/status 枚举
+      if (Object.hasOwn(ev, 'priorRequirementStatuses') && ev.priorRequirementStatuses !== undefined) {
+        if (!Array.isArray(ev.priorRequirementStatuses)) {
+          errors.push('evaluation.priorRequirementStatuses must be an array');
+        } else {
+          for (const entry of ev.priorRequirementStatuses) {
+            if (!isRecord(entry)) {
+              errors.push('evaluation.priorRequirementStatuses entries must be objects');
+              break;
+            }
+            if (typeof entry.id !== 'string' || entry.id.trim() === '') {
+              errors.push('evaluation.priorRequirementStatuses entries must have non-empty id');
+            }
+            if (entry.status !== 'resolved' && entry.status !== 'still_open' && entry.status !== 'regressed') {
+              errors.push(`evaluation.priorRequirementStatuses status must be resolved/still_open/regressed, got ${String(entry.status)}`);
+            }
+          }
+        }
+      }
     }
 
     if (!Object.hasOwn(output, 'sourceTrace') || !isRecord(output.sourceTrace)) {

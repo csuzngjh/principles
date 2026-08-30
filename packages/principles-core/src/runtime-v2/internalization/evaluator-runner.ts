@@ -582,7 +582,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return undefined;
     }
     if (typeof parsed !== 'object' || parsed === null) return undefined;
-    const {evaluation} = (parsed as Record<string, unknown>);
+    // runtime-contract-exempt: ERR-001 object-guarded unknown property extraction; typeof guard follows immediately
+    const {evaluation} = parsed as { evaluation?: unknown };
     if (typeof evaluation !== 'object' || evaluation === null) {
       this.emitEvent('previous_evaluation_context_degraded', taskId, {
         priorEvaluatorTaskId: priorTaskId,
@@ -609,9 +610,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     try {
       const art = JSON.parse(repairArtifactContentJson) as unknown;
       if (typeof art === 'object' && art !== null) {
-        const summary = (art as Record<string, unknown>).implementationSummary;
-        if (typeof summary === 'string' && summary.trim() !== '') {
-          repairSummary = summary.slice(0, 800);
+        // runtime-contract-exempt: ERR-001 object-guarded unknown property extraction; typeof guard follows immediately
+        const { implementationSummary } = art as { implementationSummary?: unknown };
+        if (typeof implementationSummary === 'string' && implementationSummary.trim() !== '') {
+          repairSummary = implementationSummary.slice(0, 800);
         }
       }
     } catch {

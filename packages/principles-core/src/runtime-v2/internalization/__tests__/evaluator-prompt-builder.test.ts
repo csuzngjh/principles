@@ -72,7 +72,7 @@ describe('EvaluatorPromptBuilder', () => {
   });
 
   it('promptContractVersion value is evaluator-output-v1.prompt.v1', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v1');
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v2');
   });
 
   it('score instruction says number not string/percentage', () => {

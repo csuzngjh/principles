@@ -55,6 +55,12 @@ export interface OwnerDecisionListResult {
 
 const GOVERNANCE_TASK_KINDS = new Set(['evaluator', 'rollout_reviewer']);
 
+/** tasks.status 合法值（PDTaskStatus）运行时守卫。 */
+const TASK_STATUSES = new Set(['pending', 'leased', 'succeeded', 'retry_wait', 'failed', 'needs_human_review']);
+function isTaskStatus(v: unknown): v is TaskRecord['status'] {
+  return typeof v === 'string' && TASK_STATUSES.has(v);
+}
+
 /** 行 → TaskRecord 的窄映射（tasks 表全部列；snake_case 键名转换）。 */
 function rowToTaskRecord(row: Record<string, unknown>): TaskRecord | null {
   if (typeof row.task_id !== 'string' || typeof row.task_kind !== 'string' || typeof row.status !== 'string') {
@@ -63,12 +69,12 @@ function rowToTaskRecord(row: Record<string, unknown>): TaskRecord | null {
   return {
     taskId: row.task_id,
     taskKind: row.task_kind,
-    status: row.status as TaskRecord['status'],
+    status: isTaskStatus(row.status) ? row.status : 'pending',
     attemptCount: typeof row.attempt_count === 'number' ? row.attempt_count : 0,
     maxAttempts: typeof row.max_attempts === 'number' ? row.max_attempts : 3,
     createdAt: typeof row.created_at === 'string' ? row.created_at : '',
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
-    ...(typeof row.last_error === 'string' ? { lastError: row.last_error as TaskRecord['lastError'] } : {}),
+    ...(typeof row.last_error === 'string' ? { lastError: row.last_error } : {}),
     ...(typeof row.input_ref === 'string' ? { inputRef: row.input_ref } : {}),
     ...(typeof row.result_ref === 'string' ? { resultRef: row.result_ref } : {}),
     ...(typeof row.lease_owner === 'string' ? { leaseOwner: row.lease_owner } : {}),
@@ -78,10 +84,16 @@ function rowToTaskRecord(row: Record<string, unknown>): TaskRecord | null {
 }
 
 /** 同一 readonly 连接上的 task 行读取闭包（依赖链遍历用）。 */
+/** DB 行守卫: 非空普通对象（列读取处再逐字段 typeof 校验）。 */
+function isRecordRow(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 function makeRowReader(db: { prepare: (sql: string) => { get: (id: string) => unknown } }) {
   const stmt = db.prepare('SELECT * FROM tasks WHERE task_id = ?');
   return (taskId: string): TaskRecord | null => {
-    const row = stmt.get(taskId) as Record<string, unknown> | undefined;
+    const row = stmt.get(taskId);
+    if (!isRecordRow(row)) return null;
     return row ? rowToTaskRecord(row) : null;
   };
 }
@@ -166,7 +178,7 @@ export class OwnerDecisionConsoleModel {
       try {
         nhrRows = db.prepare(
           `SELECT * FROM tasks WHERE status = 'needs_human_review' AND task_kind IN ('evaluator', 'rollout_reviewer')`,
-        ).all() as Record<string, unknown>[];
+        ).all().filter(isRecordRow);
       } catch {
         nhrRows = []; // tasks 表缺失（旧库）→ 无决策项
       }
@@ -207,7 +219,7 @@ export class OwnerDecisionConsoleModel {
           `SELECT activation_id, channel, activated_at FROM activations
            WHERE action = 'code_tool_hook_shadow_activate'
              AND promoted_at IS NULL AND deactivated_at IS NULL`,
-        ).all() as Record<string, unknown>[];
+        ).all().filter(isRecordRow);
         for (const row of shadowRows) {
           items.push({
             reviewKey: `rulecode:${String(row.activation_id ?? '')}`,
@@ -251,7 +263,7 @@ export class OwnerDecisionConsoleModel {
       try {
         rows = db.prepare(
           `SELECT * FROM tasks WHERE status = 'needs_human_review' AND task_kind IN ('evaluator', 'rollout_reviewer')`,
-        ).all() as Record<string, unknown>[];
+        ).all().filter(isRecordRow);
       } catch {
         return ids;
       }

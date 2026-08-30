@@ -205,9 +205,11 @@ export function detectHardGateFailureFromArtifact(contentJson: string): boolean 
   try {
     const parsed: unknown = JSON.parse(contentJson);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
-    const adv = (parsed as Record<string, unknown>).adversarialResult;
-    if (typeof adv !== 'object' || adv === null) return false;
-    const {passed} = (adv as Record<string, unknown>);
+    // runtime-contract-exempt: ERR-001 object-guarded unknown property extraction; the value is typeof-checked immediately below
+    const { adversarialResult } = parsed as { adversarialResult?: unknown };
+    if (typeof adversarialResult !== 'object' || adversarialResult === null) return false;
+    // runtime-contract-exempt: ERR-001 object-guarded unknown property extraction; the value is compared against false immediately
+    const { passed } = adversarialResult as { passed?: unknown };
     // passed 显式为 false 才是门失败；缺失/true/其它值不判失败
     return passed === false;
   } catch {

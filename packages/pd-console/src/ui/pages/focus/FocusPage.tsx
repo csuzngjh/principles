@@ -14,6 +14,7 @@ import {
   rejectApproval,
   editApproval,
   fetchAllActivations,
+  fetchOwnerDecisions,
 } from "../../api.js";
 import type {
   GovernanceQueueData,
@@ -23,6 +24,8 @@ import type {
   DegradedSignal,
   ActivationRecord,
 } from "../../api.js";
+import type { OwnerDecisionItemData } from "../../utils/validators.js";
+import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
 import { fetchGovernanceExperience } from "../../api.js";
 import type {
   GovernanceExperienceSnapshot,
@@ -990,6 +993,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const [groupedErrorReason, setGroupedErrorReason] = useState<string | null>(null);
   const [ruleCodeItems, setRuleCodeItems] = useState<ActivationRecord[]>([]);
   const [ruleCodeErrorReason, setRuleCodeErrorReason] = useState<string | null>(null);
+  // PRI-629: 统一 Owner Inbox — 两种模式都加载 (决策与治理摘要模式正交)
+  const [ownerDecisionItems, setOwnerDecisionItems] = useState<OwnerDecisionItemData[]>([]);
+  const [ownerDecisionError, setOwnerDecisionError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -1043,6 +1049,17 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     } else {
       setRuleCodeItems([]);
       setRuleCodeErrorReason(activationsResult.error);
+    }
+
+    // PRI-629: 统一 Owner Inbox (decision-capable NHR + approvals + rulecode)。
+    // 投影失败不阻塞页面 (rc-9 降级 — 显示原因,治理摘要仍可用)。
+    const decisionsResult = await fetchOwnerDecisions();
+    if (decisionsResult.success) {
+      setOwnerDecisionItems(decisionsResult.data.items);
+      setOwnerDecisionError(null);
+    } else {
+      setOwnerDecisionItems([]);
+      setOwnerDecisionError(decisionsResult.error ?? "Owner decisions unavailable");
     }
 
     setLoadingState("loaded");
@@ -1159,6 +1176,32 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         </div>
       </div>
       ) : null}
+
+      {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
+          N = 真实可执行决策数 (INV-01),不是 lifecycle/NHR/failed 计数。 */}
+      <section aria-label={t("pages.focus.ownerDecision.sectionTitle")} className="mb-7" data-testid="owner-decisions-section">
+        <div className="flex items-baseline gap-2 mb-3">
+          <SectionTitle>{t("pages.focus.ownerDecision.sectionTitle")}</SectionTitle>
+          <span className="font-mono text-ink-4 text-[12px]">
+            {ownerDecisionError !== null
+              ? t("pages.focus.ownerDecision.unavailable")
+              : `· ${ownerDecisionItems.length}`}
+          </span>
+        </div>
+        {ownerDecisionError !== null && (
+          <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerDecision.loadError")}</p>
+        )}
+        {ownerDecisionError === null && ownerDecisionItems.length === 0 && (
+          <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerDecision.empty")}</p>
+        )}
+        {ownerDecisionItems.map((item) => (
+          <OwnerDecisionCard
+            key={item.reviewKey}
+            item={item}
+            onResolved={() => { void loadData(); }}
+          />
+        ))}
+      </section>
 
       {/* Queue-derived widgets render only in legacy mode — in experience mode
           their inputs would be stale zeros, which would misinform (SPEC §14.2). */}

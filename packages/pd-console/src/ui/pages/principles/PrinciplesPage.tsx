@@ -20,7 +20,7 @@ import { enumLabel } from "../../utils/enum-labels.js";
 import { formatDate } from "../../utils/format-date.js";
 
 // ── Status types for the review page ────────────────────────────────────────
-type ReviewStatus = "pending" | "approved" | "rejected" | "parked";
+type ReviewStatus = "pending" | "candidate" | "approved" | "rejected" | "parked";
 
 // ── Merged principle + approval data ────────────────────────────────────────
 interface PrincipleCard {
@@ -55,13 +55,15 @@ function toReviewStatus(
   if (principleStatus === "active") return "approved";
   if (principleStatus === "archived") return "parked";
   if (principleStatus === "deprecated") return "rejected";
-  if (principleStatus === "probation") return "pending";
-  return "pending";
+  // PRI-629 INV-02: candidate/probation 是生命周期(内化进行中),不是"待你
+  // 审查"。真实 Owner 决策只在治理焦点 Owner Inbox 呈现。
+  return "candidate";
 }
 
 // ── Status visual mapping ───────────────────────────────────────────────────
 const STATUS_BORDER: Record<ReviewStatus, string> = {
   pending: "border-l-gov",
+  candidate: "border-l-ink-3",
   approved: "border-l-green",
   rejected: "border-l-danger",
   parked: "border-l-ink-3",
@@ -69,6 +71,7 @@ const STATUS_BORDER: Record<ReviewStatus, string> = {
 
 const STATUS_TEXT: Record<ReviewStatus, string> = {
   pending: "text-gov",
+  candidate: "text-ink-3",
   approved: "text-green",
   rejected: "text-danger",
   parked: "text-ink-3",
@@ -83,6 +86,7 @@ const CHANNEL_LABELS: Record<string, string> = {
 // ── PRI-558: timeline node fill + status-driven copy (theme tokens, dark-mode safe) ──
 const STATUS_DOT_BG: Record<ReviewStatus, string> = {
   pending: "bg-gov",
+  candidate: "bg-ink-3",
   approved: "bg-green",
   rejected: "bg-danger",
   parked: "bg-ink-3",
@@ -93,6 +97,7 @@ const STATUS_DOT_BG: Record<ReviewStatus, string> = {
 const GOV_DECISION: Record<ReviewStatus, { glyph: string; labelKey: string }> = {
   approved: { glyph: "✓", labelKey: "principles.govApproved" },
   pending: { glyph: "⏳", labelKey: "principles.govPending" },
+  candidate: { glyph: "○", labelKey: "principles.statusCandidate" },
   rejected: { glyph: "✗", labelKey: "principles.statusRejected" },
   parked: { glyph: "⏸", labelKey: "principles.statusParked" },
 };
@@ -100,6 +105,7 @@ const GOV_DECISION: Record<ReviewStatus, { glyph: string; labelKey: string }> = 
 const BLOCK_IMPACT_KEY: Record<ReviewStatus, string> = {
   approved: "principles.blockImpactActive",
   pending: "principles.blockImpactPending",
+  candidate: "principles.blockImpactPending",
   rejected: "principles.blockImpactRejected",
   parked: "principles.blockImpactParked",
 };
@@ -186,8 +192,9 @@ export function PrinciplesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
   const [sortBy, setSortBy] = useState<"updatedAt" | "createdAt">("updatedAt");
-  // PRI-330: Default to actionable filter
-  const [filterMode, setFilterMode] = useState<'actionable' | 'all'>('actionable');
+  // PRI-629 (INV-02): 默认展示全部 — candidate 是生命周期而非待办,
+  // "只看待决策"不再作为默认视图 (真实决策在治理焦点)。
+  const [filterMode, setFilterMode] = useState<'actionable' | 'all'>('all');
   const [categories, setCategories] = useState<Record<string, number> | undefined>();
 
   // Fetch data

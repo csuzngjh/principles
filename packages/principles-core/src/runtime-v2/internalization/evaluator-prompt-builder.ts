@@ -11,6 +11,39 @@ export interface EvaluatorPromptBuilderInput {
    * principle text the evaluator uses to judge intentConsistency / scopePrecision.
    */
   scribeArtifact?: unknown;
+  /**
+   * PRI-630 收敛契约: 上一轮评估上下文 (第二轮及之后注入)。requirements 携带
+   * 稳定 id (req-1..req-N);本轮必须先逐条裁定 resolved/still_open/regressed,
+   * 再决定是否新增 blocker (新 blocker 必须给 evidence,否则只能作为 concern)。
+   */
+  previousEvaluation?: PreviousEvaluationContext;
+  /**
+   * PRI-630 工具目录权威: runtime-authoritative host tool facts。存在时,
+   * 工具名合法性只以本目录为准;缺失时工具名差异最多作为 concern,
+   * 不得作为 hard blocker。
+   */
+  hostToolCatalog?: HostToolCatalogFacts;
+}
+
+export interface PriorRequirement {
+  readonly id: string;
+  readonly statement: string;
+}
+
+export interface PreviousEvaluationContext {
+  readonly decision: string;
+  readonly score: number;
+  readonly concerns: readonly string[];
+  readonly requirements: readonly PriorRequirement[];
+  /** 本轮是第几次修复 (1-based;由 dependency artificer 的 repairPayload 推出) */
+  readonly repairIteration: number;
+  /** 修复说明 (artificer 声称已完成的修改,供逐条核销) */
+  readonly repairSummary?: string;
+}
+
+export interface HostToolCatalogFacts {
+  readonly readOnlyTools: readonly string[];
+  readonly writeTools: readonly string[];
 }
 
 export interface EvaluatorPromptInput {
@@ -19,6 +52,8 @@ export interface EvaluatorPromptInput {
   sourceArtificerArtifactId: string;
   artificerArtifact: unknown;
   scribeArtifact?: unknown;
+  previousEvaluation?: PreviousEvaluationContext;
+  hostToolCatalog?: HostToolCatalogFacts;
   evaluatorInstruction: string;
   promptContractVersion: string;
 }
@@ -41,6 +76,15 @@ When evaluating whether the dreamer's decision dimensions are covered in the scr
 7. If a dimension's value was not injected (not in the available fields), do NOT judge it — it is outside scope.
 
 These criteria apply identically to Stage 1 and Stage 2.
+
+CONVERGENCE CONTRACT (PRI-630 — applies whenever input.previousEvaluation is present):
+1. input.previousEvaluation.requirements lists the PRIOR round's review contract with stable ids (req-1..req-N). You MUST first verify each prior requirement against the CURRENT artifact state (not your memory of it), then emit evaluation.priorRequirementStatuses: an array of { id, status } where status is "resolved" | "still_open" | "regressed".
+2. requiredChanges in THIS round MUST be built from requirements you marked still_open or regressed, plus — only if genuinely necessary — newly discovered blockers. A newly discovered blocker MUST include: the concrete evidence found in the current artifact, the blocking reason, and why it was not detectable in the previous round. If you cannot state that evidence, the item MUST go to concerns instead of requiredChanges.
+3. Do NOT re-introduce a requirement that the artifact already satisfies. Before listing any required change, check the current artifact content (goldenTraceCases, implementationCode, summaries) for an item that already covers it. Demanding something that is already present is a review defect.
+4. If every prior requirement is resolved, no new evidenced blocker exists, and no Part A dimension fails, you MUST set decision to "approved" — do not invent new open-ended polish requirements.
+
+TOOL CATALOG AUTHORITY (PRI-630 — applies whenever input.hostToolCatalog is present):
+Tool legality is judged ONLY against input.hostToolCatalog (readOnlyTools / writeTools). If a tool name appears in the catalog, it is a legitimate host tool — you MUST NOT flag it as a blocker for being a "non-standard name", regardless of your prior knowledge. The catalog is NOT exhaustive: a tool name absent from the catalog is not evidence of illegality either — tool-name spelling is never a blocker; only the tool BEHAVIOR described in the rule may be. When input.hostToolCatalog is ABSENT, you have NO authoritative tool knowledge: tool-name observations may appear in concerns at most, and MUST NOT become requiredChanges or affect the decision.
 
 PROTOCOL:
 1. Review the artificerArtifact to understand the proposed implementation plan
@@ -72,7 +116,8 @@ CONSTRAINTS:
 - evaluation.score MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
 - evaluation.strengths MUST be an array of strings (can be empty)
 - evaluation.concerns MUST be an array of strings (can be empty)
-- evaluation.requiredChanges MUST be an array of strings (can be empty)
+- evaluation.requiredChanges MUST be an array of strings; when decision is "needs_revision" it MUST contain at least one item (a revision demand without an actionable change is an invalid verdict)
+- evaluation.priorRequirementStatuses is REQUIRED when input.previousEvaluation is present: an array of { id, status } covering EVERY prior requirement id, where status is one of resolved, still_open, regressed; omit the field entirely on the first round (no prior evaluation)
 - sourceArtificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId (non-empty string)
 - sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId
 - sourceTrace.scribeArtifactId is optional — include only if available from artificer artifact
@@ -84,7 +129,7 @@ CONSTRAINTS:
 - adversarialCases (when present) MUST be an array of 3-5 objects; omit entirely when passive review fails
 `;
 
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v1';
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v2';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
@@ -95,6 +140,8 @@ export class EvaluatorPromptBuilder {
       sourceArtificerArtifactId: input.sourceArtificerArtifactId,
       artificerArtifact: input.artificerArtifact,
       scribeArtifact: input.scribeArtifact,
+      previousEvaluation: input.previousEvaluation,
+      hostToolCatalog: input.hostToolCatalog,
       evaluatorInstruction: EVALUATOR_PROTOCOL_INSTRUCTION,
       promptContractVersion: EVALUATOR_PROMPT_CONTRACT_VERSION,
     };
