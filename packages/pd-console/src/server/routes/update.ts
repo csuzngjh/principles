@@ -841,11 +841,9 @@ function ensureRuntimeResolutionLinks(layout: UpdateLayout): string | undefined 
       const pkgPath = path.join(componentDir, 'package.json');
       if (!fs.existsSync(pkgPath)) return {};
       const parsed: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      if (typeof parsed !== 'object' || parsed === null) return {};
-      const deps = (parsed as Record<string, unknown>).dependencies;
-      if (typeof deps !== 'object' || deps === null) return {};
+      if (!isRecord(parsed) || !isRecord(parsed.dependencies)) return {};
       const out: Record<string, string> = {};
-      for (const [name, ref] of Object.entries(deps as Record<string, unknown>)) {
+      for (const [name, ref] of Object.entries(parsed.dependencies)) {
         if (typeof ref === 'string') out[name] = ref;
       }
       return out;
