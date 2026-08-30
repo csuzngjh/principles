@@ -15,8 +15,7 @@
  */
 import {
   admitGovernanceSignals,
-  ensureGovernanceDiagnosticianTask,
-  promoteAdmittedGovernanceEvidence,
+  ensureGovernanceContinuation,
   type GovernanceSignalCandidate,
 } from '@principles/host-runtime';
 import type { GovernanceObservationInput } from '@principles/host-runtime';
@@ -131,9 +130,8 @@ export function buildTranscriptCandidates(observations: readonly GovernanceObser
 export async function runGovernanceAdmission(args: {
   workspaceDir: string;
   candidates: readonly GovernanceSignalCandidate[];
-  rolloutIdentity: string;
 }): Promise<GovernanceAdmissionRun> {
-  const { workspaceDir, candidates, rolloutIdentity } = args;
+  const { workspaceDir, candidates } = args;
   if (candidates.length === 0) return { degradations: [] };
   const degradations: GovernanceAdmissionDegradation[] = [];
   const push = (reason: string, nextAction: string): void => {
@@ -148,35 +146,14 @@ export async function runGovernanceAdmission(args: {
 
   for (const outcome of admitted.outcomes) {
     if (!('disposition' in outcome)) continue;
-    if (outcome.disposition === 'already_admitted' && outcome.diagnosticianTaskId === null) {
-      // Crash window (marker committed, task ensure lost): heal at delivery
-      // time instead of waiting for reconciliation.
-      const healed = await ensureGovernanceDiagnosticianTask({
-        workspaceDir,
-        logicalObservationKey: outcome.logicalObservationKey,
-        canonicalPainId: outcome.canonicalPainId,
-      });
-      if (!healed.ok) push(healed.reason, healed.nextAction);
-      continue;
-    }
-    if (outcome.disposition !== 'admitted') continue;
-    const ensured = await ensureGovernanceDiagnosticianTask({
+    if (outcome.disposition !== 'admitted' && outcome.disposition !== 'already_admitted') continue;
+    const cont = await ensureGovernanceContinuation({
       workspaceDir,
       logicalObservationKey: outcome.logicalObservationKey,
       canonicalPainId: outcome.canonicalPainId,
     });
-    if (!ensured.ok) {
-      push(ensured.reason, ensured.nextAction);
-      continue;
-    }
-    const promoted = promoteAdmittedGovernanceEvidence({
-      workspaceDir,
-      rolloutIdentity,
-      triggerLogicalKey: outcome.logicalObservationKey,
-      canonicalPainId: outcome.canonicalPainId,
-    });
-    if (!promoted.ok && promoted.reason !== 'rollout_not_found' && promoted.reason !== 'trigger_not_found') {
-      push(promoted.reason, promoted.nextAction);
+    if (!cont.ok) {
+      push(cont.reason, cont.nextAction);
     }
   }
   return { degradations };

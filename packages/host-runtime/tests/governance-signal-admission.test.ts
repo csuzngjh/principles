@@ -7,6 +7,7 @@ import {
   admitGovernanceSignals,
   buildSharedSeedKeywordStore,
   createSharedCorrectionKeywordStore,
+  ensureGovernanceContinuation,
   ensureGovernanceDiagnosticianTask,
   evaluateCorrectionSignal,
   GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,
@@ -14,6 +15,7 @@ import {
   type GovernanceCorrectionCandidate,
   type GovernanceToolFailureCandidate,
 } from '../src/governance-signal-admission.js';
+import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
 import { createProductionPainEvidenceHandler, deriveProductionCorrectionPainIdentity } from '../src/production-pain-evidence.js';
 import { invalidatePainSignalBridge } from '@principles/core/runtime-v2';
 
@@ -105,6 +107,34 @@ function admit(candidates: readonly (GovernanceCorrectionCandidate | GovernanceT
   return admitGovernanceSignals({ workspaceDir, candidates, now, keywordStore: buildSharedSeedKeywordStore() });
 }
 
+/**
+ * Slice A promotion substrate: ingest the rollout PLUS its triggering user turn
+ * so evidence promotion can succeed. promoteGovernanceEvidence requires BOTH
+ * the governance_rollouts row and the trigger observation row
+ * (`rollout_not_found` / `trigger_not_found` otherwise — SPEC §13 Case A/B/C).
+ */
+function ingestRollout(turnId: string): void {
+  ingestGovernanceObservations({
+    workspaceDir,
+    rollout: { hostKind: 'codex', rolloutIdentity: 'rollout-1', rootSessionId: 'root-session-1' },
+    observations: [
+      {
+        hostKind: 'codex',
+        rolloutIdentity: 'rollout-1',
+        rootSessionId: 'root-session-1',
+        hostTurnId: turnId,
+        kind: 'user_turn',
+        logicalObservationKey: `codex|rollout-1|${turnId}|user`,
+        visibleText: '不要自作主张,这是错的',
+        source: 'live_hook',
+        completeness: 'complete',
+        observedAt: NOW.toISOString(),
+      },
+    ],
+    now: NOW,
+  });
+}
+
 describe('shared correction detector (SPEC §12)', () => {
   it('classifies a real owner correction as a high-precision STRONG signal', () => {
     const detection = evaluateCorrectionSignal({
@@ -160,7 +190,8 @@ describe('correction admission → one canonical pain (SPEC §10/§12)', () => {
     const painId = outcome.canonicalPainId;
     expect(painId).toMatch(/^pain_host_[0-9a-f]{64}$/);
     // Deterministic identity: same fields → same id, independent of the module call.
-    const derived = deriveProductionCorrectionPainIdentity({ workspaceDir, sessionId: 'root-session-1', turnId: 'turn-1', text: correction().text });
+    // The canonical JSON carries `occurrenceId` (the host turn id, SPEC §10).
+    const derived = deriveProductionCorrectionPainIdentity({ workspaceDir, sessionId: 'root-session-1', occurrenceId: 'turn-1', text: correction().text });
     expect(derived.painId).toBe(painId);
     const rows = withTrajectory((db) => db.prepare('SELECT source, score, severity, origin, canonical_pain_id FROM pain_events').all());
     expect(rows).toHaveLength(1);
@@ -435,6 +466,9 @@ describe('diagnostician continuation (SPEC §13)', () => {
 describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
   it('Case A: pain admitted, crash before task → reconcile creates the missing task', async () => {
     admit([correction()]);
+    // Promotion substrate: ingest the rollout + triggering observation so the
+    // reconcile pass can promote the admitted evidence (SPEC §13 Case A).
+    ingestRollout('turn-1');
     const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
     expect(reconciled.ok).toBe(true);
     expect(reconciled.tasksEnsured).toBe(1);
@@ -446,13 +480,24 @@ describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
       state.close();
     }
     expect(count).toEqual({ n: 1 });
-    // Second pass is idempotent: nothing left to do.
+    // Second pass is idempotent: tasksEnsured counts markers whose continuation
+    // was ensured (1 again), but the continuation finds the existing task and
+    // link → no second task is created (still exactly one).
     const again = await reconcileGovernanceContinuation({ workspaceDir });
-    expect(again.tasksEnsured).toBe(0);
     expect(again.ok).toBe(true);
+    expect(again.tasksEnsured).toBe(1);
+    expect(again.linksRepaired).toBe(1);
+    const stateAgain = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
+    try {
+      expect(stateAgain.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 1 });
+    } finally {
+      stateAgain.close();
+    }
   });
 
   it('Case B: task exists but link lost → reconcile repairs the link without a second task', async () => {
+    // Promotion substrate first so the reconcile pass can promote the evidence.
+    ingestRollout('turn-1');
     const result = admit([correction()]);
     const painId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId ?? '';
     await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: 'codex|rollout-1|turn-1|user', canonicalPainId: painId });
@@ -463,7 +508,10 @@ describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
       wdb.close();
     }
     const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+    // New linksRepaired semantics: the continuation found the existing task
+    // (taskCreated=false) → the marker link was repaired, no second task.
     expect(reconciled.linksRepaired).toBe(1);
+    expect(reconciled.tasksEnsured).toBe(1);
     const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
     let count: unknown;
     try {
@@ -483,5 +531,168 @@ describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
     } finally {
       fs.rmSync(other, { recursive: true, force: true });
     }
+  });
+});
+
+describe('P1-1 privacy: raw correction secrets sanitized before persistence (SPEC §12)', () => {
+  it('secrets in correction text are absent from pain_events, task payload, and diagnostics; correction still admitted', async () => {
+    const secretText = '不要自作主张，我的 key 是 sk-test-not-a-real-key-123456，这是错的。';
+    const result = admit([correction({ text: secretText, logicalObservationKey: 'codex|rollout-1|turn-priv-1|user', hostTurnId: 'turn-priv-1' })]);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    const painId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId ?? '';
+    // Ensure the Diagnostician task so the task payload / diagnostic_json
+    // can be inspected for the raw secret (admission → ensure → task).
+    await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: 'codex|rollout-1|turn-priv-1|user', canonicalPainId: painId });
+    // Assert the raw secret is NOT in pain_events.text
+    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    const pain = wdb.prepare('SELECT text, reason FROM pain_events WHERE canonical_pain_id = ?').get(painId) as { text: string; reason: string } | undefined;
+    expect(pain).toBeDefined();
+    expect(pain?.text).not.toContain('sk-test-not-a-real-key-123456');
+    // The token should be redacted by the sanitizer: prefix + ___REDACTED___ + length
+    expect(pain?.text).toContain('___REDACTED___');
+    // The reason (matched terms) is safe — comes from keyword store, not user text.
+    // The marker's task_payload_json evidence note should also be sanitized.
+    const marker = wdb.prepare('SELECT task_payload_json, reason FROM governance_signal_admissions WHERE canonical_pain_id = ?').get(painId) as { task_payload_json: string; reason: string } | undefined;
+    expect(marker).toBeDefined();
+    const payload = JSON.parse(marker?.task_payload_json ?? '{}') as { evidence?: { note: string }[] };
+    const evidenceNote = payload.evidence?.[0]?.note ?? '';
+    expect(evidenceNote).not.toContain('sk-test-not-a-real-key-123456');
+    expect(evidenceNote).toContain('___REDACTED___');
+    wdb.close();
+    // Ensure the task was created (admission → ensure → task)
+    const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
+    try {
+      const task = state.prepare('SELECT status, diagnostic_json FROM tasks WHERE task_kind = ?').get('diagnostician') as { status: string; diagnostic_json: string } | undefined;
+      expect(task).toBeDefined();
+      if (!task) throw new Error('expected a pending diagnostician task');
+      expect(task.status).toBe('pending');
+      // The diagnostic_json evidence should also NOT contain the raw secret.
+      const dj = JSON.parse(task.diagnostic_json) as { evidence?: { note: string }[] };
+      const djNote = dj.evidence?.[0]?.note ?? '';
+      expect(djNote).not.toContain('sk-test-not-a-real-key-123456');
+      expect(djNote).toContain('___REDACTED___');
+    } finally {
+      state.close();
+    }
+  });
+
+  it('absolute path in correction text is sanitized before persistence', () => {
+    // Outside-workspace absolute path → the sanitizer converges it to
+    // `<path:file.ts>` (basename only), never the raw absolute path.
+    const outsidePath = path.join(os.tmpdir(), 'pd-privacy-elsewhere', 'file.ts');
+    const text = `不要自作主张，路径 ${outsidePath} 是错的`;
+    const result = admit([correction({ text, logicalObservationKey: 'codex|rollout-1|turn-priv-2|user', hostTurnId: 'turn-priv-2' })]);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    const textCol = (wdb.prepare('SELECT text FROM pain_events ORDER BY id DESC').get() as { text: string }).text;
+    wdb.close();
+    // The absolute path (and the workspace prefix) must not be persisted.
+    expect(textCol).not.toContain(outsidePath);
+    expect(textCol).not.toContain(workspaceDir);
+    expect(textCol).toContain('<path:file.ts>');
+  });
+
+  it('ordinary conversation with secrets still creates no pain (privacy is not at the expense of exactly-once)', () => {
+    const ordinary = admit([correction({ text: '帮我查一下，我的 key 是 sk-test-not-a-real-key-123456', logicalObservationKey: 'codex|rollout-1|turn-priv-3|user', hostTurnId: 'turn-priv-3' })]);
+    expect(ordinary.outcomes?.[0]).toMatchObject({ disposition: 'not_a_signal' });
+  });
+});
+
+describe('P1-2 continuation crash recovery (SPEC §13)', () => {
+  it('Case C: pain+task admitted but promotion never started → reconcile heals', async () => {
+    ingestRollout('turn-1');
+    // Admit and ensure task only (simulate crash before promotion)
+    const result = admit([correction()]);
+    const painId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId ?? '';
+    await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: 'codex|rollout-1|turn-1|user', canonicalPainId: painId });
+    // Simulate: promotion never ran
+    const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+    expect(reconciled.ok).toBe(true);
+    expect(reconciled.tasksEnsured).toBe(1); // the marker was processed
+    // Promotion should now be started (pending tail since no next assistant exists)
+    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const tail = wdb.prepare('SELECT state FROM governance_pending_promotion_tails').get() as { state: string } | undefined;
+      expect(tail).toBeDefined();
+      expect(tail?.state).toBe('pending');
+    } finally {
+      wdb.close();
+    }
+  });
+
+  it('already_admitted redelivery ensures promotion (self-heal, no Slice C wait)', async () => {
+    ingestRollout('turn-selfheal-1');
+    // First delivery: admit then crash before continuation (no ensure, no promote).
+    const result = admit([correction({ logicalObservationKey: 'codex|rollout-1|turn-selfheal-1|user', hostTurnId: 'turn-selfheal-1' })]);
+    const painId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId ?? '';
+    void painId;
+    // Second delivery: already_admitted. The orchestrator calls
+    // ensureGovernanceContinuation (marker carries the rollout identity).
+    const cont = await ensureGovernanceContinuation({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-1|turn-selfheal-1|user',
+      canonicalPainId: painId,
+    });
+    expect(cont.ok).toBe(true);
+    if (!cont.ok) throw new Error(`expected continuation to succeed, got: ${cont.reason}`);
+    expect(cont.taskCreated).toBe(true); // task was created now
+    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const tail = wdb.prepare('SELECT state FROM governance_pending_promotion_tails').get() as { state: string } | undefined;
+      expect(tail).toBeDefined();
+      expect(tail?.state).toBe('pending');
+    } finally {
+      wdb.close();
+    }
+  });
+
+  it('repeated reconciliation three times is idempotent', async () => {
+    ingestRollout('turn-idem-1');
+    const result = admit([correction({ logicalObservationKey: 'codex|rollout-1|turn-idem-1|user', hostTurnId: 'turn-idem-1' })]);
+    void result;
+    for (let i = 0; i < 3; i += 1) {
+      const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+      expect(reconciled.ok).toBe(true);
+    }
+    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      expect(wdb.prepare('SELECT COUNT(*) AS n FROM pain_events').get()).toEqual({ n: 1 });
+      expect(wdb.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get()).toEqual({ n: 1 });
+    } finally {
+      wdb.close();
+    }
+    const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
+    try {
+      expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 1 });
+    } finally {
+      state.close();
+    }
+  });
+});
+
+describe('P1-3 correction occurrence identity (SPEC §10)', () => {
+  it('same occurrence retry → same canonical pain; different turn same text → new pain', () => {
+    // Same occurrence: retry of the same real event (same hostTurnId, same text)
+    const first = admit([correction({ text: '不要自作主张,这是错的', logicalObservationKey: 'codex|rollout-1|turn-occ-1|user', hostTurnId: 'turn-occ-1' })]);
+    const firstPainId = (first.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId ?? '';
+    const second = admit([correction({ text: '不要自作主张,这是错的', logicalObservationKey: 'codex|rollout-1|turn-occ-1|user', hostTurnId: 'turn-occ-1' })]);
+    expect(second.outcomes?.[0]).toMatchObject({ disposition: 'already_admitted' });
+    expect((second.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId).toBe(firstPainId);
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 1 });
+
+    // Same text, different turn → new pain occurrence
+    const sameTextNewTurn = admit([correction({ text: '不要自作主张,这是错的', logicalObservationKey: 'codex|rollout-1|turn-occ-2|user', hostTurnId: 'turn-occ-2' })]);
+    expect(sameTextNewTurn.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    const secondPainId = (sameTextNewTurn.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
+    expect(secondPainId).not.toBe(firstPainId);
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 2 });
+  });
+
+  it('different sessions produce separate correction pains', () => {
+    const sessionA = admit([correction({ rootSessionId: 'session-a', text: '不要自作主张', logicalObservationKey: 'codex|rollout-1|turn-sess-1|user', hostTurnId: 'turn-sess-1' })]);
+    expect(sessionA.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    const sessionB = admit([correction({ rootSessionId: 'session-b', text: '不要自作主张', logicalObservationKey: 'codex|rollout-1|turn-sess-2|user', hostTurnId: 'turn-sess-2' })]);
+    expect(sessionB.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 2 });
   });
 });

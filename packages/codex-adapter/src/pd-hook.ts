@@ -52,7 +52,6 @@ async function runConversationIngestion(args: { rawPayload: unknown; kind: HostE
       const admission = await runGovernanceAdmission({
         workspaceDir,
         candidates: outcome.admissionCandidates,
-        rolloutIdentity: outcome.rolloutIdentity,
       });
       for (const degradation of admission.degradations.slice(0, 2)) {
         diagnostics.push(diagnostic(degradation.reason, degradation.nextAction));

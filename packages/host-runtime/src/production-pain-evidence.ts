@@ -218,19 +218,24 @@ export function deriveProductionToolPainIdentity(fields: ProductionToolEventFiel
 /**
  * The canonical correction-pain identity derivation (SPEC §10/§12): deterministic,
  * content-derived, retry-safe — replacing the legacy random `correction_<traceId>`
- * ids. Turn-scoped where the host supplies a stable turn id, so one real Owner
- * correction delivered live and via transcript resolves to one canonical pain.
+ * ids. The identity is scoped by a stable OCCURRENCE identity supplied by the
+ * host (Codex hostTurnId / OpenClaw per-session turn index), so:
+ *   - a retry / live+transcript replay of the SAME real occurrence → same pain;
+ *   - the same correction text in a LATER real turn → a NEW pain occurrence.
+ * The raw text participates only in the in-memory hash — it is never persisted
+ * (the persistence boundary sanitizes it; see governance-signal-admission).
  */
 export function deriveProductionCorrectionPainIdentity(fields: {
   workspaceDir: string;
   sessionId: string;
-  turnId?: string;
+  /** Stable occurrence identity of the real correction event (host turn id / per-session turn index). */
+  occurrenceId: string;
   text: string;
 }): { eventId: string; painId: string } {
   const canonical = stable({
     workspaceDir: path.resolve(fields.workspaceDir),
     sessionId: fields.sessionId,
-    turnId: fields.turnId ?? null,
+    occurrenceId: fields.occurrenceId,
     source: 'user_correction',
     text: fields.text,
   });

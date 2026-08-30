@@ -45,6 +45,7 @@ import {
   PrincipleTreeLedgerAdapter,
   RuntimeStateManager,
   createDiagnosticianTaskId,
+  sanitizeString,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
   type UnifiedKeywordStore,
@@ -452,16 +453,21 @@ function tryConsumeRateLimit({ db, rootSessionId, ruleVersion, now }: RateLimitA
 interface CorrectionPainArgs {
   db: Database.Database;
   candidate: GovernanceCorrectionCandidate;
+  workspaceDir: string;
   painId: string;
   detection: SignalCollectorOutput;
   nowIso: string;
 }
 
-function insertCorrectionPain({ db, candidate, painId, detection, nowIso }: CorrectionPainArgs): string {
+function insertCorrectionPain({ db, candidate, workspaceDir, painId, detection, nowIso }: CorrectionPainArgs): string {
   const reason = detection.matchedTerms.length > 0
     ? `User correction detected: ${detection.matchedTerms.join(', ')}`
     : 'User correction detected';
-  const excerpt = detection.evidence.excerpt.length > MAX_TEXT_BOUND ? detection.evidence.excerpt.slice(0, MAX_TEXT_BOUND) : detection.evidence.excerpt;
+  // P1-1 privacy: the persisted evidence must pass through the existing
+  // evidence sanitizer — the raw text participates only in the in-memory
+  // canonical identity hash, never in the durable store.
+  const rawExcerpt = detection.evidence.excerpt.length > MAX_TEXT_BOUND ? detection.evidence.excerpt.slice(0, MAX_TEXT_BOUND) : detection.evidence.excerpt;
+  const excerpt = sanitizeString(rawExcerpt, workspaceDir);
   db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(candidate.rootSessionId, 'user_correction', GOVERNANCE_STRONG_PAIN_SCORE, reason.slice(0, MAX_REASON_BOUND), 'severe', 'system_infer', null, excerpt, painId, null, nowIso);
@@ -478,7 +484,9 @@ interface GovernanceTaskSubmissionPayload {
   readonly evidence: readonly { sourceRef: string; note: string }[];
 }
 
-function taskSubmissionPayload(candidate: GovernanceSignalCandidate, reason: string): string {
+function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, reason: string): string {
+  // P1-1 privacy: task payload evidence notes pass through the existing
+  // sanitizer too — the Diagnostician reads ONLY promoted/sanitized evidence.
   const payload: GovernanceTaskSubmissionPayload = candidate.kind === 'user_correction'
     ? {
       painType: 'user_frustration',
@@ -487,7 +495,7 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, reason: str
       score: GOVERNANCE_STRONG_PAIN_SCORE,
       sessionId: candidate.rootSessionId,
       hostKind: 'codex',
-      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: candidate.text.slice(0, MAX_TEXT_BOUND) }],
+      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(candidate.text.slice(0, MAX_TEXT_BOUND), workspaceDir) }],
     }
     : {
       painType: 'tool_failure',
@@ -496,7 +504,7 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, reason: str
       score: 70,
       sessionId: candidate.rootSessionId,
       hostKind: 'codex',
-      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: (reason || candidate.toolName).slice(0, MAX_TEXT_BOUND) }],
+      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString((reason || candidate.toolName).slice(0, MAX_TEXT_BOUND), workspaceDir) }],
     };
   return JSON.stringify(payload);
 }
@@ -504,14 +512,15 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, reason: str
 interface AdmissionMarkerArgs {
   db: Database.Database;
   candidate: GovernanceSignalCandidate;
+  workspaceDir: string;
   canonicalPainId: string;
   ruleVersion: number | null;
   reason: string;
   nowIso: string;
 }
 
-function insertAdmissionMarker({ db, candidate, canonicalPainId, ruleVersion, reason, nowIso }: AdmissionMarkerArgs): void {
-  const payload = taskSubmissionPayload(candidate, reason);
+function insertAdmissionMarker({ db, candidate, workspaceDir, canonicalPainId, ruleVersion, reason, nowIso }: AdmissionMarkerArgs): void {
+  const payload = taskSubmissionPayload(candidate, workspaceDir, reason);
   db.prepare(`INSERT INTO governance_signal_admissions
     (host_kind, logical_observation_key, rollout_identity, root_session_id, signal_kind, decision, canonical_pain_id, diagnostician_task_id, rule_version, reason, task_payload_json, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 'admitted', ?, NULL, ?, ?, ?, ?, ?)`)
@@ -554,7 +563,10 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
   const { painId } = deriveProductionCorrectionPainIdentity({
     workspaceDir,
     sessionId: candidate.rootSessionId,
-    turnId: candidate.hostTurnId,
+    // Codex occurrence identity = the stable host turn id (SPEC §10): retry of
+    // the same real occurrence → same pain; same text in a later real turn →
+    // a NEW pain occurrence.
+    occurrenceId: candidate.hostTurnId,
     text: candidate.text,
   });
 
@@ -570,9 +582,9 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         if (!tryConsumeRateLimit({ db, rootSessionId: candidate.rootSessionId, ruleVersion: detection.ruleVersion, now })) {
           throw new RateLimitedSignal();
         }
-        reason = insertCorrectionPain({ db, candidate, painId, detection: detection.output, nowIso });
+        reason = insertCorrectionPain({ db, candidate, workspaceDir, painId, detection: detection.output, nowIso });
       }
-      insertAdmissionMarker({ db, candidate, canonicalPainId: painId, ruleVersion: detection.ruleVersion, reason, nowIso });
+      insertAdmissionMarker({ db, candidate, workspaceDir, canonicalPainId: painId, ruleVersion: detection.ruleVersion, reason, nowIso });
     })();
   } catch (error) {
     if (error instanceof RateLimitedSignal) {
@@ -650,7 +662,7 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
         .run(candidate.rootSessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, null, painId, null, nowIso);
     }
     if (!duplicateWithoutPain) {
-      insertAdmissionMarker({ db, candidate, canonicalPainId: painId, ruleVersion: null, reason, nowIso });
+      insertAdmissionMarker({ db, candidate, workspaceDir, canonicalPainId: painId, ruleVersion: null, reason: sanitizeString(reason, workspaceDir), nowIso });
     }
     // A duplicate call row without an admitted pain mirrors the production
     // handler (no pain insert on duplicates) and records no marker, so a later
@@ -888,6 +900,62 @@ export function promoteAdmittedGovernanceEvidence(input: {
   return { ok: true, promoted: result.promoted, tailState: result.tailState };
 }
 
+// ─── Single ensure path: task + evidence promotion ──────────────────────────
+
+export interface EnsureGovernanceContinuationInput {
+  readonly workspaceDir: string;
+  readonly logicalObservationKey: string;
+  readonly canonicalPainId: string;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type EnsureGovernanceContinuationResult =
+  | { ok: true; taskId: string; taskCreated: boolean; promoted: number; tailState: 'completed' | 'pending' }
+  | { ok: false; reason: string; nextAction: string };
+
+/**
+ * Given an admitted canonical pain (identified by its marker), ensure both
+ * the Diagnostician task AND the evidence promotion exist idempotently.
+ * Single ensure path for both fresh admits and crash recovery (already_admitted
+ * redelivery). The marker row carries rollout_identity so the function is
+ * self-contained (caller only needs workspaceDir, logicalObservationKey, painId).
+ */
+export async function ensureGovernanceContinuation(input: EnsureGovernanceContinuationInput): Promise<EnsureGovernanceContinuationResult> {
+  const workspaceDir = path.resolve(input.workspaceDir);
+  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const marker = db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ? AND canonical_pain_id = ?').get(input.logicalObservationKey, input.canonicalPainId);
+    if (!isRecord(marker)) {
+      return { ok: false, reason: 'admission_marker_not_found', nextAction: 'admit the signal before ensuring its continuation' };
+    }
+    const rolloutIdentity = rowField(marker, 'rollout_identity');
+    if (typeof rolloutIdentity !== 'string' || rolloutIdentity.length === 0) {
+      return { ok: false, reason: 'marker_missing_rollout_identity', nextAction: 're-admit the signal' };
+    }
+    // 1. Ensure task (idempotent)
+    const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: input.logicalObservationKey, canonicalPainId: input.canonicalPainId });
+    if (!ensured.ok) {
+      return { ok: false, reason: ensured.reason, nextAction: ensured.nextAction };
+    }
+    // 2. Ensure promotion (idempotent substrate — already promoted = no-op,
+    //    pending tail = re-complete, never started = start now).
+    const promoted = promoteAdmittedGovernanceEvidence({
+      workspaceDir,
+      rolloutIdentity,
+      triggerLogicalKey: input.logicalObservationKey,
+      canonicalPainId: input.canonicalPainId,
+    });
+    if (!promoted.ok) {
+      return { ok: false, reason: promoted.reason, nextAction: promoted.nextAction };
+    }
+    return { ok: true, taskId: ensured.taskId, taskCreated: ensured.created, promoted: promoted.promoted, tailState: promoted.tailState };
+  } finally {
+    close();
+  }
+}
+
 // ─── Reconciliation (SPEC §13 crash-gap pass; Slice C worker calls this) ────
 
 export interface ReconcileGovernanceContinuationInput {
@@ -915,7 +983,8 @@ export interface ReconcileGovernanceContinuationResult {
  * transaction exists, SPEC §13). Recovers:
  *  - Case A: pain admitted, crash before task creation → create the task now;
  *  - Case B: task exists, crash before the link write → repair the link;
- *  - Case C: promotion tail still pending → retry completion once; stale
+ *  - Case C: pain+task, crash before promotion → promote evidence now;
+ *  - Case D: promotion started → pending tail → retry completion once; stale
  *    tails are reported (never silently dropped).
  * Not a background worker — Slice C's Companion worker and the CLI call this.
  */
@@ -930,46 +999,37 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
   const degradations: string[] = [];
   let tasksEnsured = 0;
   let linksRepaired = 0;
+  let pendingTails = 0;
+  let completedTails = 0;
 
   try {
-    const missing = db.prepare("SELECT logical_observation_key, canonical_pain_id FROM governance_signal_admissions WHERE decision = 'admitted' AND diagnostician_task_id IS NULL ORDER BY id LIMIT ?").all(limit);
-    for (const row of missing) {
+    // Scan ALL admitted markers (bounded), not just those missing task links:
+    // covers Case A (pain+marker, crash before task), Case B (task created,
+    // crash before link), Case C (pain+task, crash before promotion),
+    // Case D (promotion started → pending tail → restart).
+    const markers = db.prepare("SELECT logical_observation_key, canonical_pain_id FROM governance_signal_admissions WHERE decision = 'admitted' ORDER BY id LIMIT ?").all(limit);
+    for (const row of markers) {
       const key = rowField(row, 'logical_observation_key');
       const painId = rowField(row, 'canonical_pain_id');
       if (typeof key !== 'string' || typeof painId !== 'string') continue;
-      const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId });
-      if (ensured.ok) {
+      const cont = await ensureGovernanceContinuation({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId });
+      if (cont.ok) {
         tasksEnsured += 1;
-        if (ensured.duplicate) linksRepaired += 1;
+        // Case B: the task already existed (crash after task creation, before
+        // the link write) — the continuation repaired the link without a
+        // second task.
+        if (!cont.taskCreated) linksRepaired += 1;
+        if (cont.tailState === 'pending') pendingTails += 1;
+        else if (cont.tailState === 'completed') completedTails += 1;
       } else {
-        degradations.push(`${key}:${ensured.reason}`);
+        degradations.push(`${key}:${cont.reason}`);
       }
     }
-
-    // Pending promotion tails whose pain was admitted through this module:
-    // retry completion once (idempotent substrate), report the rest.
-    let pendingTails = 0;
-    let completedTails = 0;
-    const tails = db.prepare(`SELECT t.rollout_identity, t.trigger_logical_key, t.pain_ref
-      FROM governance_pending_promotion_tails t
-      WHERE t.state = 'pending'
-        AND EXISTS (SELECT 1 FROM governance_signal_admissions a WHERE a.canonical_pain_id = t.pain_ref)
-      ORDER BY t.id LIMIT ?`).all(limit);
-    for (const tail of tails) {
-      const rolloutIdentity = rowField(tail, 'rollout_identity');
-      const trigger = rowField(tail, 'trigger_logical_key');
-      const painRef = rowField(tail, 'pain_ref');
-      if (typeof rolloutIdentity !== 'string' || typeof trigger !== 'string' || typeof painRef !== 'string') continue;
-      pendingTails += 1;
-      const promoted = promoteAdmittedGovernanceEvidence({ workspaceDir, rolloutIdentity, triggerLogicalKey: trigger, canonicalPainId: painRef });
-      if (promoted.ok && promoted.tailState === 'completed') completedTails += 1;
-      else if (!promoted.ok) degradations.push(`tail:${trigger}:${promoted.reason}`);
-    }
+    // Also report stale tails scoped to governance admissions.
     const stale = db.prepare(`SELECT COUNT(*) AS n FROM governance_pending_promotion_tails t
       WHERE t.state = 'stale'
         AND EXISTS (SELECT 1 FROM governance_signal_admissions a WHERE a.canonical_pain_id = t.pain_ref)`).get();
     const staleTails = typeof rowField(stale, 'n') === 'number' ? (rowField(stale, 'n') as number) : 0;
-
     return {
       ok: degradations.length === 0,
       ...(degradations.length > 0 ? { reason: 'reconciliation_degradations', nextAction: 'inspect the per-item degradations; admitted pains and evidence remain durable' } : {}),
