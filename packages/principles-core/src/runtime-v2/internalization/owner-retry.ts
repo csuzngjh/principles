@@ -18,12 +18,24 @@
  */
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from './pitask-metadata.js';
+import {
+  collectOwnerDecisionFacts,
+  deriveOwnerDecisionCapability,
+  findPendingOwnerResolutionForCurrentEpoch,
+} from './owner-review.js';
+import { factStoreFromStateManager } from './owner-resolution-service.js';
 
 export type OwnerRetryOutcome =
   | { status: 'not_found' }
   | { status: 'skipped'; taskKind: string; previousStatus: string }
   | { status: 'metadata_invalid'; taskKind: string }
-  | { status: 'requeued'; taskKind: string; previousStatus: string };
+  | { status: 'requeued'; taskKind: string; previousStatus: string }
+  /**
+   * PRI-629 Recover guard: decision-capable 人工裁决（或本 epoch 已有
+   * resolution）不允许 authority reset — Recover 不是治理出口（SPEC §17/INV-06）。
+   * 出口 = 治理焦点的 Owner Decision（open_governance_focus）。
+   */
+  | { status: 'rejected'; taskKind: string; previousStatus: string; reason: 'owner_decision_required'; nextAction: 'open_governance_focus' };
 
 /**
  * 对单个 needs_human_review 任务执行 Owner authority reset（→ pending）。
@@ -65,6 +77,28 @@ export async function ownerRetryNeedsHumanReviewTask(
 
   // 原子单写: 同一 patch 同时落 status=pending / attemptCount=0 / 清空后的
   // diagnosticJson。updateTask 抛错时 DB 行保持原样(单条 UPDATE)，无 partial reset。
+  // ── PRI-629 Recover guard (SPEC §17) ──
+  // decision-capable（capability eligible）或本 epoch 已有 resolution（含
+  // revise_once 进行中）→ 拒绝。模糊 legacy 事实 → 不阻断（capability 不
+  // eligible），保持既有 Recover 行为。core 层强制 — 不只是 UI 隐藏按钮。
+  const facts = await collectOwnerDecisionFacts(factStoreFromStateManager(stateManager), taskId);
+  if (facts) {
+    const capability = deriveOwnerDecisionCapability(facts);
+    // P0 评审修复: 只拒 pending resolution（等待 runner 应用，此时 Recover
+    // 会与之竞争）。applied resolution 的下游 recovery NHR 必须保持 Recover
+    // 出口——resume 门会基于 applied override 确定性重放，否则任务死胡同
+    // （Focus 不显示决策、Recover 又被拒）。
+    if (capability.eligible || findPendingOwnerResolutionForCurrentEpoch(facts.task)) {
+      return {
+        status: 'rejected',
+        taskKind: task.taskKind,
+        previousStatus: task.status,
+        reason: 'owner_decision_required',
+        nextAction: 'open_governance_focus',
+      };
+    }
+  }
+
   const merged = mergePITaskMetadata(piTask, {
     runnerDecision: undefined,
     completionIntent: undefined,

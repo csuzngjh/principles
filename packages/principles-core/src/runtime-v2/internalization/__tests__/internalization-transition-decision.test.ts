@@ -229,12 +229,15 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
 
     expect(result.decision).toBe('revision_reopened');
     expect(result.reopenedTaskId).toBe('evaluator-cand-4-prompt');
-    // evaluator 被更新为 pending + attemptCount 重置
-    expect(mockStateManager.updateTask).toHaveBeenCalledWith('evaluator-cand-4-prompt', {
-      status: 'pending', attemptCount: 0,
-    });
+    // evaluator 被单次 task-row mutation 更新: pending + attemptCount 重置 + metadata
+    // (P1 评审修复: 单行原子写,消除 metadata/status 两写 crash 窗口)
+    const reopenCall1 = (mockStateManager.updateTask.mock.calls as Array<[string, { status?: string; attemptCount?: number; diagnosticJson?: string }]>).find(
+      (c) => c[0] === 'evaluator-cand-4-prompt',
+    )?.[1];
+    expect(reopenCall1?.status).toBe('pending');
+    expect(reopenCall1?.attemptCount).toBe(0);
     // dep 替换: 原 artificer dep 移除, repair 任务成为唯一 artificer dep
-    const writtenJson = mockStateManager.updateTaskDiagnosticJson.mock.calls[0]?.[1] as string;
+    const writtenJson = reopenCall1?.diagnosticJson as string;
     const parsed = JSON.parse(writtenJson) as { pi_metadata: { dependencyTaskIds: string[]; revisionCount?: number } };
     expect(parsed.pi_metadata.dependencyTaskIds).toContain('artificer-repair-xyz');
     expect(parsed.pi_metadata.dependencyTaskIds).not.toContain('artificer-cand-4-prompt');
@@ -263,9 +266,12 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
 
     expect(result.decision).toBe('successor_reopened');
     expect(result.reopenedTaskId).toBe('rollout_reviewer-cand-5-prompt');
-    expect(mockStateManager.updateTask).toHaveBeenCalledWith('rollout_reviewer-cand-5-prompt', {
-      status: 'pending', attemptCount: 0,
-    });
+    const reopenCall2 = (mockStateManager.updateTask.mock.calls as Array<[string, { status?: string; attemptCount?: number; diagnosticJson?: string }]>).find(
+      (c) => c[0] === 'rollout_reviewer-cand-5-prompt',
+    )?.[1];
+    expect(reopenCall2?.status).toBe('pending');
+    expect(reopenCall2?.attemptCount).toBe(0);
+    expect(typeof reopenCall2?.diagnosticJson).toBe('string');
     expect(mockStateManager.createTask).not.toHaveBeenCalled();
   });
 
@@ -307,13 +313,14 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
     const orchestrator = makeOrchestrator();
     const r1 = await orchestrator.reopenTaskForRevision('evaluator-cand-7-prompt', { reason: 'idempotent-check' });
     expect(r1.ok).toBe(true);
-    // revisionCount 在 pending 态仍会写为 2 (merge 最新元数据), 但状态写 pending 幂等
-    const writtenJson = mockStateManager.updateTaskDiagnosticJson.mock.calls[0]?.[1] as string;
-    const parsed = JSON.parse(writtenJson) as { pi_metadata: { revisionCount?: number } };
+    // 单写契约: metadata + status + attemptCount 一个 UPDATE (P1 评审修复)
+    const call3 = (mockStateManager.updateTask.mock.calls as Array<[string, { status?: string; attemptCount?: number; diagnosticJson?: string }]>).find(
+      (c) => c[0] === 'evaluator-cand-7-prompt',
+    )?.[1];
+    const parsed = JSON.parse(call3?.diagnosticJson ?? '') as { pi_metadata: { revisionCount?: number } };
     expect(parsed.pi_metadata.revisionCount).toBe(2);
-    expect(mockStateManager.updateTask).toHaveBeenCalledWith('evaluator-cand-7-prompt', {
-      status: 'pending', attemptCount: 0,
-    });
+    expect(call3?.status).toBe('pending');
+    expect(call3?.attemptCount).toBe(0);
   });
 });
 

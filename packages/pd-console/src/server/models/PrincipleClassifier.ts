@@ -20,6 +20,7 @@ import { isCorePrincipleId } from '@principles/core/runtime-v2';
 
 export type PrincipleCategory =
   | 'owner_actionable'
+  | 'in_pipeline'
   | 'demo'
   | 'smoke'
   | 'historical'
@@ -77,6 +78,7 @@ function isBuiltinId(id: string): boolean {
 export function classifyPrinciple(
   p: PrincipleListItem,
   decidedPrincipleIds?: Set<string>,
+  pendingApprovalPrincipleIds?: Set<string>,
 ): PrincipleCategory {
   // 1. Builtin axioms (T-01..T-10) are never governance targets
   if (isBuiltinId(p.id)) {
@@ -108,6 +110,12 @@ export function classifyPrinciple(
     return 'already_decided';
   }
 
+  // 4b. PRI-629: a PENDING approval is a real Owner decision — owner_actionable
+  //     (INV-01: actionability requires an executable action, and it exists here).
+  if (pendingApprovalPrincipleIds && pendingApprovalPrincipleIds.has(p.id)) {
+    return 'owner_actionable';
+  }
+
   // 5. Already decided: active = approved & in effect, no governance needed
   if (p.status === 'active') {
     return 'already_decided';
@@ -118,8 +126,10 @@ export function classifyPrinciple(
     return 'historical';
   }
 
-  // 7. Only candidate / probation need owner decision
-  return 'owner_actionable';
+  // 7. candidate / probation = 内化管线进行中 (PRI-629 INV-02: lifecycle ≠
+  //    Owner attention)。真正的 Owner 决策由治理焦点的 Owner Decision
+  //    投影呈现;此处不再产生假"待审查"。
+  return 'in_pipeline';
 }
 
 /**
@@ -132,8 +142,9 @@ export function classifyPrinciple(
 export function classifyPrinciples(
   principles: PrincipleListItem[],
   decidedPrincipleIds?: Set<string>,
+  pendingApprovalPrincipleIds?: Set<string>,
 ): ClassifiedPrinciple[] {
-  return principles.map((p) => ({ principle: p, category: classifyPrinciple(p, decidedPrincipleIds) }));
+  return principles.map((p) => ({ principle: p, category: classifyPrinciple(p, decidedPrincipleIds, pendingApprovalPrincipleIds) }));
 }
 
 /**

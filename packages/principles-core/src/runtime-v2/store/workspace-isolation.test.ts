@@ -151,6 +151,7 @@ describe('Workspace Isolation', () => {
       createTask: async () => { throw new Error('not implemented'); },
       getTask: async (id: string) => id === 'task-diag' ? diagTask as DiagnosticianTaskRecord : null,
       updateTask: async () => { throw new Error('not implemented'); },
+      updateTaskIfDiagnosticJsonUnchanged: async () => null,
       listTasks: async () => [],
       deleteTask: async () => true,
     };

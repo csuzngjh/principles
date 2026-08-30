@@ -33,9 +33,9 @@ describe('classifyPrinciple', () => {
   });
 
   it('does NOT classify T-11, T-100, T-0 as builtin', () => {
-    expect(classifyPrinciple(makePrinciple({ id: 'T-11', status: 'candidate' }))).toBe('owner_actionable');
-    expect(classifyPrinciple(makePrinciple({ id: 'T-100', status: 'candidate' }))).toBe('owner_actionable');
-    expect(classifyPrinciple(makePrinciple({ id: 'T-0', status: 'candidate' }))).toBe('owner_actionable');
+    expect(classifyPrinciple(makePrinciple({ id: 'T-11', status: 'candidate' }))).toBe('in_pipeline');
+    expect(classifyPrinciple(makePrinciple({ id: 'T-100', status: 'candidate' }))).toBe('in_pipeline');
+    expect(classifyPrinciple(makePrinciple({ id: 'T-0', status: 'candidate' }))).toBe('in_pipeline');
   });
 
   it('classifies demo principles by keyword', () => {
@@ -47,8 +47,8 @@ describe('classifyPrinciple', () => {
 
   it('does NOT misclassify real principles mentioning "sample" or "template" in text', () => {
     // These should be owner_actionable because text keywords are now bracket-only
-    expect(classifyPrinciple(makePrinciple({ text: 'Use a sample to verify output' }))).toBe('owner_actionable');
-    expect(classifyPrinciple(makePrinciple({ text: 'Follow the template pattern for consistency' }))).toBe('owner_actionable');
+    expect(classifyPrinciple(makePrinciple({ text: 'Use a sample to verify output' }))).toBe('in_pipeline');
+    expect(classifyPrinciple(makePrinciple({ text: 'Follow the template pattern for consistency' }))).toBe('in_pipeline');
   });
 
   it('classifies smoke test principles by keyword', () => {
@@ -77,9 +77,9 @@ describe('classifyPrinciple', () => {
     expect(classifyPrinciple(makePrinciple({ status: 'active' }))).toBe('already_decided');
   });
 
-  it('classifies candidate/probation as owner_actionable', () => {
-    expect(classifyPrinciple(makePrinciple({ status: 'candidate' }))).toBe('owner_actionable');
-    expect(classifyPrinciple(makePrinciple({ status: 'probation' }))).toBe('owner_actionable');
+  it('classifies candidate/probation as in_pipeline (PRI-629 INV-02: lifecycle is not attention)', () => {
+    expect(classifyPrinciple(makePrinciple({ status: 'candidate' }))).toBe('in_pipeline');
+    expect(classifyPrinciple(makePrinciple({ status: 'probation' }))).toBe('in_pipeline');
   });
 
   it('prioritizes builtin over historical', () => {
@@ -104,7 +104,7 @@ describe('classifyPrinciple', () => {
 
   it('does not classify principle as already_decided when not in decidedPrincipleIds', () => {
     const decidedIds = new Set(['P_OTHER']);
-    expect(classifyPrinciple(makePrinciple({ id: 'P_001', status: 'candidate' }), decidedIds)).toBe('owner_actionable');
+    expect(classifyPrinciple(makePrinciple({ id: 'P_001', status: 'candidate' }), decidedIds)).toBe('in_pipeline');
   });
 
   it('builtin takes priority over decidedPrincipleIds', () => {
@@ -126,7 +126,7 @@ describe('classifyPrinciples', () => {
     expect(classified).toHaveLength(4);
     expect(classified[0].category).toBe('builtin');
     expect(classified[1].category).toBe('demo');
-    expect(classified[2].category).toBe('owner_actionable');
+    expect(classified[2].category).toBe('in_pipeline');
     expect(classified[3].category).toBe('historical');
   });
 
@@ -138,23 +138,30 @@ describe('classifyPrinciples', () => {
     ];
     const decidedIds = new Set(['P_REJECTED']);
     const classified = classifyPrinciples(principles, decidedIds);
-    expect(classified[0].category).toBe('owner_actionable');
+    expect(classified[0].category).toBe('in_pipeline');
     expect(classified[1].category).toBe('already_decided');
-    expect(classified[2].category).toBe('owner_actionable');
+    expect(classified[2].category).toBe('in_pipeline');
   });
 });
 
 describe('filterOwnerActionable', () => {
-  it('filters to only owner_actionable principles', () => {
-    const classified = classifyPrinciples([
-      makePrinciple({ id: 'T-01' }),
-      makePrinciple({ id: 'P_001', text: '[demo]' }),
-      makePrinciple({ id: 'P_002', status: 'candidate' }),
-      makePrinciple({ id: 'P_003', status: 'probation' }),
-    ]);
+  it('PRI-629: only pending-approval principles are owner_actionable (not lifecycle)', () => {
+    const classified = classifyPrinciples(
+      [
+        makePrinciple({ id: 'T-01' }),
+        makePrinciple({ id: 'P_001', text: '[demo]' }),
+        makePrinciple({ id: 'P_002', status: 'candidate' }),
+        makePrinciple({ id: 'P_003', status: 'probation' }),
+        makePrinciple({ id: 'P_PENDING', status: 'candidate' }),
+      ],
+      undefined,
+      new Set(['P_PENDING']),
+    );
     const filtered = filterOwnerActionable(classified);
-    expect(filtered).toHaveLength(2);
-    expect(filtered.every((c) => c.category === 'owner_actionable')).toBe(true);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].principle.id).toBe('P_PENDING');
+    expect(classified.find((c) => c.principle.id === 'P_002')?.category).toBe('in_pipeline');
+    expect(classified.find((c) => c.principle.id === 'P_003')?.category).toBe('in_pipeline');
   });
 
   it('returns empty array when no actionable principles', () => {
@@ -175,7 +182,8 @@ describe('filterOwnerActionable', () => {
       new Set(['P_REJECTED']),
     );
     const filtered = filterOwnerActionable(classified);
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0].principle.id).toBe('P_001');
+    expect(filtered).toHaveLength(0); // INV-02: candidate lifecycle 不再 actionable
+    expect(classified.find((c) => c.principle.id === 'P_001')?.category).toBe('in_pipeline');
+    expect(classified.find((c) => c.principle.id === 'P_REJECTED')?.category).toBe('already_decided');
   });
 });

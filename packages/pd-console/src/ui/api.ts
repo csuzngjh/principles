@@ -1,4 +1,5 @@
 import type { ApiResponse } from "../types.js";
+import type { OwnerDecisionsData, OwnerResolutionResultData } from "./utils/validators.js";
 import {
   listActiveSignalKeywords,
   listPendingSignalTerms,
@@ -31,6 +32,8 @@ import {
   validateOutputLanguage,
   validateGovernanceQueue,
   validateRecoveryResult,
+  validateOwnerDecisionsData,
+  validateOwnerResolutionResult,
   validateActivations,
   validateDisableActivation,
   validateLifecycleMetrics,
@@ -764,6 +767,27 @@ async function recoverFailedTask(taskId: string, reason?: string, force?: boolea
   }, validateRecoveryResult);
 }
 
+// PRI-629: unified Owner Decision inbox — read projection + resolution.
+async function fetchOwnerDecisions(): Promise<ApiResponse<OwnerDecisionsData>> {
+  return request<OwnerDecisionsData>('/api/v1/governance/owner-decisions', undefined, validateOwnerDecisionsData);
+}
+
+async function resolveOwnerDecision(taskId: string, body: {
+  action: 'accept_current' | 'revise_once' | 'reject_current';
+  reviewKey: string;
+  expectedRevisionEpoch: number;
+  expectedSourceRunId: string;
+  expectedSourceArtifactId: string;
+  expectedSourceArtifactHash: string;
+  ownerInstruction?: string | null;
+}): Promise<ApiResponse<OwnerResolutionResultData>> {
+  return request<OwnerResolutionResultData>(
+    '/api/v1/governance/owner-decisions/' + encodeURIComponent(taskId) + '/resolve',
+    { method: 'POST', body: JSON.stringify(body) },
+    validateOwnerResolutionResult,
+  );
+}
+
 async function fetchApprovalsGrouped(): Promise<ApiResponse<ApprovalsGroupedData>> {
   return request<ApprovalsGroupedData>('/api/v1/approvals/grouped', undefined, validateApprovalsGrouped);
 }
@@ -1043,6 +1067,8 @@ export {
   fetchGovernanceQueue,
   fetchGovernanceExperience,
   recoverFailedTask,
+  fetchOwnerDecisions,
+  resolveOwnerDecision,
   fetchApprovalsGrouped,
   fetchAllActivations,
   disableActivation,

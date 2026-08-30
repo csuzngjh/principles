@@ -509,7 +509,8 @@ describe('PrinciplesConsoleModel', () => {
     expect(result.categories).toBeDefined();
     expect(result.categories!['builtin']).toBe(1);
     expect(result.categories!['demo']).toBe(1);
-    expect(result.categories!['owner_actionable']).toBe(1);
+    // PRI-629 INV-02: candidate 生命周期 → in_pipeline (不再是 owner_actionable)
+    expect(result.categories!['in_pipeline']).toBe(1);
     expect(result.categories!['historical']).toBe(1);
   });
 
@@ -562,13 +563,15 @@ describe('PrinciplesConsoleModel', () => {
 
     const model = new PrinciplesConsoleModel(ws.workspaceDir);
     const allResult = await model.listPrinciples('all');
+    // PRI-629 INV-02: lifecycle 不是 attention — candidate/probation 全部落入
+    // in_pipeline;只有携带 pending approval 的原则 actionable。
     const actionableResult = await model.listPrinciples('actionable');
+    const actionableWithPending = await model.listPrinciples('actionable', undefined, new Set(['P_001']));
 
     expect(allResult.principles).toHaveLength(4);
-    // Only candidate (P_001) and probation (P_002) are actionable
-    expect(actionableResult.principles).toHaveLength(2);
-    expect(actionableResult.principles[0].id).toBe('P_001');
-    expect(actionableResult.principles[1].id).toBe('P_002');
+    expect(actionableResult.principles).toHaveLength(0);
+    expect(actionableWithPending.principles).toHaveLength(1);
+    expect(actionableWithPending.principles[0].id).toBe('P_001');
   });
 
   it('listPrinciples with filter=all returns all principles', async () => {

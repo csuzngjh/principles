@@ -34,6 +34,17 @@ export class MemoryTaskStore implements TaskStore {
     return updated;
   }
 
+  async updateTaskIfDiagnosticJsonUnchanged(
+    taskId: string,
+    expectedDiagnosticJson: string | null,
+    patch: TaskStoreUpdatePatch,
+  ): Promise<TaskRecord | null> {
+    const existing = this.tasks.get(taskId);
+    if (!existing) return null;
+    if ((existing.diagnosticJson ?? null) !== expectedDiagnosticJson) return null;
+    return this.updateTask(taskId, patch);
+  }
+
   async listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]> {
     let results = [...this.tasks.values()];
     if (filter?.status) results = results.filter((t) => t.status === filter.status);

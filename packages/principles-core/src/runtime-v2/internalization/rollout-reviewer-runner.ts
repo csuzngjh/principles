@@ -11,7 +11,14 @@ import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata, type RolloutRevisionPayload, type RunnerDecision } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata, type RolloutRevisionPayload, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
+import {
+  planOwnerVerdictOverrideResume,
+  markOwnerResolutionApplied,
+  canonicalHumanReviewReasonCode,
+  computeArtifactContentHash,
+  type OwnerOverrideResumePlan,
+} from './owner-review.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
@@ -558,7 +565,7 @@ export class RolloutReviewerRunner {
       // P0-A: verdict + completion intent (effect=needs_human_review) 已
       // durable;执行终态效果后标 applied — crash 窗口内 resume 会重写
       // needs_human_review,绝不重问 LLM。
-      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_budget_exhausted_applied_${recorded.appliedCount}`);
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_budget_exhausted_applied_${recorded.appliedCount}`, ctx);
       await this.markCompletionIntentAppliedOrThrow(ctx.taskId);
       this.phase = RunnerPhase.Completed;
       return RolloutReviewerRunner.buildSucceededResult(ctx, artifactId, resultRef);
@@ -712,7 +719,7 @@ export class RolloutReviewerRunner {
         reason: 'dispatch_activation_dep_not_injected',
         nextAction: 'wire_activation_dispatcher_in_auto_consumer_or_run_once',
       });
-      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_dispatch_not_wired');
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_dispatch_not_wired', ctx);
       return false;
     }
     // throw 在此冒泡: transient (db locked / network) → retry_wait,由消费循环重试
@@ -739,7 +746,7 @@ export class RolloutReviewerRunner {
       },
     );
     if (!completed) {
-      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_dispatch_${outcome.decision}`);
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_dispatch_${outcome.decision}`, ctx);
       return false;
     }
     return true;
@@ -761,7 +768,7 @@ export class RolloutReviewerRunner {
   private async handleRevisionRouting(ctx: SucceedContext, iteration: number): Promise<boolean> {
     const target = await this.resolveRevisionTarget(ctx.taskId, ctx.channel ?? 'prompt');
     if (!target) {
-      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_target_unresolved');
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_target_unresolved', ctx);
       return false;
     }
     if (!this.reopenRevisionTarget) {
@@ -769,7 +776,7 @@ export class RolloutReviewerRunner {
         reason: 'reopen_revision_target_dep_not_injected',
         nextAction: 'wire_revision_routing_in_auto_consumer_or_run_once',
       });
-      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_routing_not_wired');
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_routing_not_wired', ctx);
       return false;
     }
 
@@ -806,7 +813,7 @@ export class RolloutReviewerRunner {
           sourceArtifactId: target.viaArtifactId ?? ctx.taskId,
         });
         if (!outcome.ok) {
-          await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`);
+          await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_revision_reopen_failed_${outcome.reason}`, ctx);
           return false;
         }
       }
@@ -902,13 +909,38 @@ export class RolloutReviewerRunner {
    * 同一 effect,不问 LLM),禁止 catch+swallow 后让 caller 把 intent 标
    * applied (intent applied ⇔ 其 durable effect 已 materialize)。
    */
-  private async markNeedsHumanReviewOrThrow(taskId: string, reason: string): Promise<void> {
+  private async markNeedsHumanReviewOrThrow(taskId: string, reason: string, review: { runId: string }): Promise<void> {
     this.emitRolloutReviewerEvent('rollout_reviewer_task_needs_human_review', taskId, {
       reason,
       nextAction: 'owner_inspect_retry_or_archive',
     });
     try {
-      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+      // PRI-629: status + humanReviewContext 同一次 task-row mutation 原子落库。
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) throw new Error(`task ${taskId} not found`);
+      const piTask = hydratePITaskRecord(raw);
+      if (!piTask) throw new Error(`task ${taskId} not hydratable`);
+      const sourceArtifactId = `pi-art-${taskId}-${review.runId}`;
+      let sourceArtifactHash;
+      try {
+        const artifact = await this.artifactStore.getArtifactById(sourceArtifactId);
+        if (artifact) sourceArtifactHash = computeArtifactContentHash(artifact.contentJson);
+      } catch {
+        sourceArtifactHash = undefined;
+      }
+      const context: HumanReviewContext = {
+        reasonCode: canonicalHumanReviewReasonCode(reason),
+        sourceRunId: review.runId,
+        sourceArtifactId,
+        ...(sourceArtifactHash !== undefined ? { sourceArtifactHash } : {}),
+        revisionEpoch: piTask.revisionCount ?? 0,
+        createdAt: new Date().toISOString(),
+      };
+      const merged: PITaskMetadata = mergePITaskMetadata(piTask, { humanReviewContext: context });
+      await this.stateManager.updateTask(taskId, {
+        status: 'needs_human_review',
+        diagnosticJson: createPITaskDiagnosticJson(merged),
+      });
       // read-back invariant (INV-2): 只有 effect durable 才允许 caller 标 applied
       const current = await this.stateManager.getTask(taskId);
       if (!current || current.status !== 'needs_human_review') {
@@ -1008,20 +1040,23 @@ export class RolloutReviewerRunner {
   private async applyDecisionEffects(
     ctx: SucceedContext,
     iteration?: number,
+    /** PRI-629 Owner verdict override — 见方法头注释;机器 verdict 不变 (INV-03) */
+    decisionOverride?: 'approve_rollout' | 'reject',
   ): Promise<{ kind: 'completed'; dispatchArtifactId?: string } | { kind: 'human_review' }> {
-    if (ctx.output.review.decision === 'approve_rollout') {
+    const decision = decisionOverride ?? ctx.output.review.decision;
+    if (decision === 'approve_rollout') {
       const candidate = await this.resolveActivationCandidate(ctx);
       if (!candidate) {
-        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_activation_candidate_unresolved');
+        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_activation_candidate_unresolved', ctx);
         return { kind: 'human_review' };
       }
       const completed = await this.dispatchOrRouteFailure(ctx, candidate);
       return completed ? { kind: 'completed', dispatchArtifactId: candidate } : { kind: 'human_review' };
     }
-    if (ctx.output.review.decision === 'needs_revision') {
+    if (decision === 'needs_revision') {
       if (iteration === undefined) {
         // intent 缺 iteration 却走到 needs_revision 效果 — authority 记录损坏
-        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_iteration_missing');
+        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_revision_iteration_missing', ctx);
         return { kind: 'human_review' };
       }
       const completed = await this.handleRevisionRouting(ctx, iteration);
@@ -1061,6 +1096,15 @@ export class RolloutReviewerRunner {
     leasedTask: TaskRecord,
   ): Promise<RolloutReviewerRunnerResult | null> {
     const piTask = hydratePITaskRecord(leasedTask);
+
+    // PRI-629: pending Owner Resolution 优先于一切 (SPEC §10/§30) — 应用
+    // override,不重新调用 LLM;applied 未 terminal 的 crash 窗口同样收敛。
+    const ownerOverride = piTask ? planOwnerVerdictOverrideResume(piTask) : null;
+    if (ownerOverride) {
+      this.phase = RunnerPhase.Completed;
+      return await this.applyOwnerVerdictOverrideAndFinalize(taskId, leasedTask, ownerOverride);
+    }
+
     const intent = piTask?.completionIntent;
     if (!piTask || !intent || intent.status !== 'pending') {
       // P0 (INV-1/INV-5): applied 但任务未 terminal (标 applied 后、
@@ -1093,7 +1137,7 @@ export class RolloutReviewerRunner {
       const budgetOutput = await this.recoverIntentOutput(taskId, intent.sourceRunId);
       const stored = await this.readRolloutRevisionPayload(taskId);
       const appliedCount = stored && stored.status !== 'pending' ? stored.revisionIteration : 2;
-      await this.markNeedsHumanReviewOrThrow(taskId, `rollout_revision_budget_exhausted_applied_${appliedCount}`);
+      await this.markNeedsHumanReviewOrThrow(taskId, `rollout_revision_budget_exhausted_applied_${appliedCount}`, { runId: intent.sourceRunId });
       await this.markCompletionIntentAppliedOrThrow(taskId);
       this.phase = RunnerPhase.Completed;
       return RolloutReviewerRunner.buildResumeResult({
@@ -1145,6 +1189,111 @@ export class RolloutReviewerRunner {
     });
     this.phase = RunnerPhase.Completed;
     return RolloutReviewerRunner.buildResumeResult({ taskId, runId: intent.sourceRunId, artifactId, resultRef, output, attemptCount: leasedTask.attemptCount });
+  }
+
+  /**
+   * PRI-629: 应用 Owner verdict override 并收敛 terminal。
+   *
+   * accept_current → effectiveDecision='approve_rollout' — 仍走
+   * resolveActivationCandidate → dispatchActivation → ActivationDispatcher
+   * 的完整通道风险门:低风险正常 policy,高风险 queued_for_approval
+   * (INV-08: Owner review ≠ deployment approval,安全边界不穿透)。
+   * reject_current → 'reject' — terminal,无 dispatch、无 approval、无 activation。
+   * 顺序: 恢复 durable output → 幂等效果 → intent applied → resolution
+   * applied → markTaskSucceeded;任何 crash 窗口重放同一 resolution,无 LLM。
+   */
+  private async applyOwnerVerdictOverrideAndFinalize(
+    taskId: string,
+    leasedTask: TaskRecord,
+    plan: OwnerOverrideResumePlan,
+  ): Promise<RolloutReviewerRunnerResult> {
+    const { resolution, overrideDecision } = plan;
+    this.emitRolloutReviewerEvent('rollout_owner_resolution_applying', taskId, {
+      resolutionId: resolution.resolutionId,
+      action: resolution.action,
+      machineDecision: resolution.machineDecision,
+      effectiveDecision: overrideDecision,
+      sourceRunId: resolution.sourceRunId,
+    });
+
+    // 恢复裁决时的 durable output — 机器判定必须与 resolution 记录一致
+    const output = await this.recoverIntentOutput(taskId, resolution.sourceRunId);
+    if (output.review.decision !== resolution.machineDecision) {
+      throw new PDRuntimeError(
+        'storage_unavailable',
+        `owner resolution output mismatch for task ${taskId}: recovered decision '${output.review.decision}' != recorded machine decision '${resolution.machineDecision}'`,
+      );
+    }
+
+    const ctx: SucceedContext = {
+      taskId,
+      runId: resolution.sourceRunId,
+      output,
+      task: leasedTask,
+      contextHash: `owner-override-${resolution.resolutionId}`,
+      sourceEvaluatorArtifactId: output.sourceEvaluatorArtifactId,
+      channel: hydratePITaskRecord(leasedTask)?.channel,
+    };
+    const artifactId = `pi-art-${taskId}-${resolution.sourceRunId}`;
+    const resultRef = `rollout-reviewer://${resolution.sourceRunId}`;
+
+    const effect = await this.applyDecisionEffects(
+      ctx,
+      undefined,
+      overrideDecision === 'approve_rollout' ? 'approve_rollout' : 'reject',
+    );
+    if (effect.kind === 'human_review') {
+      // P0 评审修复: override 后效果仍进 NHR (candidate unresolved / dispatch
+      // refused) 属 recovery 类技术故障——但 Owner 裁决 **已被执行**,resolution
+      // 必须标 applied。若停留 pending,任务将死胡同: Focus 不再显示决策
+      // (recovery 原因),Recover 又被 guard 拒绝 (存在 resolution)。
+      // 标 applied 后: 现在及未来 Recover 放行 (只拒 pending),resume 门会
+      // 基于 applied override 确定性重放 dispatch,不重问 LLM。
+      await markOwnerResolutionApplied({
+        updateDiagnosticJson: (tid: string, json: string) => this.stateManager.updateTaskDiagnosticJson(tid, json),
+        getTask: (tid: string) => this.stateManager.getTask(tid),
+        taskId,
+        resolutionId: resolution.resolutionId,
+        appliedAt: new Date().toISOString(),
+      });
+      this.phase = RunnerPhase.Completed;
+      return RolloutReviewerRunner.buildResumeResult({
+        taskId, runId: resolution.sourceRunId, artifactId, resultRef, output,
+        attemptCount: leasedTask.attemptCount,
+      });
+    }
+    await this.markCompletionIntentAppliedOrThrow(taskId);
+    await markOwnerResolutionApplied({
+      updateDiagnosticJson: (tid: string, json: string) => this.stateManager.updateTaskDiagnosticJson(tid, json),
+      getTask: (tid: string) => this.stateManager.getTask(tid),
+      taskId,
+      resolutionId: resolution.resolutionId,
+      appliedAt: new Date().toISOString(),
+    });
+    try {
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+    } catch (stateErr) {
+      this.emitRolloutReviewerEvent('rollout_reviewer_mark_succeeded_failed', taskId, {
+        taskId,
+        runId: resolution.sourceRunId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
+    this.emitRolloutReviewerEvent('rollout_reviewer_task_succeeded', taskId, {
+      attemptCount: leasedTask.attemptCount,
+      resultRef,
+      reviewDecision: output.review.decision,
+      reviewConfidence: output.review.confidence,
+      ownerResolutionApplied: resolution.resolutionId,
+      effectiveDecision: overrideDecision,
+      ...(effect.dispatchArtifactId ? { dispatchedArtifactId: effect.dispatchArtifactId } : {}),
+    });
+    this.phase = RunnerPhase.Completed;
+    return RolloutReviewerRunner.buildResumeResult({
+      taskId, runId: resolution.sourceRunId, artifactId, resultRef, output,
+      attemptCount: leasedTask.attemptCount,
+    });
   }
 
   /**

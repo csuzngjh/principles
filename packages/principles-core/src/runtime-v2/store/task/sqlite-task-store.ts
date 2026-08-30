@@ -149,6 +149,40 @@ export class SqliteTaskStore implements TaskStore {
     return (await this.getTask(taskId)) as TaskRecord;
   }
 
+  async updateTaskIfDiagnosticJsonUnchanged(
+    taskId: string,
+    expectedDiagnosticJson: string | null,
+    patch: TaskStoreUpdatePatch,
+  ): Promise<TaskRecord | null> {
+    const db = this.connection.getDb();
+    const now = patch.updatedAt ?? new Date().toISOString();
+    const sets: string[] = ['updated_at = ?'];
+    const values: unknown[] = [now];
+
+    if (patch.status !== undefined) { sets.push('status = ?'); values.push(patch.status); }
+    if (patch.leaseOwner !== undefined) { sets.push('lease_owner = ?'); values.push(patch.leaseOwner); }
+    if (patch.leaseExpiresAt !== undefined) { sets.push('lease_expires_at = ?'); values.push(patch.leaseExpiresAt); }
+    if (patch.attemptCount !== undefined) { sets.push('attempt_count = ?'); values.push(patch.attemptCount); }
+    if (patch.maxAttempts !== undefined) { sets.push('max_attempts = ?'); values.push(patch.maxAttempts); }
+    if (patch.lastError !== undefined) { sets.push('last_error = ?'); values.push(patch.lastError); }
+    if (patch.inputRef !== undefined) { sets.push('input_ref = ?'); values.push(patch.inputRef); }
+    if (patch.resultRef !== undefined) { sets.push('result_ref = ?'); values.push(patch.resultRef); }
+    if (patch.diagnosticJson !== undefined) { sets.push('diagnostic_json = ?'); values.push(patch.diagnosticJson); }
+
+    values.push(taskId, expectedDiagnosticJson);
+
+    // Single conditional mutation: `IS` gives NULL-safe equality, so the
+    // precondition covers both a NULL column and a byte-equal JSON string.
+    const result = db
+      .prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ? AND diagnostic_json IS ?`)
+      .run(...values);
+
+    if (result.changes === 0) {
+      return null;
+    }
+    return (await this.getTask(taskId));
+  }
+
   async listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]> {
     const db = this.connection.getDb();
     let sql = 'SELECT * FROM tasks';

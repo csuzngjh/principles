@@ -65,6 +65,20 @@ export interface TaskStore {
    */
   updateTask(taskId: string, patch: TaskStoreUpdatePatch): Promise<TaskRecord>;
 
+  /**
+   * Narrow compare-and-swap (PRI-629 owner-resolution concurrency):
+   * apply `patch` only when the task's current diagnostic_json is byte-equal
+   * to `expectedDiagnosticJson` (null matches a NULL column). Single SQL
+   * conditional mutation — no read→JS-compare→write race window. Returns the
+   * updated record on success, or null when the precondition failed (task
+   * missing or diagnostic_json changed concurrently).
+   */
+  updateTaskIfDiagnosticJsonUnchanged(
+    taskId: string,
+    expectedDiagnosticJson: string | null,
+    patch: TaskStoreUpdatePatch,
+  ): Promise<TaskRecord | null>;
+
   /** List tasks with optional filter. */
   listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]>;
 

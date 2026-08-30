@@ -795,6 +795,61 @@ describe('handleFailedTasksRoute', () => {
       expect(audit[0]?.previousStatus).toBe('needs_human_review');
     });
 
+    it('PRI-629: decision-capable NHR recover → 409 owner_decision_required, task untouched (SPEC §17)', async () => {
+      // decision-capable: evaluator + dep artificer repairPayload.repairIteration=2
+      // + needs_revision + intent + 决策 artifact (legacy 推断路径)
+      await seedTask({
+        taskId: 'artificer-r2',
+        taskKind: 'artificer',
+        status: 'succeeded',
+        meta: {
+          dependencyTaskIds: [],
+          repairPayload: {
+            requiredChanges: ['fix'], concerns: [], previousScore: 0.7, repairIteration: 2,
+            sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: 'decision-task-1',
+          },
+        },
+      });
+      await seedTask({
+        taskId: 'decision-task-1',
+        taskKind: 'evaluator',
+        status: 'needs_human_review',
+        meta: {
+          dependencyTaskIds: ['artificer-r2'],
+          runnerDecision: 'needs_revision',
+          completionIntent: { decision: 'needs_revision', sourceRunId: 'run-d1', revisionEpoch: 0, status: 'pending' },
+        },
+      });
+      await stateManager.piArtifactStore.upsertArtifact({
+        artifactId: 'pi-art-decision-task-1-run-d1',
+        artifactKind: 'principle',
+        sourceTaskId: 'decision-task-1',
+        lineageArtifactIds: [],
+        validationStatus: 'pending',
+        contentJson: JSON.stringify({ evaluation: { decision: 'needs_revision' } }),
+        createdAt: '2026-08-30T00:00:00.000Z',
+        updatedAt: '2026-08-30T00:00:00.000Z',
+      });
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/decision-task-1/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/decision-task-1/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(409);
+      const body = errorEnvelope(res);
+      expect(body.error).toBe('owner_decision_required');
+      expect(body.nextAction).toContain('governance focus');
+      // core guard: 任务原样保留 — 无 authority reset
+      const row = await stateManager.getTask('decision-task-1');
+      expect(row?.status).toBe('needs_human_review');
+      const meta = row ? hydratePITaskRecord(row) : null;
+      expect(meta?.runnerDecision).toBe('needs_revision');
+    });
+
     it('409 metadata_invalid (fail closed) leaves a corrupt-metadata needs_human_review row untouched', async () => {
       await seedTask({
         taskId: 'corrupt-meta-task',

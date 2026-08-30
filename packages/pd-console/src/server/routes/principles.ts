@@ -43,12 +43,13 @@ function getOwnStringField(obj: unknown, key: string): string | undefined {
  */
 async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
   ids: Set<string>;
+  pendingIds: Set<string>;
   unavailableReason?: string;
 }> {
   // Runtime V2 uses <workspace>/.pd/state.db (NOT .state/state.db)
   const dbPath = path.join(workspaceDir, '.pd', 'state.db');
   if (!fs.existsSync(dbPath)) {
-    return { ids: new Set(), unavailableReason: 'approval_db_not_found' };
+    return { ids: new Set(), pendingIds: new Set(), unavailableReason: 'approval_db_not_found' };
   }
 
   let closeFn: (() => void) | null = null;
@@ -59,27 +60,33 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
     const db = conn.getDb();
 
     // Join approvals with pi_artifacts to find decided principle IDs
+    // PRI-629: also resolve PENDING approvals — a pending approval is a real
+    // Owner decision (owner_actionable), unlike candidate lifecycle (in_pipeline).
     const rows = db.prepare(
-      "SELECT DISTINCT a.source_principle_id " +
+      "SELECT DISTINCT a.source_principle_id, ap.status " +
       "FROM approvals ap " +
       "JOIN pi_artifacts a ON a.artifact_id = ap.artifact_id " +
-      "WHERE ap.status IN ('approved', 'rejected') " +
+      "WHERE ap.status IN ('approved', 'rejected', 'pending') " +
       "AND a.source_principle_id IS NOT NULL"
     ).all();
 
     // EP-01 Rule 1: treat DB rows as unknown; validate before use
     // EP-01 Rule 2: no `as` cast — use getOwnStringField instead
     const ids = new Set<string>();
+    const pendingIds = new Set<string>();
     for (const row of rows) {
       const val = getOwnStringField(row, 'source_principle_id');
-      if (val !== undefined) {
+      if (val === undefined) continue;
+      if (getOwnStringField(row, 'status') === 'pending') {
+        pendingIds.add(val);
+      } else {
         ids.add(val);
       }
     }
-    return { ids };
+    return { ids, pendingIds };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ids: new Set(), unavailableReason: `approval_query_failed: ${message}` };
+    return { ids: new Set(), pendingIds: new Set(), unavailableReason: `approval_query_failed: ${message}` };
   } finally {
     closeFn?.();
   }
@@ -224,7 +231,7 @@ export async function handlePrinciplesRoute({
       const filter = (filterRaw !== null && VALID_FILTERS.has(filterRaw) ? filterRaw : 'actionable') as PrincipleFilter;
 
       const decidedResult = await getDecidedPrincipleIds(workspaceDir);
-      const result = await model.listPrinciples(filter, decidedResult.ids);
+      const result = await model.listPrinciples(filter, decidedResult.ids, decidedResult.pendingIds);
       // Surface approval cross-check unavailability to the UI (ERR-002)
       if (decidedResult.unavailableReason) {
         result.approvalCrossCheckUnavailable = decidedResult.unavailableReason;
