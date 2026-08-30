@@ -328,7 +328,7 @@ export function buildOwnerReviewKey(facts: ReviewKeyFacts): string {
  * Internalization transition / orchestrator / 任何消费方必须经由本函数；
  * Console / HTTP route / 各 runner 禁止自行计算。
  */
-/** 当前 epoch 内最新 applied verdict override（accept/reject）— resolver 的输入。 */
+/** 当前 epoch 内最新一条 owner resolution（pending 或 applied），无则 null。 */
 export function findOwnerResolutionForCurrentEpoch(piTask: PITaskRecord): OwnerResolutionRecord | null {
   const epoch = piTask.revisionCount ?? 0;
   const resolutions = piTask.ownerResolutions;
