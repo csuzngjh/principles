@@ -1035,6 +1035,33 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
+  it('normalizes the legacy openclaw_context_bound provenance on read (SPEC §12)', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-prov-legacy',
+      reasonSummary: 'Legacy spelling row',
+      source: 'pain',
+      severity: 'severe',
+      sessionIdHint: 'sess-legacy',
+      provenance: 'openclaw_context_bound',
+    });
+    const legacyTask = makeDiagnosticianTask({
+      taskId: 'task_diag_prov_legacy',
+      sourcePainId: 'pain-prov-legacy',
+      sessionIdHint: 'sess-legacy',
+      reasonSummary: 'Legacy spelling row',
+    });
+    const legacyWithDj = { ...legacyTask, diagnosticJson: dj };
+    const tasks = new Map([[legacyWithDj.taskId, legacyWithDj]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      const payload = await f.assembler.assemble(legacyTask.taskId);
+      // The persisted legacy spelling is normalized at the read boundary —
+      // no history rewrite, no unknown-value guessing.
+      expect(payload.diagnosisTarget.provenance).toBe('host_context_bound');
+      expect(payload.diagnosisTarget.traceAvailability).toBe('unavailable_with_reason');
+    } finally { cleanupFixture(f); }
+  });
+
   it('sets traceAvailability=unavailable_with_reason for automatic_hook when trace not found', async () => {
     const dj = JSON.stringify({
       sourcePainId: 'pain-auto-nf',

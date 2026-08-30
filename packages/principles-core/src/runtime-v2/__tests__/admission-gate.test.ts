@@ -3,10 +3,31 @@ import {
   evaluateAdmission,
   evaluateCandidateAdmissions,
   evaluateCandidateAdmissionFromRecord,
+  normalizePainProvenance,
   ADMISSION_CONFIDENCE_THRESHOLD,
 } from '../admission-gate.js';
 import type { AdmissionGateInput } from '../admission-gate.js';
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+
+describe('normalizePainProvenance (SPEC §12 read-side normalization)', () => {
+  it('accepts the current provenance values unchanged', () => {
+    expect(normalizePainProvenance('host_context_bound')).toBe('host_context_bound');
+    expect(normalizePainProvenance('owner_reported_no_host_trace')).toBe('owner_reported_no_host_trace');
+    expect(normalizePainProvenance('automatic_hook')).toBe('automatic_hook');
+  });
+
+  it('normalizes the legacy openclaw_context_bound spelling to host_context_bound', () => {
+    expect(normalizePainProvenance('openclaw_context_bound')).toBe('host_context_bound');
+  });
+
+  it('returns undefined for unknown or malformed values instead of guessing', () => {
+    expect(normalizePainProvenance('openai_context_bound')).toBeUndefined();
+    expect(normalizePainProvenance('')).toBeUndefined();
+    expect(normalizePainProvenance(123)).toBeUndefined();
+    expect(normalizePainProvenance(null)).toBeUndefined();
+    expect(normalizePainProvenance(undefined)).toBeUndefined();
+  });
+});
 
 const makeInput = (overrides: Partial<AdmissionGateInput> = {}): AdmissionGateInput => ({
   recommendationKind: 'principle',
