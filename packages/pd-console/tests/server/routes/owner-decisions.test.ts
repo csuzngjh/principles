@@ -285,6 +285,35 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
     expect(parse(replay).success).toBe(true);
   });
 
+  it('unknown task → 404 task_not_found', async () => {
+    setupDb().close();
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('POST', {
+      action: 'accept_current', reviewKey: 'odk_x', expectedRevisionEpoch: 0,
+      expectedSourceRunId: 'run-x', expectedSourceArtifactId: 'pi-art-x',
+      expectedSourceArtifactHash: 'h'.repeat(64), ownerInstruction: null,
+    }), res, ctxBase('/evaluator-does-not-exist/resolve'));
+    expect(res.statusCode).toBe(404);
+    expect(parse(res).error).toBe('task_not_found');
+  });
+
+  it('non-decision task (recovery-class reason) → 409 not_decision_capable with blockers', async () => {
+    const conn = setupDb();
+    // rollout NHR with recovery-only context (from fixture) — POST 应拒绝
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('POST', {
+      action: 'accept_current', reviewKey: 'odk_x', expectedRevisionEpoch: 0,
+      expectedSourceRunId: 'run-x', expectedSourceArtifactId: 'pi-art-x',
+      expectedSourceArtifactHash: 'h'.repeat(64), ownerInstruction: null,
+    }), res, ctxBase(`/${ROLLOUT_ID}/resolve`));
+    expect(res.statusCode).toBe(409);
+    const body = parse(res) as { error: string; blockers?: string[]; nextAction?: string };
+    expect(body.error).toBe('not_decision_capable');
+    expect(Array.isArray(body.blockers)).toBe(true);
+    expect(body.nextAction).toContain('governance focus');
+    conn.close();
+  });
+
   it('malformed body → 400 (rc-3 fail loud)', async () => {
     setupDb().close();
     const res = makeRes();

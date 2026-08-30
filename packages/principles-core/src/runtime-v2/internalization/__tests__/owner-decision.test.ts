@@ -19,7 +19,6 @@ import {
   parsePITaskMetadata,
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
-  mergePITaskMetadata,
   type PITaskMetadata,
   type HumanReviewContext,
   type OwnerResolutionRecord,
@@ -28,7 +27,6 @@ import {
 import {
   HUMAN_REVIEW_REASON,
   LEGACY_EVALUATOR_BUDGET_EXHAUSTED,
-  LEGACY_ROLLOUT_BUDGET_EXHAUSTED,
   buildOwnerReviewKey,
   collectOwnerDecisionFacts,
   deriveOwnerDecisionCapability,

@@ -304,7 +304,6 @@ describe('PRI-629 rollout owner override resume (INV-08)', () => {
 
 describe('PRI-629 P0: epoch-aware repair reopen (SPEC §12)', () => {
   function orchestratorHarness(evaluatorCauseId: string | undefined, artificerRevisionCount?: number) {
-    const artifacts = makeArtifacts();
     const evalTask = task(EVAL_ID, 'evaluator', 'needs_human_review', meta({
       runnerDecision: 'needs_revision',
       revisionCount: 1,
