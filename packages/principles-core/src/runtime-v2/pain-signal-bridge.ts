@@ -41,6 +41,8 @@ export interface PainDetectedData {
   taskId?: string;
   traceId?: string;
   provenance?: PainProvenance;
+  /** Codex Governance Closure SPEC §12: provenance `host_context_bound` names the host. */
+  hostKind?: 'openclaw' | 'codex';
   evidence?: PainEvidenceEntry[];
 }
 
@@ -111,15 +113,15 @@ function inferProvenance(data: PainDetectedData): PainProvenance {
     return 'owner_reported_no_host_trace';
   }
   if (data.sessionId && data.sessionId !== 'cli' && data.sessionId !== 'unknown') {
-    return 'openclaw_context_bound';
+    return 'host_context_bound';
   }
   return 'automatic_hook';
 }
 
 function provenanceReason(provenance: PainProvenance): string {
   switch (provenance) {
-    case 'openclaw_context_bound':
-      return 'Pain reported from an OpenClaw host session with authenticated sessionId';
+    case 'host_context_bound':
+      return 'Pain reported from an authenticated host session with a bound host context';
     case 'owner_reported_no_host_trace':
       return 'No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable';
     case 'automatic_hook':
@@ -138,6 +140,7 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     agentIdHint: data.agentId ?? null,
     provenance,
     provenanceReason: provenanceReason(provenance),
+    ...(data.hostKind ? { hostKind: data.hostKind } : {}),
     evidence: data.evidence ?? [],
     workspaceDir: workspaceDir ?? null,
   });

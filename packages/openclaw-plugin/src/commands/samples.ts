@@ -63,7 +63,8 @@ export function handleSamplesCommand(ctx: PluginCommandContext): PluginCommandRe
           score: painScore,
           sessionId: record.sessionId,
           agentId: 'main',
-          provenance: 'openclaw_context_bound',
+          provenance: 'host_context_bound',
+          hostKind: 'openclaw',
           evidence: [{ sourceRef: 'correction_sample', note: record.diffExcerpt.slice(0, 200) }],
         },
       }, { recordObservability: true }).catch((e) => {

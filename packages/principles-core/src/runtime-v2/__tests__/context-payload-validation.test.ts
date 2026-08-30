@@ -309,7 +309,7 @@ describe('DiagnosisTargetSchema', () => {
 
   it('accepts all provenance variants', () => {
     const provenances: DiagnosisTarget['provenance'][] = [
-      'openclaw_context_bound',
+      'host_context_bound',
       'owner_reported_no_host_trace',
       'automatic_hook',
     ];

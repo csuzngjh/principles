@@ -15,6 +15,7 @@ export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';
 export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
+export * from './governance-signal-admission.js';
 export * from './host-liveness-contract.js';
 // Anonymous Product Telemetry v1 (PRI-595~603) — opt-in, default-off,
 // read-only with respect to all PD governance facts.

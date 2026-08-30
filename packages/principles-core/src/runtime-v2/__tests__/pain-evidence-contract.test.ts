@@ -123,14 +123,14 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
       score: 100,
       sessionId: 'sess-abc-123',
       agentId: 'main',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
     };
 
     await bridge.onPainDetected(painData);
 
     const dj = getDiagnosticJson(capturedTasks, painData.painId);
-    expect(dj.provenance).toBe('openclaw_context_bound');
-    expect(dj.provenanceReason).toContain('OpenClaw host session');
+    expect(dj.provenance).toBe('host_context_bound');
+    expect(dj.provenanceReason).toContain('authenticated host session');
     expect(dj.sessionIdHint).toBe('sess-abc-123');
   });
 

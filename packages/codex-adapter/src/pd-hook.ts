@@ -8,6 +8,7 @@ import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
+import { runGovernanceAdmission } from './ingestion/admission.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface PdHookResult { stdout: unknown; exitCode: number; stderr: string[] }
@@ -24,11 +25,16 @@ function errorMessage(error: unknown): string {
 }
 
 // Bounded governance-observation ingestion (Codex Governance Closure Slice
-// A). Runs only when BOTH host.codex and codex_conversation_ingestion are
+// A) followed by the Slice B signal-admission pass (SPEC §12/§13): detection
+// → canonical pain → evidence promotion → one pending Diagnostician task.
+// Runs only when BOTH host.codex and codex_conversation_ingestion are
 // enabled — the flag gate below happens BEFORE any transcript path
 // validation or filesystem I/O, so flag-off means the transcript boundary
-// receives zero calls (SPEC §10 hard privacy invariant).
-function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; env: EnvMap }): string[] {
+// receives zero calls (SPEC §10 hard privacy invariant). Admission runs
+// BEFORE dispatch so a live tool failure is admitted through the same
+// canonical derivation first and the production handler's duplicate probe
+// then converges to a no-op (exactly one pain per real tool call).
+async function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; env: EnvMap }): Promise<string[]> {
   const { rawPayload, kind, workspaceDir, env } = args;
   if (kind !== 'turn_complete' && kind !== 'before_prompt_build' && kind !== 'after_tool_call') return [];
   const diagnostics: string[] = [];
@@ -39,6 +45,17 @@ function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKi
     } else {
       for (const warning of outcome.warnings.slice(0, 2)) {
         diagnostics.push(diagnostic(warning, 'Inspect PD Workspace governance-observation state; ingestion continued.'));
+      }
+      // Slice B admission: hook awaits only admission + durable enqueue —
+      // never an LLM (SPEC §12/§13). Ordinary conversation returns no
+      // candidates/no admissions and stays completely silent.
+      const admission = await runGovernanceAdmission({
+        workspaceDir,
+        candidates: outcome.admissionCandidates,
+        rolloutIdentity: outcome.rolloutIdentity,
+      });
+      for (const degradation of admission.degradations.slice(0, 2)) {
+        diagnostics.push(diagnostic(degradation.reason, degradation.nextAction));
       }
     }
   } catch (error) {
@@ -88,7 +105,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // turn on stderr — never stdout, and never on the per-tool events (that
     // would be per-event noise).
     const stderr = ingestionEnabled
-      ? runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
+      ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
       : [diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
     return { stdout: {}, exitCode: 0, stderr };
   }
@@ -100,7 +117,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: [] };
     }
     const ingestionDiagnostics = ingestionEnabled
-      ? runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
+      ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
       : [];
     const result = await createProductionHostRuntime().dispatch(event);
     const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];

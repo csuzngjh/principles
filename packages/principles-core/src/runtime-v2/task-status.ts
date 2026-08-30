@@ -94,10 +94,14 @@ export const DiagnosticianTaskRecordSchema = Type.Intersect([
     agentIdHint: Type.Optional(Type.String()),
     reasonSummary: Type.String(),
     provenance: Type.Optional(Type.Union([
-      Type.Literal('openclaw_context_bound'),
+      Type.Literal('host_context_bound'),
       Type.Literal('owner_reported_no_host_trace'),
       Type.Literal('automatic_hook'),
+      // Legacy spelling persisted before Codex Governance Closure Slice B —
+      // valid on read (normalized via normalizePainProvenance), never written.
+      Type.Literal('openclaw_context_bound'),
     ])),
+    hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex')])),
     provenanceReason: Type.Optional(Type.String()),
     evidence: Type.Optional(Type.Array(Type.Object({
       sourceRef: Type.String({ minLength: 1 }),

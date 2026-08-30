@@ -24,11 +24,14 @@ import {
   readGovernanceCheckpoint,
   type GovernanceIngestDegradation,
   type GovernanceObservationInput,
+  type GovernanceSignalCandidate,
 } from '@principles/host-runtime';
 import { resolveCodexHome } from './codex-home.js';
 import { validateCodexTranscriptPath } from './transcript-path.js';
 import { classifyCodexVersion, CODEX_VERSION_NEXT_ACTION } from './codex-version.js';
 import { decodeTranscriptWindow, createNodeTranscriptPort, CODEX_INGESTION_MAX_BATCH_BYTES, TranscriptReplacedError, type TranscriptExpectedIdentity, type TranscriptPort } from './transcript-decoder.js';
+import { extractFields, type PayloadFields } from './ingestion-fields.js';
+import { buildLiveCorrectionCandidate, buildLiveToolCandidate, buildTranscriptCandidates } from './admission.js';
 
 export interface CodexIngestionOptions {
   readonly workspaceDir: string;
@@ -38,7 +41,12 @@ export interface CodexIngestionOptions {
 }
 
 export type CodexIngestionOutcome =
-  | { status: 'ok'; inserted: number; enriched: number; duplicates: number; warnings: readonly string[]; lagBytes: number }
+  | {
+    status: 'ok'; inserted: number; enriched: number; duplicates: number; warnings: readonly string[]; lagBytes: number;
+    /** Slice B: normalized admission candidates for the committed observations (host-neutral; consumed by pd-hook's admission pass). */
+    readonly admissionCandidates: readonly GovernanceSignalCandidate[];
+    readonly rolloutIdentity: string;
+  }
   | { status: 'degraded'; reason: string; nextAction: string; warnings: readonly string[] };
 
 let activePort: TranscriptPort | null = null;
@@ -50,46 +58,6 @@ export function setCodexTranscriptPortForTest(port: TranscriptPort | null): void
 
 function activeTranscriptPort(options: CodexIngestionOptions): TranscriptPort {
   return options.port ?? activePort ?? createNodeTranscriptPort();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function own(value: Record<string, unknown>, key: string): unknown {
-  return Object.hasOwn(value, key) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
-}
-
-interface PayloadFields {
-  transcriptPath: string | null;
-  sessionId: string;
-  turnId: string | null;
-  prompt: string | null;
-  toolUseId: string | null;
-  toolName: string | null;
-  toolInput: unknown;
-  toolResponse: unknown;
-}
-
-function extractFields(raw: unknown): PayloadFields | null {
-  if (!isRecord(raw)) return null;
-  const transcriptPath = own(raw, 'transcript_path');
-  if (transcriptPath !== null && typeof transcriptPath !== 'string') return null;
-  const sessionId = own(raw, 'session_id');
-  const turnId = own(raw, 'turn_id');
-  const prompt = own(raw, 'prompt');
-  const toolUseId = own(raw, 'tool_use_id');
-  const toolName = own(raw, 'tool_name');
-  return {
-    transcriptPath: transcriptPath ?? null,
-    sessionId: typeof sessionId === 'string' ? sessionId : '',
-    turnId: typeof turnId === 'string' ? turnId : null,
-    prompt: typeof prompt === 'string' ? prompt : null,
-    toolUseId: typeof toolUseId === 'string' ? toolUseId : null,
-    toolName: typeof toolName === 'string' ? toolName : null,
-    toolInput: own(raw, 'tool_input'),
-    toolResponse: own(raw, 'tool_response'),
-  };
 }
 
 interface LiveObservationArgs {
@@ -143,7 +111,16 @@ function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: L
     now,
   });
   if (!result.ok) return { status: 'degraded', reason: result.reason ?? 'governance_write_failed', nextAction: result.nextAction ?? 'inspect the workspace trajectory database.', warnings: result.warnings };
-  return { status: 'ok', inserted: result.inserted, enriched: result.enriched, duplicates: result.duplicates, warnings: result.warnings, lagBytes: 0 };
+  // Slice B: hand the live observation to the admission pass as a normalized
+  // candidate (SPEC §12) — the caller (pd-hook) runs detection/admission.
+  const candidate = observation.kind === 'user_turn'
+    ? buildLiveCorrectionCandidate({ fields, rolloutIdentity })
+    : buildLiveToolCandidate({ fields, rolloutIdentity });
+  return {
+    status: 'ok', inserted: result.inserted, enriched: result.enriched, duplicates: result.duplicates, warnings: result.warnings, lagBytes: 0,
+    admissionCandidates: candidate !== null ? [candidate] : [],
+    rolloutIdentity,
+  };
 }
 
 interface TranscriptDeltaArgs {
@@ -274,6 +251,11 @@ function ingestTranscriptDelta({ fields, canonicalPath, identity, rolloutIdentit
     duplicates: result.duplicates,
     warnings,
     lagBytes: Math.max(0, window.fileSize - decoded.nextByteOffset),
+    // Slice B: transcript-only user turns / tool calls that were never seen
+    // live get their admission evaluation here (SPEC §10/§12) — already
+    // admitted logical keys no-op on the marker.
+    admissionCandidates: buildTranscriptCandidates(decoded.observations),
+    rolloutIdentity,
   };
 }
 

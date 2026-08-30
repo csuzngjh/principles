@@ -85,7 +85,7 @@ export interface TriageInput {
   /** Whether the action is high-confidence unsafe (for rulehost_block) */
   readonly isUnsafeHighConfidence?: boolean;
   /** Provenance: how was this pain observed? */
-  readonly provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
+  readonly provenance?: 'host_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
   /**
    * Whether the failed action was risky/irreversible.
    *

@@ -2,9 +2,23 @@ import type { DiagnosticianOutputV1, RecommendationKind } from './diagnostician-
 import { isOwnerExplicitManual } from './evidence-guards.js';
 
 export type PainProvenance =
-  | 'openclaw_context_bound'
+  | 'host_context_bound'
   | 'owner_reported_no_host_trace'
   | 'automatic_hook';
+
+/**
+ * Codex Governance Closure SPEC rev 2 §12: `host_context_bound` + hostKind is
+ * the current provenance value; `openclaw_context_bound` is the legacy spelling
+ * written before Slice B and remains valid on read. Reads of persisted
+ * provenance normalize the legacy value instead of rewriting history.
+ */
+export function normalizePainProvenance(value: unknown): PainProvenance | undefined {
+  if (value === 'host_context_bound' || value === 'owner_reported_no_host_trace' || value === 'automatic_hook') {
+    return value;
+  }
+  if (value === 'openclaw_context_bound') return 'host_context_bound';
+  return undefined;
+}
 
 export type AdmissionDecision = 'admitted' | 'needs_evidence' | 'deferred';
 

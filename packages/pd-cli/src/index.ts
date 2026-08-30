@@ -563,6 +563,31 @@ runtimeHealthCmd
     await handleRuntimeHealthSnapshot({ workspace: opts.workspace, json: opts.json });
   });
 
+// ── pd codex reconcile — Codex governance continuation recovery ───────────────
+// Codex Governance Closure Slice B (PRI-623, SPEC §13/§20): runs the idempotent
+// cross-store reconciliation pass (admitted pain → missing Diagnostician task,
+// task-before-link, pending promotion tails) exposed for the CLI now and the
+// Slice C Companion worker later.
+const codexCmd = program
+  .command('codex')
+  .description('Codex host governance operations');
+
+codexCmd
+  .command('reconcile')
+  .description('Reconcile admitted Codex pains with Diagnostician tasks and promotion tails (idempotent)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--limit <n>', 'Maximum admitted pains to reconcile per pass (1-200, default 50)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleCodexReconcile } = await import('./commands/codex-reconcile.js');
+    const limit = typeof opts.limit === 'string' ? Number.parseInt(opts.limit, 10) : undefined;
+    await handleCodexReconcile({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      ...(limit !== undefined && Number.isInteger(limit) ? { limit } : {}),
+    });
+  });
+
 runtimeHealthCmd
   .command('gfi')
   .description('GFI workspace snapshot — active vs stale session breakdown')

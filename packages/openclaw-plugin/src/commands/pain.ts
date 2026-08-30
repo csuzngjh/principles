@@ -329,7 +329,8 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
     score: 90,
     sessionId,
     agentId: 'openclaw-host',
-    provenance: 'openclaw_context_bound' as const,
+    provenance: 'host_context_bound' as const,
+    hostKind: 'openclaw' as const,
   };
 
   try {

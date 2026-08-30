@@ -184,7 +184,7 @@ describe('PainSignalBridge admission gate integration', () => {
       source: 'openclaw',
       reason: 'Valid reason',
       sessionId: 'session-123',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       evidence: [{ sourceRef: 'session-trace-1', note: 'test evidence' }],
     });
 
@@ -216,7 +216,7 @@ describe('PainSignalBridge admission gate integration', () => {
       source: 'openclaw',
       reason: 'Test',
       sessionId: 'session-456',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       evidence: [{ sourceRef: 'session-trace-2', note: 'test evidence' }],
     });
 
@@ -282,7 +282,7 @@ describe('PainSignalBridge admission gate integration', () => {
       source: 'openclaw',
       reason: 'Mixed',
       sessionId: 'session-789',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       evidence: [{ sourceRef: 'session-trace-3', note: 'test evidence' }],
     });
 
@@ -451,7 +451,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       source: 'openclaw',
       reason: 'Test dreamer seeding',
       sessionId: 'session-dreamer',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       evidence: [{ sourceRef: 'dreamer-src', note: 'test evidence' }],
     });
 
@@ -486,7 +486,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       source: 'openclaw',
       reason: 'Test non-MVP channel',
       sessionId: 'session-impl',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       evidence: [{ sourceRef: 'impl-src', note: 'test evidence' }],
     });
 
@@ -531,7 +531,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
       source: 'openclaw',
       reason: 'Test seed failure',
       sessionId: 'session-fail',
-      provenance: 'openclaw_context_bound',
+      provenance: 'host_context_bound',
       evidence: [{ sourceRef: 'fail-src', note: 'test evidence' }],
     });
 
