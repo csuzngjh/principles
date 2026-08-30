@@ -32,7 +32,7 @@ import {
 } from '../utils/pd-backups.js';
 import { ActivationCompatibilityReadModel } from '@principles/core/runtime-v2';
 import { getInstallLayoutPaths, resolveInstallLayout, type InstallHost } from '@principles/install-layout';
-import { collectFileDepLinkSpecs } from '../utils/update-links.js';
+import { collectFileDepLinkSpecs, type StagedComponent } from '../utils/update-links.js';
 
 /**
  * Legacy rule contract preflight (2026-08-19): refuse to swap the runtime
@@ -807,21 +807,22 @@ function depsMeaningfullyChanged(
  * Two sources, both fail-closed on creation errors:
  *   1. the explicit link list below (known-critical links: a missing one
  *      means the updated console cannot start);
- *   2. a data-driven pass that derives links from EACH deployed component's
- *      declared `file:` dependencies. This is what makes the updater immune
- *      to the generation gap: the running console executes update logic from
- *      its own dist (one generation behind the components it installs), so a
- *      hardcoded list goes stale the moment a release adds a new internal
- *      dependency — observed 2026-08-29 when the 1.221.2 console updated
- *      hosts to 1.222.5 but could not know about the newly introduced
- *      install-layout component, leaving
+ *   2. a data-driven pass that derives links from the STAGED manifests —
+ *      the freshly extracted release trees under tempDir. Their `file:`
+ *      declarations are the authoritative list of links the updated tree
+ *      needs. Reading the deployed (pre-update) manifests instead would
+ *      miss every dependency this release newly introduced: the running
+ *      console executes update logic from its own dist (one generation
+ *      behind the components it installs) — observed 2026-08-29 when the
+ *      1.221.2 console updated hosts to 1.222.5 but could not know about
+ *      the newly introduced install-layout component, leaving
  *      host-runtime/node_modules/@principles/install-layout missing and
  *      every pd-cli runtime command failing with ERR_MODULE_NOT_FOUND.
  *
  * Returns undefined on success, or an error message (rc-9: observable, never
  * silent — a missing link means the updated console cannot start).
  */
-function ensureRuntimeResolutionLinks(layout: UpdateLayout): string | undefined {
+function ensureRuntimeResolutionLinks(layout: UpdateLayout, tempDir: string): string | undefined {
   const links = [
     { linkPath: path.join(layout.consoleDir, 'node_modules', '@principles', 'host-runtime'), target: layout.hostRuntimeDir },
     { linkPath: path.join(layout.pdCliDir, 'node_modules', '@principles', 'host-runtime'), target: layout.hostRuntimeDir },
@@ -832,13 +833,19 @@ function ensureRuntimeResolutionLinks(layout: UpdateLayout): string | undefined 
     { linkPath: path.join(layout.hostRuntimeDir, 'node_modules', '@principles', 'install-layout'), target: layout.installLayoutDir },
     { linkPath: path.join(layout.consoleDir, 'node_modules', 'principles-disciple'), target: layout.pluginDir },
   ];
-  // Data-driven pass: derive links from each deployed component's declared
-  // `file:` dependencies so newly introduced internal dependencies are
-  // linked without requiring a console-generation change first.
-  const componentDirs = [layout.consoleDir, layout.pdCliDir, layout.hostRuntimeDir, layout.installLayoutDir, layout.pluginDir];
-  const readComponentDependencies = (componentDir: string): Record<string, string> => {
+  // Data-driven pass: derive links from the STAGED component manifests (see
+  // the comment above — staged, never the deployed pre-update manifests).
+  const stagedComponents: StagedComponent[] = [
+    { manifestDir: path.join(tempDir, 'console'), deployedDir: layout.consoleDir },
+    { manifestDir: path.join(tempDir, 'pd-cli'), deployedDir: layout.pdCliDir },
+    { manifestDir: path.join(tempDir, 'host-runtime'), deployedDir: layout.hostRuntimeDir },
+    { manifestDir: path.join(tempDir, 'install-layout'), deployedDir: layout.installLayoutDir },
+    { manifestDir: path.join(tempDir, 'core'), deployedDir: layout.coreDir },
+    { manifestDir: path.join(tempDir, 'plugin'), deployedDir: layout.pluginDir },
+  ];
+  const readStagedDependencies = (manifestDir: string): Record<string, string> => {
     try {
-      const pkgPath = path.join(componentDir, 'package.json');
+      const pkgPath = path.join(manifestDir, 'package.json');
       if (!fs.existsSync(pkgPath)) return {};
       const parsed: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       if (!isRecord(parsed) || !isRecord(parsed.dependencies)) return {};
@@ -848,20 +855,16 @@ function ensureRuntimeResolutionLinks(layout: UpdateLayout): string | undefined 
       }
       return out;
     } catch {
-      // rc-9: an unreadable manifest degrades to "no derived links" — the
-      // explicit list above still covers the known-critical links.
+      // rc-9: an unreadable staged manifest degrades to "no derived links" —
+      // the explicit list above still covers the known-critical links.
       return {};
     }
   };
-  const fileDepSpecs = collectFileDepLinkSpecs(componentDirs, readComponentDependencies, (dir) => fs.existsSync(dir));
-  for (const spec of fileDepSpecs) {
-    if (!links.some((existing) => existing.linkPath === spec.linkPath)) {
-      links.push(spec);
-    }
-  }
-  for (const { linkPath, target } of links) {
-    if (!fs.existsSync(target)) continue;
-    if (fs.existsSync(linkPath)) continue;
+  const fileDepSpecs = collectFileDepLinkSpecs(stagedComponents, readStagedDependencies);
+  const createResolutionLink = (linkPath: string, target: string): string | undefined => {
+    // Idempotent: never overwrite an existing link or directory (fresh
+    // installs have npm-created real dirs in these slots).
+    if (fs.existsSync(linkPath)) return undefined;
     try {
       fs.mkdirSync(path.dirname(linkPath), { recursive: true });
       if (process.platform === 'win32') {
@@ -869,11 +872,29 @@ function ensureRuntimeResolutionLinks(layout: UpdateLayout): string | undefined 
       } else {
         fs.symlinkSync(path.relative(path.dirname(linkPath), target), linkPath, 'dir');
       }
+      return undefined;
     } catch (error) {
       return `Failed to create runtime resolution link at ${linkPath}: ${
         error instanceof Error ? error.message : String(error)
       }`;
     }
+  };
+  // Pass 1 — explicit known-critical links, fail-closed BEFORE any byte is
+  // swapped (a link-creation failure aborts with the installed packages
+  // untouched: the PRI-561 ordering contract).
+  for (const { linkPath, target } of links) {
+    if (!fs.existsSync(target)) continue;
+    const error = createResolutionLink(linkPath, target);
+    if (error) return error;
+  }
+  // Pass 2 — data-driven derived links. Their deployed target dir may be
+  // created by the copy steps that follow (a brand-new component's dir does
+  // not exist yet); each staged target's existence was already proven by the
+  // extraction, and the copies below run unconditionally.
+  for (const spec of fileDepSpecs) {
+    if (fs.existsSync(spec.linkPath)) continue;
+    const error = createResolutionLink(spec.linkPath, spec.target);
+    if (error) return error;
   }
   return undefined;
 }
@@ -1064,7 +1085,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       if (fs.existsSync(path.join(installLayoutSrc, 'package.json')) && fs.existsSync(path.join(installLayoutSrc, 'dist'))) {
         copyDirRecursive(installLayoutSrc, layout.installLayoutDir, SKIP_DIRS);
       }
-      const linkError = ensureRuntimeResolutionLinks(layout);
+      const linkError = ensureRuntimeResolutionLinks(layout, tempDir);
       if (linkError) {
         appendUpdateHistory(workspaceDir, {
           fromVersion,

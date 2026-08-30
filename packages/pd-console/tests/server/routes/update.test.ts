@@ -1853,6 +1853,94 @@ describe('handleUpdateRoute', () => {
       expect(probeError).toBe('');
     });
 
+    it('creates node_modules links for internal deps the staged manifests newly declare (generation-gap regression)', async () => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      let stagingDirDebug: string | undefined;
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              version: '1.121.0',
+              dist: { tarball: 'https://example.com/installer.tgz' },
+            }),
+          } as Response);
+        }
+        return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'tar') {
+          const ci = args ? args.indexOf('-C') : -1;
+          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          if (dir) {
+            stagingDirDebug = dir;
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            // The STAGED console manifest declares a file: dep that the
+            // pre-update install never had — the data-driven derivation must
+            // pick it up from the staged tree, not the deployed manifest.
+            fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+            fs.writeFileSync(path.join(dir, 'console', 'package.json'),
+              JSON.stringify({ version: '1.0.0', dependencies: { '@principles/core': 'file:../core' } }));
+            fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'core', 'dist', 'index.js'), 'new core');
+            fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), 'new cli');
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+            // A real 1.222.5+ installer bundles host-runtime and
+            // install-layout — without them the host-runtime copy block (and
+            // the link derivation inside it) is skipped entirely.
+            fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+              JSON.stringify({ name: '@principles/host-runtime', version: '0.1.1', type: 'module', main: './dist/index.js', dependencies: { '@principles/install-layout': 'file:../install-layout' } }));
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const HOST_TELEMETRY = 1;');
+            fs.mkdirSync(path.join(dir, 'install-layout', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'install-layout', 'package.json'),
+              JSON.stringify({ name: '@principles/install-layout', version: '0.1.1', type: 'module', main: './dist/index.js' }));
+            fs.writeFileSync(path.join(dir, 'install-layout', 'dist', 'index.js'), 'export function getInstallLayoutPaths() { return {}; }');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Existing install WITHOUT any console node_modules link for
+      // @principles/core (the dep is newly introduced by this release).
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+      fs.mkdirSync(path.join(pluginDir, 'console', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(pluginDir, 'console', 'dist', 'server.js'), 'old console');
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; newVersion?: string } }>(res);
+      expect(body.data.success).toBe(true);
+
+      // TEMP DEBUG
+      const dump = (d: string): string => {
+        try { return fs.readdirSync(d).join(','); } catch (e) { return 'ERR:' + (e as Error).message; }
+      };
+      console.log('[DEBUG] stagingDir:', stagingDirDebug, '->', stagingDirDebug ? dump(stagingDirDebug) : 'N/A');
+      console.log('[DEBUG] staged console pkg deps:', (() => { try { return fs.readFileSync(path.join(stagingDirDebug!, 'console', 'package.json'), 'utf8'); } catch (e) { return 'ERR ' + (e as Error).message; } })());
+      console.log('[DEBUG] console/node_modules exists:', fs.existsSync(path.join(pluginDir, 'console', 'node_modules')));
+      try {
+        console.log('[DEBUG] console/node_modules contents:', dump(path.join(pluginDir, 'console', 'node_modules')));
+        console.log('[DEBUG] console/node_modules/@principles contents:', dump(path.join(pluginDir, 'console', 'node_modules', '@principles')));
+      } catch { /* ignore */ }
+
+      // The data-driven derivation created the link the new dependency
+      // requires — without any console-generation change or hardcoded entry.
+      expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'core'))).toBe(true);
+    });
+
     // Negative control for the PRI-561 probe: the SAME probe on the PRE-fix
     // layout (no extDir/host-runtime; console/node_modules has core only,
     // never passing through the updater) must die with ERR_MODULE_NOT_FOUND.

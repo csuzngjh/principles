@@ -5,15 +5,16 @@ import * as path from 'node:path';
 import { collectFileDepLinkSpecs } from '../../../src/server/utils/update-links.js';
 
 /**
- * Unit tests for the data-driven link derivation: whatever a deployed
- * component declares as `file:` dependencies becomes the link spec list —
- * this is what makes the updater immune to the generation gap (a hardcoded
- * list goes stale when a release adds a new internal dependency).
+ * Unit tests for the staged-manifest link derivation: whatever the freshly
+ * extracted components declare as `file:` dependencies becomes the link
+ * spec list, with targets mapped to the deployed layout dirs by basename.
+ * Reading the DEPLOYED manifests instead is the generation-gap bug this
+ * exists to prevent.
  */
 
-const readDepsFromDisk = (componentDir: string): Record<string, string> => {
+const readDepsFromDisk = (manifestDir: string): Record<string, string> => {
   try {
-    const pkg: unknown = JSON.parse(fs.readFileSync(path.join(componentDir, 'package.json'), 'utf8'));
+    const pkg: unknown = JSON.parse(fs.readFileSync(path.join(manifestDir, 'package.json'), 'utf8'));
     if (typeof pkg !== 'object' || pkg === null) return {};
     const deps = (pkg as Record<string, unknown>).dependencies;
     if (typeof deps !== 'object' || deps === null) return {};
@@ -28,78 +29,110 @@ const readDepsFromDisk = (componentDir: string): Record<string, string> => {
 };
 
 describe('collectFileDepLinkSpecs', () => {
-  it('derives link specs from declared file: dependencies whose target exists', () => {
-    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
-    const consoleDir = path.join(root, 'console');
-    const coreDir = path.join(root, 'core');
-    fs.mkdirSync(path.join(consoleDir, 'dist'), { recursive: true });
-    fs.mkdirSync(coreDir, { recursive: true });
+  it('maps staged file: refs to the deployed layout dir of the target basename', () => {
+    const staged = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
+    const consoleStaged = path.join(staged, 'console');
+    const coreStaged = path.join(staged, 'core');
+    const deployedConsole = path.join(staged, 'deployed', 'console');
+    const deployedCore = path.join(staged, 'deployed', 'core');
+    fs.mkdirSync(consoleStaged, { recursive: true });
+    fs.mkdirSync(coreStaged, { recursive: true });
+    fs.mkdirSync(deployedConsole, { recursive: true });
+    fs.mkdirSync(deployedCore, { recursive: true });
     fs.writeFileSync(
-      path.join(consoleDir, 'package.json'),
-      JSON.stringify({ name: '@principles/console', dependencies: { '@principles/core': 'file:../core', better: 'sqlite3' } }),
+      path.join(consoleStaged, 'package.json'),
+      JSON.stringify({ dependencies: { '@principles/core': 'file:../core' } }),
     );
-    const specs = collectFileDepLinkSpecs([consoleDir], readDepsFromDisk, (dir) => fs.existsSync(dir));
+    const specs = collectFileDepLinkSpecs(
+      [
+        { manifestDir: consoleStaged, deployedDir: deployedConsole },
+        { manifestDir: coreStaged, deployedDir: deployedCore },
+      ],
+      readDepsFromDisk,
+    );
     expect(specs).toEqual([
-      { linkPath: path.join(consoleDir, 'node_modules', '@principles/core'), target: path.resolve(consoleDir, '../core') },
+      {
+        linkPath: path.join(deployedConsole, 'node_modules', '@principles/core'),
+        target: deployedCore,
+        stagedTarget: coreStaged,
+      },
     ]);
   });
 
-  it('skips file: dependencies whose target directory is not deployed', () => {
-    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
-    const consoleDir = path.join(root, 'console');
-    fs.mkdirSync(consoleDir, { recursive: true });
-    // codex-adapter is a separate host install — NOT part of this layout.
+  it('skips deps whose staged target basename has no deployed counterpart', () => {
+    const staged = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
+    const consoleStaged = path.join(staged, 'console');
+    fs.mkdirSync(consoleStaged, { recursive: true });
     fs.writeFileSync(
-      path.join(consoleDir, 'package.json'),
+      path.join(consoleStaged, 'package.json'),
       JSON.stringify({ dependencies: { '@principles/codex-adapter': 'file:../codex-adapter' } }),
     );
-    const specs = collectFileDepLinkSpecs([consoleDir], readDepsFromDisk, (dir) => fs.existsSync(dir));
+    const deployedConsole = path.join(staged, 'deployed', 'console');
+    fs.mkdirSync(deployedConsole, { recursive: true });
+    const specs = collectFileDepLinkSpecs(
+      [{ manifestDir: consoleStaged, deployedDir: deployedConsole }],
+      readDepsFromDisk,
+    );
     expect(specs).toEqual([]);
   });
 
-  it('deduplicates when multiple components declare the same dependency', () => {
-    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
-    const consoleDir = path.join(root, 'console');
-    const pdCliDir = path.join(root, 'pd-cli');
-    const installDir = path.join(root, 'install-layout');
-    fs.mkdirSync(consoleDir, { recursive: true });
-    fs.mkdirSync(pdCliDir, { recursive: true });
-    fs.mkdirSync(installDir, { recursive: true });
-    for (const dir of [consoleDir, pdCliDir]) {
+  it('derives one spec per declaring component and dedupes identical link paths', () => {
+    const staged = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
+    const consoleStaged = path.join(staged, 'console');
+    const pdCliStaged = path.join(staged, 'pd-cli');
+    const installStaged = path.join(staged, 'install-layout');
+    const deployedConsole = path.join(staged, 'deployed', 'console');
+    const deployedPdCli = path.join(staged, 'deployed', 'pd-cli');
+    const deployedInstall = path.join(staged, 'deployed', 'install-layout');
+    for (const dir of [consoleStaged, pdCliStaged, installStaged, deployedConsole, deployedPdCli, deployedInstall]) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    for (const dir of [consoleStaged, pdCliStaged]) {
       fs.writeFileSync(
         path.join(dir, 'package.json'),
         JSON.stringify({ dependencies: { '@principles/install-layout': 'file:../install-layout' } }),
       );
     }
-    const specs = collectFileDepLinkSpecs([consoleDir, pdCliDir, installDir], readDepsFromDisk, (dir) => fs.existsSync(dir));
-    expect(specs).toHaveLength(2);
-    expect(specs[0]?.linkPath).toBe(path.join(consoleDir, 'node_modules', '@principles', 'install-layout'));
-    expect(specs[1]?.linkPath).toBe(path.join(pdCliDir, 'node_modules', '@principles', 'install-layout'));
+    const specs = collectFileDepLinkSpecs(
+      [
+        { manifestDir: consoleStaged, deployedDir: deployedConsole },
+        { manifestDir: pdCliStaged, deployedDir: deployedPdCli },
+        { manifestDir: installStaged, deployedDir: deployedInstall },
+      ],
+      readDepsFromDisk,
+    );
+    expect(specs).toEqual([
+      {
+        linkPath: path.join(deployedConsole, 'node_modules', '@principles', 'install-layout'),
+        target: deployedInstall,
+        stagedTarget: installStaged,
+      },
+      {
+        linkPath: path.join(deployedPdCli, 'node_modules', '@principles', 'install-layout'),
+        target: deployedInstall,
+        stagedTarget: installStaged,
+      },
+    ]);
   });
 
-  it('returns no specs for unreadable manifests or components without file: deps', () => {
-    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
-    const broken = path.join(root, 'broken');
-    const clean = path.join(root, 'clean');
+  it('returns no specs for unreadable manifests or non-file dependencies', () => {
+    const staged = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
+    const broken = path.join(staged, 'broken');
+    const clean = path.join(staged, 'clean');
+    const deployed = path.join(staged, 'deployed');
     fs.mkdirSync(broken, { recursive: true });
     fs.writeFileSync(path.join(broken, 'package.json'), 'not-json{');
     fs.mkdirSync(clean, { recursive: true });
     fs.writeFileSync(path.join(clean, 'package.json'), JSON.stringify({ dependencies: { express: '^4.0.0' } }));
-    expect(collectFileDepLinkSpecs([broken, clean], readDepsFromDisk, () => true)).toEqual([]);
-  });
-
-  it('collapses parent-directory traversal before checking the target', () => {
-    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
-    const consoleDir = path.join(root, 'console');
-    fs.mkdirSync(consoleDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(consoleDir, 'package.json'),
-      JSON.stringify({ dependencies: { '@principles/core': 'file:../core' } }),
-    );
-    fs.mkdirSync(path.join(root, 'core'), { recursive: true });
-    const specs = collectFileDepLinkSpecs([consoleDir], readDepsFromDisk, (dir) => fs.existsSync(dir));
-    expect(specs).toHaveLength(1);
-    // path.resolve collapses ../ — the spec target is the canonical dir.
-    expect(specs[0]?.target).toBe(path.resolve(consoleDir, '../core'));
+    fs.mkdirSync(deployed, { recursive: true });
+    expect(
+      collectFileDepLinkSpecs(
+        [
+          { manifestDir: broken, deployedDir: deployed },
+          { manifestDir: clean, deployedDir: deployed },
+        ],
+        readDepsFromDisk,
+      ),
+    ).toEqual([]);
   });
 });
