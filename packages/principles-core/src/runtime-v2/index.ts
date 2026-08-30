@@ -840,6 +840,10 @@ export type {
   PITaskMetadata,
   RunnerDecision,
   RolloutRevisionPayload,
+  HumanReviewContext,
+  OwnerResolutionRecord,
+  OwnerResolutionAction,
+  OwnerResolutionStatus,
 } from './internalization/pitask-metadata.js';
 
 export {
@@ -1225,6 +1229,49 @@ export type { RecoverySweepService, RecoverySweepServiceHandle, FailedTaskRecove
 // Console recovery — Governance Recovery Actions v1)
 export { ownerRetryNeedsHumanReviewTask } from './internalization/owner-retry.js';
 export type { OwnerRetryOutcome } from './internalization/owner-retry.js';
+// PRI-629 unified Owner Decision (Console/CLI/Runner 共用策略层)
+export {
+  HUMAN_REVIEW_REASON,
+  DECISION_CAPABLE_HUMAN_REVIEW_REASONS,
+  LEGACY_EVALUATOR_BUDGET_EXHAUSTED,
+  LEGACY_ROLLOUT_BUDGET_EXHAUSTED,
+  buildOwnerReviewKey,
+  collectOwnerDecisionFacts,
+  computeArtifactContentHash,
+  decisionArtifactIdFor,
+  deriveOwnerDecisionCapability,
+  resolveEffectiveRunnerDecision,
+  findOwnerResolutionForCurrentEpoch,
+  findAppliedVerdictOverrideResolution,
+  planOwnerVerdictOverrideResume,
+  markOwnerResolutionApplied,
+  canonicalHumanReviewReasonCode,
+  detectHardGateFailureFromArtifact,
+  effectiveDecisionFor,
+} from './internalization/owner-review.js';
+export type {
+  HumanReviewAttention,
+  OwnerDecisionCapability,
+  OwnerDecisionFactStore,
+  OwnerDecisionFacts,
+  DecisionArtifactRecord,
+  DecisionArtifactFacts,
+  ReviewKeyFacts,
+  OwnerOverrideResumePlan,
+} from './internalization/owner-review.js';
+export {
+  applyOwnerResolution,
+  factStoreFromStateManager,
+  sanitizeOwnerInstruction,
+} from './internalization/owner-resolution-service.js';
+export type {
+  OwnerResolutionApplyDeps,
+  OwnerResolutionRequest,
+  OwnerResolutionOutcome,
+  OwnerIdentityContext,
+} from './internalization/owner-resolution-service.js';
+export { reopenTaskForRevision, resolveRolloutRevisionTarget, buildRepairRevisionCauseId } from './internalization/revision-reopen.js';
+export type { ReopenRevisionOptions, RolloutRevisionTarget } from './internalization/revision-reopen.js';
 
 // ── RuntimeStateHandle (PRI-198) ────────────────────────────────────────────
 

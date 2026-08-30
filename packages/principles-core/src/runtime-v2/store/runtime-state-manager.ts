@@ -459,6 +459,20 @@ export class RuntimeStateManager {
     await this._taskStore.updateTask(taskId, { diagnosticJson });
   }
 
+  /**
+   * Narrow CAS (PRI-629): apply patch only when the task's diagnostic_json is
+   * still byte-equal to expectedDiagnosticJson. Returns null on precondition
+   * failure — caller re-reads and re-evaluates (idempotent-or-conflict).
+   */
+  async updateTaskIfDiagnosticJsonUnchanged(
+    taskId: string,
+    expectedDiagnosticJson: string | null,
+    patch: TaskStoreUpdatePatch,
+  ): Promise<TaskRecord | null> {
+    this.assertInitialized();
+    return this._taskStore.updateTaskIfDiagnosticJsonUnchanged(taskId, expectedDiagnosticJson, patch);
+  }
+
   getRetryPolicy(): RetryPolicy {
     return this.retryPolicy;
   }

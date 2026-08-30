@@ -357,6 +357,22 @@ async function seedArtifacts(store: PIArtifactStore): Promise<void> {
   await store.upsertArtifact(makeArtificerArtifact());
 }
 
+
+/** PRI-629: NHR 写入携带 humanReviewContext (status+context 原子同写) — 谓词断言。 */
+function expectNhrWriteWithReason(stateManager: unknown, expectedReason: string): void {
+  const calls = (stateManager as { updateTask: { mock: { calls: unknown[][] } } }).updateTask.mock.calls as [string, Record<string, unknown>][];
+  const hit = calls.some(([id, patch]) => {
+    if (id !== EVALUATOR_TASK_ID || patch?.status !== 'needs_human_review' || typeof patch.diagnosticJson !== 'string') return false;
+    try {
+      const parsed = JSON.parse(patch.diagnosticJson) as { pi_metadata?: { humanReviewContext?: { reasonCode?: string } } };
+      return parsed.pi_metadata?.humanReviewContext?.reasonCode === expectedReason;
+    } catch {
+      return false;
+    }
+  });
+  if (!hit) throw new Error(`expected needs_human_review write with reasonCode=${expectedReason}`);
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('PRI-509: Evaluator→Artificer Repair Loop (Slice 4 + 5)', () => {
@@ -512,6 +528,9 @@ describe('PRI-509: Evaluator→Artificer Repair Loop (Slice 4 + 5)', () => {
           status: 'needs_human_review',
         }),
       );
+      // PRI-629 (SPEC §4): status 与 humanReviewContext 同一次 task-row mutation,
+      // reasonCode 为拆分后的 budget-exhausted (decision-capable)。
+      expectNhrWriteWithReason(stateManager, 'evaluator_repair_budget_exhausted');
 
       // Observable event emitted (rc-9 — no silent fallback).
       // Convention: emitEvent prefixes with runnerName → 'evaluator_repair_loop_max_iterations'.

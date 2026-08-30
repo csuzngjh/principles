@@ -154,6 +154,30 @@ function makeRunner(deps: RolloutReviewerRunnerDeps): RolloutReviewerRunner {
   return new RolloutReviewerRunner(deps, { owner: 'err-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
 }
 
+
+/**
+ * PRI-629: markNeedsHumanReviewOrThrow 现在把 status 与 humanReviewContext
+ * 写进同一次 updateTask (SPEC §4)。断言采用谓词匹配而非精确形状。
+ */
+function expectNeedsHumanReviewWrite(
+  stateManager: Record<string, unknown>,
+  expectedReasonCode: string,
+): void {
+  const calls = (stateManager.updateTask as ReturnType<typeof vi.fn>).mock.calls as unknown as [string, { status?: string; diagnosticJson?: string }][];
+  const hit = calls.some(([id, patch]) => {
+    if (id !== ROLLOUT_ID || patch?.status !== 'needs_human_review' || typeof patch.diagnosticJson !== 'string') return false;
+    try {
+      const parsed = JSON.parse(patch.diagnosticJson) as { pi_metadata?: { humanReviewContext?: { reasonCode?: string } } };
+      return parsed.pi_metadata?.humanReviewContext?.reasonCode === expectedReasonCode;
+    } catch {
+      return false;
+    }
+  });
+  if (!hit) {
+    throw new Error(`expected needs_human_review write with reasonCode=${expectedReasonCode}`);
+  }
+}
+
 describe('RolloutReviewerRunner verdict out-edge error paths', () => {
   it('approve_rollout + dispatch dep 未注入 → not_wired 事件 + needs_human_review (P0-2: 不伪装成功)', async () => {
     const { deps, stateManager } = await makeDeps(makeOutput('approve_rollout'));
@@ -163,7 +187,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
     expect(result.status).toBe('succeeded');
     const emitted = getEmitted(deps);
     expect(emitted.some((e) => e.eventType === 'rollout_dispatch_not_wired')).toBe(true);
-    expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
+    expectNeedsHumanReviewWrite(stateManager, 'rollout_dispatch_not_wired');
     expect(stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 
@@ -191,7 +215,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
     const result = await makeRunner({ ...deps, reopenRevisionTarget: reopen }).run(ROLLOUT_ID);
     expect(result.status).toBe('succeeded');
     expect(reopen).not.toHaveBeenCalled();
-    expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
+    expectNeedsHumanReviewWrite(stateManager, 'rollout_revision_budget_exhausted');
     expect(getEmitted(deps).some((e) => e.eventType === 'rollout_reviewer_task_needs_human_review')).toBe(true);
   });
 
@@ -212,7 +236,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
       });
     const result = await makeRunner({ ...deps, reopenRevisionTarget: vi.fn() }).run(ROLLOUT_ID);
     expect(result.status).toBe('succeeded');
-    expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
+    expectNeedsHumanReviewWrite(stateManager, 'rollout_revision_target_unresolved');
   });
 
   it('needs_revision + reopen dep 未注入 → not_wired 事件 + needs_human_review', async () => {
@@ -221,7 +245,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
     expect(result.status).toBe('succeeded');
     const emitted = getEmitted(deps);
     expect(emitted.some((e) => e.eventType === 'rollout_revision_not_wired')).toBe(true);
-    expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
+    expectNeedsHumanReviewWrite(stateManager, 'rollout_revision_routing_not_wired');
   });
 
   it('needs_revision + reopen 返回 ok=false → needs_human_review (reopen_failed reason)', async () => {
@@ -230,7 +254,7 @@ describe('RolloutReviewerRunner verdict out-edge error paths', () => {
     });
     const result = await makeRunner(deps).run(ROLLOUT_ID);
     expect(result.status).toBe('succeeded');
-    expect(stateManager.updateTask).toHaveBeenCalledWith(ROLLOUT_ID, { status: 'needs_human_review' });
+    expectNeedsHumanReviewWrite(stateManager, 'rollout_revision_reopen_failed');
   });
 
   it('needs_revision + reopen throw → route_failed 事件 + transient 上抛 retry (P0: resume 而非 human_review)', async () => {
