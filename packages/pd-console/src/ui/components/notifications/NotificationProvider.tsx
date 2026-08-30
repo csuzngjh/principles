@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { fetchGovernanceQueue } from '../../api.js';
+import { fetchGovernanceQueue, fetchOwnerDecisions } from '../../api.js';
 import { useNotificationSound } from '../../hooks/useNotificationSound.js';
 import { diffNotificationCounts } from './notification-reducer.js';
 import { loadSoundEnabled, saveSoundEnabled } from './sound-storage.js';
@@ -56,8 +56,15 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const pendingCount = result.data.pendingReviewCount;
       const degradedCount = result.data.degradedSignals?.length ?? 0;
+
+      // PRI-629 (SPEC §27): 侧边栏徽标 N = 真实可执行 Owner 决策数
+      // (OwnerDecisionItem.length) — 不是 approvals pending / candidate /
+      // needs_human_review 计数。投影失败时回退 approvals pending (保守)。
+      const decisionsResult = await fetchOwnerDecisions();
+      const pendingCount = decisionsResult.success
+        ? decisionsResult.data.total
+        : result.data.pendingReviewCount;
 
       hasSuccessfulPollRef.current = true;
       setState((prev) => ({

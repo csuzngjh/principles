@@ -18,7 +18,8 @@ import type { TaskRecord, PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson } from './pitask-metadata.js';
+import { reopenTaskForRevision, buildRepairRevisionCauseId } from './revision-reopen.js';
 import type { PITaskMetadata } from './pitask-metadata.js';
 import { isPeerRunnerKind, isDiagnosticianStageKind, isRunnerKind } from './peer-runner-contracts.js';
 import {
@@ -454,7 +455,11 @@ export class InternalizationOrchestrator {
       };
     }
     if (transition.kind === 'REOPEN_SOURCE_EVALUATOR' && piTask.repairPayload) {
-      const causeId = `repair-${taskId}`;
+      // PRI-629 P0 (SPEC §12): epoch-aware causal identity — Owner 额外修订轮
+      // (revise_once reopen 该 artificer,其 revisionCount+1) 再次完成时,
+      // 重开来源 evaluator 必须使用新 causeId 才是真 reopen;同 epoch 重放
+      // (crash/reconciliation) 使用相同 causeId → no-op。
+      const causeId = buildRepairRevisionCauseId(piTask);
       // A/B: cause 已 materialize 的判定前移 — 目标(任意状态)的 revisionCauseId
       // 与本 repair 的 causeId 相同,说明这轮 reopen 已发生过: 目标可能仍在
       // pending(等待重跑),也可能已经跑完(succeeded 且带新 verdict)。两种
@@ -834,61 +839,10 @@ export class InternalizationOrchestrator {
       revisionCauseId?: string;
     },
   ): Promise<{ ok: boolean; reason: string }> {
-    const rawTask = await this.stateManager.getTask(taskId);
-    if (!rawTask) {
-      return { ok: false, reason: 'task_not_found' };
-    }
-    const piTask = hydratePITaskRecord(rawTask);
-    if (!piTask) {
-      return { ok: false, reason: 'invalid_task_metadata' };
-    }
-    if (rawTask.status === 'pending' || rawTask.status === 'retry_wait') {
-      // P0-4 幂等: 同一 causeKey 重放 → 真 no-op (revisionCount 不再递增,
-      // 防止 consumer 重复周期烧穿 revision budget)
-      if (options?.revisionCauseId && piTask.revisionCauseId === options.revisionCauseId) {
-        return { ok: true, reason: 'idempotent_replay_same_revision' };
-      }
-      // 不同 causeKey / 无 causeKey — 更新依赖/反馈后继续 (保证 revision 输入最新)
-    } else if (rawTask.status !== 'succeeded' && rawTask.status !== 'needs_human_review') {
-      return { ok: false, reason: `task_in_flight_${rawTask.status}` };
-    }
-
-    const merged: PITaskMetadata = mergePITaskMetadata(piTask, {
-      runnerDecision: undefined, // 新一轮 verdict 未定,清空旧判定 (INV-02 单一决策依据)
-      // P0 verdict drift: revision reopen = 新 execution epoch — 旧 completion
-      // intent 失去 authority,必须随旧 verdict 一并清空;否则重跑时入口门
-      // 会 resume 旧 intent,新 epoch 的重新评估被永远跳过。
-      completionIntent: undefined,
-      revisionCount: (piTask.revisionCount ?? 0) + 1,
-      revisionFeedback: options?.revisionFeedback ?? piTask.revisionFeedback,
-      revisionCauseId: options?.revisionCauseId,
-    });
-
-    if (options?.replaceArtificerDependencyWith) {
-      // 替换 artificer 依赖为指定任务(修订轮读取其 repairPayload/artifacts)。
-      // 链是线性的: evaluator 的 artificer dep 只有一个。
-      const nonArtificerDeps: string[] = [];
-      for (const depId of piTask.dependencyTaskIds) {
-        if (depId === options.replaceArtificerDependencyWith) continue;
-        const dep = await this.stateManager.getTask(depId);
-        if (dep && dep.taskKind === 'artificer') continue;
-        nonArtificerDeps.push(depId);
-      }
-      merged.dependencyTaskIds = [...nonArtificerDeps, options.replaceArtificerDependencyWith];
-      // 修订轮 evaluator 的输入 artifact 来自新 artificer 任务的产出
-      merged.inputArtifactRefs = [];
-    }
-
-    await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
-    await this.stateManager.updateTask(taskId, {
-      status: 'pending',
-      attemptCount: 0,
-    });
-    return { ok: true, reason: options?.reason ?? 'revision_reopen' };
+    // PRI-629: 提取至 revision-reopen.ts 的单一核心实现 (Console/CLI 复用),
+    // orchestrator 方法保留为兼容委托。
+    return reopenTaskForRevision(this.stateManager, taskId, options);
   }
-
-  // ── Private helpers ───────────────────────────────────────────────────────
-
   /**
    * Find an existing successor task matching parentTaskId + successorKind + channel.
    * Scans pending tasks and hydrates to check PI metadata.

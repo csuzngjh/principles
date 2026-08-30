@@ -65,6 +65,68 @@ export interface RepairPayload {
 }
 
 /**
+ * 人工裁决上下文 (PRI-629): 任务进入 needs_human_review 时与 status 同一次
+ * task-row mutation 原子落库的"为什么找人"事实。classification (owner_decision
+ * vs recovery) 由此派生;缺失 = legacy 任务,由 collectOwnerDecisionFacts 按
+ * durable facts 推断,模糊 → recovery (fail closed)。
+ */
+export interface HumanReviewContext {
+  /** 结构化原因码 (HumanReviewReasonCode;解析接受任意非空串以保持前向兼容) */
+  readonly reasonCode: string;
+  /** 产出待裁决 verdict 的 run */
+  readonly sourceRunId: string;
+  /** 该 run 的决策输出 artifact (evaluator/rollout 输出 artifact id) */
+  readonly sourceArtifactId?: string;
+  /** sourceArtifactId 内容的 sha256 hex — Owner decision 的 stale 防护输入 */
+  readonly sourceArtifactHash?: string;
+  /** 进入 needs_human_review 时的 revisionEpoch (= 当时 revisionCount) */
+  readonly revisionEpoch: number;
+  readonly createdAt: string;
+}
+
+/**
+ * Owner 裁决动作 (PRI-629)。accept_current/reject_current 是 verdict override
+ * (写 effectiveDecision,不改 runnerDecision);revise_once 授权一个额外
+ * revision epoch (不开自动预算,repairIteration 不变)。
+ */
+export type OwnerResolutionAction = 'accept_current' | 'revise_once' | 'reject_current';
+
+export type OwnerResolutionStatus = 'pending' | 'applied';
+
+/**
+ * task-scoped Owner authority log (PRI-629)。不是第二状态源: 它只记录 Owner
+ * 对某个人工裁决事实快照 (reviewKey) 的决定;effective decision 的唯一解析点
+ * 是 resolveEffectiveRunnerDecision (owner-review.ts)。append-only: 保留历史
+ * resolution,不覆盖;同一 reviewKey 至多一条 (CAS 写入保证)。
+ */
+export interface OwnerResolutionRecord {
+  readonly resolutionId: string;
+  /** 绑定裁决事实快照的稳定 hash — POST 时服务端重读 durable facts 重算比对 */
+  readonly reviewKey: string;
+  readonly action: OwnerResolutionAction;
+  readonly status: OwnerResolutionStatus;
+  /** 服务端 auth context 推导的身份 (console token / operator_legacy) */
+  readonly ownerId: string;
+  readonly credentialId?: string;
+  readonly decidedAt: string;
+  readonly appliedAt?: string;
+  readonly sourceRunId: string;
+  readonly sourceArtifactId: string;
+  readonly sourceArtifactHash: string;
+  readonly revisionEpoch: number;
+  /** 机器原始判定 — 永久保留 (INV-03 machine verdict immutability) */
+  readonly machineDecision: RunnerDecision;
+  /** 仅 verdict override 动作有;revise_once 无 (新 epoch 由新 verdict 产生) */
+  readonly effectiveDecision?: RunnerDecision;
+  /** 仅 revise_once: 被 reopen 的修订目标任务 */
+  readonly targetTaskId?: string;
+  /** 仅 revise_once: reopen 使用的 epoch-aware causeId */
+  readonly targetRevisionCauseId?: string;
+  /** 仅 revise_once: 有界、已消毒的短指导 (仅作 revision feedback) */
+  readonly ownerInstruction?: string;
+}
+
+/**
  * PI-specific metadata stored inside TaskRecord.diagnosticJson.
  * All fields must be present except parentTaskId and correlationId (optional).
  */
@@ -134,6 +196,16 @@ export interface PITaskMetadata {
    * epoch 不匹配的残留 intent 视为 stale,不得 resume。
    */
   completionIntent?: RunnerCompletionIntent;
+  /**
+   * PRI-629: 进入 needs_human_review 的结构化上下文 (与 status 原子同写)。
+   * classification / capability / reviewKey 的权威输入;缺失 = legacy。
+   */
+  humanReviewContext?: HumanReviewContext;
+  /**
+   * PRI-629: task-scoped Owner 裁决 log (append-only,同一 reviewKey 至多一条)。
+   * 不是状态源 — effective decision 由 resolveEffectiveRunnerDecision 唯一解析。
+   */
+  ownerResolutions?: readonly OwnerResolutionRecord[];
 }
 
 /** evaluator / rollout_reviewer 的合法 runner 决策值 */
@@ -217,6 +289,8 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       revisionCauseId: metadata.revisionCauseId,
       rolloutRevisionPayload: metadata.rolloutRevisionPayload,
       completionIntent: metadata.completionIntent,
+      humanReviewContext: metadata.humanReviewContext,
+      ownerResolutions: metadata.ownerResolutions,
     },
   });
 }
@@ -251,6 +325,8 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     revisionCauseId: base.revisionCauseId,
     rolloutRevisionPayload: base.rolloutRevisionPayload,
     completionIntent: base.completionIntent,
+    humanReviewContext: base.humanReviewContext,
+    ownerResolutions: base.ownerResolutions,
     ...overrides,
   };
 }
@@ -309,6 +385,65 @@ function isValidRepairPayload(value: unknown): value is RepairPayload {
     || p.repairIteration > 2) return false;
   if (typeof p.sourceArtificerArtifactId !== 'string' || p.sourceArtificerArtifactId.trim() === '') return false;
   if (typeof p.sourceEvaluatorTaskId !== 'string' || p.sourceEvaluatorTaskId.trim() === '') return false;
+  return true;
+}
+
+const OWNER_RESOLUTION_ACTIONS: ReadonlySet<string> = new Set(['accept_current', 'revise_once', 'reject_current']);
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.trim() !== '';
+}
+
+/**
+ * Trust boundary (rc-1/rc-2): humanReviewContext 从 diagnosticJson (DB 行) 读回,
+ * 按未知值逐字段校验。reasonCode 接受任意非空串 (前向兼容: 分类侧对未知码
+ * fail closed 到 recovery),结构性损坏则整体 fail closed。
+ */
+function isValidHumanReviewContext(value: unknown): value is HumanReviewContext {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  if (!isNonEmptyString(c.reasonCode)) return false;
+  if (!isNonEmptyString(c.sourceRunId)) return false;
+  if (c.sourceArtifactId !== undefined && !isNonEmptyString(c.sourceArtifactId)) return false;
+  if (c.sourceArtifactHash !== undefined && !isNonEmptyString(c.sourceArtifactHash)) return false;
+  if (typeof c.revisionEpoch !== 'number' || !Number.isInteger(c.revisionEpoch) || c.revisionEpoch < 0) return false;
+  if (!isNonEmptyString(c.createdAt)) return false;
+  return true;
+}
+
+/**
+ * Trust boundary (rc-1/rc-2/rc-4): ownerResolutions 是治理 authority log,
+ * 每条记录逐字段严格校验;resolutionId / reviewKey 在数组内必须唯一 (重复 =
+ * authority 腐坏,fail closed 整条 metadata,禁止静默取第一条)。
+ */
+function isValidOwnerResolutions(value: unknown): value is readonly OwnerResolutionRecord[] {
+  if (!Array.isArray(value)) return false;
+  const seenResolutionIds = new Set<string>();
+  const seenReviewKeys = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return false;
+    const r = item as Record<string, unknown>;
+    if (!isNonEmptyString(r.resolutionId) || !isNonEmptyString(r.reviewKey)) return false;
+    if (typeof r.action !== 'string' || !OWNER_RESOLUTION_ACTIONS.has(r.action)) return false;
+    if (r.status !== 'pending' && r.status !== 'applied') return false;
+    if (!isNonEmptyString(r.ownerId)) return false;
+    if (r.credentialId !== undefined && !isNonEmptyString(r.credentialId)) return false;
+    if (!isNonEmptyString(r.decidedAt)) return false;
+    if (r.appliedAt !== undefined && !isNonEmptyString(r.appliedAt)) return false;
+    if (!isNonEmptyString(r.sourceRunId)) return false;
+    if (!isNonEmptyString(r.sourceArtifactId)) return false;
+    if (!isNonEmptyString(r.sourceArtifactHash)) return false;
+    if (typeof r.revisionEpoch !== 'number' || !Number.isInteger(r.revisionEpoch) || r.revisionEpoch < 0) return false;
+    if (typeof r.machineDecision !== 'string' || !RUNNER_DECISIONS.has(r.machineDecision)) return false;
+    if (r.effectiveDecision !== undefined
+      && (typeof r.effectiveDecision !== 'string' || !RUNNER_DECISIONS.has(r.effectiveDecision))) return false;
+    if (r.targetTaskId !== undefined && !isNonEmptyString(r.targetTaskId)) return false;
+    if (r.targetRevisionCauseId !== undefined && !isNonEmptyString(r.targetRevisionCauseId)) return false;
+    if (r.ownerInstruction !== undefined && !isNonEmptyString(r.ownerInstruction)) return false;
+    if (seenResolutionIds.has(r.resolutionId) || seenReviewKeys.has(r.reviewKey)) return false;
+    seenResolutionIds.add(r.resolutionId);
+    seenReviewKeys.add(r.reviewKey);
+  }
   return true;
 }
 
@@ -473,6 +608,21 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     };
   }
 
+  // humanReviewContext (PRI-629): optional, full validation; malformed fails
+  // the whole metadata (authority record corruption must surface, not degrade).
+  let humanReviewContext: HumanReviewContext | undefined;
+  if (Object.hasOwn(m, 'humanReviewContext') && m.humanReviewContext !== undefined) {
+    if (!isValidHumanReviewContext(m.humanReviewContext)) return null;
+    ({ humanReviewContext } = m);
+  }
+
+  // ownerResolutions (PRI-629): optional, full validation (rc-1/rc-4).
+  let ownerResolutions: readonly OwnerResolutionRecord[] | undefined;
+  if (Object.hasOwn(m, 'ownerResolutions') && m.ownerResolutions !== undefined) {
+    if (!isValidOwnerResolutions(m.ownerResolutions)) return null;
+    ({ ownerResolutions } = m);
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -492,6 +642,8 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     revisionCauseId: typeof m.revisionCauseId === 'string' ? m.revisionCauseId : undefined,
     rolloutRevisionPayload,
     completionIntent,
+    humanReviewContext,
+    ownerResolutions,
   };
 }
 
@@ -546,5 +698,7 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     revisionCauseId: meta.revisionCauseId,
     rolloutRevisionPayload: meta.rolloutRevisionPayload,
     completionIntent: meta.completionIntent,
+    humanReviewContext: meta.humanReviewContext,
+    ownerResolutions: meta.ownerResolutions,
   } as unknown as PITaskRecord;
 }

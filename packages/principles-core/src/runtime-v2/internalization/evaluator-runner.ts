@@ -36,8 +36,15 @@ import type {
 import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type RepairPayload, type PITaskMetadata, type RunnerDecision } from './pitask-metadata.js';
-import { EvaluatorPromptBuilder } from './evaluator-prompt-builder.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type RepairPayload, type PITaskMetadata, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
+import {
+  HUMAN_REVIEW_REASON,
+  planOwnerVerdictOverrideResume,
+  markOwnerResolutionApplied,
+  computeArtifactContentHash,
+  type OwnerOverrideResumePlan,
+} from './owner-review.js';
+import { EvaluatorPromptBuilder, deriveRequirementLedger, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
 import { reconcileLineageEcho, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -74,6 +81,14 @@ interface EvaluatorContext {
    */
   readonly scribeArtifact: string | null;
   readonly sourceScribeArtifactId: string | null;
+  /**
+   * PRI-630 收敛契约: 依赖 artificer 的 repairPayload (第 2+ 轮存在)。
+   * 派生 previousEvaluation 注入 prompt — 上轮 decision/score/concerns/
+   * requiredChanges(稳定 id)/repairIteration。
+   */
+  readonly dependencyRepairPayload?: RepairPayload;
+  /** PRI-630: 由 dependencyRepairPayload 解析的上轮评估上下文 (首轮 undefined) */
+  readonly previousEvaluation?: PreviousEvaluationContext;
 }
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
@@ -203,6 +218,12 @@ export interface EvaluatorRunnerResult {
  */
 export interface EvaluatorRunnerOptions extends PeerRunnerOptions {
   readonly gateDeps?: RefinerRuleHostGateDeps;
+  /**
+   * PRI-630 工具目录权威: runtime-authoritative host tool facts (readOnly /
+   * write 工具名)。由宿主装配层注入;缺失时 prompt 声明 degraded 规则 —
+   * 工具名差异不得成为 hard blocker。
+   */
+  readonly hostToolCatalog?: HostToolCatalogFacts;
 }
 
 export interface ResolvedEvaluatorRunnerOptions {
@@ -304,6 +325,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * Null when the deps did not inject the seeder (= repair seeding unavailable).
    */
   private readonly repairTaskSeeder: ((params: SeedArtificerRepairParams) => Promise<string>) | null;
+  /** PRI-630: runtime-authoritative tool facts; null = catalog unavailable (degraded rule in prompt) */
+  private readonly hostToolCatalog: HostToolCatalogFacts | null;
 
   constructor(deps: EvaluatorRunnerDeps, options: EvaluatorRunnerOptions) {
     super(deps, options, {
@@ -316,6 +339,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     this.gateDeps = options.gateDeps ?? null;
     this.repairLoopEnabledResolver = deps.isRepairLoopEnabled ?? null;
     this.repairTaskSeeder = deps.seedArtificerRepairTask ?? null;
+    this.hostToolCatalog = options.hostToolCatalog ?? null;
   }
 
   /**
@@ -358,6 +382,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         continue;
       }
 
+      const depPi = hydratePITaskRecord(depTask);
+      const dependencyRepairPayload = depPi?.repairPayload;
       const artifacts = await this.artifactStore.listBySourceTaskId(depId);
       if (artifacts.length > 0) {
         const [firstArtifact] = artifacts;
@@ -390,12 +416,21 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         const contextRefs: string[] = scribeContent && scribeRef
           ? [artifactRef, scribeRef]
           : [artifactRef];
+        // PRI-630: 修复轮 (repairPayload 存在) 时解析上轮评估上下文
+        let previousEvaluation: PreviousEvaluationContext | undefined;
+        if (dependencyRepairPayload) {
+          previousEvaluation = await this.resolvePreviousEvaluation(
+            taskId, dependencyRepairPayload, firstArtifact.contentJson,
+          );
+        }
         return {
           contextHash: BasePeerRunner.hashContextRefs(contextRefs),
           artificerArtifact: firstArtifact.contentJson,
           sourceArtificerArtifactId: firstArtifact.artifactId,
           scribeArtifact: scribeContent,
           sourceScribeArtifactId: scribeRef,
+          ...(dependencyRepairPayload !== undefined ? { dependencyRepairPayload } : {}),
+          ...(previousEvaluation !== undefined ? { previousEvaluation } : {}),
         };
       }
     }
@@ -504,6 +539,111 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * Build the evaluator prompt with the given manifest's resolved context.
    * Shared by single-stage and two-stage paths.
    */
+  /**
+   * PRI-630 收敛契约 (SPEC §18.1): 解析上轮评估上下文 — 从 dependency
+   * artificer 的 repairPayload.sourceEvaluatorTaskId 找到上轮 evaluator,
+   * 读取其最近 principle artifact,按 rc-1/rc-2 守卫解析 evaluation 字段。
+   * requirements 用稳定 id (req-1..N, 上轮 requiredChanges 顺序)。
+   * 解析失败 → 结构化降级事件 + undefined (保持既有行为,可观测)。
+   */
+  private async resolvePreviousEvaluation(
+    taskId: string,
+    repairPayload: RepairPayload,
+    repairArtifactContentJson: string,
+  ): Promise<PreviousEvaluationContext | undefined> {
+    const priorTaskId = repairPayload.sourceEvaluatorTaskId;
+    const priorArtifactJson = await this.artifactStore
+      .listBySourceTaskId(priorTaskId)
+      .then((artifacts) => {
+        let latest = null as { updatedAt: string; contentJson: string } | null;
+        for (const a of artifacts) {
+          if (a.artifactKind !== 'principle') continue;
+          if (!latest || a.updatedAt > latest.updatedAt) latest = a;
+        }
+        return latest?.contentJson ?? null;
+      })
+      .catch(() => null);
+    if (priorArtifactJson === null) {
+      this.emitEvent('previous_evaluation_context_degraded', taskId, {
+        priorEvaluatorTaskId: priorTaskId,
+        reason: 'prior_evaluation_artifact_unavailable',
+        repairIteration: repairPayload.repairIteration,
+      });
+      return undefined;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(priorArtifactJson);
+    } catch {
+      this.emitEvent('previous_evaluation_context_degraded', taskId, {
+        priorEvaluatorTaskId: priorTaskId,
+        reason: 'prior_evaluation_artifact_unparseable',
+      });
+      return undefined;
+    }
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    // runtime-contract-exempt: ERR-001 object-guarded unknown property extraction; typeof guard follows immediately
+    const {evaluation} = parsed as { evaluation?: unknown };
+    if (typeof evaluation !== 'object' || evaluation === null) {
+      this.emitEvent('previous_evaluation_context_degraded', taskId, {
+        priorEvaluatorTaskId: priorTaskId,
+        reason: 'prior_evaluation_shape_invalid',
+      });
+      return undefined;
+    }
+    const ev = evaluation as Record<string, unknown>;
+    const decision = typeof ev.decision === 'string' ? ev.decision : 'needs_revision';
+    const score = typeof ev.score === 'number' && Number.isFinite(ev.score) ? Math.min(1, Math.max(0, ev.score)) : 0;
+    const toStringArray = (v: unknown, cap: number): string[] => {
+      if (!Array.isArray(v)) return [];
+      const out: string[] = [];
+      for (const item of v.slice(0, cap)) {
+        if (typeof item === 'string' && item.trim() !== '') out.push(item.slice(0, 500));
+      }
+      return out;
+    };
+    const concerns = toStringArray(ev.concerns, 10);
+    const requiredChanges = toStringArray(ev.requiredChanges, 10);
+    // PRI-630 P1 评审修复: 需求身份跨轮稳定 — 上轮 echo 的 requirementLedger
+    // (若有) 中 still_open/regressed 条目保留原 id 与原 statement;本轮
+    // requiredChanges 的非重述项作为新需求从最大序号递增。无 ledger 时
+    // (首个修复轮) 退回顺序编号。
+    let prevLedger: { id: string; statement: string; status: string }[] | undefined;
+    if (Array.isArray(ev.requirementLedger)) {
+      prevLedger = [];
+      for (const entry of ev.requirementLedger) {
+        if (entry === null || typeof entry !== 'object') continue;
+        const rec = entry as { id?: unknown; statement?: unknown; status?: unknown };
+        if (typeof rec.id !== 'string' || typeof rec.statement !== 'string') continue;
+        if (rec.status !== 'resolved' && rec.status !== 'still_open' && rec.status !== 'regressed') continue;
+        prevLedger.push({ id: rec.id, statement: rec.statement, status: rec.status });
+      }
+    }
+    const requirements = deriveRequirementLedger(prevLedger, requiredChanges);
+    // 修复说明: 当前 (被修复) artificer artifact 的声明性摘要 — 有界提取
+    let repairSummary: string | undefined;
+    try {
+      const art = JSON.parse(repairArtifactContentJson) as unknown;
+      if (typeof art === 'object' && art !== null) {
+        // runtime-contract-exempt: ERR-001 object-guarded unknown property extraction; typeof guard follows immediately
+        const { implementationSummary } = art as { implementationSummary?: unknown };
+        if (typeof implementationSummary === 'string' && implementationSummary.trim() !== '') {
+          repairSummary = implementationSummary.slice(0, 800);
+        }
+      }
+    } catch {
+      repairSummary = undefined;
+    }
+    return {
+      decision,
+      score,
+      concerns,
+      requirements,
+      repairIteration: repairPayload.repairIteration,
+      ...(repairSummary !== undefined ? { repairSummary } : {}),
+    };
+  }
+
   private buildEvaluatorPrompt(taskId: string, context: EvaluatorContext, manifest: typeof EVALUATOR_STAGE1_MANIFEST): string {
     let parsedArtificerArtifact: unknown = null;
     if (context.artificerArtifact) {
@@ -528,6 +668,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       artificerArtifact: parsedArtificerArtifact,
       scribeArtifact: parsedScribeArtifact,
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? '',
+      previousEvaluation: context.previousEvaluation,
+      hostToolCatalog: this.hostToolCatalog ?? undefined,
     });
     return message;
   }
@@ -546,7 +688,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   async validateOutput(output: unknown, taskId: string, context: EvaluatorContext): Promise<PeerRunnerValidationResult> {
-    const result = await this.validator.validate(output, taskId, context.sourceArtificerArtifactId ?? undefined);
+    // PRI-630 P1 评审修复: 修复轮把上轮 requirement ids 传入做完整覆盖校验
+    // (缺 priorRequirementStatuses 或漏 id → output_invalid),不再仅靠 prompt。
+    const convergence = context.previousEvaluation
+      ? { expectedRequirements: context.previousEvaluation.requirements.map((r) => ({ id: r.id, statement: r.statement })) }
+      : undefined;
+    const result = await this.validator.validate(output, taskId, context.sourceArtificerArtifactId ?? undefined, convergence);
 
     // Trust-boundary: validator is an injected dependency returning `string | undefined`
     // for errorCategory. We must not `as`-cast; validate at runtime (ERR-001, ERR-005).
@@ -778,12 +925,18 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     contextHash: string;
     sourceArtificerArtifactId: string | null;
     ruleAssemblyInput: RuleAssemblyInput;
+    /**
+     * PRI-629 Owner verdict override (accept_current→approved /
+     * reject_current→rejected)。提供时以 override 为效果分派依据 — 机器
+     * verdict (finalOutput.evaluation.decision) 保持不变 (INV-03)。
+     */
+    decisionOverride?: 'approved' | 'rejected';
   }): Promise<
     | { kind: 'human_review'; result: PeerRunnerResult<EvaluatorOutputV1> }
     | { kind: 'completed'; ruleArtifactId: string | null }
   > {
     const { taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId } = args;
-    const {decision} = finalOutput.evaluation;
+    const decision = args.decisionOverride ?? finalOutput.evaluation.decision;
 
     // ── Evaluator-specific: validate principle-bearing Scribe artifact ──
     // This is the critical business logic: approved evaluator must validate
@@ -856,6 +1009,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         { runId, output: finalOutput, sourceArtificerArtifactId },
       );
       if (repairOutcome.kind === 'max_iterations_reached') {
+        // PRI-629: budget 耗尽(decision-capable)与 seed 失败(recovery)拆分原因码
+        const reasonCode = repairOutcome.detail === 'budget_exhausted'
+          ? HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted
+          : HUMAN_REVIEW_REASON.evaluatorRepairSeedFailed;
         // Fail loud (rc-9, EP-03, ERR-002): mark the task needs_human_review
         // so it does NOT stay in 'leased' state (which would cause the lease
         // to expire and the evaluator to re-run the same verdict infinitely).
@@ -863,14 +1020,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         // fail-closed: 写失败 throw → retry_wait → 入口门 resume 同一效果,
         // 不问 LLM;禁止吞错后继续 (intent applied ⇔ effect 已 durable)。
         const resultRef = `${this.config.resultRefPrefix}://${runId}`;
-        await this.markNeedsHumanReviewOrThrow(taskId, runId, 'repair_loop_max_iterations_or_seed_failure');
+        await this.markNeedsHumanReviewOrThrow(taskId, { runId, reasonCode, sourceArtifactId: artifactId });
         this.emitEvent('task_needs_human_review', taskId, {
           attemptCount: task.attemptCount,
           resultRef,
           evaluationDecision: finalOutput.evaluation.decision,
           evaluationScore: finalOutput.evaluation.score,
           ruleArtifactId: null,
-          reason: 'repair_loop_max_iterations_or_seed_failure',
+          reason: `repair_loop_${reasonCode}`,
         });
         return {
           kind: 'human_review',
@@ -938,9 +1095,38 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * effect,不问 LLM;禁止吞错后让 caller 标 intent applied
    * (intent applied ⇔ 其 durable effect 已 materialize)。
    */
-  private async markNeedsHumanReviewOrThrow(taskId: string, runId: string, reason: string): Promise<void> {
+  private async markNeedsHumanReviewOrThrow(
+    taskId: string,
+    review: { runId: string; reasonCode: string; sourceArtifactId: string },
+  ): Promise<void> {
+    const { runId, reasonCode, sourceArtifactId } = review;
     try {
-      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+      // PRI-629: status + humanReviewContext 同一次 task-row mutation 原子落库
+      // (SPEC §4 — context 缺失的 NHR 是 legacy,只能靠推断)。
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) throw new Error(`task ${taskId} not found`);
+      const piTask = hydratePITaskRecord(raw);
+      if (!piTask) throw new Error(`task ${taskId} not hydratable`);
+      let sourceArtifactHash: string | undefined;
+      try {
+        const artifact = await this.artifactStore.getArtifactById(sourceArtifactId);
+        if (artifact) sourceArtifactHash = computeArtifactContentHash(artifact.contentJson);
+      } catch {
+        sourceArtifactHash = undefined; // hash 可选 — capability 侧要求 artifact 存在,届时重算
+      }
+      const context: HumanReviewContext = {
+        reasonCode,
+        sourceRunId: runId,
+        sourceArtifactId,
+        ...(sourceArtifactHash !== undefined ? { sourceArtifactHash } : {}),
+        revisionEpoch: piTask.revisionCount ?? 0,
+        createdAt: new Date().toISOString(),
+      };
+      const merged: PITaskMetadata = mergePITaskMetadata(piTask, { humanReviewContext: context });
+      await this.stateManager.updateTask(taskId, {
+        status: 'needs_human_review',
+        diagnosticJson: createPITaskDiagnosticJson(merged),
+      });
       // read-back invariant (INV-2): 只有 effect durable 才允许 caller 标 applied
       const current = await this.stateManager.getTask(taskId);
       if (!current || current.status !== 'needs_human_review') {
@@ -952,7 +1138,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     } catch (err) {
       this.emitEvent('repair_loop_mark_review_failed', taskId, {
         runId,
-        reason,
+        reason: reasonCode,
         errorMessage: err instanceof Error ? err.message : String(err),
         nextAction: 'task_will_retry_then_resume_completion_intent_without_llm',
       });
@@ -1026,6 +1212,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     leasedTask: TaskRecord,
   ): Promise<PeerRunnerResult<EvaluatorOutputV1> | null> {
     const piTask = hydratePITaskRecord(leasedTask);
+
+    // ── PRI-629: pending Owner Resolution 优先于一切 (SPEC §10) ──
+    // Owner accept_current / reject_current 已 durable 记录且任务被翻回
+    // pending — 本次 run 应用 override,绝不重新调用 LLM。applied 但未
+    // terminal 的 crash 窗口同样由此收敛 (SPEC §30)。
+    const ownerOverride = piTask ? planOwnerVerdictOverrideResume(piTask) : null;
+    if (ownerOverride) {
+      return await this.applyOwnerVerdictOverrideAndFinalize(taskId, leasedTask, ownerOverride);
+    }
+
     const intent = piTask?.completionIntent;
     if (!piTask || !intent || intent.status !== 'pending') {
       // P0 (INV-1/INV-5): applied 但任务未 terminal (标 applied 后、
@@ -1160,6 +1356,126 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   /**
+   * PRI-629: 应用 Owner verdict override 并收敛 terminal。
+   *
+   * 顺序 (SPEC §10/§30): 恢复 durable output → 幂等效果 (override decision)
+   * → completion intent 标 applied → resolution 标 applied → markTaskSucceeded。
+   * 任何 crash 窗口重放同一 resolution,不重新调用 LLM。机器 verdict
+   * (runnerDecision) 永不改写。
+   */
+  private async applyOwnerVerdictOverrideAndFinalize(
+    taskId: string,
+    leasedTask: TaskRecord,
+    plan: OwnerOverrideResumePlan,
+  ): Promise<PeerRunnerResult<EvaluatorOutputV1>> {
+    const { resolution, overrideDecision } = plan;
+    this.emitEvent('owner_resolution_applying', taskId, {
+      resolutionId: resolution.resolutionId,
+      action: resolution.action,
+      machineDecision: resolution.machineDecision,
+      effectiveDecision: overrideDecision,
+      sourceRunId: resolution.sourceRunId,
+    });
+
+    // 恢复裁决时的 durable output — decision 必须与 resolution 记录的机器判定一致
+    const output = await this.recoverIntentOutput(taskId, resolution.sourceRunId, resolution.machineDecision);
+
+    // SPEC §20 纵深防御: 确定性对抗门失败不允许 approved override (capability
+    // 层已挡一道;此处防事实漂移窗口)。
+    if (overrideDecision === 'approved'
+      && isEvaluatorOutputV2(output)
+      && output.adversarialResult
+      && output.adversarialResult.passed === false) {
+      this.emitEvent('owner_resolution_rejected_by_policy', taskId, {
+        resolutionId: resolution.resolutionId,
+        reason: 'deterministic_hard_gate_failed',
+        nextAction: 'owner_may_choose_revise_once_or_reject_current',
+      });
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Owner accept_current refused for task ${taskId}: deterministic adversarial gate failed (owner cannot override hard safety)`,
+      );
+    }
+
+    const artifactId = resolution.sourceArtifactId;
+    const contextHash = `owner-override-${resolution.resolutionId}`;
+    // rule assembly 输入由 durable lineage 重建 (与 intent resume 相同)
+    const assemblySourceId = output.sourceArtificerArtifactId ?? null;
+    let artificerContent: string | null = null;
+    if (assemblySourceId) {
+      try {
+        const rec = await this.artifactStore.getArtifactById(assemblySourceId);
+        artificerContent = rec?.contentJson ?? null;
+      } catch {
+        artificerContent = null;
+      }
+    }
+    const effectResult = await this.applyEvaluatorDecisionEffects({
+      taskId,
+      runId: resolution.sourceRunId,
+      finalOutput: output,
+      task: leasedTask,
+      artifactId,
+      contextHash,
+      sourceArtificerArtifactId: assemblySourceId,
+      ruleAssemblyInput: { artificerArtifact: artificerContent, sourceArtificerArtifactId: assemblySourceId },
+      decisionOverride: overrideDecision === 'approved' ? 'approved' : 'rejected',
+    });
+    if (effectResult.kind === 'human_review') {
+      // P0 评审修复: 与 rollout 对称——override 驱动的 effects 落入 recovery
+      // NHR 时,Owner 裁决已被执行,resolution 标 applied (否则 pending 残留
+      // + Recover guard 拒绝 = 死胡同)。applied 后 Recover 放行,resume 门
+      // 确定性重放。
+      await markOwnerResolutionApplied({
+        updateDiagnosticJson: (tid: string, json: string) => this.stateManager.updateTaskDiagnosticJson(tid, json),
+        getTask: (tid: string) => this.stateManager.getTask(tid),
+        taskId,
+        resolutionId: resolution.resolutionId,
+        appliedAt: new Date().toISOString(),
+      });
+      return effectResult.result;
+    }
+    await this.markCompletionIntentAppliedOrThrow(taskId);
+    await markOwnerResolutionApplied({
+      updateDiagnosticJson: (tid: string, json: string) => this.stateManager.updateTaskDiagnosticJson(tid, json),
+      getTask: (tid: string) => this.stateManager.getTask(tid),
+      taskId,
+      resolutionId: resolution.resolutionId,
+      appliedAt: new Date().toISOString(),
+    });
+    const resultRef = `${this.config.resultRefPrefix}://${resolution.sourceRunId}`;
+    try {
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
+    } catch (stateErr) {
+      this.emitEvent('mark_succeeded_failed', taskId, {
+        taskId,
+        runId: resolution.sourceRunId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
+    this.emitEvent('task_succeeded', taskId, {
+      attemptCount: leasedTask.attemptCount,
+      resultRef,
+      evaluationDecision: output.evaluation.decision,
+      evaluationScore: output.evaluation.score,
+      ruleArtifactId: effectResult.ruleArtifactId,
+      ownerResolutionApplied: resolution.resolutionId,
+      effectiveDecision: overrideDecision,
+    });
+    return {
+      status: 'succeeded',
+      taskId,
+      runId: resolution.sourceRunId,
+      artifactId,
+      resultRef,
+      contextHash,
+      output,
+      attemptCount: leasedTask.attemptCount,
+    };
+  }
+
+  /**
    * 从 runs 表恢复 intent 落库前已持久化的 validated output,并交叉核对
    * decision 与 intent 一致 (authority 记录一致性)。intent 的存在保证
    * updateRunOutput 曾成功;缺失/损坏/漂移 = 存储腐坏 → fail loud。
@@ -1217,7 +1533,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       output: EvaluatorOutputV1;
       sourceArtificerArtifactId: string | null;
     },
-  ): Promise<{ kind: 'repair_seeded'; taskId: string } | { kind: 'max_iterations_reached' }> {
+  ): Promise<{ kind: 'repair_seeded'; taskId: string } | { kind: 'max_iterations_reached'; detail: 'budget_exhausted' | 'seed_failed' }> {
     const { runId: evaluatorRunId, output } = ctx;
     const priorRepairIteration = await this.resolvePriorRepairIteration(evaluatorTaskId);
 
@@ -1231,7 +1547,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         nextAction: 'owner_manual_review_required',
         priorRepairIteration,
       });
-      return { kind: 'max_iterations_reached' };
+      return { kind: 'max_iterations_reached', detail: 'budget_exhausted' };
     }
 
     // ── Slice 4: seed artificer repair task ──
@@ -1244,7 +1560,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         runId: evaluatorRunId,
         reason: 'source_artificer_artifact_id_unresolved',
       });
-      return { kind: 'max_iterations_reached' };
+      return { kind: 'max_iterations_reached', detail: 'seed_failed' };
     }
 
     // Construct the new repairPayload (repairIteration = prior + 1).
@@ -1296,7 +1612,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         runId: evaluatorRunId,
         reason: 'seed_artificer_repair_task_not_injected',
       });
-      return { kind: 'max_iterations_reached' };
+      return { kind: 'max_iterations_reached', detail: 'seed_failed' };
     }
 
     try {
@@ -1322,7 +1638,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // Treat as max iterations reached so the caller skips markTaskSucceeded
       // and returns succeeded — the evaluator verdict stands; only the repair
       // seeding failed, which is logged.
-      return { kind: 'max_iterations_reached' };
+      return { kind: 'max_iterations_reached', detail: 'seed_failed' };
     }
   }
 

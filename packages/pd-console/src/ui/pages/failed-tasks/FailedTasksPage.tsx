@@ -58,6 +58,8 @@ interface FailedTask {
   maxAttempts: number;
   createdAt: string;
   lastAttemptAt: string | null;
+  /** PRI-629: decision-capable NHR — 决策出口在治理焦点,不显示 Recover */
+  ownerDecisionRequired?: boolean;
 }
 
 interface FailedTasksData {
@@ -129,6 +131,9 @@ function validateTask(v: unknown): FailedTask | null {
   const painId = readNullableString(v, "painId");
   const lastError = readNullableString(v, "lastError");
   const lastAttemptAt = readNullableString(v, "lastAttemptAt");
+  const ownerDecisionRequired = Object.hasOwn(v, "ownerDecisionRequired")
+    ? v.ownerDecisionRequired === true
+    : undefined;
   return {
     taskId,
     taskKind,
@@ -139,6 +144,7 @@ function validateTask(v: unknown): FailedTask | null {
     maxAttempts,
     createdAt,
     lastAttemptAt,
+    ...(ownerDecisionRequired !== undefined ? { ownerDecisionRequired } : {}),
   };
 }
 
@@ -577,7 +583,14 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
           <span className="font-mono text-ink-3 text-[12px]">
             {task.lastAttemptAt ? formatDate(task.lastAttemptAt) : "—"}
           </span>
-          {onRecover && (
+          {task.ownerDecisionRequired === true ? (
+            <span className="whitespace-nowrap text-[12px]">
+              <span className="text-amber">{t("pages.failedTasks.awaitingOwnerDecision")}</span>{" "}
+              <a href="#/focus" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
+                {t("pages.failedTasks.goGovernanceFocus")}
+              </a>
+            </span>
+          ) : onRecover ? (
             <Button
               variant="default"
               size="sm"
@@ -586,7 +599,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
             >
               {t("pages.failedTasks.recover")}
             </Button>
-          )}
+          ) : null}
           <Button
             variant="outline"
             size="sm"

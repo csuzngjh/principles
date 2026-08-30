@@ -1,4 +1,5 @@
 import type { OpenClawPluginServiceContext, PluginLogger } from '../openclaw-sdk.js';
+import { READ_ONLY_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, AGENT_TOOL_NAMES } from '../constants/tools.js';
 import {
   createRuntimeStateHandle,
   InternalizationOrchestrator,
@@ -318,13 +319,21 @@ export async function runConsumerCycle(
         // P0-D 生产接线: PRI-509 repair loop 正式进入 auto-consumer (bounded,
         // flag evaluator_artificer_repair_loop 保留运行时关闭能力)。needs_revision
         // → seed artificer repair; commit 门控保证不再并行 seed rollout_reviewer。
+        // PRI-630: 注入宿主声明的 runtime-authoritative 工具目录 — 工具名合法
+        // 性以目录为准,禁止 LLM 凭记忆判 "非标准工具名" (链 48371236 根因②)。
         runner = new EvaluatorRunner(
           {
             stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
             artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
             ...createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
           },
-          runnerOptions,
+          {
+            ...runnerOptions,
+            hostToolCatalog: {
+              readOnlyTools: [...READ_ONLY_TOOL_NAMES],
+              writeTools: [...LOW_RISK_WRITE_TOOL_NAMES, ...HIGH_RISK_TOOL_NAMES, ...AGENT_TOOL_NAMES],
+            },
+          },
         );
         break;
       case 'rollout_reviewer':

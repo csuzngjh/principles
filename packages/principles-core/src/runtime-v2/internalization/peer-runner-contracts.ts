@@ -15,7 +15,7 @@
  */
 
 import type { TaskRecord } from '../task-status.js';
-import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent } from './pitask-metadata.js';
+import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent, HumanReviewContext, OwnerResolutionRecord } from './pitask-metadata.js';
 
 // ── Internalization Channel Types ─────────────────────────────────────────────
 
@@ -158,6 +158,10 @@ export interface PITaskRecord extends TaskRecord {
    * resume it instead of re-invoking the LLM. See pitask-metadata.ts.
    */
   completionIntent?: RunnerCompletionIntent;
+  /** PRI-629: structured context written atomically with needs_human_review. */
+  humanReviewContext?: HumanReviewContext;
+  /** PRI-629: task-scoped Owner resolution log (append-only; not a state source). */
+  ownerResolutions?: readonly OwnerResolutionRecord[];
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

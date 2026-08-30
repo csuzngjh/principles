@@ -19,6 +19,7 @@
  */
 
 import type { PITaskRecord } from './peer-runner-contracts.js';
+import { resolveEffectiveRunnerDecision } from './owner-review.js';
 
 export type InternalizationTransitionDecisionKind =
   /** 正常推进: seed job-graph 后继 (或对 rollout_reviewer: 触发 activation dispatch) */
@@ -116,7 +117,13 @@ export function decideInternalizationTransition(input: TransitionDecisionInput):
   return { kind: 'ADVANCE', reason: `task_succeeded_${taskKind}` };
 }
 
-/** 从 PITaskRecord 提取决策输入的便利投影 (legacy 判据由调用方解析后传入) */
+/**
+ * 从 PITaskRecord 提取决策输入的便利投影 (legacy 判据由调用方解析后传入)。
+ *
+ * PRI-629: runnerDecision 一律取 effective decision (resolveEffectiveRunnerDecision
+ * 的唯一解析点) — Owner applied override (accept_current/reject_current) 后,
+ * 仲裁看到的是 effectiveDecision;机器原始 runnerDecision 永不改写 (INV-03)。
+ */
 export function transitionInputFromTask(
   piTask: PITaskRecord,
   legacyRunnerDecision?: string,
@@ -124,7 +131,7 @@ export function transitionInputFromTask(
   return {
     taskKind: piTask.taskKind,
     taskStatus: piTask.status,
-    runnerDecision: piTask.runnerDecision,
+    runnerDecision: resolveEffectiveRunnerDecision(piTask),
     legacyRunnerDecision,
     isRepairTask: piTask.repairPayload !== undefined,
     revisionCount: piTask.revisionCount ?? 0,

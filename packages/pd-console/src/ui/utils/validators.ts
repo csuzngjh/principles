@@ -2783,3 +2783,144 @@ export function validateOwnerIdentityUnregister(v: unknown): OwnerIdentityUnregi
   if (governance === null) return null;
   return { ok: true, source: 'none', governance };
 }
+
+// ── PRI-629: unified Owner Decision inbox (owner-decisions API) ──────────────
+
+const OWNER_DECISION_KINDS = new Set(['evaluator_review', 'rollout_review', 'activation_approval', 'rulecode_decision']);
+const OWNER_DECISION_ACTIONS = new Set(['accept_current', 'revise_once', 'reject_current', 'approve', 'reject', 'promote', 'reject_after_shadow']);
+
+export interface OwnerDecisionItemData {
+  reviewKey: string;
+  kind: string;
+  taskId: string;
+  title: string;
+  summary: string;
+  reasonCode: string;
+  legacy: boolean;
+  allowedActions: string[];
+  expectedRevisionEpoch: number;
+  expectedSourceRunId: string;
+  expectedSourceArtifactId: string;
+  expectedSourceArtifactHash: string;
+  createdAt: string;
+  machineRecommendation?: string;
+  score?: number;
+  principleId?: string;
+}
+
+export interface OwnerDecisionsData {
+  items: OwnerDecisionItemData[];
+  total: number;
+  generatedAt: string;
+}
+
+export function validateOwnerDecisionItem(v: unknown): OwnerDecisionItemData | null {
+  if (!isObject(v)) return null;
+  const {reviewKey} = v;
+  const {kind} = v;
+  const {taskId} = v;
+  const {title} = v;
+  const {summary} = v;
+  const {reasonCode} = v;
+  const {createdAt} = v;
+  if (!isString(reviewKey) || !isString(kind) || !isString(taskId) || !isString(title)
+    || !isString(summary) || !isString(reasonCode) || !isString(createdAt)) return null;
+  if (!OWNER_DECISION_KINDS.has(kind)) return null;
+  if (!Object.hasOwn(v, 'legacy') || !isBoolean(v.legacy)) return null;
+  if (!Object.hasOwn(v, 'allowedActions') || !Array.isArray(v.allowedActions)) return null;
+  for (const action of v.allowedActions) {
+    if (typeof action !== 'string' || !OWNER_DECISION_ACTIONS.has(action)) return null;
+  }
+  if (!Object.hasOwn(v, 'expectedRevisionEpoch') || !isNumber(v.expectedRevisionEpoch)) return null;
+  const { expectedRevisionEpoch } = v;
+  const { expectedSourceRunId } = v;
+  const { expectedSourceArtifactId } = v;
+  const { expectedSourceArtifactHash } = v;
+  if (!isString(expectedSourceRunId) || !isString(expectedSourceArtifactId) || !isString(expectedSourceArtifactHash)) return null;
+  const item: OwnerDecisionItemData = {
+    reviewKey,
+    kind,
+    taskId,
+    title,
+    summary,
+    reasonCode,
+    legacy: v.legacy,
+    allowedActions: v.allowedActions,
+    expectedRevisionEpoch,
+    expectedSourceRunId,
+    expectedSourceArtifactId,
+    expectedSourceArtifactHash,
+    createdAt,
+  };
+  if (Object.hasOwn(v, 'machineRecommendation')) {
+    if (!isString(v.machineRecommendation)) return null;
+    item.machineRecommendation = v.machineRecommendation;
+  }
+  if (Object.hasOwn(v, 'score')) {
+    if (!isNumber(v.score)) return null;
+    item.score = v.score;
+  }
+  if (Object.hasOwn(v, 'principleId')) {
+    if (!isString(v.principleId)) return null;
+    item.principleId = v.principleId;
+  }
+  return item;
+}
+
+export function validateOwnerDecisionsData(v: unknown): OwnerDecisionsData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'items') || !Array.isArray(v.items)) return null;
+  const items: OwnerDecisionItemData[] = [];
+  for (const entry of v.items) {
+    const item = validateOwnerDecisionItem(entry);
+    if (item === null) return null;
+    items.push(item);
+  }
+  if (!Object.hasOwn(v, 'total') || !isNumber(v.total)) return null;
+  if (!Object.hasOwn(v, 'generatedAt') || !isString(v.generatedAt)) return null;
+  return { items, total: v.total, generatedAt: v.generatedAt };
+}
+
+export interface OwnerResolutionResultData {
+  status: 'resolved';
+  resolutionId: string;
+  reviewKey: string;
+  action: string;
+  applied: boolean;
+  runnerWillApply: boolean;
+  effectiveDecision?: string;
+  targetTaskId?: string;
+  nextAction?: string;
+}
+
+export function validateOwnerResolutionResult(v: unknown): OwnerResolutionResultData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'status') || v.status !== 'resolved') return null;
+  const { resolutionId } = v;
+  const { reviewKey } = v;
+  const { action } = v;
+  if (!isString(resolutionId) || !isString(reviewKey) || !isString(action)) return null;
+  if (!Object.hasOwn(v, 'applied') || !isBoolean(v.applied)) return null;
+  if (!Object.hasOwn(v, 'runnerWillApply') || !isBoolean(v.runnerWillApply)) return null;
+  const result: OwnerResolutionResultData = {
+    status: 'resolved',
+    resolutionId,
+    reviewKey,
+    action,
+    applied: v.applied,
+    runnerWillApply: v.runnerWillApply,
+  };
+  if (Object.hasOwn(v, 'effectiveDecision')) {
+    if (!isString(v.effectiveDecision)) return null;
+    result.effectiveDecision = v.effectiveDecision;
+  }
+  if (Object.hasOwn(v, 'targetTaskId')) {
+    if (!isString(v.targetTaskId)) return null;
+    result.targetTaskId = v.targetTaskId;
+  }
+  if (Object.hasOwn(v, 'nextAction')) {
+    if (!isString(v.nextAction)) return null;
+    result.nextAction = v.nextAction;
+  }
+  return result;
+}

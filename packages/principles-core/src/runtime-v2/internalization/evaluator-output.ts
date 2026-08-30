@@ -57,6 +57,17 @@ export interface EvaluatorAdversarialResult {
   readonly failedCases: readonly AdversarialFailedCase[];
 }
 
+/**
+ * PRI-630 收敛契约: 第二轮及之后,评估器必须对上轮 review contract 的每个
+ * 稳定需求 id 裁定 resolved / still_open / regressed。
+ */
+export type PriorRequirementStatus = 'resolved' | 'still_open' | 'regressed';
+
+export interface PriorRequirementStatusEntry {
+  readonly id: string;
+  readonly status: PriorRequirementStatus;
+}
+
 export interface EvaluatorEvaluation {
   readonly decision: 'approved' | 'needs_revision' | 'rejected';
   readonly summary: string;
@@ -64,6 +75,17 @@ export interface EvaluatorEvaluation {
   readonly strengths: readonly string[];
   readonly concerns: readonly string[];
   readonly requiredChanges: readonly string[];
+  /** PRI-630: 上轮需求的逐条核销 (仅有上轮上下文时合法;首轮省略) */
+  readonly priorRequirementStatuses?: readonly PriorRequirementStatusEntry[];
+  /**
+   * PRI-630 P1 评审修复: 输入需求的 ledger echo ({id, statement, status}) —
+   * 下一轮上下文的身份载体,保证 requirement id 跨轮稳定。
+   */
+  readonly requirementLedger?: readonly {
+    readonly id: string;
+    readonly statement: string;
+    readonly status: PriorRequirementStatus;
+  }[];
 }
 
 export interface EvaluatorSourceTrace {
@@ -127,6 +149,25 @@ export interface EvaluatorOutputV2 extends EvaluatorOutputV1 {
 
 export const EVALUATOR_DECISIONS = ['approved', 'needs_revision', 'rejected'] as const;
 
+export const PriorRequirementStatusEntrySchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  status: Type.Union([
+    Type.Literal('resolved'),
+    Type.Literal('still_open'),
+    Type.Literal('regressed'),
+  ]),
+});
+
+export const RequirementLedgerEntrySchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  statement: Type.String({ minLength: 1 }),
+  status: Type.Union([
+    Type.Literal('resolved'),
+    Type.Literal('still_open'),
+    Type.Literal('regressed'),
+  ]),
+});
+
 export const EvaluatorEvaluationSchema = Type.Object({
   decision: Type.Union([
     Type.Literal('approved'),
@@ -138,6 +179,8 @@ export const EvaluatorEvaluationSchema = Type.Object({
   strengths: Type.Array(Type.String()),
   concerns: Type.Array(Type.String()),
   requiredChanges: Type.Array(Type.String()),
+  priorRequirementStatuses: Type.Optional(Type.Array(PriorRequirementStatusEntrySchema)),
+  requirementLedger: Type.Optional(Type.Array(RequirementLedgerEntrySchema)),
 });
 
 export const EvaluatorSourceTraceSchema = Type.Object({
@@ -334,12 +377,28 @@ export function isEvaluatorOutputV2(output: unknown): output is EvaluatorOutputV
 }
 
 export interface EvaluatorValidator {
-  validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string): Promise<EvaluatorValidationResult>;
+  validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string, convergence?: EvaluatorConvergenceContext): Promise<EvaluatorValidationResult>;
+}
+
+export interface EvaluatorExpectedRequirement {
+  /** 上轮分配的稳定 id (req-N) */
+  readonly id: string;
+  /** 上轮注入上下文的陈述原文 — ledger 必须 verbatim echo */
+  readonly statement: string;
+}
+
+export interface EvaluatorConvergenceContext {
+  /**
+   * 评审轮 2 P1: authoritative 修复轮契约 — runner 从上一轮上下文原样传入。
+   * repair round 的 priorRequirementStatuses 与 requirementLedger 都以此为准
+   * 做机器校验 (存在/完整/不重复/不重编号/statement 原文/status 互洽)。
+   */
+  readonly expectedRequirements?: readonly EvaluatorExpectedRequirement[];
 }
 
 export class DefaultEvaluatorValidator implements EvaluatorValidator {
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string): Promise<EvaluatorValidationResult> {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this, @typescript-eslint/max-params -- 4th param is the PRI-630 convergence context (mirrors EvaluatorValidator interface); a params object would break existing call sites
+  async validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string, convergence?: EvaluatorConvergenceContext): Promise<EvaluatorValidationResult> {
     const errors: string[] = [];
 
     if (!isRecord(output)) {
@@ -374,6 +433,53 @@ export class DefaultEvaluatorValidator implements EvaluatorValidator {
       else if (!ev.concerns.every((e: unknown) => typeof e === 'string')) errors.push('evaluation.concerns must be an array of strings');
       if (!Object.hasOwn(ev, 'requiredChanges') || !Array.isArray(ev.requiredChanges)) errors.push('evaluation.requiredChanges must be an array');
       else if (!ev.requiredChanges.every((e: unknown) => typeof e === 'string')) errors.push('evaluation.requiredChanges must be an array of strings');
+      // PRI-630 (SPEC §18.4) schema invariant: needs_revision 必须携带至少一条
+      // 可执行修改 — 空清单的 revision 判定是裁决与依据脱节 (链 48371236 轮3)。
+      else if (ev.decision === 'needs_revision' && ev.requiredChanges.length === 0) {
+        errors.push('evaluation.requiredChanges must be non-empty when decision is needs_revision (PRI-630 convergence invariant)');
+      }
+      // PRI-630 (SPEC §18.2): 上轮需求核销 — 结构校验 + id/status 枚举
+      if (Object.hasOwn(ev, 'priorRequirementStatuses') && ev.priorRequirementStatuses !== undefined) {
+        if (!Array.isArray(ev.priorRequirementStatuses)) {
+          errors.push('evaluation.priorRequirementStatuses must be an array');
+        } else {
+          for (const entry of ev.priorRequirementStatuses) {
+            if (!isRecord(entry)) {
+              errors.push('evaluation.priorRequirementStatuses entries must be objects');
+              break;
+            }
+            if (typeof entry.id !== 'string' || entry.id.trim() === '') {
+              errors.push('evaluation.priorRequirementStatuses entries must have non-empty id');
+            }
+            if (entry.status !== 'resolved' && entry.status !== 'still_open' && entry.status !== 'regressed') {
+              errors.push(`evaluation.priorRequirementStatuses status must be resolved/still_open/regressed, got ${String(entry.status)}`);
+            }
+          }
+        }
+      }
+      // PRI-630 P1 评审修复: requirementLedger 结构校验 (id/statement 非空,
+      // status 枚举;『new』是上下文构建侧的状态,evaluator 输出不含)
+      if (Object.hasOwn(ev, 'requirementLedger') && ev.requirementLedger !== undefined) {
+        if (!Array.isArray(ev.requirementLedger)) {
+          errors.push('evaluation.requirementLedger must be an array');
+        } else {
+          for (const entry of ev.requirementLedger) {
+            if (!isRecord(entry)) {
+              errors.push('evaluation.requirementLedger entries must be objects');
+              break;
+            }
+            if (typeof entry.id !== 'string' || entry.id.trim() === '') {
+              errors.push('evaluation.requirementLedger entries must have non-empty id');
+            }
+            if (typeof entry.statement !== 'string' || entry.statement.trim() === '') {
+              errors.push('evaluation.requirementLedger entries must have non-empty statement');
+            }
+            if (entry.status !== 'resolved' && entry.status !== 'still_open' && entry.status !== 'regressed') {
+              errors.push(`evaluation.requirementLedger status must be resolved/still_open/regressed, got ${String(entry.status)}`);
+            }
+          }
+        }
+      }
     }
 
     if (!Object.hasOwn(output, 'sourceTrace') || !isRecord(output.sourceTrace)) {
@@ -424,6 +530,72 @@ export class DefaultEvaluatorValidator implements EvaluatorValidator {
     }
     if (Object.hasOwn(output, 'adversarialResult')) {
       errors.push(...validateAdversarialResult(output.adversarialResult));
+    }
+
+    // 评审轮 2 P1: requirementLedger 从 prompt-only echo 收紧为
+    // validator-enforced authoritative contract (机器可验证,不再依赖模型自觉):
+    //   statuses   — 每个 expected id 恰好一次 (不缺、不重复、无幻觉 id)
+    //   ledger     — 必须存在;每个 expected id 恰好一次;不重编号 (额外 id 拒绝);
+    //                statement 与上下文原文一致;status 与 statuses 同 id 一致
+    const expectedReqs = convergence?.expectedRequirements;
+    if (expectedReqs && expectedReqs.length > 0) {
+      const ev = (isRecord(output) && isRecord(output.evaluation)) ? output.evaluation : undefined;
+      const statuses = ev && Array.isArray(ev.priorRequirementStatuses) ? ev.priorRequirementStatuses : undefined;
+      const ledger = ev && Array.isArray(ev.requirementLedger) ? ev.requirementLedger : undefined;
+
+      if (!statuses) {
+        errors.push('evaluation.priorRequirementStatuses is required in a repair round (previous evaluation context was provided)');
+      }
+      if (!ledger) {
+        errors.push('evaluation.requirementLedger is required in a repair round (previous evaluation context was provided)');
+      }
+      if (statuses && ledger) {
+        const statusById = new Map<string, { count: number; status: unknown }>();
+        for (const entry of statuses) {
+          if (!isRecord(entry) || typeof entry.id !== 'string') continue;
+          const prev = statusById.get(entry.id) ?? { count: 0, status: entry.status };
+          statusById.set(entry.id, { count: prev.count + 1, status: entry.status });
+        }
+        const ledgerById = new Map<string, { count: number; statement: unknown; status: unknown }>();
+        for (const entry of ledger) {
+          if (!isRecord(entry) || typeof entry.id !== 'string') continue;
+          const prev = ledgerById.get(entry.id) ?? { count: 0, statement: entry.statement, status: entry.status };
+          ledgerById.set(entry.id, { count: prev.count + 1, statement: entry.statement, status: entry.status });
+        }
+        for (const expected of expectedReqs) {
+          const st = statusById.get(expected.id);
+          if (st === undefined || st.count === 0) {
+            errors.push(`evaluation.priorRequirementStatuses must cover prior requirement id ${expected.id} (missing)`);
+          } else if (st.count > 1) {
+            errors.push(`evaluation.priorRequirementStatuses id ${expected.id} must appear exactly once (got ${st.count})`);
+          }
+          const lg = ledgerById.get(expected.id);
+          if (lg === undefined || lg.count === 0) {
+            errors.push(`evaluation.requirementLedger must cover prior requirement id ${expected.id} (missing or renumbered)`);
+          } else if (lg.count > 1) {
+            errors.push(`evaluation.requirementLedger id ${expected.id} must appear exactly once (got ${lg.count})`);
+          } else {
+            if (lg.statement !== expected.statement) {
+              errors.push(`evaluation.requirementLedger statement for ${expected.id} must match the authoritative context verbatim (got ${String(lg.statement)})`);
+            }
+            if (st !== undefined && st.count === 1 && lg.status !== st.status) {
+              errors.push(`evaluation.requirementLedger status for ${expected.id} (${String(lg.status)}) must match priorRequirementStatuses (${String(st.status)})`);
+            }
+          }
+        }
+        // 幻觉/重编号 id: expected 之外的任何 id 都不允许 (echo 契约)
+        const expectedIdSet = new Set(expectedReqs.map((e) => e.id));
+        for (const [id] of statusById) {
+          if (!expectedIdSet.has(id)) {
+            errors.push(`evaluation.priorRequirementStatuses has unexpected id ${id} (not in prior context — renumbering/fabrication)`);
+          }
+        }
+        for (const [id] of ledgerById) {
+          if (!expectedIdSet.has(id)) {
+            errors.push(`evaluation.requirementLedger has unexpected id ${id} (not in prior context — renumbering/fabrication)`);
+          }
+        }
+      }
     }
 
     return errors.length > 0

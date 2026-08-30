@@ -137,6 +137,20 @@ export async function handleRuntimeInternalizationRetry(opts: InternalizationRet
       emit(out, opts.json);
       return;
     }
+    if (outcome.status === 'rejected') {
+      // PRI-629 Recover guard: decision-capable 人工裁决不走 authority reset —
+      // 治理出口在 Console 治理焦点 (或 owner-decisions API)。
+      const out: InternalizationRetryOutput = {
+        status: 'skipped',
+        taskId: opts.taskId,
+        taskKind: outcome.taskKind,
+        previousStatus: outcome.previousStatus,
+        reason: outcome.reason,
+        nextAction: 'This task awaits an Owner decision (accept / revise once / reject). Resolve it in the Console governance focus, or via the owner-decisions API. Recover is not a governance exit.',
+      };
+      emit(out, opts.json);
+      return;
+    }
     if (outcome.status === 'metadata_invalid') {
       // fail closed: 只改 status 会把(可能损坏的)旧 authority 记录原样留在
       // metadata 里,下一次 run 由它接管 —— 产生 partial retry。

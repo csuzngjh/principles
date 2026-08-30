@@ -39,6 +39,7 @@ import {
   sendBadRequest,
 } from '../utils/response.js';
 import { readBody } from '../utils/request.js';
+import { OwnerDecisionConsoleModel } from '../models/OwnerDecisionConsoleModel.js';
 
 // ── Per-workspace store cache ──────────────────────────────────────────────
 //
@@ -190,6 +191,17 @@ interface RecoverDispatchOutcome {
  * is raised (core raises it by +3). needs_human_review resets ignore it —
  * the owner authority reset has its own budget semantics.
  */
+const ownerDecisionModels = new Map<string, OwnerDecisionConsoleModel>();
+
+function getOwnerDecisionModel(workspaceDir: string): OwnerDecisionConsoleModel {
+  let model = ownerDecisionModels.get(workspaceDir);
+  if (!model) {
+    model = new OwnerDecisionConsoleModel(workspaceDir);
+    ownerDecisionModels.set(workspaceDir, model);
+  }
+  return model;
+}
+
 async function dispatchRecovery(
   workspaceDir: string,
   taskId: string,
@@ -232,6 +244,19 @@ async function dispatchRecovery(
 
     // not failed (or missing) → owner authority reset path
     const outcome = await service.recoverNeedsHumanReviewTask(taskId);
+    if (outcome.status === 'rejected') {
+      // PRI-629 Recover guard (SPEC §17): decision-capable 人工裁决不允许
+      // authority reset — Recover 不是治理出口,出口在治理焦点 Owner Decision。
+      return {
+        ok: false,
+        failure: {
+          httpStatus: 409,
+          errorCode: 'owner_decision_required',
+          message: 'This task awaits an Owner decision (accept current / revise once / reject). Recover is not a governance exit and was refused.',
+          nextAction: 'Open the Console governance focus (#/focus) and resolve the decision there.',
+        },
+      };
+    }
     if (outcome.status === 'requeued') {
       return {
         ok: true,
@@ -384,18 +409,33 @@ export async function handleFailedTasksRoute(
       const tasks = await store.listFailedTasks({ kind, since, limit: limitResult, offset: offsetResult });
       const total = await store.countFailedTasks({ kind, since });
 
+      // PRI-629 分流: decision-capable NHR 任务标 ownerDecisionRequired —
+      // UI 隐藏 Recover、引导前往治理焦点 (决策出口不在失败页)。
+      let decisionRequiredIds: Set<string> | null = null;
+      try {
+        decisionRequiredIds = await getOwnerDecisionModel(workspaceDir).ownerDecisionRequiredTaskIds();
+      } catch {
+        decisionRequiredIds = null; // 投影失败不阻塞失败列表 (rc-9 降级由 UI 兜底)
+      }
+      const enriched = tasks.map((task) => ({
+        ...task,
+        ...(decisionRequiredIds !== null && (task as { status?: string }).status === 'needs_human_review'
+          ? { ownerDecisionRequired: decisionRequiredIds.has((task as { taskId?: string }).taskId ?? '') }
+          : {}),
+      }));
+
       // Only report "PD pipeline is healthy" when total === 0. When
       // tasks.length === 0 but total > 0, the caller has paginated past the
       // last page — returning "healthy" here would mask the failures that
       // exist on earlier pages.
       if (total === 0) {
         sendSuccess(res, {
-          tasks,
+          tasks: enriched,
           total,
           nextAction: 'No failed tasks. PD pipeline is healthy.',
         });
       } else {
-        sendSuccess(res, { tasks, total });
+        sendSuccess(res, { tasks: enriched, total });
       }
     } catch (err) {
       sendError(res, 500, 'failed_tasks_list_error', errorMessage(err));
