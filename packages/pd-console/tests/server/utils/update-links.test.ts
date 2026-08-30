@@ -59,6 +59,37 @@ describe('collectFileDepLinkSpecs', () => {
     ]);
   });
 
+  it('maps the legacy plugin dir despite the deployed/staged basename mismatch (review P1)', () => {
+    const staged = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
+    const pdCliStaged = path.join(staged, 'pd-cli');
+    const pluginStaged = path.join(staged, 'plugin');
+    const deployedPdCli = path.join(staged, 'extensions', 'principles-disciple', 'pd-cli');
+    const deployedLegacyPlugin = path.join(staged, 'extensions', 'principles-disciple');
+    for (const dir of [pdCliStaged, pluginStaged, deployedPdCli, deployedLegacyPlugin]) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    // Legacy layout: the deployed plugin dir is named principles-disciple,
+    // while the staged one is plugin — a basename-based lookup misses it.
+    fs.writeFileSync(
+      path.join(pdCliStaged, 'package.json'),
+      JSON.stringify({ dependencies: { 'principles-disciple': 'file:../plugin' } }),
+    );
+    const specs = collectFileDepLinkSpecs(
+      [
+        { manifestDir: pdCliStaged, deployedDir: deployedPdCli },
+        { manifestDir: pluginStaged, deployedDir: deployedLegacyPlugin },
+      ],
+      readDepsFromDisk,
+    );
+    expect(specs).toEqual([
+      {
+        linkPath: path.join(deployedPdCli, 'node_modules', 'principles-disciple'),
+        target: deployedLegacyPlugin,
+        stagedTarget: pluginStaged,
+      },
+    ]);
+  });
+
   it('skips deps whose staged target basename has no deployed counterpart', () => {
     const staged = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-links-'));
     const consoleStaged = path.join(staged, 'console');

@@ -1855,7 +1855,6 @@ describe('handleUpdateRoute', () => {
 
     it('creates node_modules links for internal deps the staged manifests newly declare (generation-gap regression)', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
-      let stagingDirDebug: string | undefined;
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
@@ -1876,7 +1875,6 @@ describe('handleUpdateRoute', () => {
           const ci = args ? args.indexOf('-C') : -1;
           const dir = ci >= 0 ? args![ci + 1] : undefined;
           if (dir) {
-            stagingDirDebug = dir;
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
               JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
@@ -1893,7 +1891,8 @@ describe('handleUpdateRoute', () => {
             fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
             fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), 'new cli');
-            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'),
+              JSON.stringify({ version: '1.0.0', dependencies: { 'principles-disciple': 'file:../plugin' } }));
             // A real 1.222.5+ installer bundles host-runtime and
             // install-layout — without them the host-runtime copy block (and
             // the link derivation inside it) is skipped entirely.
@@ -1924,21 +1923,14 @@ describe('handleUpdateRoute', () => {
       const body = parseResponseBody<{ data: { success: boolean; newVersion?: string } }>(res);
       expect(body.data.success).toBe(true);
 
-      // TEMP DEBUG
-      const dump = (d: string): string => {
-        try { return fs.readdirSync(d).join(','); } catch (e) { return 'ERR:' + (e as Error).message; }
-      };
-      console.log('[DEBUG] stagingDir:', stagingDirDebug, '->', stagingDirDebug ? dump(stagingDirDebug) : 'N/A');
-      console.log('[DEBUG] staged console pkg deps:', (() => { try { return fs.readFileSync(path.join(stagingDirDebug!, 'console', 'package.json'), 'utf8'); } catch (e) { return 'ERR ' + (e as Error).message; } })());
-      console.log('[DEBUG] console/node_modules exists:', fs.existsSync(path.join(pluginDir, 'console', 'node_modules')));
-      try {
-        console.log('[DEBUG] console/node_modules contents:', dump(path.join(pluginDir, 'console', 'node_modules')));
-        console.log('[DEBUG] console/node_modules/@principles contents:', dump(path.join(pluginDir, 'console', 'node_modules', '@principles')));
-      } catch { /* ignore */ }
-
       // The data-driven derivation created the link the new dependency
       // requires — without any console-generation change or hardcoded entry.
       expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'core'))).toBe(true);
+      // Legacy layout: pd-cli's staged manifest declares principles-disciple
+      // file:../plugin, and the deployed plugin dir is the legacy
+      // principles-disciple root — the derivation must map it despite the
+      // staged/deployed basename mismatch (review P1).
+      expect(fs.existsSync(path.join(pluginDir, 'pd-cli', 'node_modules', 'principles-disciple'))).toBe(true);
     });
 
     // Negative control for the PRI-561 probe: the SAME probe on the PRE-fix

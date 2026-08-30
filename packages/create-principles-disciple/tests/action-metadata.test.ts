@@ -33,7 +33,7 @@ const COMPOSITE_STEP_ALLOWED_KEYS = new Set([
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function listActionFiles(dir: string): string[] {
@@ -115,5 +115,27 @@ runs:
     const violations = validateCompositeAction('in-memory/action.yml', bad);
     expect(violations).toHaveLength(1);
     expect(violations[0]?.problem).toContain('timeout-minutes');
+  });
+
+  it('rejects array-shaped runs and non-mapping steps instead of passing them silently (review P2)', () => {
+    // isRecord() must not accept arrays: `runs: []` previously flowed through
+    // as a valid (vacuous) document, hiding malformed metadata from PR CI.
+    const arrayRuns = `
+runs: []
+`;
+    const arrayRunsViolations = validateCompositeAction('in-memory/array-runs.yml', arrayRuns);
+    expect(arrayRunsViolations.length).toBeGreaterThanOrEqual(1);
+    expect(arrayRunsViolations[0]?.problem).toMatch(/runs/);
+
+    // A step that is an array (or any non-mapping) must be flagged too.
+    const nonMappingStep = `
+runs:
+  using: composite
+  steps:
+    - []
+`;
+    const stepViolations = validateCompositeAction('in-memory/bad-step.yml', nonMappingStep);
+    expect(stepViolations.length).toBeGreaterThanOrEqual(1);
+    expect(stepViolations[0]?.problem).toMatch(/step 1/);
   });
 });

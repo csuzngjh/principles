@@ -16,8 +16,8 @@
  * definition do not declare newly added dependencies.
  *
  * Each staged component's `file:` refs resolve to a sibling staged
- * component directory; the deployed link target is the staged sibling's
- * basename mapped back to the deployed layout directory.
+ * component directory; the deployed link target is that sibling's entry in
+ * the same staged->deployed pairing.
  */
 import * as path from 'node:path';
 
@@ -44,9 +44,14 @@ export type StagedComponent = {
  * - `readDependencies(manifestDir)` returns the component's dependency map
  *   (name -> version-or-ref); return {} for unreadable/missing manifests.
  * - A `file:` ref is resolved against its staged manifest dir to find the
- *   staged sibling target; the deployed link target is that sibling's
- *   basename mapped to the deployed layout dir passed in `deployedDir`.
- * - Deps whose staged target basename has no deployed counterpart (e.g.
+ *   staged sibling target; the deployed link target is taken from the same
+ *   staged->deployed pairing the caller provides — component identity is
+ *   the staged directory itself (normalized absolute path), NOT the
+ *   deployed directory's basename. In the legacy layout the deployed
+ *   plugin dir is named `principles-disciple` while the staged one is
+ *   `plugin`, so a basename lookup would silently drop the derived link
+ *   (review P1, PR #1457).
+ * - Deps whose staged target is not one of the layout components (e.g.
  *   @principles/codex-adapter — a separate host install, not part of this
  *   layout) are skipped.
  *
@@ -59,9 +64,9 @@ export function collectFileDepLinkSpecs(
   stagedComponents: readonly StagedComponent[],
   readDependencies: (manifestDir: string) => Record<string, string>,
 ): FileDepLinkSpec[] {
-  const deployedDirByBasename = new Map<string, string>();
+  const deployedDirByStagedDir = new Map<string, string>();
   for (const component of stagedComponents) {
-    deployedDirByBasename.set(path.basename(component.deployedDir), component.deployedDir);
+    deployedDirByStagedDir.set(path.resolve(component.manifestDir), component.deployedDir);
   }
   const specs: FileDepLinkSpec[] = [];
   const seen = new Set<string>();
@@ -69,14 +74,14 @@ export function collectFileDepLinkSpecs(
     for (const [name, ref] of Object.entries(readDependencies(component.manifestDir))) {
       if (typeof ref !== 'string' || !ref.startsWith('file:')) continue;
       const stagedTarget = path.resolve(component.manifestDir, ref.slice('file:'.length));
-      const deployedTarget = deployedDirByBasename.get(path.basename(stagedTarget));
+      const deployedTarget = deployedDirByStagedDir.get(stagedTarget);
       if (deployedTarget === undefined) continue;
       // The link lives in the DEPLOYED component dir (what the updated dist
       // resolves against) — never inside the throwaway temp dir.
       const linkPath = path.join(component.deployedDir, 'node_modules', name);
       if (seen.has(linkPath)) continue;
       seen.add(linkPath);
-      specs.push({ linkPath, target: deployedTarget, stagedTarget: stagedTarget });
+      specs.push({ linkPath, target: deployedTarget, stagedTarget });
     }
   }
   return specs;
