@@ -380,9 +380,20 @@ export interface EvaluatorValidator {
   validate(output: unknown, taskId: string, expectedSourceArtificerArtifactId?: string, convergence?: EvaluatorConvergenceContext): Promise<EvaluatorValidationResult>;
 }
 
+export interface EvaluatorExpectedRequirement {
+  /** 上轮分配的稳定 id (req-N) */
+  readonly id: string;
+  /** 上轮注入上下文的陈述原文 — ledger 必须 verbatim echo */
+  readonly statement: string;
+}
+
 export interface EvaluatorConvergenceContext {
-  /** 修复轮 (previousEvaluation 存在) 必须逐条核销的 requirement ids */
-  readonly expectedRequirementIds?: readonly string[];
+  /**
+   * 评审轮 2 P1: authoritative 修复轮契约 — runner 从上一轮上下文原样传入。
+   * repair round 的 priorRequirementStatuses 与 requirementLedger 都以此为准
+   * 做机器校验 (存在/完整/不重复/不重编号/statement 原文/status 互洽)。
+   */
+  readonly expectedRequirements?: readonly EvaluatorExpectedRequirement[];
 }
 
 export class DefaultEvaluatorValidator implements EvaluatorValidator {
@@ -521,22 +532,67 @@ export class DefaultEvaluatorValidator implements EvaluatorValidator {
       errors.push(...validateAdversarialResult(output.adversarialResult));
     }
 
-    // PRI-630 P1 评审修复: 修复轮必须逐条核销上轮全部 requirement ids —
-    // 不再仅靠 prompt 约束,runner 把上下文 ids 传入做完整覆盖校验。
-    const expectedIds = convergence?.expectedRequirementIds;
-    if (expectedIds && expectedIds.length > 0) {
+    // 评审轮 2 P1: requirementLedger 从 prompt-only echo 收紧为
+    // validator-enforced authoritative contract (机器可验证,不再依赖模型自觉):
+    //   statuses   — 每个 expected id 恰好一次 (不缺、不重复、无幻觉 id)
+    //   ledger     — 必须存在;每个 expected id 恰好一次;不重编号 (额外 id 拒绝);
+    //                statement 与上下文原文一致;status 与 statuses 同 id 一致
+    const expectedReqs = convergence?.expectedRequirements;
+    if (expectedReqs && expectedReqs.length > 0) {
       const ev = (isRecord(output) && isRecord(output.evaluation)) ? output.evaluation : undefined;
       const statuses = ev && Array.isArray(ev.priorRequirementStatuses) ? ev.priorRequirementStatuses : undefined;
+      const ledger = ev && Array.isArray(ev.requirementLedger) ? ev.requirementLedger : undefined;
+
       if (!statuses) {
         errors.push('evaluation.priorRequirementStatuses is required in a repair round (previous evaluation context was provided)');
-      } else {
-        const covered = new Set<string>();
+      }
+      if (!ledger) {
+        errors.push('evaluation.requirementLedger is required in a repair round (previous evaluation context was provided)');
+      }
+      if (statuses && ledger) {
+        const statusById = new Map<string, { count: number; status: unknown }>();
         for (const entry of statuses) {
-          if (isRecord(entry) && typeof entry.id === 'string') covered.add(entry.id);
+          if (!isRecord(entry) || typeof entry.id !== 'string') continue;
+          const prev = statusById.get(entry.id) ?? { count: 0, status: entry.status };
+          statusById.set(entry.id, { count: prev.count + 1, status: entry.status });
         }
-        for (const id of expectedIds) {
-          if (!covered.has(id)) {
-            errors.push(`evaluation.priorRequirementStatuses must cover prior requirement id ${id} (missing)`);
+        const ledgerById = new Map<string, { count: number; statement: unknown; status: unknown }>();
+        for (const entry of ledger) {
+          if (!isRecord(entry) || typeof entry.id !== 'string') continue;
+          const prev = ledgerById.get(entry.id) ?? { count: 0, statement: entry.statement, status: entry.status };
+          ledgerById.set(entry.id, { count: prev.count + 1, statement: entry.statement, status: entry.status });
+        }
+        for (const expected of expectedReqs) {
+          const st = statusById.get(expected.id);
+          if (st === undefined || st.count === 0) {
+            errors.push(`evaluation.priorRequirementStatuses must cover prior requirement id ${expected.id} (missing)`);
+          } else if (st.count > 1) {
+            errors.push(`evaluation.priorRequirementStatuses id ${expected.id} must appear exactly once (got ${st.count})`);
+          }
+          const lg = ledgerById.get(expected.id);
+          if (lg === undefined || lg.count === 0) {
+            errors.push(`evaluation.requirementLedger must cover prior requirement id ${expected.id} (missing or renumbered)`);
+          } else if (lg.count > 1) {
+            errors.push(`evaluation.requirementLedger id ${expected.id} must appear exactly once (got ${lg.count})`);
+          } else {
+            if (lg.statement !== expected.statement) {
+              errors.push(`evaluation.requirementLedger statement for ${expected.id} must match the authoritative context verbatim (got ${String(lg.statement)})`);
+            }
+            if (st !== undefined && st.count === 1 && lg.status !== st.status) {
+              errors.push(`evaluation.requirementLedger status for ${expected.id} (${String(lg.status)}) must match priorRequirementStatuses (${String(st.status)})`);
+            }
+          }
+        }
+        // 幻觉/重编号 id: expected 之外的任何 id 都不允许 (echo 契约)
+        const expectedIdSet = new Set(expectedReqs.map((e) => e.id));
+        for (const [id] of statusById) {
+          if (!expectedIdSet.has(id)) {
+            errors.push(`evaluation.priorRequirementStatuses has unexpected id ${id} (not in prior context — renumbering/fabrication)`);
+          }
+        }
+        for (const [id] of ledgerById) {
+          if (!expectedIdSet.has(id)) {
+            errors.push(`evaluation.requirementLedger has unexpected id ${id} (not in prior context — renumbering/fabrication)`);
           }
         }
       }

@@ -1294,7 +1294,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       )}
 
       {/* Section 1: Pending Review */}
-      <section id="section-pending" className="mt-8" aria-labelledby="section-pending">
+      <section id="approval-queue-section" className="mt-8" aria-labelledby="section-pending">
         <SectionTitle id="section-pending">
           {t("pages.focus.sectionPending")}
         </SectionTitle>

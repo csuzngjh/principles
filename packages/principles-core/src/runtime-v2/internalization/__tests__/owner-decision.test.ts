@@ -840,44 +840,140 @@ describe('PRI-630 evaluator convergence invariants', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('P1 review: repair round without priorRequirementStatuses → rejected when convergence context provided', async () => {
+  // ── 评审轮 2 P1: requirementLedger 收紧为 validator-enforced contract ──
+  // convergence context 携带 authoritative expected {id, statement};
+  // repair round 必须同时输出 statuses + ledger,且二者互洽。
+  const EXPECTED = [
+    { id: 'req-1', statement: 'fix timeout handling' },
+    { id: 'req-2', statement: 'add retry backoff' },
+  ];
+  const okStatuses = [
+    { id: 'req-1', status: 'resolved' as const },
+    { id: 'req-2', status: 'still_open' as const },
+  ];
+  const okLedger = [
+    { id: 'req-1', statement: 'fix timeout handling', status: 'resolved' as const },
+    { id: 'req-2', statement: 'add retry backoff', status: 'still_open' as const },
+  ];
+
+  it('R2: repair round missing priorRequirementStatuses → rejected', async () => {
     const result = await validator.validate(baseOutput('needs_revision', ['fix']), EVAL_ID, undefined, {
-      expectedRequirementIds: ['req-1', 'req-2'],
+      expectedRequirements: EXPECTED,
     });
     expect(result.valid).toBe(false);
     expect(result.errors.join('; ')).toContain('priorRequirementStatuses');
   });
 
-  it('P1 review: partial coverage of expected requirement ids → rejected', async () => {
+  it('R2: repair round missing requirementLedger entirely → rejected (no longer prompt-only)', async () => {
     const out = {
       ...baseOutput('needs_revision', ['fix']),
       evaluation: {
         ...baseOutput('needs_revision', ['fix']).evaluation,
-        priorRequirementStatuses: [{ id: 'req-1', status: 'resolved' as const }],
+        priorRequirementStatuses: okStatuses,
+        // requirementLedger 缺失 — LLM 忘了输出也必须被机器拒绝
       },
     };
-    const result = await validator.validate(out, EVAL_ID, undefined, {
-      expectedRequirementIds: ['req-1', 'req-2'],
-    });
+    const result = await validator.validate(out, EVAL_ID, undefined, { expectedRequirements: EXPECTED });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('; ')).toContain('requirementLedger');
+  });
+
+  it('R2: statuses partial coverage → rejected with the missing id named', async () => {
+    const out = {
+      ...baseOutput('needs_revision', ['fix']),
+      evaluation: {
+        ...baseOutput('needs_revision', ['fix']).evaluation,
+        priorRequirementStatuses: [okStatuses[0]!],
+        requirementLedger: okLedger,
+      },
+    };
+    const result = await validator.validate(out, EVAL_ID, undefined, { expectedRequirements: EXPECTED });
     expect(result.valid).toBe(false);
     expect(result.errors.join('; ')).toContain('req-2');
   });
 
-  it('P1 review: full coverage of expected ids → valid; first round (no convergence) unaffected', async () => {
+  it('R2: statuses duplicate id → rejected (each expected id exactly once)', async () => {
     const out = {
       ...baseOutput('needs_revision', ['fix']),
       evaluation: {
         ...baseOutput('needs_revision', ['fix']).evaluation,
-        priorRequirementStatuses: [
-          { id: 'req-1', status: 'resolved' as const },
-          { id: 'req-2', status: 'still_open' as const },
+        priorRequirementStatuses: [okStatuses[0]!, okStatuses[0]!, okStatuses[1]!],
+        requirementLedger: okLedger,
+      },
+    };
+    const result = await validator.validate(out, EVAL_ID, undefined, { expectedRequirements: EXPECTED });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('; ')).toContain('req-1');
+  });
+
+  it('R2: ledger renumbered (req-2 renamed to req-9) → rejected as missing + unexpected id', async () => {
+    const out = {
+      ...baseOutput('needs_revision', ['fix']),
+      evaluation: {
+        ...baseOutput('needs_revision', ['fix']).evaluation,
+        priorRequirementStatuses: okStatuses,
+        requirementLedger: [
+          okLedger[0]!,
+          { id: 'req-9', statement: 'add retry backoff', status: 'still_open' },
         ],
       },
     };
+    const result = await validator.validate(out, EVAL_ID, undefined, { expectedRequirements: EXPECTED });
+    expect(result.valid).toBe(false);
+    const errs = result.errors.join('; ');
+    expect(errs).toContain('req-2'); // 缺失
+    expect(errs).toContain('req-9'); // 幻觉/重编号 id 不允许
+  });
+
+  it('R2: ledger statement drift → rejected (must match authoritative context verbatim)', async () => {
+    const out = {
+      ...baseOutput('needs_revision', ['fix']),
+      evaluation: {
+        ...baseOutput('needs_revision', ['fix']).evaluation,
+        priorRequirementStatuses: okStatuses,
+        requirementLedger: [
+          okLedger[0]!,
+          { id: 'req-2', statement: 'add retry backoff (paraphrased)', status: 'still_open' },
+        ],
+      },
+    };
+    const result = await validator.validate(out, EVAL_ID, undefined, { expectedRequirements: EXPECTED });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('; ')).toContain('req-2');
+    expect(result.errors.join('; ')).toContain('statement');
+  });
+
+  it('R2: ledger status inconsistent with priorRequirementStatuses → rejected', async () => {
+    const out = {
+      ...baseOutput('needs_revision', ['fix']),
+      evaluation: {
+        ...baseOutput('needs_revision', ['fix']).evaluation,
+        priorRequirementStatuses: okStatuses,
+        requirementLedger: [
+          okLedger[0]!,
+          { id: 'req-2', statement: 'add retry backoff', status: 'resolved' }, // statuses 说 still_open
+        ],
+      },
+    };
+    const result = await validator.validate(out, EVAL_ID, undefined, { expectedRequirements: EXPECTED });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join('; ')).toContain('req-2');
+    expect(result.errors.join('; ')).toContain('status');
+  });
+
+  it('R2: fully compliant statuses + ledger → valid; first round (no convergence) unaffected', async () => {
+    const out = {
+      ...baseOutput('needs_revision', ['fix']),
+      evaluation: {
+        ...baseOutput('needs_revision', ['fix']).evaluation,
+        priorRequirementStatuses: okStatuses,
+        requirementLedger: okLedger,
+      },
+    };
     expect((await validator.validate(out, EVAL_ID, undefined, {
-      expectedRequirementIds: ['req-1', 'req-2'],
+      expectedRequirements: EXPECTED,
     })).valid).toBe(true);
-    // 第一轮: 未提供 convergence 上下文 → 无 priorRequirementStatuses 也合法
+    // 第一轮: 未提供 convergence 上下文 → 两者皆省略仍合法
     expect((await validator.validate(baseOutput('needs_revision', ['fix']), EVAL_ID)).valid).toBe(true);
   });
 

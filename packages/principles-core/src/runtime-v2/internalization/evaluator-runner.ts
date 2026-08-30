@@ -691,7 +691,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // PRI-630 P1 评审修复: 修复轮把上轮 requirement ids 传入做完整覆盖校验
     // (缺 priorRequirementStatuses 或漏 id → output_invalid),不再仅靠 prompt。
     const convergence = context.previousEvaluation
-      ? { expectedRequirementIds: context.previousEvaluation.requirements.map((r) => r.id) }
+      ? { expectedRequirements: context.previousEvaluation.requirements.map((r) => ({ id: r.id, statement: r.statement })) }
       : undefined;
     const result = await this.validator.validate(output, taskId, context.sourceArtificerArtifactId ?? undefined, convergence);
 

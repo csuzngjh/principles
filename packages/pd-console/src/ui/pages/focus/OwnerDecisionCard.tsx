@@ -196,7 +196,7 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
             <button
               type="button"
               onClick={() => {
-                document.getElementById("section-pending")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                document.getElementById("approval-queue-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
               }}
               data-testid={`go-approvals-${item.taskId}`}
               className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors"
