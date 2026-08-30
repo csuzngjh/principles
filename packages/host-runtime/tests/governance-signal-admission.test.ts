@@ -459,7 +459,14 @@ describe('diagnostician continuation (SPEC §13)', () => {
     expect(parsed.provenance).toBe('host_context_bound');
     expect(parsed.hostKind).toBe('codex');
     const evidence = parsed.evidence as { sourceRef: string; note: string }[];
-    expect(evidence[0]?.note.length).toBeLessThanOrEqual(200);
+    // SanitizeString bounds to MAX_EVIDENCE_VALUE_CHARS + '___TRUNCATED___' (200 + 13 = 213).
+    // The note is the sanitized full text, not a pre-slice of the raw text.
+    const MAX_SANITIZED_NOTE = 200 + '___TRUNCATED___'.length;
+    expect(evidence[0]?.note.length).toBeLessThanOrEqual(MAX_SANITIZED_NOTE);
+    // The raw text tail (the '长' characters beyond 200) must NOT appear verbatim:
+    // the sanitizer truncates + appends the marker, so the padded text beyond
+    // the bound is absent.
+    expect(evidence[0]?.note).not.toContain('长'.repeat(200));
   });
 });
 
@@ -480,13 +487,13 @@ describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
       state.close();
     }
     expect(count).toEqual({ n: 1 });
-    // Second pass is idempotent: tasksEnsured counts markers whose continuation
-    // was ensured (1 again), but the continuation finds the existing task and
-    // link → no second task is created (still exactly one).
+    // Second pass is idempotent AND advances past the now-healthy marker:
+    // task linked + promotion started → excluded from the recovery predicate
+    // → no fake actions counted (review round 3 P1-2/P2).
     const again = await reconcileGovernanceContinuation({ workspaceDir });
     expect(again.ok).toBe(true);
-    expect(again.tasksEnsured).toBe(1);
-    expect(again.linksRepaired).toBe(1);
+    expect(again.tasksEnsured).toBe(0);
+    expect(again.linksRepaired).toBe(0);
     const stateAgain = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
     try {
       expect(stateAgain.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 1 });
@@ -509,9 +516,10 @@ describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
     }
     const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
     // New linksRepaired semantics: the continuation found the existing task
-    // (taskCreated=false) → the marker link was repaired, no second task.
+    // (taskCreated=false) → the marker link was repaired (linkRepaired=true),
+    // no second task created → tasksEnsured stays 0 (review round 3 P2).
     expect(reconciled.linksRepaired).toBe(1);
-    expect(reconciled.tasksEnsured).toBe(1);
+    expect(reconciled.tasksEnsured).toBe(0);
     const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
     let count: unknown;
     try {
@@ -592,6 +600,61 @@ describe('P1-1 privacy: raw correction secrets sanitized before persistence (SPE
     expect(textCol).toContain('<path:file.ts>');
   });
 
+  it('review round 3 P1-1: a token crossing the 200-char boundary is redacted BEFORE truncation, never split and persisted verbatim', async () => {
+    // Regression for the sanitizer-ordering fix. The OLD code sliced the raw
+    // text to 200 chars BEFORE sanitizing: a secret starting inside the bound
+    // and continuing past it was cut mid-token, the surviving fragment no
+    // longer matched the token regex, and the raw prefix was persisted. The
+    // fix sanitizes the FULL text first and lets sanitizeString bound itself.
+    // Build a text whose `sk-` secret starts inside the 200-char bound (at
+    // index 190) and continues well beyond it — so a pre-slice would have
+    // persisted a recognizable raw fragment like `sk-boundar`.
+    const prefix = '不要自作主张,这是错的。'.padEnd(190, '长');
+    const secret = 'sk-boundary-test-secret-1234567890-abcdefghij';
+    const text = `${prefix}${secret}`;
+    expect(text.length).toBeGreaterThan(200);
+    // The token really crosses the bound: `sk-` is inside the first 200 chars
+    // but the token continues past it.
+    expect(prefix.length).toBeLessThan(200);
+    expect(text.slice(200)).toContain(secret.slice(200 - prefix.length));
+
+    const result = admit([correction({ text, logicalObservationKey: 'codex|rollout-1|turn-priv-boundary|user', hostTurnId: 'turn-priv-boundary' })]);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    const painId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId ?? '';
+    await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: 'codex|rollout-1|turn-priv-boundary|user', canonicalPainId: painId });
+
+    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    const pain = wdb.prepare('SELECT text FROM pain_events WHERE canonical_pain_id = ?').get(painId) as { text: string } | undefined;
+    expect(pain).toBeDefined();
+    // The raw secret (in full OR split across the boundary) must not appear.
+    expect(pain?.text).not.toContain(secret);
+    // The raw fragment a pre-200 slice would have persisted (`sk-boundar`)
+    // must be redacted — only the redacted-prefix `sk-b` may survive.
+    expect(pain?.text).not.toMatch(/sk-bound/);
+    // The sanitizer bounded the output after redaction (proves the full token
+    // was processed before truncation).
+    expect(pain?.text).toContain('___TRUNCATED___');
+    // The task payload evidence note: same text, same sanitizer, same check.
+    const marker = wdb.prepare('SELECT task_payload_json FROM governance_signal_admissions WHERE canonical_pain_id = ?').get(painId) as { task_payload_json: string } | undefined;
+    const payload = JSON.parse(marker?.task_payload_json ?? '{}') as { evidence?: { note: string }[] };
+    const note = payload.evidence?.[0]?.note ?? '';
+    expect(note).not.toContain(secret);
+    expect(note).not.toMatch(/sk-bound/);
+    expect(note).toContain('___TRUNCATED___');
+    wdb.close();
+    const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
+    try {
+      const task = state.prepare('SELECT diagnostic_json FROM tasks WHERE task_kind = ?').get('diagnostician') as { diagnostic_json: string } | undefined;
+      expect(task).toBeDefined();
+      const dj = JSON.parse(task?.diagnostic_json ?? '{}') as { evidence?: { note: string }[] };
+      const djNote = dj.evidence?.[0]?.note ?? '';
+      expect(djNote).not.toContain(secret);
+      expect(djNote).not.toMatch(/sk-bound/);
+      expect(djNote).toContain('___TRUNCATED___');
+    } finally {
+      state.close();
+    }
+  });
   it('ordinary conversation with secrets still creates no pain (privacy is not at the expense of exactly-once)', () => {
     const ordinary = admit([correction({ text: '帮我查一下，我的 key 是 sk-test-not-a-real-key-123456', logicalObservationKey: 'codex|rollout-1|turn-priv-3|user', hostTurnId: 'turn-priv-3' })]);
     expect(ordinary.outcomes?.[0]).toMatchObject({ disposition: 'not_a_signal' });
@@ -608,7 +671,10 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
     // Simulate: promotion never ran
     const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
     expect(reconciled.ok).toBe(true);
-    expect(reconciled.tasksEnsured).toBe(1); // the marker was processed
+    // Task already existed (taskCreated=false) → tasksEnsured=0; only
+    // promotion was missing and is now started (review round 3 P2).
+    expect(reconciled.tasksEnsured).toBe(0);
+    expect(reconciled.linksRepaired).toBe(0);
     // Promotion should now be started (pending tail since no next assistant exists)
     const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
     try {
@@ -667,6 +733,69 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
     } finally {
       state.close();
     }
+  });
+
+  it('review round 3 P1-2: reconcile(limit=50) advances past a full batch — all 60 admitted markers converge in two passes', async () => {
+    // Starvation regression: with 60 admitted markers and limit=50, the pass
+    // must advance past the first batch instead of re-processing it forever.
+    // Every marker is "needy" (promotion never started — Case C: task linked,
+    // but no observation carries its pain ref). Pass 1 heals the first 50;
+    // pass 2 must then select the REMAINING 10 (markers 51-60), not re-select
+    // the already-healed 1-50. The old predicate (`decision='admitted'
+    // ORDER BY id LIMIT 50`) always re-selected 1-50 → 51-60 starved forever.
+    // Bootstrap both governance schemas (no markers yet).
+    const boot = await reconcileGovernanceContinuation({ workspaceDir });
+    expect(boot.ok).toBe(true);
+    const nowIso = NOW.toISOString();
+
+    // One rollout + 60 trigger observations + 60 admitted markers, inserted
+    // directly (the 5/hour STRONG bucket makes admit() unusable for 60 rows).
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      const rollout = db.prepare(`INSERT INTO governance_rollouts (host_kind, rollout_identity, root_session_id, created_at, updated_at)
+        VALUES ('codex', 'rollout-starvation', 'root-starvation', ?, ?)`).run(nowIso, nowIso);
+      const rolloutRowId = rollout.lastInsertRowid;
+      const insertObservation = db.prepare(`INSERT INTO governance_observations
+        (rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key, source, completeness, observed_at, promotion_ref)
+        VALUES (?, 'codex', 'rollout-starvation', 'root-starvation', ?, 'user_turn', ?, 'live_hook', 'complete', ?, NULL)`);
+      const insertMarker = db.prepare(`INSERT INTO governance_signal_admissions
+        (host_kind, logical_observation_key, rollout_identity, root_session_id, signal_kind, decision, canonical_pain_id, diagnostician_task_id, rule_version, reason, task_payload_json, created_at, updated_at)
+        VALUES ('codex', ?, 'rollout-starvation', 'root-starvation', 'user_correction', 'admitted', ?, ?, 2, 'starvation test', NULL, ?, ?)`);
+      for (let i = 1; i <= 60; i += 1) {
+        const key = `codex|rollout-starvation|turn-${i}|user`;
+        insertObservation.run(rolloutRowId, `turn-${i}`, key, nowIso);
+        insertMarker.run(key, `starv-pain-${i}`, `task-${i}`, nowIso, nowIso);
+      }
+    } finally {
+      db.close();
+    }
+
+    // Pass 1 (limit=50): every marker matches the recovery predicate, so the
+    // first 50 (lowest ids) are healed — promotion starts for each.
+    const first = await reconcileGovernanceContinuation({ workspaceDir, limit: 50 });
+    expect(first.ok).toBe(true);
+    expect(first.pendingTails).toBe(50);
+
+    // Pass 2 (limit=50): markers 1-50 now carry promotion_ref (left the
+    // working set) → the pass selects ONLY the remaining 10 (markers 51-60).
+    const second = await reconcileGovernanceContinuation({ workspaceDir, limit: 50 });
+    expect(second.ok).toBe(true);
+    expect(second.pendingTails).toBe(10);
+
+    // All 60 pains are now promoted (converged), and a third pass finds
+    // nothing left to recover → healthy no-op pass reports 0/0.
+    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const promoted = wdb.prepare(`SELECT COUNT(*) AS n FROM governance_observations
+        WHERE rollout_identity = 'rollout-starvation' AND promotion_ref IS NOT NULL`).get() as { n: number };
+      expect(promoted.n).toBe(60);
+    } finally {
+      wdb.close();
+    }
+    const third = await reconcileGovernanceContinuation({ workspaceDir, limit: 50 });
+    expect(third.tasksEnsured).toBe(0);
+    expect(third.linksRepaired).toBe(0);
+    expect(third.pendingTails).toBe(0);
   });
 });
 

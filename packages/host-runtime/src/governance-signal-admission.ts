@@ -46,6 +46,7 @@ import {
   RuntimeStateManager,
   createDiagnosticianTaskId,
   sanitizeString,
+  MAX_EVIDENCE_VALUE_CHARS,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
   type UnifiedKeywordStore,
@@ -73,7 +74,6 @@ const SYNC_DETECTION_CONFIG: SignalCollectorConfig = {
   strongRateLimitPerHour: GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,
 };
 
-const MAX_TEXT_BOUND = 200;
 const MAX_REASON_BOUND = 300;
 
 // ─── Small shared guards ────────────────────────────────────────────────────
@@ -463,11 +463,14 @@ function insertCorrectionPain({ db, candidate, workspaceDir, painId, detection, 
   const reason = detection.matchedTerms.length > 0
     ? `User correction detected: ${detection.matchedTerms.join(', ')}`
     : 'User correction detected';
-  // P1-1 privacy: the persisted evidence must pass through the existing
-  // evidence sanitizer — the raw text participates only in the in-memory
-  // canonical identity hash, never in the durable store.
-  const rawExcerpt = detection.evidence.excerpt.length > MAX_TEXT_BOUND ? detection.evidence.excerpt.slice(0, MAX_TEXT_BOUND) : detection.evidence.excerpt;
-  const excerpt = sanitizeString(rawExcerpt, workspaceDir);
+  // P1-1 privacy (review round 2): the FULL raw text must pass through the
+  // sanitizer BEFORE any truncation — sanitizeString's own contract is
+  // redact → path-replace → bound. Slicing first would split a token that
+  // crosses the 200-char boundary into a fragment that no longer matches the
+  // token regex and would be persisted verbatim. `detection.evidence.excerpt`
+  // is NOT used here: buildEvidence already truncated it upstream, so a token
+  // straddling that cut would survive sanitization the same way.
+  const excerpt = sanitizeString(candidate.text, workspaceDir);
   db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(candidate.rootSessionId, 'user_correction', GOVERNANCE_STRONG_PAIN_SCORE, reason.slice(0, MAX_REASON_BOUND), 'severe', 'system_infer', null, excerpt, painId, null, nowIso);
@@ -485,8 +488,9 @@ interface GovernanceTaskSubmissionPayload {
 }
 
 function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, reason: string): string {
-  // P1-1 privacy: task payload evidence notes pass through the existing
-  // sanitizer too — the Diagnostician reads ONLY promoted/sanitized evidence.
+  // P1-1 privacy (review round 2): sanitize the FULL text before any
+  // truncation — a token crossing the 200-char boundary must be redacted, not
+  // split into a fragment that survives verbatim. sanitizeString bounds itself.
   const payload: GovernanceTaskSubmissionPayload = candidate.kind === 'user_correction'
     ? {
       painType: 'user_frustration',
@@ -495,7 +499,7 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDi
       score: GOVERNANCE_STRONG_PAIN_SCORE,
       sessionId: candidate.rootSessionId,
       hostKind: 'codex',
-      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(candidate.text.slice(0, MAX_TEXT_BOUND), workspaceDir) }],
+      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(candidate.text, workspaceDir) }],
     }
     : {
       painType: 'tool_failure',
@@ -504,7 +508,7 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDi
       score: 70,
       sessionId: candidate.rootSessionId,
       hostKind: 'codex',
-      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString((reason || candidate.toolName).slice(0, MAX_TEXT_BOUND), workspaceDir) }],
+      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(reason || candidate.toolName, workspaceDir) }],
     };
   return JSON.stringify(payload);
 }
@@ -773,7 +777,13 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
     const sourceRef = own(entry, 'sourceRef');
     const note = own(entry, 'note');
     if (typeof sourceRef !== 'string' || sourceRef.length === 0 || sourceRef.length > 300) return false;
-    if (typeof note !== 'string' || note.length > 200) return false;
+    // The note is produced by sanitizeString, whose own contract bounds the
+    // output to MAX_EVIDENCE_VALUE_CHARS plus the truncation marker — so the
+    // validator must accept that real output bound, not the pre-sanitizer
+    // input bound. (Review round 3 P1-1: sanitize FIRST, then let the
+    // sanitizer truncate; a stricter check here would reject valid payloads.)
+    const MAX_SANITIZED_NOTE_CHARS = MAX_EVIDENCE_VALUE_CHARS + '___TRUNCATED___'.length;
+    if (typeof note !== 'string' || note.length > MAX_SANITIZED_NOTE_CHARS) return false;
   }
   return true;
 }
@@ -786,7 +796,7 @@ export interface EnsureGovernanceTaskInput {
 }
 
 export type EnsureGovernanceTaskResult =
-  | { ok: true; taskId: string; created: boolean; duplicate: boolean }
+  | { ok: true; taskId: string; created: boolean; duplicate: boolean; linkRepaired: boolean }
   | Degradation;
 
 /**
@@ -794,6 +804,10 @@ export type EnsureGovernanceTaskResult =
  * canonical pain (SPEC §13). Idempotent across hook retries, reconciliation,
  * and crash restarts: deterministic task id + task-store PK + marker link.
  * Never awaits an LLM — PainToPrincipleService async mode only enqueues.
+ *
+ * `linkRepaired` is true ONLY when this call actually wrote the marker task
+ * link because the task already existed (Case B recovery). A marker that
+ * already carried the link reports linkRepaired=false — no fake repair.
  */
 export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceTaskInput): Promise<EnsureGovernanceTaskResult> {
   const workspaceDir = path.resolve(input.workspaceDir);
@@ -805,7 +819,7 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
     const marker = db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ? AND canonical_pain_id = ?').get(input.logicalObservationKey, input.canonicalPainId);
     const existingTaskId = rowField(marker, 'diagnostician_task_id');
     if (isRecord(marker) && typeof existingTaskId === 'string' && existingTaskId.length > 0) {
-      return { ok: true, taskId: existingTaskId, created: false, duplicate: true };
+      return { ok: true, taskId: existingTaskId, created: false, duplicate: true, linkRepaired: false };
     }
     if (!isRecord(marker)) {
       return { ok: false, reason: 'admission_marker_not_found', nextAction: 'admit the signal before ensuring its Diagnostician continuation' };
@@ -861,7 +875,15 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
     }
     db.prepare('UPDATE governance_signal_admissions SET diagnostician_task_id = ?, updated_at = ? WHERE logical_observation_key = ?')
       .run(taskId, new Date().toISOString(), input.logicalObservationKey);
-    return { ok: true, taskId, created: existing === null, duplicate: existing !== null };
+    return {
+      ok: true,
+      taskId,
+      created: existing === null,
+      duplicate: existing !== null,
+      // The link was just written because the task already existed → a real
+      // Case B repair (not a no-op on an already-linked marker).
+      linkRepaired: existing !== null,
+    };
   } catch (error) {
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `governance_task_ensure_failed:${detail}`, nextAction: 'inspect the workspace state database; reconciliation retries task creation' };
@@ -910,7 +932,7 @@ export interface EnsureGovernanceContinuationInput {
 }
 
 export type EnsureGovernanceContinuationResult =
-  | { ok: true; taskId: string; taskCreated: boolean; promoted: number; tailState: 'completed' | 'pending' }
+  | { ok: true; taskId: string; taskCreated: boolean; linkRepaired: boolean; promoted: number; tailState: 'completed' | 'pending' }
   | { ok: false; reason: string; nextAction: string };
 
 /**
@@ -950,7 +972,7 @@ export async function ensureGovernanceContinuation(input: EnsureGovernanceContin
     if (!promoted.ok) {
       return { ok: false, reason: promoted.reason, nextAction: promoted.nextAction };
     }
-    return { ok: true, taskId: ensured.taskId, taskCreated: ensured.created, promoted: promoted.promoted, tailState: promoted.tailState };
+    return { ok: true, taskId: ensured.taskId, taskCreated: ensured.created, linkRepaired: ensured.linkRepaired, promoted: promoted.promoted, tailState: promoted.tailState };
   } finally {
     close();
   }
@@ -1003,22 +1025,44 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
   let completedTails = 0;
 
   try {
-    // Scan ALL admitted markers (bounded), not just those missing task links:
-    // covers Case A (pain+marker, crash before task), Case B (task created,
-    // crash before link), Case C (pain+task, crash before promotion),
-    // Case D (promotion started → pending tail → restart).
-    const markers = db.prepare("SELECT logical_observation_key, canonical_pain_id FROM governance_signal_admissions WHERE decision = 'admitted' ORDER BY id LIMIT ?").all(limit);
+    // Scan ONLY admitted markers that need recovery (bounded). A healthy marker
+    // — task linked AND promotion started (observation promoted) — does NOT
+    // match this predicate, so it leaves the working set and the pass advances
+    // past it. Without this, LIMIT always starts at the oldest admitted marker
+    // and markers beyond the batch starve forever (review round 3 P1-2).
+    //
+    // Recovery needed:
+    //   Case A/B: task link missing (crash before task, or before the link write)
+    //   Case C:   promotion never started (no observation carries this painRef)
+    //
+    // A pending tail (promotion started, waiting for the next assistant turn)
+    // is NOT a recovery need — it's a forward-looking state resolved by future
+    // evidence. The live already_admitted redelivery path (ensureContinuation
+    // → promote) handles tail completion when new data arrives; reconcile does
+    // not retry pending tails, so pending-tail markers do not block later
+    // markers. Stale tails are NOT auto-recoverable (substrate refuses to
+    // re-arm them): they are counted separately below and reported.
+    const markers = db.prepare(`SELECT a.logical_observation_key, a.canonical_pain_id
+      FROM governance_signal_admissions a
+      WHERE a.decision = 'admitted'
+        AND (
+          a.diagnostician_task_id IS NULL
+          OR NOT EXISTS (SELECT 1 FROM governance_observations o
+              WHERE o.promotion_ref = a.canonical_pain_id)
+        )
+      ORDER BY a.id LIMIT ?`).all(limit);
     for (const row of markers) {
       const key = rowField(row, 'logical_observation_key');
       const painId = rowField(row, 'canonical_pain_id');
       if (typeof key !== 'string' || typeof painId !== 'string') continue;
       const cont = await ensureGovernanceContinuation({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId });
       if (cont.ok) {
-        tasksEnsured += 1;
-        // Case B: the task already existed (crash after task creation, before
-        // the link write) — the continuation repaired the link without a
-        // second task.
-        if (!cont.taskCreated) linksRepaired += 1;
+        // Only count REAL actions: a task actually created, a link actually
+        // repaired (task existed but the marker link was missing). Healthy
+        // no-op markers are excluded by the predicate above, so a healthy
+        // pass reports 0/0 (review round 2 P2).
+        if (cont.taskCreated) tasksEnsured += 1;
+        if (cont.linkRepaired) linksRepaired += 1;
         if (cont.tailState === 'pending') pendingTails += 1;
         else if (cont.tailState === 'completed') completedTails += 1;
       } else {
