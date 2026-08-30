@@ -166,14 +166,14 @@ export class SqliteContextAssembler implements ContextAssembler {
     if (diagnosisTarget.traceAvailability === undefined) {
       if (fullTrace !== null) {
         diagnosisTarget.traceAvailability = 'available';
-    } else if (dt.provenance === 'openclaw_context_bound' || dt.provenance === 'host_context_bound') {
-      diagnosisTarget.traceAvailability = 'unavailable_with_reason';
-      if (!diagnosisTarget.traceUnavailableDetail) {
-        diagnosisTarget.traceUnavailableDetail = {
-          reason: 'Context-bound pain but source trace could not be resolved',
-          nextAction: 'Check sessionIdHint matches an active host session with recorded trajectory',
-        };
-      }
+      } else if (dt.provenance === 'openclaw_context_bound' || dt.provenance === 'host_context_bound') {
+        diagnosisTarget.traceAvailability = 'unavailable_with_reason';
+        if (!diagnosisTarget.traceUnavailableDetail) {
+          diagnosisTarget.traceUnavailableDetail = {
+            reason: 'Context-bound pain but source trace could not be resolved',
+            nextAction: 'Check sessionIdHint matches an active host session with recorded trajectory',
+          };
+        }
       } else if (dt.provenance === 'automatic_hook' || dt.provenance === 'owner_reported_no_host_trace') {
         diagnosisTarget.traceAvailability = 'unavailable_with_reason';
         if (!diagnosisTarget.traceUnavailableDetail) {
