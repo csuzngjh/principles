@@ -110,10 +110,16 @@ describe('SignalCollectorHost.detectSync', () => {
     // 异步,等微任务
     await flushAsync();
     expect(emitPainDetectedEvent).toHaveBeenCalled();
-    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { type: string; data: { source: string; score?: number; reason?: string } };
+    const callArg = vi.mocked(emitPainDetectedEvent).mock.calls[0][1] as { type: string; data: { source: string; score?: number; reason?: string; painId?: string; provenance?: string; hostKind?: string } };
     expect(callArg.type).toBe('pain_detected');
     expect(callArg.data.source).toBe('user_correction');
     expect(callArg.data.score).toBe(70);
+    // Codex Governance Closure Slice B convergence (ADR-0020 §11.4): the
+    // correction pain id is the content-derived canonical id from the single
+    // pain identity authority — never a random `correction_<traceId>`.
+    expect(callArg.data.painId).toMatch(/^pain_host_[0-9a-f]{64}$/);
+    expect(callArg.data.provenance).toBe('host_context_bound');
+    expect(callArg.data.hostKind).toBe('openclaw');
   });
 
   it('ambiguous term → writes user_turns correctionDetected=false, no immediate STRONG emit', () => {
