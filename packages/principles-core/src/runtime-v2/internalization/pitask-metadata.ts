@@ -81,6 +81,13 @@ export interface HumanReviewContext {
   readonly sourceArtifactHash?: string;
   /** 进入 needs_human_review 时的 revisionEpoch (= 当时 revisionCount) */
   readonly revisionEpoch: number;
+  /**
+   * PRI-634: 规范 reasonCode 之外的可诊断细节（面向 Owner 展示）。
+   * 例：dispatch 被拒的具体 outcome.reason、候选解析被内容契约筛掉的产物清单。
+   * 不参与 buildOwnerReviewKey —— 后者只绑定 7 个稳定事实，新增本字段不影响
+   * 已有 pending resolution 的匹配。
+   */
+  readonly detail?: string;
   readonly createdAt: string;
 }
 
@@ -408,6 +415,11 @@ function isValidHumanReviewContext(value: unknown): value is HumanReviewContext 
   if (c.sourceArtifactHash !== undefined && !isNonEmptyString(c.sourceArtifactHash)) return false;
   if (typeof c.revisionEpoch !== 'number' || !Number.isInteger(c.revisionEpoch) || c.revisionEpoch < 0) return false;
   if (!isNonEmptyString(c.createdAt)) return false;
+  // PRI-634: detail 是 trust boundary 内的可选字段 —— 一旦存在必须是 non-empty
+  // string。省略该检查会让 DB 中的 { detail: {...} } / 数组 / 数字静默穿过
+  // 校验,hydrate 成静态类型声称 detail?: string 的对象,下游 .trim()/.slice()
+  // 直接打崩展示路径 (rc-1/rc-2 runtime validation)。
+  if (c.detail !== undefined && !isNonEmptyString(c.detail)) return false;
   return true;
 }
 

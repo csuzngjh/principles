@@ -227,6 +227,29 @@ describe('PRI-629 metadata: humanReviewContext + ownerResolutions round-trip', (
     expect(parsePITaskMetadata(json)).toBeNull();
   });
 
+  it('PRI-634: humanReviewContext.detail round-trips through serialize → parse (legacy 无 detail 照常 hydrate)', () => {
+    const json = serializePITaskMetadata(baseMeta({
+      humanReviewContext: { ...nhrContext(), detail: '1 rule/validated artifact(s) rejected: pi-art-x (missing: goldenTrace)' },
+    }));
+    const parsed = parsePITaskMetadata(json);
+    expect(parsed?.humanReviewContext?.detail)
+      .toBe('1 rule/validated artifact(s) rejected: pi-art-x (missing: goldenTrace)');
+    // legacy: 无 detail 的 context 照常 hydrate,字段为 undefined 而非空串
+    const legacy = parsePITaskMetadata(serializePITaskMetadata(baseMeta({ humanReviewContext: nhrContext() })));
+    expect(legacy?.humanReviewContext?.detail).toBeUndefined();
+  });
+
+  it('PRI-634: malformed humanReviewContext.detail fails closed (rc-1/rc-2 trust boundary)', () => {
+    // detail 一旦存在必须是 non-empty string;object/array/number/空串一律
+    // 整条 metadata fail closed,禁止静默 hydrate 成类型谎言 (detail?: string)。
+    for (const badDetail of [{}, [], 123, ''] as unknown[]) {
+      const json = serializePITaskMetadata(baseMeta({
+        humanReviewContext: { ...nhrContext(), detail: badDetail as string },
+      }));
+      expect(parsePITaskMetadata(json)).toBeNull();
+    }
+  });
+
   it('rejects duplicate reviewKey within ownerResolutions (authority corruption fails closed)', () => {
     const rec = (id: string): OwnerResolutionRecord => ({
       resolutionId: id, reviewKey: 'odk_same', action: 'reject_current', status: 'applied',
@@ -703,7 +726,7 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
     const sm = {
       async getTask(id: string) { return store.getTask(id); },
       async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
-      async updateTask(id: string, patch: Record<string, unknown>) { return store.updateTask(id, patch as never); },
+      async updateTask(id: string, patch: Record<string, unknown>) { return store.updateTask(id, patch); },
     };
     const outcome = await reopenTaskForRevision(sm as never, ARTIFER_ID, {
       revisionCauseId: 'owner-res-ores_x',
@@ -718,7 +741,7 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
   it('reopen is a SINGLE task-row mutation (status+attemptCount+metadata together)', async () => {
     const store = new MemoryTaskStore();
     void store.createTask({ ...artificerTaskWithPayload(2) });
-    const writes: Array<Record<string, unknown>> = [];
+    const writes: Record<string, unknown>[] = [];
     const sm = {
       async getTask(id: string) { return store.getTask(id); },
       async updateTaskDiagnosticJson(id: string, json: string) {
@@ -727,7 +750,7 @@ describe('PRI-629 P1 review: reopen crash-window idempotency (same cause, termin
       },
       async updateTask(id: string, patch: Record<string, unknown>) {
         writes.push(patch);
-        return store.updateTask(id, patch as never);
+        return store.updateTask(id, patch);
       },
     };
     await reopenTaskForRevision(sm as never, ARTIFER_ID, {

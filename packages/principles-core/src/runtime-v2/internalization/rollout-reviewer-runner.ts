@@ -22,6 +22,7 @@ import {
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
+import { checkRuleActivationContent } from './rule-activation-contract.js';
 
 export type RolloutReviewerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 
@@ -636,17 +637,31 @@ export class RolloutReviewerRunner {
    *   - code_tool_hook 渠道的合法目标 = evaluator assemble 的 validated **rule**
    *     artifact (pi-rule-<evalTask>-<run>, V2 对抗通过)。
    *
+   * PRI-634 (内容契约): kind+validated 不足以证明产物可激活 —— 数据修复或历史
+   * 脏数据可以造出 kind='rule'+validated 但内容是 artificer schema 的伪候选
+   * (有 implementationCode / goldenTraceCases / affectedTools,无 evaluator
+   * assemble 才写入的 goldenTrace / ruleHostGateDecision)。放行它只会让失败
+   * 推迟到 RuleHostWriter.canActivate 以 no_golden_trace
+   * 爆炸,Owner 侧只剩一个无解释力的 rollout_dispatch_refused。因此 rule 候选
+   * 在此按 checkRuleActivationContent 过滤,并把被筛掉的产物与缺口字段一并返回,
+   * 进入事件与 humanReviewContext.detail。
+   *
    * 解析策略: 沿 dep 链 (rollout→evaluator→artificer→scribe) 收集各 source task
    * 的 artifacts,按 channel 期望的 kind+validated 过滤;恰好一个候选才接受;
    * 零候选或多个候选 (历史脏数据) 一律 unresolved → needs_human_review,
    * 禁止 firstArtifact/created_at 猜测。
    */
-  private async resolveActivationCandidate(ctx: SucceedContext): Promise<string | null> {
+  private async resolveActivationCandidate(ctx: SucceedContext): Promise<{
+    candidateId: string | null;
+    rejectionDetail?: string;
+  }> {
     const channel = ctx.channel ?? 'prompt';
     const wantKind = channel === 'code_tool_hook' ? 'rule' : 'principle';
 
     const chainIds = await this.collectLineageSourceTaskIds(ctx.taskId, [ctx.taskId], 0);
     const matches: string[] = [];
+    /** PRI-634: kind+validated 匹配但内容契约不通过的伪候选 (可观测,不静默丢弃) */
+    const rejected: { artifactId: string; missingFields: readonly string[] }[] = [];
     for (const taskId of chainIds) {
       // P0-1 加固: prompt/defer 渠道排除决策型 runner 名下的 artifacts —
       // evaluator 名下的 principle 是评审输出(即使历史脏数据把它翻成
@@ -661,6 +676,15 @@ export class RolloutReviewerRunner {
       if (!artifacts) continue;
       for (const a of artifacts) {
         if (a.artifactKind === wantKind && a.validationStatus === 'validated') {
+          // PRI-634: rule 候选按内容契约过滤 —— 只接受 evaluator assemble 产物。
+          // principle 渠道不变 (其合法性已由 owner taskKind 排除保证)。
+          if (wantKind === 'rule') {
+            const contentCheck = checkRuleActivationContent(a.contentJson);
+            if (!contentCheck.ok) {
+              rejected.push({ artifactId: a.artifactId, missingFields: contentCheck.missingFields });
+              continue;
+            }
+          }
           matches.push(a.artifactId);
         }
       }
@@ -674,17 +698,29 @@ export class RolloutReviewerRunner {
         kind: wantKind,
         searchedTaskIds: chainIds,
       });
-      return candidateId ?? null;
+      return { candidateId: candidateId ?? null };
     }
+    // PRI-634: 被内容契约筛掉的伪候选写进事件与 detail —— 这类失败的根因在
+    // 产物生产侧 (evaluator 未执行 rule assembly / 数据修复误标 kind),
+    // Owner 需要看到缺口字段才能判断,而不是只拿到一个候选数为 0 的结论。
+    const rejectionDetail = rejected.length === 0
+      ? undefined
+      : `${rejected.length} ${wantKind}/validated artifact(s) rejected by activation content contract: `
+        + rejected.map((r) => `${r.artifactId} (missing: ${r.missingFields.join(', ')})`).join('; ');
     this.emitRolloutReviewerEvent('rollout_activation_candidate_unresolved', ctx.taskId, {
       channel,
       kind: wantKind,
       matchCount: matches.length,
       matchedArtifactIds: matches,
-      reason: matches.length === 0 ? 'no_validated_candidate_in_lineage' : 'ambiguous_validated_candidates',
-      nextAction: 'inspect lineage artifacts; dispatch manually via pd activation dispatch after fixing',
+      ...(rejected.length > 0 ? { rejectedCandidates: rejected } : {}),
+      reason: matches.length === 0
+        ? (rejected.length > 0 ? 'no_content_valid_candidate_in_lineage' : 'no_validated_candidate_in_lineage')
+        : 'ambiguous_validated_candidates',
+      nextAction: rejected.length > 0 && matches.length === 0
+        ? 'rejected candidates are not evaluator-assembled rule artifacts (missing goldenTrace/ruleHostGateDecision); fix artifact production or dispatch a valid artifact manually'
+        : 'inspect lineage artifacts; dispatch manually via pd activation dispatch after fixing',
     });
-    return null;
+    return { candidateId: null, ...(rejectionDetail !== undefined ? { rejectionDetail } : {}) };
   }
 
   /** 收集 lineage 上所有 source task id (BFS 沿 dependencyTaskIds, 有界深度)。 */
@@ -746,7 +782,13 @@ export class RolloutReviewerRunner {
       },
     );
     if (!completed) {
-      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_dispatch_${outcome.decision}`, ctx);
+      // PRI-634: outcome.reason 是 dispatcher/writer 给出的具体拒绝原因
+      // (如 no_golden_trace、gate_decision_not_accepted_shadow)。此前它被丢弃,
+      // Owner 只拿到规范化的 rollout_dispatch_refused,无法自助定位。
+      await this.markNeedsHumanReviewOrThrow(ctx.taskId, `rollout_dispatch_${outcome.decision}`, {
+        runId: ctx.runId,
+        ...(outcome.reason !== undefined ? { detail: outcome.reason } : {}),
+      });
       return false;
     }
     return true;
@@ -909,7 +951,15 @@ export class RolloutReviewerRunner {
    * 同一 effect,不问 LLM),禁止 catch+swallow 后让 caller 把 intent 标
    * applied (intent applied ⇔ 其 durable effect 已 materialize)。
    */
-  private async markNeedsHumanReviewOrThrow(taskId: string, reason: string, review: { runId: string }): Promise<void> {
+  /**
+   * @param review.detail PRI-634: 规范 reasonCode 之外的具体原因,写入
+   *   humanReviewContext.detail 供 Owner 展示;不参与 reviewKey 计算。
+   */
+  private async markNeedsHumanReviewOrThrow(
+    taskId: string,
+    reason: string,
+    review: { runId: string; detail?: string },
+  ): Promise<void> {
     this.emitRolloutReviewerEvent('rollout_reviewer_task_needs_human_review', taskId, {
       reason,
       nextAction: 'owner_inspect_retry_or_archive',
@@ -934,6 +984,7 @@ export class RolloutReviewerRunner {
         sourceArtifactId,
         ...(sourceArtifactHash !== undefined ? { sourceArtifactHash } : {}),
         revisionEpoch: piTask.revisionCount ?? 0,
+        ...(typeof review.detail === 'string' && review.detail.length > 0 ? { detail: review.detail } : {}),
         createdAt: new Date().toISOString(),
       };
       const merged: PITaskMetadata = mergePITaskMetadata(piTask, { humanReviewContext: context });
@@ -1045,13 +1096,17 @@ export class RolloutReviewerRunner {
   ): Promise<{ kind: 'completed'; dispatchArtifactId?: string } | { kind: 'human_review' }> {
     const decision = decisionOverride ?? ctx.output.review.decision;
     if (decision === 'approve_rollout') {
-      const candidate = await this.resolveActivationCandidate(ctx);
-      if (!candidate) {
-        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_activation_candidate_unresolved', ctx);
+      const { candidateId, rejectionDetail } = await this.resolveActivationCandidate(ctx);
+      if (!candidateId) {
+        // PRI-634: rejectionDetail 透传给 Owner —— 说明候选为何不合格
+        await this.markNeedsHumanReviewOrThrow(ctx.taskId, 'rollout_activation_candidate_unresolved', {
+          runId: ctx.runId,
+          ...(rejectionDetail !== undefined ? { detail: rejectionDetail } : {}),
+        });
         return { kind: 'human_review' };
       }
-      const completed = await this.dispatchOrRouteFailure(ctx, candidate);
-      return completed ? { kind: 'completed', dispatchArtifactId: candidate } : { kind: 'human_review' };
+      const completed = await this.dispatchOrRouteFailure(ctx, candidateId);
+      return completed ? { kind: 'completed', dispatchArtifactId: candidateId } : { kind: 'human_review' };
     }
     if (decision === 'needs_revision') {
       if (iteration === undefined) {
