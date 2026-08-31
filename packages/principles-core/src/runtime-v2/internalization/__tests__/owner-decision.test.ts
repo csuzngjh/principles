@@ -13,6 +13,7 @@
  *   I. transition 仲裁使用 effective decision
  *   K. evaluator 收敛 schema 不变量 (SPEC §18.4)
  */
+/* eslint-disable @typescript-eslint/no-non-null-assertion -- legacy fixture assertions predate staged-file linting. */
 import { describe, it, expect } from 'vitest';
 import {
   serializePITaskMetadata,
@@ -36,7 +37,12 @@ import {
   detectHardGateFailureFromArtifact,
   type OwnerDecisionFactStore,
 } from '../owner-review.js';
-import { applyOwnerResolution, sanitizeOwnerInstruction } from '../owner-resolution-service.js';
+import {
+  applyOwnerResolution,
+  reviewStoreFromStateManager,
+  sanitizeOwnerInstruction,
+} from '../owner-resolution-service.js';
+import { buildOwnerDecisionReview } from '../owner-decision-review.js';
 import { buildRepairRevisionCauseId, reopenTaskForRevision, resolveRolloutRevisionTarget } from '../revision-reopen.js';
 import { decideInternalizationTransition, transitionInputFromTask } from '../internalization-transition-decision.js';
 import { ownerRetryNeedsHumanReviewTask } from '../owner-retry.js';
@@ -186,6 +192,26 @@ function makeInMemoryStateManager(tasks: TaskRecord[], artifacts: MemoryPIArtifa
     async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
     async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1]) {
       return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch);
+    },
+    async updateTaskIfDiagnosticJsonAndArtifactsUnchanged(input: {
+      taskId: string;
+      expectedDiagnosticJson: string | null;
+      artifacts: readonly {
+        artifactId: string;
+        sourceTaskId: string;
+        lineageArtifactIdsJson: string;
+        contentJson: string;
+      }[],
+      patch: Parameters<MemoryTaskStore['updateTask']>[1];
+    }) {
+      for (const bound of input.artifacts) {
+        const current = await artifacts.getArtifactById(bound.artifactId);
+        if (!current
+          || current.sourceTaskId !== bound.sourceTaskId
+          || JSON.stringify(current.lineageArtifactIds) !== bound.lineageArtifactIdsJson
+          || current.contentJson !== bound.contentJson) return null;
+      }
+      return store.updateTaskIfDiagnosticJsonUnchanged(input.taskId, input.expectedDiagnosticJson, input.patch);
     },
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
   };
@@ -481,6 +507,160 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     expect(second.status).toBe('resolved');
     const pi = hydratePITaskRecord((await sm.getTask(EVAL_ID))!);
     expect(pi?.ownerResolutions?.length).toBe(1); // 无第二条记录
+  });
+
+  it('same reviewKey/action with changed lineage evidence digest is not an idempotent replay', async () => {
+    const { sm, deps, req } = await setup();
+    const decision = await sm.piArtifactStore.getArtifactById(ARTIFACT_ID);
+    expect(decision).not.toBeNull();
+    await sm.piArtifactStore.upsertArtifact({
+      ...decision!,
+      lineageArtifactIds: ['pi-art-artificer-old'],
+    });
+    await sm.piArtifactStore.upsertArtifact({
+      artifactId: 'pi-art-artificer-old',
+      artifactKind: 'principle',
+      sourceTaskId: ARTIFER_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        implementationSummary: 'Implementation A',
+        affectedTools: ['write_file'],
+        risks: [],
+      }),
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+    });
+    const firstReview = await buildOwnerDecisionReview(
+      reviewStoreFromStateManager(sm as never),
+      EVAL_ID,
+    );
+    expect(firstReview).not.toBeNull();
+    const artificer = await sm.piArtifactStore.getArtifactById('pi-art-artificer-old');
+    await sm.piArtifactStore.upsertArtifact({
+      ...artificer!,
+      contentJson: JSON.stringify({
+        implementationSummary: 'Implementation B',
+        affectedTools: ['write_file'],
+        risks: [],
+      }),
+      updatedAt: '2026-08-30T00:01:00.000Z',
+    });
+    const secondReview = await buildOwnerDecisionReview(
+      reviewStoreFromStateManager(sm as never),
+      EVAL_ID,
+    );
+    expect(secondReview?.reviewKey).toBe(firstReview?.reviewKey);
+    expect(secondReview?.evidence.digest).not.toBe(firstReview?.evidence.digest);
+    await sm.piArtifactStore.upsertArtifact(artificer!);
+
+    const firstRequest = req('reject_current', {
+      expectedEvidenceDigest: firstReview!.evidence.digest,
+    });
+    const first = await applyOwnerResolution(deps, {
+      taskId: EVAL_ID,
+      request: firstRequest,
+      identity,
+    });
+    expect(first.status).toBe('resolved');
+
+    await sm.piArtifactStore.upsertArtifact({
+      ...artificer!,
+      contentJson: JSON.stringify({
+        implementationSummary: 'Implementation B',
+        affectedTools: ['write_file'],
+        risks: [],
+      }),
+      updatedAt: '2026-08-30T00:01:00.000Z',
+    });
+
+    const replay = await applyOwnerResolution(deps, {
+      taskId: EVAL_ID,
+      request: req('reject_current', {
+        expectedEvidenceDigest: secondReview!.evidence.digest,
+      }),
+      identity,
+    });
+    expect(replay.status).toBe('stale_owner_decision');
+  });
+
+  it('revalidates independently persisted evidence after the CAS read and refuses a raced digest', async () => {
+    const { sm, deps, req } = await setup();
+    const decision = await sm.piArtifactStore.getArtifactById(ARTIFACT_ID);
+    await sm.piArtifactStore.upsertArtifact({
+      ...decision!,
+      lineageArtifactIds: ['pi-art-artificer-old'],
+    });
+    await sm.piArtifactStore.upsertArtifact({
+      artifactId: 'pi-art-artificer-old',
+      artifactKind: 'principle',
+      sourceTaskId: ARTIFER_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({ implementationSummary: 'Evidence A', affectedTools: ['write_file'] }),
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+    });
+    const rendered = await buildOwnerDecisionReview(reviewStoreFromStateManager(sm as never), EVAL_ID);
+    expect(rendered).not.toBeNull();
+
+    const originalGetTask = sm.getTask.bind(sm);
+    let evaluatorReads = 0;
+    sm.getTask = async (id: string) => {
+      const task = await originalGetTask(id);
+      if (id === EVAL_ID && ++evaluatorReads === 3) {
+        const artifact = await sm.piArtifactStore.getArtifactById('pi-art-artificer-old');
+        await sm.piArtifactStore.upsertArtifact({
+          ...artifact!,
+          contentJson: JSON.stringify({ implementationSummary: 'Evidence B', affectedTools: ['write_file'] }),
+          updatedAt: '2026-08-30T00:01:00.000Z',
+        });
+      }
+      return task;
+    };
+
+    const outcome = await applyOwnerResolution(deps, {
+      taskId: EVAL_ID,
+      request: req('reject_current', { expectedEvidenceDigest: rendered!.evidence.digest }),
+      identity,
+    });
+    expect(outcome.status).toBe('stale_owner_decision');
+    const unchanged = hydratePITaskRecord((await originalGetTask(EVAL_ID))!);
+    expect(unchanged?.status).toBe('needs_human_review');
+    expect(unchanged?.ownerResolutions).toBeUndefined();
+  });
+
+  it('does not persist when evidence changes after the final review rebuild but before the task mutation', async () => {
+    const { sm, deps, req } = await setup();
+    const rendered = await buildOwnerDecisionReview(reviewStoreFromStateManager(sm as never), EVAL_ID);
+    expect(rendered).not.toBeNull();
+
+    const originalAtomicUpdate = sm.updateTaskIfDiagnosticJsonAndArtifactsUnchanged.bind(sm);
+    let intercepted = false;
+    sm.updateTaskIfDiagnosticJsonAndArtifactsUnchanged = async (...args) => {
+      if (!intercepted) {
+        intercepted = true;
+        const decision = await sm.piArtifactStore.getArtifactById(ARTIFACT_ID);
+        await sm.piArtifactStore.upsertArtifact({
+          ...decision!,
+          contentJson: JSON.stringify({ changedAfterFinalReview: true }),
+          updatedAt: '2026-08-30T00:02:00.000Z',
+        });
+      }
+      return originalAtomicUpdate(...args);
+    };
+
+    const outcome = await applyOwnerResolution(deps, {
+      taskId: EVAL_ID,
+      request: req('reject_current', { expectedEvidenceDigest: rendered!.evidence.digest }),
+      identity,
+    });
+
+    expect(intercepted).toBe(true);
+    expect(outcome.status).toBe('stale_owner_decision');
+    const unchanged = hydratePITaskRecord((await sm.getTask(EVAL_ID))!);
+    expect(unchanged?.status).toBe('needs_human_review');
+    expect(unchanged?.ownerResolutions).toBeUndefined();
   });
 
   it('same reviewKey + different action → already_resolved (conflict)', async () => {

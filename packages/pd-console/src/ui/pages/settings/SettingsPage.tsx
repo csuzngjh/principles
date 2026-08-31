@@ -511,27 +511,27 @@ export function SettingsPage() {
               <div
                 className="flex items-center gap-2 text-[13px] mb-2"
                 data-testid="owner-governance-readiness"
-                data-ready={ownerIdentity.governance.ownerIdentityConfiguration === "configured" ? "true" : "false"}
+                data-ready={ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "authenticated" ? "true" : "false"}
               >
                 <span
                   className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
-                    ownerIdentity.governance.ownerIdentityConfiguration === "configured" ? "bg-green text-ink" : "bg-amber text-ink"
+                    ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "authenticated" ? "bg-green text-ink" : "bg-amber text-ink"
                   }`}
                   role="status"
                 >
-                  {ownerIdentity.governance.ownerIdentityConfiguration === "configured"
+                  {ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "authenticated"
                     ? t("pages.settings.ownerIdentity.governanceReady")
                     : t("pages.settings.ownerIdentity.governanceNotReady")}
                 </span>
-                {ownerIdentity.governance.ownerIdentityConfiguration !== "configured" && (
+                {(ownerIdentity.governance.ownerIdentityConfiguration !== "configured" || ownerIdentity.governance.authenticationMode !== "authenticated") && (
                   <span className="text-ink-3 text-[12px]">
-                    {ownerIdentity.governance.authenticationMode === "no_auth"
+                    {ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "no_auth"
                       ? t("pages.settings.ownerIdentity.governanceReasonTokenAuth")
                       : t("pages.settings.ownerIdentity.governanceReasonIdentity")}
                   </span>
                 )}
               </div>
-              {ownerIdentity.governance.ownerIdentityConfiguration !== "configured" &&
+              {ownerIdentity.governance.ownerIdentityConfiguration === "configured" &&
                 ownerIdentity.governance.authenticationMode === "no_auth" && (
                   <div className="text-ink-4 text-[12px] mb-3" data-testid="owner-governance-next-action">
                     {t("pages.settings.ownerIdentity.governanceNextActionTokenAuth")}

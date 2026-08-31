@@ -31,6 +31,23 @@ function makeItem(overrides: Record<string, unknown> = {}): Record<string, unkno
     expectedSourceRunId: 'run-1',
     expectedSourceArtifactId: 'pi-art-x',
     expectedSourceArtifactHash: 'a'.repeat(64),
+    expectedEvidenceDigest: 'e'.repeat(64),
+    review: {
+      brief: {
+        kind: 'evaluator',
+        principle: { statement: 'Confirm the target.', scope: ['filesystem'] },
+        implementation: { summary: 'Adds a confirmation gate.', affectedTools: ['write_file'], risks: [] },
+        strengths: ['Deterministic target check'], concerns: ['Copy is ambiguous'],
+        requiredChanges: ['Clarify copy'], score: 0.72,
+      },
+      evidence: {
+        completeness: 'complete',
+        deterministicChecks: [{ check: 'adversarial_hard_gate', status: 'not_run' }],
+        items: [{ evidenceClass: 'automated_review', label: 'concern', value: 'Copy is ambiguous' }],
+        digest: 'e'.repeat(64),
+      },
+      capability: { acceptRequirement: { kind: 'none' } },
+    },
     createdAt: '2026-08-30T00:00:00.000Z',
     ...overrides,
   };
@@ -46,6 +63,18 @@ describe('cr10: validateOwnerDecisionsData (ERR-001/005/009/013)', () => {
     expect(data).not.toBeNull();
     expect(data?.items[0]?.allowedActions).toHaveLength(3);
     expect(data?.items[0]?.score).toBe(0.72);
+  });
+
+  it('accepts a visible but non-actionable decision when evidence recovery is required', () => {
+    const item = makeItem({
+      allowedActions: [],
+      evidenceUnavailableReason: 'decision_artifact_missing',
+    });
+    delete item.expectedEvidenceDigest;
+    delete item.review;
+    expect(validateOwnerDecisionsData({
+      items: [item], total: 1, generatedAt: 't',
+    })?.items[0]?.evidenceUnavailableReason).toBe('decision_artifact_missing');
   });
 
   it('rejects null / arrays / primitives / missing fields / unknown kind / bad action', () => {

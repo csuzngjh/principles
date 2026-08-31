@@ -77,6 +77,10 @@ export interface DecisionArtifactRecord {
   readonly artifactKind: string;
   readonly validationStatus: string;
   readonly contentJson: string;
+  /** Review projection lineage fields; optional for legacy fact-store adapters. */
+  readonly sourceTaskId?: string;
+  readonly lineageArtifactIds?: readonly string[];
+  readonly createdAt?: string;
 }
 
 /** 决策输出 artifact（evaluator/rollout 名下的 kind='principle' 评审输出）。 */
