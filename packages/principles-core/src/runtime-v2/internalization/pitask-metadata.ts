@@ -81,6 +81,13 @@ export interface HumanReviewContext {
   readonly sourceArtifactHash?: string;
   /** 进入 needs_human_review 时的 revisionEpoch (= 当时 revisionCount) */
   readonly revisionEpoch: number;
+  /**
+   * PRI-634: 规范 reasonCode 之外的可诊断细节（面向 Owner 展示）。
+   * 例：dispatch 被拒的具体 outcome.reason、候选解析被内容契约筛掉的产物清单。
+   * 不参与 buildOwnerReviewKey —— 后者只绑定 7 个稳定事实，新增本字段不影响
+   * 已有 pending resolution 的匹配。
+   */
+  readonly detail?: string;
   readonly createdAt: string;
 }
 
