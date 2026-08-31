@@ -428,6 +428,59 @@ describe('worker cycle — SPEC §18 scenario 12: provider failure and recovery 
     expect(candidateCount(ws.root)).toBe(1);
     expect(runCount(ws.root, taskId)).toBe(2); // attempt 1 failed + attempt 2 succeeded — nothing more
   });
+
+  it('review P1: an old retry_wait inside its backoff does not starve a younger elapsed one (no head-of-line blocking)', async () => {
+    const ws = makeWorkspace();
+    await seedAdmittedPendingTask(ws); // task A — oldest
+    const secondHook = await runHook(ws, correctionPayload(ws, `${TURN_1.slice(0, 8)}-hol-second`));
+    expect(secondHook.status).toBe(0); // task B — newer
+    const db = stateDbOf(ws.root);
+    const rows = db.prepare("SELECT task_id FROM tasks WHERE task_kind = 'diagnostician' AND status = 'pending' ORDER BY updated_at ASC").all() as Array<{ task_id: string }>;
+    db.close();
+    expect(rows).toHaveLength(2);
+    const [taskA, taskB] = rows;
+    expect(taskA).toBeDefined();
+    expect(taskB).toBeDefined();
+    // Both become retry_wait; A's backoff has NOT elapsed, B's HAS.
+    const writer = new Database(path.join(ws.root, '.pd', 'state.db'));
+    writer.prepare('UPDATE tasks SET status = ?, lease_expires_at = ?, attempt_count = 1 WHERE task_id = ?').run('retry_wait', new Date(Date.now() + 10 * 60_000).toISOString(), taskA.task_id);
+    writer.prepare('UPDATE tasks SET status = ?, lease_expires_at = ?, attempt_count = 1 WHERE task_id = ?').run('retry_wait', new Date(Date.now() - 60_000).toISOString(), taskB.task_id);
+    writer.close();
+
+    const spy = spySplitPipelineSuccess(ws);
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    expect(spy.calls).toEqual([taskB.task_id]); // the ELIGIBLE one runs
+    expect(result.report?.diagnostician).toMatchObject({ taskId: taskB.task_id, status: 'succeeded' });
+    // A stays waiting with its budget untouched.
+    expect(diagnosticianTask(ws.root)).toMatchObject({ task_id: taskA.task_id, status: 'retry_wait', attempt_count: 1 });
+  });
+});
+
+describe('worker cycle — aggregated mode (review P1)', () => {
+  it('a failed diagnostician surfaces the cycle as degraded with a structured reason', async () => {
+    const ws = makeWorkspace();
+    const { taskId } = await seedAdmittedPendingTask(ws);
+    vi.spyOn(SplitDiagnosticianRunner.prototype, 'run').mockImplementation(async () => ({
+      status: 'failed', taskId, errorCategory: 'execution_failed', failureReason: 'provider 500 (simulated)', attemptCount: 1,
+    }));
+
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    expect(result.mode).toBe('degraded');
+    expect(result.reason).toContain('diagnostician_failed');
+    expect(result.report?.diagnostician).toMatchObject({ taskId, status: 'failed', errorCategory: 'execution_failed' });
+  });
+
+  it('a lease_conflict diagnostician failure is contention, NOT degradation', async () => {
+    const ws = makeWorkspace();
+    const { taskId } = await seedAdmittedPendingTask(ws);
+    vi.spyOn(SplitDiagnosticianRunner.prototype, 'run').mockImplementation(async () => ({
+      status: 'failed', taskId, errorCategory: 'lease_conflict', failureReason: 'Task is leased by another consumer', attemptCount: 1,
+    }));
+
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    expect(result.mode).toBe('ready');
+    expect(result.report?.diagnostician).toMatchObject({ taskId, status: 'failed', errorCategory: 'lease_conflict' });
+  });
 });
 
 describe('worker cycle — backlog bound (matrix E)', () => {

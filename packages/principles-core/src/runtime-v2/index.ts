@@ -801,6 +801,7 @@ export {
   isArtifactRejected,
   isUnresolvable,
   recordRejection,
+  isRetryWaitBackoffElapsed,
   DEFAULT_UNRESOLVABLE_THRESHOLD,
 } from './internalization/internalization-task-guards.js';
 

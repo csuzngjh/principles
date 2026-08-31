@@ -37,6 +37,11 @@ interface WorkerEntry {
   child: WorkerChild | null;
   restartAttempts: number;
   stopped: boolean;
+  /** Set when the restart ladder is exhausted; the entry STAYS in the map so
+   * periodic sync() cannot silently reset the budget into an infinite
+   * restart loop (review P1). Cleared only by manifest removal/re-add,
+   * i.e. an explicit Owner action, or by a fresh Companion launch. */
+  degraded: boolean;
   restartHandle: { clear(): void } | null;
 }
 
@@ -99,11 +104,17 @@ export class WorkspaceWorkerRegistry {
     return [...this.entries.keys()];
   }
 
+  /** Workspaces whose restart ladder is exhausted (no child running). */
+  degradedWorkspaces(): string[] {
+    return [...this.entries.entries()].filter(([, entry]) => entry.degraded).map(([canonical]) => canonical);
+  }
+
   private startEntry(canonical: string): void {
     const entry: WorkerEntry = {
       child: null,
       restartAttempts: 0,
       stopped: false,
+      degraded: false,
       restartHandle: null,
     };
     this.entries.set(canonical, entry);
@@ -132,8 +143,11 @@ export class WorkspaceWorkerRegistry {
   private scheduleRestart(canonical: string, entry: WorkerEntry): void {
     if (entry.stopped) return;
     if (entry.restartAttempts >= MAX_RESTART_ATTEMPTS) {
+      // Stay in the map as degraded: periodic sync() must NOT re-create the
+      // entry (that would reset the budget into an infinite crash loop).
+      // Recovery = manifest removal + re-add, or a fresh Companion launch.
+      entry.degraded = true;
       this.log('workspace_worker_degraded', { workspace: canonical, reason: 'restart_attempts_exhausted' });
-      this.entries.delete(canonical);
       return;
     }
     const delay = this.restartDelaysMs[Math.min(entry.restartAttempts, this.restartDelaysMs.length - 1)] ?? 1_000;

@@ -27,6 +27,7 @@ import {
   computeFeatureFlagsFromConfig,
   createRuntimeStateHandle,
   createPainSignalBridge,
+  isRetryWaitBackoffElapsed,
   PrincipleTreeLedgerAdapter,
   type TaskRecord,
 } from '@principles/core/runtime-v2';
@@ -52,6 +53,7 @@ export interface CodexWorkerCycleStepReport {
     readonly taskId: string;
     readonly status: 'succeeded' | 'failed' | 'retried' | 'skipped' | 'degraded';
     readonly message?: string;
+    readonly errorCategory?: string;
   } | null;
   readonly downstream: InternalizationConsumerCycleOutcome | null;
 }
@@ -94,16 +96,24 @@ function directoryExists(dir: string): boolean {
   }
 }
 
-/** Oldest pending diagnostician first; retry_wait candidates only when their backoff elapsed. */
+/**
+ * Oldest pending diagnostician first; retry_wait candidates are filtered to
+ * those whose backoff window has ELAPSED, so an old-but-still-waiting task
+ * cannot starve a younger eligible one (review P1). The candidate set stays
+ * bounded (`limit`), and executePendingDiagnosis re-enforces the backoff
+ * window on the chosen task — no double bookkeeping.
+ */
 async function pickDiagnosticianCandidate(stateManager: Awaited<ReturnType<typeof createRuntimeStateHandle>>['stateManager'], limit: number): Promise<TaskRecord | null> {
   const pending = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', orderBy: 'updated_at_asc', limit });
   const [first] = pending;
   if (first !== undefined) return first;
   const retrying = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'retry_wait', orderBy: 'updated_at_asc', limit });
-  // executePendingDiagnosis itself enforces the backoff window and returns a
-  // structured skip — no double bookkeeping here.
-  const [firstRetry] = retrying;
-  return firstRetry !== undefined ? firstRetry : null;
+  for (const candidate of retrying) {
+    if (isRetryWaitBackoffElapsed(candidate.status, candidate.leaseExpiresAt)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 /**
@@ -185,11 +195,21 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
           taskId: candidate.taskId,
           status: executed.status,
           ...(executed.message !== undefined ? { message: executed.message.slice(0, 200) } : {}),
+          ...(executed.errorCategory !== undefined ? { errorCategory: executed.errorCategory } : {}),
         };
         // The bridge stays cached per workspace (bounded: one per workspace
         // per worker process, exactly like the OpenClaw plugin host) — no
         // per-cycle dispose, so a concurrent cycle can never hit a disposed
         // bridge. The factory self-disposes losing concurrent constructions.
+      } else {
+        // No eligible candidate, but a retry_wait task may still be inside
+        // its backoff window — report it so the cycle is observable instead
+        // of looking like "nothing pending" (review P1: head-of-line).
+        const waiting = await handle.stateManager.listTasks({ taskKind: 'diagnostician', status: 'retry_wait', orderBy: 'updated_at_asc', limit: 1 });
+        const [oldestWaiting] = waiting;
+        if (oldestWaiting !== undefined && !isRetryWaitBackoffElapsed(oldestWaiting.status, oldestWaiting.leaseExpiresAt)) {
+          diagnostician = { taskId: oldestWaiting.taskId, status: 'skipped', message: 'retry_wait_pending' };
+        }
       }
     } finally {
       await handle.close().catch(() => undefined);
@@ -216,11 +236,22 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     // (OpenClaw) catalog would be worse than none (PRI-630 follow-up).
   });
 
-  const degraded = downstream.skipReason === 'runtime_config_error' || downstream.skipReason === 'cycle_error' || downstream.skipReason === 'config_malformed';
+  // Aggregated mode: degraded overrides all (review P1).  Any component
+  // degrading — catch-up, reconciliation, diagnostician or downstream —
+  // surfaces the workspace as degraded, with the highest-priority reason.
+  // A lease_conflict diagnostician failure is contention, not degradation:
+  // another consumer owns the task, which is normal operation.
+  const degradedReason: string | undefined
+    = catchUp.status === 'degraded' ? `catch_up:${catchUp.remainingLagRollouts[0] ?? 'unknown'}`
+    : !reconcile.ok ? `reconcile:${reconcile.reason ?? 'failed'}`
+    : diagnostician?.status === 'failed' && diagnostician.errorCategory !== 'lease_conflict' ? `diagnostician_failed:${diagnostician.message ?? 'max_attempts_exceeded'}`
+    : diagnostician?.status === 'degraded' ? `diagnostician_degraded:${diagnostician.message ?? 'unknown'}`
+    : downstream.skipReason === 'runtime_config_error' || downstream.skipReason === 'cycle_error' || downstream.skipReason === 'config_malformed' ? `downstream:${downstream.skipReason}`
+    : undefined;
   return {
     ...base,
-    mode: degraded ? 'degraded' : 'ready',
-    ...(degraded ? { reason: downstream.skipReason, nextAction: 'Inspect the Workspace .pd/config.yaml runtime profile; execution resumes automatically once it is repaired.' } : {}),
+    mode: degradedReason !== undefined ? 'degraded' : 'ready',
+    ...(degradedReason !== undefined ? { reason: degradedReason, nextAction: 'Inspect the Workspace .pd/config.yaml runtime profile and the per-step report above; the worker retries automatically on the next cycle.' } : {}),
     report: { catchUp, reconcile, diagnostician, downstream },
   };
 }

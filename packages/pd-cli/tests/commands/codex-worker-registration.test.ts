@@ -135,6 +135,17 @@ describe('codex worker handler (functional)', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
+  it('--json without --once/--status is refused (continuous mode streams, it is not one JSON document)', async () => {
+    const { handleCodexWorker } = await import('../../src/commands/codex-worker.js');
+    await handleCodexWorker({ workspace: workspaceDir, json: true });
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const error = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as { error: string; reason: string; nextAction: string };
+    expect(error.error).toBe('cli_contract');
+    expect(error.reason).toBe('json_without_once_or_status');
+    expect(error.nextAction).toContain('--once');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('--status reports manual_action_required for a workspace absent from the install manifest', async () => {
     const { handleCodexWorker } = await import('../../src/commands/codex-worker.js');
     // Execution enabled — the manifest absence is then the deciding fact.

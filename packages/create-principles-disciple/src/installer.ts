@@ -462,6 +462,7 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Validating bundled core dependencies', weight: 5 },
   { name: 'Installing bundled @principles/host-runtime', weight: 3 },
   { name: 'Validating bundled host runtime dependencies', weight: 5 },
+  { name: 'Installing bundled @principles/codex-adapter', weight: 3 },
   { name: 'Installing plugin', weight: 10 },
   { name: 'Preparing core library for plugin', weight: 3 },
   { name: 'Validating bundled plugin dependencies', weight: 10 },
@@ -1193,6 +1194,20 @@ function syncPdCli(pluginDir: string): boolean {
     }
   }
 
+  // Create node_modules/@principles/codex-adapter symlink so pd-cli can resolve
+  // its @principles/codex-adapter dependency (rewritten to
+  // "file:../codex-adapter" by bundle-plugin.mjs). Without this, `pd codex
+  // worker` crashes with ERR_MODULE_NOT_FOUND (PRI-624).
+  const codexAdapterLinkTarget = path.join(getPdRuntimeDir(), 'codex-adapter');
+  const codexAdapterLinkPath = path.join(coreLinkDir, 'codex-adapter');
+  if (!existsSync(codexAdapterLinkPath)) {
+    if (isWindows()) {
+      symlinkSync(codexAdapterLinkTarget, codexAdapterLinkPath, 'junction');
+    } else {
+      symlinkSync('../../../codex-adapter', codexAdapterLinkPath, 'dir');
+    }
+  }
+
   // Create node_modules/principles-disciple symlink so pd-cli can resolve
   // its principles-disciple dependency (the plugin package, rewritten to
   // "file:../plugin" by bundle-plugin.mjs). The plugin is installed at the
@@ -1330,6 +1345,10 @@ function getInstalledHostRuntimeDir(): string {
   return path.join(getPdRuntimeDir(), 'host-runtime');
 }
 
+function getInstalledCodexAdapterDir(): string {
+  return path.join(getPdRuntimeDir(), 'codex-adapter');
+}
+
 function installBundledCore(pluginDir: string): void {
   const coreSrc = path.join(pluginDir, 'core');
   const coreDest = getInstalledCoreDir();
@@ -1364,6 +1383,29 @@ function installBundledHostRuntime(pluginDir: string): void {
 
   rmSync(hostRuntimeDest, { recursive: true, force: true });
   cpSync(hostRuntimeSrc, hostRuntimeDest, { recursive: true });
+}
+
+/**
+ * PRI-624: pd-cli's `codex worker` / `codex ingest catch-up` commands import
+ * the workspace worker cycle from @principles/codex-adapter, so the bundled
+ * package is installed as a runtime sibling exactly like host-runtime.
+ */
+function installBundledCodexAdapter(pluginDir: string): void {
+  const codexAdapterSrc = path.join(pluginDir, 'codex-adapter');
+  const codexAdapterDest = getInstalledCodexAdapterDir();
+
+  if (!existsSync(codexAdapterSrc)) {
+    throw new Error('Bundled @principles/codex-adapter not found in package. Cannot resolve runtime dependencies.');
+  }
+
+  const codexAdapterPkgJson = path.join(codexAdapterSrc, 'package.json');
+  const codexAdapterDist = path.join(codexAdapterSrc, 'dist');
+  if (!existsSync(codexAdapterPkgJson) || !existsSync(codexAdapterDist)) {
+    throw new Error('Bundled @principles/codex-adapter is incomplete (missing package.json or dist). Package may be corrupted.');
+  }
+
+  rmSync(codexAdapterDest, { recursive: true, force: true });
+  cpSync(codexAdapterSrc, codexAdapterDest, { recursive: true });
 }
 
 function ensureCoreDependency(_targetDir: string): void {
@@ -2015,6 +2057,10 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
     if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled host runtime dependencies...');
     await installHostRuntimeDependencies();
+    stepIndex++;
+
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/codex-adapter...');
+    installBundledCodexAdapter(pluginDir);
     stepIndex++;
 
     installBundledLayoutPackage(pluginDir);

@@ -12,7 +12,9 @@
  * commands below are the recovery path.
  *
  * CLI gate compliance:
- * - cli-1: --json outputs exactly one parseable JSON object per cycle/scan.
+ * - cli-1: --json is restricted to the single-output forms (--once / --status)
+ *   so stdout is exactly one parseable JSON object; continuous mode streams
+ *   human-readable reports instead (review P2).
  * - cli-2: exit paths stop execution.
  * - cli-6: paused/degraded modes carry reason + nextAction.
  */
@@ -119,6 +121,22 @@ function printCycleReport(result: CodexWorkerCycleResult, json: boolean): void {
 }
 
 export async function handleCodexWorker(options: CodexWorkerOptions): Promise<void> {
+  // cli-1: continuous mode streams one report per cycle — that is NOT one
+  // parseable JSON document. --json is only valid for the single-output
+  // forms (--once / --status), enforced here (review P2).
+  if (options.json === true && options.once !== true && options.status !== true) {
+    const error = {
+      generatedAt: new Date().toISOString(),
+      host: 'codex',
+      error: 'cli_contract',
+      reason: 'json_without_once_or_status',
+      nextAction: 'Use --json with --once (single cycle) or --status (no-op scan); continuous mode streams human-readable reports instead.',
+    };
+    console.log(JSON.stringify(error));
+    process.exitCode = 1;
+    return;
+  }
+
   const workspace = resolveWorkspaceDir(options.workspace);
 
   if (options.status === true) {
@@ -143,12 +161,7 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
   try {
     while (!stopped) {
       const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME } });
-      printCycleReport(result, options.json === true);
-      if (result.mode === 'degraded' && options.json === true) {
-        // Keep looping — degraded is reportable, not fatal (provider outages
-        // recover through the existing retry semantics). Exit code stays 0 so
-        // a supervisor restart loop cannot spin on transient degradation.
-      }
+      printCycleReport(result, false);
       if (stopped) break;
       await new Promise((resolve) => setTimeout(resolve, interval));
     }

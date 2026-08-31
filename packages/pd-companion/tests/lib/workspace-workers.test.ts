@@ -118,8 +118,33 @@ describe('WorkspaceWorkerRegistry (matrix A)', () => {
     ctx.spawned[3]?.emitExit(1);
     ctx.flush();
     expect(ctx.spawnCalls).toHaveLength(4); // no 5th spawn
-    expect(ctx.registry.activeWorkspaces()).toHaveLength(0);
+    expect(ctx.registry.degradedWorkspaces()).toEqual([canonicalWorkspacePath('D:/Code/ws-a')]);
     expect(ctx.events.some((e) => e.event === 'workspace_worker_degraded')).toBe(true);
+  });
+
+  it('periodic sync() after restart exhaustion does NOT reset the budget (review P1 regression)', () => {
+    const ctx = makeRegistry();
+    ctx.registry.sync(['D:/Code/ws-a']);
+    for (let crash = 0; crash < 4; crash += 1) {
+      ctx.spawned[ctx.spawned.length - 1]?.emitExit(1);
+      ctx.flush();
+    }
+    expect(ctx.spawnCalls).toHaveLength(4);
+    expect(ctx.registry.degradedWorkspaces()).toHaveLength(1);
+    // The Companion's 60s periodic reconciliation must not silently restart
+    // the degraded worker — that would turn the bounded ladder into an
+    // infinite crash loop.
+    ctx.registry.sync(['D:/Code/ws-a']);
+    ctx.registry.sync(['D:/Code/ws-a']);
+    ctx.flush();
+    expect(ctx.spawnCalls).toHaveLength(4);
+    // Removing the workspace from the manifest is the explicit Owner action
+    // that clears the degraded state; re-adding it starts fresh.
+    ctx.registry.sync([]);
+    ctx.registry.sync(['D:/Code/ws-a']);
+    ctx.flush();
+    expect(ctx.spawnCalls).toHaveLength(5);
+    expect(ctx.registry.degradedWorkspaces()).toEqual([]);
   });
 
   it('stopAll kills everything and clears pending restarts (Companion quit)', () => {

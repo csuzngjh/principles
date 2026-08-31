@@ -289,11 +289,11 @@ function spawnWorkspaceWorker(canonicalWorkspaceDir: string): WorkerChild {
     'codex', 'worker',
     '--workspace', canonicalWorkspaceDir,
     '--interval', String(WORKSPACE_WORKER_CYCLE_INTERVAL_MS),
-    '--json',
   ], { env: { ...process.env }, stdio: ['ignore', 'ignore', 'pipe'] });
   child.stderr?.on('data', (chunk: Buffer) => {
     // Bounded stderr tail into the companion log — the worker's own
-    // structured output already lands in workspace state/log surfaces.
+    // human-readable cycle reports go to stdout (companion does not consume
+    // them; Slice D health surface adds the structured health API).
     log('workspace_worker_stderr', { workspace: canonicalWorkspaceDir, tail: chunk.toString('utf8').slice(-400) });
   });
   return child;
