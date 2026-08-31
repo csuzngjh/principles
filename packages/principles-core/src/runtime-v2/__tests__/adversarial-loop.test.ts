@@ -194,6 +194,17 @@ function makePassingGateDeps(): RefinerRuleHostGateDeps {
   };
 }
 
+function makeFailingGateDeps(): RefinerRuleHostGateDeps {
+  return {
+    evaluateInSandbox: () => ({
+      success: false,
+      failedCases: [{ caseId: 'neg-1', errorType: 'runtime_error', message: 'sandbox blocked /etc/x' }],
+      executionTimeMs: 1,
+      forbiddenPatternViolations: [],
+    }),
+  };
+}
+
 // ── Harness ──────────────────────────────────────────────────────────────────
 
 interface Harness {
@@ -269,6 +280,15 @@ describe('runAdversarialLoop (PRI-428)', () => {
   });
 
   it('does not report approved when the evaluator produced no rule artifact', async () => {
+    // PRI-634 A2 (authority migration): the fixture Artificer output is
+    // code-bearing (implementationCode + goldenTraceCases), so the
+    // deterministic gate now RUNS for approved verdicts regardless of the
+    // evaluator's V1/V2 output shape. To keep this test's original contract
+    // — approved without a durable rule artifact must degrade to rejected —
+    // we fail the gate instead: adversarialResult.passed=false → rule
+    // assembly is skipped → no rule artifact → rejected.
+    try { fs.rmSync(h.tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    h = await makeHarness({ gateDeps: makeFailingGateDeps() });
     h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator((taskId, artificerArtifactId) => ({
       taskId,

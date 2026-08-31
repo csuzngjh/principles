@@ -20,6 +20,7 @@ import {
   buildL2PrincipleReaderFromLedger,
   OpenClawCliRuntimeAdapter,
   storeEmitter,
+  createProductionGateDeps,
   resolveRuntimeConfigFromPdConfig,
   isRuntimeConfigError,
   computeConsumerDecision,
@@ -34,6 +35,7 @@ import {
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { createEvaluatorRepairDeps, createRolloutGovernanceDeps } from './auto-consumer-governance-wiring.js';
+import { WorkspaceTelemetryEmitter } from './workspace-telemetry-sink.js';
 import {
   SqliteConnection,
   SqliteReconciliationCursorStore,
@@ -286,6 +288,13 @@ export async function runConsumerCycle(
     // (ADR-0019). Flag-off / absent = legacy behavior.
     const runnerOptions = { owner: 'auto-consumer' as const, runtimeKind, effectiveConfig: configResult.effective };
 
+    // PRI-634 A3: workspace-scoped telemetry sink for the evaluator runner.
+    // Constructed here (per-wake, workspaceDir in scope) so events from THIS
+    // workspace's runner are attributable to THIS workspace — a global
+    // subscriber on the storeEmitter singleton cannot (multi-workspace
+    // isolation, see workspace-telemetry-sink.ts).
+    const evaluatorEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir);
+
     // Dispatch by leased task kind. Only kinds listed in
     // FULL_CHAIN_CONSUMER_RUNNER_KINDS can be leased here; anything else
     // (e.g. diagnostician) hits the default branch — fail loud if it does (EP-03).
@@ -321,14 +330,20 @@ export async function runConsumerCycle(
         // → seed artificer repair; commit 门控保证不再并行 seed rollout_reviewer。
         // PRI-630: 注入宿主声明的 runtime-authoritative 工具目录 — 工具名合法
         // 性以目录为准,禁止 LLM 凭记忆判 "非标准工具名" (链 48371236 根因②)。
+        // PRI-634 A1/A3: (a) 注入 canonical production gateDeps — 此前缺省导致
+        // adversarial replay 结构性不可达 (链 48371236 根因 A1); (b) evaluator
+        // 的事件改走 workspace-scoped emitter, 只把 4 类 critical events 落盘到
+        // <workspaceDir>/.pd/telemetry/critical-events.jsonl, 其余照旧转发全局
+        // storeEmitter (multi-workspace 隔离, 见 workspace-telemetry-sink.ts)。
         runner = new EvaluatorRunner(
           {
-            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
+            stateManager, runtimeAdapter: adapter, eventEmitter: evaluatorEmitter,
             artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
             ...createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
           },
           {
             ...runnerOptions,
+            gateDeps: createProductionGateDeps(),
             hostToolCatalog: {
               readOnlyTools: [...READ_ONLY_TOOL_NAMES],
               writeTools: [...LOW_RISK_WRITE_TOOL_NAMES, ...HIGH_RISK_TOOL_NAMES, ...AGENT_TOOL_NAMES],
