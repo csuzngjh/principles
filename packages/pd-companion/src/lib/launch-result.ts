@@ -8,6 +8,7 @@
  */
 
 export type ConsoleOpenStatus = 'started' | 'reused' | 'failed' | 'refused';
+export type ConsoleAuthenticationMode = 'authenticated' | 'no_auth';
 
 export interface ConsoleOpenResult {
   status: ConsoleOpenStatus;
@@ -17,6 +18,7 @@ export interface ConsoleOpenResult {
   workspaceDir: string;
   reused: boolean;
   browserOpened: boolean;
+  authenticationMode?: ConsoleAuthenticationMode;
   serverPid?: number;
   reason?: string;
   nextAction?: string;
@@ -62,6 +64,13 @@ function validateConsoleOpenResult(record: Record<string, unknown>): ConsoleOpen
       throw new LaunchResultError(`CLI JSON serverPid invalid: ${JSON.stringify(serverPid)}`);
     }
     result.serverPid = serverPid;
+  }
+  const { authenticationMode } = record;
+  if (authenticationMode !== undefined) {
+    if (authenticationMode !== 'authenticated' && authenticationMode !== 'no_auth') {
+      throw new LaunchResultError(`CLI JSON authenticationMode invalid: ${JSON.stringify(authenticationMode)}`);
+    }
+    result.authenticationMode = authenticationMode;
   }
   const reason = readString(record, 'reason');
   if (reason !== undefined) result.reason = reason;

@@ -45,7 +45,18 @@ function activityItem(category: GovernanceActivityCategory, view: OwnerGovernanc
 }
 
 function buildReadiness(inputs: GovernanceExperienceInputs, decisionCount: number): OwnerGovernanceReadiness {
-  const ownerConfigured = inputs.ownerConfigSnapshot.ownerIdentityConfiguration === 'configured';
+  const identityState = inputs.ownerConfigSnapshot.ownerIdentityConfiguration;
+  const ownerConfigured = identityState === 'configured';
+  const ownerAuthenticated = inputs.ownerConfigSnapshot.authenticationMode === 'authenticated';
+  const governanceReady = ownerConfigured && ownerAuthenticated;
+  const ownerBlockReason: GovernanceExperienceReasonCode = identityState === 'invalid'
+    ? 'governance.exp.reason.owner_identity_invalid'
+    : !ownerConfigured
+      ? 'governance.exp.reason.owner_identity_missing'
+      : 'governance.exp.reason.owner_authentication_missing';
+  const ownerBlockNext: GovernanceExperienceNextActionCode = ownerConfigured
+    ? 'governance.exp.next.authenticate_console'
+    : 'governance.exp.next.configure_owner';
   const principleApprovalReason: GovernanceExperienceReasonCode = decisionCount > 0
     ? 'governance.exp.reason.approval_pending'
     : 'governance.exp.reason.no_pending_decision';
@@ -66,7 +77,7 @@ function buildReadiness(inputs: GovernanceExperienceInputs, decisionCount: numbe
         reasonCode: principleApprovalReason,
         nextActionCode: decisionCount > 0 ? 'governance.exp.next.review_approvals' : 'governance.exp.next.none',
       },
-      ownerConfigured
+      governanceReady
         ? {
           kind: 'rulecode_owner_decision',
           observedAuthority: 'configured_owner',
@@ -78,10 +89,10 @@ function buildReadiness(inputs: GovernanceExperienceInputs, decisionCount: numbe
           kind: 'rulecode_owner_decision',
           observedAuthority: 'configured_owner',
           status: 'blocked',
-          reasonCode: 'governance.exp.reason.owner_identity_missing',
-          nextActionCode: 'governance.exp.next.configure_owner',
+          reasonCode: ownerBlockReason,
+          nextActionCode: ownerBlockNext,
         },
-      ownerConfigured
+      governanceReady
         ? {
           kind: 'emergency_pause',
           observedAuthority: 'configured_owner',
@@ -220,7 +231,8 @@ export function deriveGovernanceExperienceSnapshot(input: unknown): GovernanceEx
   if (decisionCount > 0) primaryAttention = 'owner_decision_required';
   else if (recoveryCount > 0 || blocked) primaryAttention = 'recovery_required';
   else if (unavailableSources.length > 0 || dataQuality.degraded) primaryAttention = 'degraded';
-  else if (inputs.ownerConfigSnapshot.ownerIdentityConfiguration === 'missing') primaryAttention = 'setup_required';
+  else if (inputs.ownerConfigSnapshot.ownerIdentityConfiguration !== 'configured'
+    || inputs.ownerConfigSnapshot.authenticationMode !== 'authenticated') primaryAttention = 'setup_required';
   else if (processingCount > 0) primaryAttention = 'background_processing';
   else primaryAttention = 'all_clear';
 
@@ -240,8 +252,16 @@ export function deriveGovernanceExperienceSnapshot(input: unknown): GovernanceEx
       nextActionCode = configInvalid && unavailableSources.length === 0 ? 'governance.exp.next.fix_config' : 'governance.exp.next.inspect_sources';
       break;
     case 'setup_required':
-      reasonCode = 'governance.exp.reason.owner_identity_missing';
-      nextActionCode = 'governance.exp.next.configure_owner';
+      if (inputs.ownerConfigSnapshot.ownerIdentityConfiguration === 'invalid') {
+        reasonCode = 'governance.exp.reason.owner_identity_invalid';
+        nextActionCode = 'governance.exp.next.configure_owner';
+      } else if (inputs.ownerConfigSnapshot.ownerIdentityConfiguration === 'configured') {
+        reasonCode = 'governance.exp.reason.owner_authentication_missing';
+        nextActionCode = 'governance.exp.next.authenticate_console';
+      } else {
+        reasonCode = 'governance.exp.reason.owner_identity_missing';
+        nextActionCode = 'governance.exp.next.configure_owner';
+      }
       break;
     case 'background_processing':
       reasonCode = 'governance.exp.reason.processing';

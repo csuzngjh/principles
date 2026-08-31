@@ -257,7 +257,11 @@ function spawnCli(): void {
     reflectSupervisorState();
     return;
   }
-  const args = [entry, ...buildConsoleOpenArgs({ workspaceDir: validatedWorkspaceOverride() })];
+  const tokenConfigured = Boolean(process.env.PD_CONSOLE_TOKEN?.trim());
+  const args = [entry, ...buildConsoleOpenArgs({
+    workspaceDir: validatedWorkspaceOverride(),
+    tokenConfigured,
+  })];
   baselineRecorded = false;
   consecutivePollFailures = 0;
   log('spawning_cli', { port: currentPort });
@@ -349,7 +353,22 @@ function spawnCli(): void {
   });
 }
 
-function handleLaunchResult(parsed: { status: string; url: string; port: number; serverPid?: number; reason?: string; nextAction?: string }): void {
+function handleLaunchResult(parsed: { status: string; url: string; port: number; authenticationMode?: 'authenticated' | 'no_auth'; serverPid?: number; reason?: string; nextAction?: string }): void {
+  if (parsed.status === 'started' || parsed.status === 'reused') {
+    const expectedMode = process.env.PD_CONSOLE_TOKEN?.trim() ? 'authenticated' : 'no_auth';
+    if (parsed.authenticationMode !== expectedMode) {
+      supervisor.onLaunchFailure({
+        reason: `console_authentication_mode_mismatch: expected=${expectedMode}, actual=${parsed.authenticationMode ?? 'unverified'}`,
+        nextAction: '停止现有 Console 后从 Companion 重试；如仍失败，请检查 PD_CONSOLE_TOKEN 配置。',
+      });
+      log('console_authentication_mode_mismatch', {
+        expectedMode,
+        actualMode: parsed.authenticationMode ?? 'unverified',
+      });
+      reflectSupervisorState();
+      return;
+    }
+  }
   if (parsed.status === 'started') {
     serverStartedVersion = readInstalledVersion();
     currentPort = parsed.port;
@@ -401,7 +420,11 @@ async function fetchJson(url: string): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const token = process.env.PD_CONSOLE_TOKEN?.trim();
+    const res = await fetch(url, {
+      signal: controller.signal,
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    });
     if (!res.ok) return undefined;
     return (await res.json());
   } catch {

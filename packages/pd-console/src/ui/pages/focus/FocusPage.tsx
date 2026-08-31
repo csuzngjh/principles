@@ -821,6 +821,8 @@ export const EXPERIENCE_ATTENTION: Record<GovernancePrimaryAttention, { labelKey
 
 export const EXPERIENCE_REASON: Record<GovernanceExperienceReasonCode, string> = {
   "governance.exp.reason.owner_identity_missing": "pages.focus.experience.reason.ownerIdentityMissing",
+  "governance.exp.reason.owner_identity_invalid": "pages.focus.experience.reason.ownerIdentityInvalid",
+  "governance.exp.reason.owner_authentication_missing": "pages.focus.experience.reason.ownerAuthenticationMissing",
   "governance.exp.reason.approval_pending": "pages.focus.experience.reason.approvalPending",
   "governance.exp.reason.rulecode_owner_decision": "pages.focus.experience.reason.rulecodeOwnerDecision",
   "governance.exp.reason.no_pending_decision": "pages.focus.experience.reason.noPendingDecision",
@@ -836,6 +838,7 @@ export const EXPERIENCE_REASON: Record<GovernanceExperienceReasonCode, string> =
 
 export const EXPERIENCE_NEXT_ACTION: Record<GovernanceExperienceNextActionCode, string> = {
   "governance.exp.next.configure_owner": "pages.focus.experience.next.configureOwner",
+  "governance.exp.next.authenticate_console": "pages.focus.experience.next.authenticateConsole",
   "governance.exp.next.review_approvals": "pages.focus.experience.next.reviewApprovals",
   "governance.exp.next.inspect_recovery": "pages.focus.experience.next.inspectRecovery",
   "governance.exp.next.inspect_sources": "pages.focus.experience.next.inspectSources",
@@ -854,7 +857,6 @@ const EXPERIENCE_ENVIRONMENT: Record<WorkspaceEnvironment | "unknown", string> =
 
 function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSnapshot }) {
   const { t } = useTranslation();
-  const [copiedCommandIdx, setCopiedCommandIdx] = useState<number | null>(null);
   const attention = EXPERIENCE_ATTENTION[snapshot.summary.primaryAttention];
   const categoryOf = (category: GovernanceActivityCategorySummary["category"]) =>
     snapshot.activity.categories.find(entry => entry.category === category);
@@ -862,12 +864,14 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
   const recovery = categoryOf("needs_recovery");
   const blocked = categoryOf("blocked");
   const processing = categoryOf("processing");
-  const actionOf = (kind: GovernanceExperienceSnapshot["readiness"]["governanceActions"][number]["kind"]) =>
-    snapshot.readiness.governanceActions.find(action => action.kind === kind);
-  const rulecodeAction = actionOf("rulecode_owner_decision");
-  const pauseAction = actionOf("emergency_pause");
   const firstIssue = snapshot.dataQuality.issueGroups[0];
-  const ownerGuide = deriveOwnerConfigureGuide(snapshot.readiness.ownerIdentityConfiguration);
+  const governanceBlocked = snapshot.readiness.ownerIdentityConfiguration !== "configured"
+    || snapshot.readiness.authenticationMode !== "authenticated";
+  const blockerKey = snapshot.readiness.ownerIdentityConfiguration === "invalid"
+    ? "pages.focus.experience.blocker.identityInvalid"
+    : snapshot.readiness.ownerIdentityConfiguration === "missing"
+      ? "pages.focus.experience.blocker.identityMissing"
+      : "pages.focus.experience.blocker.authenticationMissing";
   return (
     <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]" data-testid="experience-summary">
       <div className="flex items-center gap-2 mb-1">
@@ -897,58 +901,12 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
           )}
         </div>
       )}
-      <div className="mt-2 text-[12px] text-ink-4 leading-relaxed" data-testid="experience-readiness">
-        {t(`pages.focus.experience.readiness.identity.${snapshot.readiness.ownerIdentityConfiguration}`)}
-        {" · "}
-        {t("pages.focus.experience.readiness.principleApproval")}
-        {t(`pages.focus.experience.readiness.rulecode.${rulecodeAction?.status === "blocked" ? "blocked" : "ready"}`)}
-        {t(`pages.focus.experience.readiness.pause.${pauseAction?.observedAuthority === "break_glass" ? "breakGlass" : "owner"}`)}
-      </div>
-      {ownerGuide !== null && (
-        <div className="mt-3 border border-line rounded-[6px] bg-panel px-3 py-2.5" data-testid="owner-configure-guide">
-          <div className="text-[13px] font-medium">{t("pages.focus.experience.ownerGuide.title")}</div>
-          <div className="mt-0.5 text-[12px] text-ink-3 leading-relaxed">{t("pages.focus.experience.ownerGuide.intro")}</div>
-          <div className="mt-2 space-y-2">
-            {ownerGuide.commands.map((cmd, idx) => (
-              <div key={cmd.labelKey} className="border border-line rounded-[4px] overflow-hidden bg-surface">
-                <div className="flex items-center justify-between px-2.5 py-1">
-                  <span className="font-mono text-[11px] uppercase text-ink-3">{t(cmd.labelKey)}</span>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(cmd.command);
-                        setCopiedCommandIdx(idx);
-                        setTimeout(() => setCopiedCommandIdx(null), 2000);
-                      } catch (error) {
-                        // clipboard unavailable — keep the command visible as fallback
-                        console.warn("Owner configure command copy failed.", error);
-                      }
-                    }}
-                    className="font-mono text-[11px] text-gov hover:text-gov-2"
-                  >
-                    {copiedCommandIdx === idx
-                      ? t("pages.focus.experience.ownerGuide.copied")
-                      : t("pages.focus.experience.ownerGuide.copy")}
-                  </button>
-                </div>
-                <pre className="px-2.5 pb-2 pt-0.5 text-[11px] font-mono text-ink-2 leading-relaxed overflow-x-auto whitespace-pre-wrap">
-                  {cmd.command}
-                </pre>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-[12px] text-amber leading-relaxed" data-testid="owner-guide-token-auth-hint">
-            {t("pages.focus.experience.ownerGuide.tokenAuthHint")}
-          </p>
-          <a
-            href={ownerGuide.docUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-2 inline-block text-[12px] text-gov underline hover:text-gov-2"
-          >
-            {t("pages.focus.experience.ownerGuide.docLink")}
-          </a>
+      {governanceBlocked && (
+        <div className="mt-3 flex items-center justify-between gap-3 border border-amber/30 rounded-[6px] bg-surface px-3 py-2.5" data-testid="owner-configure-guide">
+          <p className="text-[12px] text-ink-3 leading-relaxed">{t(blockerKey)}</p>
+          <Link to="/settings" className="shrink-0 text-[12px] text-gov underline hover:text-gov-2">
+            {t("pages.focus.experience.blocker.goSettings")}
+          </Link>
         </div>
       )}
       <div className="mt-1 text-[12px] text-ink-4" data-testid="experience-trust">
@@ -996,6 +954,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // PRI-629: 统一 Owner Inbox — 两种模式都加载 (决策与治理摘要模式正交)
   const [ownerDecisionItems, setOwnerDecisionItems] = useState<OwnerDecisionItemData[]>([]);
   const [ownerDecisionError, setOwnerDecisionError] = useState<string | null>(null);
+  const [filteredSyntheticDecisionCount, setFilteredSyntheticDecisionCount] = useState(0);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -1056,9 +1015,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     const decisionsResult = await fetchOwnerDecisions();
     if (decisionsResult.success) {
       setOwnerDecisionItems(decisionsResult.data.items);
+      setFilteredSyntheticDecisionCount(decisionsResult.data.filteredSyntheticCount);
       setOwnerDecisionError(null);
     } else {
       setOwnerDecisionItems([]);
+      setFilteredSyntheticDecisionCount(0);
       setOwnerDecisionError(decisionsResult.error ?? "Owner decisions unavailable");
     }
 
@@ -1144,39 +1105,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         {t("pages.focus.subtitle")}
       </p>
 
-      {/* Governance summary — single source: experience snapshot when the flag
-          is on (PRI-586), legacy queue panel otherwise. Never both. */}
-      {experienceMode && experienceData !== null ? (
-        <ExperienceSummaryCard snapshot={experienceData} />
-      ) : !experienceMode ? (
-      <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
-        <div className="flex items-center gap-2 mb-1">
-          {/* State badge */}
-          <span
-            className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
-              governanceState === "owner_review_ready"
-                ? "bg-gov/10 text-gov border border-gov/20"
-                : governanceState === "degraded"
-                  ? "bg-amber/10 text-amber border border-amber/20"
-                  : governanceState === "in_progress"
-                    ? "bg-green/10 text-green border border-green/20"
-                    : "text-ink-4 border border-line bg-surface/80"
-            }`}
-            role="status"
-          >
-            {t(`pages.focus.stateLabel.${governanceState}`)}
-          </span>
-        </div>
-        <div className="text-ink-2 text-[13px] leading-relaxed mt-1">
-          {stateReason}
-        </div>
-        <div className="text-ink-4 text-[13px] leading-relaxed mt-1">
-          <span className="font-medium">{t("pages.focus.nextActionLabel")}</span>{" "}
-          {nextAction}
-        </div>
-      </div>
-      ) : null}
-
       {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
           N = 真实可执行决策数 (INV-01),不是 lifecycle/NHR/failed 计数。 */}
       <section aria-label={t("pages.focus.ownerDecision.sectionTitle")} className="mb-7" data-testid="owner-decisions-section">
@@ -1194,14 +1122,46 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         {ownerDecisionError === null && ownerDecisionItems.length === 0 && (
           <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerDecision.empty")}</p>
         )}
+        {filteredSyntheticDecisionCount > 0 && (
+          <p className="mb-2 text-ink-4 text-[11.5px]" data-testid="owner-decisions-filtered-synthetic">
+            {t("pages.focus.ownerDecision.filteredSynthetic", { count: filteredSyntheticDecisionCount })}
+          </p>
+        )}
         {ownerDecisionItems.map((item) => (
           <OwnerDecisionCard
             key={item.reviewKey}
             item={item}
+            governanceReady={experienceData === null || (
+              experienceData.readiness.authenticationMode === "authenticated"
+              && experienceData.readiness.ownerIdentityConfiguration === "configured"
+            )}
             onResolved={() => { void loadData(); }}
           />
         ))}
       </section>
+
+      {/* Governance blocker/recovery follows the actual decision index so the
+          first actionable card remains visible in common Companion viewports. */}
+      {experienceMode && experienceData !== null ? (
+        <ExperienceSummaryCard snapshot={experienceData} />
+      ) : !experienceMode ? (
+        <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+              governanceState === "owner_review_ready" ? "bg-gov/10 text-gov border border-gov/20"
+                : governanceState === "degraded" ? "bg-amber/10 text-amber border border-amber/20"
+                  : governanceState === "in_progress" ? "bg-green/10 text-green border border-green/20"
+                    : "text-ink-4 border border-line bg-surface/80"
+            }`} role="status">
+              {t(`pages.focus.stateLabel.${governanceState}`)}
+            </span>
+          </div>
+          <div className="text-ink-2 text-[13px] leading-relaxed mt-1">{stateReason}</div>
+          <div className="text-ink-4 text-[13px] leading-relaxed mt-1">
+            <span className="font-medium">{t("pages.focus.nextActionLabel")}</span>{" "}{nextAction}
+          </div>
+        </div>
+      ) : null}
 
       {/* Queue-derived widgets render only in legacy mode — in experience mode
           their inputs would be stale zeros, which would misinform (SPEC §14.2). */}
@@ -1261,60 +1221,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       )}
 
       {/* Layer 2: Why — three sections with evidence summaries */}
-
-      {(ruleCodeErrorReason || ruleCodePending.length > 0 || ruleCodeAlerts.length > 0) && (
-        <section className="mt-8" aria-labelledby="section-rulecode-owner">
-          <SectionTitle id="section-rulecode-owner">{t("pages.focus.ruleCodeOwnerQueue")}</SectionTitle>
-          {ruleCodeErrorReason && (
-            <div className="mb-3 rounded border border-amber/30 bg-panel p-4 text-[12px] text-ink-3">
-              <div className="font-medium text-amber">{t("pages.focus.ruleCodeUnavailable")}</div>
-              <div className="mt-1 font-mono">{ruleCodeErrorReason}</div>
-              <div className="mt-1">{t("pages.focus.ruleCodeUnavailableNextAction")}</div>
-            </div>
-          )}
-          <div className="grid gap-3 md:grid-cols-2">
-            {ruleCodePending.length > 0 && (
-              <Link to="/activation" className="rounded border border-gov/30 bg-panel p-4 hover:border-gov">
-                <div className="font-medium text-ink">{t("pages.focus.ruleCodePending")}</div>
-                <div className="mt-1 text-[12px] text-ink-3">
-                  {t("pages.focus.ruleCodePendingCount", { count: ruleCodePending.length })}
-                </div>
-              </Link>
-            )}
-            {ruleCodeAlerts.length > 0 && (
-              <Link to="/activation" className="rounded border border-danger/30 bg-panel p-4 hover:border-danger">
-                <div className="font-medium text-danger">{t("pages.focus.ruleCodeAlerts")}</div>
-                <div className="mt-1 text-[12px] text-ink-3">
-                  {t("pages.focus.ruleCodeAlertCount", { count: ruleCodeAlerts.length })}
-                </div>
-              </Link>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* Section 1: Pending Review */}
-      <section id="approval-queue-section" className="mt-8" aria-labelledby="section-pending">
-        <SectionTitle id="section-pending">
-          {t("pages.focus.sectionPending")}
-        </SectionTitle>
-
-        {pendingGroups.length > 0 ? (
-          <div className="space-y-[14px]">
-            {pendingGroups.map((group) => (
-              <PendingReviewCard key={group.principleId} group={group} onDecisionApplied={loadData} />
-            ))}
-          </div>
-        ) : (
-          <div className="text-ink-3 text-[13px] leading-relaxed py-3">
-            {approvalDataUnavailable
-              ? (groupedErrorReason
-                ? `${t("pages.focus.loadError")} (${groupedErrorReason})`
-                : t("pages.focus.loadError"))
-              : t("pages.focus.emptyPending")}
-          </div>
-        )}
-      </section>
 
       {/* Section 2: Behavior Deviations / Evidence (queue-derived; legacy mode only) */}
       {!experienceMode && (

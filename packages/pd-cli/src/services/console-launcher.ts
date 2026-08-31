@@ -21,6 +21,7 @@ import * as http from 'http';
 // ─── Public types ────────────────────────────────────────────────────────────
 
 export type ConsoleStatus = 'reused' | 'started' | 'failed' | 'refused';
+export type ConsoleAuthenticationMode = 'authenticated' | 'no_auth';
 
 export interface ConsoleLaunchResult {
   status: ConsoleStatus;
@@ -34,6 +35,8 @@ export interface ConsoleLaunchResult {
   reused: boolean;
   /** True when a browser should/has been opened (skipped in --json mode). */
   browserOpened: boolean;
+  /** Verified for successful launch/reuse; omitted when no server was reached. */
+  authenticationMode?: ConsoleAuthenticationMode;
   /**
    * PID of the freshly spawned console server process. Present only when
    * status === 'started'; absent on 'reused' (the server was started by
@@ -57,6 +60,10 @@ export interface ConsoleLaunchOptions {
 const DEFAULT_PORT = 3100;
 const DEFAULT_HOST = '127.0.0.1';
 const PORT_FALLBACK_LIMIT = 20; // try 3100..3119 before giving up
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 // ─── Loopback safety (ERR-049) ──────────────────────────────────────────────
 
@@ -138,13 +145,20 @@ export interface HealthProbeOptions {
 }
 
 /** Probe a port to see if it serves a healthy PD Console. */
-export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<{ healthy: boolean; reason?: string }> {
+export interface ConsoleHealthProbeResult {
+  healthy: boolean;
+  authenticationMode?: ConsoleAuthenticationMode;
+  reason?: string;
+  failureKind?: 'unauthorized' | 'invalid_response' | 'unreachable';
+}
+
+export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<ConsoleHealthProbeResult> {
   const { host, port, timeoutMs = 1500, token } = opts;
 
   if (Object.hasOwn(globalThis, '__mockProbeConsoleHealth')) {
     const mock = Reflect.get(globalThis, '__mockProbeConsoleHealth') as (
       o: HealthProbeOptions
-    ) => Promise<{ healthy: boolean; reason?: string }>;
+    ) => Promise<ConsoleHealthProbeResult>;
     return mock(opts);
   }
   return new Promise((resolve) => {
@@ -157,7 +171,7 @@ export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<{ he
       (res) => {
         // 401 means auth required — treat as unhealthy, not a generic error
         if (res.statusCode === 401) {
-          resolve({ healthy: false, reason: 'console health endpoint returned 401 (unauthorized) — check PD_CONSOLE_TOKEN' });
+          resolve({ healthy: false, failureKind: 'unauthorized', reason: 'console health endpoint returned 401 (unauthorized) — check PD_CONSOLE_TOKEN' });
           return;
         }
         if (res.statusCode !== 200) {
@@ -170,13 +184,19 @@ export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<{ he
         });
         res.on('end', () => {
           try {
-            const body = JSON.parse(data) as unknown;
-            if (body && typeof body === 'object') {
+            const body: unknown = JSON.parse(data);
+            if (isRecord(body)) {
               const isHealthy =
                 (Object.hasOwn(body, 'healthy') && Reflect.get(body, 'healthy') === true) ||
                 (Object.hasOwn(body, 'success') && Reflect.get(body, 'success') === true);
               if (isHealthy) {
-                resolve({ healthy: true });
+                const dataValue = Object.hasOwn(body, 'data') ? Reflect.get(body, 'data') : undefined;
+                const payloadRecord = isRecord(dataValue) ? dataValue : body;
+                const mode = Reflect.get(payloadRecord, 'authenticationMode');
+                resolve({
+                  healthy: true,
+                  ...(mode === 'authenticated' || mode === 'no_auth' ? { authenticationMode: mode } : {}),
+                });
               } else {
                 resolve({ healthy: false, reason: 'console health JSON was missing healthy/success markers' });
               }
@@ -387,12 +407,35 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
   // Step 1: Is there already a healthy console on the preferred port?
   const health = await probeConsoleHealth({ host, port: preferredPort, token });
   if (health.healthy) {
+    if (token && health.authenticationMode !== 'authenticated') {
+      return {
+        status: 'refused',
+        url: '',
+        port: preferredPort,
+        host,
+        reused: false,
+        reason: 'console_authentication_mode_mismatch',
+        nextAction: `Stop the Console on port ${preferredPort}, then retry so Companion can start an authenticated Console.`,
+      };
+    }
     return {
       status: 'reused',
       url: buildConsoleUrl(host, preferredPort),
       port: preferredPort,
       host,
       reused: true,
+    };
+  }
+
+  if (token && health.failureKind === 'unauthorized') {
+    return {
+      status: 'refused',
+      url: '',
+      port: preferredPort,
+      host,
+      reused: false,
+      reason: 'console_authentication_failed',
+      nextAction: 'Verify PD_CONSOLE_TOKEN matches the running Console, stop that Console, then retry.',
     };
   }
 

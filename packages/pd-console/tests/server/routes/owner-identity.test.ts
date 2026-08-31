@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -79,8 +79,18 @@ interface RouteData {
 }
 
 describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
+  const originalOwnerId = process.env.PD_OWNER_ID;
+  const originalCredentialId = process.env.PD_OWNER_CREDENTIAL_ID;
+  beforeEach(() => {
+    delete process.env.PD_OWNER_ID;
+    delete process.env.PD_OWNER_CREDENTIAL_ID;
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
+    if (originalOwnerId === undefined) delete process.env.PD_OWNER_ID;
+    else process.env.PD_OWNER_ID = originalOwnerId;
+    if (originalCredentialId === undefined) delete process.env.PD_OWNER_CREDENTIAL_ID;
+    else process.env.PD_OWNER_CREDENTIAL_ID = originalCredentialId;
   });
 
   it('GET: none when neither env nor file is present', async () => {
@@ -118,7 +128,7 @@ describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
     expect(data.governance).toEqual({ authenticationMode: 'authenticated', ownerIdentityConfiguration: 'configured' });
   });
 
-  it('GET: file registration + token auth disabled → registration exists but governance is NOT configured', async () => {
+  it('GET: file registration remains configured when token auth is disabled', async () => {
     const home = tempHome();
     await handleOwnerIdentityRoute(
       createMockRequest('POST', { ownerId: 'alice', credentialId: 'c' }),
@@ -131,7 +141,7 @@ describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
     await handleOwnerIdentityRoute(createMockRequest('GET'), res, home, '', authConfig(false));
     const data = parseBody<{ data: RouteData }>(res).data;
     expect(data.resolved.source).toBe('file');
-    expect(data.governance).toEqual({ authenticationMode: 'no_auth', ownerIdentityConfiguration: 'missing' });
+    expect(data.governance).toEqual({ authenticationMode: 'no_auth', ownerIdentityConfiguration: 'configured' });
   });
 
   it('env wins over the file in GET (highest precedence)', async () => {
@@ -152,7 +162,7 @@ describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
     expect(data.resolved.ownerId).toBe('env-owner');
   });
 
-  it('GET: partial env pair over a valid file → fail-closed invalid_env, no file identity, governance missing', async () => {
+  it('GET: partial env pair over a valid file → fail-closed invalid_env, no file identity, governance invalid', async () => {
     vi.stubEnv('PD_OWNER_ID', 'env-owner');
     const home = tempHome();
     await handleOwnerIdentityRoute(
@@ -171,7 +181,7 @@ describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
     expect(data.resolved.error).toContain('owner_identity_invalid_env');
     // The stale file Owner must NOT leak through as the effective identity.
     expect(data.fileRecord?.ownerId).toBe('file-owner');
-    expect(data.governance).toEqual({ authenticationMode: 'authenticated', ownerIdentityConfiguration: 'missing' });
+    expect(data.governance).toEqual({ authenticationMode: 'authenticated', ownerIdentityConfiguration: 'invalid' });
   });
 
   it('POST rejects empty input with 400', async () => {

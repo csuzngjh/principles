@@ -176,7 +176,8 @@ export function validateOwnerGovernanceView(value: unknown): OwnerGovernanceView
 
 const governancePrimaryAttentions = new Set(['setup_required', 'owner_decision_required', 'recovery_required', 'degraded', 'background_processing', 'all_clear']);
 const governanceExperienceReasonCodes = new Set([
-  'governance.exp.reason.owner_identity_missing', 'governance.exp.reason.approval_pending',
+  'governance.exp.reason.owner_identity_missing', 'governance.exp.reason.owner_identity_invalid',
+  'governance.exp.reason.owner_authentication_missing', 'governance.exp.reason.approval_pending',
   'governance.exp.reason.rulecode_owner_decision', 'governance.exp.reason.no_pending_decision',
   'governance.exp.reason.owner_decision_available', 'governance.exp.reason.break_glass_entry',
   'governance.exp.reason.recovery_required', 'governance.exp.reason.source_unavailable',
@@ -184,7 +185,7 @@ const governanceExperienceReasonCodes = new Set([
   'governance.exp.reason.workspace_clear', 'governance.exp.reason.workspace_empty',
 ]);
 const governanceExperienceNextActionCodes = new Set([
-  'governance.exp.next.configure_owner', 'governance.exp.next.review_approvals',
+  'governance.exp.next.configure_owner', 'governance.exp.next.authenticate_console', 'governance.exp.next.review_approvals',
   'governance.exp.next.inspect_recovery', 'governance.exp.next.inspect_sources',
   'governance.exp.next.fix_config', 'governance.exp.next.monitor', 'governance.exp.next.none',
 ]);
@@ -230,7 +231,7 @@ function isGovernanceExperienceSnapshot(value: unknown): value is GovernanceExpe
     || !isStringEnum(summary.nextActionCode, governanceExperienceNextActionCodes)) return false;
   if (!isObject(readiness) || !hasOwnFields(readiness, ['authenticationMode', 'ownerIdentityConfiguration', 'governanceActions'])
     || !isStringEnum(readiness.authenticationMode, new Set(['authenticated', 'no_auth']))
-    || !isStringEnum(readiness.ownerIdentityConfiguration, new Set(['configured', 'missing']))
+    || !isStringEnum(readiness.ownerIdentityConfiguration, new Set(['configured', 'missing', 'invalid']))
     || !Array.isArray(readiness.governanceActions) || readiness.governanceActions.length !== 3
     || !readiness.governanceActions.every(isGovernanceActionReadiness)) return false;
   if (!isObject(activity) || !hasOwnFields(activity, ['primaryAttention', 'categories'])
@@ -2694,13 +2695,13 @@ export interface OwnerIdentityRecordData {
 /** Canonical governance readiness — mirrors core OwnerConfigSnapshot. */
 export interface OwnerGovernanceReadinessData {
   authenticationMode: 'authenticated' | 'no_auth';
-  ownerIdentityConfiguration: 'configured' | 'missing';
+  ownerIdentityConfiguration: 'configured' | 'missing' | 'invalid';
 }
 
 function parseOwnerGovernanceReadiness(v: unknown): OwnerGovernanceReadinessData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'authenticationMode') || (v.authenticationMode !== 'authenticated' && v.authenticationMode !== 'no_auth')) return null;
-  if (!Object.hasOwn(v, 'ownerIdentityConfiguration') || (v.ownerIdentityConfiguration !== 'configured' && v.ownerIdentityConfiguration !== 'missing')) return null;
+  if (!Object.hasOwn(v, 'ownerIdentityConfiguration') || (v.ownerIdentityConfiguration !== 'configured' && v.ownerIdentityConfiguration !== 'missing' && v.ownerIdentityConfiguration !== 'invalid')) return null;
   return { authenticationMode: v.authenticationMode, ownerIdentityConfiguration: v.ownerIdentityConfiguration };
 }
 
@@ -2802,15 +2803,105 @@ export interface OwnerDecisionItemData {
   expectedSourceRunId: string;
   expectedSourceArtifactId: string;
   expectedSourceArtifactHash: string;
+  expectedEvidenceDigest?: string;
+  review?: OwnerDecisionReviewData;
   createdAt: string;
   machineRecommendation?: string;
   score?: number;
   principleId?: string;
 }
 
+export interface OwnerDecisionReviewData {
+  brief: {
+    kind: 'evaluator' | 'rollout';
+    principle?: { title?: string; statement?: string; rationale?: string; scope: string[] };
+    implementation?: { summary?: string; affectedTools: string[]; risks: string[] };
+    summary?: string;
+    strengths?: string[];
+    concerns?: string[];
+    requiredChanges: string[];
+    risks?: string[];
+    score?: number;
+  };
+  evidence: {
+    completeness: 'complete' | 'partial' | 'insufficient';
+    deterministicChecks: { check: string; status: 'passed' | 'failed' | 'not_run' | 'unavailable' }[];
+    items: { evidenceClass: string; label: string; value: string }[];
+    digest: string;
+  };
+  capability: {
+    acceptRequirement: { kind: 'none' | 'acknowledge_partial_evidence' | 'forbidden'; reasonCode?: string };
+  };
+}
+
+function readOwnerStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string')) return null;
+  return value;
+}
+
+function validateOwnerDecisionReview(value: unknown): OwnerDecisionReviewData | null {
+  if (!isObject(value) || !isObject(value.brief) || !isObject(value.evidence) || !isObject(value.capability)) return null;
+  const { brief, evidence, capability } = value;
+  if (brief.kind !== 'evaluator' && brief.kind !== 'rollout') return null;
+  const requiredChanges = readOwnerStringArray(brief.requiredChanges);
+  if (requiredChanges === null) return null;
+  const parsedBrief: OwnerDecisionReviewData['brief'] = { kind: brief.kind, requiredChanges };
+  if (brief.kind === 'evaluator') {
+    if (!isObject(brief.principle) || !isObject(brief.implementation)) return null;
+    const scope = readOwnerStringArray(brief.principle.scope);
+    const affectedTools = readOwnerStringArray(brief.implementation.affectedTools);
+    const risks = readOwnerStringArray(brief.implementation.risks);
+    const strengths = readOwnerStringArray(brief.strengths);
+    const concerns = readOwnerStringArray(brief.concerns);
+    if (scope === null || affectedTools === null || risks === null || strengths === null || concerns === null) return null;
+    parsedBrief.principle = { scope };
+    for (const key of ['title', 'statement', 'rationale'] as const) {
+      const candidate = brief.principle[key];
+      if (candidate !== undefined && !isString(candidate)) return null;
+      if (isString(candidate)) parsedBrief.principle[key] = candidate;
+    }
+    parsedBrief.implementation = { affectedTools, risks };
+    if (brief.implementation.summary !== undefined && !isString(brief.implementation.summary)) return null;
+    if (isString(brief.implementation.summary)) parsedBrief.implementation.summary = brief.implementation.summary;
+    parsedBrief.strengths = strengths;
+    parsedBrief.concerns = concerns;
+    if (brief.score !== undefined && !isNumber(brief.score)) return null;
+    if (isNumber(brief.score)) parsedBrief.score = brief.score;
+  } else {
+    const risks = readOwnerStringArray(brief.risks);
+    if (risks === null) return null;
+    if (brief.summary !== undefined && !isString(brief.summary)) return null;
+    if (isString(brief.summary)) parsedBrief.summary = brief.summary;
+    parsedBrief.risks = risks;
+  }
+  if (evidence.completeness !== 'complete' && evidence.completeness !== 'partial' && evidence.completeness !== 'insufficient') return null;
+  if (!isString(evidence.digest) || !Array.isArray(evidence.deterministicChecks) || !Array.isArray(evidence.items)) return null;
+  const deterministicChecks: OwnerDecisionReviewData['evidence']['deterministicChecks'] = [];
+  for (const entry of evidence.deterministicChecks) {
+    if (!isObject(entry) || !isString(entry.check)
+      || (entry.status !== 'passed' && entry.status !== 'failed' && entry.status !== 'not_run' && entry.status !== 'unavailable')) return null;
+    deterministicChecks.push({ check: entry.check, status: entry.status });
+  }
+  const items: OwnerDecisionReviewData['evidence']['items'] = [];
+  for (const entry of evidence.items) {
+    if (!isObject(entry) || !isString(entry.evidenceClass) || !isString(entry.label) || !isString(entry.value)) return null;
+    items.push({ evidenceClass: entry.evidenceClass, label: entry.label, value: entry.value });
+  }
+  if (!isObject(capability.acceptRequirement)) return null;
+  const requirement = capability.acceptRequirement;
+  if (requirement.kind !== 'none' && requirement.kind !== 'acknowledge_partial_evidence' && requirement.kind !== 'forbidden') return null;
+  if (requirement.reasonCode !== undefined && !isString(requirement.reasonCode)) return null;
+  return {
+    brief: parsedBrief,
+    evidence: { completeness: evidence.completeness, deterministicChecks, items, digest: evidence.digest },
+    capability: { acceptRequirement: { kind: requirement.kind, ...(isString(requirement.reasonCode) ? { reasonCode: requirement.reasonCode } : {}) } },
+  };
+}
+
 export interface OwnerDecisionsData {
   items: OwnerDecisionItemData[];
   total: number;
+  filteredSyntheticCount: number;
   generatedAt: string;
 }
 
@@ -2852,6 +2943,18 @@ export function validateOwnerDecisionItem(v: unknown): OwnerDecisionItemData | n
     expectedSourceArtifactHash,
     createdAt,
   };
+  if (Object.hasOwn(v, 'expectedEvidenceDigest')) {
+    if (!isString(v.expectedEvidenceDigest)) return null;
+    item.expectedEvidenceDigest = v.expectedEvidenceDigest;
+  }
+  if (Object.hasOwn(v, 'review')) {
+    const review = validateOwnerDecisionReview(v.review);
+    if (review === null) return null;
+    if (item.expectedEvidenceDigest !== undefined && item.expectedEvidenceDigest !== review.evidence.digest) return null;
+    item.review = review;
+  }
+  if ((kind === 'evaluator_review' || kind === 'rollout_review')
+    && (item.expectedEvidenceDigest === undefined || item.review === undefined)) return null;
   if (Object.hasOwn(v, 'machineRecommendation')) {
     if (!isString(v.machineRecommendation)) return null;
     item.machineRecommendation = v.machineRecommendation;
@@ -2877,8 +2980,9 @@ export function validateOwnerDecisionsData(v: unknown): OwnerDecisionsData | nul
     items.push(item);
   }
   if (!Object.hasOwn(v, 'total') || !isNumber(v.total)) return null;
+  if (!Object.hasOwn(v, 'filteredSyntheticCount') || !isNumber(v.filteredSyntheticCount)) return null;
   if (!Object.hasOwn(v, 'generatedAt') || !isString(v.generatedAt)) return null;
-  return { items, total: v.total, generatedAt: v.generatedAt };
+  return { items, total: v.total, filteredSyntheticCount: v.filteredSyntheticCount, generatedAt: v.generatedAt };
 }
 
 export interface OwnerResolutionResultData {

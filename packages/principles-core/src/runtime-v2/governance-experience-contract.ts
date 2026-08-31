@@ -28,6 +28,8 @@ export const GovernancePrimaryAttentionSchema = Type.Union([
 ]);
 export const GovernanceExperienceReasonCodeSchema = Type.Union([
   Type.Literal('governance.exp.reason.owner_identity_missing'),
+  Type.Literal('governance.exp.reason.owner_identity_invalid'),
+  Type.Literal('governance.exp.reason.owner_authentication_missing'),
   Type.Literal('governance.exp.reason.approval_pending'),
   Type.Literal('governance.exp.reason.rulecode_owner_decision'),
   Type.Literal('governance.exp.reason.no_pending_decision'),
@@ -42,6 +44,7 @@ export const GovernanceExperienceReasonCodeSchema = Type.Union([
 ]);
 export const GovernanceExperienceNextActionCodeSchema = Type.Union([
   Type.Literal('governance.exp.next.configure_owner'),
+  Type.Literal('governance.exp.next.authenticate_console'),
   Type.Literal('governance.exp.next.review_approvals'),
   Type.Literal('governance.exp.next.inspect_recovery'),
   Type.Literal('governance.exp.next.inspect_sources'),
@@ -82,7 +85,7 @@ export const UnlinkedRecordGroupSchema = Type.Object({
 }, { additionalProperties: false });
 export const OwnerConfigSnapshotSchema = Type.Object({
   authenticationMode: Type.Union([Type.Literal('authenticated'), Type.Literal('no_auth')]),
-  ownerIdentityConfiguration: Type.Union([Type.Literal('configured'), Type.Literal('missing')]),
+  ownerIdentityConfiguration: Type.Union([Type.Literal('configured'), Type.Literal('missing'), Type.Literal('invalid')]),
 }, { additionalProperties: false });
 export const GovernanceViewInputSchema = Type.Object({
   view: OwnerGovernanceViewSchema,

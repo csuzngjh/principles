@@ -3,7 +3,8 @@ Feature: Companion 解析 pd console open --json 输出契约
 
   对应 rc-1-treat-as-unknown / cli-1-strict-json:companion 把 CLI 子进程的
   stdout 当不可信输入,逐字段校验后才进入 supervisor;流式部分 JSON 等待更多
-  分片,完整但非法的对象必须 fail loud。
+  分片,完整但非法的对象必须 fail loud。成功结果还必须携带已验证的
+  authenticationMode；该字段只允许 authenticated/no_auth，绝不包含令牌值。
 
   Background:
     Given companion 的控制台启动输出解析器

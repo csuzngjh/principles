@@ -63,11 +63,13 @@ export function resolveSystemNodeCommand(): string {
 /**
  * Arguments for `pd console open` in companion mode:
  * --json (machine-readable result), --no-browser (companion owns the window),
- * --no-auth (parity with the installer's auto-launch path; the server refuses
- * --no-auth on non-loopback hosts).
+ * Authentication remains secret-free at this boundary. When a token is
+ * configured the child inherits PD_CONSOLE_TOKEN from the environment; the
+ * token is never copied into argv.
  */
-export function buildConsoleOpenArgs(opts: { workspaceDir?: string } = {}): string[] {
-  const args = ['console', 'open', '--json', '--no-browser', '--no-auth'];
+export function buildConsoleOpenArgs(opts: { workspaceDir?: string; tokenConfigured?: boolean } = {}): string[] {
+  const args = ['console', 'open', '--json', '--no-browser'];
+  if (opts.tokenConfigured !== true) args.push('--no-auth');
   if (opts.workspaceDir !== undefined && opts.workspaceDir.length > 0) {
     args.push('--workspace', opts.workspaceDir);
   }

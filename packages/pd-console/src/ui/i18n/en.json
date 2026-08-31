@@ -147,6 +147,8 @@
         },
         "reason": {
           "ownerIdentityMissing": "The Owner identity is not configured. RuleCode governance decisions are blocked until PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID are set and the console token auth is enabled.",
+          "ownerIdentityInvalid": "The Owner identity configuration is invalid, so governance actions are safely blocked.",
+          "ownerAuthenticationMissing": "The identity is registered, but Console token authentication is not enabled.",
           "approvalPending": "Principle approvals are waiting for your decision.",
           "rulecodeOwnerDecision": "RuleCode shadow activations are waiting for your promotion decision.",
           "noPendingDecision": "No principle approval is waiting right now.",
@@ -161,6 +163,7 @@
         },
         "next": {
           "configureOwner": "Configure PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID, then enable console token auth.",
+          "authenticateConsole": "Enable Console token authentication, then retry.",
           "reviewApprovals": "Review the pending decisions below.",
           "inspectRecovery": "Open Failed Tasks and recover the stalled work.",
           "inspectSources": "Inspect state.db and the principle ledger, then restart the console.",
@@ -178,6 +181,12 @@
           "copied": "Copied",
           "docLink": "Configuration guide and verification →"
         },
+        "blocker": {
+          "identityMissing": "Register the Owner identity to enable governance actions.",
+          "identityInvalid": "The Owner identity configuration is invalid; fix it in Settings.",
+          "authenticationMissing": "Identity registered; enable Console token authentication to use governance actions.",
+          "goSettings": "Go to Settings"
+        },
         "activity": {
           "needsDecision": "{{count}} decision(s) waiting",
           "needsRecovery": "{{count}} item(s) need recovery",
@@ -187,7 +196,8 @@
         "readiness": {
           "identity": {
             "configured": "Owner identity: configured",
-            "missing": "Owner identity: missing"
+            "missing": "Owner identity: missing",
+            "invalid": "Owner identity: invalid"
           },
           "principleApproval": "Principle approvals: operator entry",
           "rulecode": {
@@ -266,12 +276,22 @@
         "empty": "Nothing needs your decision right now. Problems the machine can solve on its own will not disturb you.",
         "unavailable": "(unavailable)",
         "loadError": "The decision list is temporarily unavailable — the governance summary is still shown.",
+        "filteredSynthetic": "{{count}} decision(s) with an explicit test/demo origin are folded from the main Inbox; their source records remain available.",
         "kindEvaluator": "Evaluator review",
         "kindRollout": "Rollout review",
         "kindApproval": "Deployment approval",
         "kindRulecode": "RuleCode decision",
         "legacyBadge": "Inferred from history",
         "machineRecommendationLabel": "Machine recommendation",
+        "principleLabel": "Principle",
+        "implementationLabel": "Implementation",
+        "concernLabel": "Primary concern",
+        "partialEvidenceAcknowledgement": "I understand the evidence is incomplete and still want to accept this version.",
+        "evidence": {
+          "complete": "Evidence complete",
+          "partial": "Evidence partial",
+          "insufficient": "Evidence insufficient"
+        },
         "rolloutSafetyNote": "Accept this review and continue. High-risk rules still require an independent deployment approval.",
         "acceptCurrent": "Accept current version",
         "reviseOnce": "Revise once more",

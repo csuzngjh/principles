@@ -34,6 +34,10 @@ import {
   findOwnerResolutionForCurrentEpoch,
   type OwnerDecisionFactStore,
 } from './owner-review.js';
+import {
+  buildOwnerDecisionReview,
+  type OwnerDecisionReviewStore,
+} from './owner-decision-review.js';
 import { reopenTaskForRevision, resolveRolloutRevisionTarget } from './revision-reopen.js';
 
 const CAS_ATTEMPTS = 3;
@@ -46,6 +50,13 @@ export interface OwnerResolutionRequest {
   readonly expectedSourceRunId: string;
   readonly expectedSourceArtifactId: string;
   readonly expectedSourceArtifactHash: string;
+  /** Required by the Console v1.2 route; optional only for pre-v1.2 internal callers. */
+  readonly expectedEvidenceDigest?: string;
+  readonly acknowledgement?: {
+    readonly kind: 'partial_evidence';
+    readonly acknowledged: true;
+    readonly note?: string;
+  };
   readonly ownerInstruction?: string | null;
 }
 
@@ -70,6 +81,7 @@ export type OwnerResolutionOutcome =
   | { status: 'metadata_invalid' }
   | { status: 'not_decision_capable'; blockers: readonly string[] }
   | { status: 'stale_owner_decision' }
+  | { status: 'evidence_acknowledgement_required' }
   | { status: 'already_resolved'; existingAction: OwnerResolutionAction }
   | { status: 'cas_conflict' }
   | { status: 'revise_target_unresolved' }
@@ -93,7 +105,28 @@ export function factStoreFromStateManager(stateManager: RuntimeStateManager): Ow
         artifactKind: a.artifactKind,
         validationStatus: a.validationStatus,
         contentJson: a.contentJson,
+        sourceTaskId: a.sourceTaskId,
+        lineageArtifactIds: a.lineageArtifactIds,
+        createdAt: a.createdAt,
       }));
+    },
+  };
+}
+
+export function reviewStoreFromStateManager(stateManager: RuntimeStateManager): OwnerDecisionReviewStore {
+  return {
+    ...factStoreFromStateManager(stateManager),
+    getArtifactById: async (artifactId) => {
+      const artifact = await stateManager.piArtifactStore.getArtifactById(artifactId);
+      return artifact ? {
+        artifactId: artifact.artifactId,
+        artifactKind: artifact.artifactKind,
+        validationStatus: artifact.validationStatus,
+        contentJson: artifact.contentJson,
+        sourceTaskId: artifact.sourceTaskId,
+        lineageArtifactIds: artifact.lineageArtifactIds,
+        createdAt: artifact.createdAt,
+      } : null;
     },
   };
 }
@@ -269,6 +302,9 @@ export async function applyOwnerResolution(
     return { status: 'metadata_invalid' };
   }
   const capability = deriveOwnerDecisionCapability(facts);
+  const review = request.expectedEvidenceDigest !== undefined
+    ? await buildOwnerDecisionReview(reviewStoreFromStateManager(stateManager), taskId)
+    : null;
   const existingForEpoch = findOwnerResolutionForCurrentEpoch(facts.task);
   if (!capability.eligible && !existingForEpoch) {
     return { status: 'not_decision_capable', blockers: capability.blockers };
@@ -281,6 +317,22 @@ export async function applyOwnerResolution(
       status: 'not_decision_capable',
       blockers: [`action_not_permitted:${request.action}`],
     };
+  }
+  if (!existingForEpoch && request.expectedEvidenceDigest !== undefined) {
+    if (!review || review.evidence.digest !== request.expectedEvidenceDigest) {
+      return { status: 'stale_owner_decision' };
+    }
+    if (!review.capability.finalOfferedActions.includes(request.action)) {
+      return {
+        status: 'not_decision_capable',
+        blockers: [`action_not_permitted_by_evidence:${request.action}`],
+      };
+    }
+    if (request.action === 'accept_current'
+      && review.capability.acceptRequirement.kind === 'acknowledge_partial_evidence'
+      && request.acknowledgement?.kind !== 'partial_evidence') {
+      return { status: 'evidence_acknowledgement_required' };
+    }
   }
 
   // 2) Stale 防护 (SPEC §6/§28): 服务端重读 durable facts,逐字段比对请求的
@@ -316,6 +368,10 @@ export async function applyOwnerResolution(
       }
       if (existing.action !== request.action) {
         return { status: 'already_resolved', existingAction: existing.action };
+      }
+      if (request.expectedEvidenceDigest !== undefined
+        && existing.evidenceDigest !== request.expectedEvidenceDigest) {
+        return { status: 'stale_owner_decision' };
       }
       // same reviewKey + same action — idempotent
       if (existing.status === 'applied') {
@@ -353,6 +409,15 @@ export async function applyOwnerResolution(
         : {}),
       ...(request.action === 'revise_once'
         ? { ownerInstruction: sanitizeOwnerInstruction(request.ownerInstruction) }
+        : {}),
+      ...(request.expectedEvidenceDigest !== undefined && review
+        ? {
+            evidenceDigest: request.expectedEvidenceDigest,
+            evidenceManifest: review.evidence.manifest,
+            ...(request.acknowledgement !== undefined
+              ? { evidenceAcknowledgement: request.acknowledgement }
+              : {}),
+          }
         : {}),
     };
 

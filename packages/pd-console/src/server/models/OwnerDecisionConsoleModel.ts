@@ -17,8 +17,9 @@ import {
   SqliteApprovalQueueStore,
   collectOwnerDecisionFacts,
   deriveOwnerDecisionCapability,
+  buildOwnerDecisionReview,
 } from '@principles/core/runtime-v2';
-import type { TaskRecord } from '@principles/core/runtime-v2';
+import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime-v2';
 import type { PIArtifactStore } from '@principles/core/runtime-v2';
 
 export type OwnerDecisionItemKind =
@@ -44,13 +45,30 @@ export interface OwnerDecisionItem {
   readonly expectedSourceRunId: string;
   readonly expectedSourceArtifactId: string;
   readonly expectedSourceArtifactHash: string;
+  readonly expectedEvidenceDigest?: string;
+  readonly review?: OwnerDecisionReviewSnapshot;
   readonly createdAt: string;
 }
 
 export interface OwnerDecisionListResult {
   readonly items: readonly OwnerDecisionItem[];
   readonly total: number;
+  readonly filteredSyntheticCount: number;
   readonly generatedAt: string;
+}
+
+const SYNTHETIC_ORIGINS = new Set(['test', 'demo', 'smoke', 'synthetic', 'manual_approval_test']);
+
+function hasExplicitSyntheticOrigin(contentJson: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(contentJson);
+    return typeof parsed === 'object' && parsed !== null
+      && Object.hasOwn(parsed, 'origin')
+      && typeof Reflect.get(parsed, 'origin') === 'string'
+      && SYNTHETIC_ORIGINS.has(String(Reflect.get(parsed, 'origin')).trim().toLowerCase());
+  } catch {
+    return false;
+  }
 }
 
 const GOVERNANCE_TASK_KINDS = new Set(['evaluator', 'rollout_reviewer']);
@@ -120,34 +138,65 @@ async function deriveTaskDecisionItem(
         artifactKind: a.artifactKind,
         validationStatus: a.validationStatus,
         contentJson: a.contentJson,
+        sourceTaskId: a.sourceTaskId,
+        lineageArtifactIds: a.lineageArtifactIds,
+        createdAt: a.createdAt,
       }));
+    },
+    getArtifactById: async (artifactId: string) => {
+      const artifact = await artifactStore.getArtifactById(artifactId).catch(() => null);
+      return artifact ? {
+        artifactId: artifact.artifactId,
+        artifactKind: artifact.artifactKind,
+        validationStatus: artifact.validationStatus,
+        contentJson: artifact.contentJson,
+        sourceTaskId: artifact.sourceTaskId,
+        lineageArtifactIds: artifact.lineageArtifactIds,
+        createdAt: artifact.createdAt,
+      } : null;
     },
   };
   const facts = await collectOwnerDecisionFacts(factStore, task.taskId);
   if (!facts) return null;
   const capability = deriveOwnerDecisionCapability(facts);
   if (!capability.eligible || !capability.reviewKey) return null;
+  const review = await buildOwnerDecisionReview(factStore, task.taskId);
+  if (!review) return null;
 
   const sourceRunId = facts.task.humanReviewContext?.sourceRunId
     ?? facts.task.completionIntent?.sourceRunId ?? '';
   const artifact = facts.decisionArtifact;
   const kind: OwnerDecisionItemKind = task.taskKind === 'rollout_reviewer' ? 'rollout_review' : 'evaluator_review';
+  const title = review.brief.kind === 'evaluator'
+    ? review.brief.principle.title
+      ?? review.brief.principle.statement
+      ?? review.brief.implementation.summary
+      ?? '自动改进需要你的判断'
+    : review.brief.summary ?? 'Rollout 评审需要你的判断';
+  const summary = review.brief.kind === 'evaluator'
+    ? review.brief.implementation.summary
+      ?? (review.brief.concerns.length > 0
+        ? `仍有 ${String(review.brief.concerns.length)} 项自动评审异议。`
+        : '查看当前实现、证据与动作后果。')
+    : review.brief.summary ?? '查看 rollout 证据与动作后果。';
   return {
     reviewKey: capability.reviewKey,
     kind,
     taskId: task.taskId,
-    title: kind === 'rollout_review'
-      ? 'Rollout 评审无法收敛'
-      : '自动改进已达到本轮上限',
-    summary: `机器建议继续修改（${capability.reasonCode}${capability.legacy ? '，由历史数据安全推断' : ''}）。需要你的判断：接受当前版本、再修改一次，或拒绝。`,
-    machineRecommendation: 'needs_revision（继续修改）',
+    title,
+    summary,
+    ...(review.brief.kind === 'evaluator' && review.brief.score !== undefined
+      ? { score: review.brief.score }
+      : {}),
     reasonCode: capability.reasonCode,
     legacy: capability.legacy,
-    allowedActions: [...capability.allowedActions],
+    allowedActions: [...review.capability.finalOfferedActions],
     expectedRevisionEpoch: facts.task.revisionCount ?? 0,
     expectedSourceRunId: sourceRunId,
     expectedSourceArtifactId: artifact?.artifactId ?? '',
     expectedSourceArtifactHash: artifact?.contentHash ?? '',
+    expectedEvidenceDigest: review.evidence.digest,
+    review,
     createdAt: task.updatedAt,
   };
 }
@@ -162,13 +211,14 @@ export class OwnerDecisionConsoleModel {
   async listOwnerDecisionItems(): Promise<OwnerDecisionListResult> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
-      return { items: [], total: 0, generatedAt: new Date().toISOString() };
+      return { items: [], total: 0, filteredSyntheticCount: 0, generatedAt: new Date().toISOString() };
     }
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
       const db = conn.getDb();
       const artifactStore: PIArtifactStore = new SqlitePIArtifactStore(conn);
       const items: OwnerDecisionItem[] = [];
+      let filteredSyntheticCount = 0;
 
       // ── 1. needs_human_review 的 decision-capable 任务 (PRI-629 核心) ──
       let nhrRows: Record<string, unknown>[] = [];
@@ -190,6 +240,11 @@ export class OwnerDecisionConsoleModel {
       try {
         const approvals = await new SqliteApprovalQueueStore(conn).listPending();
         for (const approval of approvals) {
+          const sourceArtifact = await artifactStore.getArtifactById(approval.artifactId).catch(() => null);
+          if (sourceArtifact && hasExplicitSyntheticOrigin(sourceArtifact.contentJson)) {
+            filteredSyntheticCount += 1;
+            continue;
+          }
           items.push({
             reviewKey: `apr:${approval.approvalId}`,
             kind: 'activation_approval',
@@ -213,11 +268,19 @@ export class OwnerDecisionConsoleModel {
       // ── 3. RuleCode shadow 待决（promote / reject — 独立 authority，动作走既有 API）──
       try {
         const shadowRows = db.prepare(
-          `SELECT activation_id, channel, activated_at FROM activations
+          `SELECT activation_id, artifact_id, channel, activated_at FROM activations
            WHERE action = 'code_tool_hook_shadow_activate'
              AND promoted_at IS NULL AND deactivated_at IS NULL`,
         ).all().filter(isRecordRow);
         for (const row of shadowRows) {
+          const artifactId = typeof row.artifact_id === 'string' ? row.artifact_id : '';
+          const sourceArtifact = artifactId
+            ? await artifactStore.getArtifactById(artifactId).catch(() => null)
+            : null;
+          if (sourceArtifact && hasExplicitSyntheticOrigin(sourceArtifact.contentJson)) {
+            filteredSyntheticCount += 1;
+            continue;
+          }
           items.push({
             reviewKey: `rulecode:${String(row.activation_id ?? '')}`,
             kind: 'rulecode_decision',
@@ -229,7 +292,7 @@ export class OwnerDecisionConsoleModel {
             allowedActions: ['promote', 'reject_after_shadow'],
             expectedRevisionEpoch: 0,
             expectedSourceRunId: '',
-            expectedSourceArtifactId: String(row.activation_id ?? ''),
+            expectedSourceArtifactId: artifactId,
             expectedSourceArtifactHash: '',
             createdAt: typeof row.activated_at === 'string' ? row.activated_at : '',
           });
@@ -238,7 +301,7 @@ export class OwnerDecisionConsoleModel {
         // activations 表缺失 → 跳过
       }
 
-      return { items, total: items.length, generatedAt: new Date().toISOString() };
+      return { items, total: items.length, filteredSyntheticCount, generatedAt: new Date().toISOString() };
     } finally {
       conn.close();
     }

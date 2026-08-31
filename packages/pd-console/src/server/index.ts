@@ -550,7 +550,10 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
 
       // GET /api/health
       if (urlPath === '/api/health') {
-        asyncHandler(() => handleHealthRoute(req, res, services.workspaceDir))(req, res);
+        asyncHandler(() => handleHealthRoute(req, res, {
+          workspaceDir: services.workspaceDir,
+          authenticationMode: services.authConfig.isEnabled() ? 'authenticated' : 'no_auth',
+        }))(req, res);
         return;
       }
 

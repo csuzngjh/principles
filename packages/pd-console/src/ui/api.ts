@@ -779,6 +779,8 @@ async function resolveOwnerDecision(taskId: string, body: {
   expectedSourceRunId: string;
   expectedSourceArtifactId: string;
   expectedSourceArtifactHash: string;
+  expectedEvidenceDigest: string;
+  acknowledgement?: { kind: 'partial_evidence'; acknowledged: true };
   ownerInstruction?: string | null;
 }): Promise<ApiResponse<OwnerResolutionResultData>> {
   return request<OwnerResolutionResultData>(

@@ -6,12 +6,14 @@ describe('tryParseConsoleOpenOutput', () => {
     const raw = JSON.stringify({
       status: 'started', url: 'http://127.0.0.1:3100', port: 3100, host: '127.0.0.1',
       workspaceDir: 'D:\\ws', reused: false, browserOpened: false, serverPid: 4242,
+      authenticationMode: 'authenticated',
     });
     const result = tryParseConsoleOpenOutput(raw);
     expect(result?.status).toBe('started');
     expect(result?.port).toBe(3100);
     expect(result?.serverPid).toBe(4242);
     expect(result?.reused).toBe(false);
+    expect(result?.authenticationMode).toBe('authenticated');
   });
 
   it('parses a reused result without serverPid', () => {
@@ -45,6 +47,12 @@ describe('tryParseConsoleOpenOutput', () => {
   it('throws when serverPid is present but invalid', () => {
     expect(() => tryParseConsoleOpenOutput(JSON.stringify({ status: 'started', port: 3100, serverPid: -5 }))).toThrow(LaunchResultError);
     expect(() => tryParseConsoleOpenOutput(JSON.stringify({ status: 'started', port: 3100, serverPid: 'x' }))).toThrow(LaunchResultError);
+  });
+
+  it('throws when authenticationMode is present but invalid', () => {
+    expect(() => tryParseConsoleOpenOutput(JSON.stringify({
+      status: 'started', port: 3100, authenticationMode: 'maybe',
+    }))).toThrow(LaunchResultError);
   });
 
   it('keeps failed status with reason and nextAction passthrough', () => {
