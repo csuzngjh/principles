@@ -6,11 +6,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 test.describe('RuleCode Owner live-decision safety journey', () => {
   test('shows bounded evidence and performs break-glass containment without CLI or host restart', async ({ page, request }) => {
-    await page.goto('/#/focus');
-    await expect(page.getByRole('heading', { name: /RuleCode Owner decisions|RuleCode 拥有者决策/ })).toBeVisible();
-    await expect(page.getByText(/1 shadow rule|1 条 Shadow 规则/)).toBeVisible();
+    const decisionsResponse = await request.get('/api/v1/governance/owner-decisions');
+    expect(decisionsResponse.status()).toBe(200);
+    const decisionsBody: unknown = await decisionsResponse.json();
+    if (!isRecord(decisionsBody) || !isRecord(decisionsBody.data) || !Array.isArray(decisionsBody.data.items)) {
+      throw new Error('Owner decision response shape is invalid');
+    }
+    const shadowDecision = decisionsBody.data.items.find(item => isRecord(item) && item.kind === 'rulecode_decision');
+    if (!isRecord(shadowDecision) || typeof shadowDecision.taskId !== 'string') {
+      throw new Error('Seeded RuleCode owner decision is missing');
+    }
 
-    await page.goto('/#/activation');
+    await page.goto('/#/focus');
+    // Focus is the Owner inbox. The activation page remains the authority for
+    // RuleCode evidence and containment controls.
+    const activationCta = page.getByTestId(`go-activation-${shadowDecision.taskId}`);
+    await expect(activationCta).toBeVisible();
+    await activationCta.click();
+    await expect(page).toHaveURL(/#\/activation$/);
+
     const shadowCard = page.getByTestId('activation-card-act-rule-shadow-e2e');
     const liveCard = page.getByTestId('activation-card-act-rule-live-e2e');
     await expect(shadowCard).toBeVisible();
