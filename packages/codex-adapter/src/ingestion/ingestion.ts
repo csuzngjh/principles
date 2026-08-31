@@ -124,7 +124,7 @@ function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: L
 }
 
 interface TranscriptDeltaArgs {
-  readonly fields: PayloadFields;
+  readonly fallbackRootSessionId: string;
   readonly canonicalPath: string;
   readonly identity: TranscriptExpectedIdentity;
   readonly rolloutIdentity: string;
@@ -134,7 +134,7 @@ interface TranscriptDeltaArgs {
   readonly port: TranscriptPort;
 }
 
-function ingestTranscriptDelta({ fields, canonicalPath, identity, rolloutIdentity, workspaceDir, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
+function ingestTranscriptDelta({ fallbackRootSessionId, canonicalPath, identity, rolloutIdentity, workspaceDir, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
   const checkpoint = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity });
   if (checkpoint !== null && !('byteOffset' in checkpoint) && 'ok' in checkpoint && checkpoint.ok === false) {
     return { status: 'degraded', reason: checkpoint.reason, nextAction: checkpoint.nextAction, warnings: [] };
@@ -166,7 +166,7 @@ function ingestTranscriptDelta({ fields, canonicalPath, identity, rolloutIdentit
     fileOffset: offset,
     byteBoundReached,
     rolloutIdentity,
-    fallbackRootSessionId: existing !== null ? existing.rootSessionId : fields.sessionId,
+    fallbackRootSessionId: existing !== null ? existing.rootSessionId : fallbackRootSessionId,
     nowIso: now.toISOString(),
   });
 
@@ -192,7 +192,7 @@ function ingestTranscriptDelta({ fields, canonicalPath, identity, rolloutIdentit
     degradations.push({ reason: 'transcript_record_too_large', nextAction: 'a single transcript record exceeds the bounded-read window; inspect the rollout file.' });
   }
 
-  const rootSessionId = decoded.rolloutMeta.rootSessionId ?? existing?.rootSessionId ?? fields.sessionId;
+  const rootSessionId = decoded.rolloutMeta.rootSessionId ?? existing?.rootSessionId ?? fallbackRootSessionId;
   const result = ingestGovernanceObservations({
     workspaceDir,
     rollout: {
@@ -278,7 +278,7 @@ export function ingestCodexConversation(rawPayload: unknown, kind: HostEventKind
     return ingestLiveObservation({ fields, rolloutIdentity: validated.rolloutIdentity, workspaceDir: options.workspaceDir, now });
   }
   return ingestTranscriptDelta({
-    fields,
+    fallbackRootSessionId: fields.sessionId,
     canonicalPath: validated.canonicalPath,
     identity: validated.identity,
     rolloutIdentity: validated.rolloutIdentity,
@@ -286,5 +286,41 @@ export function ingestCodexConversation(rawPayload: unknown, kind: HostEventKind
     env: options.env ?? {},
     now,
     port: activeTranscriptPort(options),
+  });
+}
+
+export interface CodexTranscriptFromPathArgs {
+  readonly workspaceDir: string;
+  /** Absolute transcript path (catch-up resolves it by exact rollout identity before calling). */
+  readonly transcriptPath: string;
+  /** Fallback root session when neither the transcript nor the checkpoint carries one. */
+  readonly fallbackRootSessionId: string;
+  readonly env?: { CODEX_HOME?: string | undefined };
+  readonly now?: Date;
+  readonly port?: TranscriptPort;
+}
+
+/**
+ * PRI-624 (Slice C): bounded incremental ingest of one known rollout from its
+ * durable checkpoint, driven by an explicit transcript path instead of a live
+ * hook payload. The path is re-authorized through the same
+ * `validateCodexTranscriptPath` containment + post-open identity contract the
+ * hook path uses (SPEC §9) — callers MUST only pass paths resolved from
+ * previously-authenticated rollouts (checkpoints), never discovered sessions.
+ */
+export function ingestCodexTranscriptFromPath(args: CodexTranscriptFromPathArgs): CodexIngestionOutcome {
+  const home = resolveCodexHome(args.env);
+  if (!home.ok) return { status: 'degraded', reason: home.reason, nextAction: home.nextAction, warnings: [] };
+  const validated = validateCodexTranscriptPath(args.transcriptPath, home.home);
+  if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction, warnings: [] };
+  return ingestTranscriptDelta({
+    fallbackRootSessionId: args.fallbackRootSessionId,
+    canonicalPath: validated.canonicalPath,
+    identity: validated.identity,
+    rolloutIdentity: validated.rolloutIdentity,
+    workspaceDir: args.workspaceDir,
+    env: args.env ?? {},
+    now: args.now ?? new Date(),
+    port: args.port ?? activeTranscriptPort({ workspaceDir: args.workspaceDir }),
   });
 }

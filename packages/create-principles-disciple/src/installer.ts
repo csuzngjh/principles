@@ -34,7 +34,7 @@ import {
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { parseInstallManifest } from '@principles/install-layout';
+import { mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -173,9 +173,28 @@ function resolveInstallManifestHosts(host: HostTarget): ('codex' | 'openclaw')[]
   return mergeInstallManifestHosts(current, host);
 }
 
-function writeInstallManifest(hosts: ('codex' | 'openclaw')[]): void {
+/**
+ * PRI-624 Slice C: the install manifest records every Workspace this install
+ * serves so the Companion can discover its per-Workspace workers (SPEC §13
+ * "canonical install manifest"). Idempotent by canonical path.
+ */
+function resolveInstallManifestWorkspaces(workspaceDir: string): string[] {
+  let current: unknown;
+  try {
+    current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
+  } catch (error) {
+    if (existsSync(getInstallManifestPath())) throw error;
+  }
+  const parsed = parseInstallManifest(current);
+  if (current !== undefined && !parsed.manifest) {
+    throw new Error(parsed.error ?? 'install_manifest_malformed');
+  }
+  return mergeInstallManifestWorkspaces(parsed.manifest, path.resolve(workspaceDir));
+}
+
+function writeInstallManifest(hosts: ('codex' | 'openclaw')[], workspaces: string[]): void {
   mkdirSync(getPdDir(), { recursive: true });
-  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts }, null, 2) + '\n', 'utf8');
+  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts, workspaces }, null, 2) + '\n', 'utf8');
 }
 
 function installBundledLayoutPackage(pluginDir: string): void {
@@ -2162,7 +2181,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     if (hostFailures.length > 0) {
       throw new Error(`Host installation failed: ${hostFailures.join(' | ')}`);
     }
-    writeInstallManifest(installManifestHosts);
+    writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir));
 
     cleanupBackup(backupDir, runtimeBackupDir);
     if (spinner) {

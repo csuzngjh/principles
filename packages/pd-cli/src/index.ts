@@ -588,6 +588,56 @@ codexCmd
     });
   });
 
+// ── pd codex ingest catch-up — bounded manual transcript lag recovery ────────
+// Codex Governance Closure Slice C (PRI-624, SPEC §15): the manual-mode
+// counterpart of the Companion worker's catch-up step. Zero transcript I/O
+// when codex_conversation_ingestion is disabled.
+const codexIngestCmd = codexCmd
+  .command('ingest')
+  .description('Codex conversation-ingestion operations');
+
+codexIngestCmd
+  .command('catch-up')
+  .description('Catch up transcript lag from durable checkpoints (bounded, non-destructive, no LLM)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--max-rollouts <n>', 'Maximum rollouts to catch up per pass (1-32, default 8)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleCodexIngestCatchUp } = await import('./commands/codex-ingest-catchup.js');
+    const maxRollouts = typeof opts.maxRollouts === 'string' ? Number.parseInt(opts.maxRollouts, 10) : undefined;
+    await handleCodexIngestCatchUp({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      ...(maxRollouts !== undefined && Number.isInteger(maxRollouts) ? { maxRollouts } : {}),
+    });
+  });
+
+// ── pd codex worker — Workspace-scoped governance worker ─────────────────────
+// Codex Governance Closure Slice C (PRI-624, SPEC §13; ADR-0020 §11.1): the
+// one Owner-approved background worker (catch-up → reconciliation → one
+// Diagnostician execution → one bounded downstream consumer cycle). The
+// Companion spawns this per registered workspace; --once is the manual and
+// supervised-restart form.
+codexCmd
+  .command('worker')
+  .description('Run the Codex workspace governance worker (catch-up, reconciliation, diagnostician, downstream)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--once', 'Run exactly one bounded cycle and exit')
+  .option('--interval <ms>', 'Cycle interval for continuous mode (default 120000, minimum 1000)')
+  .option('--status', 'Report the SPEC §15 worker mode without executing anything')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleCodexWorker } = await import('./commands/codex-worker.js');
+    const intervalMs = typeof opts.interval === 'string' ? Number.parseInt(opts.interval, 10) : undefined;
+    await handleCodexWorker({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      once: opts.once === true,
+      status: opts.status === true,
+      ...(intervalMs !== undefined && Number.isInteger(intervalMs) ? { intervalMs } : {}),
+    });
+  });
+
 runtimeHealthCmd
   .command('gfi')
   .description('GFI workspace snapshot — active vs stale session breakdown')

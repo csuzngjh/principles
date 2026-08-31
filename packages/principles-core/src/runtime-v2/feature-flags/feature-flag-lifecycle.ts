@@ -55,8 +55,8 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   },
   internalization_auto_consumer: {
     decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/service/internalization-auto-consumer*', 'pd-cli runtime-internalization commands'],
-    evidence: 'MVP core-loop liveness — advances ready internalization tasks (PRI-381; default-on since 2026-06-13)',
+    consumers: ['openclaw-plugin/src/service/internalization-auto-consumer*', 'pd-cli runtime-internalization commands', 'codex-adapter workspace worker (PRI-624, via shared host-runtime consumer cycle)'],
+    evidence: 'MVP core-loop liveness — advances ready internalization tasks (PRI-381; default-on since 2026-06-13). PRI-624 elevates it to the Workspace internalization execution authority: one flag, one definition, two consumers (OpenClaw scheduler + Companion workspace worker); flag-off = execution pause, never an evidence freeze.',
     decided: '2026-08-27',
     graduationCriteria: 'Core-loop closure validated (PR #1358, merged 2026-08-20) — promotion to core optional once stability window passes',
     retirementCriteria: 'Consumer removed from production auto-consumer wiring (would break INV-07 liveness — retire only with replacement)',

@@ -41,7 +41,7 @@ function isHex(value: string): boolean {
 }
 
 /** rollout-<timestamp>-<uuid>.jsonl — returns the rollout uuid, or null when the name is off-contract. */
-function parseRolloutFileName(fileName: string): string | null {
+export function parseRolloutFileName(fileName: string): string | null {
   if (!fileName.startsWith('rollout-') || !fileName.endsWith('.jsonl')) return null;
   const stem = fileName.slice('rollout-'.length, -'.jsonl'.length);
   const parts = stem.split('-');

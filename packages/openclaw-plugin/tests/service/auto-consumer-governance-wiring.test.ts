@@ -16,11 +16,14 @@ import {
   SqliteConnection,
   SqlitePIArtifactStore,
 } from '@principles/core/runtime-v2';
+// PRI-624: the wiring moved to the shared host-runtime module (one
+// implementation for OpenClaw auto-consumer + Companion workspace worker);
+// these tests now exercise the shared seam directly.
 import {
   createEvaluatorRepairDeps,
   createRolloutGovernanceDeps,
   dispatchRolloutActivation,
-} from '../../src/service/auto-consumer-governance-wiring.js';
+} from '@principles/host-runtime';
 
 const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
 

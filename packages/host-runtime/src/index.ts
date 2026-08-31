@@ -17,6 +17,10 @@ export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
 export * from './governance-signal-admission.js';
 export * from './host-liveness-contract.js';
+// PRI-624 Slice C: shared internalization consumer execution (OpenClaw
+// auto-consumer + Companion workspace worker call the same cycle).
+export * from './internalization-consumer-governance.js';
+export * from './internalization-consumer-cycle.js';
 // Anonymous Product Telemetry v1 (PRI-595~603) — opt-in, default-off,
 // read-only with respect to all PD governance facts.
 export * from './product-telemetry/consent-store.js';

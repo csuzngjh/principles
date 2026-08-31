@@ -38,6 +38,8 @@ import {
   parseUpdateCheckResponse,
   shouldNotifyUpdate,
 } from '../lib/poller.js';
+import { WorkspaceWorkerRegistry, type WorkerChild } from '../lib/workspace-workers.js';
+import { parseInstallManifest } from '@principles/install-layout';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_USER_MODEL_ID = 'party.principles.disciple.companion';
@@ -57,6 +59,7 @@ let extDir: string | undefined;
 let installedPluginDir: string | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let updateTimer: ReturnType<typeof setInterval> | undefined;
+let workspaceWorkerTimer: ReturnType<typeof setInterval> | undefined;
 let quitting = false;
 let baselineRecorded = false;
 let consecutivePollFailures = 0;
@@ -245,8 +248,76 @@ function startSupervision(): void {
   spawnCli();
 }
 
-function spawnCli(): void {
-  if (extDir === undefined) return;
+// ─── Workspace worker supervision (PRI-624 Slice C) ──────────────────────────
+// The Companion schedules ONE `pd codex worker` child per canonical workspace
+// listed in the install manifest. Lifecycle only — execution correctness is
+// owned by the durable Runtime V2 task lease inside the worker.
+
+const WORKSPACE_WORKER_SYNC_INTERVAL_MS = 60_000;
+const WORKSPACE_WORKER_CYCLE_INTERVAL_MS = 120_000;
+let workspaceWorkers: WorkspaceWorkerRegistry | undefined;
+
+function manifestCodexWorkspaces(): string[] {
+  const paths = getInstallLayoutPaths(app.getPath('home'));
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
+  } catch {
+    return [];
+  }
+  const parsed = parseInstallManifest(manifest);
+  if (parsed.manifest === undefined) return [];
+  if (!parsed.manifest.hosts.includes('codex')) return [];
+  return (parsed.manifest.workspaces ?? []).filter((workspace) => {
+    try {
+      return fs.statSync(workspace).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+}
+
+function spawnWorkspaceWorker(canonicalWorkspaceDir: string): WorkerChild {
+  // Same system-node discipline as the console server: better-sqlite3 is
+  // built for the SYSTEM Node ABI, never Electron's bundled Node.
+  const entry = extDir !== undefined ? resolvePdCliEntry(extDir) : undefined;
+  if (entry === undefined || !isSafeExistingFile(entry)) {
+    throw new Error('pd-cli entry unavailable');
+  }
+  const child = spawn('node', [
+    entry,
+    'codex', 'worker',
+    '--workspace', canonicalWorkspaceDir,
+    '--interval', String(WORKSPACE_WORKER_CYCLE_INTERVAL_MS),
+    '--json',
+  ], { env: { ...process.env }, stdio: ['ignore', 'ignore', 'pipe'] });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    // Bounded stderr tail into the companion log — the worker's own
+    // structured output already lands in workspace state/log surfaces.
+    log('workspace_worker_stderr', { workspace: canonicalWorkspaceDir, tail: chunk.toString('utf8').slice(-400) });
+  });
+  return child;
+}
+
+function startWorkspaceWorkerSupervision(): void {
+  workspaceWorkers = new WorkspaceWorkerRegistry({
+    spawnWorker: spawnWorkspaceWorker,
+    log: (event, fields) => log(event, fields ?? {}),
+  });
+  workspaceWorkers.sync(manifestCodexWorkspaces());
+  workspaceWorkerTimer = setInterval(() => {
+    if (quitting) return;
+    workspaceWorkers?.sync(manifestCodexWorkspaces());
+  }, WORKSPACE_WORKER_SYNC_INTERVAL_MS);
+  workspaceWorkerTimer.unref();
+}
+
+function stopWorkspaceWorkerSupervision(): void {
+  if (workspaceWorkerTimer !== undefined) clearInterval(workspaceWorkerTimer);
+  workspaceWorkers?.stopAll();
+}
+
+function spawnCli(): void {  if (extDir === undefined) return;
   // spawn argv hardening: program is the literal 'node' (resolved via PATH by
   // the OS — never env-controlled); every path argument is validated above.
   // The workspace override comes from a local state file and only reaches
@@ -590,6 +661,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     createTray();
     startSupervision();
+    startWorkspaceWorkerSupervision();
 
     log('companion_started', { version: app.getVersion() });
   });
@@ -597,6 +669,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
     stopServer();
+    stopWorkspaceWorkerSupervision();
     if (pollTimer !== undefined) clearInterval(pollTimer);
     if (updateTimer !== undefined) clearInterval(updateTimer);
     saveState();

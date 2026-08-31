@@ -10,6 +10,14 @@ export interface InstallManifest {
   layoutVersion: typeof INSTALL_LAYOUT_VERSION;
   mode: InstallLayoutMode;
   hosts: InstallHost[];
+  /**
+   * Canonical absolute paths of Workspaces the install serves (PRI-624 Slice C).
+   * Optional so pre-PRI-624 manifests stay valid; always normalized to
+   * resolved absolute paths and deduped. The installer merges the install
+   * Workspace in; the Companion worker discovers its per-Workspace workers
+   * from this list (SPEC §13 "canonical install manifest").
+   */
+  workspaces?: readonly string[];
 }
 
 export interface InstallLayoutPaths {
@@ -52,6 +60,33 @@ function isHost(value: unknown): value is InstallHost {
   return typeof value === 'string' && (INSTALL_HOSTS as readonly string[]).includes(value);
 }
 
+/** Workspace entries must be non-empty absolute paths — the Companion spawns per-Workspace workers keyed by canonical path. */
+function parseWorkspaceList(value: unknown): { workspaces?: string[]; error?: string } {
+  if (value === undefined) return { workspaces: [] };
+  if (!Array.isArray(value)) return { error: 'install_manifest_malformed: workspaces must be non-empty absolute paths' };
+  const resolved: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry.length === 0 || !path.isAbsolute(entry)) {
+      return { error: 'install_manifest_malformed: workspaces must be non-empty absolute paths' };
+    }
+    const canonical = path.resolve(entry);
+    if (!resolved.includes(canonical)) resolved.push(canonical);
+  }
+  return { workspaces: resolved };
+}
+
+/** Merge one Workspace into a manifest's workspace list (installer write path). Idempotent by canonical path. */
+export function mergeInstallManifestWorkspaces(current: InstallManifest | undefined, workspaceDir: string): string[] {
+  const canonical = path.resolve(workspaceDir);
+  const resolved: string[] = [];
+  for (const entry of current?.workspaces ?? []) {
+    const normalized = path.resolve(entry);
+    if (!resolved.includes(normalized)) resolved.push(normalized);
+  }
+  if (!resolved.includes(canonical)) resolved.push(canonical);
+  return resolved;
+}
+
 export function parseInstallManifest(value: unknown): { manifest?: InstallManifest; error?: string } {
   if (!isRecord(value)) return { error: 'install_manifest_malformed: expected an object' };
   if (value.layoutVersion !== INSTALL_LAYOUT_VERSION) {
@@ -64,7 +99,9 @@ export function parseInstallManifest(value: unknown): { manifest?: InstallManife
     return { error: 'install_manifest_malformed: hosts must contain codex and/or openclaw' };
   }
   const hosts = [...new Set(value.hosts)];
-  return { manifest: { layoutVersion: INSTALL_LAYOUT_VERSION, mode: value.mode, hosts } };
+  const workspaces = parseWorkspaceList(value.workspaces);
+  if (workspaces.error) return { error: workspaces.error };
+  return { manifest: { layoutVersion: INSTALL_LAYOUT_VERSION, mode: value.mode, hosts, workspaces: workspaces.workspaces } };
 }
 
 export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {

@@ -692,6 +692,52 @@ export function readGovernanceCheckpoint(args: ReadGovernanceCheckpointArgs): Go
   }
 }
 
+export interface ListGovernanceCheckpointsArgs {
+  readonly workspaceDir: string;
+  readonly hostKind: 'codex';
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type ListGovernanceCheckpointsResult =
+  | { ok: true; checkpoints: readonly GovernanceCheckpointRecord[] }
+  | Degradation;
+
+/**
+ * List every checkpoint for a host kind, oldest-updated first (PRI-624).
+ * The Slice C worker/CLI catch-up uses this to find rollouts with pending
+ * transcript lag — the checkpoint set is exactly the set of rollouts the
+ * authenticated hook previously delivered, so this is never session
+ * discovery (SPEC §13 / ADR-0020 §11.2).
+ */
+export function listGovernanceCheckpoints(args: ListGovernanceCheckpointsArgs): ListGovernanceCheckpointsResult {
+  const { workspaceDir, hostKind, databaseFactory } = args;
+  const opened = openStore(workspaceDir, databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const rows = db.prepare('SELECT * FROM governance_transcript_checkpoints WHERE host_kind = ? ORDER BY updated_at ASC').all(hostKind);
+    const checkpoints: GovernanceCheckpointRecord[] = [];
+    for (const raw of rows) {
+      if (!isRecord(raw)) continue;
+      checkpoints.push({
+        hostKind: String(rowField(raw, 'host_kind')),
+        rolloutIdentity: String(rowField(raw, 'rollout_identity')),
+        byteOffset: Number(rowField(raw, 'byte_offset')),
+        lastOrdinal: Number(rowField(raw, 'last_ordinal')),
+        cliVersion: typeof rowField(raw, 'cli_version') === 'string' ? (rowField(raw, 'cli_version') as string) : null,
+        rootSessionId: String(rowField(raw, 'root_session_id')),
+        incompleteTail: rowField(raw, 'incomplete_tail') === 1,
+        lastDegradationReason: typeof rowField(raw, 'last_degradation_reason') === 'string' ? (rowField(raw, 'last_degradation_reason') as string) : null,
+        lastDegradationOrdinal: typeof rowField(raw, 'last_degradation_ordinal') === 'number' ? (rowField(raw, 'last_degradation_ordinal') as number) : null,
+        updatedAt: String(rowField(raw, 'updated_at')),
+      });
+    }
+    return { ok: true, checkpoints };
+  } finally {
+    close();
+  }
+}
+
 export interface ListGovernanceObservationsInput {
   readonly workspaceDir: string;
   readonly rolloutIdentity?: string;
