@@ -16,7 +16,7 @@
     "@principles/install-layout": "0.1.0"
   },
   "devDependencies": {
-    "@electron/asar": "3.4.1",
+    "@electron/asar": "4.3.0",
     "electron": "39.8.10",
     "electron-builder": "^26.0.12",
     "typescript": "^7.0.2",
