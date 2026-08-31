@@ -2157,7 +2157,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // LLM-declared adversarialResult.passed=true could stand in for a real
     // replay (chain 48371236). Accept both spellings — this is the input that
     // makes the deterministic gate reachable at all.
-    const params = firstPositive.params;
+    const { params } = firstPositive;
     const pathParam = resolveCasePathParam(params);
     if (pathParam === null) {
       this.emitEvent('v2_adversarial_cases_skipped', taskId, {
