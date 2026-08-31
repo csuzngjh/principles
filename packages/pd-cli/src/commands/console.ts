@@ -369,7 +369,8 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   }
 
   // 4) Read auth token for health probes (PD_CONSOLE_TOKEN)
-  const token = opts.token ?? process.env.PD_CONSOLE_TOKEN;
+  const rawToken = opts.token ?? process.env.PD_CONSOLE_TOKEN;
+  const token = !opts.noAuth && rawToken?.trim() ? rawToken.trim() : undefined;
 
   // 5) Plan the launch (reuse or fresh bind)
   let plan;
@@ -461,6 +462,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       workspaceDir,
       reused: true,
       browserOpened,
+      ...(health.authenticationMode ? { authenticationMode: health.authenticationMode } : {}),
       nextAction: browserOpened
         ? 'Browser opened to the running Console.'
         : `Open ${plan.url} in your browser to access the Console.`,
@@ -535,10 +537,15 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   // 7) Wait for console ready (bounded poll)
   const readyDeadline = Date.now() + 15_000;
   let ready = false;
+  let readyAuthenticationMode: 'authenticated' | 'no_auth' | undefined;
   while (Date.now() < readyDeadline) {
     if (child.exitCode !== null) break;
     const h = await probeConsoleHealth({ host: plan.host, port: plan.port, timeoutMs: 1000, token });
-    if (h.healthy) { ready = true; break; }
+    if (h.healthy) {
+      ready = true;
+      readyAuthenticationMode = h.authenticationMode;
+      break;
+    }
     await sleep(250);
   }
 
@@ -587,6 +594,31 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     return;
   }
 
+  const expectedAuthenticationMode = token?.trim() ? 'authenticated' : 'no_auth';
+  if (readyAuthenticationMode !== expectedAuthenticationMode) {
+    try { child.kill('SIGTERM'); } catch { /* child may already have exited */ }
+    const result: ConsoleLaunchResult = {
+      status: 'refused',
+      url: '',
+      port: plan.port,
+      host: plan.host,
+      workspaceDir,
+      reused: false,
+      browserOpened: false,
+      authenticationMode: readyAuthenticationMode,
+      reason: 'console_authentication_mode_mismatch',
+      nextAction: 'Stop the Console, verify PD_CONSOLE_TOKEN propagation, and retry.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`error: ${result.reason}`);
+      console.error(`next:   ${result.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
+
   // 7) Console is ready → optionally open browser, emit result, then keep child running
   let browserOpened = false;
   let browserWarning: string | undefined;
@@ -604,6 +636,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     workspaceDir,
     reused: false,
     browserOpened,
+    ...(readyAuthenticationMode ? { authenticationMode: readyAuthenticationMode } : {}),
     nextAction: browserOpened
       ? 'Browser opened to the Console. Press Ctrl+C to stop.'
       : `Open ${plan.url} in your browser. Press Ctrl+C to stop.`,

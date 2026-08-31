@@ -24,18 +24,18 @@ function getModel(workspaceDir: string): HealthCheckModel {
 export async function handleHealthRoute(
   req: IncomingMessage,
   res: ServerResponse,
-  workspaceDir: string,
+  options: { workspaceDir: string; authenticationMode: 'authenticated' | 'no_auth' },
 ): Promise<void> {
   if (req.method !== 'GET') {
     sendError(res, 405, 'method_not_allowed', 'Only GET method is allowed');
     return;
   }
 
-  const model = getModel(workspaceDir);
+  const model = getModel(options.workspaceDir);
 
   try {
     const health = await model.checkSystemHealth();
-    sendSuccess(res, health);
+    sendSuccess(res, { ...health, authenticationMode: options.authenticationMode });
   } catch (err) {
     sendError(res, 500, 'health_check_error', (err as Error).message);
   }

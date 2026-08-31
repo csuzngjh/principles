@@ -17,8 +17,9 @@ import {
   SqliteApprovalQueueStore,
   collectOwnerDecisionFacts,
   deriveOwnerDecisionCapability,
+  buildOwnerDecisionReview,
 } from '@principles/core/runtime-v2';
-import type { TaskRecord } from '@principles/core/runtime-v2';
+import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime-v2';
 import type { PIArtifactStore } from '@principles/core/runtime-v2';
 
 export type OwnerDecisionItemKind =
@@ -44,6 +45,10 @@ export interface OwnerDecisionItem {
   readonly expectedSourceRunId: string;
   readonly expectedSourceArtifactId: string;
   readonly expectedSourceArtifactHash: string;
+  readonly expectedEvidenceDigest?: string;
+  readonly review?: OwnerDecisionReviewSnapshot;
+  /** Visible recovery state: the decision is still required, but evidence is unsafe to act on. */
+  readonly evidenceUnavailableReason?: string;
   readonly createdAt: string;
 }
 
@@ -97,57 +102,133 @@ function makeRowReader(db: { prepare: (sql: string) => { get: (id: string) => un
 
 /** 行 → TaskRecord 的窄映射（tasks 表全部列；diagnostic_json 键名转换）。 */
 
+interface TaskDecisionItemDependencies {
+  readonly artifactStore: PIArtifactStore;
+  readonly readTaskRow: (taskId: string) => TaskRecord | null;
+}
+
 /** 单任务 capability → 决策条目（不 eligible → null，INV-01）。 */
 async function deriveTaskDecisionItem(
   task: TaskRecord,
-  artifactStore: PIArtifactStore,
-  readTaskRow: (taskId: string) => TaskRecord | null,
+  dependencies: TaskDecisionItemDependencies,
 ): Promise<OwnerDecisionItem | null> {
   if (!GOVERNANCE_TASK_KINDS.has(task.taskKind)) return null;
   const factStore = {
     getTask: async (taskId: string): Promise<TaskRecord | null> => {
       if (taskId === task.taskId) return task;
       try {
-        return readTaskRow(taskId);
+        return dependencies.readTaskRow(taskId);
       } catch {
         return null;
       }
     },
     listArtifactsBySourceTask: async (taskId: string) => {
-      const list = await artifactStore.listBySourceTaskId(taskId).catch(() => []);
+      const list = await dependencies.artifactStore.listBySourceTaskId(taskId).catch(() => []);
       return list.map((a) => ({
         artifactId: a.artifactId,
         artifactKind: a.artifactKind,
         validationStatus: a.validationStatus,
         contentJson: a.contentJson,
+        sourceTaskId: a.sourceTaskId,
+        lineageArtifactIds: a.lineageArtifactIds,
+        createdAt: a.createdAt,
       }));
+    },
+    getArtifactById: async (artifactId: string) => {
+      const artifact = await dependencies.artifactStore.getArtifactById(artifactId).catch(() => null);
+      return artifact ? {
+        artifactId: artifact.artifactId,
+        artifactKind: artifact.artifactKind,
+        validationStatus: artifact.validationStatus,
+        contentJson: artifact.contentJson,
+        sourceTaskId: artifact.sourceTaskId,
+        lineageArtifactIds: artifact.lineageArtifactIds,
+        createdAt: artifact.createdAt,
+      } : null;
     },
   };
   const facts = await collectOwnerDecisionFacts(factStore, task.taskId);
   if (!facts) return null;
   const capability = deriveOwnerDecisionCapability(facts);
-  if (!capability.eligible || !capability.reviewKey) return null;
+  const evidenceBlockers = capability.blockers.filter((blocker) =>
+    blocker === 'decision_artifact_missing' || blocker === 'lineage_unresolvable');
+  const kind: OwnerDecisionItemKind = task.taskKind === 'rollout_reviewer' ? 'rollout_review' : 'evaluator_review';
+  if (!capability.eligible || !capability.reviewKey) {
+    if (evidenceBlockers.length === 0) return null;
+    return {
+      reviewKey: `unavailable:${task.taskId}`,
+      kind,
+      taskId: task.taskId,
+      title: task.taskKind === 'rollout_reviewer'
+        ? 'Rollout 评审仍需要你的判断'
+        : '自动改进仍需要你的判断',
+      summary: '决策证据当前不完整，PD 已停止提供裁决动作以避免你批准错误版本。',
+      reasonCode: capability.reasonCode,
+      legacy: capability.legacy,
+      allowedActions: [],
+      expectedRevisionEpoch: facts.task.revisionCount ?? 0,
+      expectedSourceRunId: facts.task.humanReviewContext?.sourceRunId
+        ?? facts.task.completionIntent?.sourceRunId ?? '',
+      expectedSourceArtifactId: '',
+      expectedSourceArtifactHash: '',
+      evidenceUnavailableReason: evidenceBlockers.join(','),
+      createdAt: task.updatedAt,
+    };
+  }
+  const review = await buildOwnerDecisionReview(factStore, task.taskId);
+  if (!review) {
+    return {
+      reviewKey: `unavailable:${task.taskId}`,
+      kind,
+      taskId: task.taskId,
+      title: '自动改进仍需要你的判断',
+      summary: '决策证据无法安全读取，PD 已停止提供裁决动作。',
+      reasonCode: capability.reasonCode,
+      legacy: capability.legacy,
+      allowedActions: [],
+      expectedRevisionEpoch: facts.task.revisionCount ?? 0,
+      expectedSourceRunId: facts.task.humanReviewContext?.sourceRunId
+        ?? facts.task.completionIntent?.sourceRunId ?? '',
+      expectedSourceArtifactId: facts.decisionArtifact?.artifactId ?? '',
+      expectedSourceArtifactHash: facts.decisionArtifact?.contentHash ?? '',
+      evidenceUnavailableReason: 'owner_review_evidence_unavailable',
+      createdAt: task.updatedAt,
+    };
+  }
 
   const sourceRunId = facts.task.humanReviewContext?.sourceRunId
     ?? facts.task.completionIntent?.sourceRunId ?? '';
   const artifact = facts.decisionArtifact;
-  const kind: OwnerDecisionItemKind = task.taskKind === 'rollout_reviewer' ? 'rollout_review' : 'evaluator_review';
+  const title = review.brief.kind === 'evaluator'
+    ? review.brief.principle.title
+      ?? review.brief.principle.statement
+      ?? review.brief.implementation.summary
+      ?? '自动改进需要你的判断'
+    : review.brief.summary ?? 'Rollout 评审需要你的判断';
+  const summary = review.brief.kind === 'evaluator'
+    ? review.brief.implementation.summary
+      ?? (review.brief.concerns.length > 0
+        ? `仍有 ${String(review.brief.concerns.length)} 项自动评审异议。`
+        : '查看当前实现、证据与动作后果。')
+    : review.brief.summary ?? '查看 rollout 证据与动作后果。';
   return {
     reviewKey: capability.reviewKey,
     kind,
     taskId: task.taskId,
-    title: kind === 'rollout_review'
-      ? 'Rollout 评审无法收敛'
-      : '自动改进已达到本轮上限',
-    summary: `机器建议继续修改（${capability.reasonCode}${capability.legacy ? '，由历史数据安全推断' : ''}）。需要你的判断：接受当前版本、再修改一次，或拒绝。`,
-    machineRecommendation: 'needs_revision（继续修改）',
+    title,
+    summary,
+    ...(review.brief.kind === 'evaluator' && review.brief.score !== undefined
+      ? { score: review.brief.score }
+      : {}),
     reasonCode: capability.reasonCode,
     legacy: capability.legacy,
-    allowedActions: [...capability.allowedActions],
+    allowedActions: [...review.capability.finalOfferedActions],
     expectedRevisionEpoch: facts.task.revisionCount ?? 0,
     expectedSourceRunId: sourceRunId,
     expectedSourceArtifactId: artifact?.artifactId ?? '',
     expectedSourceArtifactHash: artifact?.contentHash ?? '',
+    expectedEvidenceDigest: review.evidence.digest,
+    review,
     createdAt: task.updatedAt,
   };
 }
@@ -182,7 +263,13 @@ export class OwnerDecisionConsoleModel {
       for (const row of nhrRows) {
         const task = rowToTaskRecord(row);
         if (!task) continue;
-        const item = await deriveTaskDecisionItem(task, artifactStore, makeRowReader(db));
+        const item = await deriveTaskDecisionItem(
+          task,
+          {
+            artifactStore,
+            readTaskRow: makeRowReader(db),
+          },
+        );
         if (item) items.push(item);
       }
 
@@ -213,11 +300,12 @@ export class OwnerDecisionConsoleModel {
       // ── 3. RuleCode shadow 待决（promote / reject — 独立 authority，动作走既有 API）──
       try {
         const shadowRows = db.prepare(
-          `SELECT activation_id, channel, activated_at FROM activations
+          `SELECT activation_id, artifact_id, channel, activated_at FROM activations
            WHERE action = 'code_tool_hook_shadow_activate'
              AND promoted_at IS NULL AND deactivated_at IS NULL`,
         ).all().filter(isRecordRow);
         for (const row of shadowRows) {
+          const artifactId = typeof row.artifact_id === 'string' ? row.artifact_id : '';
           items.push({
             reviewKey: `rulecode:${String(row.activation_id ?? '')}`,
             kind: 'rulecode_decision',
@@ -229,7 +317,7 @@ export class OwnerDecisionConsoleModel {
             allowedActions: ['promote', 'reject_after_shadow'],
             expectedRevisionEpoch: 0,
             expectedSourceRunId: '',
-            expectedSourceArtifactId: String(row.activation_id ?? ''),
+            expectedSourceArtifactId: artifactId,
             expectedSourceArtifactHash: '',
             createdAt: typeof row.activated_at === 'string' ? row.activated_at : '',
           });
@@ -267,7 +355,7 @@ export class OwnerDecisionConsoleModel {
       for (const row of rows) {
         const task = rowToTaskRecord(row);
         if (!task) continue;
-        const item = await deriveTaskDecisionItem(task, artifactStore, makeRowReader(db));
+        const item = await deriveTaskDecisionItem(task, { artifactStore, readTaskRow: makeRowReader(db) });
         if (item) ids.add(task.taskId);
       }
       return ids;

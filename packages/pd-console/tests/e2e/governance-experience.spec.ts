@@ -2,15 +2,15 @@
  * PRI-586 E2E — Governance Experience Snapshot user flow (SPEC v1.5.1 Phase 5):
  *
  *   Open Console → understand current state → know required action →
- *   complete a governance action.
+ *   follow the configuration recovery action when governance is not authenticated.
  *
  * The seed enables governance_experience_v1, so Focus runs in experience mode.
- * Assertions prove the snapshot is the single governance status source AND that
- * the mutation path still works through the (unchanged) approvals endpoint.
+ * Assertions prove the snapshot is the single governance status source and
+ * that Focus routes a blocked Owner to the configuration authority.
  */
 import { test, expect } from '@playwright/test';
 
-test('governance experience snapshot serves and drives Focus', async ({ page }) => {
+test('governance experience snapshot serves Focus and routes its recovery action', async ({ page }) => {
   // ── 1. Understand current state: the API serves one schema-valid snapshot ──
   const resp = await page.request.get('/api/v1/governance/experience');
   expect(resp.status()).toBe(200);
@@ -59,38 +59,15 @@ test('governance experience snapshot serves and drives Focus', async ({ page }) 
   const queueRequests = apiRequests.filter(pathname => pathname.startsWith('/api/v1/governance/queue'));
   expect(queueRequests.length).toBeLessThanOrEqual(1);
   await expect(page.getByTestId('experience-reason')).toContainText('waiting for your decision');
-  await expect(page.getByTestId('experience-readiness')).toContainText('Owner identity');
   await expect(page.getByTestId('experience-trust')).toContainText('Environment: test');
-
-  // ── 3. Know the required action: decision cards are still the action surface ──
-  // apr-experience-1 is an isolated seed record dedicated to this spec (valid
-  // prompt-channel artifact → approving activates cleanly), so the spec stays
-  // deterministic in a full serial run.
-  const grouped = await page.request.get('/api/v1/approvals/grouped');
-  const groupedBody = (await grouped.json()) as { success: boolean; data: { groups: { principleId: string; status: string; records: { id: string }[] }[] } };
-  expect(groupedBody.success).toBe(true);
-  const group = groupedBody.data.groups.find(g => g.records.some(record => record.id === 'apr-experience-1'));
-  expect(group, 'seeded workspace must contain the apr-experience-1 approval group').toBeDefined();
-  const principleId = group!.principleId;
-
-  // ── 4. Complete a governance action: approve through the real UI button ──
-  const pending = await page.request.get('/api/v1/approvals?status=pending');
-  const pendingBody = (await pending.json()) as { data: { items: unknown[] } };
-  const pendingCount = pendingBody.data.items.length;
-  expect(pendingCount).toBeGreaterThan(0);
-  const approveButton = page.locator(`[data-testid="approve-btn-${principleId}"]`).first();
-  await expect(approveButton).toBeVisible();
-  // The group decision fans out per record; wait for the apr-prompt-1 POST to
-  // complete (approval writes an activation and can outlive networkidle).
-  const approveResponsePromise = page.waitForResponse(
-    response => response.url().endsWith('/api/v1/approvals/apr-experience-1/approve') && response.request().method() === 'POST',
-    { timeout: 15_000 },
-  );
-  await approveButton.click();
-  const approveResponse = await approveResponsePromise;
-  expect(approveResponse.status()).toBe(200);
-  // The decision lands in the ledger (read-back through the API).
-  const approvalsAfter = await page.request.get('/api/v1/approvals?status=pending');
-  const afterBody = (await approvalsAfter.json()) as { data: { items: unknown[] } };
-  expect(afterBody.data.items.length).toBeLessThan(pendingCount);
+  // PRI-629 moved readiness detail into the contextual recovery guide. This
+  // seed has an identity but no Console token authentication, so the Owner
+  // gets a direct route to the configuration authority instead of an inert
+  // status field.
+  const configureGuide = page.getByTestId('owner-configure-guide');
+  await expect(configureGuide).toContainText('enable Console token authentication');
+  const settingsLink = configureGuide.getByRole('link');
+  await expect(settingsLink).toHaveAttribute('href', '#/settings');
+  await settingsLink.click();
+  await expect(page).toHaveURL(/#\/settings$/);
 });

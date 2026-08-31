@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import {
+  createRuntimeStateHandle,
   getDefaultPdConfig,
   SplitDiagnosticianRunner,
   DreamerRunner,
@@ -598,6 +599,81 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
     expect(result.report?.downstream?.ran).toBe(true);
     expect(dreamerRan).not.toBeNull();
     expect(['dreamer', undefined]).toContain(result.report?.downstream?.taskKind);
+  });
+
+  it('PRI-634 A3 via the Codex path (AC-4): evaluator critical telemetry lands in THIS workspace sink through the shared cycle', async () => {
+    const ws = makeWorkspace();
+    const { EvaluatorRunner, createPITaskDiagnosticJson } = await import('@principles/core/runtime-v2');
+    // Seed artificer(succeeded) → evaluator(pending) through the real state
+    // manager; only the LLM boundary is doubled, and the double emits its
+    // critical telemetry through the REAL emitter the shared cycle wired into
+    // the runner — proving the workspace-scoped sink works on the Codex path.
+    const seedHandle = await createRuntimeStateHandle({ workspaceDir: ws.root, readonly: false });
+    try {
+      const { stateManager } = seedHandle;
+      await stateManager.createTask({
+        taskId: 'artificer-seed-001',
+        taskKind: 'artificer',
+        status: 'succeeded',
+        attemptCount: 1,
+        maxAttempts: 3,
+        resultRef: 'artificer://run-001',
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+        }),
+      });
+      await stateManager.createTask({
+        taskId: 'evaluator-seed-001',
+        taskKind: 'evaluator',
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        resultRef: null,
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: ['artificer-seed-001'],
+          channel: 'prompt',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+        }),
+      });
+    } finally {
+      await seedHandle.close().catch(() => undefined);
+    }
+
+    let evaluatorRan = false;
+    vi.spyOn(EvaluatorRunner.prototype, 'run').mockImplementation(async function (this: unknown, taskId: string) {
+      evaluatorRan = true;
+      const self = this as unknown as {
+        eventEmitter: { emitTelemetry: (e: unknown) => true };
+        stateManager: RuntimeStateManager;
+      };
+      self.eventEmitter.emitTelemetry({
+        eventType: 'evaluator_rule_assembled',
+        traceId: 'trace-codex-ac4',
+        timestamp: '2026-08-31T00:00:00.000Z',
+        sessionId: 'owner-ac4',
+        agentId: 'evaluator',
+        payload: { runId: 'run-ac4', reason: 'test' },
+      });
+      await self.stateManager.markTaskSucceeded(taskId, 'evaluator://test-run');
+      return { status: 'succeeded', taskId, attemptCount: 1 } satisfies RunnerResult;
+    });
+
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+
+    expect(evaluatorRan).toBe(true);
+    expect(result.report?.downstream?.ran).toBe(true);
+    expect(result.report?.downstream?.taskKind).toBe('evaluator');
+    const sink = path.join(ws.root, '.pd', 'telemetry', 'critical-events.jsonl');
+    expect(fs.existsSync(sink)).toBe(true);
+    const lines = fs.readFileSync(sink, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ eventType: 'evaluator_rule_assembled', traceId: 'trace-codex-ac4' });
   });
 });
 

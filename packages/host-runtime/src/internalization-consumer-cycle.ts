@@ -41,6 +41,7 @@ import {
   buildL2PrincipleReaderFromLedger,
   OpenClawCliRuntimeAdapter,
   storeEmitter,
+  createProductionGateDeps,
   resolveRuntimeConfigFromPdConfig,
   isRuntimeConfigError,
   computeConsumerDecision,
@@ -58,6 +59,7 @@ import {
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from './pd-config.js';
 import { createEvaluatorRepairDeps, createRolloutGovernanceDeps, type ConsumerGovernanceLogger } from './internalization-consumer-governance.js';
+import { WorkspaceTelemetryEmitter } from './workspace-telemetry-emitter.js';
 
 export const INTERNALIZATION_AUTO_CONSUMER_FLAG_ID = 'internalization_auto_consumer';
 
@@ -414,6 +416,16 @@ export async function runInternalizationConsumerCycle(
     // (ADR-0019). Flag-off / absent = legacy behavior.
     const runnerOptions = { owner, runtimeKind, effectiveConfig: configResult.effective };
 
+    // PRI-634 A3: workspace-scoped telemetry sink for the evaluator runner.
+    // Constructed here (per-wake, workspaceDir in scope) so events from THIS
+    // workspace's runner are attributable to THIS workspace — a global
+    // subscriber on the storeEmitter singleton cannot (multi-workspace
+    // isolation, see workspace-telemetry-emitter.ts). Persist failures
+    // degrade through the host's structured event port, never break the runner.
+    const evaluatorEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
+      emitEvent('WORKSPACE_TELEMETRY_PERSIST_FAILED', detail);
+    });
+
     // Dispatch by leased task kind. Only kinds listed in
     // FULL_CHAIN_CONSUMER_RUNNER_KINDS can be leased here; anything else
     // (e.g. diagnostician) hits the default branch — fail loud if it does (EP-03).
@@ -449,14 +461,23 @@ export async function runInternalizationConsumerCycle(
         // → seed artificer repair; commit 门控保证不再并行 seed rollout_reviewer。
         // PRI-630: 注入宿主声明的 runtime-authoritative 工具目录 — 工具名合法
         // 性以目录为准,禁止 LLM 凭记忆判 "非标准工具名" (链 48371236 根因②)。
+        // PRI-634 A1/A3: (a) 注入 canonical production gateDeps — 此前缺省导致
+        // adversarial replay 结构性不可达 (链 48371236 根因 A1); (b) evaluator
+        // 的事件改走 workspace-scoped emitter, 只把 4 类 critical events 落盘到
+        // <workspaceDir>/.pd/telemetry/critical-events.jsonl, 其余照旧转发全局
+        // storeEmitter (multi-workspace 隔离, 见 workspace-telemetry-emitter.ts)。
+        // gateDeps 属于 evaluator production semantics, 不是宿主可选能力 —
+        // 无论 OpenClaw 还是 Codex worker 执行, deterministic gate wiring
+        // 必须存在 (第二个 options 参数, 绝不放第一个 deps 参数)。
         runner = new EvaluatorRunner(
           {
-            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
+            stateManager, runtimeAdapter: adapter, eventEmitter: evaluatorEmitter,
             artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
             ...createEvaluatorRepairDeps(workspaceDir, stateManager, logger),
           },
           {
             ...runnerOptions,
+            gateDeps: createProductionGateDeps(),
             ...(hostToolCatalog
               ? { hostToolCatalog: { readOnlyTools: [...hostToolCatalog.readOnlyTools], writeTools: [...hostToolCatalog.writeTools] } }
               : {}),

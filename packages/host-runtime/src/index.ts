@@ -21,6 +21,9 @@ export * from './host-liveness-contract.js';
 // auto-consumer + Companion workspace worker call the same cycle).
 export * from './internalization-consumer-governance.js';
 export * from './internalization-consumer-cycle.js';
+// PRI-634 A3: workspace-scoped critical telemetry — canonical implementation
+// moved from openclaw-plugin so both hosts share ONE semantics.
+export * from './workspace-telemetry-emitter.js';
 // Anonymous Product Telemetry v1 (PRI-595~603) — opt-in, default-off,
 // read-only with respect to all PD governance facts.
 export * from './product-telemetry/consent-store.js';

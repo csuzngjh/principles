@@ -234,6 +234,27 @@ describe('PRI-584 readiness (SPEC §6)', () => {
       observedAuthority: 'configured_owner', status: 'entry_conditions_met',
     });
   });
+
+  it('configured identity without Console authentication remains blocked for Owner actions', () => {
+    const snapshot = deriveGovernanceExperienceSnapshot(inputs([], {
+      ownerConfigSnapshot: { authenticationMode: 'no_auth', ownerIdentityConfiguration: 'configured' },
+    }));
+    expect(snapshot.readiness.governanceActions.find(action => action.kind === 'rulecode_owner_decision')).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'governance.exp.reason.owner_authentication_missing',
+      nextActionCode: 'governance.exp.next.authenticate_console',
+    });
+    expect(snapshot.summary.reasonCode).toBe('governance.exp.reason.owner_authentication_missing');
+  });
+
+  it('invalid Owner identity remains distinct from a missing identity', () => {
+    const snapshot = deriveGovernanceExperienceSnapshot(inputs([], {
+      ownerConfigSnapshot: { authenticationMode: 'authenticated', ownerIdentityConfiguration: 'invalid' },
+    }));
+    expect(snapshot.readiness.governanceActions.find(action => action.kind === 'rulecode_owner_decision')).toMatchObject({
+      status: 'blocked', reasonCode: 'governance.exp.reason.owner_identity_invalid',
+    });
+  });
 });
 
 describe('PRI-584 environment & trust context (SPEC §10-§11)', () => {

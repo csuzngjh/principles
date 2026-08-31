@@ -134,12 +134,17 @@ describe('PRI-585 GET /api/v1/governance/experience — flag contract (SPEC §14
 });
 
 describe('PRI-584 resolveOwnerConfigSnapshot — authority evidence (SPEC §6)', () => {
-  it('no-auth → no_auth + missing identity even with a complete identity', () => {
-    // Identity present but the auth gate is off: identity is not honored.
+  it('keeps identity configuration independent from Console authentication', () => {
     expect(resolveOwnerConfigSnapshot({ isEnabled: () => false }, { ownerId: 'owner-1', credentialId: 'cred-1', source: 'env' })).toEqual({
       authenticationMode: 'no_auth',
-      ownerIdentityConfiguration: 'missing',
+      ownerIdentityConfiguration: 'configured',
     });
+  });
+
+  it('surfaces invalid identity configuration independently from authentication', () => {
+    expect(resolveOwnerConfigSnapshot({ isEnabled: () => true }, {
+      ownerId: null, credentialId: null, source: 'invalid_env', error: 'owner_identity_env_pair_incomplete',
+    })).toEqual({ authenticationMode: 'authenticated', ownerIdentityConfiguration: 'invalid' });
   });
 
   it('auth enabled + both identity fields → configured owner identity', () => {

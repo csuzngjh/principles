@@ -19,6 +19,7 @@ import {
   SqliteConnection,
   createRuntimeStateHandle,
   createPITaskDiagnosticJson,
+  hydratePITaskRecord,
 } from '@principles/core/runtime-v2';
 import { handleOwnerDecisionsRoute } from '../../../src/server/routes/owner-decisions.js';
 import type { OwnerDecisionRouteContext } from '../../../src/server/routes/owner-decisions.js';
@@ -29,6 +30,8 @@ const ARTIFER_ID = 'artificer-repair-evaluator-001-r2';
 const SCRIBE_ID = 'scribe-001';
 const RUN_ID = 'run-evaluator-001';
 const ARTIFACT_ID = `pi-art-${EVAL_ID}-${RUN_ID}`;
+const ARTIFICER_ARTIFACT_ID = `pi-art-${ARTIFER_ID}-run-1`;
+const SCRIBE_ARTIFACT_ID = `pi-art-${SCRIBE_ID}-run-1`;
 
 function evaluatorMeta(extra: Record<string, unknown> = {}): string {
   return createPITaskDiagnosticJson({
@@ -89,14 +92,27 @@ function setupDb(): SqliteConnection {
     `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  insertArtifact.run(ARTIFACT_ID, 'principle', EVAL_ID, '[]', 'pending', JSON.stringify({
+  insertArtifact.run(SCRIBE_ARTIFACT_ID, 'principle', SCRIBE_ID, '[]', 'pending', JSON.stringify({
+    principleDraft: {
+      title: 'Confirm destructive changes',
+      statement: 'Confirm the exact target before destructive changes.',
+      rationale: 'Prevents irreversible changes against an ambiguous target.',
+      applicability: ['filesystem writes'],
+    },
+  }), now, now);
+  insertArtifact.run(ARTIFICER_ARTIFACT_ID, 'principle', ARTIFER_ID, JSON.stringify([SCRIBE_ARTIFACT_ID]), 'pending', JSON.stringify({
+    implementationSummary: 'Adds a confirmation gate before destructive writes.',
+    affectedTools: ['write_file', 'apply_patch'],
+    risks: ['May require one Owner interaction.'],
+  }), now, now);
+  insertArtifact.run(ARTIFACT_ID, 'principle', EVAL_ID, JSON.stringify([ARTIFICER_ARTIFACT_ID]), 'pending', JSON.stringify({
     taskId: EVAL_ID,
-    sourceArtificerArtifactId: 'pi-art-old',
+    sourceArtificerArtifactId: ARTIFICER_ARTIFACT_ID,
     evaluation: {
       decision: 'needs_revision', summary: 's', score: 0.72,
       strengths: [], concerns: ['c'], requiredChanges: ['fix timeout'],
     },
-    sourceTrace: { artificerArtifactId: 'pi-art-old' },
+    sourceTrace: { artificerArtifactId: ARTIFICER_ARTIFACT_ID },
     risks: [], generatedAt: now,
   }), now, now);
 
@@ -198,6 +214,66 @@ describe('GET /api/v1/governance/owner-decisions', () => {
     expect(body.success).toBe(true);
     expect((body.data as { total: number }).total).toBe(0);
   });
+
+  it('keeps an Owner-required decision visible when its evidence artifact is missing', async () => {
+    const conn = setupDb();
+    conn.getDb().prepare('DELETE FROM pi_artifacts WHERE artifact_id = ?').run(ARTIFACT_ID);
+    conn.close();
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = parse(res).data as {
+      items: Array<{ taskId: string; allowedActions: string[]; evidenceUnavailableReason?: string }>;
+      total: number;
+    };
+    expect(data.total).toBe(1);
+    expect(data.items[0]).toMatchObject({ taskId: EVAL_ID, allowedActions: [] });
+    expect(data.items[0]?.evidenceUnavailableReason).toContain('decision_artifact_missing');
+  });
+
+  it('does not let a producer-declared origin hide a durable task decision', async () => {
+    const conn = setupDb();
+    const now = '2026-08-30T00:00:00.000Z';
+    conn.getDb().prepare(
+      'UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?',
+    ).run(JSON.stringify({
+      origin: 'synthetic',
+      taskId: EVAL_ID,
+      sourceArtificerArtifactId: ARTIFICER_ARTIFACT_ID,
+      evaluation: {
+        decision: 'needs_revision', summary: 's', score: 0.72,
+        strengths: [], concerns: ['c'], requiredChanges: ['fix timeout'],
+      },
+      sourceTrace: { artificerArtifactId: ARTIFICER_ARTIFACT_ID },
+      risks: [], generatedAt: now,
+    }), ARTIFACT_ID);
+    conn.close();
+
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = parse(res).data as { items: Array<{ taskId: string }>; total: number };
+    expect(data.total).toBe(1);
+    expect(data.items[0]?.taskId).toBe(EVAL_ID);
+  });
+
+  it('does not let producer-declared origin hide a durable RuleCode decision', async () => {
+    const conn = setupDb();
+    const now = '2026-08-30T00:00:00.000Z';
+    conn.getDb().prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+       VALUES (?, 'rule', ?, '[]', 'validated', ?, ?, ?)`,
+    ).run('rule-demo-1', 'demo-task', JSON.stringify({ origin: 'demo', ruleId: 'demo-rule' }), now, now);
+    conn.getDb().prepare(
+      `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+       VALUES (?, ?, ?, 'code_tool_hook', 'code_tool_hook_shadow_activate', ?, ?, NULL, NULL)`,
+    ).run('activation-demo-1', 'idem-demo-1', 'rule-demo-1', 'impl://demo', now);
+    conn.close();
+
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = (parse(res).data as { items: Array<{ kind: string }>; total: number });
+    expect(data.total).toBe(2);
+    expect(data.items.some(item => item.kind === 'rulecode_decision')).toBe(true);
+  });
 });
 
 describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
@@ -218,6 +294,7 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
       expectedSourceRunId: item.expectedSourceRunId,
       expectedSourceArtifactId: item.expectedSourceArtifactId,
       expectedSourceArtifactHash: item.expectedSourceArtifactHash,
+      expectedEvidenceDigest: item.expectedEvidenceDigest,
       ownerInstruction: null,
     };
     const res = makeRes();
@@ -242,6 +319,101 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
     }
   });
 
+  it('refuses mutation without an authenticated configured Owner and does not change state', async () => {
+    setupDb().close();
+    const item = await listItem();
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('POST', {
+      action: 'reject_current', reviewKey: item.reviewKey,
+      expectedRevisionEpoch: item.expectedRevisionEpoch,
+      expectedSourceRunId: item.expectedSourceRunId,
+      expectedSourceArtifactId: item.expectedSourceArtifactId,
+      expectedSourceArtifactHash: item.expectedSourceArtifactHash,
+      expectedEvidenceDigest: item.expectedEvidenceDigest,
+      ownerInstruction: null,
+    }), res, { ...ctxBase(`/${EVAL_ID}/resolve`), ownerIdentity: null });
+    expect(res.statusCode).toBe(403);
+    expect(parse(res).error).toBe('owner_authentication_required');
+
+    const handle = await createRuntimeStateHandle({ workspaceDir });
+    try {
+      const task = await handle.stateManager.getTask(EVAL_ID);
+      expect(task?.status).toBe('needs_human_review');
+      expect(hydratePITaskRecord(task!)?.ownerResolutions).toBeUndefined();
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('partial evidence requires an explicit acknowledgement before accept', async () => {
+    const conn = setupDb();
+    conn.getDb().prepare('DELETE FROM pi_artifacts WHERE artifact_id = ?').run(SCRIBE_ARTIFACT_ID);
+    conn.close();
+    const item = await listItem();
+    const body = {
+      action: 'accept_current', reviewKey: item.reviewKey,
+      expectedRevisionEpoch: item.expectedRevisionEpoch,
+      expectedSourceRunId: item.expectedSourceRunId,
+      expectedSourceArtifactId: item.expectedSourceArtifactId,
+      expectedSourceArtifactHash: item.expectedSourceArtifactHash,
+      expectedEvidenceDigest: item.expectedEvidenceDigest,
+      ownerInstruction: null,
+    };
+    const refused = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('POST', body), refused, ctxBase(`/${EVAL_ID}/resolve`));
+    expect(refused.statusCode).toBe(409);
+    expect(parse(refused).error).toBe('evidence_acknowledgement_required');
+
+    const accepted = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('POST', {
+      ...body, acknowledgement: { kind: 'partial_evidence', acknowledged: true },
+    }), accepted, ctxBase(`/${EVAL_ID}/resolve`));
+    expect(parse(accepted).success).toBe(true);
+
+    const handle = await createRuntimeStateHandle({ workspaceDir });
+    try {
+      const task = await handle.stateManager.getTask(EVAL_ID);
+      const diagnostic = JSON.parse(task?.diagnosticJson ?? '{}') as {
+        pi_metadata?: { ownerResolutions?: Array<{ evidenceDigest?: string; evidenceAcknowledgement?: { kind: string; acknowledged: boolean } }> };
+      };
+      expect(diagnostic.pi_metadata?.ownerResolutions?.[0]).toMatchObject({
+        evidenceDigest: item.expectedEvidenceDigest,
+        evidenceAcknowledgement: { kind: 'partial_evidence', acknowledged: true },
+      });
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('normalizes a blank acknowledgement note so persisted metadata remains hydratable', async () => {
+    const conn = setupDb();
+    conn.getDb().prepare('DELETE FROM pi_artifacts WHERE artifact_id = ?').run(SCRIBE_ARTIFACT_ID);
+    conn.close();
+    const item = await listItem();
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('POST', {
+      action: 'accept_current', reviewKey: item.reviewKey,
+      expectedRevisionEpoch: item.expectedRevisionEpoch,
+      expectedSourceRunId: item.expectedSourceRunId,
+      expectedSourceArtifactId: item.expectedSourceArtifactId,
+      expectedSourceArtifactHash: item.expectedSourceArtifactHash,
+      expectedEvidenceDigest: item.expectedEvidenceDigest,
+      acknowledgement: { kind: 'partial_evidence', acknowledged: true, note: '   ' },
+      ownerInstruction: null,
+    }), res, ctxBase(`/${EVAL_ID}/resolve`));
+    expect(parse(res).success).toBe(true);
+
+    const handle = await createRuntimeStateHandle({ workspaceDir });
+    try {
+      const task = await handle.stateManager.getTask(EVAL_ID);
+      const hydrated = task ? hydratePITaskRecord(task) : null;
+      expect(hydrated).not.toBeNull();
+      expect(hydrated?.ownerResolutions?.[0]?.evidenceAcknowledgement?.note).toBeUndefined();
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('stale hash → 409 stale_owner_decision, nothing mutated', async () => {
     setupDb().close();
     const item = await listItem();
@@ -253,6 +425,7 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
       expectedSourceRunId: item.expectedSourceRunId,
       expectedSourceArtifactId: item.expectedSourceArtifactId,
       expectedSourceArtifactHash: 'deadbeef'.repeat(8),
+      expectedEvidenceDigest: item.expectedEvidenceDigest,
       ownerInstruction: null,
     }), res, ctxBase(`/${EVAL_ID}/resolve`));
     expect(res.statusCode).toBe(409);
@@ -269,6 +442,7 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
       expectedSourceRunId: item.expectedSourceRunId,
       expectedSourceArtifactId: item.expectedSourceArtifactId,
       expectedSourceArtifactHash: item.expectedSourceArtifactHash,
+      expectedEvidenceDigest: item.expectedEvidenceDigest,
       ownerInstruction: null,
     });
     const first = makeRes();
@@ -291,7 +465,7 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
     await handleOwnerDecisionsRoute(makeReq('POST', {
       action: 'accept_current', reviewKey: 'odk_x', expectedRevisionEpoch: 0,
       expectedSourceRunId: 'run-x', expectedSourceArtifactId: 'pi-art-x',
-      expectedSourceArtifactHash: 'h'.repeat(64), ownerInstruction: null,
+      expectedSourceArtifactHash: 'h'.repeat(64), expectedEvidenceDigest: 'e'.repeat(64), ownerInstruction: null,
     }), res, ctxBase('/evaluator-does-not-exist/resolve'));
     expect(res.statusCode).toBe(404);
     expect(parse(res).error).toBe('task_not_found');
@@ -304,7 +478,7 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
     await handleOwnerDecisionsRoute(makeReq('POST', {
       action: 'accept_current', reviewKey: 'odk_x', expectedRevisionEpoch: 0,
       expectedSourceRunId: 'run-x', expectedSourceArtifactId: 'pi-art-x',
-      expectedSourceArtifactHash: 'h'.repeat(64), ownerInstruction: null,
+      expectedSourceArtifactHash: 'h'.repeat(64), expectedEvidenceDigest: 'e'.repeat(64), ownerInstruction: null,
     }), res, ctxBase(`/${ROLLOUT_ID}/resolve`));
     expect(res.statusCode).toBe(409);
     const body = parse(res) as { error: string; blockers?: string[]; nextAction?: string };

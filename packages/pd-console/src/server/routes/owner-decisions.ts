@@ -34,11 +34,15 @@ function getModel(workspaceDir: string): OwnerDecisionConsoleModel {
 
 export interface OwnerDecisionRouteContext {
   workspaceDir: string;
-  /** server-side auth context 推导的身份（SPEC §29 — 不信任 body） */
-  ownerIdentity: { ownerId: string; credentialId?: string };
+  /** Only present after both Console authentication and Owner identity verification. */
+  ownerIdentity: { ownerId: string; credentialId: string } | null;
 }
 
 const RESOLVE_ACTIONS = new Set(['accept_current', 'revise_once', 'reject_current']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 interface ResolveRequestBody {
   action: 'accept_current' | 'revise_once' | 'reject_current';
@@ -47,19 +51,25 @@ interface ResolveRequestBody {
   expectedSourceRunId: string;
   expectedSourceArtifactId: string;
   expectedSourceArtifactHash: string;
+  expectedEvidenceDigest: string;
+  acknowledgement?: {
+    kind: 'partial_evidence';
+    acknowledged: true;
+    note?: string;
+  };
   ownerInstruction?: string | null;
 }
 
 /** rc-1/rc-2/rc-3: body 按未知值逐字段校验，非法即 400 fail-loud。 */
 function parseResolveBody(raw: unknown): { ok: true; body: ResolveRequestBody } | { ok: false; error: string } {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+  if (!isRecord(raw)) {
     return { ok: false, error: 'Request body must be a JSON object.' };
   }
-  const b = raw as Record<string, unknown>;
+  const b = raw;
   if (typeof b.action !== 'string' || !RESOLVE_ACTIONS.has(b.action)) {
     return { ok: false, error: `action must be one of accept_current/revise_once/reject_current, got ${String(b.action)}` };
   }
-  for (const field of ['reviewKey', 'expectedSourceRunId', 'expectedSourceArtifactId', 'expectedSourceArtifactHash'] as const) {
+  for (const field of ['reviewKey', 'expectedSourceRunId', 'expectedSourceArtifactId', 'expectedSourceArtifactHash', 'expectedEvidenceDigest'] as const) {
     const v = b[field];
     if (typeof v !== 'string' || v.trim() === '') {
       return { ok: false, error: `${field} must be a non-empty string.` };
@@ -72,12 +82,34 @@ function parseResolveBody(raw: unknown): { ok: true; body: ResolveRequestBody } 
     && (typeof b.ownerInstruction !== 'string' || b.ownerInstruction.length > 600)) {
     return { ok: false, error: 'ownerInstruction must be a string of at most 600 characters (or null).' };
   }
+  let acknowledgement: ResolveRequestBody['acknowledgement'];
+  if (b.acknowledgement !== undefined) {
+    if (!isRecord(b.acknowledgement)) {
+      return { ok: false, error: 'acknowledgement must be an object.' };
+    }
+    const rawAcknowledgement = b.acknowledgement;
+    if (rawAcknowledgement.kind !== 'partial_evidence' || rawAcknowledgement.acknowledged !== true) {
+      return { ok: false, error: 'acknowledgement must explicitly acknowledge partial_evidence.' };
+    }
+    if (rawAcknowledgement.note !== undefined
+      && (typeof rawAcknowledgement.note !== 'string' || rawAcknowledgement.note.length > 600)) {
+      return { ok: false, error: 'acknowledgement.note must be at most 600 characters.' };
+    }
+    const note = typeof rawAcknowledgement.note === 'string' ? rawAcknowledgement.note.trim() : '';
+    acknowledgement = {
+      kind: 'partial_evidence',
+      acknowledged: true,
+      ...(note !== '' ? { note } : {}),
+    };
+  }
   const {reviewKey} = b;
   const {expectedSourceRunId} = b;
   const {expectedSourceArtifactId} = b;
   const {expectedSourceArtifactHash} = b;
+  const {expectedEvidenceDigest} = b;
   if (typeof reviewKey !== 'string' || typeof expectedSourceRunId !== 'string'
-    || typeof expectedSourceArtifactId !== 'string' || typeof expectedSourceArtifactHash !== 'string') {
+    || typeof expectedSourceArtifactId !== 'string' || typeof expectedSourceArtifactHash !== 'string'
+    || typeof expectedEvidenceDigest !== 'string') {
     return { ok: false, error: 'unreachable: string fields validated above' };
   }
   return {
@@ -89,6 +121,8 @@ function parseResolveBody(raw: unknown): { ok: true; body: ResolveRequestBody } 
     expectedSourceRunId,
     expectedSourceArtifactId,
     expectedSourceArtifactHash,
+    expectedEvidenceDigest,
+      ...(acknowledgement !== undefined ? { acknowledgement } : {}),
       ...(typeof b.ownerInstruction === 'string' ? { ownerInstruction: b.ownerInstruction } : {}),
     },
   };
@@ -129,6 +163,11 @@ function sendOutcome(res: ServerResponse, outcome: OwnerResolutionOutcome): void
     case 'stale_owner_decision':
       sendError(res, 409, 'stale_owner_decision', 'The durable decision facts changed since this item was rendered. The decision was NOT applied.', {
         nextAction: 'Refresh the governance focus and decide again on the current version.',
+      });
+      return;
+    case 'evidence_acknowledgement_required':
+      sendError(res, 409, 'evidence_acknowledgement_required', 'Accepting partial evidence requires explicit acknowledgement.', {
+        nextAction: 'Review the missing evidence, acknowledge it explicitly, then submit again.',
       });
       return;
     case 'already_resolved':
@@ -192,6 +231,12 @@ export async function handleOwnerDecisionsRoute(
   if (resolveMatch) {
     if (method !== 'POST') {
       sendMethodNotAllowed(res);
+      return;
+    }
+    if (!ownerIdentity) {
+      sendError(res, 403, 'owner_authentication_required', 'Owner decisions require an authenticated Console and a configured Owner identity.', {
+        nextAction: 'Configure the Console token and Owner identity, then retry from Governance Focus.',
+      });
       return;
     }
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- match group is always present

@@ -311,6 +311,46 @@ describe('planConsoleLaunch — reused (healthy console on preferred port)', () 
     }
   });
 
+  it('does not reuse a verified no-auth Console when a token is configured', async () => {
+    const server = http.createServer((_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const result = await planConsoleLaunch({
+        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
+        host: '127.0.0.1', token: 'configured-token',
+      });
+      expect(result.status).toBe('refused');
+      expect(result.reason).toBe('console_authentication_mode_mismatch');
+    } finally {
+      await new Promise<void>((resolve) => server.close(resolve));
+    }
+  });
+
+  it('fails loud when the configured token is rejected by an existing Console', async () => {
+    const server = http.createServer((_req, res) => {
+      res.statusCode = 401;
+      res.end('unauthorized');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const result = await planConsoleLaunch({
+        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
+        host: '127.0.0.1', token: 'wrong-token',
+      });
+      expect(result.status).toBe('refused');
+      expect(result.reason).toBe('console_authentication_failed');
+    } finally {
+      await new Promise<void>((resolve) => server.close(resolve));
+    }
+  });
+
   it('does NOT classify a non-console responder as reused', async () => {
     // Server returns 200 on any path but with a non-OK status code from /api/health
     const server = http.createServer((req, res) => {
@@ -384,6 +424,22 @@ describe('probeConsoleHealth', () => {
       expect(h.healthy).toBe(true);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('returns the verified authentication mode from the health contract', async () => {
+    const server = http.createServer((_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'authenticated' } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port, token: 'token' });
+      expect(h).toMatchObject({ healthy: true, authenticationMode: 'authenticated' });
+    } finally {
+      await new Promise<void>((resolve) => server.close(resolve));
     }
   });
 
@@ -491,8 +547,11 @@ describe('CLI command wiring (pd console open)', () => {
   let cliPath: string;
   let workspaceRoot: string;
   let tmp: string;
+  let originalConsoleToken: string | undefined;
 
   beforeEach(() => {
+    originalConsoleToken = process.env.PD_CONSOLE_TOKEN;
+    delete process.env.PD_CONSOLE_TOKEN;
     workspaceRoot = path.resolve(__dirname, '../../../..');
     cliPath = path.join(workspaceRoot, 'packages', 'pd-cli', 'dist', 'index.js');
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-console-open-test-'));
@@ -520,7 +579,7 @@ describe('CLI command wiring (pd console open)', () => {
       const server = http.createServer((req, res) => {
         if (req.url === '/api/health') {
           res.writeHead(200, {'Content-Type': 'application/json'});
-          res.end(JSON.stringify({success: true}));
+          res.end(JSON.stringify({success: true, data: {authenticationMode: 'no_auth'}}));
         } else {
           res.writeHead(404);
           res.end();
@@ -533,6 +592,8 @@ describe('CLI command wiring (pd console open)', () => {
   });
 
   afterEach(() => {
+    if (originalConsoleToken === undefined) delete process.env.PD_CONSOLE_TOKEN;
+    else process.env.PD_CONSOLE_TOKEN = originalConsoleToken;
     delete process.env.__PD_CONSOLE_TEST_FAKE_HOME;
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
   });
@@ -598,13 +659,32 @@ describe('CLI command wiring (pd console open)', () => {
     }
   }, 20_000);
 
+  it('kills and refuses a fresh Console whose reported authentication mode mismatches the configured token', async () => {
+    process.env.PD_CONSOLE_TOKEN = 'configured-token';
+    let run: CliJsonRun | undefined;
+    try {
+      run = await runPdUntilJson(
+        ['console', 'open', '--workspace', tmp, '--port', '49391', '--json', '--no-browser'],
+        workspaceRoot,
+      );
+      if (!isRecord(run.parsed)) throw new Error('CLI JSON output was not an object');
+      expect(run.parsed.status).toBe('refused');
+      expect(run.parsed.reason).toBe('console_authentication_mode_mismatch');
+      expect(run.parsed).not.toHaveProperty('serverPid');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(await isPortInUse('127.0.0.1', 49391)).toBe(false);
+    } finally {
+      await teardownCliTree(run);
+    }
+  }, 20_000);
+
   it('pd console open --json reused path does NOT include serverPid (PRI-526)', async () => {
     // Stand up a fake healthy console in-process, then point the CLI at its
     // port: planConsoleLaunch probes /api/health → 200 → reused, no spawn.
     const server = http.createServer((req, res) => {
       if (req.url === '/api/health') {
         res.statusCode = 200;
-        res.end(JSON.stringify({ success: true }));
+        res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
         return;
       }
       res.statusCode = 404;
@@ -622,6 +702,7 @@ describe('CLI command wiring (pd console open)', () => {
       if (!isRecord(run.parsed)) throw new Error('CLI JSON output was not an object');
       expect(run.parsed.status).toBe('reused');
       expect(run.parsed.reused).toBe(true);
+      expect(run.parsed.authenticationMode).toBe('no_auth');
       expect(run.parsed).not.toHaveProperty('serverPid');
     } finally {
       await teardownCliTree(run);

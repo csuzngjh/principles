@@ -38,7 +38,15 @@ export default defineConfig({
   webServer: {
     command: 'node scripts/e2e-start.mjs',
     url: `${e2eBaseUrl}/api/health`,
-    env: { PD_CONSOLE_E2E_PORT: e2ePort },
+    // Keep the governance fixture independent from the developer machine.
+    // This suite intentionally exercises "identity configured + no-auth";
+    // without explicit values local Owner env leaked in while clean CI had no
+    // identity and rendered a different (correct, but unintended) recovery.
+    env: {
+      PD_CONSOLE_E2E_PORT: e2ePort,
+      PD_OWNER_ID: 'e2e-owner',
+      PD_OWNER_CREDENTIAL_ID: 'e2e-credential',
+    },
     reuseExistingServer: false,
     timeout: 60000,
     cwd: __dirname,

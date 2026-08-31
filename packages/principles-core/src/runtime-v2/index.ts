@@ -1262,9 +1262,23 @@ export type {
   ReviewKeyFacts,
   OwnerOverrideResumePlan,
 } from './internalization/owner-review.js';
+export { buildOwnerDecisionReview } from './internalization/owner-decision-review.js';
+export type {
+  BoundEvidenceManifestV1,
+  DeterministicCheckStatus,
+  EvidenceClass,
+  EvaluatorDecisionBrief,
+  OwnerDecisionBrief,
+  OwnerDecisionReviewSnapshot,
+  OwnerDecisionReviewStore,
+  OwnerEvidenceItem,
+  ReviewEvidenceCompleteness,
+  RolloutDecisionBrief,
+} from './internalization/owner-decision-review.js';
 export {
   applyOwnerResolution,
   factStoreFromStateManager,
+  reviewStoreFromStateManager,
   sanitizeOwnerInstruction,
 } from './internalization/owner-resolution-service.js';
 export type {

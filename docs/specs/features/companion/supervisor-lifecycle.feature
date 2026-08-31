@@ -1,8 +1,11 @@
 @companion @supervisor
 Feature: Companion 控制台服务监管生命周期
 
-  对应 PRI-526 锁定决策:companion 通过 `pd console open --json --no-browser --no-auth`
-  拉起(或附着)控制台服务,并在异常时自动重启。行为契约覆盖:
+  对应 PRI-526/PRI-631 锁定决策:companion 通过 `pd console open --json --no-browser`
+  拉起(或附着)控制台服务；仅在没有有效 PD_CONSOLE_TOKEN 时追加 `--no-auth`。
+  token 只由子进程环境继承，不进入 argv、日志或 launch JSON。配置 token 时，
+  只有 health 明确报告 authenticated 且 token 验证成功的实例才允许复用。
+  行为契约覆盖:
   - fresh spawn(有 serverPid)→ managed 模式;复用已有实例 → attached 模式且不拥有进程
   - 快速连续崩溃按 1s/2s/4s 退避重启,超过 3 次进入 server_crash_loop 降级
   - 稳定运行(≥60s)后崩溃视为新一轮故障,重新计数

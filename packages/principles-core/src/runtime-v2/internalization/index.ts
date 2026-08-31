@@ -264,6 +264,11 @@ export {
 // Types/classes remain in evaluator-output.ts, evaluator-runner.ts, and evaluator-prompt-builder.ts.
 // Import directly from those source files if needed (not from this barrel).
 
+// PRI-634 A2 (authority migration): code-bearing Artificer artifact 判定 —
+// deterministic gate 的执行 authority（durable artifact，非 LLM output shape）。
+export type { ArtificerCodeBearingAssessment } from './artificer-code-bearing.js';
+export { assessArtificerCodeBearing } from './artificer-code-bearing.js';
+
 // ── Rollout Reviewer Runner (PRI-RR) — MVP-Quiet: de-surfaced from internal barrel (PRI-458) ──
 // Types/classes remain in rollout-reviewer-output.ts, rollout-reviewer-runner.ts, and rollout-reviewer-prompt-builder.ts.
 // Import directly from those source files if needed (not from this barrel).

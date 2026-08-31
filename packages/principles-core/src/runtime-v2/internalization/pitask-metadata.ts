@@ -32,6 +32,7 @@ import type {
   ArtifactRef,
 } from './peer-runner-contracts.js';
 import { isInternalizationChannel, isRunnerKind } from './peer-runner-contracts.js';
+import type { BoundEvidenceManifestV1 } from './owner-decision-review.js';
 
 /** Namespace key used inside diagnosticJson to isolate PI metadata. */
 export const PI_METADATA_KEY = 'pi_metadata' as const;
@@ -81,6 +82,13 @@ export interface HumanReviewContext {
   readonly sourceArtifactHash?: string;
   /** 进入 needs_human_review 时的 revisionEpoch (= 当时 revisionCount) */
   readonly revisionEpoch: number;
+  /**
+   * PRI-634: 规范 reasonCode 之外的可诊断细节（面向 Owner 展示）。
+   * 例：dispatch 被拒的具体 outcome.reason、候选解析被内容契约筛掉的产物清单。
+   * 不参与 buildOwnerReviewKey —— 后者只绑定 7 个稳定事实，新增本字段不影响
+   * 已有 pending resolution 的匹配。
+   */
+  readonly detail?: string;
   readonly createdAt: string;
 }
 
@@ -124,6 +132,14 @@ export interface OwnerResolutionRecord {
   readonly targetRevisionCauseId?: string;
   /** 仅 revise_once: 有界、已消毒的短指导 (仅作 revision feedback) */
   readonly ownerInstruction?: string;
+  /** v1.2 evidence integrity receipt; absent only on pre-v1.2 legacy records. */
+  readonly evidenceDigest?: string;
+  readonly evidenceManifest?: BoundEvidenceManifestV1;
+  readonly evidenceAcknowledgement?: {
+    readonly kind: 'partial_evidence';
+    readonly acknowledged: true;
+    readonly note?: string;
+  };
 }
 
 /**
@@ -408,6 +424,11 @@ function isValidHumanReviewContext(value: unknown): value is HumanReviewContext 
   if (c.sourceArtifactHash !== undefined && !isNonEmptyString(c.sourceArtifactHash)) return false;
   if (typeof c.revisionEpoch !== 'number' || !Number.isInteger(c.revisionEpoch) || c.revisionEpoch < 0) return false;
   if (!isNonEmptyString(c.createdAt)) return false;
+  // PRI-634: detail 是 trust boundary 内的可选字段 —— 一旦存在必须是 non-empty
+  // string。省略该检查会让 DB 中的 { detail: {...} } / 数组 / 数字静默穿过
+  // 校验,hydrate 成静态类型声称 detail?: string 的对象,下游 .trim()/.slice()
+  // 直接打崩展示路径 (rc-1/rc-2 runtime validation)。
+  if (c.detail !== undefined && !isNonEmptyString(c.detail)) return false;
   return true;
 }
 
@@ -440,10 +461,50 @@ function isValidOwnerResolutions(value: unknown): value is readonly OwnerResolut
     if (r.targetTaskId !== undefined && !isNonEmptyString(r.targetTaskId)) return false;
     if (r.targetRevisionCauseId !== undefined && !isNonEmptyString(r.targetRevisionCauseId)) return false;
     if (r.ownerInstruction !== undefined && !isNonEmptyString(r.ownerInstruction)) return false;
+    if (r.evidenceDigest !== undefined && !isNonEmptyString(r.evidenceDigest)) return false;
+    // Manifest validation is declared below with the other v1.2 evidence guards.
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    if (r.evidenceManifest !== undefined && !isValidEvidenceManifest(r.evidenceManifest)) return false;
+    if (r.evidenceAcknowledgement !== undefined) {
+      if (typeof r.evidenceAcknowledgement !== 'object' || r.evidenceAcknowledgement === null
+        || Array.isArray(r.evidenceAcknowledgement)) return false;
+      const acknowledgement = r.evidenceAcknowledgement as Record<string, unknown>;
+      if (acknowledgement.kind !== 'partial_evidence' || acknowledgement.acknowledged !== true) return false;
+      if (acknowledgement.note !== undefined && !isNonEmptyString(acknowledgement.note)) return false;
+    }
     if (seenResolutionIds.has(r.resolutionId) || seenReviewKeys.has(r.reviewKey)) return false;
     seenResolutionIds.add(r.resolutionId);
     seenReviewKeys.add(r.reviewKey);
   }
+  return true;
+}
+
+function isValidEvidenceManifest(value: unknown): value is BoundEvidenceManifestV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const manifest = value as Record<string, unknown>;
+  if (manifest.schemaVersion !== 'owner-review-evidence-v1' || manifest.digestAlgorithm !== 'sha256') return false;
+  if (!Array.isArray(manifest.sources) || manifest.sources.length > 16) return false;
+  for (const source of manifest.sources) {
+    if (typeof source !== 'object' || source === null || Array.isArray(source)) return false;
+    const record = source as Record<string, unknown>;
+    if (!isNonEmptyString(record.role) || !isNonEmptyString(record.stableId) || !isNonEmptyString(record.contentHash)) return false;
+  }
+  if (typeof manifest.semanticFacts !== 'object' || manifest.semanticFacts === null
+    || Array.isArray(manifest.semanticFacts)) return false;
+  const semantic = manifest.semanticFacts as Record<string, unknown>;
+  if (semantic.completeness !== 'complete' && semantic.completeness !== 'partial'
+    && semantic.completeness !== 'insufficient') return false;
+  if (!Array.isArray(semantic.deterministicStatuses) || semantic.deterministicStatuses.length > 16) return false;
+  for (const status of semantic.deterministicStatuses) {
+    if (typeof status !== 'object' || status === null || Array.isArray(status)) return false;
+    const record = status as Record<string, unknown>;
+    if (!isNonEmptyString(record.check)
+      || (record.status !== 'passed' && record.status !== 'failed'
+        && record.status !== 'not_run' && record.status !== 'unavailable')) return false;
+  }
+  if (!Array.isArray(semantic.offeredActions)
+    || !semantic.offeredActions.every((action) => typeof action === 'string' && OWNER_RESOLUTION_ACTIONS.has(action))) return false;
+  if (!isNonEmptyString(semantic.acceptRequirement) || !isNonEmptyString(semantic.briefSemanticHash)) return false;
   return true;
 }
 

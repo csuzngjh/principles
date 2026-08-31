@@ -147,6 +147,8 @@
         },
         "reason": {
           "ownerIdentityMissing": "尚未配置拥有者身份。RuleCode 治理决策入口被阻塞，需要设置 PD_OWNER_ID 与 PD_OWNER_CREDENTIAL_ID 并启用控制台令牌认证。",
+          "ownerIdentityInvalid": "拥有者身份配置无效，治理动作已安全阻止。",
+          "ownerAuthenticationMissing": "身份已登记，但控制台尚未启用令牌认证。",
           "approvalPending": "有原则审批正在等待你的决策。",
           "rulecodeOwnerDecision": "有 RuleCode 影子激活正在等待你的晋升决策。",
           "noPendingDecision": "当前没有等待决策的原则审批。",
@@ -161,6 +163,7 @@
         },
         "next": {
           "configureOwner": "配置 PD_OWNER_ID 与 PD_OWNER_CREDENTIAL_ID，并启用控制台令牌认证。",
+          "authenticateConsole": "启用控制台令牌认证后重试。",
           "reviewApprovals": "在下方处理待决策事项。",
           "inspectRecovery": "打开失败任务页面并恢复停滞的工作。",
           "inspectSources": "检查 state.db 与原则账本，然后重启控制台。",
@@ -178,6 +181,12 @@
           "copied": "已复制",
           "docLink": "查看配置说明与验证方法 →"
         },
+        "blocker": {
+          "identityMissing": "登记拥有者身份后即可执行治理动作。",
+          "identityInvalid": "拥有者身份配置无效；请在设置中修正。",
+          "authenticationMissing": "身份已登记；启用控制台令牌认证后治理动作即可执行。",
+          "goSettings": "前往设置"
+        },
         "activity": {
           "needsDecision": "{{count}} 项决策待处理",
           "needsRecovery": "{{count}} 项需要恢复",
@@ -187,7 +196,8 @@
         "readiness": {
           "identity": {
             "configured": "拥有者身份：已配置",
-            "missing": "拥有者身份：未配置"
+            "missing": "拥有者身份：未配置",
+            "invalid": "拥有者身份：配置无效"
           },
           "principleApproval": "原则审批：操作员入口",
           "rulecode": {
@@ -262,6 +272,8 @@
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
       "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。",
       "ownerDecision": {
+        "evidenceUnavailable": "这项裁决仍在等待你，但证据链目前不完整。PD 已暂停所有裁决动作，避免你在看不到正确版本时做决定。",
+        "goRecoverCta": "查看恢复详情",
         "sectionTitle": "需要你决定",
         "empty": "现在没有需要你决定的事项。机器能自己解决的问题不会打扰你。",
         "unavailable": "（暂不可用）",
@@ -272,6 +284,15 @@
         "kindRulecode": "RuleCode 决策",
         "legacyBadge": "历史数据推断",
         "machineRecommendationLabel": "机器建议",
+        "principleLabel": "原则",
+        "implementationLabel": "实现",
+        "concernLabel": "主要顾虑",
+        "partialEvidenceAcknowledgement": "我知道当前证据不完整，仍要接受当前版本。",
+        "evidence": {
+          "complete": "证据完整",
+          "partial": "证据不完整",
+          "insufficient": "证据不足"
+        },
         "rolloutSafetyNote": "接受当前评审并继续。高风险规则仍需经过独立部署审批。",
         "acceptCurrent": "接受当前版本",
         "reviseOnce": "再修改一次",

@@ -43,9 +43,14 @@ export function resolveOwnerConfigSnapshot(
   identity: OwnerIdentityResolved,
 ): OwnerConfigSnapshot {
   const authEnabled = authConfig.isEnabled();
+  const ownerIdentityConfiguration = identity.source === 'invalid_env' || identity.error !== undefined
+    ? 'invalid'
+    : (identity.source === 'env' || identity.source === 'file') && identity.ownerId && identity.credentialId
+      ? 'configured'
+      : 'missing';
   return {
     authenticationMode: authEnabled ? 'authenticated' : 'no_auth',
-    ownerIdentityConfiguration: authEnabled && identity.ownerId && identity.credentialId ? 'configured' : 'missing',
+    ownerIdentityConfiguration,
   };
 }
 

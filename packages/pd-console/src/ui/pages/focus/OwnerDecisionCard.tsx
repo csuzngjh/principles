@@ -18,19 +18,23 @@ type VerdictAction = "accept_current" | "revise_once" | "reject_current";
 export interface OwnerDecisionCardProps {
   item: OwnerDecisionItemData;
   onResolved: () => void;
+  governanceReady?: boolean;
 }
 
-export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) {
+export function OwnerDecisionCard({ item, onResolved, governanceReady = true }: OwnerDecisionCardProps) {
   const { t } = useTranslation();
   const [actionLoading, setActionLoading] = useState<VerdictAction | null>(null);
   const [instruction, setInstruction] = useState("");
   const [showInstruction, setShowInstruction] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [partialEvidenceAcknowledged, setPartialEvidenceAcknowledged] = useState(false);
 
   const isTaskDecision = item.kind === "evaluator_review" || item.kind === "rollout_review";
   const canAccept = item.allowedActions.includes("accept_current");
   const canRevise = item.allowedActions.includes("revise_once");
   const canReject = item.allowedActions.includes("reject_current");
+  const requiresPartialAcknowledgement = item.review?.capability.acceptRequirement.kind === "acknowledge_partial_evidence";
+  const evidenceUnavailable = item.evidenceUnavailableReason !== undefined;
 
   async function handleAction(action: VerdictAction) {
     if (action === "revise_once" && showInstruction && instruction.trim().length === 0) {
@@ -48,6 +52,10 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
         expectedSourceRunId: item.expectedSourceRunId,
         expectedSourceArtifactId: item.expectedSourceArtifactId,
         expectedSourceArtifactHash: item.expectedSourceArtifactHash,
+        expectedEvidenceDigest: item.expectedEvidenceDigest ?? "",
+        ...(action === "accept_current" && requiresPartialAcknowledgement && partialEvidenceAcknowledged
+          ? { acknowledgement: { kind: "partial_evidence" as const, acknowledged: true as const } }
+          : {}),
         ...(action === "revise_once" && instruction.trim().length > 0
           ? { ownerInstruction: instruction.trim() }
           : { ownerInstruction: null }),
@@ -96,6 +104,36 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
 
       <p className="text-ink-2 text-[13px] leading-relaxed mb-2">{item.summary}</p>
 
+      {item.review?.brief.kind === "evaluator" && (
+        <div className="mb-3 grid gap-2 text-[12.5px] leading-relaxed">
+          {item.review.brief.principle?.statement && (
+            <p><span className="font-medium text-ink">{t("pages.focus.ownerDecision.principleLabel")}</span>{" "}{item.review.brief.principle.statement}</p>
+          )}
+          {item.review.brief.implementation?.summary && (
+            <p><span className="font-medium text-ink">{t("pages.focus.ownerDecision.implementationLabel")}</span>{" "}{item.review.brief.implementation.summary}</p>
+          )}
+          {(item.review.brief.concerns?.length ?? 0) > 0 && (
+            <p className="text-amber"><span className="font-medium">{t("pages.focus.ownerDecision.concernLabel")}</span>{" "}{item.review.brief.concerns?.[0]}</p>
+          )}
+        </div>
+      )}
+      {item.review?.brief.kind === "rollout" && item.review.brief.summary && (
+        <p className="mb-3 text-[12.5px] text-ink-2">{item.review.brief.summary}</p>
+      )}
+
+      {item.review && (
+        <div className="mb-2 flex flex-wrap gap-2 text-[10.5px] font-mono uppercase tracking-[0.06em]">
+          <span className="rounded-[2px] border border-line px-2 py-1 text-ink-3">
+            {t(`pages.focus.ownerDecision.evidence.${item.review.evidence.completeness}`)}
+          </span>
+          {item.review.evidence.deterministicChecks.map(check => (
+            <span key={check.check} className="rounded-[2px] border border-line px-2 py-1 text-ink-3">
+              {check.check}: {check.status}
+            </span>
+          ))}
+        </div>
+      )}
+
       {item.machineRecommendation && (
         <p className="text-ink-3 text-[12.5px] mb-1">
           <span className="font-medium">{t("pages.focus.ownerDecision.machineRecommendationLabel")}</span>{" "}
@@ -107,7 +145,20 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
         <p className="text-ink-4 text-[12px] mb-1">{t("pages.focus.ownerDecision.rolloutSafetyNote")}</p>
       )}
 
-      {isTaskDecision ? (
+      {evidenceUnavailable ? (
+        <div className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 p-3">
+          <p className="text-ink-2 text-[12.5px] leading-relaxed">
+            {t("pages.focus.ownerDecision.evidenceUnavailable")}
+          </p>
+          <Link
+            to="/failed"
+            data-testid={`owner-evidence-recover-${item.taskId}`}
+            className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
+          >
+            {t("pages.focus.ownerDecision.goRecoverCta")}
+          </Link>
+        </div>
+      ) : isTaskDecision ? (
         <>
           {showInstruction && (
             <div className="mt-2 mb-2">
@@ -123,12 +174,24 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
               />
             </div>
           )}
+          {requiresPartialAcknowledgement && (
+            <label className="mt-2 mb-1 flex items-start gap-2 text-[12px] text-ink-3">
+              <input
+                type="checkbox"
+                checked={partialEvidenceAcknowledged}
+                onChange={(event) => setPartialEvidenceAcknowledged(event.target.checked)}
+                data-testid={`owner-partial-evidence-ack-${item.taskId}`}
+                className="mt-0.5"
+              />
+              <span>{t("pages.focus.ownerDecision.partialEvidenceAcknowledgement")}</span>
+            </label>
+          )}
           <div className="flex flex-wrap gap-2 mt-3">
             {canAccept && (
               <button
                 type="button"
                 onClick={() => handleAction("accept_current")}
-                disabled={actionLoading !== null}
+                disabled={!governanceReady || actionLoading !== null || (requiresPartialAcknowledgement && !partialEvidenceAcknowledged)}
                 data-testid={`owner-accept-${item.taskId}`}
                 className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -145,7 +208,7 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
                   }
                   void handleAction("revise_once");
                 }}
-                disabled={actionLoading !== null}
+                disabled={!governanceReady || actionLoading !== null}
                 data-testid={`owner-revise-${item.taskId}`}
                 className="inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -156,7 +219,7 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
               <button
                 type="button"
                 onClick={() => handleAction("reject_current")}
-                disabled={actionLoading !== null}
+                disabled={!governanceReady || actionLoading !== null}
                 data-testid={`owner-reject-${item.taskId}`}
                 className="inline-flex items-center border border-danger text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-danger/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -181,6 +244,12 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
               <div>reasonCode: {item.reasonCode}</div>
               <div>reviewKey: {item.reviewKey.slice(0, 24)}…</div>
               <div>epoch: {item.expectedRevisionEpoch}</div>
+              {item.review?.brief.requiredChanges.map((change, index) => (
+                <div key={`${change}-${index}`}>requiredChange: {change}</div>
+              ))}
+              {item.review?.evidence.items.map((evidence, index) => (
+                <div key={`${evidence.label}-${index}`}>{evidence.evidenceClass}/{evidence.label}: {evidence.value}</div>
+              ))}
             </dl>
           )}
         </>
@@ -193,16 +262,13 @@ export function OwnerDecisionCard({ item, onResolved }: OwnerDecisionCardProps) 
           </p>
           {/* P1 评审修复: 真实 CTA — 不再只渲染提示 (否则出现"有决策但不能处理") */}
           {item.kind === "activation_approval" ? (
-            <button
-              type="button"
-              onClick={() => {
-                document.getElementById("approval-queue-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }}
+            <Link
+              to="/principles"
               data-testid={`go-approvals-${item.taskId}`}
               className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors"
             >
               {t("pages.focus.ownerDecision.goApprovalsCta")}
-            </button>
+            </Link>
           ) : (
             <Link
               to="/activation"
