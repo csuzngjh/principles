@@ -106,6 +106,15 @@ import { BehaviorExamplePackAssembler } from '../../src/core/behavior-example-pa
 // context = undefined, and the rule falls through to allow (v1 zero-change).
 const RULE_CODE = `
 function evaluate(input, helpers) {
+  // PRI-634: v1 action-only risk-path check must dominate any v2 context
+  // (spec §7.4 / PRI-485 v2-combination adversarial case). In golden-trace
+  // replay the sandbox does not recompute workspace.isRiskPath, so the rule
+  // carries the literal risk-path guard itself — same shape as the v1 rule
+  // set (cf. production-host-runtime.test.ts '/etc/passwd' guard).
+  var targetPath = input.action.paramsSummary && input.action.paramsSummary.path;
+  if (targetPath === '/etc/passwd') {
+    return { decision: 'block', matched: true, reason: 'R_RBW_001: risk path blocked' };
+  }
   if (!input.context || input.context.history.status === 'unavailable') {
     return { decision: 'allow', matched: false, reason: 'R_RBW_001: context unavailable, fail-soft' };
   }
@@ -559,14 +568,18 @@ beforeAll(async () => {
   evaluatorRunner = new EvaluatorRunner(
     {
       stateManager, runtimeAdapter: adapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
+    },
+    {
+      ...runnerOpts,
       // PRI-634 A2/R2: code-bearing Artificer output REQUIRES the deterministic
       // gate. Previously this runner had no gateDeps and the approved verdict
       // trusted the scripted adversarialResult.passed=true declaration — the
       // exact LLM-declared-beats-gate hole (chain 48371236). Inject the same
-      // production gateDeps as RuleHostWriter (A1 wiring parity).
+      // production gateDeps as RuleHostWriter (A1 wiring parity). NOTE: the
+      // EvaluatorRunner constructor reads gateDeps from OPTIONS (2nd arg), not
+      // deps (1st arg) — evaluator-runner.ts this.gateDeps = options.gateDeps.
       gateDeps: createProductionGateDeps(),
     },
-    runnerOpts,
   );
 
   // 7. Build approval queue + dispatcher + completion service (real production path)

@@ -36,6 +36,21 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard', () => {
     expect(evaluatorCase()).toContain('gateDeps: createProductionGateDeps()');
   });
 
+  it('gateDeps 位于 OPTIONS 参数（第二个构造参数）而非 deps（第一个）', () => {
+    // EvaluatorRunner 构造: this.gateDeps = options.gateDeps ?? null
+    // (evaluator-runner.ts) —— 注入到第一个参数会被静默丢弃, R2 会以
+    // capability_missing fail-loud。E2E 曾把 gateDeps 错放到 deps (PRI-634
+    // 修复 40d47738 的教训), 本断言锁死正确位置。
+    const slice = evaluatorCase();
+    const optsStart = slice.indexOf('...runnerOptions');
+    expect(optsStart).toBeGreaterThan(-1);
+    const afterOpts = slice.slice(optsStart);
+    expect(afterOpts).toContain('gateDeps: createProductionGateDeps()');
+    // 第一个参数对象里不得出现 gateDeps（防止回退到错位注入）
+    const depsBlock = slice.slice(0, optsStart);
+    expect(depsBlock).not.toContain('gateDeps:');
+  });
+
   it('auto-consumer evaluator case 的事件走 workspace-scoped emitter 而非全局 storeEmitter', () => {
     expect(evaluatorCase()).toContain('eventEmitter: evaluatorEmitter');
     expect(evaluatorCase()).not.toContain('eventEmitter: storeEmitter');
