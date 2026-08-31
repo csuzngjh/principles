@@ -59,11 +59,14 @@ function validRuleContent(): string {
 
 /**
  * PRI-634 真实伪候选：artificer 原始产物被改标 kind='rule' + validated。
- * 关键特征 —— 有 goldenTraceCases，没有 goldenTrace / ruleHostGateDecision /
- * implementationCode。
+ * 关键特征（与 state.db 取证记录一致）—— artificer schema 全字段都在
+ * （implementationCode / goldenTraceCases / affectedTools），**只缺 evaluator
+ * assemble 才会写入的 goldenTrace 与 ruleHostGateDecision**。回归失败原因
+ * 因此精确锁定这两个缺口，而不是顺便靠 implementationCode 缺失把测试打红。
  */
 function pseudoCandidateContent(): string {
   return JSON.stringify({
+    implementationCode: 'export function evaluate() { return { decision: "allow" }; }',
     goldenTraceCases: buildValidTrace().cases,
     affectedTools: ['edit'],
     sourceArtifactId: 'pi-art-artificer-1',
@@ -102,10 +105,9 @@ describe('checkRuleActivationContent (PRI-634)', () => {
     const result = checkRuleActivationContent(pseudoCandidateContent());
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    // 三项全缺 —— 与 PRI-634 实测数据 (state.db 里 repair-r2 的产物) 一致
-    expect(result.missingFields).toContain('implementationCode');
-    expect(result.missingFields).toContain('goldenTrace');
-    expect(result.missingFields).toContain('ruleHostGateDecision:accepted_shadow');
+    // 真实形态（取证记录）: artificer 产物自带 implementationCode,缺口精确
+    // 锁定为 evaluator assemble 未写入的两项 —— goldenTrace 与 gate decision。
+    expect(result.missingFields).toEqual(['goldenTrace', 'ruleHostGateDecision:accepted_shadow']);
   });
 
   it('goldenTrace 结构非法时拒绝 (即使字段存在)', () => {
@@ -170,9 +172,11 @@ describe('与 RuleHostWriter.canActivate 静态检查一致 (防漂移)', () => 
     expect(checkRuleActivationContent(contentJson).ok).toBe(false);
     const result = await writer.canActivate(snapshot(contentJson));
     expect(result.ok).toBe(false);
-    // 静态失败原因应是缺字段类，而非沙箱/门禁执行结果
-    expect(['no_implementation_code', 'content_json_parse_failed', 'gate_decision_not_accepted_shadow'])
-      .toContain(result.ok ? 'unreachable' : result.reason);
+    if (result.ok) return;
+    // 真实形态下 implementationCode 存在,writer 的静态检查走到 goldenTrace
+    // 提取处失败 —— 与 PRI-634 生产事故的原始失败 reason 完全一致,证明
+    // 回归复现的就是那条真实失败链,而非另一个缺字段变体。
+    expect(result.reason).toBe('no_golden_trace');
   });
 
   it('合法产物：契约接受 ⇒ writer 不因缺字段拒绝 (进入沙箱/门禁阶段)', async () => {

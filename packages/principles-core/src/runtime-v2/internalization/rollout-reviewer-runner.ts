@@ -639,8 +639,9 @@ export class RolloutReviewerRunner {
    *
    * PRI-634 (内容契约): kind+validated 不足以证明产物可激活 —— 数据修复或历史
    * 脏数据可以造出 kind='rule'+validated 但内容是 artificer schema 的伪候选
-   * (有 goldenTraceCases,无 goldenTrace / ruleHostGateDecision / implementation
-   * Code)。放行它只会让失败推迟到 RuleHostWriter.canActivate 以 no_golden_trace
+   * (有 implementationCode / goldenTraceCases / affectedTools,无 evaluator
+   * assemble 才写入的 goldenTrace / ruleHostGateDecision)。放行它只会让失败
+   * 推迟到 RuleHostWriter.canActivate 以 no_golden_trace
    * 爆炸,Owner 侧只剩一个无解释力的 rollout_dispatch_refused。因此 rule 候选
    * 在此按 checkRuleActivationContent 过滤,并把被筛掉的产物与缺口字段一并返回,
    * 进入事件与 humanReviewContext.detail。

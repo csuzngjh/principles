@@ -415,6 +415,11 @@ function isValidHumanReviewContext(value: unknown): value is HumanReviewContext 
   if (c.sourceArtifactHash !== undefined && !isNonEmptyString(c.sourceArtifactHash)) return false;
   if (typeof c.revisionEpoch !== 'number' || !Number.isInteger(c.revisionEpoch) || c.revisionEpoch < 0) return false;
   if (!isNonEmptyString(c.createdAt)) return false;
+  // PRI-634: detail 是 trust boundary 内的可选字段 —— 一旦存在必须是 non-empty
+  // string。省略该检查会让 DB 中的 { detail: {...} } / 数组 / 数字静默穿过
+  // 校验,hydrate 成静态类型声称 detail?: string 的对象,下游 .trim()/.slice()
+  // 直接打崩展示路径 (rc-1/rc-2 runtime validation)。
+  if (c.detail !== undefined && !isNonEmptyString(c.detail)) return false;
   return true;
 }
 

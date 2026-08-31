@@ -2,8 +2,9 @@
  * PRI-634 — rollout activation 候选解析的内容契约回归测试（code_tool_hook 渠道）。
  *
  * 复现 PRI-634 取证场景：血缘上存在一个 kind='rule' + validated 的伪候选
- * （artificer 原始产物被数据修复改标），内容是 artificer schema
- * （goldenTraceCases，无 goldenTrace / ruleHostGateDecision / implementationCode）。
+ * （artificer 原始产物被数据修复改标），内容是 artificer schema 全字段
+ * （implementationCode / goldenTraceCases / affectedTools），只缺 evaluator
+ * assemble 才写入的 goldenTrace / ruleHostGateDecision。
  *
  * 修复前：resolver 只按 kind+validated 过滤 → 伪候选被 dispatch →
  *         RuleHostWriter.canActivate 以 no_golden_trace 拒绝 →
@@ -80,8 +81,15 @@ function validGoldenTrace() {
   return built.trace;
 }
 
+/**
+ * 伪候选 (PRI-634 实测形态,与 state.db 取证记录一致): artificer 产物被改标
+ * rule + validated。artificer schema 全字段都在 —— implementationCode /
+ * goldenTraceCases / affectedTools;缺的是 evaluator assemble 才写入的
+ * goldenTrace 与 ruleHostGateDecision。
+ */
 function pseudoCandidateContentJson(): string {
   return JSON.stringify({
+    implementationCode: 'export function evaluate() { return { decision: "allow" }; }',
     goldenTraceCases: validGoldenTrace().cases,
     affectedTools: ['edit'],
     sourceArtifactId: 'pi-art-artificer-pri634',
@@ -222,12 +230,18 @@ describe('PRI-634: rollout activation 候选内容契约', () => {
     const ctx = readHumanReviewContext(stateManager);
     expect(ctx?.reasonCode).toBe('rollout_activation_candidate_unresolved');
     expect(ctx?.detail).toContain(PSEUDO_CANDIDATE_ID);
+    // 缺口精确锁定为真实形态的两项 —— implementationCode 存在,不在缺口里
     expect(ctx?.detail).toContain('goldenTrace');
     expect(ctx?.detail).toContain('ruleHostGateDecision:accepted_shadow');
+    expect(ctx?.detail).not.toContain('implementationCode');
 
     const unresolved = emittedEvents(deps).find((e) => e.eventType === 'rollout_activation_candidate_unresolved');
     expect(unresolved).toBeDefined();
     expect(unresolved?.payload.reason).toBe('no_content_valid_candidate_in_lineage');
+    expect(unresolved?.payload.rejectedCandidates).toEqual([{
+      artifactId: PSEUDO_CANDIDATE_ID,
+      missingFields: ['goldenTrace', 'ruleHostGateDecision:accepted_shadow'],
+    }]);
   });
 
   it('合法 evaluator assemble 产物 → 正常 dispatch (修复不是一刀切拒所有)', async () => {
