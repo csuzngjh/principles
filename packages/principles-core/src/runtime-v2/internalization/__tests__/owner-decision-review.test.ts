@@ -78,6 +78,7 @@ function artifact(input: {
 
 function makeStore(options: {
   adversarialPassed?: boolean;
+  codeBearingArtificer?: boolean;
   includeScribe?: boolean;
   concern?: string;
   evaluatorExtra?: Record<string, unknown>;
@@ -106,6 +107,29 @@ function makeStore(options: {
       },
     }}),
     artifact({ artifactId: ARTIFICER_ARTIFACT_ID, sourceTaskId: ARTIFICER_TASK_ID, lineageArtifactIds: [SCRIBE_ARTIFACT_ID], content: {
+      ...(options.codeBearingArtificer
+        ? {
+            taskId: ARTIFICER_TASK_ID,
+            implementationCode: 'export function confirmTarget() { return true; }',
+            goldenTraceCases: [
+              {
+                caseId: 'allows-confirmed-target',
+                kind: 'positive',
+                toolName: 'write_file',
+                params: { confirmed: true },
+                expectedDecision: 'allow',
+              },
+              {
+                caseId: 'blocks-unconfirmed-target',
+                kind: 'negative',
+                toolName: 'write_file',
+                params: { confirmed: false },
+                expectedDecision: 'block',
+              },
+            ],
+            generatedAt: '2026-08-31T00:00:00.000Z',
+          }
+        : {}),
       sourceScribeArtifactId: SCRIBE_ARTIFACT_ID,
       sourceTrace: { scribeArtifactId: SCRIBE_ARTIFACT_ID },
       implementationSummary: 'Adds a confirmation gate before destructive writes.',
@@ -192,9 +216,9 @@ describe('Owner Decision Review Snapshot', () => {
     });
   });
 
-  it('forbids accept when a V2 evaluator did not run the adversarial hard gate', async () => {
+  it('forbids accept when a validated code-bearing Artificer output has not passed the hard gate', async () => {
     const snapshot = await buildOwnerDecisionReview(
-      makeStore({ evaluatorExtra: { painCoverage: {} } }),
+      makeStore({ codeBearingArtificer: true }),
       EVALUATOR_ID,
     );
 
@@ -206,7 +230,7 @@ describe('Owner Decision Review Snapshot', () => {
     });
   });
 
-  it('keeps V1 compatibility when no V2 hard-gate fields exist', async () => {
+  it('keeps legacy compatibility when the Artificer artifact is not a validated code-bearing output', async () => {
     const snapshot = await buildOwnerDecisionReview(makeStore(), EVALUATOR_ID);
     expect(snapshot?.capability.finalOfferedActions).toContain('accept_current');
   });

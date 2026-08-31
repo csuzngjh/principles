@@ -8,7 +8,7 @@ import {
   type OwnerDecisionFactStore,
 } from './owner-review.js';
 import type { OwnerResolutionAction } from './pitask-metadata.js';
-import { isEvaluatorOutputV2 } from './evaluator-output.js';
+import { DefaultArtificerValidator } from './artificer-output.js';
 
 const MAX_TEXT = 600;
 const MAX_ITEMS = 3;
@@ -277,6 +277,15 @@ export async function buildOwnerDecisionReview(
     'scribe',
     declaredLineageId(artificerContent, 'sourceScribeArtifactId', 'scribeArtifactId'),
   );
+  const codeBearingArtificer = facts.task.taskKind === 'evaluator'
+    && artificer !== null
+    && artificerContent !== null
+    && typeof artificer.sourceTaskId === 'string'
+    && (await new DefaultArtificerValidator().validate(
+      artificerContent,
+      artificer.sourceTaskId,
+      scribe?.artifactId,
+    )).valid;
 
   const checkStatus = deterministicStatus(decisionContent);
   const deterministicChecks = [{ check: 'adversarial_hard_gate', status: checkStatus }] as const;
@@ -339,11 +348,10 @@ export async function buildOwnerDecisionReview(
   const baseAllowedActions = [...capability.allowedActions];
   let finalOfferedActions = [...baseAllowedActions];
   let acceptRequirement: OwnerDecisionReviewSnapshot['capability']['acceptRequirement'] = { kind: 'none' };
-  const v2HardGateRequired = facts.task.taskKind === 'evaluator' && isEvaluatorOutputV2(decisionContent);
   if (checkStatus === 'failed') {
     finalOfferedActions = finalOfferedActions.filter((action) => action !== 'accept_current');
     acceptRequirement = { kind: 'forbidden', reasonCode: 'adversarial_hard_gate_failed' };
-  } else if (v2HardGateRequired && checkStatus !== 'passed') {
+  } else if (codeBearingArtificer && checkStatus !== 'passed') {
     finalOfferedActions = finalOfferedActions.filter((action) => action !== 'accept_current');
     acceptRequirement = { kind: 'forbidden', reasonCode: 'adversarial_hard_gate_not_passed' };
   } else if (completeness === 'insufficient') {

@@ -12,7 +12,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { SqliteConnection } from '../../sqlite-connection.js';
 import { SqliteTaskStore } from '../sqlite-task-store.js';
-import type { TaskRecord } from '../../../task-status.js';
 
 describe('SqliteTaskStore.updateTaskIfDiagnosticJsonUnchanged (PRI-629 CAS)', () => {
   let dir: string;
@@ -82,5 +81,48 @@ describe('SqliteTaskStore.updateTaskIfDiagnosticJsonUnchanged (PRI-629 CAS)', ()
   it('returns null for a missing task (no throw, no partial state)', async () => {
     const result = await store.updateTaskIfDiagnosticJsonUnchanged('task-does-not-exist', null, { status: 'pending' });
     expect(result).toBeNull();
+  });
+
+  it('does not write when bound evidence content or lineage changed after review', async () => {
+    const taskId = await createTask('{"pi_metadata":{"v":1}}');
+    const db = connection.getDb();
+    db.prepare(`
+      INSERT INTO pi_artifacts (
+        artifact_id, artifact_kind, source_task_id, lineage_artifact_ids,
+        validation_status, content_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'artifact-bound', 'principle', taskId, '["scribe-a"]',
+      'pending', '{"summary":"Evidence A"}', '2026-08-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z',
+    );
+
+    const expectedEvidence = [{
+      artifactId: 'artifact-bound',
+      sourceTaskId: taskId,
+      lineageArtifactIdsJson: '["scribe-a"]',
+      contentJson: '{"summary":"Evidence A"}',
+    }];
+    db.prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+      .run('{"summary":"Evidence B"}', 'artifact-bound');
+
+    const contentRace = await store.updateTaskIfDiagnosticJsonAndArtifactsUnchanged({
+      taskId,
+      expectedDiagnosticJson: '{"pi_metadata":{"v":1}}',
+      artifacts: expectedEvidence,
+      patch: { status: 'pending' },
+    });
+    expect(contentRace).toBeNull();
+    expect((await store.getTask(taskId))?.status).toBe('needs_human_review');
+
+    db.prepare('UPDATE pi_artifacts SET content_json = ?, lineage_artifact_ids = ? WHERE artifact_id = ?')
+      .run('{"summary":"Evidence A"}', '["scribe-b"]', 'artifact-bound');
+    const lineageRace = await store.updateTaskIfDiagnosticJsonAndArtifactsUnchanged({
+      taskId,
+      expectedDiagnosticJson: '{"pi_metadata":{"v":1}}',
+      artifacts: expectedEvidence,
+      patch: { status: 'pending' },
+    });
+    expect(lineageRace).toBeNull();
+    expect((await store.getTask(taskId))?.status).toBe('needs_human_review');
   });
 });

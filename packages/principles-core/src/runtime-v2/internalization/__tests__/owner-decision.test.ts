@@ -193,6 +193,26 @@ function makeInMemoryStateManager(tasks: TaskRecord[], artifacts: MemoryPIArtifa
     async updateTaskIfDiagnosticJsonUnchanged(id: string, expected: string | null, patch: Parameters<MemoryTaskStore['updateTask']>[1]) {
       return store.updateTaskIfDiagnosticJsonUnchanged(id, expected, patch);
     },
+    async updateTaskIfDiagnosticJsonAndArtifactsUnchanged(input: {
+      taskId: string;
+      expectedDiagnosticJson: string | null;
+      artifacts: readonly {
+        artifactId: string;
+        sourceTaskId: string;
+        lineageArtifactIdsJson: string;
+        contentJson: string;
+      }[],
+      patch: Parameters<MemoryTaskStore['updateTask']>[1];
+    }) {
+      for (const bound of input.artifacts) {
+        const current = await artifacts.getArtifactById(bound.artifactId);
+        if (!current
+          || current.sourceTaskId !== bound.sourceTaskId
+          || JSON.stringify(current.lineageArtifactIds) !== bound.lineageArtifactIdsJson
+          || current.contentJson !== bound.contentJson) return null;
+      }
+      return store.updateTaskIfDiagnosticJsonUnchanged(input.taskId, input.expectedDiagnosticJson, input.patch);
+    },
     async markTaskSucceeded(id: string, resultRef: string) { await store.updateTask(id, { status: 'succeeded', resultRef }); },
   };
   return sm;
@@ -606,6 +626,39 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     });
     expect(outcome.status).toBe('stale_owner_decision');
     const unchanged = hydratePITaskRecord((await originalGetTask(EVAL_ID))!);
+    expect(unchanged?.status).toBe('needs_human_review');
+    expect(unchanged?.ownerResolutions).toBeUndefined();
+  });
+
+  it('does not persist when evidence changes after the final review rebuild but before the task mutation', async () => {
+    const { sm, deps, req } = await setup();
+    const rendered = await buildOwnerDecisionReview(reviewStoreFromStateManager(sm as never), EVAL_ID);
+    expect(rendered).not.toBeNull();
+
+    const originalAtomicUpdate = sm.updateTaskIfDiagnosticJsonAndArtifactsUnchanged.bind(sm);
+    let intercepted = false;
+    sm.updateTaskIfDiagnosticJsonAndArtifactsUnchanged = async (...args) => {
+      if (!intercepted) {
+        intercepted = true;
+        const decision = await sm.piArtifactStore.getArtifactById(ARTIFACT_ID);
+        await sm.piArtifactStore.upsertArtifact({
+          ...decision!,
+          contentJson: JSON.stringify({ changedAfterFinalReview: true }),
+          updatedAt: '2026-08-30T00:02:00.000Z',
+        });
+      }
+      return originalAtomicUpdate(...args);
+    };
+
+    const outcome = await applyOwnerResolution(deps, {
+      taskId: EVAL_ID,
+      request: req('reject_current', { expectedEvidenceDigest: rendered!.evidence.digest }),
+      identity,
+    });
+
+    expect(intercepted).toBe(true);
+    expect(outcome.status).toBe('stale_owner_decision');
+    const unchanged = hydratePITaskRecord((await sm.getTask(EVAL_ID))!);
     expect(unchanged?.status).toBe('needs_human_review');
     expect(unchanged?.ownerResolutions).toBeUndefined();
   });

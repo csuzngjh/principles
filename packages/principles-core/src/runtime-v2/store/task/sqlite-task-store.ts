@@ -13,6 +13,20 @@ import type { FailedTaskSummary, FailedTaskFilter, FailedTaskDetail } from './ta
 import type { RunRecord } from '../run/run-store.js';
 import { SqliteRunStore } from '../run/sqlite-run-store.js';
 
+export interface ArtifactContentPrecondition {
+  readonly artifactId: string;
+  readonly sourceTaskId: string;
+  readonly lineageArtifactIdsJson: string;
+  readonly contentJson: string;
+}
+
+export interface TaskArtifactCasInput {
+  readonly taskId: string;
+  readonly expectedDiagnosticJson: string | null;
+  readonly artifacts: readonly ArtifactContentPrecondition[];
+  readonly patch: TaskStoreUpdatePatch;
+}
+
 // ── Field-level runtime readers for failed-task summary rows (rc-1, rc-3) ────
 //
 // These readers enforce that DB row fields have the expected runtime shape
@@ -154,6 +168,29 @@ export class SqliteTaskStore implements TaskStore {
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
   ): Promise<TaskRecord | null> {
+    return this.updateTaskWithPreconditions({
+      taskId,
+      expectedDiagnosticJson,
+      artifacts: [],
+      patch,
+    });
+  }
+
+  /**
+   * Owner-decision CAS: task metadata and every evidence row used to build the
+   * review must still be byte-equal in the same SQL statement that records the
+   * decision. This closes the final evidence check-to-write window.
+   */
+  async updateTaskIfDiagnosticJsonAndArtifactsUnchanged(
+    input: TaskArtifactCasInput,
+  ): Promise<TaskRecord | null> {
+    return this.updateTaskWithPreconditions(input);
+  }
+
+  private async updateTaskWithPreconditions(
+    input: TaskArtifactCasInput,
+  ): Promise<TaskRecord | null> {
+    const { taskId, expectedDiagnosticJson, artifacts, patch } = input;
     const db = this.connection.getDb();
     const now = patch.updatedAt ?? new Date().toISOString();
     const sets: string[] = ['updated_at = ?'];
@@ -170,11 +207,28 @@ export class SqliteTaskStore implements TaskStore {
     if (patch.diagnosticJson !== undefined) { sets.push('diagnostic_json = ?'); values.push(patch.diagnosticJson); }
 
     values.push(taskId, expectedDiagnosticJson);
+    const artifactConditions = artifacts.map(() => `EXISTS (
+      SELECT 1 FROM pi_artifacts
+      WHERE artifact_id = ?
+        AND source_task_id IS ?
+        AND lineage_artifact_ids IS ?
+        AND content_json IS ?
+    )`);
+    for (const artifact of artifacts) {
+      values.push(
+        artifact.artifactId,
+        artifact.sourceTaskId,
+        artifact.lineageArtifactIdsJson,
+        artifact.contentJson,
+      );
+    }
 
     // Single conditional mutation: `IS` gives NULL-safe equality, so the
     // precondition covers both a NULL column and a byte-equal JSON string.
     const result = db
-      .prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE task_id = ? AND diagnostic_json IS ?`)
+      .prepare(`UPDATE tasks SET ${sets.join(', ')}
+        WHERE task_id = ? AND diagnostic_json IS ?
+        ${artifactConditions.map((condition) => `AND ${condition}`).join('\n')}`)
       .run(...values);
 
     if (result.changes === 0) {

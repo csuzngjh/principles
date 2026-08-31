@@ -26,7 +26,7 @@ import type { RecoverySweep, RecoveryResult } from './lifecycle/recovery-sweep.j
 import type { PDErrorCategory } from '../error-categories.js';
 import type { TaskRecord } from '../task-status.js';
 import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
-import { SqliteTaskStore } from './task/sqlite-task-store.js';
+import { SqliteTaskStore, type TaskArtifactCasInput } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { SqliteConnection as SqliteConnectionClass } from './sqlite-connection.js';
 import { DefaultLeaseManager } from './lifecycle/lease-manager.js';
@@ -71,7 +71,7 @@ export interface RuntimeStateManagerOptions {
 
 export class RuntimeStateManager {
   private _connection!: SqliteConnection;
-  private _taskStore!: TaskStore;
+  private _taskStore!: SqliteTaskStore;
   private _runStore!: RunStore;
   private _commitStore!: CommitStore;
   private _candidateStore!: CandidateStore;
@@ -471,6 +471,17 @@ export class RuntimeStateManager {
   ): Promise<TaskRecord | null> {
     this.assertInitialized();
     return this._taskStore.updateTaskIfDiagnosticJsonUnchanged(taskId, expectedDiagnosticJson, patch);
+  }
+
+  /**
+   * Atomically records an Owner decision only while both the task metadata and
+   * every artifact row used by its evidence snapshot remain unchanged.
+   */
+  async updateTaskIfDiagnosticJsonAndArtifactsUnchanged(
+    input: TaskArtifactCasInput,
+  ): Promise<TaskRecord | null> {
+    this.assertInitialized();
+    return this._taskStore.updateTaskIfDiagnosticJsonAndArtifactsUnchanged(input);
   }
 
   getRetryPolicy(): RetryPolicy {

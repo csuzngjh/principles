@@ -29,6 +29,7 @@ import {
 } from './pitask-metadata.js';
 import {
   collectOwnerDecisionFacts,
+  computeArtifactContentHash,
   deriveOwnerDecisionCapability,
   effectiveDecisionFor,
   findOwnerResolutionForCurrentEpoch,
@@ -129,6 +130,31 @@ export function reviewStoreFromStateManager(stateManager: RuntimeStateManager): 
       } : null;
     },
   };
+}
+
+async function captureEvidencePreconditions(
+  stateManager: RuntimeStateManager,
+  review: NonNullable<Awaited<ReturnType<typeof buildOwnerDecisionReview>>>,
+): Promise<readonly {
+  artifactId: string;
+  sourceTaskId: string;
+  lineageArtifactIdsJson: string;
+  contentJson: string;
+}[] | null> {
+  const preconditions = [];
+  for (const source of review.evidence.manifest.sources) {
+    const artifact = await stateManager.piArtifactStore.getArtifactById(source.stableId);
+    if (!artifact || computeArtifactContentHash(artifact.contentJson) !== source.contentHash) {
+      return null;
+    }
+    preconditions.push({
+      artifactId: artifact.artifactId,
+      sourceTaskId: artifact.sourceTaskId,
+      lineageArtifactIdsJson: JSON.stringify(artifact.lineageArtifactIds),
+      contentJson: artifact.contentJson,
+    });
+  }
+  return preconditions;
 }
 
 /** revise_once 可选短指导的有界消毒（SPEC §13）— 仅作 revision feedback，非命令。 */
@@ -411,6 +437,12 @@ export async function applyOwnerResolution(
         return { status: 'evidence_acknowledgement_required' };
       }
     }
+    const evidencePreconditions = writeReview
+      ? await captureEvidencePreconditions(stateManager, writeReview)
+      : null;
+    if (writeReview && evidencePreconditions === null) {
+      return { status: 'stale_owner_decision' };
+    }
 
     // 首次写入
     const reviewKey = capability.reviewKey ?? request.reviewKey;
@@ -453,9 +485,19 @@ export async function applyOwnerResolution(
       const nextMeta = mergePITaskMetadata(piTask, {
         ownerResolutions: [...(piTask.ownerResolutions ?? []), record],
       });
-      const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
-        taskId, raw.diagnosticJson ?? null, { diagnosticJson: createPITaskDiagnosticJson(nextMeta) },
-      );
+      const patch = { diagnosticJson: createPITaskDiagnosticJson(nextMeta) };
+      const updated = evidencePreconditions
+        ? await stateManager.updateTaskIfDiagnosticJsonAndArtifactsUnchanged(
+            {
+              taskId,
+              expectedDiagnosticJson: raw.diagnosticJson ?? null,
+              artifacts: evidencePreconditions,
+              patch,
+            },
+          )
+        : await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+            taskId, raw.diagnosticJson ?? null, patch,
+          );
       if (!updated) continue; // CAS 冲突 → 重读重试
       return await driveReviseOnce({ deps, reopen, taskId, taskWithRecord: updated, record, now });
     }
@@ -464,14 +506,23 @@ export async function applyOwnerResolution(
     const nextMeta = mergePITaskMetadata(piTask, {
       ownerResolutions: [...(piTask.ownerResolutions ?? []), record],
     });
-    const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
-      taskId, raw.diagnosticJson ?? null,
-      {
-        status: 'pending',
-        attemptCount: 0,
-        diagnosticJson: createPITaskDiagnosticJson(nextMeta),
-      },
-    );
+    const patch = {
+      status: 'pending' as const,
+      attemptCount: 0,
+      diagnosticJson: createPITaskDiagnosticJson(nextMeta),
+    };
+    const updated = evidencePreconditions
+      ? await stateManager.updateTaskIfDiagnosticJsonAndArtifactsUnchanged(
+          {
+            taskId,
+            expectedDiagnosticJson: raw.diagnosticJson ?? null,
+            artifacts: evidencePreconditions,
+            patch,
+          },
+        )
+      : await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+          taskId, raw.diagnosticJson ?? null, patch,
+        );
     if (!updated) continue;
     return resolvedOutcome(record, false, now);
   }
