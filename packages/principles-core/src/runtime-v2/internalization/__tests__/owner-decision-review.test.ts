@@ -82,6 +82,7 @@ function makeStore(options: {
   includeScribe?: boolean;
   concern?: string;
   evaluatorExtra?: Record<string, unknown>;
+  artificerExtra?: Record<string, unknown>;
   includeOlderRepair?: boolean;
 } = {}): OwnerDecisionReviewStore {
   const oldArtificerArtifactId = 'pi-art-artificer-review-old-run-1';
@@ -135,6 +136,7 @@ function makeStore(options: {
       implementationSummary: 'Adds a confirmation gate before destructive writes.',
       affectedTools: ['write_file', 'apply_patch'],
       risks: ['May add one interaction before a destructive action.'],
+      ...options.artificerExtra,
     }}),
     artifact({ artifactId: EVALUATOR_ARTIFACT_ID, sourceTaskId: EVALUATOR_ID, lineageArtifactIds: [
       ...(options.includeOlderRepair ? [oldArtificerArtifactId] : []),
@@ -219,6 +221,23 @@ describe('Owner Decision Review Snapshot', () => {
   it('forbids accept when a validated code-bearing Artificer output has not passed the hard gate', async () => {
     const snapshot = await buildOwnerDecisionReview(
       makeStore({ codeBearingArtificer: true }),
+      EVALUATOR_ID,
+    );
+
+    expect(snapshot?.evidence.deterministicChecks[0]?.status).toBe('not_run');
+    expect(snapshot?.capability.finalOfferedActions).not.toContain('accept_current');
+    expect(snapshot?.capability.acceptRequirement).toEqual({
+      kind: 'forbidden',
+      reasonCode: 'adversarial_hard_gate_not_passed',
+    });
+  });
+
+  it('uses the canonical code-bearing assessment when affectedTools is omitted', async () => {
+    const snapshot = await buildOwnerDecisionReview(
+      makeStore({
+        codeBearingArtificer: true,
+        artificerExtra: { affectedTools: undefined },
+      }),
       EVALUATOR_ID,
     );
 

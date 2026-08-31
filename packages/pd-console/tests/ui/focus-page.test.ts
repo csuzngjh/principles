@@ -23,7 +23,7 @@ vi.mock("../../src/ui/api.js", () => ({
   fetchGovernanceQueue: (...args: unknown[]) => mockFetchGovernanceQueue(...args),
   fetchApprovalsGrouped: (...args: unknown[]) => mockFetchApprovalsGrouped(...args),
   // PRI-629: Focus 决策区与 RuleCode 区的 API (默认成功空集,保持既有用例语义)
-  fetchOwnerDecisions: vi.fn().mockResolvedValue({ success: true, data: { items: [], total: 0, filteredSyntheticCount: 0, generatedAt: "2026-08-30T00:00:00.000Z" } }),
+  fetchOwnerDecisions: vi.fn().mockResolvedValue({ success: true, data: { items: [], total: 0, generatedAt: "2026-08-30T00:00:00.000Z" } }),
   fetchAllActivations: vi.fn().mockResolvedValue({ success: true, data: { activations: [], status: "ok" } }),
 }));
 

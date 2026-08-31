@@ -954,7 +954,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // PRI-629: 统一 Owner Inbox — 两种模式都加载 (决策与治理摘要模式正交)
   const [ownerDecisionItems, setOwnerDecisionItems] = useState<OwnerDecisionItemData[]>([]);
   const [ownerDecisionError, setOwnerDecisionError] = useState<string | null>(null);
-  const [filteredSyntheticDecisionCount, setFilteredSyntheticDecisionCount] = useState(0);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -1015,11 +1014,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     const decisionsResult = await fetchOwnerDecisions();
     if (decisionsResult.success) {
       setOwnerDecisionItems(decisionsResult.data.items);
-      setFilteredSyntheticDecisionCount(decisionsResult.data.filteredSyntheticCount);
       setOwnerDecisionError(null);
     } else {
       setOwnerDecisionItems([]);
-      setFilteredSyntheticDecisionCount(0);
       setOwnerDecisionError(decisionsResult.error ?? "Owner decisions unavailable");
     }
 
@@ -1121,11 +1118,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         )}
         {ownerDecisionError === null && ownerDecisionItems.length === 0 && (
           <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerDecision.empty")}</p>
-        )}
-        {filteredSyntheticDecisionCount > 0 && (
-          <p className="mb-2 text-ink-4 text-[11.5px]" data-testid="owner-decisions-filtered-synthetic">
-            {t("pages.focus.ownerDecision.filteredSynthetic", { count: filteredSyntheticDecisionCount })}
-          </p>
         )}
         {ownerDecisionItems.map((item) => (
           <OwnerDecisionCard

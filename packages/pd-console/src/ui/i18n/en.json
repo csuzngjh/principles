@@ -278,7 +278,6 @@
         "empty": "Nothing needs your decision right now. Problems the machine can solve on its own will not disturb you.",
         "unavailable": "(unavailable)",
         "loadError": "The decision list is temporarily unavailable — the governance summary is still shown.",
-        "filteredSynthetic": "{{count}} decision(s) with an explicit test/demo origin are folded from the main Inbox; their source records remain available.",
         "kindEvaluator": "Evaluator review",
         "kindRollout": "Rollout review",
         "kindApproval": "Deployment approval",

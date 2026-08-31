@@ -58,7 +58,6 @@ describe('cr10: validateOwnerDecisionsData (ERR-001/005/009/013)', () => {
     const data = validateOwnerDecisionsData({
       items: [makeItem({ machineRecommendation: 'needs_revision', score: 0.72 })],
       total: 1,
-      filteredSyntheticCount: 0,
       generatedAt: '2026-08-30T00:00:00.000Z',
     });
     expect(data).not.toBeNull();
@@ -74,7 +73,7 @@ describe('cr10: validateOwnerDecisionsData (ERR-001/005/009/013)', () => {
     delete item.expectedEvidenceDigest;
     delete item.review;
     expect(validateOwnerDecisionsData({
-      items: [item], total: 1, filteredSyntheticCount: 0, generatedAt: 't',
+      items: [item], total: 1, generatedAt: 't',
     })?.items[0]?.evidenceUnavailableReason).toBe('decision_artifact_missing');
   });
 
@@ -84,13 +83,13 @@ describe('cr10: validateOwnerDecisionsData (ERR-001/005/009/013)', () => {
     expect(validateOwnerDecisionsData('x')).toBeNull();
     expect(validateOwnerDecisionsData({ items: [], total: 0 })).toBeNull(); // missing generatedAt
     expect(validateOwnerDecisionsData({
-      items: [makeItem({ kind: 'mystery_kind' })], total: 1, filteredSyntheticCount: 0, generatedAt: 't',
+      items: [makeItem({ kind: 'mystery_kind' })], total: 1, generatedAt: 't',
     })).toBeNull();
     expect(validateOwnerDecisionsData({
-      items: [makeItem({ allowedActions: ['format_disk'] })], total: 1, filteredSyntheticCount: 0, generatedAt: 't',
+      items: [makeItem({ allowedActions: ['format_disk'] })], total: 1, generatedAt: 't',
     })).toBeNull();
     expect(validateOwnerDecisionsData({
-      items: [makeItem({ legacy: 'yes' })], total: 1, filteredSyntheticCount: 0, generatedAt: 't',
+      items: [makeItem({ legacy: 'yes' })], total: 1, generatedAt: 't',
     })).toBeNull();
   });
 });

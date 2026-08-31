@@ -2902,7 +2902,6 @@ function validateOwnerDecisionReview(value: unknown): OwnerDecisionReviewData | 
 export interface OwnerDecisionsData {
   items: OwnerDecisionItemData[];
   total: number;
-  filteredSyntheticCount: number;
   generatedAt: string;
 }
 
@@ -2986,9 +2985,8 @@ export function validateOwnerDecisionsData(v: unknown): OwnerDecisionsData | nul
     items.push(item);
   }
   if (!Object.hasOwn(v, 'total') || !isNumber(v.total)) return null;
-  if (!Object.hasOwn(v, 'filteredSyntheticCount') || !isNumber(v.filteredSyntheticCount)) return null;
   if (!Object.hasOwn(v, 'generatedAt') || !isString(v.generatedAt)) return null;
-  return { items, total: v.total, filteredSyntheticCount: v.filteredSyntheticCount, generatedAt: v.generatedAt };
+  return { items, total: v.total, generatedAt: v.generatedAt };
 }
 
 export interface OwnerResolutionResultData {

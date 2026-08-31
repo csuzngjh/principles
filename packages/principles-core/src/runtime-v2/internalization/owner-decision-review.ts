@@ -8,7 +8,7 @@ import {
   type OwnerDecisionFactStore,
 } from './owner-review.js';
 import type { OwnerResolutionAction } from './pitask-metadata.js';
-import { DefaultArtificerValidator } from './artificer-output.js';
+import { assessArtificerCodeBearing } from './artificer-code-bearing.js';
 
 const MAX_TEXT = 600;
 const MAX_ITEMS = 3;
@@ -279,13 +279,7 @@ export async function buildOwnerDecisionReview(
   );
   const codeBearingArtificer = facts.task.taskKind === 'evaluator'
     && artificer !== null
-    && artificerContent !== null
-    && typeof artificer.sourceTaskId === 'string'
-    && (await new DefaultArtificerValidator().validate(
-      artificerContent,
-      artificer.sourceTaskId,
-      scribe?.artifactId,
-    )).valid;
+    && assessArtificerCodeBearing(artificer.contentJson).codeBearing;
 
   const checkStatus = deterministicStatus(decisionContent);
   const deterministicChecks = [{ check: 'adversarial_hard_gate', status: checkStatus }] as const;

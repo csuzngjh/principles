@@ -55,7 +55,6 @@ export interface OwnerDecisionItem {
 export interface OwnerDecisionListResult {
   readonly items: readonly OwnerDecisionItem[];
   readonly total: number;
-  readonly filteredSyntheticCount: number;
   readonly generatedAt: string;
 }
 
@@ -92,17 +91,6 @@ function isRecordRow(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/** Producer-declared synthetic sources are not actionable Owner decisions. */
-function hasExplicitSyntheticOrigin(contentJson: string): boolean {
-  try {
-    const content: unknown = JSON.parse(contentJson);
-    if (!isRecordRow(content) || !Object.hasOwn(content, 'origin')) return false;
-    return content.origin === 'test' || content.origin === 'demo' || content.origin === 'synthetic';
-  } catch {
-    return false;
-  }
-}
-
 function makeRowReader(db: { prepare: (sql: string) => { get: (id: string) => unknown } }) {
   const stmt = db.prepare('SELECT * FROM tasks WHERE task_id = ?');
   return (taskId: string): TaskRecord | null => {
@@ -117,7 +105,6 @@ function makeRowReader(db: { prepare: (sql: string) => { get: (id: string) => un
 interface TaskDecisionItemDependencies {
   readonly artifactStore: PIArtifactStore;
   readonly readTaskRow: (taskId: string) => TaskRecord | null;
-  readonly onExplicitSyntheticOrigin?: () => void;
 }
 
 /** 单任务 capability → 决策条目（不 eligible → null，INV-01）。 */
@@ -162,13 +149,6 @@ async function deriveTaskDecisionItem(
   };
   const facts = await collectOwnerDecisionFacts(factStore, task.taskId);
   if (!facts) return null;
-  if (facts.decisionArtifact) {
-    const decisionArtifact = await dependencies.artifactStore.getArtifactById(facts.decisionArtifact.artifactId).catch(() => null);
-    if (decisionArtifact && hasExplicitSyntheticOrigin(decisionArtifact.contentJson)) {
-      dependencies.onExplicitSyntheticOrigin?.();
-      return null;
-    }
-  }
   const capability = deriveOwnerDecisionCapability(facts);
   const evidenceBlockers = capability.blockers.filter((blocker) =>
     blocker === 'decision_artifact_missing' || blocker === 'lineage_unresolvable');
@@ -263,14 +243,13 @@ export class OwnerDecisionConsoleModel {
   async listOwnerDecisionItems(): Promise<OwnerDecisionListResult> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
-      return { items: [], total: 0, filteredSyntheticCount: 0, generatedAt: new Date().toISOString() };
+      return { items: [], total: 0, generatedAt: new Date().toISOString() };
     }
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
       const db = conn.getDb();
       const artifactStore: PIArtifactStore = new SqlitePIArtifactStore(conn);
       const items: OwnerDecisionItem[] = [];
-      let filteredSyntheticCount = 0;
 
       // ── 1. needs_human_review 的 decision-capable 任务 (PRI-629 核心) ──
       let nhrRows: Record<string, unknown>[] = [];
@@ -289,7 +268,6 @@ export class OwnerDecisionConsoleModel {
           {
             artifactStore,
             readTaskRow: makeRowReader(db),
-            onExplicitSyntheticOrigin: () => { filteredSyntheticCount += 1; },
           },
         );
         if (item) items.push(item);
@@ -348,7 +326,7 @@ export class OwnerDecisionConsoleModel {
         // activations 表缺失 → 跳过
       }
 
-      return { items, total: items.length, filteredSyntheticCount, generatedAt: new Date().toISOString() };
+      return { items, total: items.length, generatedAt: new Date().toISOString() };
     } finally {
       conn.close();
     }

@@ -278,7 +278,6 @@
         "empty": "现在没有需要你决定的事项。机器能自己解决的问题不会打扰你。",
         "unavailable": "（暂不可用）",
         "loadError": "决策列表暂时不可用——治理摘要仍可查看。",
-        "filteredSynthetic": "已从主 Inbox 折叠 {{count}} 条带明确测试/演示来源的决策；原始记录仍保留在来源页面。",
         "kindEvaluator": "Evaluator 评审",
         "kindRollout": "Rollout 评审",
         "kindApproval": "部署审批",

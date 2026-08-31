@@ -230,7 +230,7 @@ describe('GET /api/v1/governance/owner-decisions', () => {
     expect(data.items[0]?.evidenceUnavailableReason).toContain('decision_artifact_missing');
   });
 
-  it('filters task decisions whose durable decision artifact explicitly declares a synthetic origin', async () => {
+  it('does not let a producer-declared origin hide a durable task decision', async () => {
     const conn = setupDb();
     const now = '2026-08-30T00:00:00.000Z';
     conn.getDb().prepare(
@@ -250,8 +250,9 @@ describe('GET /api/v1/governance/owner-decisions', () => {
 
     const res = makeRes();
     await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
-    const data = parse(res).data as { total: number; filteredSyntheticCount: number };
-    expect(data).toMatchObject({ total: 0, filteredSyntheticCount: 1 });
+    const data = parse(res).data as { items: Array<{ taskId: string }>; total: number };
+    expect(data.total).toBe(1);
+    expect(data.items[0]?.taskId).toBe(EVAL_ID);
   });
 
   it('does not let producer-declared origin hide a durable RuleCode decision', async () => {
@@ -269,10 +270,9 @@ describe('GET /api/v1/governance/owner-decisions', () => {
 
     const res = makeRes();
     await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
-    const data = (parse(res).data as { items: Array<{ kind: string }>; total: number; filteredSyntheticCount: number });
+    const data = (parse(res).data as { items: Array<{ kind: string }>; total: number });
     expect(data.total).toBe(2);
     expect(data.items.some(item => item.kind === 'rulecode_decision')).toBe(true);
-    expect(data.filteredSyntheticCount).toBe(0);
   });
 });
 
