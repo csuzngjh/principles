@@ -47,6 +47,8 @@ export interface OwnerDecisionItem {
   readonly expectedSourceArtifactHash: string;
   readonly expectedEvidenceDigest?: string;
   readonly review?: OwnerDecisionReviewSnapshot;
+  /** Visible recovery state: the decision is still required, but evidence is unsafe to act on. */
+  readonly evidenceUnavailableReason?: string;
   readonly createdAt: string;
 }
 
@@ -55,20 +57,6 @@ export interface OwnerDecisionListResult {
   readonly total: number;
   readonly filteredSyntheticCount: number;
   readonly generatedAt: string;
-}
-
-const SYNTHETIC_ORIGINS = new Set(['test', 'demo', 'smoke', 'synthetic', 'manual_approval_test']);
-
-function hasExplicitSyntheticOrigin(contentJson: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(contentJson);
-    return typeof parsed === 'object' && parsed !== null
-      && Object.hasOwn(parsed, 'origin')
-      && typeof Reflect.get(parsed, 'origin') === 'string'
-      && SYNTHETIC_ORIGINS.has(String(Reflect.get(parsed, 'origin')).trim().toLowerCase());
-  } catch {
-    return false;
-  }
 }
 
 const GOVERNANCE_TASK_KINDS = new Set(['evaluator', 'rollout_reviewer']);
@@ -159,14 +147,55 @@ async function deriveTaskDecisionItem(
   const facts = await collectOwnerDecisionFacts(factStore, task.taskId);
   if (!facts) return null;
   const capability = deriveOwnerDecisionCapability(facts);
-  if (!capability.eligible || !capability.reviewKey) return null;
+  const evidenceBlockers = capability.blockers.filter((blocker) =>
+    blocker === 'decision_artifact_missing' || blocker === 'lineage_unresolvable');
+  const kind: OwnerDecisionItemKind = task.taskKind === 'rollout_reviewer' ? 'rollout_review' : 'evaluator_review';
+  if (!capability.eligible || !capability.reviewKey) {
+    if (evidenceBlockers.length === 0) return null;
+    return {
+      reviewKey: `unavailable:${task.taskId}`,
+      kind,
+      taskId: task.taskId,
+      title: task.taskKind === 'rollout_reviewer'
+        ? 'Rollout 评审仍需要你的判断'
+        : '自动改进仍需要你的判断',
+      summary: '决策证据当前不完整，PD 已停止提供裁决动作以避免你批准错误版本。',
+      reasonCode: capability.reasonCode,
+      legacy: capability.legacy,
+      allowedActions: [],
+      expectedRevisionEpoch: facts.task.revisionCount ?? 0,
+      expectedSourceRunId: facts.task.humanReviewContext?.sourceRunId
+        ?? facts.task.completionIntent?.sourceRunId ?? '',
+      expectedSourceArtifactId: '',
+      expectedSourceArtifactHash: '',
+      evidenceUnavailableReason: evidenceBlockers.join(','),
+      createdAt: task.updatedAt,
+    };
+  }
   const review = await buildOwnerDecisionReview(factStore, task.taskId);
-  if (!review) return null;
+  if (!review) {
+    return {
+      reviewKey: `unavailable:${task.taskId}`,
+      kind,
+      taskId: task.taskId,
+      title: '自动改进仍需要你的判断',
+      summary: '决策证据无法安全读取，PD 已停止提供裁决动作。',
+      reasonCode: capability.reasonCode,
+      legacy: capability.legacy,
+      allowedActions: [],
+      expectedRevisionEpoch: facts.task.revisionCount ?? 0,
+      expectedSourceRunId: facts.task.humanReviewContext?.sourceRunId
+        ?? facts.task.completionIntent?.sourceRunId ?? '',
+      expectedSourceArtifactId: facts.decisionArtifact?.artifactId ?? '',
+      expectedSourceArtifactHash: facts.decisionArtifact?.contentHash ?? '',
+      evidenceUnavailableReason: 'owner_review_evidence_unavailable',
+      createdAt: task.updatedAt,
+    };
+  }
 
   const sourceRunId = facts.task.humanReviewContext?.sourceRunId
     ?? facts.task.completionIntent?.sourceRunId ?? '';
   const artifact = facts.decisionArtifact;
-  const kind: OwnerDecisionItemKind = task.taskKind === 'rollout_reviewer' ? 'rollout_review' : 'evaluator_review';
   const title = review.brief.kind === 'evaluator'
     ? review.brief.principle.title
       ?? review.brief.principle.statement
@@ -218,7 +247,7 @@ export class OwnerDecisionConsoleModel {
       const db = conn.getDb();
       const artifactStore: PIArtifactStore = new SqlitePIArtifactStore(conn);
       const items: OwnerDecisionItem[] = [];
-      let filteredSyntheticCount = 0;
+      const filteredSyntheticCount = 0;
 
       // ── 1. needs_human_review 的 decision-capable 任务 (PRI-629 核心) ──
       let nhrRows: Record<string, unknown>[] = [];
@@ -240,11 +269,6 @@ export class OwnerDecisionConsoleModel {
       try {
         const approvals = await new SqliteApprovalQueueStore(conn).listPending();
         for (const approval of approvals) {
-          const sourceArtifact = await artifactStore.getArtifactById(approval.artifactId).catch(() => null);
-          if (sourceArtifact && hasExplicitSyntheticOrigin(sourceArtifact.contentJson)) {
-            filteredSyntheticCount += 1;
-            continue;
-          }
           items.push({
             reviewKey: `apr:${approval.approvalId}`,
             kind: 'activation_approval',
@@ -274,13 +298,6 @@ export class OwnerDecisionConsoleModel {
         ).all().filter(isRecordRow);
         for (const row of shadowRows) {
           const artifactId = typeof row.artifact_id === 'string' ? row.artifact_id : '';
-          const sourceArtifact = artifactId
-            ? await artifactStore.getArtifactById(artifactId).catch(() => null)
-            : null;
-          if (sourceArtifact && hasExplicitSyntheticOrigin(sourceArtifact.contentJson)) {
-            filteredSyntheticCount += 1;
-            continue;
-          }
           items.push({
             reviewKey: `rulecode:${String(row.activation_id ?? '')}`,
             kind: 'rulecode_decision',

@@ -509,13 +509,15 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/v1/governance/owner-decisions' || urlPath.startsWith('/api/v1/governance/owner-decisions/')) {
         const subPath = urlPath.slice('/api/v1/governance/owner-decisions'.length);
         const odIdentity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
-        const authEnabledForOwner = services.authConfig.isEnabled() && odIdentity.ownerId && odIdentity.credentialId;
+        const { ownerId, credentialId } = odIdentity;
+        const authEnabledForOwner = services.authConfig.isEnabled()
+          && ownerId !== null && credentialId !== null;
         asyncHandler(() => handleOwnerDecisionsRoute(req, res, {
           workspaceDir: services.workspaceDir,
           subPath,
           ownerIdentity: authEnabledForOwner
-            ? { ownerId: odIdentity.ownerId ?? 'console_operator', credentialId: odIdentity.credentialId ?? undefined }
-            : { ownerId: 'console_operator' },
+            ? { ownerId, credentialId }
+            : null,
         }))(req, res);
         return;
       }

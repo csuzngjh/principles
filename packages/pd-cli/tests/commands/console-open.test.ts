@@ -659,6 +659,25 @@ describe('CLI command wiring (pd console open)', () => {
     }
   }, 20_000);
 
+  it('kills and refuses a fresh Console whose reported authentication mode mismatches the configured token', async () => {
+    process.env.PD_CONSOLE_TOKEN = 'configured-token';
+    let run: CliJsonRun | undefined;
+    try {
+      run = await runPdUntilJson(
+        ['console', 'open', '--workspace', tmp, '--port', '49391', '--json', '--no-browser'],
+        workspaceRoot,
+      );
+      if (!isRecord(run.parsed)) throw new Error('CLI JSON output was not an object');
+      expect(run.parsed.status).toBe('refused');
+      expect(run.parsed.reason).toBe('console_authentication_mode_mismatch');
+      expect(run.parsed).not.toHaveProperty('serverPid');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(await isPortInUse('127.0.0.1', 49391)).toBe(false);
+    } finally {
+      await teardownCliTree(run);
+    }
+  }, 20_000);
+
   it('pd console open --json reused path does NOT include serverPid (PRI-526)', async () => {
     // Stand up a fake healthy console in-process, then point the CLI at its
     // port: planConsoleLaunch probes /api/health → 200 → reused, no spawn.

@@ -34,6 +34,7 @@ export function OwnerDecisionCard({ item, onResolved, governanceReady = true }: 
   const canRevise = item.allowedActions.includes("revise_once");
   const canReject = item.allowedActions.includes("reject_current");
   const requiresPartialAcknowledgement = item.review?.capability.acceptRequirement.kind === "acknowledge_partial_evidence";
+  const evidenceUnavailable = item.evidenceUnavailableReason !== undefined;
 
   async function handleAction(action: VerdictAction) {
     if (action === "revise_once" && showInstruction && instruction.trim().length === 0) {
@@ -144,7 +145,20 @@ export function OwnerDecisionCard({ item, onResolved, governanceReady = true }: 
         <p className="text-ink-4 text-[12px] mb-1">{t("pages.focus.ownerDecision.rolloutSafetyNote")}</p>
       )}
 
-      {isTaskDecision ? (
+      {evidenceUnavailable ? (
+        <div className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 p-3">
+          <p className="text-ink-2 text-[12.5px] leading-relaxed">
+            {t("pages.focus.ownerDecision.evidenceUnavailable")}
+          </p>
+          <Link
+            to="/failed"
+            data-testid={`owner-evidence-recover-${item.taskId}`}
+            className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
+          >
+            {t("pages.focus.ownerDecision.goRecoverCta")}
+          </Link>
+        </div>
+      ) : isTaskDecision ? (
         <>
           {showInstruction && (
             <div className="mt-2 mb-2">

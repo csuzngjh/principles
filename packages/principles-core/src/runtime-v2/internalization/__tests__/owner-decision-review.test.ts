@@ -80,8 +80,22 @@ function makeStore(options: {
   adversarialPassed?: boolean;
   includeScribe?: boolean;
   concern?: string;
+  evaluatorExtra?: Record<string, unknown>;
+  includeOlderRepair?: boolean;
 } = {}): OwnerDecisionReviewStore {
+  const oldArtificerArtifactId = 'pi-art-artificer-review-old-run-1';
+  const oldScribeArtifactId = 'pi-art-scribe-review-old-run-1';
   const records = [
+    ...(options.includeOlderRepair ? [
+      artifact({ artifactId: oldScribeArtifactId, sourceTaskId: 'scribe-review-old', lineageArtifactIds: [], content: {
+        principleDraft: { statement: 'OLD principle must not be shown.' },
+      }}),
+      artifact({ artifactId: oldArtificerArtifactId, sourceTaskId: 'artificer-review-old', lineageArtifactIds: [oldScribeArtifactId], content: {
+        sourceScribeArtifactId: oldScribeArtifactId,
+        sourceTrace: { scribeArtifactId: oldScribeArtifactId },
+        implementationSummary: 'OLD implementation must not be shown.',
+      }}),
+    ] : []),
     artifact({ artifactId: SCRIBE_ARTIFACT_ID, sourceTaskId: SCRIBE_TASK_ID, lineageArtifactIds: [], content: {
       principleDraft: {
         title: 'Confirm destructive changes',
@@ -92,11 +106,18 @@ function makeStore(options: {
       },
     }}),
     artifact({ artifactId: ARTIFICER_ARTIFACT_ID, sourceTaskId: ARTIFICER_TASK_ID, lineageArtifactIds: [SCRIBE_ARTIFACT_ID], content: {
+      sourceScribeArtifactId: SCRIBE_ARTIFACT_ID,
+      sourceTrace: { scribeArtifactId: SCRIBE_ARTIFACT_ID },
       implementationSummary: 'Adds a confirmation gate before destructive writes.',
       affectedTools: ['write_file', 'apply_patch'],
       risks: ['May add one interaction before a destructive action.'],
     }}),
-    artifact({ artifactId: EVALUATOR_ARTIFACT_ID, sourceTaskId: EVALUATOR_ID, lineageArtifactIds: [ARTIFICER_ARTIFACT_ID], content: {
+    artifact({ artifactId: EVALUATOR_ARTIFACT_ID, sourceTaskId: EVALUATOR_ID, lineageArtifactIds: [
+      ...(options.includeOlderRepair ? [oldArtificerArtifactId] : []),
+      ARTIFICER_ARTIFACT_ID,
+    ], content: {
+      sourceArtificerArtifactId: ARTIFICER_ARTIFACT_ID,
+      sourceTrace: { artificerArtifactId: ARTIFICER_ARTIFACT_ID },
       evaluation: {
         decision: 'needs_revision',
         score: 0.72,
@@ -107,10 +128,15 @@ function makeStore(options: {
       ...(options.adversarialPassed === undefined
         ? {}
         : { adversarialResult: { passed: options.adversarialPassed, failedCases: [] } }),
+      ...options.evaluatorExtra,
     }}),
   ].filter((record) => options.includeScribe !== false || record.artifactId !== SCRIBE_ARTIFACT_ID);
   const tasks = [
     task(EVALUATOR_ID, 'evaluator'),
+    ...(options.includeOlderRepair ? [
+      task('artificer-review-old', 'artificer'),
+      task('scribe-review-old', 'scribe'),
+    ] : []),
     task(ARTIFICER_TASK_ID, 'artificer'),
     ...(options.includeScribe === false ? [] : [task(SCRIBE_TASK_ID, 'scribe')]),
   ];
@@ -164,6 +190,39 @@ describe('Owner Decision Review Snapshot', () => {
       kind: 'forbidden',
       reasonCode: 'adversarial_hard_gate_failed',
     });
+  });
+
+  it('forbids accept when a V2 evaluator did not run the adversarial hard gate', async () => {
+    const snapshot = await buildOwnerDecisionReview(
+      makeStore({ evaluatorExtra: { painCoverage: {} } }),
+      EVALUATOR_ID,
+    );
+
+    expect(snapshot?.evidence.deterministicChecks[0]?.status).toBe('not_run');
+    expect(snapshot?.capability.finalOfferedActions).not.toContain('accept_current');
+    expect(snapshot?.capability.acceptRequirement).toEqual({
+      kind: 'forbidden',
+      reasonCode: 'adversarial_hard_gate_not_passed',
+    });
+  });
+
+  it('keeps V1 compatibility when no V2 hard-gate fields exist', async () => {
+    const snapshot = await buildOwnerDecisionReview(makeStore(), EVALUATOR_ID);
+    expect(snapshot?.capability.finalOfferedActions).toContain('accept_current');
+  });
+
+  it('uses the evaluator-declared repair lineage instead of the first reachable artificer', async () => {
+    const snapshot = await buildOwnerDecisionReview(
+      makeStore({ includeOlderRepair: true }),
+      EVALUATOR_ID,
+    );
+
+    expect(snapshot?.brief.kind).toBe('evaluator');
+    if (snapshot?.brief.kind !== 'evaluator') throw new Error('expected evaluator brief');
+    expect(snapshot.brief.principle.statement).toContain('confirm the exact target');
+    expect(snapshot.brief.implementation.summary).toContain('confirmation gate');
+    expect(snapshot.evidence.manifest.sources.map((source) => source.stableId))
+      .not.toContain('pi-art-artificer-review-old-run-1');
   });
 
   it('changes the evidence digest when visible decision semantics change', async () => {

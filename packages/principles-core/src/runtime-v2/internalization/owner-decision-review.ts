@@ -8,6 +8,7 @@ import {
   type OwnerDecisionFactStore,
 } from './owner-review.js';
 import type { OwnerResolutionAction } from './pitask-metadata.js';
+import { isEvaluatorOutputV2 } from './evaluator-output.js';
 
 const MAX_TEXT = 600;
 const MAX_ITEMS = 3;
@@ -205,14 +206,28 @@ async function collectCanonicalArtifacts(
   return collected;
 }
 
-async function legacyArtifact(
-  store: OwnerDecisionReviewStore,
+function declaredLineageId(
   content: Record<string, unknown> | null,
-  key: 'artificerArtifactId' | 'scribeArtifactId',
-): Promise<DecisionArtifactRecord | null> {
-  const sourceTrace = readRecord(content, 'sourceTrace');
-  const id = readString(sourceTrace, key);
-  return id ? store.getArtifactById(id).catch(() => null) : null;
+  directKey: 'sourceArtificerArtifactId' | 'sourceScribeArtifactId',
+  traceKey: 'artificerArtifactId' | 'scribeArtifactId',
+): string | null | false {
+  const direct = readString(content, directKey);
+  const traced = readString(readRecord(content, 'sourceTrace'), traceKey);
+  if (direct && traced && direct !== traced) return false;
+  return direct ?? traced ?? null;
+}
+
+function selectLineageArtifact(
+  canonical: readonly { artifact: DecisionArtifactRecord; taskKind: string }[],
+  taskKind: 'artificer' | 'scribe',
+  declaredId: string | null | false,
+): DecisionArtifactRecord | null {
+  if (declaredId === false) return null;
+  const candidates = canonical.filter((entry) => entry.taskKind === taskKind);
+  if (declaredId !== null) {
+    return candidates.find((entry) => entry.artifact.artifactId === declaredId)?.artifact ?? null;
+  }
+  return candidates.length === 1 ? candidates[0]?.artifact ?? null : null;
 }
 
 function summaryFor(
@@ -250,14 +265,18 @@ export async function buildOwnerDecisionReview(
   if (!decision) return null;
   const decisionContent = parseRecord(decision.contentJson);
   const canonical = await collectCanonicalArtifacts(store, decision);
-  let artificer = canonical.find((entry) => entry.taskKind === 'artificer')?.artifact ?? null;
-  let scribe = canonical.find((entry) => entry.taskKind === 'scribe')?.artifact ?? null;
-  if (!artificer) artificer = await legacyArtifact(store, decisionContent, 'artificerArtifactId');
-  if (!scribe) scribe = await legacyArtifact(store, decisionContent, 'scribeArtifactId');
-  if (!scribe && artificer) {
-    const lineage = await collectCanonicalArtifacts(store, artificer);
-    scribe = lineage.find((entry) => entry.taskKind === 'scribe')?.artifact ?? null;
-  }
+  const artificer = selectLineageArtifact(
+    canonical,
+    'artificer',
+    declaredLineageId(decisionContent, 'sourceArtificerArtifactId', 'artificerArtifactId'),
+  );
+  const artificerContent = artificer ? parseRecord(artificer.contentJson) : null;
+  const artificerLineage = artificer ? await collectCanonicalArtifacts(store, artificer) : [];
+  const scribe = selectLineageArtifact(
+    artificerLineage,
+    'scribe',
+    declaredLineageId(artificerContent, 'sourceScribeArtifactId', 'scribeArtifactId'),
+  );
 
   const checkStatus = deterministicStatus(decisionContent);
   const deterministicChecks = [{ check: 'adversarial_hard_gate', status: checkStatus }] as const;
@@ -270,7 +289,6 @@ export async function buildOwnerDecisionReview(
   if (facts.task.taskKind === 'evaluator') {
     const scribeContent = scribe ? parseRecord(scribe.contentJson) : null;
     const draft = readRecord(scribeContent, 'principleDraft');
-    const artificerContent = artificer ? parseRecord(artificer.contentJson) : null;
     const scribeSummary = summaryFor('scribe', scribe);
     const artificerSummary = summaryFor('artificer', artificer);
     const principleStatement = scribeSummary?.ok
@@ -321,9 +339,13 @@ export async function buildOwnerDecisionReview(
   const baseAllowedActions = [...capability.allowedActions];
   let finalOfferedActions = [...baseAllowedActions];
   let acceptRequirement: OwnerDecisionReviewSnapshot['capability']['acceptRequirement'] = { kind: 'none' };
+  const v2HardGateRequired = facts.task.taskKind === 'evaluator' && isEvaluatorOutputV2(decisionContent);
   if (checkStatus === 'failed') {
     finalOfferedActions = finalOfferedActions.filter((action) => action !== 'accept_current');
     acceptRequirement = { kind: 'forbidden', reasonCode: 'adversarial_hard_gate_failed' };
+  } else if (v2HardGateRequired && checkStatus !== 'passed') {
+    finalOfferedActions = finalOfferedActions.filter((action) => action !== 'accept_current');
+    acceptRequirement = { kind: 'forbidden', reasonCode: 'adversarial_hard_gate_not_passed' };
   } else if (completeness === 'insufficient') {
     finalOfferedActions = finalOfferedActions.filter((action) => action !== 'accept_current');
     acceptRequirement = { kind: 'forbidden', reasonCode: 'review_evidence_insufficient' };

@@ -389,6 +389,29 @@ export async function applyOwnerResolution(
       return { status: 'not_decision_capable', blockers: [`task_status_${piTask.status}`] };
     }
 
+    // Artifacts are persisted independently from task diagnosticJson. Rebuild the
+    // bound evidence after the CAS read and immediately before constructing the
+    // resolution so a changed artifact cannot reuse the earlier digest/manifest.
+    const writeReview = request.expectedEvidenceDigest !== undefined
+      ? await buildOwnerDecisionReview(reviewStoreFromStateManager(stateManager), taskId)
+      : null;
+    if (request.expectedEvidenceDigest !== undefined) {
+      if (!writeReview || writeReview.evidence.digest !== request.expectedEvidenceDigest) {
+        return { status: 'stale_owner_decision' };
+      }
+      if (!writeReview.capability.finalOfferedActions.includes(request.action)) {
+        return {
+          status: 'not_decision_capable',
+          blockers: [`action_not_permitted_by_evidence:${request.action}`],
+        };
+      }
+      if (request.action === 'accept_current'
+        && writeReview.capability.acceptRequirement.kind === 'acknowledge_partial_evidence'
+        && request.acknowledgement?.kind !== 'partial_evidence') {
+        return { status: 'evidence_acknowledgement_required' };
+      }
+    }
+
     // 首次写入
     const reviewKey = capability.reviewKey ?? request.reviewKey;
     let record: OwnerResolutionRecord = {
@@ -410,10 +433,10 @@ export async function applyOwnerResolution(
       ...(request.action === 'revise_once'
         ? { ownerInstruction: sanitizeOwnerInstruction(request.ownerInstruction) }
         : {}),
-      ...(request.expectedEvidenceDigest !== undefined && review
+      ...(request.expectedEvidenceDigest !== undefined && writeReview
         ? {
             evidenceDigest: request.expectedEvidenceDigest,
-            evidenceManifest: review.evidence.manifest,
+            evidenceManifest: writeReview.evidence.manifest,
             ...(request.acknowledgement !== undefined
               ? { evidenceAcknowledgement: request.acknowledgement }
               : {}),

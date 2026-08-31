@@ -272,6 +272,8 @@
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
       "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。",
       "ownerDecision": {
+        "evidenceUnavailable": "这项裁决仍在等待你，但证据链目前不完整。PD 已暂停所有裁决动作，避免你在看不到正确版本时做决定。",
+        "goRecoverCta": "查看恢复详情",
         "sectionTitle": "需要你决定",
         "empty": "现在没有需要你决定的事项。机器能自己解决的问题不会打扰你。",
         "unavailable": "（暂不可用）",

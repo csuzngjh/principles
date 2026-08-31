@@ -34,11 +34,15 @@ function getModel(workspaceDir: string): OwnerDecisionConsoleModel {
 
 export interface OwnerDecisionRouteContext {
   workspaceDir: string;
-  /** server-side auth context 推导的身份（SPEC §29 — 不信任 body） */
-  ownerIdentity: { ownerId: string; credentialId?: string };
+  /** Only present after both Console authentication and Owner identity verification. */
+  ownerIdentity: { ownerId: string; credentialId: string } | null;
 }
 
 const RESOLVE_ACTIONS = new Set(['accept_current', 'revise_once', 'reject_current']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 interface ResolveRequestBody {
   action: 'accept_current' | 'revise_once' | 'reject_current';
@@ -58,10 +62,10 @@ interface ResolveRequestBody {
 
 /** rc-1/rc-2/rc-3: body 按未知值逐字段校验，非法即 400 fail-loud。 */
 function parseResolveBody(raw: unknown): { ok: true; body: ResolveRequestBody } | { ok: false; error: string } {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+  if (!isRecord(raw)) {
     return { ok: false, error: 'Request body must be a JSON object.' };
   }
-  const b = raw as Record<string, unknown>;
+  const b = raw;
   if (typeof b.action !== 'string' || !RESOLVE_ACTIONS.has(b.action)) {
     return { ok: false, error: `action must be one of accept_current/revise_once/reject_current, got ${String(b.action)}` };
   }
@@ -80,11 +84,10 @@ function parseResolveBody(raw: unknown): { ok: true; body: ResolveRequestBody } 
   }
   let acknowledgement: ResolveRequestBody['acknowledgement'];
   if (b.acknowledgement !== undefined) {
-    if (typeof b.acknowledgement !== 'object' || b.acknowledgement === null
-      || Array.isArray(b.acknowledgement)) {
+    if (!isRecord(b.acknowledgement)) {
       return { ok: false, error: 'acknowledgement must be an object.' };
     }
-    const rawAcknowledgement = b.acknowledgement as Record<string, unknown>;
+    const rawAcknowledgement = b.acknowledgement;
     if (rawAcknowledgement.kind !== 'partial_evidence' || rawAcknowledgement.acknowledged !== true) {
       return { ok: false, error: 'acknowledgement must explicitly acknowledge partial_evidence.' };
     }
@@ -92,10 +95,11 @@ function parseResolveBody(raw: unknown): { ok: true; body: ResolveRequestBody } 
       && (typeof rawAcknowledgement.note !== 'string' || rawAcknowledgement.note.length > 600)) {
       return { ok: false, error: 'acknowledgement.note must be at most 600 characters.' };
     }
+    const note = typeof rawAcknowledgement.note === 'string' ? rawAcknowledgement.note.trim() : '';
     acknowledgement = {
       kind: 'partial_evidence',
       acknowledged: true,
-      ...(typeof rawAcknowledgement.note === 'string' ? { note: rawAcknowledgement.note } : {}),
+      ...(note !== '' ? { note } : {}),
     };
   }
   const {reviewKey} = b;
@@ -227,6 +231,12 @@ export async function handleOwnerDecisionsRoute(
   if (resolveMatch) {
     if (method !== 'POST') {
       sendMethodNotAllowed(res);
+      return;
+    }
+    if (!ownerIdentity) {
+      sendError(res, 403, 'owner_authentication_required', 'Owner decisions require an authenticated Console and a configured Owner identity.', {
+        nextAction: 'Configure the Console token and Owner identity, then retry from Governance Focus.',
+      });
       return;
     }
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- match group is always present

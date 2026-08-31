@@ -66,6 +66,18 @@ describe('cr10: validateOwnerDecisionsData (ERR-001/005/009/013)', () => {
     expect(data?.items[0]?.score).toBe(0.72);
   });
 
+  it('accepts a visible but non-actionable decision when evidence recovery is required', () => {
+    const item = makeItem({
+      allowedActions: [],
+      evidenceUnavailableReason: 'decision_artifact_missing',
+    });
+    delete item.expectedEvidenceDigest;
+    delete item.review;
+    expect(validateOwnerDecisionsData({
+      items: [item], total: 1, filteredSyntheticCount: 0, generatedAt: 't',
+    })?.items[0]?.evidenceUnavailableReason).toBe('decision_artifact_missing');
+  });
+
   it('rejects null / arrays / primitives / missing fields / unknown kind / bad action', () => {
     expect(validateOwnerDecisionsData(null)).toBeNull();
     expect(validateOwnerDecisionsData([])).toBeNull();

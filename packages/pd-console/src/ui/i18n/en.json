@@ -272,6 +272,8 @@
       "zeroStateDbMissing": "PD has not run in this workspace yet. Once the state database is initialized, governance data will appear here.",
       "evidenceInProgress": "{{count}} behavior evidence item(s) recorded, being diagnosed and processed.",
       "ownerDecision": {
+        "evidenceUnavailable": "This decision still needs you, but its evidence chain is incomplete. PD has paused all decision actions so you cannot approve the wrong version.",
+        "goRecoverCta": "View recovery details",
         "sectionTitle": "Needs your decision",
         "empty": "Nothing needs your decision right now. Problems the machine can solve on its own will not disturb you.",
         "unavailable": "(unavailable)",

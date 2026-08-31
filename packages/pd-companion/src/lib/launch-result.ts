@@ -99,6 +99,15 @@ export function tryParseConsoleOpenOutput(buffer: string): ConsoleOpenResult | u
   return validateConsoleOpenResult(parsed);
 }
 
+/** Return only a newly spawned process that Companion owns and must clean up. */
+export function getAuthenticationMismatchCleanupPid(
+  result: ConsoleOpenResult,
+  expectedMode: ConsoleAuthenticationMode,
+): number | undefined {
+  if (result.authenticationMode === expectedMode) return undefined;
+  return result.status === 'started' ? result.serverPid : undefined;
+}
+
 /**
  * Parse the plugin package.json content for the installed version.
  * Mirrors readCurrentVersion in pd-console update.ts (same source of truth).

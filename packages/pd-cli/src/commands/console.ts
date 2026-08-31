@@ -594,6 +594,31 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     return;
   }
 
+  const expectedAuthenticationMode = token?.trim() ? 'authenticated' : 'no_auth';
+  if (readyAuthenticationMode !== expectedAuthenticationMode) {
+    try { child.kill('SIGTERM'); } catch { /* child may already have exited */ }
+    const result: ConsoleLaunchResult = {
+      status: 'refused',
+      url: '',
+      port: plan.port,
+      host: plan.host,
+      workspaceDir,
+      reused: false,
+      browserOpened: false,
+      authenticationMode: readyAuthenticationMode,
+      reason: 'console_authentication_mode_mismatch',
+      nextAction: 'Stop the Console, verify PD_CONSOLE_TOKEN propagation, and retry.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`error: ${result.reason}`);
+      console.error(`next:   ${result.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
+
   // 7) Console is ready → optionally open browser, emit result, then keep child running
   let browserOpened = false;
   let browserWarning: string | undefined;

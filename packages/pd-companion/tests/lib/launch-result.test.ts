@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { tryParseConsoleOpenOutput, parsePluginVersion, LaunchResultError } from '../../src/lib/launch-result.js';
+import {
+  tryParseConsoleOpenOutput,
+  parsePluginVersion,
+  getAuthenticationMismatchCleanupPid,
+  LaunchResultError,
+} from '../../src/lib/launch-result.js';
 
 describe('tryParseConsoleOpenOutput', () => {
   it('parses a complete started result with serverPid', () => {
@@ -64,6 +69,22 @@ describe('tryParseConsoleOpenOutput', () => {
     expect(result?.status).toBe('failed');
     expect(result?.reason).toBe('workspace_missing');
     expect(result?.nextAction).toBe('Pass --workspace <path>');
+  });
+});
+
+describe('getAuthenticationMismatchCleanupPid', () => {
+  it('returns the PID only for a newly started mismatched Console', () => {
+    expect(getAuthenticationMismatchCleanupPid({
+      status: 'started', url: '', port: 3100, host: '127.0.0.1', workspaceDir: '',
+      reused: false, browserOpened: false, authenticationMode: 'no_auth', serverPid: 4242,
+    }, 'authenticated')).toBe(4242);
+  });
+
+  it('never claims ownership of a reused Console', () => {
+    expect(getAuthenticationMismatchCleanupPid({
+      status: 'reused', url: '', port: 3100, host: '127.0.0.1', workspaceDir: '',
+      reused: true, browserOpened: false, authenticationMode: 'no_auth', serverPid: 4242,
+    }, 'authenticated')).toBeUndefined();
   });
 });
 

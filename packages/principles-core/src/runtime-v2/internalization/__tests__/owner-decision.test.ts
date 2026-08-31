@@ -564,6 +564,52 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     expect(replay.status).toBe('stale_owner_decision');
   });
 
+  it('revalidates independently persisted evidence after the CAS read and refuses a raced digest', async () => {
+    const { sm, deps, req } = await setup();
+    const decision = await sm.piArtifactStore.getArtifactById(ARTIFACT_ID);
+    await sm.piArtifactStore.upsertArtifact({
+      ...decision!,
+      lineageArtifactIds: ['pi-art-artificer-old'],
+    });
+    await sm.piArtifactStore.upsertArtifact({
+      artifactId: 'pi-art-artificer-old',
+      artifactKind: 'principle',
+      sourceTaskId: ARTIFER_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({ implementationSummary: 'Evidence A', affectedTools: ['write_file'] }),
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+    });
+    const rendered = await buildOwnerDecisionReview(reviewStoreFromStateManager(sm as never), EVAL_ID);
+    expect(rendered).not.toBeNull();
+
+    const originalGetTask = sm.getTask.bind(sm);
+    let evaluatorReads = 0;
+    sm.getTask = async (id: string) => {
+      const task = await originalGetTask(id);
+      if (id === EVAL_ID && ++evaluatorReads === 3) {
+        const artifact = await sm.piArtifactStore.getArtifactById('pi-art-artificer-old');
+        await sm.piArtifactStore.upsertArtifact({
+          ...artifact!,
+          contentJson: JSON.stringify({ implementationSummary: 'Evidence B', affectedTools: ['write_file'] }),
+          updatedAt: '2026-08-30T00:01:00.000Z',
+        });
+      }
+      return task;
+    };
+
+    const outcome = await applyOwnerResolution(deps, {
+      taskId: EVAL_ID,
+      request: req('reject_current', { expectedEvidenceDigest: rendered!.evidence.digest }),
+      identity,
+    });
+    expect(outcome.status).toBe('stale_owner_decision');
+    const unchanged = hydratePITaskRecord((await originalGetTask(EVAL_ID))!);
+    expect(unchanged?.status).toBe('needs_human_review');
+    expect(unchanged?.ownerResolutions).toBeUndefined();
+  });
+
   it('same reviewKey + different action → already_resolved (conflict)', async () => {
     const { deps, req } = await setup();
     await applyOwnerResolution(deps, { taskId: EVAL_ID, request: req('accept_current'), identity });

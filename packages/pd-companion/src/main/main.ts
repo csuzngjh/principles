@@ -22,7 +22,13 @@ import {
   resolvePluginPackageJson,
 } from '../lib/locate.js';
 import { getInstallLayoutPaths } from '@principles/install-layout';
-import { tryParseConsoleOpenOutput, parsePluginVersion, LaunchResultError } from '../lib/launch-result.js';
+import {
+  tryParseConsoleOpenOutput,
+  parsePluginVersion,
+  getAuthenticationMismatchCleanupPid,
+  LaunchResultError,
+  type ConsoleOpenResult,
+} from '../lib/launch-result.js';
 import { ConsoleSupervisor } from '../lib/supervisor.js';
 import { buildDegradedPageHtml, describeDegraded } from '../lib/degraded.js';
 import {
@@ -353,10 +359,21 @@ function spawnCli(): void {
   });
 }
 
-function handleLaunchResult(parsed: { status: string; url: string; port: number; authenticationMode?: 'authenticated' | 'no_auth'; serverPid?: number; reason?: string; nextAction?: string }): void {
+function handleLaunchResult(parsed: ConsoleOpenResult): void {
   if (parsed.status === 'started' || parsed.status === 'reused') {
     const expectedMode = process.env.PD_CONSOLE_TOKEN?.trim() ? 'authenticated' : 'no_auth';
     if (parsed.authenticationMode !== expectedMode) {
+      const cleanupPid = getAuthenticationMismatchCleanupPid(parsed, expectedMode);
+      if (cleanupPid !== undefined) {
+        try {
+          process.kill(cleanupPid, 'SIGTERM');
+        } catch (err) {
+          log('console_authentication_mismatch_cleanup_failed', {
+            serverPid: cleanupPid,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
       supervisor.onLaunchFailure({
         reason: `console_authentication_mode_mismatch: expected=${expectedMode}, actual=${parsed.authenticationMode ?? 'unverified'}`,
         nextAction: '停止现有 Console 后从 Companion 重试；如仍失败，请检查 PD_CONSOLE_TOKEN 配置。',

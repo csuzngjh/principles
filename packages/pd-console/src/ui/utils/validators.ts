@@ -2805,6 +2805,7 @@ export interface OwnerDecisionItemData {
   expectedSourceArtifactHash: string;
   expectedEvidenceDigest?: string;
   review?: OwnerDecisionReviewData;
+  evidenceUnavailableReason?: string;
   createdAt: string;
   machineRecommendation?: string;
   score?: number;
@@ -2953,7 +2954,12 @@ export function validateOwnerDecisionItem(v: unknown): OwnerDecisionItemData | n
     if (item.expectedEvidenceDigest !== undefined && item.expectedEvidenceDigest !== review.evidence.digest) return null;
     item.review = review;
   }
+  if (Object.hasOwn(v, 'evidenceUnavailableReason')) {
+    if (!isString(v.evidenceUnavailableReason) || v.evidenceUnavailableReason.trim() === '') return null;
+    item.evidenceUnavailableReason = v.evidenceUnavailableReason;
+  }
   if ((kind === 'evaluator_review' || kind === 'rollout_review')
+    && item.evidenceUnavailableReason === undefined
     && (item.expectedEvidenceDigest === undefined || item.review === undefined)) return null;
   if (Object.hasOwn(v, 'machineRecommendation')) {
     if (!isString(v.machineRecommendation)) return null;
