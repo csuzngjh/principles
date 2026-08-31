@@ -600,3 +600,36 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
     expect(['dreamer', undefined]).toContain(result.report?.downstream?.taskKind);
   });
 });
+
+describe('worker status mode (SPEC §15) — computeCodexWorkerStatusMode', () => {
+  it('registered + enabled workspace → ready', async () => {
+    const ws = makeWorkspace();
+    const { computeCodexWorkerStatusMode } = await import('../../src/worker/workspace-worker.js');
+    const status = computeCodexWorkerStatusMode({ workspaceDir: ws.root, registeredInInstallManifest: true });
+    expect(status).toMatchObject({ mode: 'ready' });
+  });
+
+  it('missing workspace → degraded with a recovery nextAction', async () => {
+    const { computeCodexWorkerStatusMode } = await import('../../src/worker/workspace-worker.js');
+    const status = computeCodexWorkerStatusMode({
+      workspaceDir: path.join(os.tmpdir(), 'pd-codex-status-missing-ws'),
+      registeredInInstallManifest: true,
+    });
+    expect(status).toMatchObject({ mode: 'degraded', reason: 'workspace_missing' });
+    expect(status.nextAction).toBeTruthy();
+  });
+
+  it('consumer flag off → paused before the manifest check', async () => {
+    const ws = makeWorkspace({ consumer: false });
+    const { computeCodexWorkerStatusMode } = await import('../../src/worker/workspace-worker.js');
+    const status = computeCodexWorkerStatusMode({ workspaceDir: ws.root, registeredInInstallManifest: true });
+    expect(status).toMatchObject({ mode: 'paused', reason: 'internalization_auto_consumer_disabled' });
+  });
+
+  it('execution enabled but not registered → manual_action_required', async () => {
+    const ws = makeWorkspace();
+    const { computeCodexWorkerStatusMode } = await import('../../src/worker/workspace-worker.js');
+    const status = computeCodexWorkerStatusMode({ workspaceDir: ws.root, registeredInInstallManifest: false });
+    expect(status).toMatchObject({ mode: 'manual_action_required', reason: 'workspace_not_in_install_manifest' });
+  });
+});

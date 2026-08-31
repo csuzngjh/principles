@@ -146,6 +146,19 @@ describe('codex worker handler (functional)', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('--once without --json prints the human-readable cycle report', { timeout: 20_000 }, async () => {
+    const { handleCodexWorker } = await import('../../src/commands/codex-worker.js');
+    await handleCodexWorker({ workspace: workspaceDir, once: true, json: false });
+    // Human-readable form: one multi-line report, no JSON envelope.
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(output).toContain('Codex workspace worker');
+    expect(output).toContain('mode: paused');
+    expect(output).toContain('catch-up:');
+    expect(output).toContain('reconcile:');
+    expect(output).toContain('next action:');
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
   it('--status reports manual_action_required for a workspace absent from the install manifest', async () => {
     const { handleCodexWorker } = await import('../../src/commands/codex-worker.js');
     // Execution enabled — the manifest absence is then the deciding fact.
