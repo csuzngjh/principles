@@ -34,7 +34,7 @@ export interface WorkspaceWorkerRegistryDeps {
 }
 
 interface WorkerEntry {
-  child: WorkerChild;
+  child: WorkerChild | null;
   restartAttempts: number;
   stopped: boolean;
   restartHandle: { clear(): void } | null;
@@ -101,7 +101,7 @@ export class WorkspaceWorkerRegistry {
 
   private startEntry(canonical: string): void {
     const entry: WorkerEntry = {
-      child: null as unknown as WorkerChild,
+      child: null,
       restartAttempts: 0,
       stopped: false,
       restartHandle: null,
@@ -148,10 +148,12 @@ export class WorkspaceWorkerRegistry {
     entry.stopped = true;
     entry.restartHandle?.clear();
     entry.restartHandle = null;
-    try {
-      entry.child.kill();
-    } catch {
-      /* already gone */
+    if (entry.child !== null) {
+      try {
+        entry.child.kill();
+      } catch {
+        /* already gone */
+      }
     }
     this.entries.delete(canonical);
   }
