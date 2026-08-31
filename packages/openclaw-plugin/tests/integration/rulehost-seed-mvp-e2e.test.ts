@@ -361,7 +361,11 @@ function evaluatorApproved(taskId: string, artificerArtifactId: string): unknown
       traceCoverage: { sufficient: true, gaps: [], explanation: 'ok' },
     },
     adversarialCases: [],
-    adversarialResult: { passed: true, failedCases: [] },
+    // PRI-634: deliberately NO adversarialResult here. It is the deterministic
+    // gate's output, not an LLM declaration. The pre-existing fixture asserted
+    // `passed: true` up front, which let assembly succeed even when the gate
+    // had never executed — the exact "LLM-declared beats gate" hole this PR
+    // closes. The gate must now produce it for real.
   };
 }
 

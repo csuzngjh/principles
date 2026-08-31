@@ -99,6 +99,30 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * PRI-634: resolve a golden-trace case's target path across the host tool
+ * schemas actually observed on real chains.
+ *
+ * Golden-trace params are echoed verbatim from the host trajectory
+ * (behavior-example-pack-assembler `params: parsedParams`), so the field name
+ * follows whatever the host tool used — the dominant write-tool schema spells
+ * it `file_path` (OpenClaw / Claude Code), while PRI-485's v2 generator only
+ * read `path`. Reading a single spelling made v2 auto-generation structurally
+ * unreachable: the merged adversarial set stayed empty, the deterministic gate
+ * never ran, and an LLM-declared `adversarialResult.passed = true` silently
+ * stood in for a real replay (chain 48371236).
+ *
+ * Returns null when neither spelling yields a non-empty string.
+ */
+function resolveCasePathParam(params: unknown): string | null {
+  if (!isRecordValue(params)) return null;
+  for (const key of ['path', 'file_path']) {
+    const raw = params[key];
+    if (typeof raw === 'string' && raw.trim() !== '') return raw;
+  }
+  return null;
+}
+
+/**
  * P0-B (verdict drift 完整性): rule assembly 的稳定输入。fresh 路径来自
  * buildContext 的内存结果;resume 路径从 durable lineage 重建 (store 按
  * output.sourceArtificerArtifactId 取 contentJson) — 瞬时内存 context 不得
@@ -891,6 +915,29 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
             errorMessage: replayPersistErr instanceof Error ? replayPersistErr.message : String(replayPersistErr),
           });
         }
+      } else if (gateAssessment.codeBearing) {
+        // ── PRI-634 R3 (terminal-state invariant) ──
+        // A code-bearing Artificer artifact that reached `approved` MUST leave
+        // this block carrying an adversarialResult. Anything else reproduces
+        // the chain-48371236 terminal state — approved with the deterministic
+        // gate never executed, adversarialResult=null, and therefore no
+        // pi-rule-* downstream — regardless of WHICH cause prevented the
+        // replay (zero adversarial cases, no positive case, unparseable
+        // artifact, conversion drift…). Telemetry is not recovery: a task that
+        // ends `succeeded` here is indistinguishable from the original defect.
+        //
+        // errorCategory is `input_invalid` (already listed in
+        // permanentErrorCategories) rather than `capability_missing`: the gate
+        // IS wired correctly (R2 owns the wiring case) — the upstream
+        // Artificer content simply cannot be turned into gate input. Permanent
+        // because retrying the LLM cannot make the Artificer emit the missing
+        // affectedTools / positive-case path.
+        return this.retryOrFail({
+          taskId,
+          task,
+          errorCategory: 'input_invalid',
+          failureReason: `PRI-634 R3: Artificer artifact ${context.sourceArtificerArtifactId ?? '(unknown)'} is code-bearing and the evaluator approved it, but the deterministic adversarial replay did not run (reason: ${replayOutcome.skipReason ?? 'unknown'}). Refusing to report succeeded with adversarialResult=null — that is the chain-48371236 terminal state. Fix: have the Artificer emit affectedTools plus at least one positive golden-trace case carrying a path, or supply LLM adversarialCases.`,
+        });
       }
     }
 
@@ -1769,7 +1816,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     taskId: string,
     runId: string,
     context: EvaluatorContext,
-  ): Promise<{ readonly updatedOutput: EvaluatorOutputV2 | null }> {
+  ): Promise<{
+    readonly updatedOutput: EvaluatorOutputV2 | null;
+    /**
+     * Non-null when the deterministic gate did NOT run (degraded path).
+     * PRI-634 R3: the caller converts this into a permanent fail-loud when the
+     * Artificer artifact is code-bearing — `succeeded` + adversarialResult=null
+     * is the chain-48371236 terminal state and must never be reachable.
+     */
+    readonly skipReason: string | null;
+  }> {
     // gateDeps is non-null here — the caller only invokes this method when
     // this.gateDeps is set. Bind to a local to avoid re-asserting.
     // eslint-disable-next-line @typescript-eslint/prefer-destructuring
@@ -1783,7 +1839,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         reason: 'gate_deps_not_injected',
         nextAction: 'wire_gateDeps_createProductionGateDeps_into_evaluator_runner_assembly',
       });
-      return { updatedOutput: null };
+      return { updatedOutput: null, skipReason: 'gate_deps_not_injected' };
     }
     // (1) Passive review short-circuit: the LLM emits decision='needs_revision'
     // when any of intentConsistency/scopePrecision/traceCoverage fails. Only
@@ -1797,7 +1853,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         reason: 'evaluation_not_approved',
         nextAction: 'repair_loop_or_next_review_round',
       });
-      return { updatedOutput: null };
+      return { updatedOutput: null, skipReason: 'evaluation_not_approved' };
     }
 
     // (2) Resolve the Artificer artifact early — we need it both to derive
@@ -1808,7 +1864,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         reason: 'no_artificer_artifact_in_context',
         nextAction: 'verify_buildContext_resolves_artificer_artifact',
       });
-      return { updatedOutput: null };
+      return { updatedOutput: null, skipReason: 'no_artificer_artifact_in_context' };
     }
 
     const artificerParsed = this.parseArtificerArtifact(context.artificerArtifact);
@@ -1818,7 +1874,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         reason: 'artificer_artifact_unparseable',
         nextAction: 'verify_artificer_artifact_contentJson',
       });
-      return { updatedOutput: null };
+      return { updatedOutput: null, skipReason: 'artificer_artifact_unparseable' };
     }
 
     const { implementationCode, goldenTraceCases, affectedTools } = artificerParsed;
@@ -1830,7 +1886,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         reason: 'artificer_artifact_has_no_implementation_code',
         nextAction: 'verify_artificer_l2_adapter_emitted_v2',
       });
-      return { updatedOutput: null };
+      return { updatedOutput: null, skipReason: 'artificer_artifact_has_no_implementation_code' };
     }
 
     // Merge positive cases from the Artificer golden trace into the adversarial
@@ -1843,7 +1899,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         reason: 'no_positive_case_in_artificer_golden_trace',
         nextAction: 'verify_artificer_emitted_at_least_one_positive_case',
       });
-      return { updatedOutput: null };
+      return { updatedOutput: null, skipReason: 'no_positive_case_in_artificer_golden_trace' };
     }
 
     // (3) PRI-485 Phase 6: auto-generate 5 v2 adversarial cases from the
@@ -1860,13 +1916,21 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // (4) No adversarial cases (neither v2-generated nor LLM-supplied) →
     // nothing to replay. codeReview may still be present (passive review only).
     // Previously a silent return (PRI-634 A3 hole #3); now observable (R9).
+    //
+    // PRI-634 R3: for a code-bearing Artificer artifact this is NOT a benign
+    // degradation — it reproduces the chain-48371236 terminal state (approved
+    // with no gate executed, adversarialResult=null, no pi-rule-* ever
+    // emitted). The caller fails loud on this skipReason instead of reporting
+    // succeeded. Non-code-bearing artifacts keep the legacy degrade (R1's
+    // authority is the durable Artificer content, and only code-bearing
+    // content can reach rule assembly).
     if (mergedAdversarialCases.length === 0) {
       this.emitEvent('adversarial_replay_skipped', taskId, {
         runId,
         reason: 'no_adversarial_cases_after_merge',
         nextAction: 'verify_artificer_affectedTools_or_positive_case_path_derivable',
       });
-      return { updatedOutput: null };
+      return { updatedOutput: null, skipReason: 'no_adversarial_cases_after_merge' };
     }
 
     // (5) Convert the merged adversarial cases to an all-negative GoldenTrace.
@@ -1879,7 +1943,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         reason: `adversarial_conversion_failed: ${conversion.reason}`,
         nextAction: 'verify_adversarial_case_validator_alignment',
       });
-      return { updatedOutput: null };
+      return { updatedOutput: null, skipReason: `adversarial_conversion_failed: ${conversion.reason}` };
     }
 
     const mergedTrace: GoldenTrace = {
@@ -1912,6 +1976,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       };
       return {
         updatedOutput: { ...output, adversarialResult: failedResult },
+        skipReason: null,
       };
     }
 
@@ -1935,6 +2000,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
     return {
       updatedOutput: { ...output, adversarialResult },
+      skipReason: null,
     };
   }
 
@@ -2083,12 +2149,21 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
       return [];
     }
-    const pathParam = firstPositive.params?.path;
-    if (typeof pathParam !== 'string' || pathParam.trim() === '') {
+    // PRI-634: golden-trace params are echoed verbatim from the host
+    // trajectory, and the dominant write-tool schema names its target
+    // `file_path` (OpenClaw / Claude Code), not `path`. Reading only `path`
+    // made v2 auto-generation structurally unreachable on real chains: the
+    // merged case set stayed empty, so the gate never ran and an
+    // LLM-declared adversarialResult.passed=true could stand in for a real
+    // replay (chain 48371236). Accept both spellings — this is the input that
+    // makes the deterministic gate reachable at all.
+    const params = firstPositive.params;
+    const pathParam = resolveCasePathParam(params);
+    if (pathParam === null) {
       this.emitEvent('v2_adversarial_cases_skipped', taskId, {
         runId,
         reason: 'no_path_param_for_v2_adversarial_cases',
-        nextAction: 'verify_positive_case_has_string_path_param',
+        nextAction: 'verify_positive_case_has_string_path_or_file_path_param',
       });
       return [];
     }

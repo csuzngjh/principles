@@ -13,7 +13,6 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SERVICE_SRC = fileURLToPath(new URL('../../src/service/internalization-auto-consumer-service.ts', import.meta.url));
