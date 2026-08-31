@@ -661,7 +661,12 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     createTray();
     startSupervision();
-    startWorkspaceWorkerSupervision();
+    // Workspace workers need the installed pd-cli entry; when the runtime is
+    // missing the console supervisor already surfaces the degraded state, and
+    // spawning worker children would only produce a restart-error loop.
+    if (extDir !== undefined && isSafeExistingFile(resolvePdCliEntry(extDir))) {
+      startWorkspaceWorkerSupervision();
+    }
 
     log('companion_started', { version: app.getVersion() });
   });
