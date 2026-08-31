@@ -45,6 +45,7 @@ import {
   PrincipleTreeLedgerAdapter,
   RuntimeStateManager,
   createDiagnosticianTaskId,
+  disposePainSignalBridgesForWorkspace,
   sanitizeString,
   MAX_EVIDENCE_VALUE_CHARS,
   type SignalCollectorConfig,
@@ -839,51 +840,62 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
 
     // Cross-store crash recovery (SPEC §13): a task may already exist from a
     // crashed prior attempt (crash-after-create, before the link write).
+    // PRI-624: the state manager MUST be closed on every exit — the Slice C
+    // worker calls this seam every cycle, and a leaked handle would pin the
+    // workspace state.db for the life of the worker process.
     const stateManager = new RuntimeStateManager({ workspaceDir });
-    await stateManager.initialize();
-    const existing = await stateManager.getTask(taskId);
-    if (existing === null) {
-      const stateDir = path.join(workspaceDir, '.state');
-      const config = loadPdConfigForPlugin(workspaceDir);
-      if (!config.ok) {
-        return { ok: false, reason: `pd_config_invalid:${config.errors[0]?.reason ?? 'unknown'}`, nextAction: config.errors[0]?.nextAction ?? 'Repair .pd/config.yaml and run reconciliation.' };
+    try {
+      await stateManager.initialize();
+      const existing = await stateManager.getTask(taskId);
+      if (existing === null) {
+        const stateDir = path.join(workspaceDir, '.state');
+        const config = loadPdConfigForPlugin(workspaceDir);
+        if (!config.ok) {
+          return { ok: false, reason: `pd_config_invalid:${config.errors[0]?.reason ?? 'unknown'}`, nextAction: config.errors[0]?.nextAction ?? 'Repair .pd/config.yaml and run reconciliation.' };
+        }
+        const service = new PainToPrincipleService({
+          workspaceDir,
+          stateDir,
+          ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
+          owner: 'codex-governance',
+          asyncMode: true,
+          effectiveConfig: config.effective,
+          getEnvVar: (name: string) => process.env[name],
+        });
+        const result = await service.recordPain({
+          painId: input.canonicalPainId,
+          painType: payloadParsed.painType,
+          source: payloadParsed.source,
+          reason: payloadParsed.reason,
+          score: payloadParsed.score,
+          sessionId: payloadParsed.sessionId,
+          provenance: 'host_context_bound',
+          hostKind: 'codex',
+          evidence: [...payloadParsed.evidence],
+          recordObservability: true,
+        });
+        // recordPain (async) leaves a cached bridge holding open SQLite
+        // handles; this seam runs per reconciliation cycle under the Slice C
+        // worker, so release it immediately (hook processes exit anyway).
+        await disposePainSignalBridgesForWorkspace(workspaceDir).catch(() => undefined);
+        if (result.status === 'failed') {
+          return { ok: false, reason: `task_submit_failed:${(result.message ?? result.failureCategory ?? 'unknown').slice(0, 160)}`, nextAction: 'inspect the diagnostician runtime profile; reconciliation retries task creation without losing the admitted pain' };
+        }
       }
-      const service = new PainToPrincipleService({
-        workspaceDir,
-        stateDir,
-        ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
-        owner: 'codex-governance',
-        asyncMode: true,
-        effectiveConfig: config.effective,
-        getEnvVar: (name: string) => process.env[name],
-      });
-      const result = await service.recordPain({
-        painId: input.canonicalPainId,
-        painType: payloadParsed.painType,
-        source: payloadParsed.source,
-        reason: payloadParsed.reason,
-        score: payloadParsed.score,
-        sessionId: payloadParsed.sessionId,
-        provenance: 'host_context_bound',
-        hostKind: 'codex',
-        evidence: [...payloadParsed.evidence],
-        recordObservability: true,
-      });
-      if (result.status === 'failed') {
-        return { ok: false, reason: `task_submit_failed:${(result.message ?? result.failureCategory ?? 'unknown').slice(0, 160)}`, nextAction: 'inspect the diagnostician runtime profile; reconciliation retries task creation without losing the admitted pain' };
-      }
+      db.prepare('UPDATE governance_signal_admissions SET diagnostician_task_id = ?, updated_at = ? WHERE logical_observation_key = ?')
+        .run(taskId, new Date().toISOString(), input.logicalObservationKey);
+      return {
+        ok: true,
+        taskId,
+        created: existing === null,
+        duplicate: existing !== null,
+        // The link was just written because the task already existed → a real
+        // Case B repair (not a no-op on an already-linked marker).
+        linkRepaired: existing !== null,
+      };
+    } finally {
+      await stateManager.close().catch(() => undefined);
     }
-    db.prepare('UPDATE governance_signal_admissions SET diagnostician_task_id = ?, updated_at = ? WHERE logical_observation_key = ?')
-      .run(taskId, new Date().toISOString(), input.logicalObservationKey);
-    return {
-      ok: true,
-      taskId,
-      created: existing === null,
-      duplicate: existing !== null,
-      // The link was just written because the task already existed → a real
-      // Case B repair (not a no-op on an already-linked marker).
-      linkRepaired: existing !== null,
-    };
   } catch (error) {
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `governance_task_ensure_failed:${detail}`, nextAction: 'inspect the workspace state database; reconciliation retries task creation' };

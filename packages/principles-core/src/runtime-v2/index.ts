@@ -381,7 +381,7 @@ export { recordPainSignalObservability } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
 export { sanitizeString, sanitizeValue, sanitizeToolParams, convergePath, MAX_EVIDENCE_VALUE_CHARS } from './evidence-sanitizer.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */
-export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
+export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
 
 // Pain-to-Principle service facade (PRI-12)
 export { PainToPrincipleService } from './pain-to-principle-service.js';
@@ -801,6 +801,7 @@ export {
   isArtifactRejected,
   isUnresolvable,
   recordRejection,
+  isRetryWaitBackoffElapsed,
   DEFAULT_UNRESOLVABLE_THRESHOLD,
 } from './internalization/internalization-task-guards.js';
 

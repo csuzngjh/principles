@@ -19,24 +19,24 @@ import type { PITaskRecord, PIArtifact } from './peer-runner-contracts.js';
 // ── Lease Acquisition Guards ─────────────────────────────────────────────────
 
 /**
- * Returns true if a retry_wait task's backoff period has expired and it can
- * be re-leased now.
+ * Backoff predicate (single authority, shared by canRetryNow and non-PI
+ * callers such as the PainSignalBridge pending-diagnosis path, PRI-624).
  *
  * When a task enters retry_wait, recovery-sweep sets leaseExpiresAt to
  * now + backoffMs (the "retry-after" deadline). The task should NOT be
- * re-leased until that deadline has passed.
- *
- * For non-retry_wait tasks, always returns true (no backoff gating needed).
- *
- * @param task - The task record to evaluate
- * @param nowMs - Current time in milliseconds (default: Date.now())
+ * re-leased until that deadline has passed. For non-retry_wait statuses the
+ * answer is always true (no backoff gating applies).
  */
-export function canRetryNow(task: PITaskRecord, nowMs: number = Date.now()): boolean {
-  if (task.status !== 'retry_wait') return true;
-  if (!task.leaseExpiresAt) return true;
-  const retryAfterMs = new Date(task.leaseExpiresAt).getTime();
+export function isRetryWaitBackoffElapsed(status: PDTaskStatus, leaseExpiresAt: string | null | undefined, nowMs: number = Date.now()): boolean {
+  if (status !== 'retry_wait') return true;
+  if (!leaseExpiresAt) return true;
+  const retryAfterMs = new Date(leaseExpiresAt).getTime();
   if (Number.isNaN(retryAfterMs)) return true;
   return retryAfterMs <= nowMs;
+}
+
+export function canRetryNow(task: PITaskRecord, nowMs: number = Date.now()): boolean {
+  return isRetryWaitBackoffElapsed(task.status, task.leaseExpiresAt, nowMs);
 }
 
 /**

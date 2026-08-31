@@ -430,6 +430,149 @@ export function mapBridgeTelemetryToStoreEvent(event: {
   };
 }
 
+async function constructBridge(
+  opts: PainSignalRuntimeFactoryOptions,
+  runtimeConfig: RuntimeConfig,
+  pipeline: { useSplitPipeline: boolean; diagnosisPersistenceEnabled: boolean },
+): Promise<PainSignalBridge> {
+  const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
+  await stateManager.initialize();
+
+  const connection = new SqliteConnection(opts.workspaceDir);
+  const historyQuery = new SqliteHistoryQuery(connection);
+  const committer = new SqliteDiagnosticianCommitter(connection);
+  const trajectoryLocator = new SqliteTrajectoryLocator(connection);
+  const sourceTraceLocator = new SqliteSourceTraceLocator(stateManager.taskStore, trajectoryLocator);
+
+  const contextAssembler = new SqliteContextAssembler(
+    stateManager.taskStore,
+    historyQuery,
+    stateManager.runStore,
+    { sourceTraceLocator, trajectoryTurnReader: opts.trajectoryTurnReader },
+  );
+
+  const runtimeAdapter: PDRuntimeAdapter = runtimeConfig.runtimeKind === 'pi-ai'
+    ? new PiAiRuntimeAdapter({
+        provider: String(runtimeConfig.provider),
+        model: String(runtimeConfig.model),
+        apiKeyEnv: String(runtimeConfig.apiKeyEnv),
+        maxRetries: runtimeConfig.maxRetries,
+        maxTokens: runtimeConfig.maxTokens,
+        timeoutMs: runtimeConfig.timeoutMs,
+        baseUrl: runtimeConfig.baseUrl,
+        workspace: opts.workspaceDir,
+        ...(runtimeConfig.systemPrompt ? { systemPrompt: runtimeConfig.systemPrompt } : {}),
+      })
+    : new OpenClawCliRuntimeAdapter({
+        runtimeMode: runtimeConfig.openclawMode ?? 'default',
+        workspaceDir: opts.workspaceDir,
+      });
+
+  // PRI-336: Resolve outputLanguage from effective config
+  // Per EP-07: use canonical resolved value, not raw input
+  const resolvedLang = resolveOutputLanguage(opts.effectiveConfig?.config.principles?.outputLanguage);
+  const outputLanguage: OutputLanguage = resolvedLang.outputLanguage;
+
+  // Per ERR-002: degradation must be observable, not silent fallback
+  if (resolvedLang.degradationWarning) {
+    storeEmitter.emitTelemetry({
+      eventType: 'degradation_triggered',
+      traceId: `output-language-config-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      sessionId: '',
+      payload: {
+        component: 'PainSignalRuntimeFactory',
+        reason: 'invalid_output_language_config',
+        warning: resolvedLang.degradationWarning,
+        fallbackValue: resolvedLang.outputLanguage,
+      },
+    });
+  }
+
+  let runner: DiagnosticianRunnerLike;
+
+  if (pipeline.useSplitPipeline) {
+    // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
+    // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
+
+    const rootCauseRunner = new DiagRootCauseRunner(
+      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
+      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+    );
+    const distillerRunner = new DiagDistillerRunner(
+      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+    );
+    const routerRunner = new DiagRouterRunner(
+      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer },
+      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
+    );
+
+    runner = new SplitDiagnosticianRunner({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
+      stateManager,
+      committer,
+      perStageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
+  } else {
+    runner = new DisabledDiagnosticianRunner();
+  }
+
+  const intakeService = new CandidateIntakeService({
+    stateManager,
+    ledgerAdapter: opts.ledgerAdapter,
+  });
+
+  const bridge = new PainSignalBridge({
+    stateManager,
+    runner,
+    intakeService,
+    ledgerAdapter: opts.ledgerAdapter,
+    autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
+    workspaceDir: opts.workspaceDir,
+    diagnosisPersistenceEnabled: pipeline.diagnosisPersistenceEnabled,
+    // rc-9: the persistence path must degrade observably in production. Only
+    // the persistence degradation events are forwarded (see
+    // mapBridgeTelemetryToStoreEvent); other bridge events stay dormant as on main.
+    eventEmitter: {
+      emitTelemetry: (event) => {
+        const mapped = mapBridgeTelemetryToStoreEvent(event);
+        if (mapped) storeEmitter.emitTelemetry(mapped);
+      },
+    },
+    // PRI-624: the factory opens one extra connection (history/committer/
+    // context assemblers) beyond the state manager — dispose() releases both.
+    ownedResources: [connection],
+  });
+
+  return bridge;
+}
+
+/**
+ * PRI-624: dispose + drop every cached bridge for a workspace, releasing
+ * their SQLite handles. Per-cycle workers (Companion workspace worker) call
+ * this after execution; long-lived hosts that reuse the cached bridge do not.
+ */
+export async function disposePainSignalBridgesForWorkspace(workspaceDir: string): Promise<void> {
+  const prefix = `${workspaceDir}:`;
+  const doomed: PainSignalBridge[] = [];
+  for (const [key, bridge] of bridgeCache) {
+    if (key.startsWith(prefix)) {
+      doomed.push(bridge);
+      bridgeCache.delete(key);
+    }
+  }
+  for (const bridge of doomed) {
+    try { await bridge.dispose(); } catch { /* best-effort cleanup */ }
+  }
+}
+
+/**
+ * Invalidate the cached bridge for a workspace (for testing).
+ * Covers both split and disabled pipeline variants.
+ */
 /**
  * Create (or return cached) PainSignalBridge for a workspace.
  *
@@ -489,123 +632,18 @@ export async function createPainSignalBridge(
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
-  const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
-  await stateManager.initialize();
-
-  const connection = new SqliteConnection(opts.workspaceDir);
-  const historyQuery = new SqliteHistoryQuery(connection);
-  const committer = new SqliteDiagnosticianCommitter(connection);
-  const trajectoryLocator = new SqliteTrajectoryLocator(connection);
-  const sourceTraceLocator = new SqliteSourceTraceLocator(stateManager.taskStore, trajectoryLocator);
-
-  const contextAssembler = new SqliteContextAssembler(
-    stateManager.taskStore,
-    historyQuery,
-    stateManager.runStore,
-    { sourceTraceLocator, trajectoryTurnReader: opts.trajectoryTurnReader },
-  );
-
-  const runtimeAdapter: PDRuntimeAdapter = runtimeConfig.runtimeKind === 'pi-ai'
-    ? new PiAiRuntimeAdapter({
-        provider: String(runtimeConfig.provider),
-        model: String(runtimeConfig.model),
-        apiKeyEnv: String(runtimeConfig.apiKeyEnv),
-        maxRetries: runtimeConfig.maxRetries,
-        maxTokens: runtimeConfig.maxTokens,
-        timeoutMs: runtimeConfig.timeoutMs,
-        baseUrl: runtimeConfig.baseUrl,
-        workspace: opts.workspaceDir,
-        ...(runtimeConfig.systemPrompt ? { systemPrompt: runtimeConfig.systemPrompt } : {}),
-      })
-    : new OpenClawCliRuntimeAdapter({
-        runtimeMode: runtimeConfig.openclawMode ?? 'default',
-        workspaceDir: opts.workspaceDir,
-      });
-
-  // PRI-336: Resolve outputLanguage from effective config
-  // Per EP-07: use canonical resolved value, not raw input
-  const resolvedLang = resolveOutputLanguage(opts.effectiveConfig?.config.principles?.outputLanguage);
-  const outputLanguage: OutputLanguage = resolvedLang.outputLanguage;
-
-  // Per ERR-002: degradation must be observable, not silent fallback
-  if (resolvedLang.degradationWarning) {
-    storeEmitter.emitTelemetry({
-      eventType: 'degradation_triggered',
-      traceId: `output-language-config-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      sessionId: '',
-      payload: {
-        component: 'PainSignalRuntimeFactory',
-        reason: 'invalid_output_language_config',
-        warning: resolvedLang.degradationWarning,
-        fallbackValue: resolvedLang.outputLanguage,
-      },
-    });
+  const bridge = await constructBridge(opts, runtimeConfig, { useSplitPipeline, diagnosisPersistenceEnabled });
+  // PRI-624: a concurrent constructor may have won the cache slot while we
+  // were building — the loser self-disposes so its handles never leak.
+  const winner = bridgeCache.get(cacheKey);
+  if (winner !== undefined && winner !== bridge) {
+    await bridge.dispose().catch(() => undefined);
+    return winner;
   }
-
-  let runner: DiagnosticianRunnerLike;
-
-  if (useSplitPipeline) {
-    // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
-    // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
-
-    const rootCauseRunner = new DiagRootCauseRunner(
-      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
-      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
-    );
-    const distillerRunner = new DiagDistillerRunner(
-      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
-      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
-    );
-    const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer },
-      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
-    );
-
-    runner = new SplitDiagnosticianRunner({
-      rootCauseRunner,
-      distillerRunner,
-      routerRunner,
-      stateManager,
-      committer,
-      perStageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    });
-  } else {
-    runner = new DisabledDiagnosticianRunner();
-  }
-
-  const intakeService = new CandidateIntakeService({
-    stateManager,
-    ledgerAdapter: opts.ledgerAdapter,
-  });
-
-  const bridge = new PainSignalBridge({
-    stateManager,
-    runner,
-    intakeService,
-    ledgerAdapter: opts.ledgerAdapter,
-    autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
-    workspaceDir: opts.workspaceDir,
-    diagnosisPersistenceEnabled,
-    // rc-9: the persistence path must degrade observably in production. Only
-    // the persistence degradation events are forwarded (see
-    // mapBridgeTelemetryToStoreEvent); other bridge events stay dormant as on main.
-    eventEmitter: {
-      emitTelemetry: (event) => {
-        const mapped = mapBridgeTelemetryToStoreEvent(event);
-        if (mapped) storeEmitter.emitTelemetry(mapped);
-      },
-    },
-  });
-
   bridgeCache.set(cacheKey, bridge);
   return bridge;
 }
 
-/**
- * Invalidate the cached bridge for a workspace (for testing).
- * Covers both split and disabled pipeline variants.
- */
 export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
   const effectiveKind = runtimeKind ?? 'pi-ai';
   for (const mode of ['local', 'gateway', '']) {

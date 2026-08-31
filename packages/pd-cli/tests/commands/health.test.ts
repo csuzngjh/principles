@@ -39,6 +39,10 @@ vi.mock('@principles/core/runtime-v2', () => ({
   }),
   auditCandidateLedgerConsistency: mockAuditCandidateLedgerConsistency,
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+  // host-runtime's workspace-telemetry-emitter (transitively imported via the
+  // host-runtime barrel) extends this class at module-load time — the mock
+  // must provide a constructible base or the import chain throws.
+  StoreEventEmitter: class {},
 }));
 
 // PRI-443 Phase 5: getLedgerFilePathPublic now imported from

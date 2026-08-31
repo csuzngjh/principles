@@ -34,7 +34,7 @@ import {
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { parseInstallManifest } from '@principles/install-layout';
+import { mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -173,9 +173,28 @@ function resolveInstallManifestHosts(host: HostTarget): ('codex' | 'openclaw')[]
   return mergeInstallManifestHosts(current, host);
 }
 
-function writeInstallManifest(hosts: ('codex' | 'openclaw')[]): void {
+/**
+ * PRI-624 Slice C: the install manifest records every Workspace this install
+ * serves so the Companion can discover its per-Workspace workers (SPEC §13
+ * "canonical install manifest"). Idempotent by canonical path.
+ */
+function resolveInstallManifestWorkspaces(workspaceDir: string): string[] {
+  let current: unknown;
+  try {
+    current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
+  } catch (error) {
+    if (existsSync(getInstallManifestPath())) throw error;
+  }
+  const parsed = parseInstallManifest(current);
+  if (current !== undefined && !parsed.manifest) {
+    throw new Error(parsed.error ?? 'install_manifest_malformed');
+  }
+  return mergeInstallManifestWorkspaces(parsed.manifest, path.resolve(workspaceDir));
+}
+
+function writeInstallManifest(hosts: ('codex' | 'openclaw')[], workspaces: string[]): void {
   mkdirSync(getPdDir(), { recursive: true });
-  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts }, null, 2) + '\n', 'utf8');
+  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts, workspaces }, null, 2) + '\n', 'utf8');
 }
 
 function installBundledLayoutPackage(pluginDir: string): void {
@@ -443,6 +462,7 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Validating bundled core dependencies', weight: 5 },
   { name: 'Installing bundled @principles/host-runtime', weight: 3 },
   { name: 'Validating bundled host runtime dependencies', weight: 5 },
+  { name: 'Installing bundled @principles/codex-adapter', weight: 3 },
   { name: 'Installing plugin', weight: 10 },
   { name: 'Preparing core library for plugin', weight: 3 },
   { name: 'Validating bundled plugin dependencies', weight: 10 },
@@ -1174,6 +1194,20 @@ function syncPdCli(pluginDir: string): boolean {
     }
   }
 
+  // Create node_modules/@principles/codex-adapter symlink so pd-cli can resolve
+  // its @principles/codex-adapter dependency (rewritten to
+  // "file:../codex-adapter" by bundle-plugin.mjs). Without this, `pd codex
+  // worker` crashes with ERR_MODULE_NOT_FOUND (PRI-624).
+  const codexAdapterLinkTarget = path.join(getPdRuntimeDir(), 'codex-adapter');
+  const codexAdapterLinkPath = path.join(coreLinkDir, 'codex-adapter');
+  if (!existsSync(codexAdapterLinkPath)) {
+    if (isWindows()) {
+      symlinkSync(codexAdapterLinkTarget, codexAdapterLinkPath, 'junction');
+    } else {
+      symlinkSync('../../../codex-adapter', codexAdapterLinkPath, 'dir');
+    }
+  }
+
   // Create node_modules/principles-disciple symlink so pd-cli can resolve
   // its principles-disciple dependency (the plugin package, rewritten to
   // "file:../plugin" by bundle-plugin.mjs). The plugin is installed at the
@@ -1311,6 +1345,10 @@ function getInstalledHostRuntimeDir(): string {
   return path.join(getPdRuntimeDir(), 'host-runtime');
 }
 
+function getInstalledCodexAdapterDir(): string {
+  return path.join(getPdRuntimeDir(), 'codex-adapter');
+}
+
 function installBundledCore(pluginDir: string): void {
   const coreSrc = path.join(pluginDir, 'core');
   const coreDest = getInstalledCoreDir();
@@ -1345,6 +1383,29 @@ function installBundledHostRuntime(pluginDir: string): void {
 
   rmSync(hostRuntimeDest, { recursive: true, force: true });
   cpSync(hostRuntimeSrc, hostRuntimeDest, { recursive: true });
+}
+
+/**
+ * PRI-624: pd-cli's `codex worker` / `codex ingest catch-up` commands import
+ * the workspace worker cycle from @principles/codex-adapter, so the bundled
+ * package is installed as a runtime sibling exactly like host-runtime.
+ */
+function installBundledCodexAdapter(pluginDir: string): void {
+  const codexAdapterSrc = path.join(pluginDir, 'codex-adapter');
+  const codexAdapterDest = getInstalledCodexAdapterDir();
+
+  if (!existsSync(codexAdapterSrc)) {
+    throw new Error('Bundled @principles/codex-adapter not found in package. Cannot resolve runtime dependencies.');
+  }
+
+  const codexAdapterPkgJson = path.join(codexAdapterSrc, 'package.json');
+  const codexAdapterDist = path.join(codexAdapterSrc, 'dist');
+  if (!existsSync(codexAdapterPkgJson) || !existsSync(codexAdapterDist)) {
+    throw new Error('Bundled @principles/codex-adapter is incomplete (missing package.json or dist). Package may be corrupted.');
+  }
+
+  rmSync(codexAdapterDest, { recursive: true, force: true });
+  cpSync(codexAdapterSrc, codexAdapterDest, { recursive: true });
 }
 
 function ensureCoreDependency(_targetDir: string): void {
@@ -1998,6 +2059,10 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     await installHostRuntimeDependencies();
     stepIndex++;
 
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/codex-adapter...');
+    installBundledCodexAdapter(pluginDir);
+    stepIndex++;
+
     installBundledLayoutPackage(pluginDir);
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
@@ -2162,7 +2227,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     if (hostFailures.length > 0) {
       throw new Error(`Host installation failed: ${hostFailures.join(' | ')}`);
     }
-    writeInstallManifest(installManifestHosts);
+    writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir));
 
     cleanupBackup(backupDir, runtimeBackupDir);
     if (spinner) {

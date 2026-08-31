@@ -9,6 +9,7 @@ import { evaluateCandidateAdmissions } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
 import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
+import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
 
 export type { PainProvenance };
@@ -95,6 +96,12 @@ export interface PainSignalBridgeOptions {
   eventEmitter?: {
     emitTelemetry: (event: { eventType: string; traceId: string; timestamp: string; payload: Record<string, unknown> }) => void;
   };
+  /**
+   * PRI-624: resources the factory created for this bridge (its extra
+   * SqliteConnection) that `dispose()` must release. Long-running workers
+   * dispose bridges per cycle so file handles do not pin the workspace DB.
+   */
+  ownedResources?: readonly { close: () => void | Promise<void> }[];
 }
 
 export function createDiagnosticianTaskId(painId: string): string {
@@ -106,6 +113,19 @@ function severityFromScore(score: number | undefined): string {
   if (score >= 70) return 'severe';
   if (score >= 40) return 'moderate';
   return 'mild';
+}
+
+/** PRI-624: bounded, validated evidence-count recovery from a submitted task's diagnosticJson (rc-1). */
+function countSubmittedEvidence(diagnosticJson: string | undefined): number {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) return 0;
+  try {
+    const parsed: unknown = JSON.parse(diagnosticJson);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return 0;
+    const {evidence} = (parsed as { evidence?: unknown });
+    return Array.isArray(evidence) ? evidence.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function inferProvenance(data: PainDetectedData): PainProvenance {
@@ -156,6 +176,7 @@ export class PainSignalBridge {
   private readonly diagnosisPersistenceEnabled: boolean;
   private readonly workspaceDir: string | undefined;
   private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
+  private readonly ownedResources: readonly { close: () => void | Promise<void> }[];
 
   constructor(opts: PainSignalBridgeOptions) {
     this.stateManager = opts.stateManager;
@@ -167,6 +188,20 @@ export class PainSignalBridge {
     this.diagnosisPersistenceEnabled = opts.diagnosisPersistenceEnabled ?? false;
     this.workspaceDir = opts.workspaceDir;
     this.eventEmitter = opts.eventEmitter;
+    this.ownedResources = opts.ownedResources ?? [];
+  }
+
+  /**
+   * PRI-624: release every handle this bridge holds (state manager + the
+   * factory-owned connection). Callers that keep the cached bridge (plugin
+   * host process) may skip this; per-cycle workers MUST dispose to avoid
+   * pinning the workspace SQLite files.
+   */
+  async dispose(): Promise<void> {
+    for (const resource of this.ownedResources) {
+      try { await resource.close(); } catch { /* best-effort cleanup */ }
+    }
+    await this.stateManager.close();
   }
 
   private emitAdmissionEvent(
@@ -289,6 +324,74 @@ export class PainSignalBridge {
       painId,
       provenance,
       inputEvidenceCount: data.evidence?.length ?? 0,
+    });
+  }
+
+  /**
+   * PRI-624 (Codex Closure Slice C): execute one already-submitted
+   * Diagnostician task — the async counterpart of `submitPainSignal`. A
+   * worker (Companion) or CLI uses this to advance a task that Slice B
+   * admission enqueued without running an LLM in the hook.
+   *
+   * Unlike `onPainDetected` this NEVER resets task state: a worker retry
+   * loop must preserve the retry budget (attemptCount/maxAttempts) exactly
+   * like the peer-runner consumers do. The lease is acquired inside
+   * `runner.run` via the existing Runtime V2 lease manager.
+   *
+   * Eligibility: 'pending', or 'retry_wait' whose backoff deadline
+   * (lease_expires_at) has elapsed (isRetryWaitBackoffElapsed — the same
+   * guard wakeOnce applies). 'leased' is skipped — the existing lease wins;
+   * expired leases are the recovery sweep's job, not ours. 'succeeded'
+   * returns the existing result (idempotent). 'failed' /
+   * 'needs_human_review' are skipped: terminal states need explicit
+   * Owner/manual action, never silent worker retries.
+   */
+  async executePendingDiagnosis(input: {
+    taskId: string;
+    /** Provenance used for admission metadata; submitted pains are host-context-bound by construction. */
+    provenance?: PainProvenance;
+  }): Promise<PainSignalBridgeResult> {
+    const { taskId } = input;
+    const task = await this.stateManager.getTask(taskId);
+    if (task === null) {
+      return { status: 'failed', painId: '', taskId, candidateIds: [], ledgerEntryIds: [], errorCategory: 'input_invalid', message: 'task_not_found' };
+    }
+    const painId = typeof task.inputRef === 'string' && task.inputRef.length > 0 ? task.inputRef : taskId;
+    if (task.status === 'succeeded') {
+      return this.buildExistingResult({ painId, taskId });
+    }
+    if (task.status === 'leased') {
+      return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'task_already_leased' };
+    }
+    if (task.status === 'failed' || task.status === 'needs_human_review') {
+      return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: `task_${task.status}` };
+    }
+    if (!isRetryWaitBackoffElapsed(task.status, task.leaseExpiresAt)) {
+      return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'retry_wait_pending' };
+    }
+
+    const result = await this.runner.run(taskId);
+    if (result.status !== 'succeeded') {
+      return {
+        status: result.status === 'retried' ? 'retried' : 'failed',
+        painId,
+        taskId,
+        runnerStatus: result.status,
+        candidateIds: [],
+        ledgerEntryIds: [],
+        errorCategory: result.errorCategory,
+        message: result.failureReason,
+      };
+    }
+    return this.onDiagnosisComplete({
+      taskId,
+      diagnosticianOutput: result.output,
+      painId,
+      provenance: input.provenance ?? 'host_context_bound',
+      // The submitted pain's evidence count lives in the task payload
+      // (buildDiagnosticJson). Admission gates on it (needs_evidence), so
+      // parse it back — validated, bounded, best-effort with explicit 0.
+      inputEvidenceCount: countSubmittedEvidence(task.diagnosticJson),
     });
   }
 

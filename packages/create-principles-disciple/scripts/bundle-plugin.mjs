@@ -57,6 +57,8 @@ const CORE_SRC = join(ROOT_DIR, 'packages', 'principles-core');
 const CORE_DEST = join(OUTPUT_ROOT, 'core');
 const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
 const HOST_RUNTIME_DEST = join(OUTPUT_ROOT, 'host-runtime');
+const CODEX_ADAPTER_SRC = join(ROOT_DIR, 'packages', 'codex-adapter');
+const CODEX_ADAPTER_DEST = join(OUTPUT_ROOT, 'codex-adapter');
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
 const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
 const RELEASE_LOCKS_ROOT = join(ROOT_DIR, 'packages', 'create-principles-disciple', 'release-locks');
@@ -103,6 +105,13 @@ const CORE_REQUIRED = [
 const HOST_RUNTIME_REQUIRED = [
   'dist',
   'dist/index.js',
+  'package.json',
+];
+
+const CODEX_ADAPTER_REQUIRED = [
+  'dist',
+  'dist/index.js',
+  'dist/pd-hook.js',
   'package.json',
 ];
 
@@ -167,6 +176,15 @@ for (const item of HOST_RUNTIME_REQUIRED) {
   if (!existsSync(src)) {
     console.error(`❌ Required host-runtime item not found: ${src}`);
     console.error(`   Run: cd packages/host-runtime && npm run build`);
+    process.exit(1);
+  }
+}
+
+for (const item of CODEX_ADAPTER_REQUIRED) {
+  const src = join(CODEX_ADAPTER_SRC, item);
+  if (!existsSync(src)) {
+    console.error(`❌ Required codex-adapter item not found: ${src}`);
+    console.error(`   Run: cd packages/codex-adapter && npm run build`);
     process.exit(1);
   }
 }
@@ -280,6 +298,26 @@ for (const item of HOST_RUNTIME_REQUIRED) {
 
 console.log(`   Host Runtime: ${HOST_RUNTIME_DEST}`);
 
+if (existsSync(CODEX_ADAPTER_DEST)) {
+  console.log('  Removing old codex-adapter/ directory...');
+  rmSync(CODEX_ADAPTER_DEST, { recursive: true, force: true });
+}
+mkdirSync(CODEX_ADAPTER_DEST, { recursive: true });
+
+for (const item of CODEX_ADAPTER_REQUIRED) {
+  const src = join(CODEX_ADAPTER_SRC, item);
+  const dest = join(CODEX_ADAPTER_DEST, item);
+  console.log(`  Copying codex-adapter/${item}...`);
+  try {
+    cpSync(src, dest, { recursive: true });
+  } catch {
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(src, dest);
+  }
+}
+
+console.log(`   Codex Adapter: ${CODEX_ADAPTER_DEST}`);
+
 if (existsSync(INSTALL_LAYOUT_DEST)) {
   console.log('  Removing old install-layout/ directory...');
   rmSync(INSTALL_LAYOUT_DEST, { recursive: true, force: true });
@@ -354,6 +392,11 @@ rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principl
 // directory. Without this rewrite + symlink, `pd --version` crashes with
 // ERR_MODULE_NOT_FOUND because pd-cli cannot resolve @principles/host-runtime.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/host-runtime', 'file:../host-runtime');
+// pd-cli's `codex worker` / `codex ingest catch-up` commands import the
+// workspace worker cycle from @principles/codex-adapter (PRI-624). Same
+// self-contained pattern: bundle it as a sibling and rewrite the dep; the
+// installer's syncPdCli() creates the resolving symlink.
+rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/codex-adapter', 'file:../codex-adapter');
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/install-layout', 'file:../install-layout');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/install-layout', 'file:../install-layout');
 // host-runtime itself depends on @principles/core. Rewrite to a local file
@@ -361,6 +404,11 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@princi
 // separate npm install. The installer creates the corresponding symlink.
 rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime', '@principles/core', 'file:../core');
 rewriteBundledDependency(join(HOST_RUNTIME_DEST, 'package.json'), 'host-runtime', '@principles/install-layout', 'file:../install-layout');
+// codex-adapter depends on core + host-runtime; rewrite both to local file
+// references so the bundled package is self-contained like its siblings.
+rewriteBundledDependency(join(CODEX_ADAPTER_DEST, 'package.json'), 'codex-adapter', '@principles/core', 'file:../core');
+rewriteBundledDependency(join(CODEX_ADAPTER_DEST, 'package.json'), 'codex-adapter', '@principles/host-runtime', 'file:../host-runtime');
+rewriteBundledDependency(join(CODEX_ADAPTER_DEST, 'package.json'), 'codex-adapter', '@principles/install-layout', 'file:../install-layout');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
 // console statically imports OPENCLAW_HOST_LIVENESS_CONTRACT at runtime for the
 // RuleCode owner live-decision readiness checks. Rewrite to a local file reference

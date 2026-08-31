@@ -8,6 +8,7 @@ import {
   listGovernanceObservations,
   promoteGovernanceEvidence,
   readGovernanceCheckpoint,
+  listGovernanceCheckpoints,
   type GovernanceObservationInput,
 } from '../src/governance-observation-store.js';
 
@@ -356,6 +357,33 @@ describe('compaction and rollback markers (G1 §6)', () => {
 });
 
 describe('checkpoint durability', () => {
+  it('lists all codex checkpoints oldest-updated-first for worker catch-up (PRI-624)', () => {
+    expect(ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user' })],
+      checkpoint: { hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1', byteOffset: 100, lastOrdinal: 1, cliVersion: '0.150.1', rootSessionId: 'root-session-1', incompleteTail: false },
+    })).toMatchObject({ ok: true });
+    expect(ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 't2', logicalObservationKey: 'codex|rollout-uuid-2|t2|user', rolloutIdentity: 'rollout-uuid-2', rootSessionId: 'root-session-2' })],
+      checkpoint: { hostKind: 'codex', rolloutIdentity: 'rollout-uuid-2', byteOffset: 200, lastOrdinal: 2, cliVersion: '0.150.1', rootSessionId: 'root-session-2', incompleteTail: true },
+    })).toMatchObject({ ok: true });
+
+    const listed = listGovernanceCheckpoints({ workspaceDir, hostKind: 'codex' });
+    if (!listed.ok) throw new Error(listed.reason ?? 'list failed');
+    expect(listed.checkpoints.length).toBe(2);
+    expect(listed.checkpoints.map((c) => c.rolloutIdentity).sort()).toEqual(['rollout-uuid-1', 'rollout-uuid-2']);
+    expect(listed.checkpoints.find((c) => c.rolloutIdentity === 'rollout-uuid-2')?.incompleteTail).toBe(true);
+    // a fresh workspace has no checkpoints — not an error
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gov-store-empty-'));
+    try {
+      fs.mkdirSync(path.join(emptyDir, '.state'), { recursive: true });
+      fs.writeFileSync(path.join(emptyDir, '.state', 'trajectory.db'), '');
+      const empty = listGovernanceCheckpoints({ workspaceDir: emptyDir, hostKind: 'codex' });
+      expect(empty.ok ? empty.checkpoints : empty).toEqual([]);
+    } finally {
+      fs.rmSync(emptyDir, { recursive: true, force: true });
+    }
+  });
+
   it('commits the checkpoint only in the transaction with its observations and records degradations', () => {
     const result = ingest({
       observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user' })],
