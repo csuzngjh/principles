@@ -557,7 +557,15 @@ beforeAll(async () => {
     runnerOpts,
   );
   evaluatorRunner = new EvaluatorRunner(
-    { stateManager, runtimeAdapter: adapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator() },
+    {
+      stateManager, runtimeAdapter: adapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultEvaluatorValidator(),
+      // PRI-634 A2/R2: code-bearing Artificer output REQUIRES the deterministic
+      // gate. Previously this runner had no gateDeps and the approved verdict
+      // trusted the scripted adversarialResult.passed=true declaration — the
+      // exact LLM-declared-beats-gate hole (chain 48371236). Inject the same
+      // production gateDeps as RuleHostWriter (A1 wiring parity).
+      gateDeps: createProductionGateDeps(),
+    },
     runnerOpts,
   );
 
