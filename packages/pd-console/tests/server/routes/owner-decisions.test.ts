@@ -230,6 +230,30 @@ describe('GET /api/v1/governance/owner-decisions', () => {
     expect(data.items[0]?.evidenceUnavailableReason).toContain('decision_artifact_missing');
   });
 
+  it('filters task decisions whose durable decision artifact explicitly declares a synthetic origin', async () => {
+    const conn = setupDb();
+    const now = '2026-08-30T00:00:00.000Z';
+    conn.getDb().prepare(
+      'UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?',
+    ).run(JSON.stringify({
+      origin: 'synthetic',
+      taskId: EVAL_ID,
+      sourceArtificerArtifactId: ARTIFICER_ARTIFACT_ID,
+      evaluation: {
+        decision: 'needs_revision', summary: 's', score: 0.72,
+        strengths: [], concerns: ['c'], requiredChanges: ['fix timeout'],
+      },
+      sourceTrace: { artificerArtifactId: ARTIFICER_ARTIFACT_ID },
+      risks: [], generatedAt: now,
+    }), ARTIFACT_ID);
+    conn.close();
+
+    const res = makeRes();
+    await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+    const data = parse(res).data as { total: number; filteredSyntheticCount: number };
+    expect(data).toMatchObject({ total: 0, filteredSyntheticCount: 1 });
+  });
+
   it('does not let producer-declared origin hide a durable RuleCode decision', async () => {
     const conn = setupDb();
     const now = '2026-08-30T00:00:00.000Z';

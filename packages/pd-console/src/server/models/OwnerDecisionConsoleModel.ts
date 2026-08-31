@@ -92,6 +92,17 @@ function isRecordRow(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** Producer-declared synthetic sources are not actionable Owner decisions. */
+function hasExplicitSyntheticOrigin(contentJson: string): boolean {
+  try {
+    const content: unknown = JSON.parse(contentJson);
+    if (!isRecordRow(content) || !Object.hasOwn(content, 'origin')) return false;
+    return content.origin === 'test' || content.origin === 'demo' || content.origin === 'synthetic';
+  } catch {
+    return false;
+  }
+}
+
 function makeRowReader(db: { prepare: (sql: string) => { get: (id: string) => unknown } }) {
   const stmt = db.prepare('SELECT * FROM tasks WHERE task_id = ?');
   return (taskId: string): TaskRecord | null => {
@@ -103,24 +114,29 @@ function makeRowReader(db: { prepare: (sql: string) => { get: (id: string) => un
 
 /** 行 → TaskRecord 的窄映射（tasks 表全部列；diagnostic_json 键名转换）。 */
 
+interface TaskDecisionItemDependencies {
+  readonly artifactStore: PIArtifactStore;
+  readonly readTaskRow: (taskId: string) => TaskRecord | null;
+  readonly onExplicitSyntheticOrigin?: () => void;
+}
+
 /** 单任务 capability → 决策条目（不 eligible → null，INV-01）。 */
 async function deriveTaskDecisionItem(
   task: TaskRecord,
-  artifactStore: PIArtifactStore,
-  readTaskRow: (taskId: string) => TaskRecord | null,
+  dependencies: TaskDecisionItemDependencies,
 ): Promise<OwnerDecisionItem | null> {
   if (!GOVERNANCE_TASK_KINDS.has(task.taskKind)) return null;
   const factStore = {
     getTask: async (taskId: string): Promise<TaskRecord | null> => {
       if (taskId === task.taskId) return task;
       try {
-        return readTaskRow(taskId);
+        return dependencies.readTaskRow(taskId);
       } catch {
         return null;
       }
     },
     listArtifactsBySourceTask: async (taskId: string) => {
-      const list = await artifactStore.listBySourceTaskId(taskId).catch(() => []);
+      const list = await dependencies.artifactStore.listBySourceTaskId(taskId).catch(() => []);
       return list.map((a) => ({
         artifactId: a.artifactId,
         artifactKind: a.artifactKind,
@@ -132,7 +148,7 @@ async function deriveTaskDecisionItem(
       }));
     },
     getArtifactById: async (artifactId: string) => {
-      const artifact = await artifactStore.getArtifactById(artifactId).catch(() => null);
+      const artifact = await dependencies.artifactStore.getArtifactById(artifactId).catch(() => null);
       return artifact ? {
         artifactId: artifact.artifactId,
         artifactKind: artifact.artifactKind,
@@ -146,6 +162,13 @@ async function deriveTaskDecisionItem(
   };
   const facts = await collectOwnerDecisionFacts(factStore, task.taskId);
   if (!facts) return null;
+  if (facts.decisionArtifact) {
+    const decisionArtifact = await dependencies.artifactStore.getArtifactById(facts.decisionArtifact.artifactId).catch(() => null);
+    if (decisionArtifact && hasExplicitSyntheticOrigin(decisionArtifact.contentJson)) {
+      dependencies.onExplicitSyntheticOrigin?.();
+      return null;
+    }
+  }
   const capability = deriveOwnerDecisionCapability(facts);
   const evidenceBlockers = capability.blockers.filter((blocker) =>
     blocker === 'decision_artifact_missing' || blocker === 'lineage_unresolvable');
@@ -247,7 +270,7 @@ export class OwnerDecisionConsoleModel {
       const db = conn.getDb();
       const artifactStore: PIArtifactStore = new SqlitePIArtifactStore(conn);
       const items: OwnerDecisionItem[] = [];
-      const filteredSyntheticCount = 0;
+      let filteredSyntheticCount = 0;
 
       // ── 1. needs_human_review 的 decision-capable 任务 (PRI-629 核心) ──
       let nhrRows: Record<string, unknown>[] = [];
@@ -261,7 +284,14 @@ export class OwnerDecisionConsoleModel {
       for (const row of nhrRows) {
         const task = rowToTaskRecord(row);
         if (!task) continue;
-        const item = await deriveTaskDecisionItem(task, artifactStore, makeRowReader(db));
+        const item = await deriveTaskDecisionItem(
+          task,
+          {
+            artifactStore,
+            readTaskRow: makeRowReader(db),
+            onExplicitSyntheticOrigin: () => { filteredSyntheticCount += 1; },
+          },
+        );
         if (item) items.push(item);
       }
 
@@ -347,7 +377,7 @@ export class OwnerDecisionConsoleModel {
       for (const row of rows) {
         const task = rowToTaskRecord(row);
         if (!task) continue;
-        const item = await deriveTaskDecisionItem(task, artifactStore, makeRowReader(db));
+        const item = await deriveTaskDecisionItem(task, { artifactStore, readTaskRow: makeRowReader(db) });
         if (item) ids.add(task.taskId);
       }
       return ids;
