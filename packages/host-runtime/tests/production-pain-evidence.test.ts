@@ -19,7 +19,7 @@ function workspaceWithTrajectory(): string {
   db.exec(`
     CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL);
-    CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, created_at TEXT NOT NULL);
+    CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL);
     CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;
   `);
   db.close();
@@ -279,7 +279,7 @@ describe('production after-tool pain/evidence kernel', () => {
   it('rolls back the tool evidence when the admitted pain write fails', async () => {
     const workspaceDir = workspaceWithTrajectory();
     const schema = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
-    schema.exec(`DROP INDEX idx_pain_events_canonical_pain_id; DROP TABLE pain_events; CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL CHECK(score < 0), reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, created_at TEXT NOT NULL); CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;`);
+    schema.exec(`DROP INDEX idx_pain_events_canonical_pain_id; DROP TABLE pain_events; CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL CHECK(score < 0), reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL); CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;`);
     schema.close();
     const result = await createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'codex:rollback-523', painScore: 90, isRisky: true, consecutiveErrors: 4, relativePath: '/etc/passwd' }) }).dispatch(failedWrite(workspaceDir));
     expect(result.warnings?.[0]).toMatch(/^trajectory_write_failed:/);
@@ -287,5 +287,30 @@ describe('production after-tool pain/evidence kernel', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 0 });
     expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 0 });
     db.close();
+  });
+});
+
+describe('PRI-640 host attribution through the shared production kernel (SPEC §13)', () => {
+  it.each([
+    ['openclaw', 'openclaw'],
+    ['codex', 'codex'],
+    [undefined, null],
+  ] as const)('hostKind=%p from the constructing adapter persists as host_kind=%p', async (hostKind, expected) => {
+    const workspaceDir = workspaceWithTrajectory();
+    const runtime = createProductionHostRuntime({
+      ...(hostKind ? { hostKind } : {}),
+      painEnrichmentProvider: () => ({ eventId: 'codex:tool-640', painScore: 90, isRisky: true, consecutiveErrors: 4, relativePath: '/etc/passwd' }),
+    });
+
+    const result = await runtime.dispatch(failedWrite(workspaceDir));
+    expect(result.metadata).toMatchObject({ admitted: true, duplicate: false });
+
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT host_kind FROM pain_events').get() as { host_kind: string | null };
+      expect(row.host_kind).toBe(expected);
+    } finally {
+      db.close();
+    }
   });
 });

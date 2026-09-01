@@ -357,6 +357,7 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
       sessionId: painData.sessionId,
       agentId: painData.agentId,
       provenance: painData.provenance,
+      hostKind: painData.hostKind,
       recordObservability: true,
     });
 

@@ -162,6 +162,7 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       text TEXT,
       canonical_pain_id TEXT,
       runtime_task_id TEXT,
+      host_kind TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS gate_blocks (
@@ -277,6 +278,9 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
   for (const col of [
     { name: 'canonical_pain_id', type: 'TEXT' },
     { name: 'runtime_task_id', type: 'TEXT' },
+    // PRI-640: host attribution — observability metadata only, orthogonal to
+    // `origin` (evidence semantics) and excluded from canonical pain identity.
+    { name: 'host_kind', type: 'TEXT' },
   ]) {
     try {
       db.exec(`ALTER TABLE pain_events ADD COLUMN ${col.name} ${col.type}`);
@@ -364,7 +368,8 @@ interface TrajectoryRecordOptions {
   runtimeTaskId?: string;
 }
 
-function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | undefined {
+/** PRI-640: id of the pain_events row (undefined when the dedup row could not be re-read); warnings carry host_kind conflict evidence. */
+function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): { id?: number; warnings: string[] } {
   const { stateDir, data, timestamp, workspaceDir, canonicalPainId, runtimeTaskId } = opts;
   const dbPath = nodePath.join(stateDir, 'trajectory.db');
   fs.mkdirSync(nodePath.dirname(dbPath), { recursive: true });
@@ -393,12 +398,13 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | unde
     // Try INSERT; on UNIQUE constraint violation for canonical_pain_id, do UPDATE instead.
     // SQLite UPSERT (ON CONFLICT) does not support partial unique indexes, so we
     // handle the conflict manually.
+    const warnings: string[] = [];
     try {
       const result = db.prepare(`
         INSERT INTO pain_events (
           session_id, source, score, reason, severity, origin, confidence, text, created_at,
-          canonical_pain_id, runtime_task_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          canonical_pain_id, runtime_task_id, host_kind
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         sessionId,
         data.source,
@@ -411,8 +417,9 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | unde
         timestamp,
         canonicalPainId ?? null,
         runtimeTaskId ?? null,
+        data.hostKind ?? null,
       );
-      return Number(result.lastInsertRowid);
+      return { id: Number(result.lastInsertRowid), warnings };
     } catch (insertErr: unknown) {
       // If UNIQUE constraint violation on canonical_pain_id, upsert manually
       if (
@@ -423,15 +430,22 @@ function recordTrajectoryPainEvent(opts: TrajectoryRecordOptions): number | unde
       ) {
         db.prepare(`
           UPDATE pain_events
-          SET runtime_task_id = COALESCE(?, runtime_task_id)
+          SET runtime_task_id = COALESCE(?, runtime_task_id),
+              host_kind = COALESCE(host_kind, ?)
           WHERE canonical_pain_id = ?
-        `).run(runtimeTaskId ?? null, canonicalPainId);
-        const rawRow = db.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').get(canonicalPainId);
+        `).run(runtimeTaskId ?? null, data.hostKind ?? null, canonicalPainId);
+        const rawRow = db.prepare('SELECT id, host_kind FROM pain_events WHERE canonical_pain_id = ?').get(canonicalPainId);
         // Runtime Contract #1/#2: validate DB row instead of `as` cast
         if (rawRow && typeof rawRow === 'object' && Object.hasOwn(rawRow, 'id') && typeof (rawRow as Record<string, unknown>).id === 'number') {
-          return (rawRow as { id: number }).id;
+          // PRI-640 §16: keep the first durable host attribution; never overwrite.
+          // A differing re-attempt is surfaced as a bounded warning (rc-9-no-silent-fallback).
+          const durableHostKind = Object.getOwnPropertyDescriptor(rawRow, 'host_kind')?.value;
+          if (data.hostKind && typeof durableHostKind === 'string' && durableHostKind !== data.hostKind) {
+            warnings.push(`host_kind_conflict:kept=${durableHostKind},rejected=${data.hostKind}`);
+          }
+          return { id: (rawRow as { id: number }).id, warnings };
         }
-        return undefined;
+        return { id: undefined, warnings };
       }
       throw insertErr;
     }
@@ -503,10 +517,12 @@ export function recordPainSignalObservability(
   }
 
   try {
-    result.trajectoryPainEventId = recordTrajectoryPainEvent({
+    const trajectory = recordTrajectoryPainEvent({
       stateDir: opts.stateDir, data: opts.data, timestamp, workspaceDir: opts.workspaceDir,
       canonicalPainId: opts.canonicalPainId, runtimeTaskId: opts.runtimeTaskId,
     });
+    result.trajectoryPainEventId = trajectory.id;
+    warnings.push(...trajectory.warnings);
   } catch (err) {
     warnings.push(`trajectory pain_events write failed: ${err instanceof Error ? err.message : String(err)}`);
   }

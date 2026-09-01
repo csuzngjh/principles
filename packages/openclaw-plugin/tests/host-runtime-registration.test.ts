@@ -13,6 +13,12 @@ import type { OpenClawPluginApi } from '../src/openclaw-sdk.js';
 // through the shared runtime, so we provision a real temporary workspace
 // with a schema-compatible trajectory.db for the after_tool_call case only.
 const workspaces: string[] = [];
+// PRI-640: hook workspace resolution gives Priority-1 PD explicit sources (env
+// + ~/.openclaw PD config) precedence over the hook context, so a machine-level
+// config can silently redirect this test into a real workspace whose trajectory
+// schema lags this branch. Pin PD_WORKSPACE_DIR to the fixture so the test is
+// hermetic on every machine; restored in afterEach.
+const priorPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
 
 function workspaceWithTrajectory(): string {
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-reg-'));
@@ -23,10 +29,11 @@ function workspaceWithTrajectory(): string {
   db.exec(`
     CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL);
-    CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, created_at TEXT NOT NULL);
+    CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL);
     CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;
   `);
   db.close();
+  process.env.PD_WORKSPACE_DIR = workspaceDir;
   return workspaceDir;
 }
 
@@ -121,6 +128,8 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
   });
 
   afterEach(() => {
+    if (priorPdWorkspaceDir === undefined) delete process.env.PD_WORKSPACE_DIR;
+    else process.env.PD_WORKSPACE_DIR = priorPdWorkspaceDir;
     vi.clearAllTimers();
     vi.useRealTimers();
     for (const workspaceDir of workspaces.splice(0)) {
