@@ -23,7 +23,6 @@ import { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-ou
 import { resolveOutputLanguage } from './language-directive.js';
 import type { OutputLanguage } from './language-directive.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from './config/pd-config-feature-flags.js';
-import { PDRuntimeError } from './error-categories.js';
 import { CandidateIntakeService } from './candidate-intake-service.js';
 import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
@@ -650,6 +649,9 @@ async function createDisabledBridge(
     workspaceDir: opts.workspaceDir,
     // No diagnosis runs, so nothing can be persisted by the persistence path.
     diagnosisPersistenceEnabled: false,
+    // PRI-638 P1-A: mark this bridge so onPainDetected / executePendingDiagnosis
+    // only ENSURE a durable task exists and never reset existing task state.
+    capabilityDisabled: { reason: capability.message, nextAction: capability.nextAction },
     ownedResources: [],
   });
 
@@ -705,22 +707,7 @@ export async function createPainSignalBridge(
   let diagnosisPersistenceEnabled = false;
   if (opts.effectiveConfig) {
     const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
-    const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
-    const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
     diagnosisPersistenceEnabled = isFeatureEnabled(featureFlags, 'pain_diagnosis_persistence');
-
-    // Config-coherence guard (unchanged by PRI-638): it only fires when an
-    // Owner has explicitly moved these flags away from their defaults.
-    if (splitPipeline && !asyncCli) {
-      const isExplicitSplit = opts.effectiveConfig.featuresChangedFromDefault?.includes('diagnostician_split_pipeline') ?? false;
-      const isExplicitAsync = opts.effectiveConfig.featuresChangedFromDefault?.includes('diagnostician_async_cli') ?? false;
-      if (isExplicitSplit || isExplicitAsync) {
-        throw new PDRuntimeError(
-          'input_invalid',
-          'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
-        );
-      }
-    }
   }
 
   const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}`;

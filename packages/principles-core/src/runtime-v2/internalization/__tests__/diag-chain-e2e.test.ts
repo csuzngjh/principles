@@ -407,8 +407,12 @@ describe('Diag chain e2e', () => {
     expect(splitPipeline).toBe(false);
   });
 
-  it('split && !async_cli → fail loud at startup when explicitly overridden', async () => {
-    // When split_pipeline=true and async_cli=false, the factory guard should throw if overridden.
+  it('PRI-638 P1-E: split && !async_cli no longer fail-loud — the split flag has no runtime authority', async () => {
+    // PRI-638 removed the split/async coherence guard: the split pipeline is
+    // the only implementation and the deprecated flag no longer decides any
+    // runtime behavior (nor a safety guard — that would be a ghost authority).
+    // Explicit split=true + async=false therefore proceeds past config
+    // resolution instead of throwing 'input_invalid'.
     const effectiveConfig: EffectivePdConfig = {
       config: {
         version: 1,
@@ -441,15 +445,21 @@ describe('Diag chain e2e', () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-diag-e2e-guard-a-'));
 
     try {
-      // Verify it actually throws in createPainSignalBridge
-      await expect(
-        createPainSignalBridge({
-          workspaceDir: tmpRoot,
-          stateDir: tmpRoot,
-          effectiveConfig,
-          ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
-        })
-      ).rejects.toThrowError('diagnostician_split_pipeline requires diagnostician_async_cli=on');
+      const result = createPainSignalBridge({
+        workspaceDir: tmpRoot,
+        stateDir: tmpRoot,
+        effectiveConfig,
+        ledgerAdapter: { writeProbationEntry: vi.fn() } as unknown as LedgerAdapter,
+      });
+      try {
+        await result;
+        expect.unreachable('should have failed with filesystem/db error');
+      } catch (err: unknown) {
+        const error = err as Error & { code?: string };
+        // NOT the removed guard's PDRuntimeError — the flag no longer throws.
+        expect(error.code).not.toBe('input_invalid');
+        expect(error.message).not.toContain('diagnostician_split_pipeline requires');
+      }
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }

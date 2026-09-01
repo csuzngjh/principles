@@ -98,6 +98,13 @@ export interface PainToPrincipleOutput {
 // ── Error classification ───────────────────────────────────────────────────
 
 function classifyFromBridge(result: PainSignalBridgeResult): FailureCategory | undefined {
+  // PRI-638 P1-D: ONLY a DisabledDiagnosticianRunner result — which uniquely
+  // carries a nextAction — is an Owner capability decision. A
+  // `capability_missing` from a real runner stage (e.g. a missing intent
+  // capability) must NOT be relabeled as an Owner disable.
+  if (result.errorCategory === 'capability_missing' && result.nextAction !== undefined) {
+    return 'capability_disabled';
+  }
   if (result.errorCategory) {
     return (FAILURE_CATEGORY_MAP[result.errorCategory] as FailureCategory) ?? 'runtime_unavailable';
   }
@@ -241,9 +248,12 @@ export class PainToPrincipleService {
         admissionResults: bridgeResult.admissionResults,
         message: bridgeResult.message,
         observabilityWarnings,
-        // PRI-638: an Owner capability decision is classified as
-        // `capability_disabled`, never as `config_missing` / runtime failure.
-        failureCategory: capability.available ? classifyFromBridge(bridgeResult) : 'capability_disabled',
+        // PRI-638 P1-D: classification comes from the bridge result itself —
+        // `capability_disabled` only when DisabledDiagnosticianRunner returned
+        // (errorCategory capability_missing + nextAction). A real persistence /
+        // runtime exception below must keep its own category; the capability
+        // state is context, never an exception-classification override.
+        failureCategory: classifyFromBridge(bridgeResult),
         ...(bridgeResult.nextAction !== undefined ? { nextAction: bridgeResult.nextAction } : {}),
         latencyMs,
       };
@@ -257,8 +267,10 @@ export class PainToPrincipleService {
         ledgerEntryIds: [],
         message: err instanceof Error ? err.message : String(err),
         observabilityWarnings: [],
-        failureCategory: capability.available ? classifyFromError(err) : 'capability_disabled',
-        ...(capability.available ? {} : { nextAction: capability.nextAction }),
+        // PRI-638 P1-D: a real throw (SQLite write failure, state init failure,
+        // storage_unavailable, malformed config, …) is classified on its own
+        // terms — the capability being disabled must not mask it.
+        failureCategory: classifyFromError(err),
         latencyMs,
       };
     }

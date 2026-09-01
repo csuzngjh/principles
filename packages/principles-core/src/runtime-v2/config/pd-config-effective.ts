@@ -173,6 +173,43 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     }
   }
 
+  // ── PRI-638 P1-B: legacy diagnostician_split_pipeline=false cutover ──────
+  //
+  // Pre-canonical workspaces may carry `diagnostician_split_pipeline.enabled:
+  // false`, whose effective meaning back then was "Diagnostician disabled"
+  // (it selected DisabledDiagnosticianRunner). After PRI-638 the split
+  // pipeline is the only implementation and the flag must no longer silently
+  // decide capability — BUT ignoring a legacy explicit `false` would silently
+  // ACTIVATE a previously-disabled 3-stage LLM pipeline on upgrade.
+  //
+  // Policy (conservative, §9: silent false-negative is safer than silent
+  // activation): fold a legacy explicit `false` into the canonical binding
+  // (internalAgents.agents.diagnostician.enabled=false) at the effective
+  // config layer, with a provenance-aware warning. The runtime keeps reading
+  // exactly one authority (the agent binding); the legacy flag is consumed
+  // here and never becomes a second runtime authority.
+  //
+  // Recovery for the Owner: remove the legacy flag (or set it enabled:true),
+  // or set internalAgents.agents.diagnostician.enabled=true explicitly.
+  const legacySplitEntry = userFeatures.diagnostician_split_pipeline as FeatureFlagEntry | undefined;
+  if (
+    legacySplitEntry !== undefined &&
+    legacySplitEntry.enabled === false &&
+    agents.diagnostician?.enabled === true
+  ) {
+    agents.diagnostician = {
+      enabled: false,
+      runtimeProfile: userConfig.internalAgents.defaultRuntime,
+    };
+    const provenance = legacySplitEntry.source ?? 'unknown';
+    warnings.push(
+      `PRI-638 cutover: legacy diagnostician_split_pipeline=false (source: ${provenance}) honored as ` +
+      'internalAgents.agents.diagnostician.enabled=false to avoid silently enabling a previously-disabled ' +
+      'LLM pipeline. To run diagnosis, remove the legacy flag or set it enabled:true, then ' +
+      'set internalAgents.agents.diagnostician.enabled=true in .pd/config.yaml.',
+    );
+  }
+
   const internalAgents: InternalAgentsConfig = {
     defaultRuntime: userConfig.internalAgents.defaultRuntime,
     agents: agents,

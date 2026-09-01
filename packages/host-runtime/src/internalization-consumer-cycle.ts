@@ -263,6 +263,20 @@ export async function runInternalizationConsumerCycle(
   );
 
   if (isRuntimeConfigError(runtimeConfigResult)) {
+    // PRI-638 P1-C: the shared runtime resolver reads the Diagnostician
+    // binding; an Owner-disabled agent reports reason='disabled'. That is an
+    // intentional governance pause, not a broken runtime — report it
+    // distinctly so consumers (Codex worker) never treat it as degradation.
+    if (runtimeConfigResult.reason === 'disabled') {
+      const disabledInfo = JSON.stringify({
+        reason: 'capability_disabled',
+        message: runtimeConfigResult.message,
+        nextAction: runtimeConfigResult.nextAction,
+      });
+      emitEvent('INTERNALIZATION_CONSUMER_SKIP', disabledInfo);
+      logger.warn(`[PD:${logLabel}] Cycle skipped: Diagnostician capability disabled — ${runtimeConfigResult.message}`);
+      return { ran: false, skipReason: 'capability_disabled' };
+    }
     const rtInfo = JSON.stringify({
       reason: 'runtime_config_error',
       message: runtimeConfigResult.message,

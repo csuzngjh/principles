@@ -304,3 +304,203 @@ describe('PRI-638 — recovery contract (disabled → re-enable → diagnosis re
     expect(result.nextAction).toContain('internalAgents.agents.diagnostician.enabled');
   });
 });
+
+// ── PRI-638 P1-A: disabled re-trigger must not reset durable task state ──────
+//
+// Owner-disable means PAUSE, not "re-trigger". While the capability is
+// disabled, re-emitting a Pain must only ensure the durable task exists; an
+// existing task keeps its status / attemptCount / lastError / lease untouched.
+// (This is the regression suite for the P1-A review finding.)
+
+describe('PRI-638 P1-A — disabled re-trigger preserves durable task state', () => {
+  async function makeDisabledBridge(workspaceDir: string, stateDir: string) {
+    return createPainSignalBridge({
+      workspaceDir,
+      stateDir,
+      ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
+      owner: 'pri638-p1a',
+      effectiveConfig: effectiveConfigFor({ agentEnabled: false }),
+      getEnvVar: () => undefined,
+    });
+  }
+
+  function painData(painId: string) {
+    return {
+      painId,
+      painType: 'user_frustration' as const,
+      source: 'manual',
+      reason: 'PRI-638 P1-A probe',
+      score: 80,
+      sessionId: 'pri638-session',
+      agentId: 'pri638',
+      evidence: [{ sourceRef: 'tool_calls:1', note: 'evidence' }],
+    };
+  }
+
+  it('A1: new Pain while disabled → task created pending, attemptCount 0, provider 0', async () => {
+    const workspaceDir = makeWorkspace();
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    const startRunSpy = vi.spyOn(OpenClawCliRuntimeAdapter.prototype, 'startRun').mockRejectedValue(new Error('probe'));
+    startRunSpy.mockClear();
+
+    const bridge = await makeDisabledBridge(workspaceDir, stateDir);
+    const result = await bridge.onPainDetected(painData('pain-p1a-new'));
+
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('capability_missing');
+    const reader = new RuntimeStateManager({ workspaceDir });
+    managers.push(reader);
+    await reader.initialize();
+    const task = await reader.getTask('diagnosis_pain-p1a-new');
+    expect(task?.status).toBe('pending');
+    expect(task?.attemptCount).toBe(0);
+    expect(startRunSpy.mock.calls).toHaveLength(0);
+  });
+
+  it('A2: existing pending keeps attemptCount + lastError', async () => {
+    const workspaceDir = makeWorkspace();
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const writer = new RuntimeStateManager({ workspaceDir });
+    managers.push(writer);
+    await writer.initialize();
+    await writer.createTask({
+      taskId: 'diagnosis_pain-p1a-pending',
+      taskKind: 'diagnostician',
+      inputRef: 'pain-p1a-pending',
+      status: 'pending',
+      attemptCount: 1,
+      maxAttempts: 3,
+      lastError: 'timeout',
+      diagnosticJson: JSON.stringify({ painId: 'pain-p1a-pending', evidence: [] }),
+    });
+
+    const bridge = await makeDisabledBridge(workspaceDir, stateDir);
+    const result = await bridge.onPainDetected(painData('pain-p1a-pending'));
+
+    expect(result.errorCategory).toBe('capability_missing');
+    const task = await writer.getTask('diagnosis_pain-p1a-pending');
+    expect(task?.status).toBe('pending');
+    expect(task?.attemptCount).toBe(1);
+    expect(task?.lastError).toBe('timeout');
+  });
+
+  it('A3: retry_wait keeps status/attemptCount/lastError/lease unchanged', async () => {
+    const workspaceDir = makeWorkspace();
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString();
+
+    const writer = new RuntimeStateManager({ workspaceDir });
+    managers.push(writer);
+    await writer.initialize();
+    await writer.createTask({
+      taskId: 'diagnosis_pain-p1a-retrywait',
+      taskKind: 'diagnostician',
+      inputRef: 'pain-p1a-retrywait',
+      status: 'retry_wait',
+      attemptCount: 2,
+      maxAttempts: 3,
+      lastError: 'timeout',
+      leaseExpiresAt,
+      diagnosticJson: JSON.stringify({ painId: 'pain-p1a-retrywait', evidence: [] }),
+    });
+
+    const bridge = await makeDisabledBridge(workspaceDir, stateDir);
+    await bridge.onPainDetected(painData('pain-p1a-retrywait'));
+
+    const task = await writer.getTask('diagnosis_pain-p1a-retrywait');
+    expect(task?.status).toBe('retry_wait');
+    expect(task?.attemptCount).toBe(2);
+    expect(task?.lastError).toBe('timeout');
+    expect(task?.leaseExpiresAt).toBe(leaseExpiresAt);
+  });
+
+  it('A4: failed task is never resurrected by a disabled re-trigger', async () => {
+    const workspaceDir = makeWorkspace();
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const writer = new RuntimeStateManager({ workspaceDir });
+    managers.push(writer);
+    await writer.initialize();
+    await writer.createTask({
+      taskId: 'diagnosis_pain-p1a-failed',
+      taskKind: 'diagnostician',
+      inputRef: 'pain-p1a-failed',
+      status: 'failed',
+      attemptCount: 3,
+      maxAttempts: 3,
+      lastError: 'max_attempts_exceeded',
+      diagnosticJson: JSON.stringify({ painId: 'pain-p1a-failed', evidence: [] }),
+    });
+
+    const bridge = await makeDisabledBridge(workspaceDir, stateDir);
+    await bridge.onPainDetected(painData('pain-p1a-failed'));
+
+    const task = await writer.getTask('diagnosis_pain-p1a-failed');
+    expect(task?.status).toBe('failed');
+    expect(task?.attemptCount).toBe(3);
+    expect(task?.lastError).toBe('max_attempts_exceeded');
+  });
+
+  it('A5: needs_human_review task is never resurrected', async () => {
+    const workspaceDir = makeWorkspace();
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const writer = new RuntimeStateManager({ workspaceDir });
+    managers.push(writer);
+    await writer.initialize();
+    await writer.createTask({
+      taskId: 'diagnosis_pain-p1a-nhr',
+      taskKind: 'diagnostician',
+      inputRef: 'pain-p1a-nhr',
+      status: 'needs_human_review',
+      attemptCount: 2,
+      maxAttempts: 3,
+      lastError: 'output_invalid',
+      diagnosticJson: JSON.stringify({ painId: 'pain-p1a-nhr', evidence: [] }),
+    });
+
+    const bridge = await makeDisabledBridge(workspaceDir, stateDir);
+    await bridge.onPainDetected(painData('pain-p1a-nhr'));
+
+    const task = await writer.getTask('diagnosis_pain-p1a-nhr');
+    expect(task?.status).toBe('needs_human_review');
+    expect(task?.attemptCount).toBe(2);
+  });
+
+  it('A6: succeeded task stays idempotent while disabled', async () => {
+    const workspaceDir = makeWorkspace();
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const writer = new RuntimeStateManager({ workspaceDir });
+    managers.push(writer);
+    await writer.initialize();
+    await writer.createTask({
+      taskId: 'diagnosis_pain-p1a-done',
+      taskKind: 'diagnostician',
+      inputRef: 'pain-p1a-done',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ painId: 'pain-p1a-done', evidence: [] }),
+    });
+
+    const bridge = await makeDisabledBridge(workspaceDir, stateDir);
+    const result = await bridge.onPainDetected(painData('pain-p1a-done'));
+
+    // Idempotent semantics preserved: the disabled path reports the existing
+    // result through buildExistingResult (its status follows the existing
+    // no-candidates shaping), and crucially the task is NOT reset.
+    expect(result.errorCategory).not.toBe('capability_missing');
+    const task = await writer.getTask('diagnosis_pain-p1a-done');
+    expect(task?.status).toBe('succeeded');
+    expect(task?.attemptCount).toBe(1);
+  });
+});
+

@@ -29,6 +29,7 @@ import {
   createPainSignalBridge,
   isRetryWaitBackoffElapsed,
   PrincipleTreeLedgerAdapter,
+  resolveDiagnosticianCapability,
   type TaskRecord,
 } from '@principles/core/runtime-v2';
 import {
@@ -54,6 +55,8 @@ export interface CodexWorkerCycleStepReport {
     readonly status: 'succeeded' | 'failed' | 'retried' | 'skipped' | 'degraded';
     readonly message?: string;
     readonly errorCategory?: string;
+    /** PRI-638 P1-C: recovery action for capability-disabled pauses. */
+    readonly nextAction?: string;
   } | null;
   readonly downstream: InternalizationConsumerCycleOutcome | null;
 }
@@ -143,6 +146,16 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
 
   const consumerFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_auto_consumer', { info: (m) => logger.info(m), warn: (m) => logger.warn(m) });
 
+  // PRI-638 P1-C: the Diagnostician capability gate is resolved from the same
+  // canonical authority the runtime factory uses. An Owner-disabled agent is
+  // an intentional governance state: the worker must NOT pick pending tasks,
+  // must NOT invoke any runner (provider calls = 0), must NOT report the
+  // workspace degraded, and must keep catch-up / reconciliation / downstream
+  // running. Pending tasks stay untouched and resume on a later cycle after
+  // the Owner re-enables the agent.
+  const capability = resolveDiagnosticianCapability(config.effective);
+  const diagnosticianDisabled = !capability.available;
+
   // Step 2 — Catch-up transcript lag (SPEC §13: gated by the ingestion flag,
   // NOT by the consumer flag; catchUpCodexIngestion re-checks and returns a
   // zero-I/O skip when ingestion is off).
@@ -158,7 +171,17 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
 
   // Steps 4–6 — execution authority: internalization_auto_consumer.
   let diagnostician: CodexWorkerCycleStepReport['diagnostician'] = null;
-  if (!consumerFlag.enabled) {
+  if (diagnosticianDisabled) {
+    // PRI-638 P1-C: intentional governance pause. No candidate picking, no
+    // provider call, no degraded mode. The rest of the cycle (downstream)
+    // continues below; pending tasks resume once the Owner re-enables.
+    diagnostician = {
+      taskId: '',
+      status: 'skipped',
+      message: 'capability_disabled',
+      nextAction: capability.available ? undefined : capability.nextAction,
+    };
+  } else if (!consumerFlag.enabled) {
     // paused: execution pause, NOT evidence freeze. Catch-up + reconcile
     // already ran above; manual CLI remains allowed (SPEC §13).
     return {
@@ -168,61 +191,64 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
       nextAction: 'Automatic internalization execution is paused for this Workspace; manual commands remain available: pd diagnose, pd runtime internalization run-once.',
       report: { catchUp, reconcile, diagnostician: null, downstream: null },
     };
-  }
-
-  // Step 4 — expired-lease recovery sweep, then Step 5/6: at most one
-  // Diagnostician task via the existing bridge lease/runner contract.
-  try {
-    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+  } else {
+    // Step 4 — expired-lease recovery sweep, then Step 5/6: at most one
+    // Diagnostician task via the existing bridge lease/runner contract.
+    // (Reached only when the Diagnostician capability is enabled AND the
+    // consumer flag is on — an intentional capability pause never reaches
+    // candidate picking or any provider call.)
     try {
-      const sweep = await handle.stateManager.runRecoverySweep();
-      if (sweep.recovered > 0 || sweep.errors.length > 0) {
-        emitEvent('CODEX_WORKER_RECOVERY_SWEEP', JSON.stringify({ recovered: sweep.recovered, failed: sweep.errors.length }));
-      }
-      const candidate = await pickDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT);
-      if (candidate !== null) {
-        const stateDir = path.join(workspaceDir, '.state');
-        const bridge = await createPainSignalBridge({
-          workspaceDir,
-          stateDir,
-          ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
-          owner: WORKER_OWNER,
-          effectiveConfig: config.effective,
-          getEnvVar: (name: string) => process.env[name],
-        });
-        const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
-        diagnostician = {
-          taskId: candidate.taskId,
-          status: executed.status,
-          ...(executed.message !== undefined ? { message: executed.message.slice(0, 200) } : {}),
-          ...(executed.errorCategory !== undefined ? { errorCategory: executed.errorCategory } : {}),
-        };
-        // The bridge stays cached per workspace (bounded: one per workspace
-        // per worker process, exactly like the OpenClaw plugin host) — no
-        // per-cycle dispose, so a concurrent cycle can never hit a disposed
-        // bridge. The factory self-disposes losing concurrent constructions.
-      } else {
-        // No eligible candidate, but a retry_wait task may still be inside
-        // its backoff window — report it so the cycle is observable instead
-        // of looking like "nothing pending" (review P1: head-of-line).
-        const waiting = await handle.stateManager.listTasks({ taskKind: 'diagnostician', status: 'retry_wait', orderBy: 'updated_at_asc', limit: 1 });
-        const [oldestWaiting] = waiting;
-        if (oldestWaiting !== undefined && !isRetryWaitBackoffElapsed(oldestWaiting.status, oldestWaiting.leaseExpiresAt)) {
-          diagnostician = { taskId: oldestWaiting.taskId, status: 'skipped', message: 'retry_wait_pending' };
+      const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+      try {
+        const sweep = await handle.stateManager.runRecoverySweep();
+        if (sweep.recovered > 0 || sweep.errors.length > 0) {
+          emitEvent('CODEX_WORKER_RECOVERY_SWEEP', JSON.stringify({ recovered: sweep.recovered, failed: sweep.errors.length }));
         }
+        const candidate = await pickDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT);
+        if (candidate !== null) {
+          const stateDir = path.join(workspaceDir, '.state');
+          const bridge = await createPainSignalBridge({
+            workspaceDir,
+            stateDir,
+            ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
+            owner: WORKER_OWNER,
+            effectiveConfig: config.effective,
+            getEnvVar: (name: string) => process.env[name],
+          });
+          const executed = await bridge.executePendingDiagnosis({ taskId: candidate.taskId });
+          diagnostician = {
+            taskId: candidate.taskId,
+            status: executed.status,
+            ...(executed.message !== undefined ? { message: executed.message.slice(0, 200) } : {}),
+            ...(executed.errorCategory !== undefined ? { errorCategory: executed.errorCategory } : {}),
+          };
+          // The bridge stays cached per workspace (bounded: one per workspace
+          // per worker process, exactly like the OpenClaw plugin host) — no
+          // per-cycle dispose, so a concurrent cycle can never hit a disposed
+          // bridge. The factory self-disposes losing concurrent constructions.
+        } else {
+          // No eligible candidate, but a retry_wait task may still be inside
+          // its backoff window — report it so the cycle is observable instead
+          // of looking like "nothing pending" (review P1: head-of-line).
+          const waiting = await handle.stateManager.listTasks({ taskKind: 'diagnostician', status: 'retry_wait', orderBy: 'updated_at_asc', limit: 1 });
+          const [oldestWaiting] = waiting;
+          if (oldestWaiting !== undefined && !isRetryWaitBackoffElapsed(oldestWaiting.status, oldestWaiting.leaseExpiresAt)) {
+            diagnostician = { taskId: oldestWaiting.taskId, status: 'skipped', message: 'retry_wait_pending' };
+          }
+        }
+      } finally {
+        await handle.close().catch(() => undefined);
       }
-    } finally {
-      await handle.close().catch(() => undefined);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+      return {
+        ...base,
+        mode: 'degraded',
+        reason: `diagnostician_execution_failed:${detail}`,
+        nextAction: 'Inspect the Workspace runtime profile and provider configuration; the task keeps its pending/retry state and no evidence was mutated.',
+        report: { catchUp, reconcile, diagnostician: null, downstream: null },
+      };
     }
-  } catch (error) {
-    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
-    return {
-      ...base,
-      mode: 'degraded',
-      reason: `diagnostician_execution_failed:${detail}`,
-      nextAction: 'Inspect the Workspace runtime profile and provider configuration; the task keeps its pending/retry state and no evidence was mutated.',
-      report: { catchUp, reconcile, diagnostician: null, downstream: null },
-    };
   }
 
   // Step 7 — ONE bounded downstream consumer cycle via the shared executor

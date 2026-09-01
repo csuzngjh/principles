@@ -6,9 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import {
+  createPainSignalBridge,
   createRuntimeStateHandle,
   getDefaultPdConfig,
   SplitDiagnosticianRunner,
+  PrincipleTreeLedgerAdapter,
   DreamerRunner,
   RuntimeStateManager,
   SqliteConnection,
@@ -50,11 +52,18 @@ interface WorkerWorkspace {
   transcriptPath: string;
 }
 
-function writeConfig(ws: WorkerWorkspace, overrides: { ingestion?: boolean; consumer?: boolean; hostCodex?: boolean }): void {
+function writeConfig(ws: WorkerWorkspace, overrides: { ingestion?: boolean; consumer?: boolean; hostCodex?: boolean; diagnostician?: boolean }): void {
   const config = getDefaultPdConfig();
   config.features['host.codex'].enabled = overrides.hostCodex ?? true;
   config.features.codex_conversation_ingestion.enabled = overrides.ingestion ?? true;
   config.features.internalization_auto_consumer.enabled = overrides.consumer ?? true;
+  // PRI-638 P1-C: canonical Diagnostician capability switch.
+  config.internalAgents = config.internalAgents ?? { defaultRuntime: 'openclaw.default', agents: {} };
+  config.internalAgents.agents = config.internalAgents.agents ?? {};
+  config.internalAgents.agents.diagnostician = {
+    enabled: overrides.diagnostician ?? true,
+    runtimeProfile: config.internalAgents.defaultRuntime,
+  };
   fs.writeFileSync(path.join(ws.root, '.pd', 'config.yaml'), JSON.stringify(config));
 }
 
@@ -707,5 +716,214 @@ describe('worker status mode (SPEC §15) — computeCodexWorkerStatusMode', () =
     const { computeCodexWorkerStatusMode } = await import('../../src/worker/workspace-worker.js');
     const status = computeCodexWorkerStatusMode({ workspaceDir: ws.root, registeredInInstallManifest: false });
     expect(status).toMatchObject({ mode: 'manual_action_required', reason: 'workspace_not_in_install_manifest' });
+  });
+});
+
+// ── PRI-638 P1-C: worker semantics while the Diagnostician is disabled ───────
+//
+// Owner-disable is an intentional governance state: the worker must not pick
+// pending tasks, must not call any provider, must not report the workspace
+// degraded, and must keep catch-up / reconciliation / downstream running.
+// Pending tasks stay untouched and resume once the Owner re-enables.
+
+describe('worker cycle — PRI-638 P1-C Diagnostician capability disabled', () => {
+  async function seedPendingTasks(ws: WorkerWorkspace, count: number): Promise<string[]> {
+    const stateManager = new RuntimeStateManager({ workspaceDir: ws.root });
+    await stateManager.initialize();
+    const ids: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const painId = `pain-p1c-${i}-${Date.now()}`;
+      const taskId = `diagnosis_${painId}`;
+      await stateManager.createTask({
+        taskId,
+        taskKind: 'diagnostician',
+        inputRef: painId,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        diagnosticJson: JSON.stringify({ painId, evidence: [{ sourceRef: 'tool_calls:1', note: 'worker p1c probe' }] }),
+      });
+      ids.push(taskId);
+    }
+    await stateManager.close();
+    return ids;
+  }
+
+  function setDiagnosticianEnabled(ws: WorkerWorkspace, enabled: boolean): void {
+    const raw = JSON.parse(fs.readFileSync(path.join(ws.root, '.pd', 'config.yaml'), 'utf8')) as {
+      internalAgents?: { agents?: Record<string, { enabled: boolean; runtimeProfile?: string }> };
+    };
+    raw.internalAgents ??= { agents: {} };
+    raw.internalAgents.agents ??= {};
+    raw.internalAgents.agents.diagnostician = { enabled, runtimeProfile: 'openclaw.default' };
+    fs.writeFileSync(path.join(ws.root, '.pd', 'config.yaml'), JSON.stringify(raw));
+  }
+
+  it('C1: 2 pending tasks + disabled → provider 0, tasks unchanged, NOT degraded, downstream runs', async () => {
+    const ws = makeWorkspace({ diagnostician: false });
+    const taskIds = await seedPendingTasks(ws, 2);
+    const spy = spySplitPipelineSuccess(ws);
+
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+
+    expect(spy.calls).toEqual([]); // no provider/runner call
+    expect(result.mode).toBe('ready'); // NOT degraded, NOT paused
+    expect(result.report?.diagnostician).toMatchObject({ status: 'skipped', message: 'capability_disabled' });
+    expect(result.report?.diagnostician?.nextAction).toContain('internalAgents.agents.diagnostician.enabled');
+    // catch-up / reconciliation / downstream all still ran.
+    expect(result.report?.catchUp).toBeDefined();
+    expect(result.report?.reconcile).toMatchObject({ ok: true });
+    expect(result.report?.downstream).not.toBeNull();
+    // Both tasks untouched.
+    for (const taskId of taskIds) {
+      expect(diagnosticianTask(ws.root)).toMatchObject({ status: 'pending', attempt_count: 0 });
+      void taskId;
+    }
+  });
+
+  it('C2: three consecutive disabled cycles → no repeated execution attempt, state unchanged', async () => {
+    const ws = makeWorkspace({ diagnostician: false });
+    const taskIds = await seedPendingTasks(ws, 2);
+    const spy = spySplitPipelineSuccess(ws);
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(result.mode).toBe('ready');
+      expect(result.report?.diagnostician).toMatchObject({ status: 'skipped', message: 'capability_disabled' });
+    }
+    expect(spy.calls).toEqual([]);
+    const db = stateDbOf(ws.root);
+    const rows = db.prepare("SELECT status, attempt_count FROM tasks WHERE task_kind = 'diagnostician' ORDER BY task_id").all() as { status: string; attempt_count: number }[];
+    db.close();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row).toMatchObject({ status: 'pending', attempt_count: 0 });
+    void taskIds;
+  });
+
+  it('C3: disabled cycle → re-enable → next cycle executes the oldest pending task', async () => {
+    const ws = makeWorkspace({ diagnostician: false });
+    const taskIds = await seedPendingTasks(ws, 2);
+    const spy = spySplitPipelineSuccess(ws);
+
+    const disabled = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    expect(disabled.report?.diagnostician).toMatchObject({ status: 'skipped', message: 'capability_disabled' });
+    expect(spy.calls).toEqual([]);
+
+    // Owner re-enables: canonical binding only — no other switch involved.
+    setDiagnosticianEnabled(ws, true);
+    const enabled = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+
+    expect(enabled.mode).toBe('ready');
+    expect(enabled.report?.diagnostician).toMatchObject({ status: 'succeeded' });
+    expect(spy.calls).toHaveLength(1);
+    expect(spy.calls[0]).toBe(taskIds[0]); // oldest pending resumed, same task identity
+  });
+
+  it('C4: disabled does not gate catch-up / reconciliation / downstream steps', async () => {
+    const ws = makeWorkspace({ diagnostician: false });
+    const spy = spySplitPipelineSuccess(ws);
+
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+
+    expect(spy.calls).toEqual([]);
+    expect(result.mode).toBe('ready');
+    expect(result.report?.catchUp).toBeDefined();
+    expect(result.report?.reconcile).toMatchObject({ ok: true });
+    expect(result.report?.downstream).not.toBeNull();
+  });
+
+  // ── PRI-638 §28: full lifecycle regression ────────────────────────────────
+  // Pain A already attempted (retry_wait / attemptCount=1) → Owner disables →
+  // re-emission keeps A's durable state → new Pain B lands pending → worker
+  // cycles while disabled touch nothing → re-enable → oldest eligible task
+  // resumes, no duplicate task ids / pain identity.
+  it('LIFE-638: retry_wait survives disable, new Pain persists, re-enable resumes exactly once', async () => {
+    const ws = makeWorkspace({ diagnostician: false });
+    const stateManager = new RuntimeStateManager({ workspaceDir: ws.root });
+    await stateManager.initialize();
+
+    // Pain A — already attempted once, currently in retry_wait backoff.
+    const painA = 'pain-life-A';
+    const taskA = 'diagnosis_pain-life-A';
+    const leaseExpiresAt = new Date(Date.now() + 300_000).toISOString();
+    await stateManager.createTask({
+      taskId: taskA,
+      taskKind: 'diagnostician',
+      inputRef: painA,
+      status: 'retry_wait',
+      attemptCount: 1,
+      maxAttempts: 3,
+      lastError: 'timeout',
+      leaseExpiresAt,
+      diagnosticJson: JSON.stringify({ painId: painA, evidence: [{ sourceRef: 'tool_calls:1', note: 'a' }] }),
+    });
+    await stateManager.close();
+    const spy = spySplitPipelineSuccess(ws);
+
+    // Disabled phase: re-emit Pain A (must NOT reset it) + three worker cycles.
+    const { loadPdConfigForPlugin } = await import('@principles/host-runtime');
+    const bridge = await createPainSignalBridge({
+      workspaceDir: ws.root,
+      stateDir: path.join(ws.root, '.state'),
+      ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir: path.join(ws.root, '.state') }),
+      owner: 'life638',
+      effectiveConfig: loadPdConfigForPlugin(ws.root).effective,
+      getEnvVar: () => undefined,
+    });
+    await bridge.onPainDetected({
+      painId: painA,
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'lifecycle re-emission',
+      score: 80,
+      sessionId: 'life',
+      agentId: 'life',
+      evidence: [{ sourceRef: 'tool_calls:1', note: 'a' }],
+    });
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+      expect(result.mode).toBe('ready');
+      expect(result.report?.diagnostician).toMatchObject({ status: 'skipped', message: 'capability_disabled' });
+    }
+    expect(spy.calls).toEqual([]); // zero provider calls across all disabled cycles
+
+    const afterDisabled = stateDbOf(ws.root);
+    const rowA = afterDisabled.prepare('SELECT status, attempt_count, last_error, lease_expires_at FROM tasks WHERE task_id = ?').get(taskA) as {
+      status: string; attempt_count: number; last_error: string | null; lease_expires_at: string;
+    };
+    expect(rowA).toMatchObject({ status: 'retry_wait', attempt_count: 1, last_error: 'timeout' });
+    expect(rowA.lease_expires_at).toBe(leaseExpiresAt);
+    afterDisabled.close();
+
+    // New Pain B while disabled → durable pending task created.
+    const bm = new RuntimeStateManager({ workspaceDir: ws.root });
+    await bm.initialize();
+    const taskB = 'diagnosis_pain-life-B';
+    await bm.createTask({
+      taskId: taskB,
+      taskKind: 'diagnostician',
+      inputRef: 'pain-life-B',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ painId: 'pain-life-B', evidence: [{ sourceRef: 'tool_calls:1', note: 'b' }] }),
+    });
+    await bm.close();
+
+    // Re-enable → next cycle executes the oldest eligible (pending) task.
+    setDiagnosticianEnabled(ws, true);
+    const enabled = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    expect(enabled.mode).toBe('ready');
+    expect(enabled.report?.diagnostician).toMatchObject({ status: 'succeeded' });
+    expect(spy.calls).toHaveLength(1);
+    expect(spy.calls[0]).toBe(taskB); // oldest pending resumed first
+
+    const db = stateDbOf(ws.root);
+    const bStatus = db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskB) as { status: string };
+    const aStatus = db.prepare('SELECT status, attempt_count FROM tasks WHERE task_id = ?').get(taskA) as { status: string; attempt_count: number };
+    expect(bStatus.status).toBe('succeeded');
+    expect(aStatus).toMatchObject({ status: 'retry_wait', attempt_count: 1 }); // A untouched
+    db.close();
   });
 });

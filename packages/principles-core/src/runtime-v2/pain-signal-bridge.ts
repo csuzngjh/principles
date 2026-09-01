@@ -116,6 +116,15 @@ export interface PainSignalBridgeOptions {
    * dispose bridges per cycle so file handles do not pin the workspace DB.
    */
   ownedResources?: readonly { close: () => void | Promise<void> }[];
+  /**
+   * PRI-638 P1-A: set ONLY by the factory's capability-disabled bridge.
+   * While the Owner has switched the Diagnostician off, `onPainDetected` /
+   * `executePendingDiagnosis` must ENSURE a durable task exists for new Pain
+   * but must NEVER reset/re-trigger an existing task (that would erase
+   * retry_wait/failed history and the retry budget). The runner is not
+   * invoked, so provider calls stay 0.
+   */
+  capabilityDisabled?: { readonly reason: string; readonly nextAction: string };
 }
 
 export function createDiagnosticianTaskId(painId: string): string {
@@ -191,6 +200,7 @@ export class PainSignalBridge {
   private readonly workspaceDir: string | undefined;
   private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
   private readonly ownedResources: readonly { close: () => void | Promise<void> }[];
+  private readonly capabilityDisabled: PainSignalBridgeOptions['capabilityDisabled'];
 
   constructor(opts: PainSignalBridgeOptions) {
     this.stateManager = opts.stateManager;
@@ -203,6 +213,25 @@ export class PainSignalBridge {
     this.workspaceDir = opts.workspaceDir;
     this.eventEmitter = opts.eventEmitter;
     this.ownedResources = opts.ownedResources ?? [];
+    this.capabilityDisabled = opts.capabilityDisabled;
+  }
+
+  /**
+   * PRI-638 P1-A: the unified disabled outcome. `status: 'failed'` is kept
+   * (existing RunnerResult vocabulary) but carries `capability_missing` +
+   * `nextAction`, so no caller can mistake it for a provider/runtime fault.
+   */
+  private disabledResult(input: { painId: string; taskId: string }): PainSignalBridgeResult {
+    return {
+      status: 'failed',
+      painId: input.painId,
+      taskId: input.taskId,
+      candidateIds: [],
+      ledgerEntryIds: [],
+      errorCategory: 'capability_missing',
+      message: this.capabilityDisabled?.reason ?? 'Diagnostician capability is disabled by Owner configuration',
+      nextAction: this.capabilityDisabled?.nextAction,
+    };
   }
 
   /**
@@ -258,6 +287,30 @@ export class PainSignalBridge {
     const { painId } = data;
     const taskId = data.taskId ?? createDiagnosticianTaskId(painId);
     const provenance = data.provenance ?? inferProvenance(data);
+
+    // PRI-638 P1-A: while the Owner has disabled the Diagnostician, this call
+    // only ENSURES a durable diagnosis task exists for new Pain. It must NOT
+    // reuse the re-trigger semantics below — an existing retry_wait / failed /
+    // needs_human_review task keeps its status, attemptCount, lastError and
+    // lease untouched (durable history preserved, retry budget preserved), and
+    // the disabled runner is never invoked (provider calls stay 0).
+    if (this.capabilityDisabled !== undefined) {
+      const existing = await this.stateManager.getTask(taskId);
+      if (existing === null) {
+        await this.stateManager.createTask({
+          taskId,
+          taskKind: 'diagnostician',
+          inputRef: painId,
+          status: 'pending',
+          attemptCount: 0,
+          maxAttempts: 3,
+          diagnosticJson: buildDiagnosticJson(data, this.workspaceDir),
+        });
+      } else if (existing.status === 'succeeded') {
+        return this.buildExistingResult({ painId, taskId });
+      }
+      return this.disabledResult({ painId, taskId });
+    }
 
     // Check for existing task FIRST — idempotency takes priority over short-circuit
     const existingTask = await this.stateManager.getTask(taskId);
@@ -370,6 +423,22 @@ export class PainSignalBridge {
     provenance?: PainProvenance;
   }): Promise<PainSignalBridgeResult> {
     const { taskId } = input;
+    // PRI-638 P1-A: on a capability-disabled bridge execution is paused, never
+    // failed. The task keeps its exact durable state (including retry budget);
+    // no runner invocation, so provider calls stay 0. Callers should normally
+    // gate on the canonical capability before reaching here (Codex worker
+    // does), this is the defensive seam.
+    if (this.capabilityDisabled !== undefined) {
+      const task = await this.stateManager.getTask(taskId);
+      if (task === null) {
+        return { status: 'failed', painId: '', taskId, candidateIds: [], ledgerEntryIds: [], errorCategory: 'input_invalid', message: 'task_not_found' };
+      }
+      const painId = typeof task.inputRef === 'string' && task.inputRef.length > 0 ? task.inputRef : taskId;
+      if (task.status === 'succeeded') {
+        return this.buildExistingResult({ painId, taskId });
+      }
+      return this.disabledResult({ painId, taskId });
+    }
     const task = await this.stateManager.getTask(taskId);
     if (task === null) {
       return { status: 'failed', painId: '', taskId, candidateIds: [], ledgerEntryIds: [], errorCategory: 'input_invalid', message: 'task_not_found' };
