@@ -54,7 +54,6 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:bench": "vitest bench",
     "lint": "eslint src/"
   },
   "dependencies": {

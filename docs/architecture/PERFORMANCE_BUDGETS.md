@@ -323,7 +323,7 @@ LLM 调用是 PD 的最大成本中心，必须严格预算。
 
 ### 8.1 基准测试套件
 
-`packages/principles-core/benchmarks/`（待建）
+`packages/principles-core/benchmarks/`（待建 — 旧 vitest benchmark 套件与 CI 对比已在 PRI-639 退役，重建后恢复）
 
 测试场景：
 
@@ -335,7 +335,7 @@ LLM 调用是 PD 的最大成本中心，必须严格预算。
 
 ### 8.2 性能回归
 
-每个 PR 必须运行核心 benchmark，对比 baseline：
+每个 PR 必须运行核心 benchmark，对比 baseline（当前无活动套件 — PRI-639 已退役旧套件，重建后恢复）：
 
 - 性能下降 < 5% → 允许
 - 5-15% → review 必须解释

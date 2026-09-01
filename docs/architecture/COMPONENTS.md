@@ -121,7 +121,6 @@ PD 系统有 5 类组件：
 
 | 组件 | 类型 | 包 | 文件 | 输入 | 输出 | Owner | 状态 |
 |------|-----|----|----|----|----|------|------|
-| `PainSignalAdapter` | 🔵 Service | core | `pain-signal-adapter.ts` | 平台事件 | PainSignal | core | ✅ |
 | `PainSignalBridge` | 🟠 Bridge | core | `runtime-v2/pain-signal-bridge.ts` | PainDetectedData | PainSignalBridgeResult | core | ✅ |
 | `PainToPrincipleService` | 🔵 Service | core | `runtime-v2/pain-to-principle-service.ts` | PainToPrincipleInput | Output | core | ✅ |
 | `DiagnosticianRunner` | 🟢 Runner | core | `runtime-v2/runner/diagnostician-runner.ts` | taskId | RunnerResult | core | ✅ |
@@ -567,7 +566,6 @@ Owner 标记规则：
 `LedgerPromptWriter` §3.3 ✅（`PromptWriter`）
 `LedgerStore` §2.2 ✅
 `OpenClawCliRuntimeAdapter` §3.5 ✅
-`PainSignalAdapter` §3.1 ✅
 `PainSignalBridge` §3.1 ✅
 `PainToPrincipleService` §3.1 ✅
 `PDRuntimeAdapter` §3.5 ✅

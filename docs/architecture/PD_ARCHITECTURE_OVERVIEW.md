@@ -183,10 +183,7 @@ Layer 3: 工具/系统失败（辅助信号）        ← 仅作为 Layer 1/2 �
 [GAP Signal / User Feedback / Tool Failure]
       │ Plugin Hook / GAP Generator / 用户显式反馈
       ▼
-[PainSignal] ─────► PainSignalAdapter ─────► state.db: pain_signals
-      │
-      ▼
-PainBridge.onPainDetected()
+[PainSignal] ─────► emitPainDetectedEvent ─────► PainSignalBridge（trajectory.db: pain_events）
       │
       ▼
 DiagnosticianRunner.run()  ◄──── PDRuntimeAdapter（LLM 调用，LRAS 长程会话）

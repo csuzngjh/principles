@@ -16,7 +16,7 @@ Each package has its own `vitest.config.ts`:
 
 | Package | Config | Notes |
 |---------|--------|-------|
-| principles-core | `packages/principles-core/vitest.config.ts` | Includes benchmark config |
+| principles-core | `packages/principles-core/vitest.config.ts` | - |
 | openclaw-plugin | `packages/openclaw-plugin/vitest.config.ts` | Unit/integration split, coverage thresholds |
 | pd-cli | `packages/pd-cli/vitest.config.ts` | - |
 | pd-console | `packages/pd-console/vitest.config.ts` | Uses forks pool for better-sqlite3 |
@@ -60,7 +60,6 @@ Test files follow the `*.test.ts` pattern. Test locations vary by package:
 - `packages/<pkg>/src/**/__tests__/**/*.test.ts` - Co-located tests
 - `packages/<pkg>/tests/integration/**/*.test.ts` - Integration tests (openclaw-plugin)
 - `packages/<pkg>/tests/e2e/*.test.ts` - E2E tests (pd-cli)
-- `packages/principles-core/tests/bench/**/*.bench.ts` - Benchmarks
 
 ## Coverage Requirements
 
@@ -125,18 +124,13 @@ Coverage reports use `json` and `lcov` formats. Uploads use `codecov/codecov-act
 
 **Setup required:** Add `CODECOV_TOKEN` secret in GitHub repository settings.
 
-### Performance Benchmark
+### Performance Benchmark (retired)
 
-CI includes a `benchmark` job that:
-- Runs `packages/principles-core/tests/bench/**/*.bench.ts` via `vitest bench --run`
-- Compares p99 latency against main branch baseline
-- Uses `scripts/compare-benchmarks.mjs` for comparison
-- Threshold: p99 regression > 20% marks job as failed
-- **Informational only** (`continue-on-error: true`) — does not block merge
-
-Benchmark targets (from `adapter-performance.bench.ts`):
-- Pain capture p99 < 50ms
-- Principle injection p99 < 100ms
+The vitest benchmark suite and its CI job were retired in PRI-639: the last
+benchmark file (`adapter-performance.bench.ts`) was removed together with the
+orphaned `PainSignalAdapter` seam it measured, and no production module has an
+active performance benchmark. Re-introduce `vitest bench` + baseline
+comparison only when a performance budget area needs an executable suite.
 
 ### E2E Nightly CI
 

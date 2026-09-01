@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { validatePainSignal, deriveSeverity, PainSignalSchema } from '../src/pain-signal.js';
+import {
+  validatePainSignal,
+  deriveSeverity,
+  PainSignalSchema,
+} from '../src/runtime-v2/types/pain-signal.js';
 
 describe('deriveSeverity', () => {
   it('returns low for scores 0-39', () => {
@@ -27,7 +31,7 @@ describe('deriveSeverity', () => {
   });
 });
 
-describe('validatePainSignal', () => {
+describe('validatePainSignal (canonical runtime-v2/types/pain-signal.ts)', () => {
   function createValidSignal(overrides = {}) {
     return {
       source: 'tool_failure',
@@ -77,6 +81,23 @@ describe('validatePainSignal', () => {
     expect(result.signal?.context).toEqual({});
   });
 
+  it('accepts signal with optional sessionId/agentId/traceId missing', () => {
+    const signal = createValidSignal();
+    delete (signal as any).sessionId;
+    delete (signal as any).agentId;
+    delete (signal as any).traceId;
+    const result = validatePainSignal(signal);
+    expect(result.valid).toBe(true);
+  });
+
+  it('includes version field default in validated signal', () => {
+    const signal = createValidSignal();
+    delete (signal as any).version;
+    const result = validatePainSignal(signal);
+    expect(result.valid).toBe(true);
+    expect(result.signal?.version).toBe('0.1.0');
+  });
+
   it('returns valid=false for null input', () => {
     const result = validatePainSignal(null);
     expect(result.valid).toBe(false);
@@ -112,8 +133,39 @@ describe('validatePainSignal', () => {
     expect(result.valid).toBe(false);
   });
 
+  it('rejects invalid ISO 8601 timestamp', () => {
+    const result = validatePainSignal(createValidSignal({ timestamp: 'not-a-date' }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('timestamp'))).toBe(true);
+  });
+
+  it('rejects context exceeding 10KB size limit', () => {
+    const largeContext: Record<string, unknown> = { big: 'x'.repeat(11_000) };
+    const result = validatePainSignal(createValidSignal({ context: largeContext }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('Context'))).toBe(true);
+  });
+
+  it('rejects context with circular references without crashing (PR review fix)', () => {
+    const circularContext: Record<string, unknown> = {};
+    circularContext.self = circularContext;
+    const result = validatePainSignal(createValidSignal({ context: circularContext }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('JSON-serializable'))).toBe(true);
+  });
+
+  it('rejects context with BigInt values without crashing (PR review fix)', () => {
+    const result = validatePainSignal(createValidSignal({ context: { bigNum: BigInt(123) } }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('JSON-serializable'))).toBe(true);
+  });
+
   it('boundary: score 39 is low, score 40 is medium', () => {
     expect(deriveSeverity(39)).toBe('low');
     expect(deriveSeverity(40)).toBe('medium');
+  });
+
+  it('PainSignalSchema is exported from the canonical module', () => {
+    expect(PainSignalSchema).toBeTypeOf('object');
   });
 });
