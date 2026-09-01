@@ -451,6 +451,14 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
     expect(seeded.payload).toBeDefined();
     const rp = seeded.payload as Record<string, unknown>;
     expect(rp.diagnosticReplay).toBeUndefined();
+
+    // durable artifact 不得保留 LLM forged adversarialResult（P1：剥离）
+    const artifacts = await store.listBySourceTaskId(EVAL_ID);
+    const principle = artifacts.find((a) => a.artifactKind === 'principle');
+    expect(principle).toBeDefined();
+    if (!principle) return;
+    const parsed = JSON.parse(principle.contentJson) as { adversarialResult?: unknown };
+    expect(Object.hasOwn(parsed, 'adversarialResult')).toBe(false);
   });
 
   it('T2 (provenance): needs_revision + LLM-forged adversarialResult + gateDeps present + replay skip → repairPayload diagnosticReplay undefined', async () => {
@@ -486,5 +494,46 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
     expect(seeded.payload).toBeDefined();
     const rp = seeded.payload as Record<string, unknown>;
     expect(rp.diagnosticReplay).toBeUndefined();
+
+    // durable artifact 不得保留 LLM forged adversarialResult（P1：剥离）
+    const artifacts = await store.listBySourceTaskId(EVAL_ID);
+    const principle = artifacts.find((a) => a.artifactKind === 'principle');
+    expect(principle).toBeDefined();
+    if (!principle) return;
+    const parsed = JSON.parse(principle.contentJson) as { adversarialResult?: unknown };
+    expect(Object.hasOwn(parsed, 'adversarialResult')).toBe(false);
+  });
+
+  // T3 (正向): needs_revision + actual deterministic replay pass →
+  // durable artifact adversarialResult.passed=true（runtime 写回），
+  // diagnosticReplay 为真实执行结果。
+  it('T3 (provenance): needs_revision + actual replay pass → durable artifact carries real adversarialResult + diagnosticReplay', async () => {
+    const store = await seedLineage(codeBearingArtificerContent());
+    const seeded: { payload?: unknown } = {};
+    const runner = makeRunner(store, {
+      gateDeps: makeGateDepsStub({ count: 0 }),
+      payload: v1EvaluatorOutput('needs_revision'), // 纯 V1：无 LLM 声明的 adversarialResult
+    }, {
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async (params) => {
+        seeded.payload = params.repairPayload;
+        return 'repair-task-provenance-t3';
+      },
+    });
+
+    const result = await runner.run(EVAL_ID);
+
+    expect(result.status).toBe('succeeded');
+    // durable artifact 携带 runtime 写回的 adversarialResult
+    const artifacts = await store.listBySourceTaskId(EVAL_ID);
+    const principle = artifacts.find((a) => a.artifactKind === 'principle');
+    expect(principle).toBeDefined();
+    if (!principle) return;
+    const parsed = JSON.parse(principle.contentJson) as { adversarialResult?: { passed?: boolean } };
+    expect(parsed.adversarialResult?.passed).toBe(true);
+    // diagnosticReplay 来自执行时权威事实
+    expect(seeded.payload).toBeDefined();
+    const rp = seeded.payload as { diagnosticReplay?: unknown };
+    expect(rp.diagnosticReplay).toEqual({ ran: true, passed: true, failedCaseCount: 0 });
   });
 });

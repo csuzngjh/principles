@@ -763,6 +763,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       );
     }
 
+    // PRI-634 R4 (P1): adversarialResult is a RUNTIME-OWNED field — the LLM
+    // may emit it for backward compatibility (validator tolerates the shape),
+    // but it MUST be stripped before the FIRST durable persistence. Only
+    // executeDeterministicReplay writes it back. This prevents an LLM-forged
+    // passed=true from being treated as a hard-gate authority by
+    // buildOwnerDecisionReview (deterministicStatus reads the durable artifact).
+    if (isEvaluatorOutputV2(output) && Object.hasOwn(output, 'adversarialResult')) {
+      const { adversarialResult: _stripped, ...authoritativeOutput } = output;
+      output = authoritativeOutput as EvaluatorOutputV1;
+    }
+
     // Store output before marking succeeded
     try {
       await this.stateManager.updateRunOutput(runId, JSON.stringify(output));
