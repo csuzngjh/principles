@@ -347,8 +347,18 @@ function formatRepairFeedback(payload: RepairPayload): string {
     ? payload.concerns.map((c, i) => `${i + 1}. ${c}`).join('\n')
     : '(none)';
   const changesLines = payload.requiredChanges.map((c, i) => `${i + 1}. ${c}`).join('\n');
+  // PRI-634 R4 (P1-2): surface the diagnostic replay evidence from the
+  // rejecting evaluator round. Replay passing ≠ semantically correct (the
+  // verdict stays needs_revision), but tells the Artificer what the
+  // deterministic gate did observe — failed cases are actionable signals.
+  const replayLines = payload.diagnosticReplay
+    ? [
+        `Deterministic adversarial replay: ${payload.diagnosticReplay.ran ? (payload.diagnosticReplay.passed ? 'PASSED' : 'FAILED') : 'not run'} (failed cases: ${payload.diagnosticReplay.failedCaseCount}). This is diagnostic evidence only — the evaluator verdict remains needs_revision.`,
+      ]
+    : [];
   return [
     `Previous attempt scored ${payload.previousScore} (needs_revision).`,
+    ...replayLines,
     `Evaluator concerns:`,
     concernsLines,
     `Required changes:`,

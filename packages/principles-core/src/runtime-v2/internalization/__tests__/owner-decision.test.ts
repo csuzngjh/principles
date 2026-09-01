@@ -392,6 +392,49 @@ describe('PRI-629 classification + capability (INV-01/INV-02/§22)', () => {
     expect(detectHardGateFailureFromArtifact('{"adversarialResult":{"passed":false}}')).toBe(true);
     expect(detectHardGateFailureFromArtifact('{"adversarialResult":{"passed":true}}')).toBe(false);
   });
+
+  it('not_run + code-bearing artificer → accept_current forbidden (deterministic gate never ran, PRI-634 R4 P1)', async () => {
+    // Evaluator artifact 不包含 adversarialResult → deterministicStatus = not_run。
+    // code-bearing 时 accept_current 被移除（owner-decision-review.ts:348-350）。
+    const store = makeArtifactStoreWithDecisionArtifact(); // 默认无 adversarialResult
+    const task = evaluatorNhrTask();
+    const sm = makeInMemoryStateManager([task, artificerTaskWithPayload(2)], store);
+    // 添加 code-bearing 的 artificer artifact（implementationCode 字段）
+    await store.upsertArtifact({
+      artifactId: 'pi-art-artificer-code-bearing',
+      artifactKind: 'principle',
+      sourceTaskId: ARTIFER_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate(i, h) { return { decision: "allow", matched: false, reason: "ok" }; }',
+        goldenTraceCases: [{ caseId: 'c-pos', kind: 'positive', toolName: 'write_file', params: { path: '/safe' }, expectedDecision: 'allow' }],
+        affectedTools: ['write_file'],
+      }),
+      createdAt: '2026-08-30T00:00:00.000Z',
+      updatedAt: '2026-08-30T00:00:00.000Z',
+    });
+    // 更新决策 artifact 的 lineage 指向 code-bearing artificer
+    const decision = await store.getArtifactById(ARTIFACT_ID);
+    expect(decision).not.toBeNull();
+    await store.upsertArtifact({ ...decision!, lineageArtifactIds: ['pi-art-artificer-code-bearing'] });
+
+    const rendered = await buildOwnerDecisionReview({
+      getTask: (id) => sm.getTask(id),
+      getArtifactById: (id) => store.getArtifactById(id).then((a) => a ?? null),
+      listArtifactsBySourceTask: async (id) => (await store.listBySourceTaskId(id)).map((a) => ({
+        artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
+      })),
+    }, EVAL_ID);
+
+    expect(rendered).not.toBeNull();
+    if (!rendered) return;
+    // deterministicStatus = not_run（adversarialResult 缺失）
+    expect(rendered.evidence.deterministicChecks[0]?.status).toBe('not_run');
+    // code-bearing + not_run → accept_current forbidden（无论具体 reasonCode 是
+    // adversarial_hard_gate_not_passed 还是 review_evidence_insufficient）
+    expect(rendered.capability.finalOfferedActions).not.toContain('accept_current');
+  });
 });
 
 // ── D. reviewKey ──────────────────────────────────────────────────────────────
