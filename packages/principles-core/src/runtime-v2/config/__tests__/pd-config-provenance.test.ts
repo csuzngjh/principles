@@ -15,8 +15,13 @@
  *   legacy `enabled` value is rewritten).
  * - Alias conflict keeps existing canonical precedence; the canonical entry's
  *   source is preserved.
+ * - `system` is an ORIGIN HINT, not an auto-delete license: direct
+ *   `.pd/config.yaml` editing is a supported path, so a system entry may carry
+ *   Owner intent; provenance never gates the value, and cleanup keyed on
+ *   `system` requires explicit Owner confirmation.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
   validatePdConfig,
@@ -189,5 +194,39 @@ describe('PRI-637 alias interaction — canonical precedence preserved', () => {
     }));
     expect(effective.config.features[canonical]?.enabled).toBe(false);
     expect(effective.config.features[canonical]?.source).toBe('owner');
+  });
+});
+
+describe('PRI-637 system is an origin hint, never an auto-delete license', () => {
+  // Direct .pd/config.yaml editing is a supported path (the pd runtime init
+  // header tells Owners: "Edit to configure feature flags…"). A fresh-install
+  // entry ships { enabled: false, source: 'system' }; the Owner may edit the
+  // value in place, leaving source untouched. Provenance must never gate the
+  // value — the current `enabled` always wins regardless of label.
+  it('an Owner hand-edit on a system-origin entry is honored (system does not pin the value)', () => {
+    const id = 'gfi';
+    expect(DEFAULT_FEATURE_FLAGS[id]?.enabled).toBe(false);
+    // Simulate: installer wrote { enabled: false, source: 'system' }, then the
+    // Owner hand-edited enabled → true directly in config.yaml.
+    const effective = computeEffectivePdConfig(mkConfig({
+      [id]: { category: 'quiet', enabled: true, source: 'system' },
+    }));
+    expect(effective.config.features[id]?.enabled).toBe(true);
+    // The label still says 'system' — it records ORIGIN, not current intent.
+    expect(effective.config.features[id]?.source).toBe('system');
+  });
+
+  // Source-scan guard (mirrors installer-config-parity pattern): the canonical
+  // FEATURE_FLAG_SOURCES doc must keep the anti-auto-delete constraint. If the
+  // overclaim ("eligible for deterministic cleanup") is ever reintroduced, this
+  // fails loud instead of silently downgrading the contract.
+  it('contract comment forbids treating system as unconditionally auto-cleanable', () => {
+    const typesSource = readFileSync(
+      new URL('../pd-config-types.ts', import.meta.url),
+      'utf8',
+    );
+    expect(typesSource).toContain('ORIGIN HINT ONLY');
+    expect(typesSource).toContain('NEVER an automatic');
+    expect(typesSource).not.toContain('eligible for deterministic cleanup');
   });
 });

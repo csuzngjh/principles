@@ -340,10 +340,13 @@ export function generateConfigYamlContent(
     version: 1,
     features: {
       // PRI-637: every entry here records `source: 'system'` — the installer is
-      // PD machinery scaffolding a fresh workspace, NOT an Owner choice. The
-      // label is metadata only (effective values unchanged) and marks the
-      // bootstrap snapshot as cleanable when a flag graduates. Owner toggles
-      // via the Console rewrite entries as `source: 'owner'`.
+      // PD machinery scaffolding a fresh workspace. This is an ORIGIN HINT, not
+      // proof of absent Owner intent: direct `.pd/config.yaml` editing is a
+      // supported path, so an Owner may later pin behavior on top of these
+      // entries. Labels are metadata only (effective values unchanged); a future
+      // normalization may SUGGEST system-origin entries for cleanup but must
+      // require explicit Owner confirmation. Owner toggles via the Console
+      // rewrite entries as `source: 'owner'` (strong Owner-intent evidence).
       // MVP-Core (ADR-0014 §2.4)
       prompt:             { category: 'core',  enabled: true, source: 'system' },
       code_tool_hook:     { category: 'core',  enabled: true, source: 'system' },

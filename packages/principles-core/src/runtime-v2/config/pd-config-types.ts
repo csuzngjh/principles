@@ -26,14 +26,18 @@ export type FeatureCategory = (typeof VALID_FEATURE_CATEGORIES)[number];
 // the minimal fact needed for lifecycle decisions — no setBy/setAt/version.
 //
 // - `owner`  — an authenticated Owner action created/edited this override
-//              (currently the Console feature-flag toggle). Must be respected
-//              indefinitely; graduation never overwrites it.
-// - `system` — PD machinery wrote this override as a bootstrap/migration
-//              snapshot (installer template, `pd runtime init`, host-flag
-//              migration, Console features-section seeding). Carries NO Owner
-//              intent, so it is eligible for deterministic cleanup when the
-//              flag graduates (future normalization; nothing auto-removes
-//              system overrides in this contract).
+//              (currently the Console feature-flag toggle). STRONG signal: the
+//              only value backed by machine evidence of Owner intent.
+//              Graduation / cleanup must never remove it.
+// - `system` — PD machinery originally created this override (installer
+//              template, `pd runtime init`, host-flag migration). It is an
+//              ORIGIN HINT ONLY: it does NOT prove the current value was not
+//              later edited by an Owner. Direct `.pd/config.yaml` editing is a
+//              supported path ("Edit to configure feature flags…"), so a
+//              system entry may carry Owner intent by the time it is read.
+//              Normalization keyed on this label therefore requires preview /
+//              explicit Owner confirmation — it is NEVER an automatic
+//              deterministic-delete license.
 // - absent   — LEGACY_UNKNOWN. The entry predates provenance. Per PRI-637 it
 //              MUST NOT be auto-normalized or guessed from its boolean alone:
 //              preserve uncertainty instead of inventing provenance. An
