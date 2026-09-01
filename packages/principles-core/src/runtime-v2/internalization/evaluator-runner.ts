@@ -864,8 +864,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       if ((gateAssessment.codeBearing || outputWantsGate) && this.gateDeps) {
         // Temporarily elevate to 'approved' so the replay's internal gate
         // (which checks for approved) lets the deterministic test run.
-        const originalDecision = output.evaluation.decision;
-        output.evaluation.decision = 'approved';
+        const originalDecision: string = output.evaluation.decision;
+        (output.evaluation as { decision: string }).decision = 'approved';
         let replaySucceeded = false;
         try {
           const replayOutcome = await this.runAdversarialReplay(output, taskId, runId, context);
@@ -878,9 +878,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
                 artifactKind: 'principle',
                 sourceTaskId: taskId,
                 contentJson: JSON.stringify(finalOutput),
-              });
+                lineageArtifactIds: [],
+                validationStatus: 'validated',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              } as Parameters<typeof this.artifactStore.upsertArtifact>[0]);
             } catch { /* best-effort persist; the critical state is the run output */ }
-            if (finalOutput.adversarialResult?.passed === true) {
+            const v2Output = finalOutput as { adversarialResult?: { passed?: boolean } };
+            if (v2Output.adversarialResult?.passed === true) {
               replaySucceeded = true;
             }
           }
@@ -896,7 +901,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           // needs_revision to approved so the downstream flow (rollout
           // dispatch → risk gate → approval queue) proceeds with the
           // objective evidence backing the decision.
-          finalOutput.evaluation.decision = 'approved';
+          (finalOutput.evaluation as { decision: string }).decision = 'approved';
           this.emitEvent('adversarial_replay_override', taskId, {
             runId,
             reason: 'needs_revision_overridden_by_passing_replay',
@@ -904,7 +909,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           });
         } else {
           // Replay failed or couldn't run: restore needs_revision.
-          finalOutput.evaluation.decision = originalDecision;
+          (finalOutput.evaluation as { decision: string }).decision = originalDecision;
           this.emitEvent('adversarial_replay_result', taskId, {
             runId,
             reason: 'replay_did_not_confirm_code_quality',
