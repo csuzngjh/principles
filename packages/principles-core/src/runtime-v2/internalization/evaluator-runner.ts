@@ -771,7 +771,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // buildOwnerDecisionReview (deterministicStatus reads the durable artifact).
     if (isEvaluatorOutputV2(output) && Object.hasOwn(output, 'adversarialResult')) {
       const { adversarialResult: _stripped, ...authoritativeOutput } = output;
-      output = authoritativeOutput as EvaluatorOutputV1;
+      output = authoritativeOutput;
     }
 
     // Store output before marking succeeded
