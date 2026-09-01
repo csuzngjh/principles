@@ -1293,7 +1293,7 @@ describe('PRI-47 store modularization Phase 2', () => {
       'ResilientContextAssembler', 'ResilientHistoryQuery',
       'DefaultLeaseManager', 'DefaultRetryPolicy', 'DefaultRecoverySweep',
       'StoreEventEmitter', 'storeEmitter',
-      'RuntimeStateManager', 'EvolutionQueueItemMigrator',
+      'RuntimeStateManager',
       'DEFAULT_HISTORY_PAGE_SIZE', 'MAX_HISTORY_PAGE_SIZE', 'DEFAULT_TIME_WINDOW_MS',
     ];
     for (const sym of storeSymbols) {

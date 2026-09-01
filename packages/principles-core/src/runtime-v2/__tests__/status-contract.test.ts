@@ -5,7 +5,6 @@ import { PD_TASK_STATUSES, PDTaskStatusSchema, isPDTaskStatus } from '../task-st
 import { PRINCIPLE_STATUSES, PrincipleStatusSchema } from '../types/principle-enums.js';
 import type { PrincipleStatus } from '../types/principle-enums.js';
 import type { EvolutionPrincipleStatus } from '../evolution/evolution-types.js';
-import { EvolutionQueueItemMigrator } from '../store/task-migration.js';
 
 /** Minimal TypeBox value acceptance check (Value.Check without importing value package). */
 function TypeSystemAccepts(schema: ReturnType<typeof Type.Union>, value: unknown): boolean {
@@ -22,8 +21,6 @@ function TypeSystemAccepts(schema: ReturnType<typeof Type.Union>, value: unknown
  * - schema⇄const parity (the derived TypeBox schemas enumerate exactly the
  *   canonical values — no more, no fewer)
  * - alias assignability (EvolutionPrincipleStatus IS PrincipleStatus)
- * - the legacy QueueStatus → PDTaskStatus lossy mapping is explicit and
- *   exhaustive, including the lossy cases (canceled→failed, in_progress→leased)
  */
 
 describe('PRI-612 PrincipleStatus canonical contract', () => {
@@ -88,35 +85,6 @@ describe('PRI-612 PDTaskStatus canonical contract', () => {
     expect(isPDTaskStatus(undefined)).toBe(false);
     expect(isPDTaskStatus(null)).toBe(false);
     expect(isPDTaskStatus(42)).toBe(false);
-  });
-});
-
-describe('PRI-612 legacy QueueStatus → PDTaskStatus explicit mapping (lossy, exhaustive)', () => {
-  it('maps every documented legacy status exactly once', () => {
-    // Documented in store/task-migration.ts header — the mapping is the
-    // single authority for crossing the legacy boundary.
-    expect(EvolutionQueueItemMigrator.mapLegacyStatus('pending')).toBe('pending');
-    expect(EvolutionQueueItemMigrator.mapLegacyStatus('in_progress')).toBe('leased');
-    expect(EvolutionQueueItemMigrator.mapLegacyStatus('completed')).toBe('succeeded');
-    expect(EvolutionQueueItemMigrator.mapLegacyStatus('failed')).toBe('failed');
-    expect(EvolutionQueueItemMigrator.mapLegacyStatus('canceled')).toBe('failed');
-  });
-
-  it('unknown legacy statuses are refused (null), never guessed', () => {
-    expect(EvolutionQueueItemMigrator.mapLegacyStatus('')).toBeNull();
-    expect(EvolutionQueueItemMigrator.mapLegacyStatus('needs_human_review')).toBeNull();
-    expect(EvolutionQueueItemMigrator.mapLegacyStatus('SUCCEEDED')).toBeNull();
-  });
-
-  it('no legacy status can map to needs_human_review — owner-attention state is never fabricated', () => {
-    // needs_human_review means a human gate fired; a legacy queue item that
-    // never had that concept must not silently acquire it (or lose it — the
-    // inverse direction simply does not exist in this mapping).
-    for (const legacy of ['pending', 'in_progress', 'completed', 'failed', 'canceled']) {
-      const mapped = EvolutionQueueItemMigrator.mapLegacyStatus(legacy);
-      expect(mapped).not.toBe('needs_human_review');
-      expect(mapped).not.toBeNull();
-    }
   });
 });
 

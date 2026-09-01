@@ -448,7 +448,7 @@ LedgerWriter.deprecate() / archive()
 ### 6.4 可观测性（Observability）
 
 - **三位一体**：Logs（结构化）+ Metrics（计数器）+ Traces（traceId 贯穿）
-- **TelemetryEvent**：所有跨流水线事件统一格式（`@principles/core/telemetry-event`）
+- **TelemetryEvent**：所有跨流水线事件统一格式（`packages/principles-core/src/telemetry-event.ts`，内部模块）
 - **强制事件**：每个 Runner 必须发出 `*_task_leased` / `*_task_succeeded` / `*_task_failed`
 - 详见：`OBSERVABILITY_ARCHITECTURE.md`
 

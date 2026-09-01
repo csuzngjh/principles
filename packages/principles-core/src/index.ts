@@ -1,29 +1,16 @@
 /**
  * @principles/core -- Universal Evolution SDK
  *
- * Framework-agnostic pain signal capture and principle injection.
+ * Runtime-v2 contracts, store primitives, and prompt-builder helpers for
+ * Principles Disciple host integrations. The pre-runtime-v2 public modules
+ * (pain-signal, pain-signal-adapter, telemetry-event, principle-injector)
+ * were removed from the public surface in PRI-636; pain-signal and
+ * telemetry-event schemas remain internal modules consumed via relative
+ * imports and the ./runtime-v2 barrel.
  *
  * @example
- * import { PainSignalSchema, validatePainSignal, deriveSeverity } from '@principles/core';
- * import type { PainSignal } from '@principles/core';
- * import type { PainSignalAdapter } from '@principles/core';
- * import type { PrincipleInjector, InjectionContext } from '@principles/core';
- * import { DefaultPrincipleInjector } from '@principles/core';
+ * import { RuntimeStateManager, SqliteTaskStore } from '@principles/core';
  */
-
-// PainSignal schema and validation
-export { PainSignalSchema, validatePainSignal, deriveSeverity, PainSeverity } from './pain-signal.js';
-export type { PainSignal, PainSignalValidationResult } from './pain-signal.js';
-
-// PainSignalAdapter interface
-export { PainSignalAdapter } from './pain-signal-adapter.js';
-
-// TelemetryEvent schema
-export { TelemetryEventSchema, validateTelemetryEvent } from './telemetry-event.js';
-export type { TelemetryEvent, TelemetryEventValidationResult, TelemetryEventType } from './telemetry-event.js';
-
-// PrincipleInjector interface and DefaultPrincipleInjector
-export { PrincipleInjector, DefaultPrincipleInjector, InjectionContext } from './principle-injector.js';
 
 // Prompt builder primitives — pure functions extracted from openclaw-plugin prompt hook (PRI-75)
 export {

@@ -398,9 +398,6 @@ export { isOwnerExplicitManual, shouldShortCircuitEmptyEvidence } from './eviden
 export { PainChainReadModel } from './pain-chain-read-model.js';
 export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions } from './pain-chain-read-model.js';
 
-// Migration bridge
-export { EvolutionQueueItemMigrator } from './store/task-migration.js';
-
 // Workspace guidance migration (PRI-286) — remove stale PLAN.md gate guidance from installed workspaces
 export { migrateWorkspaceGuidance, containsStalePlanMdGuidance, STALE_PLAN_MD_PATTERNS } from './workspace-guidance-migration.js';
 export type { MigrationResult as WorkspaceGuidanceMigrationResult } from './workspace-guidance-migration.js';

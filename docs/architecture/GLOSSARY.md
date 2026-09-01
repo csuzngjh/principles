@@ -22,7 +22,7 @@
 
 | 字段 | 标准 | 说明 |
 |-----|------|------|
-| 数据类型 | `PainSignal` | TypeBox schema 定义于 `@principles/core/pain-signal.ts` |
+| 数据类型 | `PainSignal` | TypeBox schema 定义于 `packages/principles-core/src/pain-signal.ts`（内部模块） |
 | 唯一标识 | `painId` | 由捕获方生成的 UUID |
 | 严重等级 | `low / medium / high / critical` | 由 `score (0-100)` 派生 |
 | 来源 | `tool_failure / subagent_error / user_frustration / ...` | 字段名 `source`，详见 GFI 文档 |

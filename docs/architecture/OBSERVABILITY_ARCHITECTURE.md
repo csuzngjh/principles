@@ -319,7 +319,7 @@ Activation Pipeline:
 
 ### 4.3 TelemetryEvent schema
 
-参见 `@principles/core/telemetry-event.ts`：
+参见 `packages/principles-core/src/telemetry-event.ts`（内部模块）：
 
 ```typescript
 interface TelemetryEvent {
