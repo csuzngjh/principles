@@ -34,9 +34,10 @@ interface InstallerFlagEntry {
 
 function parseInstallerFeatures(source: string): InstallerFlagEntry[] {
   // Entries look like:
-  //   prompt:             { category: 'core',  enabled: true },
-  //   'host.codex':        { category: 'core', enabled: true },
-  const entryPattern = /(^|\n)\s{6}'?([a-z0-9_.]+)'?:\s*\{\s*category:\s*'([a-z_]+)',\s*enabled:\s*(true|false),?\s*\}/g;
+  //   prompt:             { category: 'core',  enabled: true, source: 'system' },
+  //   'host.codex':        { category: 'core', enabled: true, source: 'system' },
+  // (PRI-637: entries carry a system provenance label — tolerated, not required.)
+  const entryPattern = /(^|\n)\s{6}'?([a-z0-9_.]+)'?:\s*\{\s*category:\s*'([a-z_]+)',\s*enabled:\s*(true|false),?\s*(?:source:\s*'[a-z_]+',?\s*)?\}/g;
   const entries: InstallerFlagEntry[] = [];
   for (const match of source.matchAll(entryPattern)) {
     // match[0] = whole match, match[1] = (^|\n) — skip both before the fields.
