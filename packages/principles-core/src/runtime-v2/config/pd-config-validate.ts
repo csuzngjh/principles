@@ -32,6 +32,8 @@ import {
   type ProjectFocusMode,
   PD_CONFIG_VERSION,
   VALID_FEATURE_CATEGORIES,
+  FEATURE_FLAG_SOURCES,
+  type FeatureFlagSource,
   VALID_PROFILE_TYPES,
   INTERNAL_AGENT_NAMES,
   VALID_DIAGNOSTICS_MODES,
@@ -111,6 +113,17 @@ function validateFeatureFlagEntry(
     errors.push(err(`${path}.enabled`, `feature '${flagId}' enabled must be boolean, got ${typeof enabledRaw}`, `Change enabled of feature '${flagId}' to true or false`));
   }
 
+  // PRI-637: optional provenance. Absent is legal (LEGACY_UNKNOWN); a present
+  // value must be a registered source so typos fail loud instead of silently
+  // creating an unclassifiable override.
+  const sourceRaw = readOwn(raw, 'source');
+  if (
+    sourceRaw !== undefined
+    && (typeof sourceRaw !== 'string' || !FEATURE_FLAG_SOURCES.includes(sourceRaw as FeatureFlagSource))
+  ) {
+    errors.push(err(`${path}.source`, `feature '${flagId}' source must be one of: ${FEATURE_FLAG_SOURCES.join(', ')}, got ${safePreview(sourceRaw)}`, `Set source to one of: ${FEATURE_FLAG_SOURCES.join(', ')}, or remove it (legacy override)`));
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -120,6 +133,9 @@ function validateFeatureFlagEntry(
     value: {
       category: categoryRaw as FeatureCategory,
       enabled: enabledRaw as boolean,
+      ...(sourceRaw !== undefined && typeof sourceRaw === 'string' && FEATURE_FLAG_SOURCES.includes(sourceRaw as FeatureFlagSource)
+        ? { source: sourceRaw as FeatureFlagSource }
+        : {}),
     },
   };
 }

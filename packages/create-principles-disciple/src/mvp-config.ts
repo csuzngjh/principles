@@ -339,38 +339,43 @@ export function generateConfigYamlContent(
   const config: Record<string, unknown> = {
     version: 1,
     features: {
+      // PRI-637: every entry here records `source: 'system'` — the installer is
+      // PD machinery scaffolding a fresh workspace, NOT an Owner choice. The
+      // label is metadata only (effective values unchanged) and marks the
+      // bootstrap snapshot as cleanable when a flag graduates. Owner toggles
+      // via the Console rewrite entries as `source: 'owner'`.
       // MVP-Core (ADR-0014 §2.4)
-      prompt:             { category: 'core',  enabled: true },
-      code_tool_hook:     { category: 'core',  enabled: true },
-      defer_archive:      { category: 'core',  enabled: true },
+      prompt:             { category: 'core',  enabled: true, source: 'system' },
+      code_tool_hook:     { category: 'core',  enabled: true, source: 'system' },
+      defer_archive:      { category: 'core',  enabled: true, source: 'system' },
       // PRI-435: Code-rule capability promoted to MVP-Core, default ON.
-      code_rule_capability: { category: 'core', enabled: true },
-      'host.codex':        { category: 'core', enabled: true },
+      code_rule_capability: { category: 'core', enabled: true, source: 'system' },
+      'host.codex':        { category: 'core', enabled: true, source: 'system' },
       // MVP-Quiet (ADR-0014 §2.5)
-      correction_observer:{ category: 'quiet', enabled: false },
-      feedback_channel:   { category: 'quiet', enabled: true },
+      correction_observer:{ category: 'quiet', enabled: false, source: 'system' },
+      feedback_channel:   { category: 'quiet', enabled: true, source: 'system' },
       // Task 17: Failed tasks observability — quiet flag, default-on so operators
       // can list failed pipeline tasks out of the box. Disable via .pd/config.yaml.
-      failed_tasks_observability: { category: 'quiet', enabled: true },
+      failed_tasks_observability: { category: 'quiet', enabled: true, source: 'system' },
       // PRI-535 (SPEC §10): Principle Receipt — owner-visible evidence that
       // approved principles change agent behavior (block copy attribution,
       // durable application ledger). Deterministic receipt capabilities are
       // default-on; experimental agent self-report stays default-off.
-      principle_receipt_block_copy:  { category: 'quiet', enabled: true },
-      principle_receipt_ledger:      { category: 'quiet', enabled: true },
-      principle_receipt_self_report: { category: 'quiet', enabled: false },
+      principle_receipt_block_copy:  { category: 'quiet', enabled: true, source: 'system' },
+      principle_receipt_ledger:      { category: 'quiet', enabled: true, source: 'system' },
+      principle_receipt_self_report: { category: 'quiet', enabled: false, source: 'system' },
       // Anonymous Product Telemetry v1 (PRI-595~603) — maintainer release
       // gate, INDEPENDENT of user consent (~/.pd/product-telemetry.json).
       // Export requires this flag AND explicit consent AND production
       // eligibility. Default off = zero export attempts from any surface.
-      anonymous_product_telemetry:   { category: 'quiet', enabled: false },
-      gfi:                { category: 'quiet', enabled: false },
-      evolution_worker:   { category: 'quiet', enabled: false },
-      empathy_observer:   { category: 'quiet', enabled: false },
-      abstraction_layer_v1: { category: 'quiet', enabled: false },
+      anonymous_product_telemetry:   { category: 'quiet', enabled: false, source: 'system' },
+      gfi:                { category: 'quiet', enabled: false, source: 'system' },
+      evolution_worker:   { category: 'quiet', enabled: false, source: 'system' },
+      empathy_observer:   { category: 'quiet', enabled: false, source: 'system' },
+      abstraction_layer_v1: { category: 'quiet', enabled: false, source: 'system' },
       // MVP-Gone (ADR-0014 §2.6)
-      nocturnal:          { category: 'gone',  enabled: false },
-      idle_trigger:       { category: 'gone',  enabled: false },
+      nocturnal:          { category: 'gone',  enabled: false, source: 'system' },
+      idle_trigger:       { category: 'gone',  enabled: false, source: 'system' },
     },
     runtimeProfiles: {
       // M9 default: pi-ai profile. Fix-4: when the installer collected
@@ -565,13 +570,15 @@ export function migrateHostRuntimeFlagsInConfigYaml(
       let changed = false;
       if (!Object.hasOwn(featuresValue, 'host.codex')) {
         Object.defineProperty(featuresValue, 'host.codex', {
-          value: { category: 'core', enabled: true }, enumerable: true, writable: true, configurable: true,
+          // PRI-637: migration writes are PD machinery (system), never Owner
+          // intent — label `source: 'system'` so graduation can clean them.
+          value: { category: 'core', enabled: true, source: 'system' }, enumerable: true, writable: true, configurable: true,
         });
         changed = true;
       }
       if (!Object.hasOwn(featuresValue, 'abstraction_layer_v1')) {
         Object.defineProperty(featuresValue, 'abstraction_layer_v1', {
-          value: { category: 'quiet', enabled: false }, enumerable: true, writable: true, configurable: true,
+          value: { category: 'quiet', enabled: false, source: 'system' }, enumerable: true, writable: true, configurable: true,
         });
         changed = true;
       }

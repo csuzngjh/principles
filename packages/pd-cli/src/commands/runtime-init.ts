@@ -95,12 +95,21 @@ const DB_NAMES = {
  */
 function buildConfigYaml(workspaceDir: string): string {
   const config = getDefaultPdConfig();
+  // PRI-637: `pd runtime init` is PD machinery writing a bootstrap snapshot, so
+  // every flag entry records `source: 'system'` — NOT Owner intent. This makes
+  // the initial defaults distinguishable from deliberate Owner pins (labels are
+  // metadata only; effective values are unchanged) and marks the snapshot as
+  // cleanable when a flag graduates.
+  const features: Record<string, unknown> = {};
+  for (const [id, entry] of Object.entries(config.features)) {
+    features[id] = { category: entry.category, enabled: entry.enabled, source: 'system' };
+  }
   const yamlObj: Record<string, unknown> = {
     version: config.version,
     workspace: {
       default: workspaceDir,
     },
-    features: config.features,
+    features,
     runtimeProfiles: config.runtimeProfiles,
     internalAgents: config.internalAgents,
     ui: config.ui,
