@@ -13,7 +13,7 @@
 | Console update history | LIVE | `update-history.ts` route + `<workspace>/.pd/update-history.json` (last 50) | unchanged until Gate B decision |
 | Companion check/notification + console restart | LIVE | `pd-companion/src/main/main.ts` (6h poll of `/api/update/check`, OS notification, `version_change_restart`) | consumes Console API — no independent update logic to converge |
 | CLI version reporting | LIVE | `pd-cli/src/services/version-report.ts` (reads `~/.pd` install state; NO update commands exist) | unchanged |
-| Installer updater (`create-principles-disciple/src/updater.ts`) | **DEAD in production** — imported only by `tests/updater.test.ts` | none | Gate C deletion candidate (Option B: proven dead) |
+| Installer updater (`create-principles-disciple/src/updater.ts`) | **REMOVED (PRI-636)** — was DEAD in production (imported only by `tests/updater.test.ts`); file + test deleted | none | done |
 | ReleaseManager + bootstrap protocol (`src/update/*`) | **Test-only today** — imported by `tests/release-manager.test.ts` + BDD steps only; NOT shipped in the npm package (`files` bundle excludes it) | none (future canonical) | IS the canonical authority once Gate B wires it |
 | `release_manager_shadow` feature flag | declared, default-off, **zero readers** | — | wiring arrives with Gate B (PRI-610 census: STAGED) |
 | Gateway restart coordination | LIVE, **3 separate implementations** | installer `utils/env.ts`, console `server/utils/gateway.ts`, Companion supervises console process only | converge in Gate B/C scope decision |
@@ -70,7 +70,7 @@
 
 - **Install-time gateway coordination:** `utils/env.ts:260-347` (`checkOpenClawGateway`/`stop`/`restart`; Windows spawns `cmd.exe /c openclaw ...`). `installer.ts:1899-1938`: pre-flight `resolveGatewayAction` (`--stop-gateway` flag / interactive prompt / proceed-with-warning), restart-after-install-even-on-failure.
 - **Existing-install detection / reinstall:** installer.ts detects prior install and offers reinstall flows; hermetic self-verification via `update/release-asset-manifest.ts` (imported at `installer.ts:40-46`) — **the ONLY update/* module consumed in production today**.
-- **`src/updater.ts` (legacy standalone updater): PRODUCTION-DEAD.** Exhaustive reachability: the only import anywhere is `tests/updater.test.ts:2`. No dynamic imports, no bundle references, no console/cli/plugin/host-runtime usage (console explicitly re-implements inline "to avoid cross-package import", update.ts:219-220). Behaviors that exist ONLY here and nowhere in production: `rmSync(targetDir, recursive)` rollback (destroys node_modules), `execSync('npm install --production')` (shell string), apply of DELETED files. **Gate C candidate — Option B (proven dead), deletion requires no replacement.**
+- **`src/updater.ts` (legacy standalone updater): DELETED in PRI-636.** Pre-deletion reachability: the only import anywhere was `tests/updater.test.ts:2`. No dynamic imports, no bundle references, no console/cli/plugin/host-runtime usage (console explicitly re-implements inline "to avoid cross-package import", update.ts:219-220). Behaviors that existed ONLY there and nowhere in production: `rmSync(targetDir, recursive)` rollback (destroys node_modules), `execSync('npm install --production')` (shell string), apply of DELETED files.
 - **Contradiction recorded:** `release-manager.ts:101` claims legacyCheck is "Injected in production from the legacy updater" — no such wiring exists; only tests inject it. Comment must be corrected when Gate B wires reality.
 
 ---

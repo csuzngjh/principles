@@ -10,45 +10,9 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./pain-signal": {
-      "types": "./dist/pain-signal.d.ts",
-      "default": "./dist/pain-signal.js"
-    },
-    "./pain-signal-adapter": {
-      "types": "./dist/pain-signal-adapter.d.ts",
-      "default": "./dist/pain-signal-adapter.js"
-    },
-    "./storage-adapter": {
-      "types": "./dist/storage-adapter.d.ts",
-      "default": "./dist/storage-adapter.js"
-    },
-    "./evolution-hook": {
-      "types": "./dist/evolution-hook.d.ts",
-      "default": "./dist/evolution-hook.js"
-    },
-    "./principle-injector": {
-      "types": "./dist/principle-injector.d.ts",
-      "default": "./dist/principle-injector.js"
-    },
-    "./telemetry-event": {
-      "types": "./dist/telemetry-event.d.ts",
-      "default": "./dist/telemetry-event.js"
-    },
-    "./pain-recorder": {
-      "types": "./dist/pain-recorder.d.ts",
-      "default": "./dist/pain-recorder.js"
-    },
-    "./pain-flag-resolver": {
-      "types": "./dist/pain-flag-resolver.d.ts",
-      "default": "./dist/pain-flag-resolver.js"
-    },
     "./principle-tree-ledger": {
       "types": "./dist/principle-tree-ledger.d.ts",
       "default": "./dist/principle-tree-ledger.js"
-    },
-    "./workspace-resolver": {
-      "types": "./dist/types/workspace-resolver.d.ts",
-      "default": "./dist/types/workspace-resolver.js"
     },
     "./trajectory-store": {
       "types": "./dist/trajectory-store.d.ts",

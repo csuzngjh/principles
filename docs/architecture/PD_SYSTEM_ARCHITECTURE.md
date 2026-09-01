@@ -103,17 +103,12 @@ principles/                         （工作区根目录）
 
 ```
 packages/principles-core/src/
-├── pain-signal.ts                 ← Schema
-├── telemetry-event.ts             ← Schema
-├── pain-signal-adapter.ts         ← Adapter interface
-├── pain-recorder.ts               ← Util（pain 记录）
-├── pain-flag-resolver.ts          ← Util（路径解析）
-├── io.ts                          ← Util（atomicWriteFileSync）
+├── pain-signal.ts                 ← Schema（内部模块，PRI-636 起不再公开导出）
+├── telemetry-event.ts             ← Schema（内部模块，PRI-636 起不再公开导出）
+├── pain-signal-adapter.ts         ← Adapter interface（内部模块，PRI-636 起不再公开导出）
 ├── principle-tree-ledger.ts       ← Store（JSON）
-├── principle-injector.ts          ← Service
 ├── trajectory-store.ts            ← Store
 ├── workflow-funnel-loader.ts      ← Util
-├── types/                         ← Type 共享
 ├── adapters/                      ← Adapter 接口（domain）
 ├── prompt-builder/                ← Util 集合
 └── runtime-v2/                    ← 主体（见下文）
