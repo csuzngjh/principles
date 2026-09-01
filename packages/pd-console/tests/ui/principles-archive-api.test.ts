@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { archivePrinciple, unarchivePrinciple } from "../../src/ui/api.js";
+import { archivePrinciple, unarchivePrinciple, fetchPrinciples } from "../../src/ui/api.js";
 
 // Mock sessionStorage (browser API not available in Node env)
 const sessionStore: Record<string, string> = {};
@@ -70,5 +70,15 @@ describe("archivePrinciple and unarchivePrinciple", () => {
 
     const result = await archivePrinciple("p1");
     expect(result.success).toBe(false);
+  });
+});
+
+describe("fetchPrinciples filter contract", () => {
+  afterEach(() => vi.mocked(fetch).mockReset());
+
+  it("requests filter=all when the review page says Show All", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true, data: { principles: [], summary: { candidate: 0, probation: 0, active: 0, deprecated: 0, archived: 0, total: 0 } } }) } as Response);
+    await fetchPrinciples('all');
+    expect(fetch).toHaveBeenCalledWith('/api/principles?filter=all', expect.anything());
   });
 });

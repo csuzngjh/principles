@@ -264,7 +264,7 @@ async function syncWorkspace(name: string): Promise<ApiResponse<SyncResultData>>
 // ── Principles ────────────────────────────────────────────────────────────────
 
 async function fetchPrinciples(filter?: 'all' | 'actionable'): Promise<ApiResponse<PrinciplesListData>> {
-  const query = filter && filter !== 'all' ? `?filter=${filter}` : '';
+  const query = filter === undefined ? '' : `?filter=${filter}`;
   return request<PrinciplesListData>(`/api/principles${query}`, undefined, validatePrinciplesList);
 }
 

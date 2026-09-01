@@ -104,6 +104,21 @@ interface ConfirmState {
   workspaceName: string;
 }
 
+interface CompanionBridge {
+  configureConsoleToken(token: string): Promise<{
+    persisted: boolean;
+    restartRequested: boolean;
+    reason?: string;
+    nextAction?: string;
+  }>;
+}
+
+function getCompanionBridge(): CompanionBridge | undefined {
+  if (typeof window === "undefined") return undefined;
+  const candidate = (window as typeof window & { pdCompanion?: CompanionBridge }).pdCompanion;
+  return candidate;
+}
+
 // ── Main page component ──────────────────────────────────────────────────────
 
 type LoadingState = "loading" | "loaded" | "error";
@@ -256,9 +271,31 @@ export function SettingsPage() {
   const handleSaveToken = useCallback(async () => {
     const trimmed = tokenInput.trim();
     if (trimmed.length === 0) return;
-    setToken(trimmed);
-    await loadOnboardingFlag();
-    toast.success(t("pages.settings.tokenSaved"));
+    try {
+      const companion = getCompanionBridge();
+      if (companion !== undefined) {
+        const result = await companion.configureConsoleToken(trimmed);
+        if (!result.persisted) {
+          toast.error(t("pages.settings.tokenSaveFailed"));
+          if (result.nextAction) toast.info(result.nextAction);
+          return;
+        }
+        if (result.reason === "external_console_attached") {
+          toast.info(t("pages.settings.tokenExternalAttached"));
+          if (result.nextAction) toast.info(result.nextAction, { duration: 8000 });
+        } else if (result.restartRequested) {
+          toast.success(t("pages.settings.tokenSavedRestarting"));
+        } else {
+          toast.success(t("pages.settings.tokenSaved"));
+        }
+      } else {
+        toast.success(t("pages.settings.tokenSaved"));
+      }
+      setToken(trimmed);
+      await loadOnboardingFlag();
+    } catch {
+      toast.error(t("pages.settings.tokenSaveFailed"));
+    }
   }, [tokenInput, loadOnboardingFlag, t]);
 
   // ── Workspace handlers ─────────────────────────────────────────────────
@@ -461,7 +498,9 @@ export function SettingsPage() {
               {t("common.save")}
             </button>
             <span className="text-ink-4 text-[12px]">
-              {t("pages.settings.tokenSessionOnly")}
+              {getCompanionBridge() === undefined
+                ? t("pages.settings.tokenSessionOnly")
+                : t("pages.settings.tokenDesktopStored")}
             </span>
           </div>
         </div>
