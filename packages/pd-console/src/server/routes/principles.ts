@@ -1,10 +1,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as path from 'path';
 import * as fs from 'fs';
-import { PrinciplesConsoleModel, type PrincipleFilter } from '../models/PrinciplesConsoleModel.js';
+import {
+  PrinciplesConsoleModel,
+  ImmutableCorePrincipleError,
+  CorePrincipleNotGovernedError,
+  type PrincipleFilter,
+} from '../models/PrinciplesConsoleModel.js';
 import { PrincipleTrajectoryModel } from '../models/PrincipleTrajectoryModel.js';
 import { GovernanceProjectionCollector, GovernanceProjectionCollectionError } from '../models/GovernanceProjectionCollector.js';
-import { OwnerGovernanceViewSchema, deriveOwnerGovernanceView } from '@principles/core/runtime-v2';
+import { CORE_PRINCIPLES, OwnerGovernanceViewSchema, deriveOwnerGovernanceView } from '@principles/core/runtime-v2';
 import { Value } from '@sinclair/typebox/value';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
@@ -18,6 +23,31 @@ function getModel(workspaceDir: string): PrinciplesConsoleModel {
     models.set(workspaceDir, model);
   }
   return model;
+}
+
+/**
+ * GET /api/principles/core — read-only PD Core Principles reference (PRI-641).
+ *
+ * Served directly from the canonical `CORE_PRINCIPLES` registry (no ledger /
+ * DB read). Dispatched in server/index.ts BEFORE the `/api/principles`
+ * catch-all so `core` is never parsed as `/:id`; the `/api/v1/principles`
+ * mount intentionally does NOT expose this endpoint.
+ */
+export async function handleCorePrinciplesRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (req.method !== 'GET') {
+    sendNotFound(res, `Route ${req.method} /api/principles/core not found`);
+    return;
+  }
+  sendSuccess(res, {
+    principles: CORE_PRINCIPLES.map((p) => ({
+      id: p.id,
+      layer: p.layer,
+      name: p.name,
+      nameZh: p.nameZh,
+      statement: p.statement,
+      statementZh: p.statementZh,
+    })),
+  });
 }
 
 /**
@@ -177,6 +207,12 @@ export async function handlePrinciplesRoute({
           sendError(res, 500, 'archive_failed', `Failed to archive principle "${principleId}"`);
         }
       } catch (err: unknown) {
+        if (err instanceof ImmutableCorePrincipleError) {
+          sendError(res, 403, 'immutable_core_principle', err.message, {
+            nextAction: 'View this principle under PD Core Principles.',
+          });
+          return;
+        }
         sendError(res, 500, 'archive_failed', err instanceof Error ? err.message : String(err));
       }
       return;
@@ -205,6 +241,12 @@ export async function handlePrinciplesRoute({
           sendError(res, 500, 'unarchive_failed', `Failed to unarchive principle "${principleId}"`);
         }
       } catch (err: unknown) {
+        if (err instanceof ImmutableCorePrincipleError) {
+          sendError(res, 403, 'immutable_core_principle', err.message, {
+            nextAction: 'View this principle under PD Core Principles.',
+          });
+          return;
+        }
         sendError(res, 500, 'unarchive_failed', err instanceof Error ? err.message : String(err));
       }
       return;
@@ -288,6 +330,14 @@ export async function handlePrinciplesRoute({
       }
       sendSuccess(res, result);
     } catch (err: unknown) {
+      if (err instanceof CorePrincipleNotGovernedError) {
+        // PRI-641: Core principles never enter the ordinary Owner detail flow
+        // (approvals/lifecycle/trajectory/receipts are workspace-governance data).
+        sendError(res, 404, 'core_principle_not_owner_managed', err.message, {
+          nextAction: 'View this principle under PD Core Principles.',
+        });
+        return;
+      }
       sendError(res, 500, 'principle_detail_error', err instanceof Error ? err.message : String(err));
     }
     return;

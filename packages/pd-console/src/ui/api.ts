@@ -43,6 +43,7 @@ import {
   validateRollbackResult,
   validateApprovalRecordDirect,
   validatePrinciplesList,
+  validateCorePrinciples,
   validateApprovalsGrouped,
   validateEvidenceChain,
   validateTrajectoryData,
@@ -98,6 +99,7 @@ import type {
   RollbackResultData,
   ApprovalRecordData,
   PrinciplesListData,
+  CorePrinciplesData,
   ApprovalsGroupedData,
   EvidenceChainData,
   TrajectoryData,
@@ -266,6 +268,12 @@ async function syncWorkspace(name: string): Promise<ApiResponse<SyncResultData>>
 async function fetchPrinciples(filter?: 'all' | 'actionable'): Promise<ApiResponse<PrinciplesListData>> {
   const query = filter === undefined ? '' : `?filter=${filter}`;
   return request<PrinciplesListData>(`/api/principles${query}`, undefined, validatePrinciplesList);
+}
+
+// PRI-641: read-only PD Core Principles reference. Served from the canonical
+// registry by the server; validated here for network shape only.
+async function fetchCorePrinciples(): Promise<ApiResponse<CorePrinciplesData>> {
+  return request<CorePrinciplesData>("/api/principles/core", undefined, validateCorePrinciples);
 }
 
 // Principle detail is deeply nested; for now we accept unvalidated until a
@@ -1036,6 +1044,7 @@ export {
   rejectApproval,
   editApproval,
   fetchPrinciples,
+  fetchCorePrinciples,
   fetchPrincipleDetail,
   fetchPrincipleGovernance,
   fetchPrincipleTrajectory,
@@ -1132,6 +1141,8 @@ export type {
   RollbackResultData,
   ApprovalRecordData,
   PrinciplesListData,
+  CorePrinciplesData,
+  CorePrincipleData,
   ApprovalsGroupedData,
   EvidenceChainData,
   EvidenceChainRecordData,

@@ -23,7 +23,7 @@ import {
 import { handleFailedTasksRoute, disposeFailedTasksModels } from './routes/failed-tasks.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
-import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
+import { handlePrinciplesRoute, handleCorePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
 import { handleLifecycleRoute, disposeLifecycleModels } from './routes/lifecycle.js';
 import { handleActivationsRoute, disposeActivationsModels } from './routes/activations.js';
 import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js';
@@ -405,6 +405,14 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath.startsWith('/api/v1/approvals')) {
         const subPath = urlPath.slice('/api/v1/approvals'.length);
         asyncHandler(() => handleApprovalsRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // GET /api/principles/core — read-only PD Core Principles reference
+      // (MUST be before the /api/principles catch-all so "core" is not parsed
+      // as a principle id; the /api/v1/principles mount does not expose it.)
+      if (urlPath === '/api/principles/core') {
+        asyncHandler(() => handleCorePrinciplesRoute(req, res))(req, res);
         return;
       }
 
