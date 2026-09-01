@@ -575,7 +575,7 @@ interface LedgerAdapter {
 
 | 数据类型 | 唯一写入路径 |
 |---------|------------|
-| PainSignal | `PainSignalAdapter.recordPain()` |
+| PainSignal | `PainSignalBridge.onPainDetected()` |
 | Diagnostician 任务 | `PainSignalBridge.onPainDetected()` |
 | Diagnostician artifact | `DiagnosticianCommitter.commit()` |
 | LedgerPrincipleEntry | `CandidateIntakeService.intake()` |

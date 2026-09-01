@@ -103,13 +103,10 @@ principles/                         （工作区根目录）
 
 ```
 packages/principles-core/src/
-├── pain-signal.ts                 ← Schema（内部模块，PRI-636 起不再公开导出）
 ├── telemetry-event.ts             ← Schema（内部模块，PRI-636 起不再公开导出）
-├── pain-signal-adapter.ts         ← Adapter interface（内部模块，PRI-636 起不再公开导出）
 ├── principle-tree-ledger.ts       ← Store（JSON）
 ├── trajectory-store.ts            ← Store
 ├── workflow-funnel-loader.ts      ← Util
-├── adapters/                      ← Adapter 接口（domain）
 ├── prompt-builder/                ← Util 集合
 └── runtime-v2/                    ← 主体（见下文）
     ├── error-categories.ts        ← Schema
@@ -277,8 +274,7 @@ packages/openclaw-plugin/src/
 │   ├── sleep-cycle.ts               ← 删除 idle/night 调度职责
 │   └── subagent-workflow/
 ├── core/                            ← Plugin 内部业务（迁移中）
-│   ├── pain.ts / pain-signal.ts     ← 部分迁入 core
-│   ├── pain-signal-adapter.ts
+│   ├── pain.ts                     ← 部分迁入 core
 │   ├── pain-context-extractor.ts
 │   ├── session-tracker.ts           ← GFI plugin 适配器
 │   ├── workspace-context.ts
@@ -666,11 +662,10 @@ PD 的配置遵循以下层级（从低优先级到高优先级，详见待建�
         │
         │ 调用 core
         ▼
-[3] PainSignalAdapter.recordPain (core/pain-signal-adapter.ts)
+[3] emitPainDetectedEvent（plugin/hooks/pain.ts）
         │
         ▼ 写入
-[4] state.db: pain_signals
-    ledger.json: pain_flag
+[4] PainSignalBridge 落库：trajectory.db pain_events / state.db pain_diagnoses
         │
         ▼ 触发
 [5] PainSignalBridge.onPainDetected (core/runtime-v2/pain-signal-bridge.ts)

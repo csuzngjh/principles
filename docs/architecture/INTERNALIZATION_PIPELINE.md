@@ -71,7 +71,7 @@ PD 的痛苦信号按重要性分为三层。**只有 Layer 1 和 Layer 2 独立
          │
          │  Plugin Hook（after_tool_call / llm_output / subagent_ended）
          ▼
-   PainSignalAdapter.recordPain()
+   emitPainDetectedEvent → PainSignalBridge
          │
          ▼
    ┌─────────────────────────┐
@@ -128,7 +128,6 @@ PD 的痛苦信号按重要性分为三层。**只有 Layer 1 和 Layer 2 独立
 
 | 组件 | 包 | 输入 | 输出 | 失败语义 |
 |------|----|----|----|---------|
-| `PainSignalAdapter` | core | 平台事件 | PainSignal | 失败 → 静默丢弃（next opportunity） |
 | `PainBridge` | core | PainSignal | 异步 ack | 幂等：同 painId 第二次进入返回缓存结果 |
 | `DiagnosticianRunner` | core | taskId | RunnerResult | 重试机制详见 retry-policy |
 | `DiagnosticianValidator` | core | RawOutput | 校验通过/失败 | 失败 → output_invalid，可重试 |
@@ -160,7 +159,6 @@ LLM/代理输出进入软件系统的通用边界见 [`AGENT_SOFTWARE_CONTRACT.m
 
 | 组件 | 实现状态 |
 |------|---------|
-| PainSignalAdapter | ✅ 完整 |
 | PainBridge | ✅ 完整 |
 | DiagnosticianRunner | ✅ 完整 |
 | DiagnosticianValidator (DefaultValidator) | ✅ 完整 |
@@ -804,7 +802,6 @@ routing_policy:
 | 组件 | 状态 | 待办 |
 |------|------|------|
 | **Stage 1 (Pain)** | | |
-| PainSignalAdapter | ✅ | |
 | PainBridge | ✅ | |
 | DiagnosticianRunner | ✅ | |
 | CandidateIntakeService | ✅ | |

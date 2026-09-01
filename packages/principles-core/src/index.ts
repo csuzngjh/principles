@@ -4,9 +4,9 @@
  * Runtime-v2 contracts, store primitives, and prompt-builder helpers for
  * Principles Disciple host integrations. The pre-runtime-v2 public modules
  * (pain-signal, pain-signal-adapter, telemetry-event, principle-injector)
- * were removed from the public surface in PRI-636; pain-signal and
- * telemetry-event schemas remain internal modules consumed via relative
- * imports and the ./runtime-v2 barrel.
+ * were removed from the public surface in PRI-636. The PainSignal schema is
+ * canonical under ./runtime-v2/types (exported via the ./runtime-v2 subpath);
+ * telemetry-event remains an internal module consumed via relative imports.
  *
  * @example
  * import { RuntimeStateManager, SqliteTaskStore } from '@principles/core';
