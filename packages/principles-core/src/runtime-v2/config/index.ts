@@ -9,6 +9,7 @@ export type {
   PdConfigVersion,
   FeatureCategory,
   FeatureFlagEntry,
+  FeatureFlagSource,
   RuntimeProfileType,
   OpenClawRuntimeProfile,
   PdLocalRuntimeProfile,

@@ -9,6 +9,7 @@
 import {
   type EffectivePdConfig,
   type FeatureCategory,
+  type FeatureFlagSource,
   DANGEROUS_KEYS,
 } from './pd-config-types.js';
 import { DEFAULT_FEATURE_FLAGS } from './pd-config-defaults.js';
@@ -19,6 +20,8 @@ export interface EffectiveFeatureFlag {
   id: string;
   category: FeatureCategory;
   enabled: boolean;
+  /** PRI-637 override provenance ('owner' | 'system'); undefined = registry default or LEGACY_UNKNOWN. */
+  source?: FeatureFlagSource;
 }
 
 export interface FeatureFlagsResult {
@@ -84,6 +87,7 @@ export function computeFeatureFlagsFromConfig(effective: EffectivePdConfig): Fea
           id,
           category: defaultFlag.category,
           enabled: false,
+          ...(userEntry.source ? { source: userEntry.source } : {}),
         };
         continue;
       }
@@ -92,6 +96,7 @@ export function computeFeatureFlagsFromConfig(effective: EffectivePdConfig): Fea
         id,
         category: userEntry.category,
         enabled: userEntry.enabled,
+        ...(userEntry.source ? { source: userEntry.source } : {}),
       };
     } else {
       // PRI-609: unknown flags are NOT effective capabilities. A config key

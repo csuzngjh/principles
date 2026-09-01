@@ -442,11 +442,15 @@ export function updateAgentBinding(
     }
   }
 
-  // Merge: start from raw config, overlay known sections, update internalAgents.agents
+  // Merge: start from raw config, overlay known sections, update internalAgents.agents.
+  // PRI-637: preserve the file's own `features:` section instead of re-writing
+  // the merged effective map. Defaults belong in the registry, not in config —
+  // snapshotting `effective.config.features` here would materialize every
+  // missing default flag into an immortal override on any agent-binding change.
   const updatedConfig: Record<string, unknown> = {
     ...rawConfig,
     version: effective.config.version,
-    features: { ...effective.config.features },
+    features: isRecord(rawConfig.features) ? rawConfig.features : { ...effective.config.features },
     runtimeProfiles: { ...effective.config.runtimeProfiles },
     internalAgents: {
       defaultRuntime: effective.config.internalAgents.defaultRuntime,
@@ -595,11 +599,13 @@ export function updateDefaultRuntime(
     // No agents in file — write nothing (all agents inherit default)
   }
 
-  // Merge: update only defaultRuntime, preserve agent overrides
+  // Merge: update only defaultRuntime, preserve agent overrides.
+  // PRI-637: preserve the file's own `features:` section (same rationale as
+  // updateAgentBinding — never re-snapshot merged defaults into config).
   const updatedConfig: Record<string, unknown> = {
     ...rawConfig,
     version: effective.config.version,
-    features: { ...effective.config.features },
+    features: isRecord(rawConfig.features) ? rawConfig.features : { ...effective.config.features },
     runtimeProfiles: { ...effective.config.runtimeProfiles },
     internalAgents: {
       defaultRuntime: defaultRuntimeRaw,
@@ -1078,13 +1084,14 @@ export function updateFeatureFlag(
   //    Use Object.hasOwn for untrusted key check (ERR-013).
   let featuresSection: Record<string, unknown>;
   if (!Object.hasOwn(rawConfig, 'features')) {
-    // Section absent — seed with defaults from the registered flag set so the
-    // subsequent validatePdConfig passes (it requires prompt/code_tool_hook /
-    // defer_archive as registered flags). Computed once at module load.
+    // Section absent — create an EMPTY features map (PRI-637). Defaults belong
+    // in the registry, not in config: seeding the whole registered flag set here
+    // would materialize an immortal default snapshot on the first toggle of a
+    // fresh install. `features: {}` is fully valid — validatePdConfig only
+    // requires the key to be an object, and the effective config merges missing
+    // flags from DEFAULT_FEATURE_FLAGS at read time. Step 6 below then writes
+    // exactly one flag: the one the Owner toggled.
     featuresSection = {};
-    for (const [flagId, flag] of Object.entries(_DEFAULT_FLAGS_RESULT.flags)) {
-      featuresSection[flagId] = { category: flag.category, enabled: flag.enabled };
-    }
     rawConfig.features = featuresSection;
   } else if (isRecord(rawConfig.features)) {
     featuresSection = rawConfig.features;
@@ -1131,7 +1138,12 @@ export function updateFeatureFlag(
   const category = (isRecord(existingEntry) && Object.hasOwn(existingEntry, 'category') && typeof existingEntry.category === 'string')
     ? existingEntry.category
     : (DEFAULT_FLAG_CATEGORY.get(featureName) ?? 'quiet');
-  existingFeatures[featureName] = { category, enabled };
+  // PRI-637: the Console toggle is the canonical Owner action — an authenticated
+  // server writes this override under an explicit owner intent, so it records
+  // `source: 'owner'` (OWNER_PIN). This also upgrades a previously source-less
+  // LEGACY_UNKNOWN or system override: an explicit Owner action converts it to
+  // OWNER_PIN, which graduation must forever respect.
+  existingFeatures[featureName] = { category, enabled, source: 'owner' };
   rawConfig.features = existingFeatures;
 
   // 7. Validate the updated config before writing

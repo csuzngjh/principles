@@ -2045,3 +2045,166 @@ describe('DELETE /api/v1/config/profiles/:profileId', () => {
     expect(res.statusCode).toBe(405);
   });
 });
+
+// ===========================================================================
+// PRI-637 — feature flag config lifecycle (override provenance)
+// ===========================================================================
+
+describe('PRI-637: Console toggle records owner provenance', () => {
+  function readFeatures(): Record<string, Record<string, unknown>> {
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    return parsed.features as Record<string, Record<string, unknown>>;
+  }
+
+  it('writes source: owner for the toggled flag', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/feedback_channel',
+      body: { enabled: false },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/feedback_channel',
+    });
+    expect(res.statusCode).toBe(200);
+
+    const features = readFeatures();
+    expect(features.feedback_channel?.enabled).toBe(false);
+    expect(features.feedback_channel?.source).toBe('owner');
+  });
+
+  it('auto-creates a SPARSE features section on fresh configs (no default snapshot)', async () => {
+    // No features: section at all — fresh install shape.
+    writeConfig({
+      version: 1,
+      runtimeProfiles: VALID_CONFIG.runtimeProfiles,
+      internalAgents: VALID_CONFIG.internalAgents,
+      ui: { diagnostics: { mode: 'simple' } },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+    expect(res.statusCode).toBe(200);
+
+    const features = readFeatures();
+    // PRI-637: only the toggled flag is written — the feature section must NOT
+    // become a permanent snapshot of every registry default.
+    expect(Object.keys(features)).toEqual(['intent_engineering']);
+    expect(features.intent_engineering?.enabled).toBe(true);
+    expect(features.intent_engineering?.source).toBe('owner');
+  });
+
+  it('upgrades a legacy source-less entry to owner on explicit toggle', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        feedback_channel: { category: 'quiet', enabled: false },
+      },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/feedback_channel',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/feedback_channel',
+    });
+    expect(res.statusCode).toBe(200);
+
+    const features = readFeatures();
+    expect(features.feedback_channel?.enabled).toBe(true);
+    // Explicit Owner action converts LEGACY_UNKNOWN → OWNER_PIN (PRI-637 §9.C).
+    expect(features.feedback_channel?.source).toBe('owner');
+    // Other flags untouched.
+    expect(features.prompt?.enabled).toBe(true);
+  });
+});
+
+describe('PRI-637: config writers do not snapshot merged defaults (sparse override preservation)', () => {
+  function readConfig(): Record<string, unknown> {
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    return yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+  }
+
+  it('updateAgentBinding preserves a sparse features section', async () => {
+    // A hand-written sparse config: only ONE flag override. Any other flag
+    // must NOT materialize into config after an agent-binding update.
+    writeConfig({
+      ...VALID_CONFIG,
+      features: { feedback_channel: { category: 'quiet', enabled: false } },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/diagnostician/binding',
+      body: { runtimeProfile: 'lmstudio-local', enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/diagnostician/binding',
+    });
+    expect(res.statusCode).toBe(200);
+
+    const features = readConfig().features as Record<string, unknown>;
+    expect(Object.keys(features)).toEqual(['feedback_channel']);
+    expect(features.feedback_channel).toEqual({ category: 'quiet', enabled: false });
+  });
+
+  it('updateDefaultRuntime preserves a sparse features section', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      features: { feedback_channel: { category: 'quiet', enabled: false } },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { defaultRuntime: 'lmstudio-local' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+    expect(res.statusCode).toBe(200);
+
+    const features = readConfig().features as Record<string, unknown>;
+    expect(Object.keys(features)).toEqual(['feedback_channel']);
+    expect(features.feedback_channel).toEqual({ category: 'quiet', enabled: false });
+  });
+
+  it('updateFeatureFlag preserves other unknown flags and sections', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        custom_flag: { category: 'quiet', enabled: true },
+      },
+      customSection: { note: 'preserve-me' },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/feedback_channel',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/feedback_channel',
+    });
+    expect(res.statusCode).toBe(200);
+
+    const parsed = readConfig();
+    expect(Object.hasOwn(parsed, 'customSection')).toBe(true);
+    const features = parsed.features as Record<string, unknown>;
+    // Unknown flag entry is preserved byte-for-byte (never rewritten).
+    expect(features.custom_flag).toEqual({ category: 'quiet', enabled: true });
+  });
+});
