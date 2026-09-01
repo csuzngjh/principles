@@ -10,7 +10,7 @@
  *   - POST 同动作重放 → 幂等 resolved
  *   - body 校验失败 → 400; 身份由服务端注入 (body 无身份字段)
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -23,6 +23,7 @@ import {
 } from '@principles/core/runtime-v2';
 import { handleOwnerDecisionsRoute } from '../../../src/server/routes/owner-decisions.js';
 import type { OwnerDecisionRouteContext } from '../../../src/server/routes/owner-decisions.js';
+import { ActivationsConsoleModel } from '../../../src/server/models/ActivationsConsoleModel.js';
 
 const EVAL_ID = 'evaluator-001';
 const ROLLOUT_ID = 'rollout-reviewer-001';
@@ -271,8 +272,38 @@ describe('GET /api/v1/governance/owner-decisions', () => {
     const res = makeRes();
     await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
     const data = (parse(res).data as { items: Array<{ kind: string }>; total: number });
-    expect(data.total).toBe(2);
-    expect(data.items.some(item => item.kind === 'rulecode_decision')).toBe(true);
+    expect(data.total).toBe(1);
+    expect(data.items.some(item => item.kind === 'rulecode_decision')).toBe(false);
+  });
+
+  it.each([
+    { status: 'ready' as const, visible: true },
+    { status: 'evidence_insufficient' as const, visible: true },
+    { status: 'blocked' as const, visible: false },
+    { status: 'unavailable' as const, visible: false },
+  ])('shows RuleCode shadow decisions only for actionable readiness ($status)', async ({ status, visible }) => {
+    const conn = setupDb();
+    const now = '2026-08-30T00:00:00.000Z';
+    conn.getDb().prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+       VALUES ('rule-readiness', 'rule', 'rule-task', '[]', 'validated', '{}', ?, ?)`,
+    ).run(now, now);
+    conn.getDb().prepare(
+      `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+       VALUES ('activation-readiness', 'idem-readiness', 'rule-readiness', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://readiness', ?, NULL, NULL)`,
+    ).run(now);
+    conn.close();
+
+    const review = { readiness: { status } } as never;
+    const getOwnerReview = vi.spyOn(ActivationsConsoleModel.prototype, 'getOwnerReview').mockResolvedValue(review);
+    try {
+      const res = makeRes();
+      await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+      const data = parse(res).data as { items: Array<{ kind: string; taskId: string }>; total: number };
+      expect(data.items.some(item => item.kind === 'rulecode_decision' && item.taskId === 'activation-readiness')).toBe(visible);
+    } finally {
+      getOwnerReview.mockRestore();
+    }
   });
 });
 

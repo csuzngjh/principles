@@ -45,6 +45,34 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
     expect(source).toContain('Bearer ${token}');
   });
 
+  it('Console auth: desktop token is encrypted by Electron and only exposed through a scoped IPC channel', () => {
+    const source = src();
+    expect(source).toContain('safeStorage.encryptString');
+    expect(source).toContain("'pd-companion:configure-console-token'");
+    expect(source).toContain('encryptedConsoleToken');
+  });
+
+  it('Console auth: token configuration reports persistence and refuses to fake a restart for an attached Console', () => {
+    const source = src();
+    expect(source).toContain('persisted: boolean');
+    expect(source).toContain("reason: 'state_save_failed'");
+    expect(source).toContain('if (!saveState())');
+    expect(source).toContain("reason: 'external_console_attached'");
+    expect(source).toContain('restartRequested: false');
+    expect(source).toContain('Stop the external Console process');
+  });
+
+  it('Console auth: sandboxed BrowserWindow points at a CommonJS preload artifact', () => {
+    const source = src();
+    expect(source).toContain('sandbox: true');
+    expect(source).toContain("path.join(__dirname, '..', 'preload.cjs')");
+  });
+
+  it('Console auth: the companion build includes the .cts preload source', () => {
+    const tsconfig = fs.readFileSync(fileURLToPath(new URL('../../tsconfig.json', import.meta.url)), 'utf8');
+    expect(tsconfig).toContain('src/**/*.cts');
+  });
+
   it('Workspace workers: whenReady 启动 supervision，manifest 驱动 sync', () => {
     const source = src();
     expect(source).toContain('startWorkspaceWorkerSupervision()');

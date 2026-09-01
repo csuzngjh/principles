@@ -44,6 +44,14 @@ PD 会在本机浏览器打开审核控制台。如果 3100 端口被占用，�
 
 控制台只绑定本机 loopback 地址，不会暴露到公网或局域网。
 
+### 需要进行 RuleCode 治理时
+
+桌面版首次需要执行 RuleCode 上线、拒绝或紧急暂停时，在“设置 → Bearer 令牌”输入一次令牌并保存即可。Desktop 会使用 Windows 系统加密保存该令牌，并自动重启本机 Console；之后无需每次登录再次填写。
+
+浏览器打开的 Web Console 只在当前浏览器会话保存令牌。关闭浏览器后需要重新登录；不要把令牌保存到浏览器扩展、`localStorage`、项目配置或截图中。
+
+使用纯 CLI / 非桌面环境时，设置 `PD_CONSOLE_TOKEN` 环境变量后重启 Console；如果同时设置 `PD_OWNER_ID` 与 `PD_OWNER_CREDENTIAL_ID`，两者会作为一组身份配置生效。
+
 ### 4. 正常使用 AI 助手
 
 继续像平时一样使用 OpenClaw。AI 助手出现重复错误时，PD 会尝试：

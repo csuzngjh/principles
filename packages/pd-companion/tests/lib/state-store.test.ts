@@ -32,6 +32,13 @@ describe('parseCompanionState (rc-1/rc-4: validate untrusted file content)', () 
     expect(parseCompanionState({ workspaceOverride: 5 }).workspaceOverride).toBeUndefined();
   });
 
+  it('preserves only a non-empty encrypted Console token payload for the Companion to decrypt', () => {
+    expect(parseCompanionState({ encryptedConsoleToken: 'base64-ciphertext' }).encryptedConsoleToken)
+      .toBe('base64-ciphertext');
+    expect(parseCompanionState({ encryptedConsoleToken: '' }).encryptedConsoleToken).toBeUndefined();
+    expect(parseCompanionState({ encryptedConsoleToken: 42 }).encryptedConsoleToken).toBeUndefined();
+  });
+
   it('enforces the FIFO cap on load', () => {
     const many = Array.from({ length: NOTIFIED_IDS_CAP + 100 }, (_, i) => `id-${i}`);
     const s = parseCompanionState({ notifiedApprovalIds: many });

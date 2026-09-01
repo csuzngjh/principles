@@ -21,6 +21,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime-v2';
 import type { PIArtifactStore } from '@principles/core/runtime-v2';
+import { ActivationsConsoleModel } from './ActivationsConsoleModel.js';
 
 export type OwnerDecisionItemKind =
   | 'evaluator_review'
@@ -304,12 +305,20 @@ export class OwnerDecisionConsoleModel {
            WHERE action = 'code_tool_hook_shadow_activate'
              AND promoted_at IS NULL AND deactivated_at IS NULL`,
         ).all().filter(isRecordRow);
+        const activationModel = new ActivationsConsoleModel(this.workspaceDir);
         for (const row of shadowRows) {
           const artifactId = typeof row.artifact_id === 'string' ? row.artifact_id : '';
+          const activationId = typeof row.activation_id === 'string' ? row.activation_id : '';
+          try {
+            const review = await activationModel.getOwnerReview(activationId, true);
+            if (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient') continue;
+          } catch {
+            continue;
+          }
           items.push({
-            reviewKey: `rulecode:${String(row.activation_id ?? '')}`,
+            reviewKey: `rulecode:${activationId}`,
             kind: 'rulecode_decision',
-            taskId: String(row.activation_id ?? ''),
+            taskId: activationId,
             title: 'RuleCode 影子规则待决',
             summary: '一条 code_tool_hook 规则处于影子激活期，等待拥有者裁决（提升 / 拒绝）。',
             reasonCode: 'rulecode_shadow_pending_promotion',
