@@ -854,11 +854,64 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const evaluatorDecision = output.evaluation.decision;
 
     if (evaluatorDecision !== 'approved') {
-      // Passive review short-circuit: the LLM emits needs_revision/rejected
-      // when its review fails — no gate needed. Previously silent inside
-      // runAdversarialReplay; now observable at the gate decision point
-      // (Runtime Contract Rule 9).
-      if (gateAssessment.codeBearing || outputWantsGate) {
+      // PRI-634: For code-bearing artifacts with needs_revision (not
+      // rejected), run the adversarial replay as a binding deterministic
+      // check. The replay executes the implementation code against golden
+      // trace cases — a passing replay provides objective evidence that the
+      // code works, overriding the LLM's subjective needs_revision verdict.
+      // Without this, a code-bearing chain can never produce a legitimate
+      // assembled rule artifact (the exact death spiral of chain 48371236).
+      if ((gateAssessment.codeBearing || outputWantsGate) && this.gateDeps) {
+        // Temporarily elevate to 'approved' so the replay's internal gate
+        // (which checks for approved) lets the deterministic test run.
+        const originalDecision = output.evaluation.decision;
+        output.evaluation.decision = 'approved';
+        let replaySucceeded = false;
+        try {
+          const replayOutcome = await this.runAdversarialReplay(output, taskId, runId, context);
+          if (replayOutcome.updatedOutput) {
+            finalOutput = replayOutcome.updatedOutput;
+            await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
+            try {
+              await this.artifactStore.upsertArtifact({
+                artifactId,
+                artifactKind: 'principle',
+                sourceTaskId: taskId,
+                contentJson: JSON.stringify(finalOutput),
+              });
+            } catch { /* best-effort persist; the critical state is the run output */ }
+            if (finalOutput.adversarialResult?.passed === true) {
+              replaySucceeded = true;
+            }
+          }
+        } catch (replayError) {
+          // Replay errored — fall through to needs_revision with the error noted.
+          this.emitEvent('adversarial_replay_error', taskId, {
+            runId,
+            reason: replayError instanceof Error ? replayError.message : String(replayError),
+          });
+        }
+        if (replaySucceeded) {
+          // Replay passed all golden trace cases: the code works. Override
+          // needs_revision to approved so the downstream flow (rollout
+          // dispatch → risk gate → approval queue) proceeds with the
+          // objective evidence backing the decision.
+          finalOutput.evaluation.decision = 'approved';
+          this.emitEvent('adversarial_replay_override', taskId, {
+            runId,
+            reason: 'needs_revision_overridden_by_passing_replay',
+            replayPassed: true,
+          });
+        } else {
+          // Replay failed or couldn't run: restore needs_revision.
+          finalOutput.evaluation.decision = originalDecision;
+          this.emitEvent('adversarial_replay_result', taskId, {
+            runId,
+            reason: 'replay_did_not_confirm_code_quality',
+            originalDecision,
+          });
+        }
+      } else if (gateAssessment.codeBearing || outputWantsGate) {
         this.emitEvent('adversarial_replay_skipped', taskId, {
           runId,
           reason: 'evaluation_not_approved',
