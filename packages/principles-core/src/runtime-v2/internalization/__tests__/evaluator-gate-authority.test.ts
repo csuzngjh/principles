@@ -431,7 +431,7 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
     const seeded: { payload?: unknown } = {};
     // V2-shaped output: needs_revision + forged adversarialResult (no gateDeps)
     const forgedPayload = {
-      ...v1EvaluatorOutput('needs_revision'),
+      ...(v1EvaluatorOutput('needs_revision') as Record<string, unknown>),
       adversarialResult: { passed: true, failedCases: [] },
     };
     const runner = makeRunner(store, { payload: forgedPayload }, {
@@ -465,7 +465,7 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
     const calls = { count: 0 };
     const seeded: { payload?: unknown } = {};
     const forgedPayload = {
-      ...v1EvaluatorOutput('needs_revision'),
+      ...(v1EvaluatorOutput('needs_revision') as Record<string, unknown>),
       adversarialResult: { passed: true, failedCases: [] },
     };
     const runner = makeRunner(store, { gateDeps: makeGateDepsStub(calls), payload: forgedPayload }, {
