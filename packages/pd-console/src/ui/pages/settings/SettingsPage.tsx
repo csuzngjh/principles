@@ -256,6 +256,8 @@ export function SettingsPage() {
   const handleSaveToken = useCallback(async () => {
     const trimmed = tokenInput.trim();
     if (trimmed.length === 0) return;
+    const companion = (window as typeof window & { pdCompanion?: { configureConsoleToken(token: string): Promise<boolean> } }).pdCompanion;
+    if (companion !== undefined) await companion.configureConsoleToken(trimmed);
     setToken(trimmed);
     await loadOnboardingFlag();
     toast.success(t("pages.settings.tokenSaved"));

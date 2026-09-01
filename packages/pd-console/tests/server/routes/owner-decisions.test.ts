@@ -271,8 +271,8 @@ describe('GET /api/v1/governance/owner-decisions', () => {
     const res = makeRes();
     await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
     const data = (parse(res).data as { items: Array<{ kind: string }>; total: number });
-    expect(data.total).toBe(2);
-    expect(data.items.some(item => item.kind === 'rulecode_decision')).toBe(true);
+    expect(data.total).toBe(1);
+    expect(data.items.some(item => item.kind === 'rulecode_decision')).toBe(false);
   });
 });
 

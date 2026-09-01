@@ -45,6 +45,13 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
     expect(source).toContain('Bearer ${token}');
   });
 
+  it('Console auth: desktop token is encrypted by Electron and only exposed through a scoped IPC channel', () => {
+    const source = src();
+    expect(source).toContain('safeStorage.encryptString');
+    expect(source).toContain("'pd-companion:configure-console-token'");
+    expect(source).toContain('encryptedConsoleToken');
+  });
+
   it('Workspace workers: whenReady 启动 supervision，manifest 驱动 sync', () => {
     const source = src();
     expect(source).toContain('startWorkspaceWorkerSupervision()');

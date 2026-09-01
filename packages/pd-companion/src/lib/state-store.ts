@@ -14,6 +14,8 @@ export interface CompanionState {
   notifiedUpdateVersions: string[];
   firstRunNoticeShown: boolean;
   workspaceOverride?: string;
+  /** OS-encrypted Console token ciphertext; plaintext never enters this file. */
+  encryptedConsoleToken?: string;
 }
 
 export function defaultCompanionState(): CompanionState {
@@ -39,6 +41,10 @@ export function parseCompanionState(raw: unknown): CompanionState {
   const workspace = record.workspaceOverride;
   if (typeof workspace === 'string' && workspace.length > 0) {
     state.workspaceOverride = workspace;
+  }
+  const { encryptedConsoleToken } = record;
+  if (typeof encryptedConsoleToken === 'string' && encryptedConsoleToken.length > 0) {
+    state.encryptedConsoleToken = encryptedConsoleToken;
   }
   return state;
 }

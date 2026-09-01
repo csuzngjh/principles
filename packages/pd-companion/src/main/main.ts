@@ -9,7 +9,7 @@
  * with the SYSTEM Node (better-sqlite3 ABI constraint) and supervises it.
  */
 
-import { app, BrowserWindow, Menu, Notification, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, safeStorage, ipcMain } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -141,7 +141,7 @@ function createWindow(): void {
     minHeight: 640,
     icon: iconPath(),
     show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, '..', 'preload.js') },
   });
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -502,6 +502,22 @@ function restartFromTray(): void {
   }, 600);
 }
 
+function restoreEncryptedConsoleToken(): void {
+  if (state.encryptedConsoleToken === undefined || !safeStorage.isEncryptionAvailable()) return;
+  try { process.env.PD_CONSOLE_TOKEN = safeStorage.decryptString(Buffer.from(state.encryptedConsoleToken, 'base64')); }
+  catch { delete state.encryptedConsoleToken; saveState(); log('console_token_restore_failed'); }
+}
+
+function configureConsoleToken(senderId: number, value: unknown): boolean {
+  if (senderId !== mainWindow?.webContents.id || typeof value !== 'string' || value.trim().length === 0 || !safeStorage.isEncryptionAvailable()) return false;
+  const token = value.trim();
+  state.encryptedConsoleToken = safeStorage.encryptString(token).toString('base64');
+  process.env.PD_CONSOLE_TOKEN = token;
+  saveState();
+  restartFromTray();
+  return true;
+}
+
 // ─── Polling: approvals + health + version watch + update check ─────────────
 
 async function fetchJson(url: string): Promise<unknown> {
@@ -690,7 +706,9 @@ if (!app.requestSingleInstanceLock()) {
     fs.mkdirSync(path.join(userData, 'logs'), { recursive: true });
     logFilePath = path.join(userData, 'logs', 'companion-main.log');
     stateFilePath = path.join(userData, 'companion-state.json');
-    loadState();
+     loadState();
+     restoreEncryptedConsoleToken();
+     ipcMain.handle('pd-companion:configure-console-token', (event, token: unknown) => configureConsoleToken(event.sender.id, token));
 
     // Locked decision #5: autostart defaults ON, announced on first run.
     if (!state.firstRunNoticeShown) {
