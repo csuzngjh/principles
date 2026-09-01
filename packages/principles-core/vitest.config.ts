@@ -8,9 +8,5 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
     },
-    benchmark: {
-      include: ['tests/bench/**/*.bench.ts'],
-      outputJson: 'bench-results.json',
-    },
   },
 });
