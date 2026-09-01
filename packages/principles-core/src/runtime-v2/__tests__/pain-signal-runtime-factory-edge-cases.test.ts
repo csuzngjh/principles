@@ -22,7 +22,10 @@ describe('DisabledDiagnosticianRunner', () => {
     expect(result.status).toBe('failed');
     expect(result.taskId).toBe('task-001');
     expect(result.errorCategory).toBe('capability_missing');
-    expect(result.failureReason).toContain('Diagnostician pipeline is disabled');
+    // PRI-638: the message now names the canonical capability authority.
+    expect(result.failureReason).toContain('disabled by Owner configuration');
+    expect(result.failureReason).toContain('internalAgents.agents.diagnostician.enabled');
+    expect(result.nextAction).toContain('internalAgents.agents.diagnostician.enabled');
     expect(result.attemptCount).toBe(1);
   });
 

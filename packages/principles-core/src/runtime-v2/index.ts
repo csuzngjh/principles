@@ -319,6 +319,12 @@ export type {
 } from './diagnostician/diag-rootcause-output.js';
 export { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-output.js';
 export { DisabledDiagnosticianRunner } from './pain-signal-runtime-factory.js';
+// PRI-638: canonical Diagnostician capability authority (one Owner intent, one authority)
+export {
+  resolveDiagnosticianCapability,
+  DIAGNOSTICIAN_CAPABILITY_DISABLED,
+  type DiagnosticianCapability,
+} from './diagnostician-capability.js';
 // Runtime Adapter (M4)
 export { TestDoubleRuntimeAdapter } from './adapter/index.js';
 export type { TestDoubleBehaviorOverrides } from './adapter/index.js';

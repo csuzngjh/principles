@@ -15,6 +15,7 @@ import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvid
 import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { EffectivePdConfig } from './config/pd-config-types.js';
+import { resolveDiagnosticianCapability } from './diagnostician-capability.js';
 import type { IntentDocReader } from './intent/intent-doc-reader-port.js';
 import type { TrajectoryTurnReader } from './store/context/trajectory-turn-reader.js';
 
@@ -25,7 +26,13 @@ export type FailureCategory =
   | 'output_invalid'
   | 'artifact_missing'
   | 'ledger_write_failed'
-  | 'candidate_missing';
+  | 'candidate_missing'
+  /**
+   * PRI-638: the Owner disabled the Diagnostician capability. Distinct from
+   * `config_missing` on purpose — a deliberate kill switch must never be
+   * reported to the Owner as a broken runtime or a bad configuration.
+   */
+  | 'capability_disabled';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -126,6 +133,12 @@ export class PainToPrincipleService {
     const {painId} = input;
     const taskId = input.taskId ?? createDiagnosticianTaskId(painId);
 
+    // PRI-638: read the canonical capability authority once per call. The
+    // factory applies the same resolver, so this is a consistent second read of
+    // one truth, not a second authority. It is what lets this service report
+    // "Owner disabled" instead of misclassifying it as a runtime fault.
+    const capability = resolveDiagnosticianCapability(this.opts.effectiveConfig);
+
     const painData: PainDetectedData = {
       painId,
       painType: input.painType,
@@ -183,6 +196,9 @@ export class PainToPrincipleService {
           observabilityWarnings,
           latencyMs,
           message: `Diagnosis submitted. Use 'pd task show ${taskIdResult.taskId}' to check progress.`,
+          // PRI-638: an async submission against a disabled capability stays
+          // durable but will not progress until the Owner re-enables the agent.
+          ...(capability.available ? {} : { nextAction: capability.nextAction, failureCategory: 'capability_disabled' as const }),
         };
       }
 
@@ -225,7 +241,10 @@ export class PainToPrincipleService {
         admissionResults: bridgeResult.admissionResults,
         message: bridgeResult.message,
         observabilityWarnings,
-        failureCategory: classifyFromBridge(bridgeResult),
+        // PRI-638: an Owner capability decision is classified as
+        // `capability_disabled`, never as `config_missing` / runtime failure.
+        failureCategory: capability.available ? classifyFromBridge(bridgeResult) : 'capability_disabled',
+        ...(bridgeResult.nextAction !== undefined ? { nextAction: bridgeResult.nextAction } : {}),
         latencyMs,
       };
     } catch (err: unknown) {
@@ -238,7 +257,8 @@ export class PainToPrincipleService {
         ledgerEntryIds: [],
         message: err instanceof Error ? err.message : String(err),
         observabilityWarnings: [],
-        failureCategory: classifyFromError(err),
+        failureCategory: capability.available ? classifyFromError(err) : 'capability_disabled',
+        ...(capability.available ? {} : { nextAction: capability.nextAction }),
         latencyMs,
       };
     }

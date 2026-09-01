@@ -82,6 +82,12 @@ export interface PainSignalBridgeResult {
   notInternalizable?: NotInternalizableCandidate[];
   errorCategory?: PDErrorCategory;
   message?: string;
+  /**
+   * PRI-638: recovery action surfaced by the runner. Only set when the failure
+   * is an Owner capability decision (Diagnostician disabled), never for runtime
+   * or provider faults — the two must remain distinguishable.
+   */
+  nextAction?: string;
 }
 
 export interface PainSignalBridgeOptions {
@@ -314,6 +320,9 @@ export class PainSignalBridge {
     const result = await this.runner.run(taskId);
 
     if (result.status !== 'succeeded') {
+      // PRI-638: the task is deliberately left in its prior state (pending /
+      // retry_wait) with its attemptCount untouched. A capability-disabled run
+      // is not a failed attempt, so it must never consume LLM retry budget.
       return {
         status: result.status === 'retried' ? 'retried' : 'failed',
         painId,
@@ -323,6 +332,7 @@ export class PainSignalBridge {
         ledgerEntryIds: [],
         errorCategory: result.errorCategory,
         message: result.failureReason,
+        ...(result.nextAction !== undefined ? { nextAction: result.nextAction } : {}),
       };
     }
 
@@ -380,6 +390,9 @@ export class PainSignalBridge {
 
     const result = await this.runner.run(taskId);
     if (result.status !== 'succeeded') {
+      // PRI-638: the task is deliberately left in its prior state (pending /
+      // retry_wait) with its attemptCount untouched. A capability-disabled run
+      // is not a failed attempt, so it must never consume LLM retry budget.
       return {
         status: result.status === 'retried' ? 'retried' : 'failed',
         painId,
@@ -389,6 +402,7 @@ export class PainSignalBridge {
         ledgerEntryIds: [],
         errorCategory: result.errorCategory,
         message: result.failureReason,
+        ...(result.nextAction !== undefined ? { nextAction: result.nextAction } : {}),
       };
     }
     return this.onDiagnosisComplete({
