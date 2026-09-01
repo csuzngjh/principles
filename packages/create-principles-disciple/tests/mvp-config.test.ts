@@ -672,11 +672,11 @@ describe('Installer has no @principles/core runtime dependency (P1 fix)', () => 
     const content = fs.readFileSync(mvpConfigPath, 'utf-8');
     // PRI-460: DEFAULT_FEATURE_FLAGS array was removed; the canonical source is
     // generateConfigYamlContent, which must still inline the core/quiet/gone categories.
-    expect(content).toContain("prompt:             { category: 'core',  enabled: true }");
-    expect(content).toContain("code_tool_hook:     { category: 'core',  enabled: true }");
-    expect(content).toContain("defer_archive:      { category: 'core',  enabled: true }");
-    expect(content).toContain("gfi:                { category: 'quiet', enabled: false }");
-    expect(content).toContain("nocturnal:          { category: 'gone',  enabled: false }");
+    expect(content).toContain("prompt:             { category: 'core',  enabled: true, source: 'system' }");
+    expect(content).toContain("code_tool_hook:     { category: 'core',  enabled: true, source: 'system' }");
+    expect(content).toContain("defer_archive:      { category: 'core',  enabled: true, source: 'system' }");
+    expect(content).toContain("gfi:                { category: 'quiet', enabled: false, source: 'system' }");
+    expect(content).toContain("nocturnal:          { category: 'gone',  enabled: false, source: 'system' }");
   });
 });
 
@@ -1512,8 +1512,8 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
   it('persists both PRI-523 host rollout flags in fresh config', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
-    expect(features['host.codex']).toEqual({ category: 'core', enabled: true });
-    expect(features.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+    expect(features['host.codex']).toEqual({ category: 'core', enabled: true, source: 'system' });
+    expect(features.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false, source: 'system' });
   });
 
   it('adds missing PRI-523 flags to a migrated config while preserving explicit rollback values', () => {
@@ -1532,7 +1532,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
       const migrated = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
       const migratedFeatures = migrated.features as Record<string, unknown>;
       expect(migratedFeatures['host.codex']).toEqual({ category: 'core', enabled: false });
-      expect(migratedFeatures.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+      expect(migratedFeatures.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false, source: 'system' });
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1560,7 +1560,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
 
       const migrated = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
       expect(migrated.ownerNote).toBe('concurrent-update-kept');
-      expect((migrated.features as Record<string, unknown>).abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false });
+      expect((migrated.features as Record<string, unknown>).abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false, source: 'system' });
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1629,7 +1629,7 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
       expect(flag?.category).toBe('quiet');
       expect(flag?.enabled).toBe(true);
     }
-    expect(features.principle_receipt_self_report).toEqual({ category: 'quiet', enabled: false });
+    expect(features.principle_receipt_self_report).toEqual({ category: 'quiet', enabled: false, source: 'system' });
   });
 
   it('written to temp workspace is loadable', () => {

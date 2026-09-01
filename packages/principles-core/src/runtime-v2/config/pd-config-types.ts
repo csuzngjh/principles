@@ -20,11 +20,38 @@ export type PdConfigVersion = 1;
 export const VALID_FEATURE_CATEGORIES = ['core', 'quiet', 'gone', 'legacy_retire'] as const;
 export type FeatureCategory = (typeof VALID_FEATURE_CATEGORIES)[number];
 
+// ── Feature Flag Override Source (PRI-637) ──────────────────────────────────
+//
+// Provenance of a feature flag override entry in `.pd/config.yaml`. This is
+// the minimal fact needed for lifecycle decisions — no setBy/setAt/version.
+//
+// - `owner`  — an authenticated Owner action created/edited this override
+//              (currently the Console feature-flag toggle). STRONG signal: the
+//              only value backed by machine evidence of Owner intent.
+//              Graduation / cleanup must never remove it.
+// - `system` — PD machinery originally created this override (installer
+//              template, `pd runtime init`, host-flag migration). It is an
+//              ORIGIN HINT ONLY: it does NOT prove the current value was not
+//              later edited by an Owner. Direct `.pd/config.yaml` editing is a
+//              supported path ("Edit to configure feature flags…"), so a
+//              system entry may carry Owner intent by the time it is read.
+//              Normalization keyed on this label therefore requires preview /
+//              explicit Owner confirmation — it is NEVER an automatic
+//              deterministic-delete license.
+// - absent   — LEGACY_UNKNOWN. The entry predates provenance. Per PRI-637 it
+//              MUST NOT be auto-normalized or guessed from its boolean alone:
+//              preserve uncertainty instead of inventing provenance. An
+//              explicit future Owner action converts it to `owner`.
+export const FEATURE_FLAG_SOURCES = ['owner', 'system'] as const;
+export type FeatureFlagSource = (typeof FEATURE_FLAG_SOURCES)[number];
+
 // ── Feature Flag Entry ──────────────────────────────────────────────────────
 
 export interface FeatureFlagEntry {
   category: FeatureCategory;
   enabled: boolean;
+  /** PRI-637 override provenance. Absent = LEGACY_UNKNOWN. */
+  source?: FeatureFlagSource;
 }
 
 // ── Runtime Profile Types ───────────────────────────────────────────────────
