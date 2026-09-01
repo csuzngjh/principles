@@ -205,8 +205,10 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     warnings.push(
       `PRI-638 cutover: legacy diagnostician_split_pipeline=false (source: ${provenance}) honored as ` +
       'internalAgents.agents.diagnostician.enabled=false to avoid silently enabling a previously-disabled ' +
-      'LLM pipeline. To run diagnosis, remove the legacy flag or set it enabled:true, then ' +
-      'set internalAgents.agents.diagnostician.enabled=true in .pd/config.yaml.',
+      'LLM pipeline. Recovery: toggle Diagnostician ON in Console → Control Center (the writer retires the ' +
+      'conflicting legacy override), or edit .pd/config.yaml to remove the legacy diagnostician_split_pipeline ' +
+      'flag. A standalone internalAgents.agents.diagnostician.enabled=true is NOT sufficient while the legacy ' +
+      'override remains false.',
     );
   }
 
