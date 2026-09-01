@@ -238,6 +238,12 @@ export const TelemetryEventType = Type.Union([
   //   merge, sandbox threw) with a structured reason.
   Type.Literal('evaluator_adversarial_replay'),
   Type.Literal('evaluator_adversarial_replay_skipped'),
+  // PRI-634 R4: needs_revision diagnostic replay outcome (evidence only — the
+  // verdict is never overridden). diagnostic_passed = the deterministic gate
+  // passed despite needs_revision; diagnostic_failed = the replay ran but did
+  // not fully pass (or could not produce a result).
+  Type.Literal('evaluator_adversarial_replay_diagnostic_passed'),
+  Type.Literal('evaluator_adversarial_replay_diagnostic_failed'),
   // PRI-427: Evaluator rule artifact assembly telemetry.
   // - evaluator_rule_assembled: emitted after a rule artifact is written AND
   //   marked validated (payload: artifactId, affectedTools, traceCaseCount).

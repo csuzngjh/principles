@@ -93,7 +93,7 @@ function codeBearingArtificerContent(overrides: Record<string, unknown> = {}): s
 }
 
 /** 纯 V1 shape：只有评估字段，没有任何 V2 字段（adversarialCases/codeReview/…） */
-function v1EvaluatorOutput(decision: 'approved' | 'needs_revision'): unknown {
+function v1EvaluatorOutput(decision: 'approved' | 'needs_revision' | 'rejected'): unknown {
   return {
     taskId: EVAL_ID,
     sourceArtificerArtifactId: ARTIFICER_ART,
@@ -368,5 +368,55 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
     // needs_revision 不是 rule-assembly 终态：缺 gateDeps 只损失诊断证据，不 fail-loud
     expect(result.status).toBe('succeeded');
     expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'gate_deps_not_injected')).toBe(true);
+  });
+
+  it('needs_revision + gate 无 positive case 可用 → 重放 skip（skipReason），verdict 保持 needs_revision，不组装 rule', async () => {
+    // positive case 缺 path → 无法生成 v2 adversarial cases → merged 为空 →
+    // executeDeterministicReplay 返回 skipReason 且 updatedOutput=null →
+    // 诊断重放未产出证据（diagnostic_failed），verdict 不受影响。
+    const store = await seedLineage(codeBearingArtificerContent({
+      affectedTools: undefined,
+      goldenTraceCases: [
+        { caseId: 'c-neg', kind: 'negative', toolName: 'edit_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        { caseId: 'c-pos', kind: 'positive', toolName: 'edit_file', params: {}, expectedDecision: 'allow' },
+      ],
+    }));
+    const calls = { count: 0 };
+    const runner = makeRunner(store, {
+      gateDeps: makeGateDepsStub(calls),
+      payload: v1EvaluatorOutput('needs_revision'),
+    }, {
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async (_params) => 'repair-task-r4c',
+    });
+
+    const result = await runner.run(EVAL_ID);
+
+    // 重放试图运行但派生不出 gate 输入：skip（诊断证据缺失），verdict 保持
+    expect(result.status).toBe('succeeded');
+    expect(calls.count).toBe(0);
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'no_adversarial_cases_after_merge')).toBe(true);
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_diagnostic_failed')).toBe(true);
+    // verdict 保持 needs_revision：task succeeded，无 rule 组装
+    const task = await stateManager.getTask(EVAL_ID);
+    expect(task?.status).toBe('succeeded');
+    const artifacts = await store.listBySourceTaskId(EVAL_ID);
+    expect(artifacts.filter((a) => a.artifactKind === 'rule')).toHaveLength(0);
+  });
+
+  it('rejected verdict + code-bearing + gateDeps → 不执行重放（rejected → skip 策略）', async () => {
+    // 调用者策略层：rejected 不是 needs_revision —— 无诊断重放，仅 skip 事件。
+    const store = await seedLineage(codeBearingArtificerContent());
+    const calls = { count: 0 };
+    const runner = makeRunner(store, {
+      gateDeps: makeGateDepsStub(calls),
+      payload: v1EvaluatorOutput('rejected'),
+    });
+
+    const result = await runner.run(EVAL_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(calls.count).toBe(0); // rejected → skip（无 binding、无 diagnostic）
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'evaluation_not_approved')).toBe(true);
   });
 });
