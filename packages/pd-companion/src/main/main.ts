@@ -94,12 +94,14 @@ function loadState(): void {
   }
 }
 
-function saveState(): void {
+function saveState(): boolean {
   try {
     fs.mkdirSync(path.dirname(stateFilePath), { recursive: true });
     fs.writeFileSync(stateFilePath, JSON.stringify(state, null, 2), 'utf8');
+    return true;
   } catch (err) {
     log('state_save_failed', { message: err instanceof Error ? err.message : String(err) });
+    return false;
   }
 }
 
@@ -141,7 +143,7 @@ function createWindow(): void {
     minHeight: 640,
     icon: iconPath(),
     show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, '..', 'preload.js') },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, '..', 'preload.cjs') },
   });
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -493,13 +495,18 @@ function reflectSupervisorState(): void {
   rebuildTrayMenu();
 }
 
-function restartFromTray(): void {
+function restartFromTray(): boolean {
   stopServer();
   setTimeout(() => {
     if (quitting) return;
-    supervisor.start();
+    if (!supervisor.start()) {
+      log('console_restart_not_started', { state: supervisor.getState().kind });
+      reflectSupervisorState();
+      return;
+    }
     spawnCli();
   }, 600);
+  return true;
 }
 
 function restoreEncryptedConsoleToken(): void {
@@ -508,14 +515,49 @@ function restoreEncryptedConsoleToken(): void {
   catch { delete state.encryptedConsoleToken; saveState(); log('console_token_restore_failed'); }
 }
 
-function configureConsoleToken(senderId: number, value: unknown): boolean {
-  if (senderId !== mainWindow?.webContents.id || typeof value !== 'string' || value.trim().length === 0 || !safeStorage.isEncryptionAvailable()) return false;
+interface ConsoleTokenConfigurationResult {
+  persisted: boolean;
+  restartRequested: boolean;
+  reason?: 'invalid_input' | 'encryption_unavailable' | 'encryption_failed' | 'state_save_failed' | 'external_console_attached';
+  nextAction?: string;
+}
+
+function configureConsoleToken(senderId: number, value: unknown): ConsoleTokenConfigurationResult {
+  if (senderId !== mainWindow?.webContents.id || typeof value !== 'string' || value.trim().length === 0) {
+    return { persisted: false, restartRequested: false, reason: 'invalid_input', nextAction: 'Enter a non-empty Console token.' };
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    return { persisted: false, restartRequested: false, reason: 'encryption_unavailable', nextAction: 'Enable the operating-system key store, then retry.' };
+  }
   const token = value.trim();
-  state.encryptedConsoleToken = safeStorage.encryptString(token).toString('base64');
+  let encryptedToken: string;
+  try {
+    encryptedToken = safeStorage.encryptString(token).toString('base64');
+  } catch {
+    return { persisted: false, restartRequested: false, reason: 'encryption_failed', nextAction: 'Check the desktop key store, then retry.' };
+  }
+  const previousEncryptedToken = state.encryptedConsoleToken;
+  const previousProcessToken = process.env.PD_CONSOLE_TOKEN;
+  const current = supervisor.getState();
+  state.encryptedConsoleToken = encryptedToken;
+  if (!saveState()) {
+    if (previousEncryptedToken === undefined) delete state.encryptedConsoleToken;
+    else state.encryptedConsoleToken = previousEncryptedToken;
+    if (previousProcessToken === undefined) delete process.env.PD_CONSOLE_TOKEN;
+    else process.env.PD_CONSOLE_TOKEN = previousProcessToken;
+    return { persisted: false, restartRequested: false, reason: 'state_save_failed', nextAction: 'Check Companion write permissions, then retry.' };
+  }
+
+  if (current.kind === 'running' && current.mode === 'attached') {
+    return {
+      persisted: true,
+      restartRequested: false,
+      reason: 'external_console_attached',
+      nextAction: 'Stop the external Console process and restart it from Companion to apply token authentication.',
+    };
+  }
   process.env.PD_CONSOLE_TOKEN = token;
-  saveState();
-  restartFromTray();
-  return true;
+  return { persisted: true, restartRequested: restartFromTray() };
 }
 
 // ─── Polling: approvals + health + version watch + update check ─────────────
