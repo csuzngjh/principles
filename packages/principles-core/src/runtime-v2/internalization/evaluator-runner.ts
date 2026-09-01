@@ -849,6 +849,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // (capability_missing, permanent) instead of succeeding un-gated.
     let finalOutput: EvaluatorOutputV1 = output;
 
+    // PRI-634 R4 (P1 provenance): diagnostic replay evidence is an
+    // EXECUTION-TIME authoritative fact — set only when the deterministic
+    // replay actually ran in THIS succeedTask invocation (see needs_revision
+    // branch below). It is never derived from the LLM-supplied optional
+    // `adversarialResult` field on the evaluator output, which a V2-shaped
+    // output can carry without any sandbox ever running. Passing the fact
+    // explicitly through applyEvaluatorDecisionEffects → maybeSeedArtificerRepair
+    // keeps provenance structural rather than inferred.
+    let diagnosticReplayEvidence: { ran: true; passed: boolean; failedCaseCount: number } | undefined;
+
     const gateAssessment = assessArtificerCodeBearing(context.artificerArtifact);
     const outputWantsGate = isEvaluatorOutputV2(output);
     const evaluatorDecision = output.evaluation.decision;
@@ -873,6 +883,19 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
             const replayOutcome = await this.executeDeterministicReplay(output, taskId, runId, context);
             if (replayOutcome.updatedOutput) {
               finalOutput = replayOutcome.updatedOutput;
+              // Execution-time provenance: executeDeterministicReplay wrote
+              // this adversarialResult in THIS invocation — record it as the
+              // authoritative diagnostic evidence for the repair round.
+              // Read from replayOutcome directly (which is EvaluatorOutputV2)
+              // rather than finalOutput (which is typed as EvaluatorOutputV1).
+              const replayAr = replayOutcome.updatedOutput.adversarialResult;
+              if (replayAr) {
+                diagnosticReplayEvidence = {
+                  ran: true,
+                  passed: replayAr.passed === true,
+                  failedCaseCount: Array.isArray(replayAr.failedCases) ? replayAr.failedCases.length : 0,
+                };
+              }
               await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
               try {
                 // Re-persist with the canonical envelope (same as the
@@ -1022,6 +1045,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       ?? null;
     const effectResult = await this.applyEvaluatorDecisionEffects({
       taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId, ruleAssemblyInput,
+      // 执行时权威事实：仅本次 succeedTask 真正运行了诊断重放才存在
+      diagnosticReplayEvidence,
     });
     if (effectResult.kind === 'human_review') {
       return effectResult.result;
@@ -1088,11 +1113,18 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
      * verdict (finalOutput.evaluation.decision) 保持不变 (INV-03)。
      */
     decisionOverride?: 'approved' | 'rejected';
+    /**
+     * PRI-634 R4 (P1 provenance): 本次 succeedTask 执行中由
+     * executeDeterministicReplay 真正产生的诊断重放 evidence。来自执行控制流
+     * 的权威事实,绝不从 LLM 可伪造的 finalOutput.adversarialResult 反推。
+     * resume / owner-override 路径无 live replay → undefined (fail-closed)。
+     */
+    diagnosticReplayEvidence?: { ran: true; passed: boolean; failedCaseCount: number } | undefined;
   }): Promise<
     | { kind: 'human_review'; result: PeerRunnerResult<EvaluatorOutputV1> }
     | { kind: 'completed'; ruleArtifactId: string | null }
   > {
-    const { taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId } = args;
+    const { taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId, diagnosticReplayEvidence } = args;
     const decision = args.decisionOverride ?? finalOutput.evaluation.decision;
 
     // ── Evaluator-specific: validate principle-bearing Scribe artifact ──
@@ -1163,7 +1195,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     if (decision === 'needs_revision' && this.isRepairLoopEnabled()) {
       const repairOutcome = await this.maybeSeedArtificerRepair(
         taskId,
-        { runId, output: finalOutput, sourceArtificerArtifactId },
+        { runId, output: finalOutput, sourceArtificerArtifactId, diagnosticReplayEvidence },
       );
       if (repairOutcome.kind === 'max_iterations_reached') {
         // PRI-629: budget 耗尽(decision-capable)与 seed 失败(recovery)拆分原因码
@@ -1689,6 +1721,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       runId: string;
       output: EvaluatorOutputV1;
       sourceArtificerArtifactId: string | null;
+      /**
+       * PRI-634 R4 (P1 provenance): 本次 succeedTask 执行中由
+       * executeDeterministicReplay 真正产生的诊断重放 evidence。来自执行
+       * 控制流的权威事实,绝不从 LLM 可伪造的 output.adversarialResult 反推。
+       * 缺失 = 确定性重放未执行或未成功（skip/error/无 live 执行路径），
+       * repairPayload 不应包含 diagnosticReplay 字段（fail-closed）。
+       */
+      diagnosticReplayEvidence?: { ran: true; passed: boolean; failedCaseCount: number } | undefined;
     },
   ): Promise<{ kind: 'repair_seeded'; taskId: string } | { kind: 'max_iterations_reached'; detail: 'budget_exhausted' | 'seed_failed' }> {
     const { runId: evaluatorRunId, output } = ctx;
@@ -1723,17 +1763,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // Construct the new repairPayload (repairIteration = prior + 1).
     // The 6 fields are sourced from the current evaluator output (rc-7:
     // fresh per-round data, never cached from a prior evaluator run).
-    // PRI-634 R4 (P1-2): carry the diagnostic replay evidence into the repair
-    // round. The evaluator's needs_revision run may have executed the
-    // deterministic replay (diagnostic only — verdict unchanged); that
-    // objective evidence reaches the next Artificer via repairPayload.
-    const diagnosticReplay = isEvaluatorOutputV2(output) && output.adversarialResult
-      ? {
-          ran: true,
-          passed: output.adversarialResult.passed === true,
-          failedCaseCount: Array.isArray(output.adversarialResult.failedCases) ? output.adversarialResult.failedCases.length : 0,
-        }
-      : undefined;
+    // PRI-634 R4 (P1 provenance): 使用执行时权威事实 diag-replay evidence
+    //（来自 succeedTask 的 executeDeterministicReplay 调用），绝不从 LLM
+    // 可伪造的 output.adversarialResult 反推。缺失 = 本次未执行确定性重放
+    //（skip/error/无 live 路径），repairPayload 不包含 diagnosticReplay。
     const repairPayload: RepairPayload = {
       requiredChanges: [...output.evaluation.requiredChanges],
       concerns: [...output.evaluation.concerns],
@@ -1741,7 +1774,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       repairIteration: priorRepairIteration + 1,
       sourceArtificerArtifactId,
       sourceEvaluatorTaskId: evaluatorTaskId,
-      ...(diagnosticReplay ? { diagnosticReplay } : {}),
+      ...(ctx.diagnosticReplayEvidence ? { diagnosticReplay: ctx.diagnosticReplayEvidence } : {}),
     };
 
     // Resolve the dependency artificer task to inherit dependencyTaskIds

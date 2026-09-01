@@ -419,4 +419,72 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
     expect(calls.count).toBe(0); // rejected → skip（无 binding、无 diagnostic）
     expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'evaluation_not_approved')).toBe(true);
   });
+
+  // ── PRI-634 R4 (P1 provenance): diagnosticReplay 必须是执行时权威事实 ──
+  // 绝不从 LLM 可伪造的 adversarialResult 字段反推。以下两个反例验证：
+  // T1: gateDeps 缺失,即使 LLM 自带 adversarialResult.passed=true,
+  //     diagnosticReplay 也不应出现（无 sandbox 执行）。
+  // T2: gateDeps 存在但 replay 无法运行（skip）,即使 LLM 自带
+  //     adversarialResult.passed=true,diagnosticReplay 也不应出现。
+  it('T1 (provenance): needs_revision + LLM-forged adversarialResult + gateDeps missing → repairPayload diagnosticReplay undefined', async () => {
+    const store = await seedLineage(codeBearingArtificerContent());
+    const seeded: { payload?: unknown } = {};
+    // V2-shaped output: needs_revision + forged adversarialResult (no gateDeps)
+    const forgedPayload = {
+      ...v1EvaluatorOutput('needs_revision'),
+      adversarialResult: { passed: true, failedCases: [] },
+    };
+    const runner = makeRunner(store, { payload: forgedPayload }, {
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async (params) => {
+        seeded.payload = params.repairPayload;
+        return 'repair-task-provenance-t1';
+      },
+    });
+
+    const result = await runner.run(EVAL_ID);
+
+    expect(result.status).toBe('succeeded');
+    // gateDeps missing → skip event
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'gate_deps_not_injected')).toBe(true);
+    // diagnosticReplayEvidence 为 undefined → repairPayload 无 diagnosticReplay
+    expect(seeded.payload).toBeDefined();
+    const rp = seeded.payload as Record<string, unknown>;
+    expect(rp.diagnosticReplay).toBeUndefined();
+  });
+
+  it('T2 (provenance): needs_revision + LLM-forged adversarialResult + gateDeps present + replay skip → repairPayload diagnosticReplay undefined', async () => {
+    // replay skip via no positive case path (affectedTools undefined + pos case no path)
+    const store = await seedLineage(codeBearingArtificerContent({
+      affectedTools: undefined,
+      goldenTraceCases: [
+        { caseId: 'c-neg', kind: 'negative', toolName: 'edit_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        { caseId: 'c-pos', kind: 'positive', toolName: 'edit_file', params: {}, expectedDecision: 'allow' },
+      ],
+    }));
+    const calls = { count: 0 };
+    const seeded: { payload?: unknown } = {};
+    const forgedPayload = {
+      ...v1EvaluatorOutput('needs_revision'),
+      adversarialResult: { passed: true, failedCases: [] },
+    };
+    const runner = makeRunner(store, { gateDeps: makeGateDepsStub(calls), payload: forgedPayload }, {
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async (params) => {
+        seeded.payload = params.repairPayload;
+        return 'repair-task-provenance-t2';
+      },
+    });
+
+    const result = await runner.run(EVAL_ID);
+
+    // replay skipped (no cases), sandbox never called
+    expect(result.status).toBe('succeeded');
+    expect(calls.count).toBe(0);
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped')).toBe(true);
+    // diagnosticReplayEvidence 为 undefined → repairPayload 无 diagnosticReplay
+    expect(seeded.payload).toBeDefined();
+    const rp = seeded.payload as Record<string, unknown>;
+    expect(rp.diagnosticReplay).toBeUndefined();
+  });
 });
