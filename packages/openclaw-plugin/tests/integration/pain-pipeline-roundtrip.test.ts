@@ -217,4 +217,70 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(source).toMatch(/painId:\s*gatePainId/);
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // PRI-640: Host attribution source invariants (Host Attribution SPEC §12/§13/§37)
+  //
+  // OpenClaw hook paths ARE the host boundary: every OpenClaw-owned pain
+  // write (legacy recordPainEvent + SDK emit) carries hostKind: 'openclaw',
+  // so pain_events.host_kind and diagnostician diagnosticJson.hostKind stay
+  // in parity (both derive from the same PainDetectedData object forwarded by
+  // emitPainDetectedEvent).
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe('PRI-640 host attribution invariants', () => {
+    const HOST_SOURCES: ReadonlyArray<[string, string]> = [
+      ['after-tool-call-helpers', AFTER_TOOL_CALL_HELPERS],
+      ['pain hook', PAIN],
+      ['llm hook', LLM],
+      ['gate-block-helper', GATE_BLOCK_HELPER],
+      ['lifecycle', LIFECYCLE],
+    ];
+
+    it('every OpenClaw hook file stamps hostKind on emitted pain_detected data', () => {
+      for (const [name, file] of HOST_SOURCES) {
+        const source = read(file);
+        const emits = source.match(/type:\s*'pain_detected'/g)?.length ?? 0;
+        expect(emits, `${name} should emit pain_detected`).toBeGreaterThan(0);
+        const withHost = source.match(/hostKind:\s*'openclaw'/g)?.length ?? 0;
+        expect(withHost, `${name}: every pain_detected emit must carry hostKind: 'openclaw'`).toBeGreaterThanOrEqual(emits);
+      }
+    });
+
+    it('legacy recordPainEvent calls in host hook paths pass hostKind (trajectory row parity)', () => {
+      const helpers = read(AFTER_TOOL_CALL_HELPERS);
+      const painHook = read(PAIN);
+      const llmHook = read(LLM);
+      const legacyCalls = [
+        ['after-tool-call-helpers', helpers.match(/recordPainEvent(\?\.)?\(\{/g)?.length ?? 0, helpers.match(/hostKind:\s*'openclaw',?\s*\}\)/g)?.length ?? 0],
+        ['pain hook', painHook.match(/recordPainEvent(\?\.)?\(\{/g)?.length ?? 0, painHook.match(/hostKind:\s*'openclaw',?\s*\}\)/g)?.length ?? 0],
+        ['llm hook', llmHook.match(/recordPainEvent(\?\.)?\(\{/g)?.length ?? 0, llmHook.match(/hostKind:\s*'openclaw',?\s*\}\)/g)?.length ?? 0],
+      ] as const;
+      for (const [name, calls, withHost] of legacyCalls) {
+        expect(calls, `${name} should have legacy recordPainEvent calls`).toBeGreaterThan(0);
+        expect(withHost, `${name}: legacy recordPainEvent calls must pass hostKind: 'openclaw'`).toBeGreaterThanOrEqual(calls);
+      }
+    });
+
+    it('emitPainDetectedEvent forwards hostKind to recordPain (diagnosticJson parity, SPEC §37)', () => {
+      const source = read(PAIN);
+      expect(source).toMatch(/hostKind:\s*painData\.hostKind,/);
+    });
+
+    it('the /pd-pain command forwards its hostKind into recordPain (wiring gap closed)', () => {
+      const source = read('packages/openclaw-plugin/src/commands/pain.ts');
+      expect(source).toMatch(/hostKind:\s*painData\.hostKind,/);
+    });
+
+    it('manual CLI pain record stays unattributed (unknown — never guessed)', () => {
+      const source = read('packages/pd-cli/src/commands/pain-record.ts');
+      expect(source).not.toMatch(/hostKind/);
+    });
+
+    it('legacy event import stays unattributed (unknown — never guessed)', () => {
+      const source = read('packages/openclaw-plugin/src/core/trajectory.ts');
+      const importSection = source.slice(source.indexOf('importLegacyEvents'));
+      expect(importSection.slice(0, 3000)).not.toMatch(/hostKind/);
+    });
+  });
 });

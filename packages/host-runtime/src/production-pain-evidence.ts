@@ -10,6 +10,7 @@ import {
   sanitizeToolParams,
   sanitizeValue,
 } from '@principles/core/runtime-v2';
+import type { GovernanceHostKind } from '@principles/core/runtime-v2';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 
 const WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace']);
@@ -247,7 +248,7 @@ export function deriveProductionCorrectionPainIdentity(fields: {
 const REQUIRED_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   sessions: { session_id: 'TEXT', started_at: 'TEXT', updated_at: 'TEXT' },
   tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', gfi_before: 'REAL', gfi_after: 'REAL', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT' },
-  pain_events: { session_id: 'TEXT', source: 'TEXT', score: 'REAL', reason: 'TEXT', severity: 'TEXT', origin: 'TEXT', confidence: 'REAL', text: 'TEXT', canonical_pain_id: 'TEXT', runtime_task_id: 'TEXT', created_at: 'TEXT' },
+  pain_events: { session_id: 'TEXT', source: 'TEXT', score: 'REAL', reason: 'TEXT', severity: 'TEXT', origin: 'TEXT', confidence: 'REAL', text: 'TEXT', canonical_pain_id: 'TEXT', runtime_task_id: 'TEXT', host_kind: 'TEXT', created_at: 'TEXT' },
 };
 
 function pragmaField(row: unknown, key: string): unknown {
@@ -295,11 +296,16 @@ function hasCanonicalSchema(db: Database.Database): boolean {
   db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?');
   db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at');
   db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  db.prepare('INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  db.prepare('INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   return true;
 }
 
-export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory } = {}) {
+/**
+ * PRI-640: host attribution is supplied by the host adapter that constructs
+ * this shared handler (OpenClaw / Codex adapters) — never guessed inside the
+ * writer. Omitted -> NULL (unknown).
+ */
+export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory; hostKind?: GovernanceHostKind } = {}) {
   return async (event: HostEvent): Promise<HostEventResult> => {
     const dbPath = path.join(event.context.workspaceDir, '.state', 'trajectory.db');
     if (!fs.existsSync(dbPath)) {
@@ -387,8 +393,8 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
           // declared enum (event-types.ts: who reported the pain), not an
           // attribution claim.
           const reason = `tool=${toolName}; error=${outcome.error ?? `exit=${outcome.exitCode}`}; path=${relativePath}`;
-          db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-            .run(event.context.sessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, enrichment.evidence?.map((entry) => `${entry.sourceRef}: ${entry.note}`).join('\n') ?? null, painId, null, createdAt);
+          db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .run(event.context.sessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, enrichment.evidence?.map((entry) => `${entry.sourceRef}: ${entry.note}`).join('\n') ?? null, painId, null, options.hostKind ?? null, createdAt);
         }
       })();
       if (admitted && !duplicate) {

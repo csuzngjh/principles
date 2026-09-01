@@ -313,6 +313,7 @@ export function handleLlmOutput(
             reason: matchedReason,
             origin: 'system_infer',
             canonicalPainId: painId,
+            hostKind: 'openclaw',
         });
 
         if (useGateB) {

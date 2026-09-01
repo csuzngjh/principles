@@ -31,6 +31,14 @@ export interface PainEvidenceEntry {
   note: string;
 }
 
+/**
+ * PRI-640 (Host Attribution SPEC §6): which agent host a pain originated from.
+ * Observability metadata only — MUST NOT participate in pain identity,
+ * admission, diagnosis, approval, or activation. NULL at the persistence
+ * layer means legacy / manual / unknown (read models report `unknown`).
+ */
+export type GovernanceHostKind = 'openclaw' | 'codex';
+
 export interface PainDetectedData {
   painId: string;
   painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
@@ -43,7 +51,7 @@ export interface PainDetectedData {
   traceId?: string;
   provenance?: PainProvenance;
   /** Codex Governance Closure SPEC §12: provenance `host_context_bound` names the host. */
-  hostKind?: 'openclaw' | 'codex';
+  hostKind?: GovernanceHostKind;
   evidence?: PainEvidenceEntry[];
 }
 

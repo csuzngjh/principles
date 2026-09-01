@@ -104,6 +104,8 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
       if (payload.kind !== 'after_tool_call') throw new Error('OpenClaw pain payload mismatch');
       return options.painEnrichmentProvider?.(payload.event, payload.context);
     },
+    // PRI-640: this adapter IS the OpenClaw host boundary — it owns host truth.
+    hostKind: 'openclaw',
   });
 
   async function dispatch(payload: NativePayload, workspaceDir: string, sessionId: string | undefined): Promise<NativeResult> {

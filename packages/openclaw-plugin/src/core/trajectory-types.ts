@@ -75,6 +75,8 @@ export interface TrajectoryPainEventInput {
   canonicalPainId?: string;
   /** PRI-406: Runtime V2 diagnostician task ID linked to this pain event. */
   runtimeTaskId?: string;
+  /** PRI-640: Host attribution ('openclaw' | 'codex'); omit for manual/legacy (persists NULL = unknown). */
+  hostKind?: 'openclaw' | 'codex';
 }
 
 export interface TrajectoryGateBlockInput {
