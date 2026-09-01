@@ -860,48 +860,69 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // the evaluator verdict — semantic review and deterministic replay
       // are complementary evidence sources, not a parent-child authority
       // chain (PRI-629 review 2026-08-31).
-      if ((gateAssessment.codeBearing || outputWantsGate) && this.gateDeps) {
-        let replaySucceeded = false;
-        try {
-          const replayOutcome = await this.runAdversarialReplay(output, taskId, runId, context);
-          if (replayOutcome.updatedOutput) {
-            finalOutput = replayOutcome.updatedOutput;
-            await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
-            try {
-              await this.artifactStore.upsertArtifact({
-                artifactId,
-                artifactKind: 'principle',
-                sourceTaskId: taskId,
-                contentJson: JSON.stringify(finalOutput),
-                lineageArtifactIds: [],
-                validationStatus: 'pending',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              });
-            } catch { /* best-effort persist */ }
-            const v2 = finalOutput as { adversarialResult?: { passed?: boolean } };
-            replaySucceeded = v2.adversarialResult?.passed === true;
+      //
+      // PRI-634 R4 (review 2026-08-31 P1-1): the diagnostic replay MUST
+      // actually run here. executeDeterministicReplay is the verdict-agnostic
+      // core — runAdversarialReplay short-circuits on decision !== 'approved'
+      // and would silently skip, making this branch a no-op.
+      const wantsGate = gateAssessment.codeBearing || outputWantsGate;
+      if (evaluatorDecision === 'needs_revision' && wantsGate) {
+        if (this.gateDeps) {
+          let replaySucceeded = false;
+          try {
+            const replayOutcome = await this.executeDeterministicReplay(output, taskId, runId, context);
+            if (replayOutcome.updatedOutput) {
+              finalOutput = replayOutcome.updatedOutput;
+              await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
+              try {
+                // Re-persist with the canonical envelope (same as the
+                // approved-path re-persist below) — the replay carries the
+                // deterministic evidence that downstream consumers read.
+                await this.artifactStore.upsertArtifact({
+                  artifactId,
+                  artifactKind: 'principle',
+                  sourceTaskId: taskId,
+                  lineageArtifactIds,
+                  validationStatus: 'pending',
+                  contentJson: this.buildArtifactContentJson(taskId, 'evaluator', finalOutput, toArtificerPredecessor(context)),
+                  createdAt: now,
+                  updatedAt: new Date().toISOString(),
+                });
+              } catch { /* best-effort persist */ }
+              const v2 = finalOutput as { adversarialResult?: { passed?: boolean } };
+              replaySucceeded = v2.adversarialResult?.passed === true;
+            }
+          } catch (replayError) {
+            this.emitEvent('adversarial_replay_error', taskId, {
+              runId,
+              reason: replayError instanceof Error ? replayError.message : String(replayError),
+            });
           }
-        } catch (replayError) {
-          this.emitEvent('adversarial_replay_error', taskId, {
-            runId,
-            reason: replayError instanceof Error ? replayError.message : String(replayError),
-          });
-        }
-        if (replaySucceeded) {
-          this.emitEvent('adversarial_replay_diagnostic_passed', taskId, {
-            runId,
-            reason: 'diagnostic_replay_passed_despite_needs_revision',
-            nextAction: 'repair_loop_continues_with_replay_evidence',
-          });
+          if (replaySucceeded) {
+            this.emitEvent('adversarial_replay_diagnostic_passed', taskId, {
+              runId,
+              reason: 'diagnostic_replay_passed_despite_needs_revision',
+              nextAction: 'repair_loop_continues_with_replay_evidence',
+            });
+          } else {
+            this.emitEvent('adversarial_replay_diagnostic_failed', taskId, {
+              runId,
+              reason: 'diagnostic_replay_ran_but_did_not_fully_pass',
+              nextAction: 'repair_loop_or_next_review_round',
+            });
+          }
         } else {
-          this.emitEvent('adversarial_replay_diagnostic_failed', taskId, {
+          // needs_revision is not a rule-assembly terminal: missing gateDeps
+          // only costs the diagnostic evidence, never the verdict. Keep
+          // observable (A3) but do not fail-loud (R2's fail-loud is scoped to
+          // the approved binding path where success would otherwise be a lie).
+          this.emitEvent('adversarial_replay_skipped', taskId, {
             runId,
-            reason: 'diagnostic_replay_ran_but_did_not_fully_pass',
-            nextAction: 'repair_loop_or_next_review_round',
+            reason: 'gate_deps_not_injected',
+            nextAction: 'wire_gateDeps_createProductionGateDeps_into_evaluator_runner_assembly',
           });
         }
-      } else if (gateAssessment.codeBearing || outputWantsGate) {
+      } else if (wantsGate) {
         this.emitEvent('adversarial_replay_skipped', taskId, {
           runId,
           reason: 'evaluation_not_approved',
@@ -1702,6 +1723,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // Construct the new repairPayload (repairIteration = prior + 1).
     // The 6 fields are sourced from the current evaluator output (rc-7:
     // fresh per-round data, never cached from a prior evaluator run).
+    // PRI-634 R4 (P1-2): carry the diagnostic replay evidence into the repair
+    // round. The evaluator's needs_revision run may have executed the
+    // deterministic replay (diagnostic only — verdict unchanged); that
+    // objective evidence reaches the next Artificer via repairPayload.
+    const diagnosticReplay = isEvaluatorOutputV2(output) && output.adversarialResult
+      ? {
+          ran: true,
+          passed: output.adversarialResult.passed === true,
+          failedCaseCount: Array.isArray(output.adversarialResult.failedCases) ? output.adversarialResult.failedCases.length : 0,
+        }
+      : undefined;
     const repairPayload: RepairPayload = {
       requiredChanges: [...output.evaluation.requiredChanges],
       concerns: [...output.evaluation.concerns],
@@ -1709,6 +1741,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       repairIteration: priorRepairIteration + 1,
       sourceArtificerArtifactId,
       sourceEvaluatorTaskId: evaluatorTaskId,
+      ...(diagnosticReplay ? { diagnosticReplay } : {}),
     };
 
     // Resolve the dependency artificer task to inherit dependencyTaskIds
@@ -1869,12 +1902,47 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
      */
     readonly skipReason: string | null;
   }> {
-    // gateDeps is non-null here — the caller only invokes this method when
+    // (1) Passive review short-circuit: the LLM emits decision='needs_revision'
+    // when any of intentConsistency/scopePrecision/traceCoverage fails. Only
+    // replay when the LLM judged the code worth defending. The needs_revision
+    // diagnostic path invokes executeDeterministicReplay directly (PRI-634 R4),
+    // so this guard stays scoped to the approved binding path.
+    if (output.evaluation.decision !== 'approved') {
+      this.emitEvent('adversarial_replay_skipped', taskId, {
+        runId,
+        reason: 'evaluation_not_approved',
+        nextAction: 'repair_loop_or_next_review_round',
+      });
+      return { updatedOutput: null, skipReason: 'evaluation_not_approved' };
+    }
+    return this.executeDeterministicReplay(output, taskId, runId, context);
+  }
+
+  /**
+   * PRI-634 R4: verdict-agnostic deterministic replay core. Runs the sandbox
+   * gate against the Artificer implementation code and returns the updated
+   * output carrying `adversarialResult`. Unlike runAdversarialReplay this does
+   * NOT short-circuit on decision !== 'approved' — the caller decides when a
+   * replay is useful (approved → binding; needs_revision → diagnostic
+   * evidence). Never throws — all failure modes degrade to a returned result
+   * with a structured reason (ERR-018). The caller persists the updated output.
+   */
+  // eslint-disable-next-line @typescript-eslint/max-params
+  private async executeDeterministicReplay(
+    output: EvaluatorOutputV1,
+    taskId: string,
+    runId: string,
+    context: EvaluatorContext,
+  ): Promise<{
+    readonly updatedOutput: EvaluatorOutputV2 | null;
+    readonly skipReason: string | null;
+  }> {
+    // gateDeps is non-null here — the callers only invoke this method when
     // this.gateDeps is set. Bind to a local to avoid re-asserting.
     // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     const gateDeps = this.gateDeps;
     if (!gateDeps) {
-      // Defensive — unreachable via the current caller (R2 fails loud before
+      // Defensive — unreachable via the current callers (R2 fails loud before
       // this point). Kept observable so a future caller cannot silently
       // reintroduce the un-gated path (PRI-634 A3).
       this.emitEvent('adversarial_replay_skipped', taskId, {
@@ -1884,21 +1952,6 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
       return { updatedOutput: null, skipReason: 'gate_deps_not_injected' };
     }
-    // (1) Passive review short-circuit: the LLM emits decision='needs_revision'
-    // when any of intentConsistency/scopePrecision/traceCoverage fails. Only
-    // replay when the LLM judged the code worth defending. This check is
-    // defensive — the caller already gated on decision='approved' (PRI-634 A2
-    // moved the check to the gate decision point); kept here so a future
-    // caller cannot silently bypass it (Runtime Contract Rule 3).
-    if (output.evaluation.decision !== 'approved') {
-      this.emitEvent('adversarial_replay_skipped', taskId, {
-        runId,
-        reason: 'evaluation_not_approved',
-        nextAction: 'repair_loop_or_next_review_round',
-      });
-      return { updatedOutput: null, skipReason: 'evaluation_not_approved' };
-    }
-
     // (2) Resolve the Artificer artifact early — we need it both to derive
     // the v2 adversarial spec (PRI-485) and to merge positive cases (PRI-423).
     if (!context.artificerArtifact) {

@@ -36,6 +36,7 @@ import { SqlitePIArtifactStore } from '../../store/artifact/sqlite-pi-artifact-s
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import type { RefinerRuleHostGateDeps } from '../refiner-rulehost-gate.js';
 import type { PDRuntimeAdapter } from '../../runtime-protocol.js';
+import type { EvaluatorRunnerDeps } from '../evaluator-runner.js';
 
 let workspaceDir: string;
 let stateManager: RuntimeStateManager;
@@ -145,11 +146,13 @@ async function seedLineage(artificerContent: string): Promise<SqlitePIArtifactSt
 function makeRunner(
   store: SqlitePIArtifactStore,
   options: { gateDeps?: RefinerRuleHostGateDeps; payload?: unknown } = {},
+  deps: Partial<Pick<EvaluatorRunnerDeps, 'isRepairLoopEnabled' | 'seedArtificerRepairTask'>> = {},
 ): EvaluatorRunner {
   return new EvaluatorRunner(
     {
       stateManager, runtimeAdapter: scriptedAdapter(options.payload ?? v1EvaluatorOutput('approved')),
       eventEmitter: emitter, artifactStore: store, validator: new DefaultEvaluatorValidator(),
+      ...deps,
     },
     { owner: 'gate-auth', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000, ...options },
   );
@@ -285,5 +288,85 @@ describe('PRI-634 R3: code-bearing + approved 若 gate 未产出 adversarialResu
     expect(result.status).toBe('succeeded');
     expect(calls.count).toBe(0);
     expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'artificer_artifact_has_no_implementation_code')).toBe(true);
+  });
+});
+
+// ── PRI-634 R4（needs_revision 诊断重放）──
+// 评审（2026-08-31）确认三条 P1：拆分 executeDeterministicReplay（P1-1）、
+// RepairPayload 增 diagnosticReplay 通道（P1-2）、canonical envelope 持久化（P1-3）。
+// R4 覆盖完整契约：
+//   - code-bearing + needs_revision + gateDeps → evaluateInSandbox MUST be called
+//   - adversarialResult MUST be persisted（canonical envelope）
+//   - machine verdict MUST remain needs_revision（不覆盖）
+//   - repairPayload MUST carry diagnosticReplay evidence（P1-2）
+//   - 本轮不组装 pi-rule-*（verdict 不是 approved）
+describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行、verdict 不变、evidence 进 repairPayload', () => {
+  it('evaluateInSandbox 被调用；adversarialResult 持久化（canonical envelope）；machine verdict 仍为 needs_revision；repairPayload 携带 diagnosticReplay；不组装 pi-rule-*', async () => {
+    const store = await seedLineage(codeBearingArtificerContent());
+    const calls = { count: 0 };
+    let seededRepairPayload: { diagnosticReplay?: unknown } | null = null;
+    const runner = makeRunner(store, {
+      gateDeps: makeGateDepsStub(calls),
+      payload: v1EvaluatorOutput('needs_revision'),
+    }, {
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async (params) => {
+        seededRepairPayload = params.repairPayload;
+        return 'repair-task-r4';
+      },
+    });
+
+    const result = await runner.run(EVAL_ID);
+
+    // R4（P1-1）：诊断重放必须真正执行（executeDeterministicReplay 无 verdict guard）
+    expect(calls.count).toBeGreaterThan(0);
+
+    // machine verdict 仍为 needs_revision（不覆盖）
+    expect(result.status).toBe('succeeded');
+    const task = await stateManager.getTask(EVAL_ID);
+    expect(task?.status).toBe('succeeded');
+
+    // R4（P1-1 + P1-3）：adversarialResult 持久化到 artifact，canonical envelope 保留
+    const artifacts = await store.listBySourceTaskId(EVAL_ID);
+    const principle = artifacts.find((a) => a.artifactKind === 'principle');
+    expect(principle).toBeDefined();
+    if (!principle) return;
+    const parsed = JSON.parse(principle.contentJson) as {
+      evaluation?: { decision?: string };
+      adversarialResult?: { passed?: boolean };
+    };
+    // verdict 不变（not overridden to approved）
+    expect(parsed.evaluation?.decision).toBe('needs_revision');
+    // adversarialResult 存在（diagnostic replay 已执行）
+    expect(parsed.adversarialResult?.passed).toBe(true);
+    // 使用 canonical envelope → contentJson 包含 summary 或 predecessorSummary
+    // 当 artifact-summary flag 开启时；没有 flag 时 contentJson 是 JSON.stringify(output)
+    // 但无论如何 lineageArtifactIds 应非空（包含 artificer artifact）
+    expect(principle.lineageArtifactIds.length).toBeGreaterThanOrEqual(1);
+    expect(principle.validationStatus).toBe('pending');
+
+    // R4（P1-2）：repairPayload 携带 diagnosticReplay evidence
+    expect(seededRepairPayload).not.toBeNull();
+    expect((seededRepairPayload as unknown as { diagnosticReplay?: unknown })?.diagnosticReplay).toEqual({ ran: true, passed: true, failedCaseCount: 0 });
+
+    // 本轮不组装 pi-rule-*（verdict 不是 approved）
+    const rules = artifacts.filter((a) => a.artifactKind === 'rule');
+    expect(rules).toHaveLength(0);
+  });
+
+  it('反向对照：needs_revision 但 gateDeps 未装配 → 不 fail-loud，仅 skip（诊断证据缺失不改变 verdict 路径）', async () => {
+    const store = await seedLineage(codeBearingArtificerContent());
+    const runner = makeRunner(store, {
+      payload: v1EvaluatorOutput('needs_revision'),
+    }, {
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async (_params) => 'repair-task-r4b',
+    });
+
+    const result = await runner.run(EVAL_ID);
+
+    // needs_revision 不是 rule-assembly 终态：缺 gateDeps 只损失诊断证据，不 fail-loud
+    expect(result.status).toBe('succeeded');
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_skipped' && e.payload.reason === 'gate_deps_not_injected')).toBe(true);
   });
 });
