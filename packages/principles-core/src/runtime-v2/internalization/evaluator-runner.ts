@@ -854,18 +854,13 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const evaluatorDecision = output.evaluation.decision;
 
     if (evaluatorDecision !== 'approved') {
-      // PRI-634: For code-bearing artifacts with needs_revision (not
-      // rejected), run the adversarial replay as a binding deterministic
-      // check. The replay executes the implementation code against golden
-      // trace cases — a passing replay provides objective evidence that the
-      // code works, overriding the LLM's subjective needs_revision verdict.
-      // Without this, a code-bearing chain can never produce a legitimate
-      // assembled rule artifact (the exact death spiral of chain 48371236).
+      // PRI-634 R3: For code-bearing artifacts with needs_revision (not
+      // rejected), run the adversarial replay as DIAGNOSTIC evidence only.
+      // The replay result is recorded in the artifact but does NOT override
+      // the evaluator verdict — semantic review and deterministic replay
+      // are complementary evidence sources, not a parent-child authority
+      // chain (PRI-629 review 2026-08-31).
       if ((gateAssessment.codeBearing || outputWantsGate) && this.gateDeps) {
-        // Temporarily elevate to 'approved' so the replay's internal gate
-        // (which checks for approved) lets the deterministic test run.
-        const originalDecision: string = output.evaluation.decision;
-        (output.evaluation as { decision: string }).decision = 'approved';
         let replaySucceeded = false;
         try {
           const replayOutcome = await this.runAdversarialReplay(output, taskId, runId, context);
@@ -879,41 +874,31 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
                 sourceTaskId: taskId,
                 contentJson: JSON.stringify(finalOutput),
                 lineageArtifactIds: [],
-                validationStatus: 'validated',
+                validationStatus: 'pending',
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
-              } as Parameters<typeof this.artifactStore.upsertArtifact>[0]);
-            } catch { /* best-effort persist; the critical state is the run output */ }
-            const v2Output = finalOutput as { adversarialResult?: { passed?: boolean } };
-            if (v2Output.adversarialResult?.passed === true) {
-              replaySucceeded = true;
-            }
+              });
+            } catch { /* best-effort persist */ }
+            const v2 = finalOutput as { adversarialResult?: { passed?: boolean } };
+            replaySucceeded = v2.adversarialResult?.passed === true;
           }
         } catch (replayError) {
-          // Replay errored — fall through to needs_revision with the error noted.
           this.emitEvent('adversarial_replay_error', taskId, {
             runId,
             reason: replayError instanceof Error ? replayError.message : String(replayError),
           });
         }
         if (replaySucceeded) {
-          // Replay passed all golden trace cases: the code works. Override
-          // needs_revision to approved so the downstream flow (rollout
-          // dispatch → risk gate → approval queue) proceeds with the
-          // objective evidence backing the decision.
-          (finalOutput.evaluation as { decision: string }).decision = 'approved';
-          this.emitEvent('adversarial_replay_override', taskId, {
+          this.emitEvent('adversarial_replay_diagnostic_passed', taskId, {
             runId,
-            reason: 'needs_revision_overridden_by_passing_replay',
-            replayPassed: true,
+            reason: 'diagnostic_replay_passed_despite_needs_revision',
+            nextAction: 'repair_loop_continues_with_replay_evidence',
           });
         } else {
-          // Replay failed or couldn't run: restore needs_revision.
-          (finalOutput.evaluation as { decision: string }).decision = originalDecision;
-          this.emitEvent('adversarial_replay_result', taskId, {
+          this.emitEvent('adversarial_replay_diagnostic_failed', taskId, {
             runId,
-            reason: 'replay_did_not_confirm_code_quality',
-            originalDecision,
+            reason: 'diagnostic_replay_ran_but_did_not_fully_pass',
+            nextAction: 'repair_loop_or_next_review_round',
           });
         }
       } else if (gateAssessment.codeBearing || outputWantsGate) {
