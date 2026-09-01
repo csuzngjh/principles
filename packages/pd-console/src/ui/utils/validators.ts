@@ -1553,6 +1553,53 @@ export interface PrinciplesListData {
   approvalCrossCheckUnavailable?: string;
 }
 
+// ── PD Core Principles (PRI-641) ─────────────────────────────────────────────
+// Network-shape validator for GET /api/principles/core. Semantic content lives
+// in the canonical server registry only — the browser never re-declares what
+// T-01..T-10 must say, it only validates the shape it received.
+
+export type CorePrincipleLayerData = 'foundational' | 'operating';
+
+export interface CorePrincipleData {
+  id: string;
+  layer: CorePrincipleLayerData;
+  name: string;
+  nameZh: string;
+  statement: string;
+  statementZh: string;
+}
+
+export interface CorePrinciplesData {
+  principles: CorePrincipleData[];
+}
+
+function validateCorePrinciple(v: unknown): CorePrincipleData | null {
+  if (!isObject(v)) return null;
+  if (!isString(v.id) || v.id.length === 0) return null;
+  if (v.layer !== 'foundational' && v.layer !== 'operating') return null;
+  if (!isString(v.name) || v.name.length === 0) return null;
+  if (!isString(v.nameZh) || v.nameZh.length === 0) return null;
+  if (!isString(v.statement) || v.statement.length === 0) return null;
+  if (!isString(v.statementZh) || v.statementZh.length === 0) return null;
+  return {
+    id: v.id,
+    layer: v.layer,
+    name: v.name,
+    nameZh: v.nameZh,
+    statement: v.statement,
+    statementZh: v.statementZh,
+  };
+}
+
+export function validateCorePrinciples(v: unknown): CorePrinciplesData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'principles') || !Array.isArray(v.principles)) return null;
+  const principles = validateArray(v.principles, validateCorePrinciple);
+  if (principles === null) return null;
+  return { principles };
+}
+
+
 export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'principles') || !Array.isArray(v.principles)) return null;

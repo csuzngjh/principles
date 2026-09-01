@@ -2,10 +2,37 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { classifyPrinciples, filterOwnerActionable } from './PrincipleClassifier.js';
 import { updatePrinciple } from '@principles/core/principle-tree-ledger';
+import { isCorePrincipleId } from '@principles/core/runtime-v2';
 
 import type { PrincipleStatus } from '@principles/core/runtime-v2';
 
 export type { PrincipleStatus };
+
+// ── PRI-641: Core principle boundary errors ─────────────────────────────────
+// Core principles (registry T-01..T-10) are PD's built-in semantics, not
+// workspace governance targets. Refusals must be distinguishable from storage
+// failures (`false`), so they surface as typed errors at the model boundary.
+
+/** Core principle refused for a workspace governance mutation (archive/unarchive). */
+export class ImmutableCorePrincipleError extends Error {
+  readonly principleId: string;
+  constructor(principleId: string) {
+    super(`Core principle "${principleId}" is built into Principles Disciple and cannot be modified through workspace governance.`);
+    this.name = 'ImmutableCorePrincipleError';
+    this.principleId = principleId;
+  }
+}
+
+/** Core principle refused from the ordinary Owner Principle detail flow. */
+export class CorePrincipleNotGovernedError extends Error {
+  readonly principleId: string;
+  constructor(principleId: string) {
+    super(`Core principle "${principleId}" is not owner-managed.`);
+    this.name = 'CorePrincipleNotGovernedError';
+    this.principleId = principleId;
+  }
+}
+
 export type PrinciplePriority = 'P0' | 'P1' | 'P2';
 export type PrincipleScope = 'general' | 'domain';
 export type PrincipleEvaluability = 'manual_only' | 'deterministic' | 'weak_heuristic';
@@ -277,26 +304,10 @@ export class PrinciplesConsoleModel {
     const ledger = this.loadLedger();
     const principles = Object.values(ledger.tree.principles);
 
-    const summary = {
-      candidate: 0,
-      probation: 0,
-      active: 0,
-      deprecated: 0,
-      archived: 0,
-      total: principles.length,
-    };
-
     const items: PrincipleListItem[] = [];
 
     for (const p of principles) {
       const status = safeCastEnum(p.status, VALID_STATUSES, 'candidate');
-      switch (status) {
-        case 'candidate': summary.candidate++; break;
-        case 'probation': summary.probation++; break;
-        case 'active': summary.active++; break;
-        case 'deprecated': summary.deprecated++; break;
-        case 'archived': summary.archived++; break;
-      }
 
       const principleText = p.text ?? '';
       const principleTrigger = p.triggerPattern ?? '';
@@ -324,16 +335,43 @@ export class PrinciplesConsoleModel {
 
     items.sort((a, b) => b.valueScore - a.valueScore);
 
-    // PRI-330: classify and optionally filter
+    // PRI-330 + PRI-641: classify first, then remove builtin from the corpus.
+    // The workspace projection is "workspace-governed principles only" —
+    // builtin axioms are PD's immutable semantics and never governance
+    // targets, so they must not reach lists, summary, or Debt consumers.
     const classified = classifyPrinciples(items, decidedPrincipleIds, pendingApprovalPrincipleIds);
+    const workspaceClassified = classified.filter((c) => c.category !== 'builtin');
+    const workspaceItems = workspaceClassified.map((c) => c.principle);
+
+    // PRI-641: summary and categories are computed over the same workspace
+    // corpus the caller sees, so `principles[]` and `summary` can never
+    // disagree (no "list 3, total 13" projection).
+    const summary = {
+      candidate: 0,
+      probation: 0,
+      active: 0,
+      deprecated: 0,
+      archived: 0,
+      total: workspaceItems.length,
+    };
+    for (const p of workspaceItems) {
+      switch (p.status) {
+        case 'candidate': summary.candidate++; break;
+        case 'probation': summary.probation++; break;
+        case 'active': summary.active++; break;
+        case 'deprecated': summary.deprecated++; break;
+        case 'archived': summary.archived++; break;
+      }
+    }
+
     const categories: Record<string, number> = {};
-    for (const c of classified) {
+    for (const c of workspaceClassified) {
       categories[c.category] = (categories[c.category] ?? 0) + 1;
     }
 
-    let outputItems = items;
+    let outputItems = workspaceItems;
     if (filter === 'actionable') {
-      const actionable = filterOwnerActionable(classified);
+      const actionable = filterOwnerActionable(workspaceClassified);
       outputItems = actionable.map((c) => c.principle);
     }
 
@@ -341,6 +379,13 @@ export class PrinciplesConsoleModel {
   }
 
   async getPrincipleDetail(principleId: string): Promise<PrincipleDetailOutput | null> {
+    // PRI-641: Core principles are not workspace-governed objects — they have
+    // no ordinary Owner detail (approvals/lifecycle/trajectory/receipts) and
+    // are viewed read-only via the Core Principles surface instead.
+    if (isCorePrincipleId(principleId)) {
+      throw new CorePrincipleNotGovernedError(principleId);
+    }
+
     const ledger = this.loadLedger();
     const p = ledger.tree.principles[principleId];
     if (!p) {
@@ -399,6 +444,10 @@ export class PrinciplesConsoleModel {
   }
 
   async archivePrinciple(principleId: string): Promise<boolean> {
+    // PRI-641: refuse before any write — builtin axioms are immutable
+    if (isCorePrincipleId(principleId)) {
+      throw new ImmutableCorePrincipleError(principleId);
+    }
     try {
       const stateDir = path.join(this.workspaceDir, '.state');
       updatePrinciple(stateDir, principleId, {
@@ -416,6 +465,10 @@ export class PrinciplesConsoleModel {
   }
 
   async unarchivePrinciple(principleId: string): Promise<boolean> {
+    // PRI-641: refuse before any write — builtin axioms are immutable
+    if (isCorePrincipleId(principleId)) {
+      throw new ImmutableCorePrincipleError(principleId);
+    }
     try {
       const stateDir = path.join(this.workspaceDir, '.state');
       updatePrinciple(stateDir, principleId, {

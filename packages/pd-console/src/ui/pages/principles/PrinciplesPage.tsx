@@ -18,6 +18,7 @@ import type {
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
 import { formatDate } from "../../utils/format-date.js";
+import { PrinciplesViewNav } from "./PrinciplesViewNav.js";
 
 // ── Status types for the review page ────────────────────────────────────────
 type ReviewStatus = "pending" | "candidate" | "approved" | "rejected" | "parked";
@@ -331,6 +332,9 @@ export function PrinciplesPage() {
       <p className="text-ink-3 text-[14px] leading-relaxed mb-6">
         {t("principles.reviewDescription")}
       </p>
+
+      {/* PRI-641: Workspace Principles vs PD Core Principles internal nav */}
+      <PrinciplesViewNav view="workspace" />
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-6">

@@ -507,7 +507,9 @@ describe('PrinciplesConsoleModel', () => {
     const result = await model.listPrinciples();
 
     expect(result.categories).toBeDefined();
-    expect(result.categories!['builtin']).toBe(1);
+    // PRI-641: builtin axioms are excluded from the workspace projection —
+    // they are served by the Core reference surface, not counted here.
+    expect(result.categories).not.toHaveProperty('builtin');
     expect(result.categories!['demo']).toBe(1);
     // PRI-629 INV-02: candidate 生命周期 → in_pipeline (不再是 owner_actionable)
     expect(result.categories!['in_pipeline']).toBe(1);
@@ -568,13 +570,14 @@ describe('PrinciplesConsoleModel', () => {
     const actionableResult = await model.listPrinciples('actionable');
     const actionableWithPending = await model.listPrinciples('actionable', undefined, new Set(['P_001']));
 
-    expect(allResult.principles).toHaveLength(4);
+    // PRI-641: filter=all = all workspace-governed principles (T-01 excluded)
+    expect(allResult.principles).toHaveLength(3);
     expect(actionableResult.principles).toHaveLength(0);
     expect(actionableWithPending.principles).toHaveLength(1);
     expect(actionableWithPending.principles[0].id).toBe('P_001');
   });
 
-  it('listPrinciples with filter=all returns all principles', async () => {
+  it('listPrinciples with filter=all returns all workspace principles (builtin excluded)', async () => {
     ws = await createTestWorkspace();
     writeLedger(ws.workspaceDir, {
       principles: {
@@ -606,7 +609,13 @@ describe('PrinciplesConsoleModel', () => {
     const model = new PrinciplesConsoleModel(ws.workspaceDir);
     const result = await model.listPrinciples('all');
 
-    expect(result.principles).toHaveLength(2);
+    // PRI-641: filter=all means "all workspace-governed principles" — the
+    // builtin axiom T-01 is served by the Core reference surface instead.
+    expect(result.principles).toHaveLength(1);
+    expect(result.principles[0]?.id).toBe('P_001');
+    expect(result.summary.total).toBe(1);
+    expect(result.summary.candidate).toBe(1);
+    expect(result.summary.active).toBe(0);
   });
 
   // ── PRI-332: Language detection & readability tests ──────────────────────

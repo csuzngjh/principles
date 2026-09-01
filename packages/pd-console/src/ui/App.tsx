@@ -16,6 +16,7 @@ import { Toaster } from "./components/ui/sonner.js";
 import { FocusPage } from "./pages/focus/FocusPage.js";
 import { PainPage } from "./pages/pain/PainPage.js";
 import { PrinciplesPage } from "./pages/principles/PrinciplesPage.js";
+import { CorePrinciplesPage } from "./pages/principles/CorePrinciplesPage.js";
 import { PrincipleDetailPage } from "./pages/principles/PrincipleDetailPage.js";
 import { ActivationPage } from "./pages/activation/ActivationPage.js";
 import { DebtPage } from "./pages/debt/DebtPage.js";
@@ -169,6 +170,8 @@ function AuthRoutes() {
                     <Route path="/focus" element={<FocusPage featureFlags={featureFlags ?? undefined} />} />
                     <Route path="/pain" element={<PainPage />} />
                     <Route path="/principles" element={<PrinciplesPage />} />
+                    {/* PRI-641: static segment must be declared before /principles/:id */}
+                    <Route path="/principles/core" element={<CorePrinciplesPage />} />
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />
                     <Route path="/activation" element={<ActivationPage />} />
                     <Route path="/debt" element={<DebtPage />} />
