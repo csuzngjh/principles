@@ -393,6 +393,26 @@ describe('pd runtime init', () => {
       } finally { rmTmpDir(tmp); }
     });
 
+    it('--confirm marks every generated flag entry as system provenance (PRI-637)', async () => {
+      const tmp = mkTmpDir();
+      try {
+        buildRuntimeInitOutput(tmp, true);
+        const configPath = path.join(tmp, '.pd', 'config.yaml');
+        const yaml = (await import('js-yaml')).default;
+        const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA }) as {
+          features?: Record<string, { source?: unknown }>;
+        };
+        const features = parsed.features ?? {};
+        // Bootstrap snapshot still carries the full registry map.
+        expect(Object.keys(features).length).toBeGreaterThan(0);
+        // PRI-637: `pd runtime init` is PD machinery — entries carry source:
+        // 'system' (NOT owner intent), matching the runtime-init lifecycle label.
+        for (const entry of Object.values(features)) {
+          expect(entry?.source).toBe('system');
+        }
+      } finally { rmTmpDir(tmp); }
+    });
+
     it('--confirm skips when config.yaml already exists (preserves user file)', () => {
       const tmp = mkTmpDir();
       try {

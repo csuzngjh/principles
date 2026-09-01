@@ -95,12 +95,23 @@ const DB_NAMES = {
  */
 function buildConfigYaml(workspaceDir: string): string {
   const config = getDefaultPdConfig();
+  // PRI-637: `pd runtime init` is PD machinery writing a bootstrap snapshot, so
+  // every flag entry records `source: 'system'` — an ORIGIN HINT, NOT proof that
+  // the value lacks Owner intent (direct .pd/config.yaml editing is a supported
+  // path; an Owner may later pin behavior on top of this entry). Labels are
+  // metadata only; effective values are unchanged. If a flag graduates, system-
+  // origin entries are cleanup CANDIDATES that still require explicit Owner
+  // confirmation before removal.
+  const features: Record<string, unknown> = {};
+  for (const [id, entry] of Object.entries(config.features)) {
+    features[id] = { category: entry.category, enabled: entry.enabled, source: 'system' };
+  }
   const yamlObj: Record<string, unknown> = {
     version: config.version,
     workspace: {
       default: workspaceDir,
     },
-    features: config.features,
+    features,
     runtimeProfiles: config.runtimeProfiles,
     internalAgents: config.internalAgents,
     ui: config.ui,

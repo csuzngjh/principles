@@ -96,7 +96,11 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
       // This deliberate override is honored with a warning so the disable is observable
       // in logs/telemetry. Per-rule rollback remains `deactivate`.
       if (defaultEntry.category === 'core' && !userEntry.enabled) {
-        features[flagId] = { category: userEntry.category, enabled: false };
+        features[flagId] = {
+          category: userEntry.category,
+          enabled: false,
+          ...(userEntry.source ? { source: userEntry.source } : {}),
+        };
         warnings.push(`feature '${flagId}': core flag explicitly disabled via config (emergency disable)`);
         featuresChangedFromDefault.push(flagId);
         continue;
@@ -104,7 +108,11 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
       if (userEntry.category !== defaultEntry.category || userEntry.enabled !== defaultEntry.enabled) {
         featuresChangedFromDefault.push(flagId);
       }
-      features[flagId] = { category: userEntry.category, enabled: userEntry.enabled };
+      features[flagId] = {
+        category: userEntry.category,
+        enabled: userEntry.enabled,
+        ...(userEntry.source ? { source: userEntry.source } : {}),
+      };
     } else {
       features[flagId] = { ...defaultEntry };
     }
