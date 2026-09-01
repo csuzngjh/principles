@@ -9,7 +9,7 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { ArtificerRuleOutput } from '../internalization/artificer-output.js';
 import { DefaultArtificerValidator } from '../internalization/artificer-output.js';
 import type { BehaviorExamplePack } from '../internalization/behavior-example-pack.js';
-import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
+import { createPITaskDiagnosticJson, parsePITaskMetadata } from '../internalization/pitask-metadata.js';
 import type { PITaskMetadata, RepairPayload } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
 import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter.js';
@@ -1690,5 +1690,63 @@ describe('PRI-509: ArtificerRunner.buildContext reads repairPayload → repairFe
     expect(parsed.repairFeedback).toBeDefined();
     expect(parsed.repairFeedback).toContain('add input validation');
     expect(parsed.repairFeedback).toContain('0.6');
+  });
+
+  it('repairPayload with diagnosticReplay → replay evidence rendered in repairFeedback (PRI-634 R4 P1-2)', async () => {
+    // The evaluator's needs_revision round ran the diagnostic adversarial
+    // replay; its evidence must reach the next Artificer via repairFeedback.
+    const artificerTask = makeArtificerTaskPri509({
+      requiredChanges: ['fix matcher semantics'],
+      concerns: ['intent mismatch'],
+      previousScore: 0.5,
+      repairIteration: 1,
+      sourceArtificerArtifactId: 'pi-art-artificer-original',
+      sourceEvaluatorTaskId: 'evaluator-r0',
+      diagnosticReplay: { ran: true, passed: true, failedCaseCount: 0 },
+    });
+
+    const { result, capturedPrompt } = await runPri509RepairLoop(artificerTask);
+    expect(result.status).toBe('succeeded');
+
+    expect(capturedPrompt).toBeDefined();
+    const parsed = JSON.parse(capturedPrompt as string);
+    expect(parsed.repairFeedback).toBeDefined();
+    expect(parsed.repairFeedback).toContain('Deterministic adversarial replay');
+    expect(parsed.repairFeedback).toContain('PASSED');
+    // The diagnostic note must be explicit that it does NOT change the verdict
+    expect(parsed.repairFeedback).toContain('needs_revision');
+  });
+
+  it('isValidRepairPayload rejects malformed diagnosticReplay (fail-closed hydrate, PRI-634 R4)', () => {
+    // diagnosticJson round-trip: a repairPayload whose diagnosticReplay has a
+    // non-boolean `ran` must be rejected at the trust boundary (rc-1/rc-3) —
+    // hydrate yields repairPayload=undefined rather than trusting the shape.
+    const base = {
+      requiredChanges: ['fix matcher'],
+      concerns: [],
+      previousScore: 0.5,
+      repairIteration: 1,
+      sourceArtificerArtifactId: 'pi-art-artificer-original',
+      sourceEvaluatorTaskId: 'evaluator-r0',
+    };
+    const malformed = [
+      { ran: 'yes', passed: true, failedCaseCount: 0 },        // ran not boolean
+      { ran: true, passed: 1, failedCaseCount: 0 },            // passed not boolean
+      { ran: true, passed: true, failedCaseCount: -1 },        // negative count
+      { ran: true, passed: true, failedCaseCount: 1.5 },       // non-integer count
+      'not-an-object',                                          // whole field wrong type
+    ];
+    for (const bad of malformed) {
+      const meta = makeMetadata({ dependencyTaskIds: [SCRIBE_TASK_ID_PRI509] });
+      meta.repairPayload = { ...base, diagnosticReplay: bad } as unknown as RepairPayload;
+      const taskJson = createPITaskDiagnosticJson(meta);
+      const hydrated = parsePITaskMetadata(taskJson);
+      expect(hydrated?.repairPayload, `expected rejection for ${JSON.stringify(bad)}`).toBeUndefined();
+    }
+    // Valid diagnosticReplay passes the trust boundary
+    const metaOk = makeMetadata({ dependencyTaskIds: [SCRIBE_TASK_ID_PRI509] });
+    metaOk.repairPayload = { ...base, diagnosticReplay: { ran: true, passed: false, failedCaseCount: 2 } };
+    const hydratedOk = parsePITaskMetadata(createPITaskDiagnosticJson(metaOk));
+    expect(hydratedOk?.repairPayload?.diagnosticReplay).toEqual({ ran: true, passed: false, failedCaseCount: 2 });
   });
 });

@@ -373,6 +373,14 @@ describe('runAdversarialLoop (PRI-428)', () => {
   });
 
   it('adversarialFeedback from Round 1 is injected into Round 2 Artificer prompt', async () => {
+    // PRI-634 R4: 用 makeFailingGateDeps 确保 Round-1 的诊断重放真实产生
+    // failedCases，验证对抗反馈传递链仍工作（反馈来源=真实 gate 结果，非 LLM 声明）。
+    // 旧行为（needs_revision → skip replay）下 feedback 依赖 LLM 声明的
+    // adversarialResult；R4 后真实 gate 执行，feedback 以 gate 观察为准。
+    const oldH = h;
+    h = await makeHarness({ gateDeps: makeFailingGateDeps() });
+    await oldH.stateManager.close();
+    try { fs.rmSync(oldH.tmpDir, { recursive: true, force: true }); } catch { /* temp */ }
     h.adapter.queueArtificer(makeArtificerOutput);
     h.adapter.queueEvaluator(makeEvaluatorNeedsRevision);
     h.adapter.queueArtificer(makeArtificerOutput);
@@ -394,8 +402,9 @@ describe('runAdversarialLoop (PRI-428)', () => {
     const promptStr = typeof round2ArtificerCall!.inputPayload === 'string'
       ? round2ArtificerCall!.inputPayload
       : JSON.stringify(round2ArtificerCall!.inputPayload);
-    // The feedback must reference the Round-1 failed case.
-    expect(promptStr).toContain('adv-1');
+    // The feedback must reference the Round-1 failed case (from the real gate).
+    // makeFailingGateDeps 的 failedCases 中 caseId 为 'neg-1'。
+    expect(promptStr).toContain('neg-1');
     // Round-1 artificer (index 0) must NOT carry the structured feedback
     // field. (The protocol instruction text always mentions `adversarialFeedback`
     // by name; check the parsed JSON field, not the raw substring.)

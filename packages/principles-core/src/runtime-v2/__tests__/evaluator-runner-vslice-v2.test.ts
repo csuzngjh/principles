@@ -461,7 +461,7 @@ describe('EvaluatorRunner V2 — adversarial sandbox replay (PRI-426)', () => {
     expect(gateSpy).not.toHaveBeenCalled();
   });
 
-  it('V2 output with failing passive review (intentConsistency) skips adversarial replay', async () => {
+  it('V2 output with failing passive review (intentConsistency) runs DIAGNOSTIC adversarial replay, verdict stays needs_revision', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeV2ArtificerArtifact());
     await store.upsertArtifact(makeScribeArtifact());
@@ -470,7 +470,10 @@ describe('EvaluatorRunner V2 — adversarial sandbox replay (PRI-426)', () => {
     const gateDeps: RefinerRuleHostGateDeps = { evaluateInSandbox: gateSpy };
 
     // Passive review fails on intentConsistency — LLM short-circuits and emits
-    // decision=needs_revision (per prompt instruction).
+    // decision=needs_revision (per prompt instruction). PRI-634 R4 changes the
+    // contract: for code-bearing artifacts, the adversarial replay STILL runs
+    // as a DIAGNOSTIC check — the result is recorded as evidence while the
+    // verdict stays needs_revision (no override, no rule assembly).
     const output = makeEvaluatorV2Output({
       evaluation: {
         decision: 'needs_revision',
@@ -491,14 +494,29 @@ describe('EvaluatorRunner V2 — adversarial sandbox replay (PRI-426)', () => {
     const runner = makeRunner(deps, gateDeps);
     const result = await runner.run(EVALUATOR_TASK_ID);
 
+    // R4 (P1-1): diagnostic replay MUST run for code-bearing + needs_revision
     expect(result.status).toBe('succeeded');
-    expect(gateSpy).not.toHaveBeenCalled();
-    // No adversarialResult populated when replay was skipped.
-    const events = (deps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
-      (call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> },
-    );
-    const replayEvent = events.find((e) => e.eventType === 'evaluator_adversarial_replay');
-    expect(replayEvent).toBeUndefined();
+    expect(gateSpy).toHaveBeenCalled(); // P1-1: the gate actually runs
+    // Verdict stays needs_revision (no override — R4 diagnostic contract):
+    // the runner completed with needs_revision (not forced to approved).
+    expect((deps.stateManager.markTaskSucceeded as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+    // The artifact carries adversarialResult populated by the diagnostic replay
+    // (canonical envelope, P1-3). No rule artifact is assembled because the
+    // verdict is not approved.
+    const artifacts = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    const principle = artifacts.find((a) => a.artifactKind === 'principle');
+    expect(principle).toBeDefined();
+    if (!principle) return;
+    const parsed = JSON.parse(principle.contentJson) as {
+      evaluation?: { decision?: string };
+      adversarialResult?: { passed?: boolean };
+    };
+    expect(parsed.evaluation?.decision).toBe('needs_revision');
+    // diagnostic replay ran and populated adversarialResult
+    expect(parsed.adversarialResult).toBeDefined();
+    // no rule artifact assembled (verdict is not approved)
+    const rules = artifacts.filter((a) => a.artifactKind === 'rule');
+    expect(rules).toHaveLength(0);
   });
 
   it('V2 output: passive review passes + adversarial sandbox PASSES → adversarialResult.passed=true', async () => {

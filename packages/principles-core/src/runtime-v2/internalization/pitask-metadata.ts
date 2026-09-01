@@ -63,6 +63,18 @@ export interface RepairPayload {
   readonly repairIteration: number;
   readonly sourceArtificerArtifactId: string;
   readonly sourceEvaluatorTaskId: string;
+  /**
+   * PRI-634 R4: 诊断性对抗重放 evidence（code-bearing + needs_revision 时
+   * evaluator 已执行 deterministic replay）。replay 通过 ≠ 语义正确,因此
+   * 不改变 verdict;但作为客观证据流入修复轮,下一轮 Artificer 可见
+   * （formatRepairFeedback 渲染）。缺失 = 该轮未执行 replay（e.g. 非
+   * code-bearing / gateDeps 未装配 / replay 未产出 adversarialResult）。
+   */
+  readonly diagnosticReplay?: {
+    readonly ran: boolean;
+    readonly passed: boolean;
+    readonly failedCaseCount: number;
+  };
 }
 
 /**
@@ -378,6 +390,9 @@ function isValidArtifactRef(value: unknown): value is ArtifactRef {
  *     relying on the runtime caller's priorRepairIteration >= 2 check)
  *   - sourceArtificerArtifactId: non-empty string
  *   - sourceEvaluatorTaskId: non-empty string
+ *   - diagnosticReplay: optional object with ran (bool), passed (bool),
+ *     failedCaseCount (non-negative integer). Absence is valid; presence
+ *     validates all fields strictly (rc-1, rc-3).
  */
 function isValidRepairPayload(value: unknown): value is RepairPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -401,6 +416,14 @@ function isValidRepairPayload(value: unknown): value is RepairPayload {
     || p.repairIteration > 2) return false;
   if (typeof p.sourceArtificerArtifactId !== 'string' || p.sourceArtificerArtifactId.trim() === '') return false;
   if (typeof p.sourceEvaluatorTaskId !== 'string' || p.sourceEvaluatorTaskId.trim() === '') return false;
+  // PRI-634 R4 (P1-2): optional diagnosticReplay — validate when present.
+  if (p.diagnosticReplay !== undefined) {
+    if (typeof p.diagnosticReplay !== 'object' || p.diagnosticReplay === null || Array.isArray(p.diagnosticReplay)) return false;
+    const dr = p.diagnosticReplay as Record<string, unknown>;
+    if (typeof dr.ran !== 'boolean') return false;
+    if (typeof dr.passed !== 'boolean') return false;
+    if (typeof dr.failedCaseCount !== 'number' || !Number.isInteger(dr.failedCaseCount) || dr.failedCaseCount < 0) return false;
+  }
   return true;
 }
 
