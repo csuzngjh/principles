@@ -414,3 +414,107 @@ describe('recordPainSignalObservability', () => {
     }
   });
 });
+
+describe('PRI-640 host attribution (host_kind on canonical pain_events)', () => {
+  function painData(overrides: Record<string, unknown> = {}) {
+    return {
+      painId: 'pain_640_001',
+      painType: 'user_frustration' as const,
+      source: 'manual',
+      reason: 'host attribution probe',
+      score: 80,
+      sessionId: 'cli',
+      ...overrides,
+    };
+  }
+
+  function readPainHostKind(stateDir: string, canonicalPainId: string): string | null {
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const raw = db.prepare('SELECT host_kind FROM pain_events WHERE canonical_pain_id = ?').get(canonicalPainId);
+      expect(raw).toBeDefined();
+      return (raw as { host_kind: string | null }).host_kind;
+    } finally {
+      db.close();
+    }
+  }
+
+  it('persists hostKind from the pain data on a fresh database (openclaw / codex / omitted)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    recordPainSignalObservability({ workspaceDir, stateDir, data: painData({ hostKind: 'openclaw' }), canonicalPainId: 'pain_640_openclaw' });
+    expect(readPainHostKind(stateDir, 'pain_640_openclaw')).toBe('openclaw');
+
+    recordPainSignalObservability({ workspaceDir, stateDir, data: painData({ hostKind: 'codex' }), canonicalPainId: 'pain_640_codex' });
+    expect(readPainHostKind(stateDir, 'pain_640_codex')).toBe('codex');
+
+    // Manual / unprovable: no hostKind -> NULL (never guessed)
+    recordPainSignalObservability({ workspaceDir, stateDir, data: painData(), canonicalPainId: 'pain_640_unknown' });
+    expect(readPainHostKind(stateDir, 'pain_640_unknown')).toBeNull();
+  });
+
+  it('migrates an existing pre-PRI-640 database additively and keeps old rows readable (SPEC §28)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    mkdirSync(stateDir, { recursive: true });
+    const legacy = new Database(join(stateDir, 'trajectory.db'));
+    try {
+      legacy.exec(`
+        CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE pain_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT,
+          severity TEXT, origin TEXT, confidence REAL, text TEXT,
+          canonical_pain_id TEXT, runtime_task_id TEXT, created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;
+      `);
+      legacy.prepare(`INSERT INTO pain_events (session_id, source, score, reason, origin, text, canonical_pain_id, created_at)
+        VALUES ('legacy-session', 'manual', 90, 'legacy row', 'user_manual', 'legacy', 'pain_640_legacy', '2026-01-01T00:00:00.000Z')`).run();
+    } finally {
+      legacy.close();
+    }
+
+    // Migration pass 1 (schema ensure inside the writer) + a new host-bound row
+    const first = recordPainSignalObservability({ workspaceDir, stateDir, data: painData({ hostKind: 'codex' }), canonicalPainId: 'pain_640_new' });
+    expect(first.warnings).toEqual([]);
+    // Migration pass 2 (repeated): idempotent, no error
+    const second = recordPainSignalObservability({ workspaceDir, stateDir, data: painData({ hostKind: 'codex' }), canonicalPainId: 'pain_640_new2' });
+    expect(second.warnings).toEqual([]);
+
+    expect(readPainHostKind(stateDir, 'pain_640_legacy')).toBeNull();
+    expect(readPainHostKind(stateDir, 'pain_640_new')).toBe('codex');
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      // Canonical unique index still enforced: one row per canonical id
+      const count = db.prepare('SELECT COUNT(*) AS n FROM pain_events WHERE canonical_pain_id = ?').get('pain_640_new') as { n: number };
+      expect(count.n).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('enriches unknown → known on re-delivery of the same canonical pain (SPEC §17)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    recordPainSignalObservability({ workspaceDir, stateDir, data: painData(), canonicalPainId: 'pain_640_enrich' });
+    expect(readPainHostKind(stateDir, 'pain_640_enrich')).toBeNull();
+
+    // Later delivery carries proven host attribution (e.g. governance continuation)
+    const result = recordPainSignalObservability({ workspaceDir, stateDir, data: painData({ hostKind: 'codex' }), canonicalPainId: 'pain_640_enrich' });
+    expect(result.warnings).toEqual([]);
+    expect(readPainHostKind(stateDir, 'pain_640_enrich')).toBe('codex');
+  });
+
+  it('keeps the first durable attribution on conflicting re-attribution and emits bounded evidence (SPEC §16)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    recordPainSignalObservability({ workspaceDir, stateDir, data: painData({ hostKind: 'openclaw' }), canonicalPainId: 'pain_640_conflict' });
+
+    const result = recordPainSignalObservability({ workspaceDir, stateDir, data: painData({ hostKind: 'codex' }), canonicalPainId: 'pain_640_conflict' });
+
+    expect(readPainHostKind(stateDir, 'pain_640_conflict')).toBe('openclaw');
+    expect(result.warnings).toContain('host_kind_conflict:kept=openclaw,rejected=codex');
+
+    // Re-delivery keeps the durable attribution (still no overwrite, still loud)
+    const again = recordPainSignalObservability({ workspaceDir, stateDir, data: painData({ hostKind: 'codex' }), canonicalPainId: 'pain_640_conflict' });
+    expect(again.warnings).toContain('host_kind_conflict:kept=openclaw,rejected=codex');
+    expect(readPainHostKind(stateDir, 'pain_640_conflict')).toBe('openclaw');
+  });
+});

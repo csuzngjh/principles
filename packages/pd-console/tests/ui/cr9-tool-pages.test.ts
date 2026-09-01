@@ -211,11 +211,19 @@ describe("CR9 Settings: auth and workspace management", () => {
     expect(typeof enSettings.bearerToken).toBe("string");
     expect(typeof enSettings.enterAccessToken).toBe("string");
     expect(typeof enSettings.tokenSaved).toBe("string");
+    expect(typeof enSettings.tokenSavedRestarting).toBe("string");
+    expect(typeof enSettings.tokenSaveFailed).toBe("string");
+    expect(typeof enSettings.tokenExternalAttached).toBe("string");
     expect(typeof enSettings.tokenSessionOnly).toBe("string");
+    expect(typeof enSettings.tokenDesktopStored).toBe("string");
     expect(typeof zhSettings.bearerToken).toBe("string");
     expect(typeof zhSettings.enterAccessToken).toBe("string");
     expect(typeof zhSettings.tokenSaved).toBe("string");
+    expect(typeof zhSettings.tokenSavedRestarting).toBe("string");
+    expect(typeof zhSettings.tokenSaveFailed).toBe("string");
+    expect(typeof zhSettings.tokenExternalAttached).toBe("string");
     expect(typeof zhSettings.tokenSessionOnly).toBe("string");
+    expect(typeof zhSettings.tokenDesktopStored).toBe("string");
   });
 
   it("has workspace management keys", () => {

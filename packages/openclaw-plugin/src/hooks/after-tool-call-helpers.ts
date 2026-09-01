@@ -581,6 +581,7 @@ export function emitPainIfAdmitted(
     origin: 'system_infer',
     text: sanitizeForEvidence(observation.params.text ?? observation.params.content, workspaceDir) || undefined,
     canonicalPainId: painId,
+    hostKind: 'openclaw',
   });
 
   // Observe: track which principles would have prevented this pain (observation-only)
@@ -658,6 +659,7 @@ export function emitPainIfAdmitted(
       traceId: observation.traceId,
       agentId,
       provenance: 'automatic_hook',
+      hostKind: 'openclaw',
       evidence: buildTrajectoryEvidence(wctx, sessionId),
     },
   }, { recordObservability: false });

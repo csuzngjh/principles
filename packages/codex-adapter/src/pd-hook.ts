@@ -111,14 +111,14 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
 
   try {
     if (event.kind === 'session_start') {
-      const health = await createProductionHostRuntime().health(resolution.workspaceDir);
+      const health = await createProductionHostRuntime({ hostKind: 'codex' }).health(resolution.workspaceDir);
       if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
       return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: [] };
     }
     const ingestionDiagnostics = ingestionEnabled
       ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
       : [];
-    const result = await createProductionHostRuntime().dispatch(event);
+    const result = await createProductionHostRuntime({ hostKind: 'codex' }).dispatch(event);
     const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {

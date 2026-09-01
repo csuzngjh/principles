@@ -366,6 +366,8 @@ export type {
   PainSignalBridgeOptions,
   PainDetectedData,
   PainEvidenceEntry,
+  /** PRI-640: host attribution union ('openclaw' | 'codex'); NULL persists as unknown. */
+  GovernanceHostKind,
   /** @deprecated Use PainToPrincipleOutput instead */
   PainSignalBridgeResult,
   /** @deprecated Internal — use PainToPrincipleOutput.status */

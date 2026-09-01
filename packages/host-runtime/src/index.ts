@@ -8,6 +8,7 @@ import { buildActivePrinciplePromptContext } from './active-principle-prompt.js'
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
 import { createProductionPainEvidenceHandler, type PainDatabaseFactory, type PainEnrichmentProvider } from './production-pain-evidence.js';
+import type { GovernanceHostKind } from '@principles/core/runtime-v2';
 
 export * from './active-principle-prompt.js';
 export * from './pd-config.js';
@@ -192,6 +193,8 @@ export function createProductionHostRuntime(
     ruleImplementationRuntime?: RuleImplementationRuntime;
     painEnrichmentProvider?: PainEnrichmentProvider;
     painDatabaseFactory?: PainDatabaseFactory;
+    /** PRI-640: host attribution supplied by the constructing host adapter (OpenClaw / Codex). */
+    hostKind?: GovernanceHostKind;
   } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
@@ -203,6 +206,7 @@ export function createProductionHostRuntime(
     afterToolCall: options.afterToolCall ?? createProductionPainEvidenceHandler({
       ...(options.painEnrichmentProvider ? { painEnrichmentProvider: options.painEnrichmentProvider } : {}),
       ...(options.painDatabaseFactory ? { painDatabaseFactory: options.painDatabaseFactory } : {}),
+      ...(options.hostKind ? { hostKind: options.hostKind } : {}),
     }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {

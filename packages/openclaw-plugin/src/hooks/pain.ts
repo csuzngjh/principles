@@ -433,7 +433,7 @@ export function handleSharedPainEvidenceResult(
     ts: new Date().toISOString(), type: 'pain_detected', data: {
       painId, painType: 'tool_failure', source: event.toolName,
       reason: `${reason}; diagnosticGate=${triggerReason}`, score, sessionId, traceId,
-      agentId: ctx.agentId, provenance: 'automatic_hook', evidence,
+      agentId: ctx.agentId, provenance: 'automatic_hook', hostKind: 'openclaw', evidence,
     },
   }, { recordObservability: false }));
 }
@@ -486,6 +486,7 @@ function handleManualPain(
     origin: 'user_manual',
     text: reason,
     canonicalPainId: painId,
+    hostKind: 'openclaw',
   });
 
   // Log to EvolutionLogger

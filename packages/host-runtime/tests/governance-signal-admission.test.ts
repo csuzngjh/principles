@@ -30,7 +30,7 @@ import { invalidatePainSignalBridge } from '@principles/core/runtime-v2';
 const BASELINE_DDL = [
   'CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
   'CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL)',
-  'CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, created_at TEXT NOT NULL)',
+  'CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL)',
   'CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL',
 ];
 
@@ -823,5 +823,63 @@ describe('P1-3 correction occurrence identity (SPEC §10)', () => {
     const sessionB = admit([correction({ rootSessionId: 'session-b', text: '不要自作主张', logicalObservationKey: 'codex|rollout-1|turn-sess-2|user', hostTurnId: 'turn-sess-2' })]);
     expect(sessionB.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
     expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 2 });
+  });
+});
+
+describe('PRI-640 host attribution (codex pain_events.host_kind)', () => {
+  it('admitted correction and tool-failure pains carry host_kind=codex (SPEC §12)', () => {
+    const corrected = admit([correction()]);
+    expect(corrected.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    const correctionPainId = (corrected.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
+    expect(String(correctionPainId)).toMatch(/^pain_host_/);
+    expect(withTrajectory((db) => db.prepare('SELECT host_kind FROM pain_events WHERE canonical_pain_id = ?').get(String(correctionPainId)))).toEqual({ host_kind: 'codex' });
+
+    const tooled = admit([toolFailure()]);
+    expect(tooled.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    const toolPainId = (tooled.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
+    expect(withTrajectory((db) => db.prepare('SELECT host_kind FROM pain_events WHERE canonical_pain_id = ?').get(String(toolPainId)))).toEqual({ host_kind: 'codex' });
+  });
+
+  it('live + transcript replay stays ONE pain with host_kind=codex (SPEC §15)', () => {
+    admit([correction()]);
+    // Re-delivery hits the admission marker → already_admitted, no second row
+    const replay = admit([correction()]);
+    expect(replay.outcomes?.[0]).toMatchObject({ disposition: 'already_admitted' });
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n, host_kind FROM pain_events').get())).toEqual({ n: 1, host_kind: 'codex' });
+  });
+
+  it('enriches a pre-existing unattributed pain row to codex without overwriting a durable attribution (SPEC §17)', () => {
+    // Simulate the ordering where the shared production kernel wrote the row
+    // first without attribution, and governance admission later proves codex.
+    const derivation = deriveProductionCorrectionPainIdentity({
+      workspaceDir,
+      sessionId: 'root-session-1',
+      occurrenceId: 'turn-enrich',
+      text: correction({ logicalObservationKey: 'codex|rollout-1|turn-enrich|user', hostTurnId: 'turn-enrich' }).text,
+    });
+    const seed = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      seed.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at)
+        VALUES ('root-session-1', 'user_correction', 90, 'seeded unattributed', 'severe', 'system_infer', NULL, NULL, ?, NULL, ?)`)
+        .run(derivation.painId, NOW.toISOString());
+    } finally {
+      seed.close();
+    }
+
+    const result = admit([correction({ logicalObservationKey: 'codex|rollout-1|turn-enrich|user', hostTurnId: 'turn-enrich' })]);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted', duplicate: true });
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n, host_kind FROM pain_events WHERE canonical_pain_id = ?').get(derivation.painId)))
+      .toEqual({ n: 1, host_kind: 'codex' });
+
+    // A durable non-null attribution is never overwritten by later admissions.
+    const conflictSeed = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      conflictSeed.prepare('UPDATE pain_events SET host_kind = ? WHERE canonical_pain_id = ?').run('openclaw', derivation.painId);
+    } finally {
+      conflictSeed.close();
+    }
+    admit([correction({ logicalObservationKey: 'codex|rollout-1|turn-enrich|user', hostTurnId: 'turn-enrich' })]);
+    expect(withTrajectory((db) => db.prepare('SELECT host_kind FROM pain_events WHERE canonical_pain_id = ?').get(derivation.painId)))
+      .toEqual({ host_kind: 'openclaw' });
   });
 });

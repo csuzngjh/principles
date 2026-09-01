@@ -230,6 +230,7 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
       text TEXT,
       canonical_pain_id TEXT,
       runtime_task_id TEXT,
+      host_kind TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS gate_blocks (
@@ -345,6 +346,10 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
   for (const col of [
     { name: 'canonical_pain_id', type: 'TEXT' },
     { name: 'runtime_task_id', type: 'TEXT' },
+    // PRI-640: host attribution — observability metadata only, orthogonal to
+    // `origin` (evidence semantics) and excluded from canonical pain identity.
+    // Keep in sync with ensureTrajectorySchema() in principles-core.
+    { name: 'host_kind', type: 'TEXT' },
   ]) {
     try {
       db.exec(`ALTER TABLE pain_events ADD COLUMN ${col.name} ${col.type}`);
@@ -656,8 +661,8 @@ export class TrajectoryDatabase {
       const runResult = this.db.prepare(`
         INSERT INTO pain_events (
           session_id, source, score, reason, severity, origin, confidence, text, created_at,
-          canonical_pain_id, runtime_task_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          canonical_pain_id, runtime_task_id, host_kind
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.sessionId,
         input.source,
@@ -670,6 +675,7 @@ export class TrajectoryDatabase {
         input.createdAt ?? nowIso(),
         input.canonicalPainId ?? null,
         input.runtimeTaskId ?? null,
+        input.hostKind ?? null,
       );
       insertedId = Number(runResult.lastInsertRowid);
     } catch (insertErr: unknown) {
@@ -679,11 +685,17 @@ export class TrajectoryDatabase {
         insertErr.message.includes('UNIQUE constraint failed') &&
         insertErr.message.includes('canonical_pain_id')
       ) {
+        // PRI-640: keep the first durable host attribution (COALESCE order);
+        // this legacy writer has no warnings channel, and every production
+        // caller is host-bound to 'openclaw', so cross-host conflicts here are
+        // practically unreachable — the SDK writer (pain-signal-observability)
+        // owns conflict evidence emission.
         this.db.prepare(`
           UPDATE pain_events
-          SET runtime_task_id = COALESCE(?, runtime_task_id)
+          SET runtime_task_id = COALESCE(?, runtime_task_id),
+              host_kind = COALESCE(host_kind, ?)
           WHERE canonical_pain_id = ?
-        `).run(input.runtimeTaskId ?? null, input.canonicalPainId);
+        `).run(input.runtimeTaskId ?? null, input.hostKind ?? null, input.canonicalPainId);
         const rawRow = this.db.prepare('SELECT id FROM pain_events WHERE canonical_pain_id = ?').get(input.canonicalPainId);
         // Runtime Contract #1/#2: validate DB row instead of `as` cast
         if (rawRow && typeof rawRow === 'object' && Object.hasOwn(rawRow, 'id') && typeof (rawRow as Record<string, unknown>).id === 'number') {
@@ -1520,6 +1532,7 @@ export class TrajectoryDatabase {
         origin: 'system_infer',
         text: diffExcerpt || undefined,
         createdAt: String(record.created_at),
+        hostKind: 'openclaw',
       });
     } catch (err) {
       // Non-fatal: pain event recording should not break the review flow

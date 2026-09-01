@@ -472,9 +472,9 @@ function insertCorrectionPain({ db, candidate, workspaceDir, painId, detection, 
   // is NOT used here: buildEvidence already truncated it upstream, so a token
   // straddling that cut would survive sanitization the same way.
   const excerpt = sanitizeString(candidate.text, workspaceDir);
-  db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(candidate.rootSessionId, 'user_correction', GOVERNANCE_STRONG_PAIN_SCORE, reason.slice(0, MAX_REASON_BOUND), 'severe', 'system_infer', null, excerpt, painId, null, nowIso);
+  db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(candidate.rootSessionId, 'user_correction', GOVERNANCE_STRONG_PAIN_SCORE, reason.slice(0, MAX_REASON_BOUND), 'severe', 'system_infer', null, excerpt, painId, null, candidate.hostKind, nowIso);
   return reason;
 }
 
@@ -583,6 +583,9 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         // Live + transcript duplicate or a crash-replay: the canonical pain
         // already exists — no second row, no second quota consumption.
         duplicate = true;
+        // PRI-640 §17: enrich unknown → codex from proven governance lineage;
+        // the IS NULL guard keeps any durable attribution (never overwrites).
+        db.prepare('UPDATE pain_events SET host_kind = ? WHERE canonical_pain_id = ? AND host_kind IS NULL').run(candidate.hostKind, painId);
       } else {
         if (!tryConsumeRateLimit({ db, rootSessionId: candidate.rootSessionId, ruleVersion: detection.ruleVersion, now })) {
           throw new RateLimitedSignal();
@@ -663,9 +666,12 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
       db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(candidate.rootSessionId, candidate.toolName, outcome.failure ? 'failure' : 'success', outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, nowIso);
       reason = `tool=${candidate.toolName}; error=${outcome.error ?? `exit=${outcome.exitCode}`}; path=${relativePath}`;
-      db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(candidate.rootSessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, null, painId, null, nowIso);
+      db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(candidate.rootSessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, null, painId, null, candidate.hostKind, nowIso);
     }
+    // PRI-640 §17: enrich unknown → codex on the already-admitted duplicate
+    // pain row; the IS NULL guard keeps any durable attribution.
+    db.prepare('UPDATE pain_events SET host_kind = ? WHERE canonical_pain_id = ? AND host_kind IS NULL').run(candidate.hostKind, painId);
     if (!duplicateWithoutPain) {
       insertAdmissionMarker({ db, candidate, workspaceDir, canonicalPainId: painId, ruleVersion: null, reason: sanitizeString(reason, workspaceDir), nowIso });
     }

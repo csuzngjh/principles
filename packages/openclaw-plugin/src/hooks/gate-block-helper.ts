@@ -271,6 +271,7 @@ export function recordGateBlockAndReturn(
               score: GATE_BLOCK_PAIN_SCORE,
               sessionId,
               agentId: 'main',
+              hostKind: 'openclaw',
             },
           }).catch((emitErr) => {
             logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
@@ -306,6 +307,7 @@ export function recordGateBlockAndReturn(
             score: GATE_BLOCK_PAIN_SCORE,
             sessionId,
             agentId: 'main',
+            hostKind: 'openclaw',
           },
         }).catch((emitErr) => {
           logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);

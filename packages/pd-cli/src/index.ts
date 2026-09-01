@@ -10,6 +10,7 @@ import { Command } from 'commander';
 import { handlePainRecord } from './commands/pain-record.js';
 import { registerPainRetryCommand } from './commands/pain-retry.js';
 import { handlePainEvidence } from './commands/pain-evidence.js';
+import { handlePainList } from './commands/pain-list.js';
 import { handleSamplesList } from './commands/samples-list.js';
 import { handleSamplesReview } from './commands/samples-review.js';
 import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
@@ -129,6 +130,17 @@ painCmd
   });
 
 registerPainRetryCommand(painCmd);
+
+painCmd
+  .command('list')
+  .description('List canonical pain events with host attribution (PRI-640)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-l, --limit <number>', 'Max entries to show (default: 20)', parseInt)
+  .option('--host <kind>', 'Filter by host: openclaw | codex | unknown')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handlePainList(opts);
+  });
 
 painCmd
   .command('evidence')

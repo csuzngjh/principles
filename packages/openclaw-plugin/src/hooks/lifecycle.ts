@@ -163,6 +163,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
             score: 100,
             sessionId: ctx.sessionId || 'unknown',
             agentId: ctx.agentId,
+            hostKind: 'openclaw',
           },
         });
       }
