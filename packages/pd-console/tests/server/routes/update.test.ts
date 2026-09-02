@@ -410,6 +410,15 @@ describe('handleUpdateRoute', () => {
 
       await handleUpdateRoute(req, res, workspaceDir, '/apply');
 
+      // tar must be invoked with --force-local: Git Bash GNU tar misparses
+      // C:\... paths as remote host C: (host:path) without it, aborting the
+      // update with "tar: Cannot connect to C: resolve failed" on Windows.
+      const tarCalls = vi.mocked(execSyncMock).mock.calls.filter((c) => c[0] === 'tar');
+      expect(tarCalls.length).toBeGreaterThan(0);
+      for (const call of tarCalls) {
+        expect(call[1]).toContain('--force-local');
+      }
+
       expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
       const body = parseResponseBody<{ success: boolean; data: { success: boolean; message: string; newVersion: string } }>(res);
       expect(body.success).toBe(true);

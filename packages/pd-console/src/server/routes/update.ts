@@ -623,7 +623,9 @@ async function doApplyUpdate(
     fs.writeFileSync(tarballPath, buffer);
     // EP-08: spawn tar via argv array — tarball/temp paths stay data, never
     // shell syntax (Mimosa command-injection finding, 2026-08-22).
-    execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1'], { stdio: 'pipe' });
+    // --force-local: Git Bash GNU tar misparses C:\... paths as remote host
+    // C: (host:path syntax), causing "tar: Cannot connect to C: resolve failed".
+    execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1', '--force-local'], { stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
     // 4. Compute diff and apply.
@@ -991,7 +993,9 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     fs.writeFileSync(tarballPath, buffer);
     // EP-08: spawn tar via argv array — tarball/temp paths stay data, never
     // shell syntax (Mimosa command-injection finding, 2026-08-22).
-    execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1'], { stdio: 'pipe' });
+    // --force-local: Git Bash GNU tar misparses C:\... paths as remote host
+    // C: (host:path syntax), causing "tar: Cannot connect to C: resolve failed".
+    execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1', '--force-local'], { stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
     // The tarball, not the installer package version, is the release we are
