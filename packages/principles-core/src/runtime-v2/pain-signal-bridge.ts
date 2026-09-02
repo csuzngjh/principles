@@ -199,14 +199,34 @@ function countSubmittedEvidence(diagnosticJson: string | undefined): number {
   }
 }
 
+/** Owner-explicit sources — mirrors shouldShortCircuitEmptyEvidence and the plugin funnel's MANUAL_SOURCES (PRI-642). */
+const OWNER_MANUAL_SOURCES = new Set(['manual', 'pain', 'skill:pain']);
+
+function inferProvenance(data: PainDetectedData): PainProvenance {
+  if (OWNER_MANUAL_SOURCES.has(data.source) && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
+    return 'owner_reported_no_host_trace';
+  }
+  if (data.sessionId && data.sessionId !== 'cli' && data.sessionId !== 'unknown') {
+    return 'host_context_bound';
+  }
+  return 'automatic_hook';
+}
+
 /**
  * PRI-642 SPEC §9: re-entry validation of the persisted diagnostic payload.
  *
  * The payload is the single authority for admission provenance and the
- * input-evidence count. A task without parseable provenance fails loud
- * (rc-3) instead of silently defaulting to `host_context_bound`; when the
- * versioned `painIngress` namespace is present it must agree with the
- * legacy top-level fields produced by the same builder.
+ * input-evidence count; when the versioned `painIngress` namespace is
+ * present it must agree with the legacy top-level fields produced by the
+ * same builder.
+ *
+ * A payload WITHOUT top-level provenance (pre-PRI-453-style raw rows) goes
+ * through the SPEC §9 legacy normalization branch: `inferProvenance`
+ * re-derives the classification from the payload's OWN persisted fields
+ * (`source`, `sessionIdHint`) exactly as the historical writer did. It
+ * never fabricates `host_context_bound` — binding is derived only when the
+ * payload itself carries a real (non-sentinel) session hint; a manual
+ * source without a session normalizes to `owner_reported_no_host_trace`.
  */
 function validatePersistedIngressFacts(diagnosticJson: string | undefined): { provenance: PainProvenance; evidenceCount: number; errorCode: null } | { provenance: null; evidenceCount: null; errorCode: string } {
   if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) {
@@ -226,14 +246,17 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
   }
   const record = parsed;
 
-  const provenance = normalizePainProvenance(record.provenance);
-  if (provenance === undefined) {
-    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:provenance_missing' };
-  }
-
   const evidenceCount = countSubmittedEvidence(diagnosticJson);
+  const hasProvenanceField = Object.hasOwn(record, 'provenance');
+  const provenance = hasProvenanceField ? normalizePainProvenance(record.provenance) : undefined;
 
   if (Object.hasOwn(record, 'painIngress')) {
+    if (provenance === undefined) {
+      // A rev-2 payload must carry both namespaces consistently; a missing
+      // top-level provenance beside a painIngress block is a contradiction
+      // (rc-3), not a legacy row.
+      return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:provenance_missing' };
+    }
     const ingress = parsePainIngressV1Payload(record.painIngress);
     if (!ingress.ok) {
       return { provenance: null, evidenceCount: null, errorCode: ingress.reasonCode };
@@ -257,20 +280,21 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
   // Legacy payload without the v1 namespace: the persisted top-level
   // provenance is the authority. This branch fabricates nothing — it only
   // reads what the writer persisted.
-  return { provenance, evidenceCount, errorCode: null };
-}
-
-/** Owner-explicit sources — mirrors shouldShortCircuitEmptyEvidence and the plugin funnel's MANUAL_SOURCES (PRI-642). */
-const OWNER_MANUAL_SOURCES = new Set(['manual', 'pain', 'skill:pain']);
-
-function inferProvenance(data: PainDetectedData): PainProvenance {
-  if (OWNER_MANUAL_SOURCES.has(data.source) && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
-    return 'owner_reported_no_host_trace';
+  if (provenance !== undefined) {
+    return { provenance, evidenceCount, errorCode: null };
   }
-  if (data.sessionId && data.sessionId !== 'cli' && data.sessionId !== 'unknown') {
-    return 'host_context_bound';
-  }
-  return 'automatic_hook';
+
+  // Legacy normalization branch (SPEC §9): no top-level provenance and no
+  // painIngress block — re-derive from the payload's own persisted fields
+  // exactly as the historical writer did (never a host-bound default).
+  const recordData: PainDetectedData = {
+    painId: typeof record.sourcePainId === 'string' ? record.sourcePainId : '',
+    painType: 'user_frustration',
+    source: typeof record.source === 'string' ? record.source : '',
+    reason: typeof record.reasonSummary === 'string' ? record.reasonSummary : '',
+    sessionId: typeof record.sessionIdHint === 'string' ? record.sessionIdHint : undefined,
+  };
+  return { provenance: inferProvenance(recordData), evidenceCount, errorCode: null };
 }
 
 function provenanceReason(provenance: PainProvenance): string {

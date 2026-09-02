@@ -138,13 +138,31 @@ describe('PainSignalBridge.executePendingDiagnosis (PRI-624)', () => {
   // ── PRI-642 SPEC §9: re-entry reads persisted facts; no host-binding
   // defaults, nested/top-level mismatch rejected before the LLM. ────────────
 
-  it('a payload without provenance fails loud instead of defaulting to host_context_bound', async () => {
-    const payload = JSON.stringify({ sourcePainId: PAIN_ID, evidence: [] });
+  it('a payload without provenance uses the legacy normalization branch — never host_context_bound without a session hint', async () => {
+    // No provenance, no session hint → automatic_hook (not a fabricated binding).
+    const payload = JSON.stringify({ sourcePainId: PAIN_ID, source: 'write_file', evidence: [] });
     const { bridge, run } = createBridge(taskRecord({ diagnosticJson: payload }), SUCCESS);
     const result = await bridge.executePendingDiagnosis({ taskId: TASK_ID });
-    expect(run).not.toHaveBeenCalled();
-    expect(result.status).toBe('failed');
-    expect(result.message).toBe('diagnostic_payload_invalid:provenance_missing');
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(result.message).not.toContain('diagnostic_payload_invalid');
+
+    // A rev-2 payload (painIngress block present) with missing top-level
+    // provenance is a contradiction — still rejected (rc-3).
+    const contradiction = JSON.stringify({
+      sourcePainId: PAIN_ID,
+      evidence: [],
+      painIngress: {
+        version: 'v1',
+        origin: { kind: 'owner_manual', channel: 'openclaw_command' },
+        correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'sess-1' },
+        evidenceClass: { status: 'available', entryCount: 0 },
+      },
+    });
+    const { bridge: bridge2, run: run2 } = createBridge(taskRecord({ diagnosticJson: contradiction }), SUCCESS);
+    const result2 = await bridge2.executePendingDiagnosis({ taskId: TASK_ID });
+    expect(run2).not.toHaveBeenCalled();
+    expect(result2.status).toBe('failed');
+    expect(result2.message).toBe('diagnostic_payload_invalid:provenance_missing');
   });
 
   it('an unparseable payload fails loud before the runner', async () => {
