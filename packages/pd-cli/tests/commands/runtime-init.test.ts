@@ -375,8 +375,9 @@ describe('pd runtime init', () => {
         const obj = parsed as { version?: unknown; workspace?: { default?: unknown }; features?: unknown };
         expect(obj.version).toBe(1);
         expect(obj.workspace?.default).toBe(path.resolve(tmp));
-        expect(obj.features).toBeDefined();
-        expect(Object.keys(obj.features as Record<string, unknown>).length).toBeGreaterThan(0);
+        // PRI-645: the section must EXIST but stay a sparse empty map —
+        // registry defaults are never materialized into a fresh config.
+        expect(obj.features).toEqual({});
       } finally { rmTmpDir(tmp); }
     });
 
@@ -393,22 +394,31 @@ describe('pd runtime init', () => {
       } finally { rmTmpDir(tmp); }
     });
 
-    it('--confirm marks every generated flag entry as system provenance (PRI-637)', async () => {
+    it('--confirm writes a sparse features map; effective flags equal registry defaults (PRI-645)', async () => {
       const tmp = mkTmpDir();
       try {
         buildRuntimeInitOutput(tmp, true);
         const configPath = path.join(tmp, '.pd', 'config.yaml');
         const yaml = (await import('js-yaml')).default;
-        const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA }) as {
-          features?: Record<string, { source?: unknown }>;
-        };
-        const features = parsed.features ?? {};
-        // Bootstrap snapshot still carries the full registry map.
-        expect(Object.keys(features).length).toBeGreaterThan(0);
-        // PRI-637: `pd runtime init` is PD machinery — entries carry source:
-        // 'system' (NOT owner intent), matching the runtime-init lifecycle label.
-        for (const entry of Object.values(features)) {
-          expect(entry?.source).toBe('system');
+        const { computeEffectivePdConfig, validatePdConfig } = await import('@principles/core/runtime-v2');
+        const parsed: unknown = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+        const parsedFeatures = (parsed as { features?: unknown }).features;
+        // Raw invariant: zero default-equivalent snapshot entries (was: full
+        // 46-entry registry snapshot with source: 'system' before PRI-645).
+        expect(parsedFeatures).toEqual({});
+        // Effective invariant: every registered flag resolves to its registry
+        // default — the sparse raw representation changes nothing. The pure-
+        // defaults effective config is the registry-derived baseline.
+        const validation = validatePdConfig(parsed);
+        expect(validation.ok).toBe(true);
+        if (validation.ok) {
+          const effective = computeEffectivePdConfig(validation.value);
+          const pureDefaults = computeEffectivePdConfig(null);
+          expect(Object.keys(effective.config.features)).toHaveLength(Object.keys(pureDefaults.config.features).length);
+          for (const [id, def] of Object.entries(pureDefaults.config.features)) {
+            expect(effective.config.features[id]).toEqual(def);
+          }
+          expect(effective.featuresChangedFromDefault).toEqual([]);
         }
       } finally { rmTmpDir(tmp); }
     });

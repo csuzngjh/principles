@@ -20,8 +20,8 @@ import {
   getInstalledBinDir,
   isWindows,
   generateConfigYamlContent,
-  HostRuntimeConfigMigrationInfraError,
-  migrateHostRuntimeFlagsInConfigYaml,
+  ExistingConfigVerifyInfraError,
+  validateExistingConfigYamlForPreserve,
   getConfigYamlPath,
   validateConfigYamlFull,
   readEnabledChannelsFromConfigYaml,
@@ -667,16 +667,14 @@ describe('Installer has no @principles/core runtime dependency (P1 fix)', () => 
     expect(content).not.toContain('@principles/core');
   });
 
-  it('generateConfigYamlContent inlines core flag definitions matching core schema', () => {
+  it('generateConfigYamlContent declares an empty sparse features map (PRI-645)', () => {
     const mvpConfigPath = path.resolve(__dirname, '..', 'src', 'mvp-config.ts');
-    const content = fs.readFileSync(mvpConfigPath, 'utf-8');
-    // PRI-460: DEFAULT_FEATURE_FLAGS array was removed; the canonical source is
-    // generateConfigYamlContent, which must still inline the core/quiet/gone categories.
-    expect(content).toContain("prompt:             { category: 'core',  enabled: true, source: 'system' }");
-    expect(content).toContain("code_tool_hook:     { category: 'core',  enabled: true, source: 'system' }");
-    expect(content).toContain("defer_archive:      { category: 'core',  enabled: true, source: 'system' }");
-    expect(content).toContain("gfi:                { category: 'quiet', enabled: false, source: 'system' }");
-    expect(content).toContain("nocturnal:          { category: 'gone',  enabled: false, source: 'system' }");
+    const content = fs.readFileSync(mvpConfigPath, 'utf8');
+    // PRI-645: the template must not duplicate registry defaults. The features
+    // literal contains no flag entries (nested objects) — defaults belong to
+    // DEFAULT_FEATURE_FLAGS in principles-core, reconciled by the core-side
+    // installer-config-parity contract test.
+    expect(content).toContain('features: {},');
   });
 });
 
@@ -1498,76 +1496,79 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     expect(feedback.maintainer_email).toBe('owner@example.com');
   });
 
-  it('core features (prompt, code_tool_hook, defer_archive) are enabled', () => {
+  it('PRI-645: core channels are not materialized — registry owns their defaults', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
     for (const ch of MVP_CHANNELS) {
-      const flag = features[ch] as Record<string, unknown>;
-      expect(flag).toBeDefined();
-      expect(flag.enabled).toBe(true);
-      expect(flag.category).toBe('core');
+      // Absence ≠ disabled: computeEffectivePdConfig resolves every missing
+      // flag from DEFAULT_FEATURE_FLAGS (core channels default ON there).
+      expect(Object.hasOwn(features, ch)).toBe(false);
     }
   });
 
-  it('persists both PRI-523 host rollout flags in fresh config', () => {
+  it('PRI-645: host rollout flags are not materialized in fresh config', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
-    expect(features['host.codex']).toEqual({ category: 'core', enabled: true, source: 'system' });
-    expect(features.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false, source: 'system' });
+    // Both flags' defaults live in the registry (host.codex=ON core,
+    // abstraction_layer_v1=OFF quiet); the PRI-523 snapshot entries are gone.
+    expect(Object.hasOwn(features, 'host.codex')).toBe(false);
+    expect(Object.hasOwn(features, 'abstraction_layer_v1')).toBe(false);
   });
 
-  it('adds missing PRI-523 flags to a migrated config while preserving explicit rollback values', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-migration-'));
+  it('PRI-645: existing config is preserved verbatim — no flag entries added, removed or rewritten', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-preserve-existing-'));
     const configDir = path.join(tmpDir, '.pd');
     fs.mkdirSync(configDir, { recursive: true });
     const configPath = path.join(configDir, 'config.yaml');
-    const existing = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
-    const features = existing.features as Record<string, unknown>;
-    delete features.abstraction_layer_v1;
-    features['host.codex'] = { category: 'core', enabled: false };
-    fs.writeFileSync(configPath, yaml.dump(existing), 'utf8');
+    // A legacy dense config (pre-PRI-645 shape) with Owner intent on top:
+    // system snapshot entries + an explicit owner override + a legacy alias.
+    // None of these may be normalized, cleaned or "sparsified" by the
+    // preserve path (PRI-637: source=system is an origin hint, not an
+    // auto-delete license).
+    const legacy = [
+      'version: 1',
+      'features:',
+      '  prompt:',
+      '    category: core',
+      '    enabled: true',
+      '    source: system',
+      '  host.codex:',
+      '    category: core',
+      '    enabled: false',
+      '  intent_engineering:',
+      '    category: quiet',
+      '    enabled: true',
+      '    source: owner',
+      'runtimeProfiles:',
+      '  pd.default:',
+      '    type: pi-ai',
+      "    provider: ''",
+      "    model: ''",
+      "    apiKeyEnv: ''",
+      'internalAgents:',
+      '  defaultRuntime: pd.default',
+      '  agents:',
+      '    diagnostician:',
+      '      enabled: true',
+      '      runtimeProfile: pd.default',
+      'ui:',
+      '  diagnostics:',
+      '    mode: simple',
+      '',
+    ].join('\n');
+    fs.writeFileSync(configPath, legacy, 'utf8');
 
     try {
-      expect(migrateHostRuntimeFlagsInConfigYaml(tmpDir)).toBe(true);
-      const migrated = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-      const migratedFeatures = migrated.features as Record<string, unknown>;
-      expect(migratedFeatures['host.codex']).toEqual({ category: 'core', enabled: false });
-      expect(migratedFeatures.abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false, source: 'system' });
+      expect(() => validateExistingConfigYamlForPreserve(tmpDir)).not.toThrow();
+      // Byte-identical preservation — the retired PRI-523 migration used to
+      // add host.codex/abstraction_layer_v1 entries here; PRI-645 writes nothing.
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(legacy);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('rereads authoritative YAML under lock and preserves a concurrent owner update', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-runtime-concurrent-'));
-    const configDir = path.join(tmpDir, '.pd');
-    fs.mkdirSync(configDir, { recursive: true });
-    const configPath = path.join(configDir, 'config.yaml');
-    const original = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
-    delete (original.features as Record<string, unknown>).abstraction_layer_v1;
-    fs.writeFileSync(configPath, yaml.dump(original), 'utf8');
-
-    try {
-      migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
-        withLock: (_filePath, action) => {
-          const ownerUpdate = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-          ownerUpdate.ownerNote = 'concurrent-update-kept';
-          fs.writeFileSync(configPath, yaml.dump(ownerUpdate), 'utf8');
-          return action();
-        },
-        atomicReplace: (filePath, content) => fs.writeFileSync(filePath, content, 'utf8'),
-      });
-
-      const migrated = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-      expect(migrated.ownerNote).toBe('concurrent-update-kept');
-      expect((migrated.features as Record<string, unknown>).abstraction_layer_v1).toEqual({ category: 'quiet', enabled: false, source: 'system' });
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('PRI-435: code_rule_capability is registered as core/enabled in generated config', () => {
-    // Runtime Contract Rule 1/2: validate parsed YAML as unknown before property access
+  it('PRI-645: code_rule_capability is not materialized (registry core/ON default)', () => {
     const parsed: unknown = yaml.load(generateConfigYamlContent());
     expect(parsed).toBeTruthy();
     expect(typeof parsed === 'object' && !Array.isArray(parsed)).toBe(true);
@@ -1575,61 +1576,39 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
     expect(Object.hasOwn(parsed, 'features')).toBe(true);
     const features = (parsed as Record<string, unknown>).features;
     expect(typeof features === 'object' && features !== null && !Array.isArray(features)).toBe(true);
-    if (typeof features !== 'object' || features === null) return;
-    expect(Object.hasOwn(features, 'code_rule_capability')).toBe(true);
-    const flag = (features as Record<string, unknown>).code_rule_capability;
-    expect(typeof flag === 'object' && flag !== null).toBe(true);
-    if (typeof flag !== 'object' || flag === null) return;
-    expect(Object.hasOwn(flag, 'enabled')).toBe(true);
-    expect((flag as Record<string, unknown>).enabled).toBe(true);
-    expect(Object.hasOwn(flag, 'category')).toBe(true);
-    expect((flag as Record<string, unknown>).category).toBe('core');
+    // Registry owns the core/ON default; absence is resolved by the effective
+    // config (locked by principles-core pd-config-sparse-bootstrap tests).
+    expect(Object.hasOwn(features as Record<string, unknown>, 'code_rule_capability')).toBe(false);
   });
 
-  it('quiet features are disabled', () => {
+  it('PRI-645: quiet flags are not materialized — absence follows registry defaults', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
     for (const quiet of MVP_QUIET_FLAGS) {
-      const flag = features[quiet] as Record<string, unknown>;
-      expect(flag).toBeDefined();
-      expect(flag.enabled).toBe(false);
-      expect(flag.category).toBe('quiet');
+      expect(Object.hasOwn(features, quiet)).toBe(false);
     }
   });
 
-  it('gone features are disabled', () => {
+  it('PRI-645: gone flags are not materialized — gone behavior is enforced by the resolver', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
     for (const gone of MVP_GONE_FLAGS) {
-      const flag = features[gone] as Record<string, unknown>;
-      expect(flag).toBeDefined();
-      expect(flag.enabled).toBe(false);
-      expect(flag.category).toBe('gone');
+      expect(Object.hasOwn(features, gone)).toBe(false);
     }
   });
 
-  it('keeps experimental receipt self-report disabled in a fresh install', () => {
+  it('PRI-645: fresh config materializes zero feature overrides of any kind', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
-    const enabledFlags: string[] = [];
-    for (const [key, value] of Object.entries(features)) {
-      if (typeof value === 'object' && value !== null && Object.hasOwn(value, 'enabled')) {
-        const flag = value as Record<string, unknown>;
-        if (flag.enabled === true) enabledFlags.push(key);
-      }
-    }
-    expect(enabledFlags.sort()).toEqual(['code_rule_capability', 'code_tool_hook', 'defer_archive', 'failed_tasks_observability', 'feedback_channel', 'host.codex', 'principle_receipt_block_copy', 'principle_receipt_ledger', 'prompt']);
+    expect(features).toEqual({});
   });
 
-  it('keeps principle receipt flags quiet and only graduates deterministic receipt capabilities', () => {
+  it('PRI-645: receipt flags follow registry defaults (no snapshot entries)', () => {
     const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;
-    for (const key of ['principle_receipt_block_copy', 'principle_receipt_ledger']) {
-      const flag = features[key] as Record<string, unknown>;
-      expect(flag?.category).toBe('quiet');
-      expect(flag?.enabled).toBe(true);
+    for (const key of ['principle_receipt_block_copy', 'principle_receipt_ledger', 'principle_receipt_self_report']) {
+      expect(Object.hasOwn(features, key)).toBe(false);
     }
-    expect(features.principle_receipt_self_report).toEqual({ category: 'quiet', enabled: false, source: 'system' });
   });
 
   it('written to temp workspace is loadable', () => {
@@ -1641,11 +1620,10 @@ describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
       const raw = fs.readFileSync(path.join(configDir, 'config.yaml'), 'utf8');
       const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>;
       expect(Object.hasOwn(parsed, 'version')).toBe(true);
+      // The features section must EXIST (validatePdConfig requires it) but be
+      // a sparse empty map — never an absent section, never a default snapshot.
       expect(Object.hasOwn(parsed, 'features')).toBe(true);
-      const features = parsed.features as Record<string, unknown>;
-      expect(Object.hasOwn(features, 'prompt')).toBe(true);
-      expect(Object.hasOwn(features, 'code_tool_hook')).toBe(true);
-      expect(Object.hasOwn(features, 'defer_archive')).toBe(true);
+      expect(parsed.features).toEqual({});
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1676,14 +1654,27 @@ describe('readEnabledChannelsFromConfigYaml', () => {
     }
   });
 
-  it('returns channels for valid config.yaml', () => {
+  it('returns [] for a sparse fresh config (PRI-645) and channels for explicit entries', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
     try {
       const configDir = path.join(tmpDir, '.pd');
       fs.mkdirSync(configDir, { recursive: true });
-      fs.writeFileSync(path.join(configDir, 'config.yaml'), generateConfigYamlContent(), 'utf8');
-      const result = readEnabledChannelsFromConfigYaml(tmpDir);
-      expect(result).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
+      fs.writeFileSync(configDir + path.sep + 'config.yaml', generateConfigYamlContent(), 'utf8');
+      // Sparse fresh config: no channel entries → no raw-enabled channels.
+      // The installer's enabledChannels output falls back to options.channels
+      // (parseChannelsOption always force-includes the three core channels),
+      // so the reported install result is unchanged.
+      expect(readEnabledChannelsFromConfigYaml(tmpDir)).toEqual([]);
+
+      // Explicit channel entries (legacy dense configs, Owner edits) still win.
+      const dense = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+      const features = dense.features as Record<string, unknown>;
+      for (const ch of MVP_CHANNELS) {
+        features[ch] = { category: 'core', enabled: true };
+      }
+      features.prompt = { category: 'core', enabled: false };
+      fs.writeFileSync(configDir + path.sep + 'config.yaml', yaml.dump(dense), 'utf8');
+      expect(readEnabledChannelsFromConfigYaml(tmpDir)).toEqual(['code_tool_hook', 'defer_archive']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -2144,11 +2135,11 @@ describe('PRI-442 P0: runtime-init.ts import resolves via symlink (Bug-B-001)', 
   });
 });
 
-// ─── PRI-523 review: infra failures are not "malformed config" ───────────────
-// Lock contention and atomic-write EPERM/ENOSPC must surface as
-// HostRuntimeConfigMigrationInfraError so the installer advises retrying —
-// never deleting — a valid .pd/config.yaml. Validation failures stay plain.
-describe('migrateHostRuntimeFlagsInConfigYaml — infra failure classification', () => {
+// ─── PRI-523 review (carried into PRI-645): infra failures are not "malformed config"
+// Read failures (EPERM/EISDIR/...) must surface as ExistingConfigVerifyInfraError
+// so the installer advises retrying — never deleting — a possibly valid
+// .pd/config.yaml. Validation failures stay plain errors.
+describe('validateExistingConfigYamlForPreserve — infra failure classification', () => {
   function writeValidConfig(tmpDir: string): string {
     const configPath = path.join(tmpDir, '.pd', 'config.yaml');
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -2156,55 +2147,44 @@ describe('migrateHostRuntimeFlagsInConfigYaml — infra failure classification',
     return configPath;
   }
 
-  it('classifies config-lock unavailability as infra, with the config left unchanged', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-lock-'));
+  it('accepts a valid existing config and leaves the file byte-identical', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-preserve-valid-'));
     try {
       const configPath = writeValidConfig(tmpDir);
       const before = fs.readFileSync(configPath, 'utf8');
-      expect(() => migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
-        withLock: () => {
-          throw new Error('Failed to acquire config lock /x/.pd/config.yaml.lock; holder PID 42; nextAction=remove the lock manually only after verifying no installer is active');
-        },
-        atomicReplace: () => { throw new Error('atomicReplace must not run when the lock fails'); },
-      })).toThrow(HostRuntimeConfigMigrationInfraError);
+      expect(() => validateExistingConfigYamlForPreserve(tmpDir)).not.toThrow();
       expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('classifies an atomic-replace EPERM as infra', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-eperm-'));
+  it('classifies a read failure (EISDIR) as infra, with the config left unchanged', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-preserve-isdir-'));
     try {
-      // Drop one rollout flag so the migration actually attempts the write
-      // (a fully-flagged fresh config is a no-op and never calls atomicReplace).
-      const configPath = writeValidConfig(tmpDir);
-      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-      delete (parsed.features as Record<string, unknown>).abstraction_layer_v1;
-      fs.writeFileSync(configPath, yaml.dump(parsed), 'utf8');
-      const eperm = Object.assign(new Error("EPERM: operation not permitted, rename '/x/.pd/config.yaml'"), { code: 'EPERM' });
-      expect(() => migrateHostRuntimeFlagsInConfigYaml(tmpDir, {
-        withLock: (_filePath, action) => action(),
-        atomicReplace: () => { throw eperm; },
-      })).toThrow(HostRuntimeConfigMigrationInfraError);
+      // config.yaml as a directory: existsSync passes, readFileSync fails with
+      // EISDIR — an environment problem, not a malformed config.
+      const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+      fs.mkdirSync(configPath, { recursive: true });
+      expect(() => validateExistingConfigYamlForPreserve(tmpDir)).toThrow(ExistingConfigVerifyInfraError);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
   it('keeps validation failures (malformed config) as plain errors, not infra', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-migration-malformed-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-preserve-malformed-'));
     try {
       const configPath = path.join(tmpDir, '.pd', 'config.yaml');
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, 'features: [not, an, object]\n', 'utf8');
       const capture = (): unknown => {
-        try { migrateHostRuntimeFlagsInConfigYaml(tmpDir); } catch (error) { return error; }
+        try { validateExistingConfigYamlForPreserve(tmpDir); } catch (error) { return error; }
         return undefined;
       };
       const thrown = capture();
       expect(thrown).toBeInstanceOf(Error);
-      expect(thrown).not.toBeInstanceOf(HostRuntimeConfigMigrationInfraError);
+      expect(thrown).not.toBeInstanceOf(ExistingConfigVerifyInfraError);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

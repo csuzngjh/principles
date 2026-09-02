@@ -2209,6 +2209,103 @@ describe('PRI-637: config writers do not snapshot merged defaults (sparse overri
   });
 });
 
+// ── PRI-645: sparse bootstrap config — writer safety on fresh workspaces ────
+//
+// Fresh configs now ship `features: {}` (registry owns defaults). These
+// tests lock the Console-side invariants:
+//   1. a toggle on a `features: {}` workspace adds EXACTLY ONE owner override;
+//   2. agent/default-runtime writers keep `features: {}` sparse (an empty
+//      object is a valid raw feature map — structural checks, not falsey);
+//   3. creating a config where none existed never snapshots registry defaults.
+
+describe('PRI-645: Console writers on a sparse fresh workspace', () => {
+  function readConfig(): Record<string, unknown> {
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    return yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+  }
+
+  it('updateFeatureFlag on features: {} adds exactly one owner override', async () => {
+    // Fresh PRI-645 bootstrap shape: section present, map empty.
+    writeConfig({ ...VALID_CONFIG, features: {} });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/features/intent_engineering',
+      body: { enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/features/intent_engineering',
+    });
+    expect(res.statusCode).toBe(200);
+
+    const features = readConfig().features as Record<string, unknown>;
+    expect(Object.keys(features)).toEqual(['intent_engineering']);
+    expect(features.intent_engineering).toEqual({ category: 'quiet', enabled: true, source: 'owner' });
+  });
+
+  it('updateAgentBinding keeps features: {} sparse (empty object is a valid feature map)', async () => {
+    writeConfig({ ...VALID_CONFIG, features: {} });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/diagnostician/binding',
+      body: { runtimeProfile: 'lmstudio-local', enabled: false },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/diagnostician/binding',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(readConfig().features).toEqual({});
+  });
+
+  it('updateDefaultRuntime keeps features: {} sparse', async () => {
+    writeConfig({ ...VALID_CONFIG, features: {} });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { defaultRuntime: 'lmstudio-local' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(readConfig().features).toEqual({});
+  });
+
+  it('updateAgentBinding on a config-less workspace creates a sparse features section, not a registry snapshot', async () => {
+    // No config.yaml at all — the writer must bootstrap `features: {}`
+    // (registry defaults are resolved at read time, never written back).
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/diagnostician/binding',
+      body: { runtimeProfile: 'openclaw.default', enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/diagnostician/binding',
+    });
+    expect(res.statusCode).toBe(200);
+    const features = readConfig().features;
+    expect(features).toEqual({});
+  });
+
+  it('updateDefaultRuntime on a config-less workspace creates a sparse features section, not a registry snapshot', async () => {
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { defaultRuntime: 'openclaw.default' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+    expect(res.statusCode).toBe(200);
+    const features = readConfig().features;
+    expect(features).toEqual({});
+  });
+});
+
 // ── PRI-638 (reviewer P1): canonical Console writer vs legacy split=false ────
 //
 // 1. An explicit Owner write to the canonical Diagnostician binding must

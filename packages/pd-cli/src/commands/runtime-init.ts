@@ -91,27 +91,23 @@ const DB_NAMES = {
  * Build a clean YAML representation of the default PD config, injecting the
  * workspace.default path so that discoverWorkspaceDefault() can find it.
  *
+ * PRI-645: `features` is a sparse map — the registry (DEFAULT_FEATURE_FLAGS)
+ * owns every default value and computeEffectivePdConfig() fills missing flags
+ * at read time. Materializing the full registry snapshot here would freeze
+ * today's defaults against future graduation flips. An empty map is fully
+ * valid (validatePdConfig only requires the section to be an object) and
+ * means "every flag follows its registry default".
+ *
  * Returns the YAML string (with header comment) for writing to disk.
  */
 function buildConfigYaml(workspaceDir: string): string {
   const config = getDefaultPdConfig();
-  // PRI-637: `pd runtime init` is PD machinery writing a bootstrap snapshot, so
-  // every flag entry records `source: 'system'` — an ORIGIN HINT, NOT proof that
-  // the value lacks Owner intent (direct .pd/config.yaml editing is a supported
-  // path; an Owner may later pin behavior on top of this entry). Labels are
-  // metadata only; effective values are unchanged. If a flag graduates, system-
-  // origin entries are cleanup CANDIDATES that still require explicit Owner
-  // confirmation before removal.
-  const features: Record<string, unknown> = {};
-  for (const [id, entry] of Object.entries(config.features)) {
-    features[id] = { category: entry.category, enabled: entry.enabled, source: 'system' };
-  }
   const yamlObj: Record<string, unknown> = {
     version: config.version,
     workspace: {
       default: workspaceDir,
     },
-    features,
+    features: {},
     runtimeProfiles: config.runtimeProfiles,
     internalAgents: config.internalAgents,
     ui: config.ui,

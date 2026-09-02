@@ -43,9 +43,11 @@ describe('Journey 12 — fresh install 默认面 (Outcome B)', () => {
     // signal LLM 检测面默认关闭 (Outcome B — 确定性路径仍由 keyword Stage1 常开承担):
     // signal_collector 未列出 → registry 默认 false;correction_observer 显式 false
     expect(features['signal_collector']).toBeUndefined();
-    // PRI-637: installer 条目带 source: 'system' (origin hint — 非 Owner 选择证据,
-    // 也非"可无条件自动删除"许可; 见 packages/principles-core pd-config-types.ts)。
-    expect(features['correction_observer']).toEqual({ category: 'quiet', enabled: false, source: 'system' });
+    // PRI-645: fresh config 携带零 feature 条目 — correction_observer 同样
+    // 不再物化,registry 默认 false 由 effective resolver 提供 (core 侧
+    // pd-config-sparse-bootstrap.test.ts 锁定该默认值)。
+    expect(features['correction_observer']).toBeUndefined();
+    expect(features).toEqual({});
   });
 
   it('带 provider 的安装: signalCollector 仍需用户显式启用 (不自动宣称 semantic 可用)', () => {
