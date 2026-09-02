@@ -12,6 +12,7 @@ import { recordPainSignalObservability } from './pain-signal-observability.js';
 import { FAILURE_CATEGORY_MAP } from './error-categories.js';
 import { createDiagnosticianTaskId } from './pain-signal-bridge.js';
 import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvidenceEntry } from './pain-signal-bridge.js';
+import type { PainIngressV1Payload } from './pain-ingress-payload.js';
 import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { EffectivePdConfig } from './config/pd-config-types.js';
@@ -73,6 +74,8 @@ export interface PainToPrincipleInput {
   hostKind?: PainDetectedData['hostKind'];
   evidence?: PainEvidenceEntry[];
   recordObservability?: boolean;
+  /** PRI-642 SPEC §9: validated rev-2 ingress facts persisted under painIngress.v1. */
+  painIngress?: PainIngressV1Payload;
 }
 
 export interface PainToPrincipleOutput {
@@ -159,6 +162,7 @@ export class PainToPrincipleService {
       provenance: input.provenance,
       hostKind: input.hostKind,
       evidence: input.evidence,
+      painIngress: input.painIngress,
     };
 
     try {

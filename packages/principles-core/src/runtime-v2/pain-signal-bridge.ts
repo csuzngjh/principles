@@ -5,12 +5,18 @@ import type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
-import { evaluateCandidateAdmissions } from './admission-gate.js';
+import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
 import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
+import {
+  parsePainIngressV1Payload,
+  checkIngressTopLevelConsistency,
+  deriveProvenanceFromIngressFacts,
+} from './pain-ingress-payload.js';
+import type { PainIngressV1Payload } from './pain-ingress-payload.js';
 
 export type { PainProvenance };
 
@@ -53,6 +59,13 @@ export interface PainDetectedData {
   /** Codex Governance Closure SPEC §12: provenance `host_context_bound` names the host. */
   hostKind?: GovernanceHostKind;
   evidence?: PainEvidenceEntry[];
+  /**
+   * PRI-642 SPEC §9: validated rev-2 ingress facts. When present,
+   * buildDiagnosticJson writes them under the versioned `painIngress`
+   * namespace next to the legacy top-level fields (one builder), and
+   * re-entry validates the two against each other.
+   */
+  painIngress?: PainIngressV1Payload;
 }
 
 export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded';
@@ -151,6 +164,64 @@ function countSubmittedEvidence(diagnosticJson: string | undefined): number {
   }
 }
 
+/**
+ * PRI-642 SPEC §9: re-entry validation of the persisted diagnostic payload.
+ *
+ * The payload is the single authority for admission provenance and the
+ * input-evidence count. A task without parseable provenance fails loud
+ * (rc-3) instead of silently defaulting to `host_context_bound`; when the
+ * versioned `painIngress` namespace is present it must agree with the
+ * legacy top-level fields produced by the same builder.
+ */
+function validatePersistedIngressFacts(diagnosticJson: string | undefined): { provenance: PainProvenance; evidenceCount: number; errorCode: null } | { provenance: null; evidenceCount: null; errorCode: string } {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:missing' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:unparseable' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:not_an_object' };
+  }
+  const record = parsed as Record<string, unknown>;
+
+  const provenance = normalizePainProvenance(record.provenance);
+  if (provenance === undefined) {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:provenance_missing' };
+  }
+
+  const evidenceCount = countSubmittedEvidence(diagnosticJson);
+
+  if (Object.hasOwn(record, 'painIngress')) {
+    const ingress = parsePainIngressV1Payload(record.painIngress);
+    if (!ingress.ok) {
+      return { provenance: null, evidenceCount: null, errorCode: ingress.reasonCode };
+    }
+    const mismatch = checkIngressTopLevelConsistency({
+      payload: ingress.payload,
+      topLevelProvenance: record.provenance,
+      topLevelSessionIdHint: Object.hasOwn(record, 'sessionIdHint') ? record.sessionIdHint : null,
+      topLevelEvidenceCount: evidenceCount,
+    });
+    if (mismatch !== null) {
+      return { provenance: null, evidenceCount: null, errorCode: mismatch };
+    }
+    return {
+      provenance: deriveProvenanceFromIngressFacts(ingress.payload.origin, ingress.payload.correlation),
+      evidenceCount,
+      errorCode: null,
+    };
+  }
+
+  // Legacy payload without the v1 namespace: the persisted top-level
+  // provenance is the authority. This branch fabricates nothing — it only
+  // reads what the writer persisted.
+  return { provenance, evidenceCount, errorCode: null };
+}
+
 function inferProvenance(data: PainDetectedData): PainProvenance {
   if (data.source === 'manual' && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
     return 'owner_reported_no_host_trace';
@@ -186,6 +257,9 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     ...(data.hostKind ? { hostKind: data.hostKind } : {}),
     evidence: data.evidence ?? [],
     workspaceDir: workspaceDir ?? null,
+    // PRI-642 SPEC §9: one builder produces BOTH the legacy top-level fields
+    // and the versioned nested namespace; re-entry validates consistency.
+    ...(data.painIngress ? { painIngress: data.painIngress } : {}),
   });
 }
 
@@ -419,7 +493,11 @@ export class PainSignalBridge {
    */
   async executePendingDiagnosis(input: {
     taskId: string;
-    /** Provenance used for admission metadata; submitted pains are host-context-bound by construction. */
+    /**
+     * @deprecated PRI-642 SPEC §9: re-entry reads the provenance from the
+     * persisted task payload; a caller-supplied value no longer overrides
+     * it (no host-binding defaults, single authority).
+     */
     provenance?: PainProvenance;
   }): Promise<PainSignalBridgeResult> {
     const { taskId } = input;
@@ -457,6 +535,23 @@ export class PainSignalBridge {
       return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'retry_wait_pending' };
     }
 
+    // PRI-642 SPEC §9: re-entry validates the persisted rev-2 facts BEFORE
+    // any LLM run — the payload is the authority for provenance/correlation
+    // (never a host_context_bound default), and a nested/top-level
+    // contradiction is rejected instead of silently resolved.
+    const reentry = validatePersistedIngressFacts(task.diagnosticJson);
+    if (reentry.errorCode !== null) {
+      return {
+        status: 'failed',
+        painId,
+        taskId,
+        candidateIds: [],
+        ledgerEntryIds: [],
+        errorCategory: 'input_invalid',
+        message: reentry.errorCode,
+      };
+    }
+
     const result = await this.runner.run(taskId);
     if (result.status !== 'succeeded') {
       // PRI-638: the task is deliberately left in its prior state (pending /
@@ -478,11 +573,8 @@ export class PainSignalBridge {
       taskId,
       diagnosticianOutput: result.output,
       painId,
-      provenance: input.provenance ?? 'host_context_bound',
-      // The submitted pain's evidence count lives in the task payload
-      // (buildDiagnosticJson). Admission gates on it (needs_evidence), so
-      // parse it back — validated, bounded, best-effort with explicit 0.
-      inputEvidenceCount: countSubmittedEvidence(task.diagnosticJson),
+      provenance: reentry.provenance,
+      inputEvidenceCount: reentry.evidenceCount,
     });
   }
 

@@ -1,0 +1,149 @@
+/**
+ * PRI-642 SPEC §9/§13 — painIngress.v1 dual-write SQLite round trip.
+ *
+ * submitPainSignal must persist BOTH the versioned `painIngress` namespace
+ * and the legacy top-level fields from one builder, consistently, in the
+ * real state store; re-entry validation must accept the round-tripped
+ * payload and reject a tampered nested/top-level contradiction.
+ */
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { PainSignalBridge } from '../pain-signal-bridge.js';
+import type { DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
+import { RuntimeStateManager } from '../store/runtime-state-manager.js';
+import { checkIngressTopLevelConsistency, parsePainIngressV1Payload } from '../pain-ingress-payload.js';
+import type { PainIngressV1Payload } from '../pain-ingress-payload.js';
+
+let tmpDir: string;
+let stateManager: RuntimeStateManager;
+
+function makeBridge(): PainSignalBridge {
+  const runner: DiagnosticianRunnerLike = { run: async () => ({ status: 'succeeded', taskId: 't', attemptCount: 1 }) };
+  return new PainSignalBridge({
+    stateManager,
+    runner,
+    intakeService: {} as never,
+    ledgerAdapter: { register: () => undefined, existsForCandidate: () => undefined, getEntries: () => [] } as never,
+  });
+}
+
+const BOUND_INGRESS: PainIngressV1Payload = {
+  version: 'v1',
+  origin: { kind: 'owner_manual', channel: 'openclaw_command' },
+  correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'sess-rt-1' },
+  evidenceClass: { status: 'available', entryCount: 2 },
+};
+
+describe('painIngress.v1 dual-write round trip (PRI-642 §9, §13)', () => {
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ingress-rt-'));
+    stateManager = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await stateManager.initialize();
+  });
+
+  afterEach(async () => {
+    await stateManager.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('persists the nested namespace beside the legacy top-level fields, consistently', async () => {
+    const bridge = makeBridge();
+    const { taskId } = await bridge.submitPainSignal({
+      painId: 'manual_rt_1',
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'round trip',
+      score: 70,
+      sessionId: 'sess-rt-1',
+      provenance: 'host_context_bound',
+      hostKind: 'openclaw',
+      evidence: [
+        { sourceRef: 'owner_message:t1', note: 'fix it' },
+        { sourceRef: 'tool_call_failure:t2', note: 'Tool bash failed' },
+      ],
+      painIngress: BOUND_INGRESS,
+    });
+
+    const task = await stateManager.getTask(taskId);
+    expect(task).not.toBeNull();
+    if (task === null) throw new Error('task missing after submit');
+    const parsed = JSON.parse(task.diagnosticJson as string) as Record<string, unknown>;
+
+    // Legacy top-level fields all present.
+    expect(parsed.sourcePainId).toBe('manual_rt_1');
+    expect(parsed.provenance).toBe('host_context_bound');
+    expect(parsed.sessionIdHint).toBe('sess-rt-1');
+    expect((parsed.evidence as unknown[]).length).toBe(2);
+    expect(parsed.hostKind).toBe('openclaw');
+
+    // Nested namespace present, parseable, consistent with top-level.
+    const ingress = parsePainIngressV1Payload(parsed.painIngress);
+    expect(ingress.ok).toBe(true);
+    if (!ingress.ok) return;
+    const mismatch = checkIngressTopLevelConsistency({
+      payload: ingress.payload,
+      topLevelProvenance: parsed.provenance,
+      topLevelSessionIdHint: parsed.sessionIdHint,
+      topLevelEvidenceCount: (parsed.evidence as unknown[]).length,
+    });
+    expect(mismatch).toBeNull();
+
+    // Re-entry accepts the round-tripped payload.
+    const executed = await bridge.executePendingDiagnosis({ taskId });
+    expect(executed.message).not.toContain('diagnostic_payload_invalid');
+    expect(executed.message).not.toContain('ingress_payload_mismatch');
+  });
+
+  it('a submission without ingress facts keeps the legacy-only payload (compatibility window)', async () => {
+    const bridge = makeBridge();
+    const { taskId } = await bridge.submitPainSignal({
+      painId: 'manual_rt_2',
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'legacy shape',
+      provenance: 'owner_reported_no_host_trace',
+      evidence: [],
+    });
+    const task = await stateManager.getTask(taskId);
+    if (task === null) throw new Error('task missing after submit');
+    const parsed = JSON.parse(task.diagnosticJson as string) as Record<string, unknown>;
+    expect(Object.hasOwn(parsed, 'painIngress')).toBe(false);
+    expect(parsed.provenance).toBe('owner_reported_no_host_trace');
+  });
+
+  it('re-entry rejects a payload whose nested facts were tampered after the write', async () => {
+    const bridge = makeBridge();
+    const { taskId } = await bridge.submitPainSignal({
+      painId: 'manual_rt_3',
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'tamper target',
+      sessionId: 'sess-rt-1',
+      provenance: 'host_context_bound',
+      hostKind: 'openclaw',
+      evidence: [{ sourceRef: 'owner_message:t1', note: 'fix it' }],
+      painIngress: {
+        version: 'v1',
+        origin: { kind: 'owner_manual', channel: 'openclaw_command' },
+        correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'sess-rt-1' },
+        evidenceClass: { status: 'available', entryCount: 1 },
+      },
+    });
+
+    // Corrupt the persisted nested evidence count (simulates drift between
+    // the two namespaces).
+    const task = await stateManager.getTask(taskId);
+    if (task === null) throw new Error('task missing after submit');
+    const payload = JSON.parse(task.diagnosticJson as string) as Record<string, unknown>;
+    const nested = payload.painIngress as Record<string, unknown>;
+    const cls = nested.evidenceClass as Record<string, unknown>;
+    cls.entryCount = 9;
+    await stateManager.updateTask(taskId, { diagnosticJson: JSON.stringify(payload) });
+
+    const executed = await bridge.executePendingDiagnosis({ taskId });
+    expect(executed.status).toBe('failed');
+    expect(executed.message).toContain('ingress_payload_mismatch');
+  });
+});

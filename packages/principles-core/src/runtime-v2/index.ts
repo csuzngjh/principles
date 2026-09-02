@@ -384,6 +384,21 @@ export type {
 export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
 /** Deterministic diagnostician task id (`diagnosis_<painId>`) — the pain→task dedup key (Codex Governance Closure §13). */
 export { createDiagnosticianTaskId } from './pain-signal-bridge.js';
+// PRI-642 SPEC §9: persisted `painIngress.v1` contract — written by the
+// bridge beside the legacy top-level fields, re-validated on re-entry.
+export {
+  PAIN_INGRESS_PAYLOAD_VERSION,
+  parsePainIngressV1Payload,
+  deriveProvenanceFromIngressFacts,
+  checkIngressTopLevelConsistency,
+} from './pain-ingress-payload.js';
+export type {
+  PainIngressV1Payload,
+  PainIngressOriginV1,
+  PainIngressCorrelationV1,
+  PainIngressEvidenceClassV1,
+  PainIngressV1ParseResult,
+} from './pain-ingress-payload.js';
 /** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
 export { recordPainSignalObservability } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';

@@ -420,6 +420,33 @@ The ingress does not freeze a new exhaustive hook-source enum before this
 inventory. No production emitter may be declared migrated solely through a
 source-text assertion.
 
+### 11.1 Migration inventory (B0 backfill, verified 2026-09-02)
+
+Every production pain emitter and its disposition. "Verified" columns cite
+the survey of `8a5001eb` + this branch's changes (`ca5e7c9d`).
+
+| # | Emitter | sessionId source | Evidence today | Provenance today | Disposition |
+|---|---|---|---|---|---|
+| 1 | `/pd-pain` command (`openclaw-plugin/src/commands/pain.ts`) | host command ctx (trusted) | typed acquisition (Scope A) | host_context_bound | **Scope A migrated** |
+| 2 | `pd pain record` (`pd-cli/src/commands/pain-record.ts`) | `--session` validated vs trajectory (Scope A) | typed acquisition (Scope A) | derived (Scope A) | **Scope A migrated** |
+| 3 | manual pain tool (`hooks/pain.ts` handleManualPain, Gate B/A) | hook ctx (`'unknown'` fallback) | `buildTrajectoryEvidence` array | ternary bound/no-trace | **Scope B, family 1 (manual/prompt)** |
+| 4 | tool-failure (`hooks/after-tool-call-helpers.ts` emitPainIfAdmitted) | hook ctx | `buildTrajectoryEvidence` array | `automatic_hook` | **Scope B, family 2 (tool failure)** |
+| 5 | shared-runtime continuation (`hooks/pain.ts` handleSharedPainEvidenceResult) | hook ctx | metadata array (≤8, from shared writer) | `automatic_hook` | **Scope B, family 2** |
+| 6 | LLM empathy (`hooks/llm.ts`, Gate B/A) | hook ctx (early-return if missing) | `buildTrajectoryEvidence` array | `host_context_bound` | **Scope B, family 3 (LLM/lifecycle)** |
+| 7 | compaction intercept (`hooks/lifecycle.ts`) | hook ctx | **none** | absent (bridge infers `host_context_bound` when session real) | **Scope B, family 3** |
+| 8 | gate-block (`hooks/gate-block-helper.ts`, Gate B/A) | BlockContext (optional) | **none** | absent (inferred) | **Scope B, family 4 (gate/sample)** |
+| 9 | signal-collector STRONG (`core/signal-collector-host.ts` routeStrong) | prompt hook ctx | inline 1-entry excerpt | `host_context_bound` | **Scope B, family 4** |
+| 10 | correction-sample reject (`commands/samples.ts`) | sample record | inline 1-entry diff excerpt | `host_context_bound` | **Scope B, family 4** |
+| 11 | Codex governance admission (`host-runtime/src/governance-signal-admission.ts`) | Codex lineage (rootSessionId/rolloutIdentity/logicalObservationKey/hostTurnId) | admission payload evidence | `host_context_bound`, hostKind codex | **Peer adapter — B4 parity gate decides** |
+| 12 | Codex worker diagnosis execution (`codex-adapter/workspace-worker.ts`) | task payload | n/a (executor, not emitter) | `host_context_bound` default at re-entry | **B1 re-entry contract fixes the default** |
+| 13 | dead-letter replay (`pd-cli/pain-retry.ts`) | replay data | replay data | normalized legacy | **Ingest via submit path; B2 re-check only** |
+| 14 | diagnostics/benchmarks (`synthetic-baseline-runner.ts`, `pain-flood-simulation-runner.ts`) | synthetic | synthetic | synthetic | **Out of scope** (non-production tools) |
+
+Direct-caller search conclusions (rg over `8a5001eb`): every
+`PainToPrincipleService` caller is listed above; `PainSignalBridge` is
+constructed only by the runtime factory, the Codex worker, dead-letter
+replay, and the two benchmark tools. No undiscovered direct callers.
+
 ## 12. Behavioral acceptance
 
 ### 12.1 Scope A must pass
