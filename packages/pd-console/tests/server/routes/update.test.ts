@@ -27,6 +27,28 @@ vi.mock('fs', async (importOriginal) => {
 // Test utilities
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve the tar extraction target dir from a mocked execFileSync call.
+ *
+ * The production route now extracts via `execFileSync('tar', ['xzf',
+ * 'package.tgz', ...], { cwd: tempDir })` — the archive is a relative path and
+ * the target dir comes from the `cwd` option (works on both Git Bash GNU tar
+ * and Windows bsdtar; absolute C:\ paths were misparsed by GNU tar as remote
+ * host C:). Older tests historically resolved the dir from the `-C` argument.
+ * This helper accepts both shapes so existing extraction mocks keep working
+ * without per-callsite rewrites.
+ */
+function tarExtractDir(
+  cmd: string,
+  args: readonly string[] | undefined,
+  options: { cwd?: string } | undefined,
+): string | undefined {
+  if (cmd !== 'tar') return undefined;
+  if (options?.cwd) return options.cwd;
+  const ci = args ? args.indexOf('-C') : -1;
+  return ci >= 0 && args ? args[ci + 1] : undefined;
+}
+
 function createMockRequest(method: string, body?: unknown): IncomingMessage {
   const bodyStr = body !== undefined ? JSON.stringify(body) : '';
 
@@ -389,11 +411,11 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      // Mock execSync to simulate tar extraction by creating a file in tempDir
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      // Mock execSync to simulate tar extraction by creating a file in the
+      // extraction cwd (the real invocation passes { cwd: tempDir }).
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = options?.cwd;
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
@@ -410,13 +432,19 @@ describe('handleUpdateRoute', () => {
 
       await handleUpdateRoute(req, res, workspaceDir, '/apply');
 
-      // tar must be invoked with --force-local: Git Bash GNU tar misparses
-      // C:\... paths as remote host C: (host:path) without it, aborting the
-      // update with "tar: Cannot connect to C: resolve failed" on Windows.
+      // tar must receive the archive as a RELATIVE path ('package.tgz') resolved
+      // against an explicit cwd. Absolute C:\... archive paths are misparsed by
+      // Git Bash GNU tar as remote host C: (host:path) and abort the update with
+      // "tar: Cannot connect to C: resolve failed"; Windows System32 bsdtar does
+      // not support GNU tar's --force-local, so relative-path-in-cwd is the only
+      // invocation that works on both.
       const tarCalls = vi.mocked(execSyncMock).mock.calls.filter((c) => c[0] === 'tar');
       expect(tarCalls.length).toBeGreaterThan(0);
       for (const call of tarCalls) {
-        expect(call[1]).toContain('--force-local');
+        expect(call[1]).toContain('package.tgz');
+        expect(call[1]).not.toContain(':');
+        const options = call[2] as { cwd?: string } | undefined;
+        expect(options?.cwd).toBeTruthy();
       }
 
       expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
@@ -441,10 +469,9 @@ describe('handleUpdateRoute', () => {
       }) as unknown as typeof fetch);
 
       // "Extract" a fresh zh-default manifest (as shipped) from the tarball
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
@@ -484,10 +511,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
@@ -538,10 +564,9 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
@@ -582,10 +607,9 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
@@ -810,10 +834,9 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '3.0.0', name: 'test' }));
@@ -906,10 +929,9 @@ describe('handleUpdateRoute', () => {
         } as Response;
       });
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
@@ -1058,10 +1080,9 @@ describe('handleUpdateRoute', () => {
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original content');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
@@ -1105,10 +1126,9 @@ describe('handleUpdateRoute', () => {
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
@@ -1152,10 +1172,9 @@ describe('handleUpdateRoute', () => {
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
@@ -1239,11 +1258,10 @@ describe('handleUpdateRoute', () => {
           } as Response);
         }) as unknown as typeof fetch);
 
-        vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+        vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
           if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-            const match = cmd.match(/-C\s+"([^"]+)"/);
-            if (match && match[1]) {
-              const dir = match[1];
+            const dir = options?.cwd;
+            if (dir) {
               fs.mkdirSync(dir, { recursive: true });
               fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
             }
@@ -1407,10 +1425,9 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
@@ -1459,10 +1476,9 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             // Tarball only has package.json — no console/, no core/, no node_modules/
@@ -1551,10 +1567,9 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
@@ -1700,10 +1715,9 @@ describe('handleUpdateRoute', () => {
         ok: true,
         arrayBuffer: async () => new ArrayBuffer(0),
       } as Response));
-      vi.mocked(execSyncMock).mockImplementation(((command: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((command: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (command !== 'tar' || !args) return;
-        const targetIndex = args.indexOf('-C');
-        const target = targetIndex >= 0 ? args[targetIndex + 1] : undefined;
+        const target = options?.cwd;
         if (target === undefined) return;
         stagingDir = target;
         fs.mkdirSync(path.join(target, 'plugin'), { recursive: true });
@@ -1741,10 +1755,9 @@ describe('handleUpdateRoute', () => {
         } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
@@ -1802,10 +1815,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
@@ -1879,10 +1891,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
@@ -1972,10 +1983,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
@@ -2029,10 +2039,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
@@ -2092,10 +2101,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
@@ -2142,10 +2150,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
@@ -2196,10 +2203,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             // Deps CHANGED: better-sqlite3 ^14.0.0 (was ^13.0.3)
@@ -2244,10 +2250,9 @@ describe('handleUpdateRoute', () => {
         return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
       }) as unknown as typeof fetch);
 
-      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
-          const ci = args ? args.indexOf('-C') : -1;
-          const dir = ci >= 0 ? args![ci + 1] : undefined;
+          const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),

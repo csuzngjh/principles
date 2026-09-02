@@ -623,9 +623,11 @@ async function doApplyUpdate(
     fs.writeFileSync(tarballPath, buffer);
     // EP-08: spawn tar via argv array — tarball/temp paths stay data, never
     // shell syntax (Mimosa command-injection finding, 2026-08-22).
-    // --force-local: Git Bash GNU tar misparses C:\... paths as remote host
-    // C: (host:path syntax), causing "tar: Cannot connect to C: resolve failed".
-    execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1', '--force-local'], { stdio: 'pipe' });
+    // Use cwd + relative archive path: GNU tar on Windows (Git Bash) misparses
+    // absolute C:\... paths as remote host C: (host:path syntax), causing
+    // "tar: Cannot connect to C: resolve failed". Windows System32 bsdtar does
+    // not support GNU tar's --force-local, so relative path is the universal fix.
+    execFileSync('tar', ['xzf', 'package.tgz', '--strip-components=1'], { cwd: tempDir, stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
     // 4. Compute diff and apply.
@@ -993,9 +995,11 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     fs.writeFileSync(tarballPath, buffer);
     // EP-08: spawn tar via argv array — tarball/temp paths stay data, never
     // shell syntax (Mimosa command-injection finding, 2026-08-22).
-    // --force-local: Git Bash GNU tar misparses C:\... paths as remote host
-    // C: (host:path syntax), causing "tar: Cannot connect to C: resolve failed".
-    execFileSync('tar', ['xzf', tarballPath, '-C', tempDir, '--strip-components=1', '--force-local'], { stdio: 'pipe' });
+    // Use cwd + relative archive path: GNU tar on Windows (Git Bash) misparses
+    // absolute C:\... paths as remote host C: (host:path syntax), causing
+    // "tar: Cannot connect to C: resolve failed". Windows System32 bsdtar does
+    // not support GNU tar's --force-local, so relative path is the universal fix.
+    execFileSync('tar', ['xzf', 'package.tgz', '--strip-components=1'], { cwd: tempDir, stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
     // The tarball, not the installer package version, is the release we are
