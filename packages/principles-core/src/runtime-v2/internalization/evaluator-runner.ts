@@ -123,6 +123,38 @@ function resolveCasePathParam(params: unknown): string | null {
 }
 
 /**
+ * PRI-634 PR-A (SPEC §16): first duplicated real trace case ID in the merged
+ * replay set, or null. System sentinels (`__*__`) are not real trace identity
+ * — callers pass only merged golden-trace cases, which by construction carry
+ * no sentinels — so no sentinel exclusion is applied here.
+ */
+function findDuplicateRealCaseId(cases: readonly { readonly caseId: string }[]): string | null {
+  const seen = new Set<string>();
+  for (const traceCase of cases) {
+    if (seen.has(traceCase.caseId)) return traceCase.caseId;
+    seen.add(traceCase.caseId);
+  }
+  return null;
+}
+
+/**
+ * PRI-634 PR-A (review P1 2026-09-02): the `__*__` namespace is RESERVED for
+ * sandbox system sentinels (__compile__ / __return_shape__ / …). The
+ * GoldenTrace schema only requires a non-empty string, so an
+ * Artificer/LLM-supplied real case could legally collide with a sentinel and
+ * be mis-partitioned as a system failure by every downstream reader. Real
+ * cases must not enter the reserved namespace — enforced pre-sandbox.
+ */
+const RESERVED_SYSTEM_CASE_ID = /^__.*__$/;
+
+function findReservedSystemCaseId(cases: readonly { readonly caseId: string }[]): string | null {
+  for (const traceCase of cases) {
+    if (RESERVED_SYSTEM_CASE_ID.test(traceCase.caseId)) return traceCase.caseId;
+  }
+  return null;
+}
+
+/**
  * P0-B (verdict drift 完整性): rule assembly 的稳定输入。fresh 路径来自
  * buildContext 的内存结果;resume 路径从 durable lineage 重建 (store 按
  * output.sourceArtificerArtifactId 取 contentJson) — 瞬时内存 context 不得
@@ -2094,6 +2126,46 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       cases: [...positiveCases, ...conversion.trace.cases],
     };
 
+    // PRI-634 PR-A (SPEC §16/§17): merged REAL trace case IDs must be unique
+    // before the sandbox runs — a duplicate (e.g. an LLM-supplied adversarial
+    // case colliding with a runtime-generated v2 case or an Artificer golden
+    // case) would let the evidence Maps silently overwrite and mis-attribute
+    // failures. Real case IDs must also stay OUT of the reserved `__*__`
+    // system-sentinel namespace (review P1 2026-09-02: the schema alone does
+    // not prevent a real case from naming itself `__compile__`, which would
+    // be mis-partitioned as a system failure downstream). Degrade LOUD: on
+    // the approved binding path the R3 terminal-state guard turns this
+    // skipReason into a permanent fail (approved + no adversarialResult is
+    // unreachable); on the needs_revision diagnostic path the verdict stands
+    // and the conflict is observable while diagnosticReplay stays absent
+    // (fail-closed provenance).
+    const reservedCaseId = findReservedSystemCaseId(mergedTrace.cases);
+    if (reservedCaseId !== null) {
+      this.emitEvent('adversarial_replay_case_id_conflict', taskId, {
+        runId,
+        caseId: reservedCaseId,
+        violationKind: 'reserved_system_namespace',
+        nextAction: 'verify_artificer_or_llm_cases_do_not_use_the_reserved___system___case_id_namespace',
+      });
+      return {
+        updatedOutput: null,
+        skipReason: `case_id_conflict: real caseId '${reservedCaseId}' uses the reserved __*__ system namespace`,
+      };
+    }
+    const duplicateCaseId = findDuplicateRealCaseId(mergedTrace.cases);
+    if (duplicateCaseId !== null) {
+      this.emitEvent('adversarial_replay_case_id_conflict', taskId, {
+        runId,
+        caseId: duplicateCaseId,
+        violationKind: 'duplicate',
+        nextAction: 'verify_llm_adversarial_cases_do_not_collide_with_artificer_or_v2_case_ids',
+      });
+      return {
+        updatedOutput: null,
+        skipReason: `case_id_conflict: duplicate real caseId '${duplicateCaseId}' in merged golden trace`,
+      };
+    }
+
     // (6) Invoke the gate. evaluateRefinerRuleHostGate is a pure function that
     // catches its own sandbox throws internally (rejected_runtime_error), so
     // this await cannot throw on sandbox failure — but we guard anyway for
@@ -2344,22 +2416,59 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private mapFailedCases(
-    gateResult: { readonly sandboxResult: { readonly failedCases: readonly { readonly caseId: string; readonly errorType: string; readonly message: string }[] } },
+    gateResult: {
+      readonly sandboxResult: {
+        readonly failedCases: readonly {
+          readonly caseId: string;
+          readonly errorType: string;
+          readonly message: string;
+          readonly expectedDecision?: string;
+          readonly actualDecision?: string;
+        }[];
+        readonly forbiddenPatternViolations: readonly string[];
+      };
+    },
     adversarialCases: readonly { readonly caseId: string; readonly attackType: 'boundary' | 'omission' | 'inversion'; readonly expectedDecision: 'allow' | 'block' | 'propose_correction' }[],
   ): AdversarialFailedCase[] {
     const advById = new Map(adversarialCases.map((c) => [c.caseId, c]));
-    return gateResult.sandboxResult.failedCases.map((fc) => {
+    // PRI-634 PR-A (SPEC §14): the sandbox failedCase is the authority for
+    // expected/actual/errorType — it sees merged positive-case failures the
+    // adversarial-case list cannot. actualDecision is copied ONLY when the
+    // rule produced a real decision (absent on timeout/throw); errorType is
+    // never stored as a decision. Message is bounded (SPEC §23).
+    const fromSandbox: AdversarialFailedCase[] = gateResult.sandboxResult.failedCases.map((fc) => {
       const adv = advById.get(fc.caseId);
+      // PRI-634 PR-A (review P2 2026-09-02): BOTH message and rationale are
+      // built from the bounded form — durable safe persistence must not leak
+      // the unbounded raw message through a second field.
+      const message = fc.message.length > 300 ? `${fc.message.slice(0, 300)}…` : fc.message;
       return {
         caseId: fc.caseId,
         attackType: adv?.attackType ?? 'boundary',
-        actualDecision: fc.errorType,
-        expectedDecision: adv?.expectedDecision ?? 'block',
+        expectedDecision: fc.expectedDecision ?? adv?.expectedDecision ?? 'unknown',
+        ...(fc.actualDecision !== undefined ? { actualDecision: fc.actualDecision } : {}),
+        errorType: fc.errorType,
+        message,
         rationale: adv
-          ? `${fc.errorType}: ${fc.message}`
-          : `non-adversarial case ${fc.caseId} failed (${fc.errorType}: ${fc.message}) — likely a code defect, not an adversarial gap`,
+          ? `${fc.errorType}: ${message}`
+          : `non-adversarial case ${fc.caseId} failed (${fc.errorType}: ${message}) — likely a code defect, not an adversarial gap`,
       };
     });
+    // PRI-634 PR-A (SPEC §22): forbidden-pattern rejections carry zero
+    // per-case evidence at the sandbox layer (failedCases=[]). Surface every
+    // violation as an actionable system failure so replay FAIL is never
+    // evidence-free.
+    const fromForbidden: AdversarialFailedCase[] = gateResult.sandboxResult.forbiddenPatternViolations.map(
+      (violation) => ({
+        caseId: '__forbidden_pattern__',
+        attackType: 'boundary' as const,
+        expectedDecision: 'block',
+        errorType: 'forbidden_pattern',
+        message: `forbidden pattern detected in rule code: ${violation}`,
+        rationale: `rule code was rejected before evaluation — forbidden pattern: ${violation}`,
+      }),
+    );
+    return [...fromSandbox, ...fromForbidden];
   }
 
   // ── PRI-427: rule artifact assembly ────────────────────────────────────────

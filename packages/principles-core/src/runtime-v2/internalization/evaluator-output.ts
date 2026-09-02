@@ -31,9 +31,26 @@ export interface AdversarialCase {
 export interface AdversarialFailedCase {
   readonly caseId: string;
   readonly attackType: AdversarialAttackType;
-  readonly actualDecision: string;
+  /**
+   * PRI-634 PR-A (SPEC §14): present ONLY when the rule produced a real
+   * decision that mismatched the expected one. Never carries an errorType
+   * value — legacy artifacts that stored e.g. actualDecision='runtime_error'
+   * are normalized by readers (repair-replay-resolver), not migrated.
+   */
+  readonly actualDecision?: string;
   readonly expectedDecision: string;
   readonly rationale: string;
+  /**
+   * PRI-634 PR-A: sandbox error classification (runtime_error / timeout /
+   * syntax_error / validation_failed / forbidden_pattern / unknown).
+   * Present on runtime-written evidence; absent on legacy artifacts.
+   */
+  readonly errorType?: string;
+  /**
+   * PRI-634 PR-A: bounded safe failure message from the deterministic replay
+   * sandbox. Present on runtime-written evidence; absent on legacy artifacts.
+   */
+  readonly message?: string;
 }
 
 export interface EvaluatorCodeReview {
@@ -340,8 +357,18 @@ function validateAdversarialResult(raw: unknown): string[] {
       if (!Object.hasOwn(entry, 'attackType') || typeof entry.attackType !== 'string' || !ADVERSARIAL_ATTACK_TYPES.has(entry.attackType)) {
         errors.push(`${prefix}.attackType must be one of boundary|omission|inversion, got ${String(entry.attackType)}`);
       }
-      if (!Object.hasOwn(entry, 'actualDecision') || typeof entry.actualDecision !== 'string') {
-        errors.push(`${prefix}.actualDecision must be a string`);
+      // PRI-634 PR-A (SPEC §14/§21): actualDecision is optional — present only
+      // when a real decision mismatched. errorType carries the sandbox error
+      // classification. Legacy artifacts (actualDecision=<error enum>) stay
+      // valid; readers normalize. Both fields are string-when-present.
+      if (Object.hasOwn(entry, 'actualDecision') && entry.actualDecision !== undefined && typeof entry.actualDecision !== 'string') {
+        errors.push(`${prefix}.actualDecision must be a string when present`);
+      }
+      if (Object.hasOwn(entry, 'errorType') && entry.errorType !== undefined && typeof entry.errorType !== 'string') {
+        errors.push(`${prefix}.errorType must be a string when present`);
+      }
+      if (Object.hasOwn(entry, 'message') && entry.message !== undefined && typeof entry.message !== 'string') {
+        errors.push(`${prefix}.message must be a string when present`);
       }
       if (!Object.hasOwn(entry, 'expectedDecision') || typeof entry.expectedDecision !== 'string') {
         errors.push(`${prefix}.expectedDecision must be a string`);

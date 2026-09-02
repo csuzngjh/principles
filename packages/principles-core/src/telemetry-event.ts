@@ -230,6 +230,15 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('artificer_l2_attempt'),
   Type.Literal('artificer_l2_turn'),
   Type.Literal('artificer_l2_complete'),
+  // PRI-634 PR-A: repair-round deterministic replay evidence resolution
+  // (read-only, by reference, from the source Evaluator artifact).
+  // - artificer_repair_replay_evidence_resolved: evidence block built
+  //   (payload: sourceEvaluatorArtifactId, failedCaseCount, truncated).
+  // - artificer_repair_replay_evidence_unavailable: diagnosticReplay says
+  //   FAILED but the durable evidence cannot be resolved — the repair round
+  //   refuses to blind-retry and fails loud (payload: reason, detail).
+  Type.Literal('artificer_repair_replay_evidence_resolved'),
+  Type.Literal('artificer_repair_replay_evidence_unavailable'),
   // PRI-426: Evaluator single-round adversarial sandbox replay telemetry.
   // - evaluator_adversarial_replay: emitted after each gate invocation with the
   //   gate decision, case count, and failed-case count.
@@ -244,6 +253,11 @@ export const TelemetryEventType = Type.Union([
   // not fully pass (or could not produce a result).
   Type.Literal('evaluator_adversarial_replay_diagnostic_passed'),
   Type.Literal('evaluator_adversarial_replay_diagnostic_failed'),
+  // PRI-634 PR-A: merged real trace case IDs must be unique before the sandbox
+  // runs — a duplicate would silently overwrite evidence Maps. The approved
+  // binding path turns this into a permanent fail via the R3 terminal-state
+  // guard; the needs_revision diagnostic path records it observably.
+  Type.Literal('evaluator_adversarial_replay_case_id_conflict'),
   // PRI-427: Evaluator rule artifact assembly telemetry.
   // - evaluator_rule_assembled: emitted after a rule artifact is written AND
   //   marked validated (payload: artifactId, affectedTools, traceCaseCount).

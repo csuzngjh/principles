@@ -43,6 +43,10 @@ import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artifice
 import { ARTIFICER_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import type { PIArtifactStore } from './pi-artifact.js';
+import {
+  resolveRepairReplayContext,
+  type RepairReplayContext,
+} from './repair-replay-resolver.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -319,6 +323,37 @@ async function resolveDreamerContext(params: {
 // ── PRI-509: Evaluator repair feedback formatting ───────────────────────────
 
 /**
+ * PRI-634 PR-A: render the resolved deterministic replay evidence for the
+ * repair prompt. Each entry names the concrete caseId, the expected decision,
+ * the actual decision (only when the rule really produced one), the sandbox
+ * errorType, and a bounded safe message — never a bare "N failed" label.
+ */
+function formatReplayEvidenceBlock(context: RepairReplayContext): string {
+  const lines: string[] = [
+    `Deterministic Replay Evidence (resolved by reference from evaluator artifact ${context.sourceEvaluatorArtifactId}; total failed cases: ${context.failedCaseCount}):`,
+  ];
+  for (const violation of context.globalViolations) {
+    lines.push(`- Global violation | ${violation}`);
+  }
+  if (context.globalViolationCount > context.globalViolations.length) {
+    lines.push(`- (global violations truncated: ${context.globalViolationCount} durable, showing ${context.globalViolations.length})`);
+  }
+  for (const failure of [...context.systemFailures, ...context.traceFailures]) {
+    const parts: string[] = [`Case: ${failure.caseId}`];
+    if (failure.expectedDecision !== undefined) parts.push(`Expected: ${failure.expectedDecision}`);
+    if (failure.actualDecision !== undefined) parts.push(`Actual: ${failure.actualDecision}`);
+    parts.push(`Error: ${failure.errorType}`);
+    if (failure.message !== undefined) parts.push(`Message: ${failure.message}`);
+    lines.push(`- ${parts.join(' | ')}`);
+  }
+  if (context.truncated) {
+    const shown = context.systemFailures.length + context.traceFailures.length + context.globalViolations.length;
+    lines.push(`- (evidence truncated: ${context.failedCaseCount + context.globalViolationCount} durable entries, showing ${shown} stratified representatives)`);
+  }
+  return lines.join('\n');
+}
+
+/**
  * Format a validated RepairPayload into a repairFeedback string for the
  * artificer prompt. The format is PoC-validated (Campaign 1 R2):
  *
@@ -341,8 +376,12 @@ async function resolveDreamerContext(params: {
  * Loop state freshness (rc-7, EP-05): the caller passes the CURRENT task's
  * repairPayload — never a cached or stale value. repairIteration tells the
  * artificer which round it's in (1 = first repair, 2 = second repair).
+ *
+ * PRI-634 PR-A: when the caller resolved concrete replay evidence (read-only
+ * from the source Evaluator artifact), the evidence block REPLACES the old
+ * "(failed cases: N)" summary line — failure must increase information.
  */
-function formatRepairFeedback(payload: RepairPayload): string {
+function formatRepairFeedback(payload: RepairPayload, replayEvidence?: string): string {
   const concernsLines = payload.concerns.length > 0
     ? payload.concerns.map((c, i) => `${i + 1}. ${c}`).join('\n')
     : '(none)';
@@ -352,9 +391,11 @@ function formatRepairFeedback(payload: RepairPayload): string {
   // verdict stays needs_revision), but tells the Artificer what the
   // deterministic gate did observe — failed cases are actionable signals.
   const replayLines = payload.diagnosticReplay
-    ? [
-        `Deterministic adversarial replay: ${payload.diagnosticReplay.ran ? (payload.diagnosticReplay.passed ? 'PASSED' : 'FAILED') : 'not run'} (failed cases: ${payload.diagnosticReplay.failedCaseCount}). This is diagnostic evidence only — the evaluator verdict remains needs_revision.`,
-      ]
+    ? replayEvidence !== undefined
+      ? [replayEvidence]
+      : [
+          `Deterministic adversarial replay: ${payload.diagnosticReplay.ran ? (payload.diagnosticReplay.passed ? 'PASSED' : 'FAILED') : 'not run'} (failed cases: ${payload.diagnosticReplay.failedCaseCount}). This is diagnostic evidence only — the evaluator verdict remains needs_revision.`,
+        ]
     : [];
   return [
     `Previous attempt scored ${payload.previousScore} (needs_revision).`,
@@ -523,9 +564,48 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // rc-7 (loop state freshness): repairPayload comes from the CURRENT task's
     // diagnosticJson — never a cached or inferred value. repairIteration tells
     // the artificer which round it's in.
-    const repairFeedback = piTask?.repairPayload
-      ? formatRepairFeedback(piTask.repairPayload)
-      : null;
+    //
+    // PRI-634 PR-A: when the diagnostic replay ran and FAILED, the concrete
+    // evidence is resolved BY REFERENCE from the source Evaluator artifact
+    // (read-only; no facts are copied into RepairPayload). If the durable
+    // evidence cannot be resolved, the repair round fails loud
+    // (repair_replay_evidence_unavailable) instead of consuming a blind LLM
+    // retry — failure must increase information (SPEC §27).
+    let repairFeedback: string | null = null;
+    if (piTask?.repairPayload) {
+      const payload = piTask.repairPayload;
+      let replayEvidence: string | undefined;
+      if (payload.diagnosticReplay?.ran === true && payload.diagnosticReplay.passed === false) {
+        const resolution = await resolveRepairReplayContext({
+          sourceEvaluatorTaskId: payload.sourceEvaluatorTaskId,
+          deps: {
+            artifactStore: this.artifactStore,
+            getTask: (tid: string) => this.stateManager.getTask(tid),
+          },
+        });
+        if (resolution.ok) {
+          replayEvidence = formatReplayEvidenceBlock(resolution.context);
+          this.emitEvent('repair_replay_evidence_resolved', taskId, {
+            sourceEvaluatorTaskId: payload.sourceEvaluatorTaskId,
+            sourceEvaluatorArtifactId: resolution.context.sourceEvaluatorArtifactId,
+            failedCaseCount: resolution.context.failedCaseCount,
+            truncated: resolution.context.truncated,
+          });
+        } else {
+          this.emitEvent('repair_replay_evidence_unavailable', taskId, {
+            sourceEvaluatorTaskId: payload.sourceEvaluatorTaskId,
+            reason: resolution.reason,
+            detail: resolution.detail,
+            nextAction: 'verify_source_evaluator_artifact_durability_before_repair_retry',
+          });
+          throw new PDRuntimeError(
+            'input_invalid',
+            `repair_replay_evidence_unavailable: diagnosticReplay reported FAILED (failed cases: ${payload.diagnosticReplay.failedCaseCount}) but the replay evidence could not be resolved from evaluator task ${payload.sourceEvaluatorTaskId} (${resolution.reason}: ${resolution.detail}). Refusing to consume a blind repair LLM round.`,
+          );
+        }
+      }
+      repairFeedback = formatRepairFeedback(payload, replayEvidence);
+    }
 
     // P1-1 (外部复核): rollout needs_revision 路由到 artificer (code 渠道) 时,
     // revisionFeedback 携带 reviewer requiredChanges — 与 repairPayload 同等

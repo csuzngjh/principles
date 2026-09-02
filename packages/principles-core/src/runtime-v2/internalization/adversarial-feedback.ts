@@ -31,7 +31,13 @@ export function formatAdversarialFeedback(failedCases: readonly AdversarialFaile
     const rationale = typeof fc.rationale === 'string' && fc.rationale.trim() !== ''
       ? fc.rationale
       : '(no rationale provided)';
-    return `- ${fc.caseId} [${fc.attackType}]: expected ${fc.expectedDecision}, got ${fc.actualDecision} — ${rationale}`;
+    // PRI-634 PR-A (SPEC §14): actualDecision is present only when the rule
+    // really returned a decision. Absent → the failure is the errorType
+    // (throw/timeout), never a fabricated "undefined" decision.
+    const actual = fc.actualDecision !== undefined
+      ? `got ${fc.actualDecision}`
+      : `error ${fc.errorType ?? 'unknown'}`;
+    return `- ${fc.caseId} [${fc.attackType}]: expected ${fc.expectedDecision}, ${actual} — ${rationale}`;
   });
 
   return `${HEADER}\n${lines.join('\n')}`;
