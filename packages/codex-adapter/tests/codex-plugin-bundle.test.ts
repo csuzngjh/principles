@@ -563,4 +563,66 @@ describe('PRI-645 sparse fresh config × bundled $pd-status / $pd-disable', () =
     expect(rewritten.version).toBe(1);
     expect(rewritten.features['host.codex']).toEqual({ category: 'core', enabled: false });
   }, 60_000);
+
+  // ── PRI-645 review round 2: tri-state status semantics ──
+  // valid explicit override → true/false; valid sparse absence → follows
+  // registry default (ok); malformed present entry or invalid features
+  // section → degraded (never a health false-positive).
+
+  async function sparseStatusCheck(workspace: string): Promise<{ state?: string; detail?: string }> {
+    const dataDir = tempDir('pd-status-tri-data-');
+    const result = await runBundledScript('pd-status.cjs', ['--plugin-root', pluginDir, '--plugin-data', dataDir, '--workspace', workspace, '--json'], workspace);
+    const report = JSON.parse(result.stdout) as { checks: Array<{ name: string; state: string; detail?: string }> };
+    return report.checks.find((check) => check.name === 'workspace') ?? {};
+  }
+
+  it('status: sparse flow-style JSON features: {} → ok, follows registry default', async () => {
+    const workspace = tempDir('pd-status-sparse-json-ws-');
+    writeSparseConfig(workspace, JSON.stringify({ version: 1, features: {} }));
+    const wsCheck = await sparseStatusCheck(workspace);
+    expect(wsCheck.state).toBe('ok');
+    expect(wsCheck.detail).toContain('follows registry default');
+  }, 60_000);
+
+  it('status: host.codex present but enabled missing (block YAML) → degraded, not registry default', async () => {
+    const workspace = tempDir('pd-status-missing-enabled-ws-');
+    writeSparseConfig(workspace, 'features:\n  host.codex:\n    category: core\n');
+    const wsCheck = await sparseStatusCheck(workspace);
+    expect(wsCheck.state).toBe('degraded');
+    expect(wsCheck.detail).toContain('host_codex_entry_invalid');
+    expect(wsCheck.detail ?? '').not.toContain('follows registry default');
+  }, 60_000);
+
+  it('status: host.codex present with non-boolean enabled (JSON) → degraded', async () => {
+    const workspace = tempDir('pd-status-bad-enabled-ws-');
+    writeSparseConfig(workspace, JSON.stringify({ features: { 'host.codex': { category: 'core', enabled: 'yes' } } }));
+    const wsCheck = await sparseStatusCheck(workspace);
+    expect(wsCheck.state).toBe('degraded');
+    expect(wsCheck.detail).toContain('host_codex_entry_invalid');
+  }, 60_000);
+
+  it('status: host.codex scalar entry (block YAML) → degraded', async () => {
+    const workspace = tempDir('pd-status-scalar-entry-ws-');
+    writeSparseConfig(workspace, 'features:\n  host.codex: broken\n');
+    const wsCheck = await sparseStatusCheck(workspace);
+    expect(wsCheck.state).toBe('degraded');
+    expect(wsCheck.detail).toContain('host_codex_entry_invalid');
+  }, 60_000);
+
+  it('status: features section missing entirely → degraded (validatePdConfig requires it)', async () => {
+    const workspace = tempDir('pd-status-no-features-ws-');
+    writeSparseConfig(workspace, 'version: 1\nruntimeProfiles: {}\n');
+    const wsCheck = await sparseStatusCheck(workspace);
+    expect(wsCheck.state).toBe('degraded');
+    expect(wsCheck.detail).toContain('features section invalid');
+  }, 60_000);
+
+  it('status: valid explicit false override → degraded DISABLED (distinct from invalid)', async () => {
+    const workspace = tempDir('pd-status-explicit-false-ws-');
+    writeSparseConfig(workspace, 'features:\n  host.codex:\n    category: core\n    enabled: false\n');
+    const wsCheck = await sparseStatusCheck(workspace);
+    expect(wsCheck.state).toBe('degraded');
+    expect(wsCheck.detail).toContain('DISABLED');
+    expect(wsCheck.detail ?? '').not.toContain('invalid');
+  }, 60_000);
 });

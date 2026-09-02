@@ -110,7 +110,7 @@ Owner-facing 控制面的已知例外**，sparse 语义由各自显式建模：
 | consumer | sparse 语义（PRI-645 review 修复后） |
 | --- | --- |
 | `plugins/principles-disciple/scripts/pd-disable.cjs`（`$pd-disable` kill switch） | `host.codex` entry 缺失/enabled-less → **插入显式 Owner override**（block YAML + JSON flow，sibling-safe + atomic write）；仅无法安全行编辑的形态 fail loud |
-| `plugins/principles-disciple/scripts/pd-status.cjs`（`$pd-status`） | entry 缺失 → `registry default` 状态（**非 degraded**）；有效值可经 `--pd-health`（`pd health --host codex --json`）取 runtime 权威面，不在脚本里硬编码默认值 |
+| `plugins/principles-disciple/scripts/pd-status.cjs`（`$pd-status`） | 三态：合法显式 override → true/false；**合法 sparse absence**（features section 合法且无 host.codex key）→ `follows registry default`（非 degraded）；entry malformed / features section invalid → **degraded**（对齐 validatePdConfig fail-loud）；有效值可经 `--pd-health`（`pd health --host codex --json`）取 runtime 权威面，不在脚本里硬编码默认值 |
 | installer `readEnabledChannelsFromConfigYaml()` | MVP channel 按 **registry default + sparse override** 计算（absent=ON；显式 false 才是 OFF）；installer 不再用 `options.channels` 掩盖实际状态（ERR-042） |
 
 新增 raw-presence reader 必须在此登记并显式定义 sparse 语义，不得把
@@ -124,7 +124,7 @@ Owner-facing 控制面的已知例外**，sparse 语义由各自显式建模：
 | gone flag 复活拒绝 | computeEffectiveFlags gone 分支 | 退役 flag 无法被配置复活 |
 | core flag 应急关闭可观测 | computeEffectiveFlags core 分支 warning | 显式 disable 记录在 warnings |
 | registry↔surface registry 对账 | evolution-worker-slimming.test.ts (PRI-294) | evolution_worker/empathy_observer/gone 组 |
-| **registry↔installer 模板对账** | installer-config-parity.test.ts（本任务新增） | installer 全部 17 条 features |
+| **registry↔installer 模板对账** | installer-config-parity.test.ts | 0 default-equivalent bootstrap entries；任何 bootstrap override 必须注册于 registry 且异于 registry default（无 allowlist） |
 | 默认值毕业状态锁定 | feature-flag-contract.test.ts PRI-571 块 + PRI-621 块 | 5 个毕业 flag 默认开+quiet+可关 |
 
 ## 5. 明确不做（Non-goal）
