@@ -101,7 +101,11 @@ describe('Runtime V2 pain entrypoint guard', () => {
     // PRI-453: recordObservability is now passed via options parameter with default true.
     // Hook paths pass { recordObservability: false } to avoid triple-write;
     // CLI and paths without legacy writers keep the default true.
-    expect(source).toMatch(/recordObservability:\s*recordObs/);
+    // PRI-642 §7.4: the value is gated through effectiveRecordObservability —
+    // an unbound submission forces the projection off so the sentinel 'cli'
+    // session can never be written.
+    expect(source).toMatch(/recordObservability:\s*effectiveRecordObservability/);
+    expect(source).toMatch(/effectiveRecordObservability = decision\.legacy\.sessionId === undefined \? false : recordObs/);
     expect(source).toMatch(/options\?\.recordObservability\s*\?\?\s*true/);
   });
 

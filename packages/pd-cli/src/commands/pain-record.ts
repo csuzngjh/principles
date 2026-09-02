@@ -172,8 +172,19 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   }
 
   if (opts.score !== undefined && (isNaN(opts.score) || opts.score < 0 || opts.score > 100)) {
-    console.error('Error: --score must be a number between 0 and 100');
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        reason: 'score_invalid',
+        message: '--score must be a number between 0 and 100',
+        nextAction: 'Provide --score as an integer from 0 to 100, or omit it for the default (80).',
+      }, null, 2));
+    } else {
+      console.error('Error: --score must be a number between 0 and 100');
+      console.error('Next action: provide --score as an integer from 0 to 100, or omit it for the default (80).');
+    }
     process.exit(1);
+    return;
   }
 
   const workspaceDir = resolveWorkspaceDir(opts.workspace);

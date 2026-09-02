@@ -200,6 +200,25 @@ export async function emitPainDetectedEvent(
           note: decision.note,
         }));
       }
+      if (decision.action === 'degrade' || (decision.warnings?.length ?? 0) > 0) {
+        // rc-9: funnel-level degradation disclosures must be observable even
+        // when the caller has no Owner-facing surface (tool-invoked pains).
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_INGRESS_DEGRADED', JSON.stringify({
+          painId: painData.painId,
+          source: painData.source,
+          ...(decision.action === 'degrade'
+            ? { reasonCode: decision.reasonCode, warning: decision.warning, nextAction: decision.nextAction }
+            : { warnings: decision.warnings }),
+        }));
+      }
+
+      // PRI-642 SPEC §7.4/§18: an unbound submission must never materialize
+      // the sentinel session 'cli' in the trajectory projection — the
+      // observability writer upserts sessions/pain_events under
+      // data.sessionId ?? 'cli'. Skip the projection entirely when the
+      // ingress produced no bound session (skipped projection is disclosed
+      // in the degrade/warning log above).
+      const effectiveRecordObservability = decision.legacy.sessionId === undefined ? false : recordObs;
 
       const result = await service.recordPain({
         painId: decision.legacy.painId,
@@ -215,7 +234,7 @@ export async function emitPainDetectedEvent(
         hostKind: decision.legacy.hostKind,
         evidence: decision.legacy.evidence,
         painIngress: decision.legacy.painIngress,
-        recordObservability: recordObs,
+        recordObservability: effectiveRecordObservability,
       });
       if (result.status === 'failed' && result.failureCategory) {
         SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_FAILED', JSON.stringify({

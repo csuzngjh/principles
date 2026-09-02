@@ -277,6 +277,13 @@ describe('parsePainIngressReport — runtime validation of untrusted input', () 
     expect(parsed.reasonCode).toBe('evidence_invalid');
   });
 
+  it('rejects a present-but-invalid score instead of silently dropping it (rc-3/rc-9)', () => {
+    const parsed = parsePainIngressReport({ ...baseReport(), score: 250 });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonCode).toBe('score_invalid');
+  });
+
   it('rejects an openclaw bound correlation with a sentinel session (rc: no sentinel as real session)', () => {
     const parsed = parsePainIngressReport({
       ...baseReport(),

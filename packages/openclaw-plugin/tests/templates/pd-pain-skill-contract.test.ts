@@ -13,9 +13,13 @@
  * unbound `pd pain record` as the default, and MUST teach admission-aware
  * verification. The templates directory IS the published artifact (shipped
  * via package.json "files"), so this test pins the shipped content.
+ *
+ * The dist/ copies (bundle pipeline output) must stay in sync with the
+ * source templates — a drifted dist copy is a stale published artifact
+ * (ERR-040 family).
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const LANGS = ['en', 'zh'] as const;
@@ -31,6 +35,20 @@ function readSkill(lang: 'en' | 'zh'): string {
     'SKILL.md',
   );
   return readFileSync(skillPath, 'utf8');
+}
+
+function readDistSkill(lang: 'en' | 'zh'): string | null {
+  const distPath = resolve(
+    process.cwd(),
+    'dist',
+    'templates',
+    'langs',
+    lang,
+    'skills',
+    'pd-pain-signal',
+    'SKILL.md',
+  );
+  return existsSync(distPath) ? readFileSync(distPath, 'utf8') : null;
 }
 
 describe('pd-pain-signal published skill contract (PRI-642 Scope A)', () => {
@@ -73,6 +91,17 @@ describe('pd-pain-signal published skill contract (PRI-642 Scope A)', () => {
         // or ask the model to guess a session ID — the template must carry
         // that prohibition explicitly.
         expect(content).toMatch(/never guess|Do not guess|禁止猜测/);
+      });
+
+      it('dist copy matches the source template (no stale published artifact)', () => {
+        const dist = readDistSkill(lang);
+        if (dist === null) {
+          // dist is produced by build:production; when absent (plain tsc
+          // build), the source template is the published artifact and this
+          // check is a no-op.
+          return;
+        }
+        expect(dist).toBe(readSkill(lang));
       });
     });
   }

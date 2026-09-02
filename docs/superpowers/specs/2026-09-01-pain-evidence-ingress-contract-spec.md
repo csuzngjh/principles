@@ -292,6 +292,15 @@ Owner report text remains `reason`. It SHALL not be inserted into `entries` mere
 to make evidence non-empty. Only validated trace/system-event entries contribute
 to input evidence count.
 
+> **Channel overloading note (implementation):** a manual pain invoked as the
+> `pain` / `skill:pain` tool inside an OpenClaw session without a usable hook
+> session is persisted with `channel: 'external_cli_unbound'` — the enum has
+> no separate value for "in-host tool without session". The correlation
+> (`unbound/missing_host_session`) remains truthful; the channel value
+> selects the row-6 owner exception, which is the intended semantics for any
+> owner-initiated report without a session. A dedicated channel value can be
+> added later without breaking readers (additive enum member).
+
 ### 8.2 Valid-combination matrix
 
 | Origin | Correlation | Evidence | Decision before LLM |
@@ -439,6 +448,16 @@ the survey of `8a5001eb` + this branch's changes (`ca5e7c9d`).
 | 6 | LLM empathy (`hooks/llm.ts`, Gate B/A) | hook ctx (early-return if missing) | `buildTrajectoryEvidence` array | `host_context_bound` | **Scope B migrated (B2, funnel seam)** |
 | 7 | compaction intercept (`hooks/lifecycle.ts`) | hook ctx | **none** | absent (bridge infers `host_context_bound` when session real) | **Scope B, family 3** |
 | 8 | gate-block (`hooks/gate-block-helper.ts`, Gate B/A) | BlockContext (optional) | **none** | absent (inferred) | **Scope B migrated (B2, funnel seam)** |
+
+> **Behavior change note (intended, per §12.2.2):** gate-block and compaction
+> intercept pains previously carried NO evidence and were short-circuited by
+> the bridge's empty-evidence guard (never a diagnostic task). After the B2
+> migration the funnel acquires trajectory evidence through typed
+> acquisition, so a bound signal with real trajectory entries now SUBMITS
+> (task + LLM) exactly as §8.2 row 8 / §12.2.2 require; signals without
+> binding/evidence remain observation-only. The extra LLM spend is bounded
+> by the emitters' own Gate A/B trigger + cooldown and is pinned by
+> tests/hooks/pain-funnel-ingress.test.ts.
 | 9 | signal-collector STRONG (`core/signal-collector-host.ts` routeStrong) | prompt hook ctx | inline 1-entry excerpt | `host_context_bound` | **Scope B migrated (B2, funnel seam)** |
 | 10 | correction-sample reject (`commands/samples.ts`) | sample record | inline 1-entry diff excerpt | `host_context_bound` | **Scope B migrated (B2, funnel seam)** |
 | 11 | Codex governance admission (`host-runtime/src/governance-signal-admission.ts`) | Codex lineage (rootSessionId/rolloutIdentity/logicalObservationKey/hostTurnId) | admission payload evidence | `host_context_bound`, hostKind codex | **Peer adapter — B4 decision below** |
@@ -635,6 +654,47 @@ For the persisted contract and public interface:
 Host-specific behavior is bounded to using authenticated context already owned by
 the host. It is verified by installed-skill and real-session tests and rolled back
 per adapter.
+
+## 17A. Production verification evidence (A3 dogfood, 2026-09-02)
+
+Real OpenClaw 2026.8.1, dev profile (`--dev`), isolated agent workspace,
+plugin `dist` overlaid from this branch, real `bai/deepseek-v4-flash`
+diagnostician. Redacted counts only — no transcript content.
+
+Run 1 (Scope A CLI leg, `pd pain record --session <real> --wait --json`):
+
+- submitted pain `manual_1788310181376_*`; task payload carried
+  `sessionIdHint = <the exact live session>`, `provenance =
+  host_context_bound`, 2 real evidence entries
+  (`agent_turn:2026-09-02T00:36:55Z` + owner text), `workspaceDir` = the
+  dogfood workspace;
+- the full chain ran to candidates (2 × confidence 0.40 → `needs_evidence`,
+  correct for the thin single-turn evidence);
+- finding found and fixed by this dogfood: `pain_events.host_kind` was NULL
+  on the bound path → bound CLI plan now attributes `openclaw` (commit
+  ca5e7c9d).
+
+Run 2 (same session, richer trajectory after run 1's turns were recorded):
+
+- `manual_1788310563478_*`: task payload `sessionIdHint` = same session,
+  `provenance = host_context_bound`, `hostKind = openclaw`, 2 evidence
+  entries; **4/4 candidates admitted at 0.55**, `pain_events.host_kind =
+  openclaw`; intake disclosed `not_internalizable` for the skill channel
+  (honest MVP-disabled surfacing, PRI-539 semantics).
+
+Unbound negative control (pre-fix build, issue reproduction): recording
+without `--session` created a `sessions` row with session id `cli` (0 turns)
+and placeholder evidence — the exact §3.1 state this SPEC removes; the
+post-fix unbound path writes no trajectory projection at all (pinned by
+tests/hooks/pain-funnel-ingress.test.ts).
+
+The interactive `/pd-pain` leg could not be dispatched headlessly in the dev
+profile (agent CLI routes free text to the LLM; the TUI requires a real TTY
+and the QA channel is unavailable) — the command path is covered by the
+host-command-context unit tests (tests/commands/pain.test.ts, including the
+session-lineage assertions) and the G0 dispatch evidence from the OpenClaw
+2026.8.1 runtime source. This is recorded as the one deviation from a fully
+scripted §12.1.1 end-to-end trace.
 
 ## 18. Definition of Done
 

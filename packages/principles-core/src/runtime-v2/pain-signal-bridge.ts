@@ -260,8 +260,11 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
   return { provenance, evidenceCount, errorCode: null };
 }
 
+/** Owner-explicit sources — mirrors shouldShortCircuitEmptyEvidence and the plugin funnel's MANUAL_SOURCES (PRI-642). */
+const OWNER_MANUAL_SOURCES = new Set(['manual', 'pain', 'skill:pain']);
+
 function inferProvenance(data: PainDetectedData): PainProvenance {
-  if (data.source === 'manual' && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
+  if (OWNER_MANUAL_SOURCES.has(data.source) && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
     return 'owner_reported_no_host_trace';
   }
   if (data.sessionId && data.sessionId !== 'cli' && data.sessionId !== 'unknown') {

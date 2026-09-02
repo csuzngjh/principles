@@ -173,8 +173,16 @@ function parseCorrelation(value: unknown): { value: PainCorrelation; error?: und
   return { error: 'correlation_invalid' };
 }
 
-function parseEvidence(value: unknown): { value: PainEvidenceBundle; error?: undefined } | { value?: undefined; error: string } {
-  if (!isRecord(value)) return { error: 'evidence_invalid' };
+/** rc-3/rc-9: a present-but-invalid score is rejected, not silently dropped. */
+function parseScore(value: unknown): { score: number | undefined; scoreInvalid?: undefined } | { score: undefined; scoreInvalid: true } {
+  if (value === undefined) return { score: undefined };
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+    return { score: undefined, scoreInvalid: true };
+  }
+  return { score: value };
+}
+
+function parseEvidence(value: unknown): { value: PainEvidenceBundle; error?: undefined } | { value?: undefined; error: string } {  if (!isRecord(value)) return { error: 'evidence_invalid' };
   if (value.status === 'available') {
     if (!Array.isArray(value.entries) || value.entries.length === 0) return { error: 'evidence_invalid' };
     const entries: IngressEvidenceEntry[] = [];
@@ -232,7 +240,11 @@ export function parsePainIngressReport(input: unknown): PainIngressParseResult {
     return { ok: false, reasonCode: evidence.error, message: `evidence rejected: ${evidence.error}` };
   }
 
-  const score = input.score === undefined ? undefined : (typeof input.score === 'number' && input.score >= 0 && input.score <= 100 ? input.score : undefined);
+  // rc-3/rc-9: a present-but-invalid score is rejected, not silently dropped.
+  const { score, scoreInvalid } = parseScore(input.score);
+  if (scoreInvalid) {
+    return { ok: false, reasonCode: 'score_invalid', message: 'score must be a number between 0 and 100' };
+  }
 
   return {
     ok: true,
