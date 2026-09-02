@@ -65,6 +65,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   isBuiltinPiAiProvider: vi.fn().mockReturnValue(true),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   isFeatureEnabled: vi.fn().mockReturnValue(false),
+  PAIN_INGRESS_PAYLOAD_VERSION: 'v1',
 }));
 
 vi.mock('../../src/services/pd-config-loader.js', () => ({

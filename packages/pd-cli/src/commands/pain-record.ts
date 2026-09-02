@@ -13,11 +13,12 @@ import {
   isRuntimeConfigError,
   isFeatureEnabled,
   isBuiltinPiAiProvider,
+  PAIN_INGRESS_PAYLOAD_VERSION,
 } from '@principles/core/runtime-v2';
+import type { PainEvidenceEntry, PainIngressV1Payload } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { acquireTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
-import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
 
 interface RecordOptions {
   reason?: string;
@@ -36,6 +37,8 @@ interface SessionBindingPlan {
   hostKind?: 'openclaw';
   evidence: PainEvidenceEntry[];
   recordObservability: boolean;
+  /** Validated rev-2 facts persisted under painIngress.v1 (SPEC §9). */
+  painIngress: PainIngressV1Payload;
   /** Populated for the unbound path — disclosed to the operator (rc-9). */
   unboundWarning?: string;
 }
@@ -80,6 +83,12 @@ function resolveSessionBinding(opts: RecordOptions, stateDir: string, workspaceD
         hostKind: 'openclaw',
         evidence: acquisition.entries,
         recordObservability: true,
+        painIngress: {
+          version: PAIN_INGRESS_PAYLOAD_VERSION,
+          origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
+          correlation: { status: 'bound', hostKind: 'openclaw', sessionId: opts.session },
+          evidenceClass: { status: 'available', entryCount: acquisition.entries.length },
+        },
       };
     }
     const { reasonCode, detail } = acquisition;
@@ -121,6 +130,12 @@ function resolveSessionBinding(opts: RecordOptions, stateDir: string, workspaceD
     // real session; skipping it is disclosed below instead of fabricating
     // the sentinel session 'cli'.
     recordObservability: false,
+    painIngress: {
+      version: PAIN_INGRESS_PAYLOAD_VERSION,
+      origin: { kind: 'owner_manual', channel: 'external_cli_unbound' },
+      correlation: { status: 'unbound', reason: 'external_cli' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    },
     unboundWarning: 'context_unbound: no session bound — no trajectory evidence attached and the '
       + 'trajectory pain_events projection was skipped (it requires a real session). '
       + 'Diagnosis relies on the Owner report text; candidates will likely be blocked by the '
@@ -214,6 +229,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     hostKind: binding.hostKind,
     evidence: binding.evidence,
     recordObservability: binding.recordObservability,
+    painIngress: binding.painIngress,
   });
 
   // Show diagnostic info for config failures

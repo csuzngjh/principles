@@ -4,7 +4,7 @@ import { normalizeSeverity } from '../core/empathy-types.js';
 import { DetectionService } from '../core/detection-service.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
-import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
+import { emitPainDetectedEvent } from './pain.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordSelfReportFromText } from '../core/principle-application-ledger.js';
@@ -341,7 +341,6 @@ export function handleLlmOutput(
                 });
                 if (triggerDecision.shouldCreateDiagnosticTask) {
                     markSharedEpisodeAsDiagnosed(sourceKind, ctx.sessionId, source);
-                    const evidence = buildTrajectoryEvidence(wctx, ctx.sessionId || 'unknown');
                     emitPainDetectedEvent(wctx, {
                         ts: new Date().toISOString(),
                         type: 'pain_detected',
@@ -353,9 +352,6 @@ export function handleLlmOutput(
                             score: painScore,
                             sessionId: ctx.sessionId || 'unknown',
                             agentId: ctx.agentId,
-                            provenance: 'host_context_bound',
-                            hostKind: 'openclaw',
-                            evidence,
                         },
                     }, { recordObservability: false });
                 } else {
@@ -379,7 +375,6 @@ export function handleLlmOutput(
             });
 
             if (gate.shouldDiagnose) {
-                const evidence = buildTrajectoryEvidence(wctx, ctx.sessionId || 'unknown');
                 emitPainDetectedEvent(wctx, {
                     ts: new Date().toISOString(),
                     type: 'pain_detected',
@@ -391,9 +386,6 @@ export function handleLlmOutput(
                         score: painScore,
                         sessionId: ctx.sessionId || 'unknown',
                         agentId: ctx.agentId,
-                        provenance: 'host_context_bound',
-                        hostKind: 'openclaw',
-                        evidence,
                     },
                 }, { recordObservability: false });
             } else {

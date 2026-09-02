@@ -39,7 +39,8 @@ export type PainEvidenceUnavailableReason =
   | 'session_not_found'
   | 'empty_trajectory'
   | 'evidence_read_failed'
-  | 'evidence_invalid';
+  | 'evidence_invalid'
+  | 'not_applicable_unbound';
 
 export type PainEvidenceBundle =
   | { status: 'available'; entries: readonly [IngressEvidenceEntry, ...IngressEvidenceEntry[]] }
@@ -92,7 +93,19 @@ export type PainIngressDecision =
       painIngress: PainIngressV1Payload;
     }
   | { action: 'refuse'; reasonCode: string; warning: string; nextAction: string }
-  | { action: 'observation_only'; reasonCode: string; note: string };
+  | {
+      /**
+       * Automatic signal without binding/evidence — no LLM, no diagnostic
+       * task. `legacy` still carries the derived (empty-evidence) submission
+       * shape so host funnels can keep their observability projection via
+       * the bridge's empty-evidence short-circuit (SPEC §12.2.1/§12.2.2).
+       */
+      action: 'observation_only';
+      reasonCode: string;
+      note: string;
+      legacy: LegacyPainSubmission;
+      painIngress: PainIngressV1Payload;
+    };
 
 export type PainIngressParseResult =
   | { ok: true; report: PainIngressReport }
@@ -174,7 +187,7 @@ function parseEvidence(value: unknown): { value: PainEvidenceBundle; error?: und
     }
     return { value: { status: 'available', entries: entries as [IngressEvidenceEntry, ...IngressEvidenceEntry[]] } };
   }
-  const reasons = ['trajectory_unavailable', 'session_not_found', 'empty_trajectory', 'evidence_read_failed', 'evidence_invalid'] as const;
+  const reasons = ['trajectory_unavailable', 'session_not_found', 'empty_trajectory', 'evidence_read_failed', 'evidence_invalid', 'not_applicable_unbound'] as const;
   if (value.status === 'unavailable' && (reasons as readonly unknown[]).includes(value.reason)) {
     return { value: { status: 'unavailable', reason: value.reason as (typeof reasons)[number] } };
   }
@@ -328,17 +341,23 @@ export function evaluatePainIngress(report: PainIngressReport): PainIngressDecis
   // Automatic hooks: no evidence or no binding → observation-only, no LLM.
   if (origin.kind === 'automatic_hook') {
     if (correlation.status === 'unbound') {
+      const legacy = buildLegacy(report, []);
       return {
         action: 'observation_only',
         reasonCode: correlation.reason,
         note: 'Automatic signal without host binding recorded as observation only; no diagnostic task, no LLM run.',
+        legacy,
+        painIngress: legacy.painIngress,
       };
     }
     if (evidence.status === 'unavailable') {
+      const legacy = buildLegacy(report, []);
       return {
         action: 'observation_only',
         reasonCode: evidence.reason,
         note: 'Automatic signal without usable evidence recorded as observation only; no diagnostic task, no LLM run.',
+        legacy,
+        painIngress: legacy.painIngress,
       };
     }
     const legacy = buildLegacy(report, [...evidence.entries]);

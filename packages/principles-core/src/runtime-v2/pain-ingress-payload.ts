@@ -49,7 +49,9 @@ export type PainIngressEvidenceClassV1 =
         | 'session_not_found'
         | 'empty_trajectory'
         | 'evidence_read_failed'
-        | 'evidence_invalid';
+        | 'evidence_invalid'
+        /** Unbound Owner reports never consult a trajectory — no evidence is sought. */
+        | 'not_applicable_unbound';
     };
 
 /**
@@ -133,6 +135,7 @@ const EVIDENCE_UNAVAILABLE_REASONS = [
   'empty_trajectory',
   'evidence_read_failed',
   'evidence_invalid',
+  'not_applicable_unbound',
 ] as const;
 
 type EvidenceUnavailableReason = (typeof EVIDENCE_UNAVAILABLE_REASONS)[number];

@@ -12,12 +12,18 @@ vi.mock('../../src/core/intent-doc-reader-adapter.js', () => ({
   createIntentDocReader: vi.fn().mockReturnValue({ readIntentDoc: vi.fn() }),
   resolveIntentLang: vi.fn().mockReturnValue('zh-CN'),
 }));
-vi.mock('@principles/core/runtime-v2', () => ({
-  PainToPrincipleService: vi.fn(),
-  PrincipleTreeLedgerAdapter: vi.fn(function(this: any) { this.stateDir = ''; }),
-  MAX_EVIDENCE_ENTRIES: 8,
-  MAX_EVIDENCE_NOTE_CHARS: 200,
-}));
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  // PRI-642: the /pd-pain path now routes through the shared ingress
+  // (@principles/host-runtime), whose barrel transitively imports many
+  // core exports — spread the actual module and override only the classes
+  // under test.
+  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  return {
+    ...actual,
+    PainToPrincipleService: vi.fn(),
+    PrincipleTreeLedgerAdapter: vi.fn(function(this: any) { this.stateDir = ''; }),
+  };
+});
 
 import { PainToPrincipleService } from '@principles/core/runtime-v2';
 

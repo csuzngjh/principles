@@ -49,6 +49,7 @@ import {
 } from './after-tool-call-helpers.js';
 
 import { buildTrajectoryEvidence } from './trajectory-evidence.js';
+import { ingressDecisionForPluginPain } from './pain-ingress-adapter.js';
 export { buildTrajectoryEvidence };
 
 const pendingPainContinuations = new Set<Promise<void>>();
@@ -161,19 +162,59 @@ export async function emitPainDetectedEvent(
       // CLI pd pain record and paths without legacy writers keep the default true.
       const recordObs = options?.recordObservability ?? true;
 
-      const result = await service.recordPain({
+      // PRI-642 Scope B: the shared ingress derives provenance, evidence and
+      // the persisted painIngress.v1 facts — emitters no longer assemble
+      // them (SPEC §8.3). Sentinel-shaped evidence from the legacy array API
+      // is re-classified through typed acquisition by the adapter.
+      const decision = ingressDecisionForPluginPain({
+        wctx,
         painId: painData.painId,
         painType: painData.painType,
         source: painData.source,
         reason: painData.reason,
         score: painData.score,
         sessionId: painData.sessionId,
+        inlineEvidence: painData.evidence,
+      });
+
+      if (decision.action === 'refuse') {
+        // Invalid origin/correlation/lineage combination — fail loud, no writes.
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_INGRESS_REFUSED', JSON.stringify({
+          painId: painData.painId,
+          source: painData.source,
+          reasonCode: decision.reasonCode,
+          warning: decision.warning,
+          nextAction: decision.nextAction,
+        }));
+        return;
+      }
+      if (decision.action === 'observation_only') {
+        // Automatic signal without binding/evidence — observation-only. The
+        // recordPain call below keeps the observability projection alive;
+        // the bridge's empty-evidence short-circuit guarantees no LLM run
+        // and no diagnostic task (SPEC §12.2.1/§12.2.2).
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_INGRESS_OBSERVATION_ONLY', JSON.stringify({
+          painId: painData.painId,
+          source: painData.source,
+          reasonCode: decision.reasonCode,
+          note: decision.note,
+        }));
+      }
+
+      const result = await service.recordPain({
+        painId: decision.legacy.painId,
+        painType: decision.legacy.painType,
+        source: decision.legacy.source,
+        reason: decision.legacy.reason,
+        score: decision.legacy.score,
+        sessionId: decision.legacy.sessionId,
         agentId: painData.agentId,
         taskId: painData.taskId,
-        traceId: painData.traceId,
-        provenance: painData.provenance,
-        hostKind: painData.hostKind,
-        evidence: painData.evidence,
+        traceId: decision.legacy.traceId,
+        provenance: decision.legacy.provenance,
+        hostKind: decision.legacy.hostKind,
+        evidence: decision.legacy.evidence,
+        painIngress: decision.legacy.painIngress,
         recordObservability: recordObs,
       });
       if (result.status === 'failed' && result.failureCategory) {
@@ -433,7 +474,10 @@ export function handleSharedPainEvidenceResult(
     ts: new Date().toISOString(), type: 'pain_detected', data: {
       painId, painType: 'tool_failure', source: event.toolName,
       reason: `${reason}; diagnosticGate=${triggerReason}`, score, sessionId, traceId,
-      agentId: ctx.agentId, provenance: 'automatic_hook', hostKind: 'openclaw', evidence,
+      agentId: ctx.agentId,
+      // Inline evidence from the shared atomic writer — real behavior traces
+      // the ingress adapter passes through (provenance is ingress-derived).
+      evidence,
     },
   }, { recordObservability: false }));
 }
@@ -551,9 +595,6 @@ function handleManualPain(
           sessionId,
           traceId,
           agentId: ctx.agentId,
-          provenance: (sessionId && sessionId !== 'unknown') ? 'host_context_bound' : 'owner_reported_no_host_trace',
-          hostKind: 'openclaw',
-          evidence: buildTrajectoryEvidence(wctx, sessionId),
         },
       }, { recordObservability: false });
     } else {
@@ -615,9 +656,6 @@ function handleManualPain(
         sessionId,
         traceId,
         agentId: ctx.agentId,
-        provenance: (sessionId && sessionId !== 'unknown') ? 'host_context_bound' : 'owner_reported_no_host_trace',
-        hostKind: 'openclaw',
-        evidence: buildTrajectoryEvidence(wctx, sessionId),
       },
     }, { recordObservability: false });
   }

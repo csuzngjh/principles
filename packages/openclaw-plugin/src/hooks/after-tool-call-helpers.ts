@@ -658,9 +658,6 @@ export function emitPainIfAdmitted(
       sessionId,
       traceId: observation.traceId,
       agentId,
-      provenance: 'automatic_hook',
-      hostKind: 'openclaw',
-      evidence: buildTrajectoryEvidence(wctx, sessionId),
     },
   }, { recordObservability: false });
 }

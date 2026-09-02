@@ -350,8 +350,6 @@ export class SignalCollectorHost {
           sessionId,
           agentId: 'main',
           traceId: createTraceId(),           // correlation only — never dedup identity (ADR-0020 §11.4)
-          provenance: 'host_context_bound',
-          hostKind: 'openclaw',
           evidence: [
             { sourceRef: 'signal_collector', note: output.evidence.excerpt },
           ],
