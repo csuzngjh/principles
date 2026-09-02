@@ -2,6 +2,13 @@
  * pd pain record command — Runtime v2 pain signal entry point.
  *
  * Uses PainToPrincipleService as the single write-side orchestration API.
+ * PRI-642 (review blocker 1): the ingress semantic interpretation — origin,
+ * bound/unbound correlation, provenance derivation, sentinel handling,
+ * submit/degrade/refuse semantics and painIngress.v1 construction — comes
+ * from the SHARED evaluator `evaluatePainIngress` in @principles/core
+ * (the same authority the OpenClaw funnel uses). This adapter only does
+ * host-specific ACQUISITION: read --session, validate it against this
+ * workspace's trajectory.db, and collect raw evidence entries.
  *
  * Usage:
  *   pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--json]
@@ -13,9 +20,9 @@ import {
   isRuntimeConfigError,
   isFeatureEnabled,
   isBuiltinPiAiProvider,
-  PAIN_INGRESS_PAYLOAD_VERSION,
+  evaluatePainIngress,
 } from '@principles/core/runtime-v2';
-import type { PainEvidenceEntry, PainIngressV1Payload } from '@principles/core/runtime-v2';
+import type { PainIngressDecision, PainEvidenceBundle, IngressEvidenceEntry, PainEvidenceEntry } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { acquireTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
@@ -28,19 +35,6 @@ interface RecordOptions {
   json?: boolean;
   session?: string;
   wait?: boolean;
-}
-
-/** PRI-642 (SPEC §7.3/§7.4): structured pre-flight result for session binding. */
-interface SessionBindingPlan {
-  sessionId?: string;
-  provenance: 'host_context_bound' | 'owner_reported_no_host_trace';
-  hostKind?: 'openclaw';
-  evidence: PainEvidenceEntry[];
-  recordObservability: boolean;
-  /** Validated rev-2 facts persisted under painIngress.v1 (SPEC §9). */
-  painIngress: PainIngressV1Payload;
-  /** Populated for the unbound path — disclosed to the operator (rc-9). */
-  unboundWarning?: string;
 }
 
 function emitSessionBindingFailure(
@@ -62,85 +56,71 @@ function emitSessionBindingFailure(
   process.exit(1);
 }
 
-/**
- * PRI-642 Scope A: resolve the session binding plan BEFORE any task/LLM work.
- *
- * - explicit `--session` → validate against the workspace trajectory.db:
- * nonexistent session / unreadable DB / empty trajectory all fail loudly with
- * a structured reason and NO mutation (SPEC §12.1.4, cli-5);
- * - no `--session` → explicit unbound Owner report: no `cli` sentinel session,
- * no placeholder evidence, no trajectory projection write (SPEC §7.4).
- */
-function resolveSessionBinding(opts: RecordOptions, stateDir: string, workspaceDir: string): SessionBindingPlan | null {
-  if (opts.session) {
-    const acquisition = acquireTrajectoryEvidenceFromDb(stateDir, opts.session, workspaceDir);
-    if (acquisition.status === 'available') {
-      return {
-        sessionId: opts.session,
-        provenance: 'host_context_bound',
-        // PRI-640/SPEC §8.3: a validated session in this workspace's
-        // trajectory is an OpenClaw-recorded session — attribute it.
-        hostKind: 'openclaw',
-        evidence: acquisition.entries,
-        recordObservability: true,
-        painIngress: {
-          version: PAIN_INGRESS_PAYLOAD_VERSION,
-          origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
-          correlation: { status: 'bound', hostKind: 'openclaw', sessionId: opts.session },
-          evidenceClass: { status: 'available', entryCount: acquisition.entries.length },
-        },
-      };
-    }
-    const { reasonCode, detail } = acquisition;
-    let failure: { reason: string; message: string; nextAction: string };
-    if (reasonCode === 'session_not_found') {
-      failure = {
-        reason: 'session_not_found',
-        message: `--session ${opts.session} does not exist in this workspace's trajectory (${detail}).`,
-        nextAction: 'Verify the session id (it must be a session recorded in this workspace), or omit --session to record an unbound Owner report (disclosed, evidence-less).',
-      };
-    } else if (reasonCode === 'trajectory_unavailable') {
-      failure = {
-        reason: 'trajectory_unavailable',
-        message: `No trajectory.db found at ${stateDir}/trajectory.db — cannot bind --session.`,
-        nextAction: 'Point --workspace at the workspace that owns the session, or omit --session to record an unbound Owner report.',
-      };
-    } else if (reasonCode === 'evidence_read_failed') {
-      failure = {
-        reason: 'evidence_read_failed',
-        message: `The trajectory database could not be read (${detail}).`,
-        nextAction: 'Ensure trajectory.db is a readable SQLite database and no other process holds an exclusive lock, or omit --session to record an unbound Owner report.',
-      };
-    } else {
-      failure = {
-        reason: 'empty_trajectory',
-        message: `Session ${opts.session} exists but contains no usable evidence (${detail}).`,
-        nextAction: 'Use a session that has recorded turns/tool calls, or omit --session to record an unbound Owner report.',
-      };
-    }
-    emitSessionBindingFailure(opts, failure);
-    return null;
-  }
+function toIngressEntry(entry: PainEvidenceEntry): IngressEvidenceEntry {
+  // Trajectory evidence references observed behavior (owner messages,
+  // assistant turns, tool-call failures) — behavior traces.
+  return { kind: 'behavior_trace', sourceRef: entry.sourceRef, note: entry.note };
+}
 
-  return {
-    sessionId: undefined,
-    provenance: 'owner_reported_no_host_trace',
-    evidence: [],
-    // SPEC §7.4: the trajectory sessions/pain_events projection requires a
-    // real session; skipping it is disclosed below instead of fabricating
-    // the sentinel session 'cli'.
-    recordObservability: false,
-    painIngress: {
-      version: PAIN_INGRESS_PAYLOAD_VERSION,
+/**
+ * PRI-642 (SPEC §7.3/§7.4, review blocker 1): build the report from this
+ * adapter's host-specific facts and let the SHARED evaluator decide.
+ *
+ * - explicit `--session` → acquisition against the workspace trajectory.db:
+ *   · session_not_found  → the claimed binding does not exist → the shared
+ *     evaluator refuses it (matrix row 5, reason origin_correlation_mismatch;
+ *     the CLI labels the failure with the SPEC §7.3 reason session_not_found);
+ *   · other unavailable evidence (empty / unreadable / missing trajectory)
+ *     → bound + unavailable → the evaluator DEGRADES (submit with honest
+ *     empty evidence + warning), identical to the OpenClaw funnel;
+ *   · available → bound submit with the real evidence entries.
+ * - no `--session` → unbound Owner report (matrix row 6) → submit with
+ *   disclosure; no sentinel session, no placeholder evidence, no trajectory
+ *   projection (the CLI skips observability when the ingress yields no
+ *   bound session — SPEC §7.4).
+ */
+function resolveIngressDecision(
+  input: { opts: RecordOptions; stateDir: string; workspaceDir: string; painId: string },
+): { decision: PainIngressDecision; acquisitionDetail: string | null } {
+  const { opts, stateDir, workspaceDir, painId } = input;
+  const score = opts.score ?? 80;
+  const base = {
+    identity: { kind: 'manual_pain_id' as const, painId },
+    painType: 'user_frustration' as const,
+    source: opts.source ?? 'manual',
+    reason: opts.reason ?? '',
+    score,
+  };
+
+  if (!opts.session) {
+    const decision = evaluatePainIngress({
+      ...base,
       origin: { kind: 'owner_manual', channel: 'external_cli_unbound' },
       correlation: { status: 'unbound', reason: 'external_cli' },
-      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
-    },
-    unboundWarning: 'context_unbound: no session bound — no trajectory evidence attached and the '
-      + 'trajectory pain_events projection was skipped (it requires a real session). '
-      + 'Diagnosis relies on the Owner report text; candidates will likely be blocked by the '
-      + 'admission gate (needs_evidence). Re-run with --session <id> for trace-backed diagnosis.',
-  };
+      evidence: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    });
+    return { decision, acquisitionDetail: null };
+  }
+
+  const acquisition = acquireTrajectoryEvidenceFromDb(stateDir, opts.session, workspaceDir);
+  // Host-specific acquisition result → shared report shape.
+  const evidenceBundle: PainEvidenceBundle = acquisition.status === 'available'
+    ? { status: 'available', entries: acquisition.entries.map(toIngressEntry) as [IngressEvidenceEntry, ...IngressEvidenceEntry[]] }
+    : { status: 'unavailable', reason: acquisition.reasonCode };
+  // SPEC §7.3: a nonexistent session means the CLI-explicit-session channel
+  // cannot claim a binding — expressed as the row-5 combination so the
+  // SHARED evaluator refuses it (never a locally-decided refusal).
+  const correlation = acquisition.status === 'unavailable' && acquisition.reasonCode === 'session_not_found'
+    ? { status: 'unbound' as const, reason: 'external_cli' as const }
+    : { status: 'bound' as const, hostKind: 'openclaw' as const, sessionId: opts.session };
+
+  const decision = evaluatePainIngress({
+    ...base,
+    origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
+    correlation,
+    evidence: evidenceBundle,
+  });
+  return { decision, acquisitionDetail: acquisition.status === 'unavailable' ? acquisition.detail : null };
 }
 
 export async function handlePainRecord(opts: RecordOptions): Promise<void> {
@@ -165,7 +145,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       }, null, 2));
     } else {
       console.error(`Error: --reason must be at most ${MAX_REASON_LENGTH} characters (got ${opts.reason.length})`);
-      console.error('Next action: shorten the reason text or split into multiple pain records.');
+      console.error('Next action: shorten the reason text or split it into multiple pain records.');
     }
     process.exit(1);
     return;
@@ -191,13 +171,28 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const stateDir = `${workspaceDir}/.state`;
   const painId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-  // PRI-642: resolve session binding before any service/LLM/task mutation.
-  const binding = resolveSessionBinding(opts, stateDir, workspaceDir);
-  if (binding === null) {
-    // resolveSessionBinding already emitted the structured failure and
-    // exited; return keeps the no-mutation contract when exit is stubbed.
+  // PRI-642: run the SHARED ingress evaluator before any service/LLM/task
+  // mutation; the decision (submit/degrade/refuse) is not made here.
+  const { decision, acquisitionDetail } = resolveIngressDecision({ opts, stateDir, workspaceDir, painId });
+
+  if (decision.action === 'refuse') {
+    // SPEC §7.3: a nonexistent --session keeps its specific reason code;
+    // the refusal itself came from the shared evaluator (row 5).
+    const reason = acquisitionDetail !== null && opts.session !== undefined && decision.reasonCode === 'origin_correlation_mismatch'
+      ? 'session_not_found'
+      : decision.reasonCode;
+    emitSessionBindingFailure(opts, {
+      reason,
+      message: decision.warning,
+      nextAction: decision.nextAction,
+    });
     return;
   }
+
+  const binding = decision.legacy;
+  // SPEC §7.4: without a bound session the trajectory projection is skipped
+  // (disclosed below) instead of fabricating the sentinel session 'cli'.
+  const recordObservability = binding.sessionId !== undefined;
 
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
   // PRI-306: Load .pd/config.yaml for config-driven runtime binding
@@ -239,7 +234,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     provenance: binding.provenance,
     hostKind: binding.hostKind,
     evidence: binding.evidence,
-    recordObservability: binding.recordObservability,
+    recordObservability,
     painIngress: binding.painIngress,
   });
 
@@ -323,7 +318,14 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     ? `admitted: 0 of ${result.candidateIds.length} candidates (all gated — needs_evidence/deferred); `
       + 'nothing was internalized. See admissionResults for per-candidate reasons; add --session evidence or Owner context to raise confidence above the admission threshold.'
     : null;
-  const cliWarnings = [binding.unboundWarning, gatedWarning].filter((w): w is string => w !== null && w !== undefined);
+  // PRI-642: the ingress decision's own disclosures (degrade warning /
+  // unbound context_unbound warning) are surfaced to the operator.
+  const decisionWarnings = decision.action === 'degrade'
+    ? [`${decision.warning} Next action: ${decision.nextAction}`]
+    : decision.action === 'submit'
+      ? decision.warnings
+      : [];
+  const cliWarnings = [...decisionWarnings, gatedWarning].filter((w): w is string => w !== null && w !== undefined);
 
   if (opts.json) {
     const out: Record<string, unknown> = { ...result };

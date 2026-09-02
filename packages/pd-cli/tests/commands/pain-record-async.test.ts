@@ -31,37 +31,42 @@ vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
   ]),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
-  PainToPrincipleService: vi.fn().mockImplementation(function(this: Record<string, unknown>, opts: Record<string, unknown>) {
-    lastServiceOpts = opts;
-    return {
-      recordPain: vi.fn(async () => mockRecordPainResult),
-    };
-  }),
-  PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function() { return {}; }),
-  computeEffectivePdConfig: vi.fn().mockReturnValue({
-    runtimeKind: 'pi-ai',
-    provider: 'test-provider',
-    model: 'test-model',
-    apiKeyEnv: 'TEST_KEY',
-    timeoutMs: 300000,
-    agentId: 'main',
-    language: 'zh-CN',
-    warnings: [],
-  }),
-  resolveRuntimeConfig: vi.fn().mockReturnValue({
-    runtimeKind: 'pi-ai',
-    provider: 'test-provider',
-    model: 'test-model',
-    apiKeyEnv: 'TEST_KEY',
-    timeoutMs: 300000,
-    agentId: 'main',
-  }),
-  isRuntimeConfigError: vi.fn().mockReturnValue(false),
-  resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
-  isFeatureEnabled: vi.fn().mockImplementation(() => mockIsFeatureEnabledReturn),
-  PAIN_INGRESS_PAYLOAD_VERSION: 'v1',
-}));
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  // PRI-642 review blocker 1: keep the REAL core evaluatePainIngress (the
+  // shared semantic authority) — only service/IO classes are mocked.
+  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  return {
+    ...actual,
+    PainToPrincipleService: vi.fn().mockImplementation(function(this: Record<string, unknown>, opts: Record<string, unknown>) {
+      lastServiceOpts = opts;
+      return {
+        recordPain: vi.fn(async () => mockRecordPainResult),
+      };
+    }),
+    PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function() { return {}; }),
+    computeEffectivePdConfig: vi.fn().mockReturnValue({
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+      timeoutMs: 300000,
+      agentId: 'main',
+      language: 'zh-CN',
+      warnings: [],
+    }),
+    resolveRuntimeConfig: vi.fn().mockReturnValue({
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+      timeoutMs: 300000,
+      agentId: 'main',
+    }),
+    isRuntimeConfigError: vi.fn().mockReturnValue(false),
+    resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
+    isFeatureEnabled: vi.fn().mockImplementation(() => mockIsFeatureEnabledReturn),
+  };
+});
 
 vi.mock('../../src/services/pd-config-loader.js', () => ({
   loadPdConfig: vi.fn().mockReturnValue({

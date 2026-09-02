@@ -14,7 +14,17 @@ import {
   evaluatePainIngress,
   parsePainIngressReport,
 } from '../src/pain-evidence-ingress.js';
+import { evaluatePainIngress as evaluatePainIngressFromCore } from '@principles/core/runtime-v2';
 import type { PainIngressReport } from '../src/pain-evidence-ingress.js';
+
+// Review blocker 1: host-runtime is a THIN RE-EXPORT — the semantic
+// authority is core's evaluatePainIngress, the same function pd-cli uses.
+// Identity (not deep-equality) proves there is exactly one implementation.
+describe('single semantic authority (review blocker 1)', () => {
+  it('host-runtime evaluatePainIngress IS core evaluatePainIngress', () => {
+    expect(evaluatePainIngress).toBe(evaluatePainIngressFromCore);
+  });
+});
 
 const OPENCLAW_SESSION = 'sess-openclaw-1';
 const EVIDENCE_ENTRIES = [

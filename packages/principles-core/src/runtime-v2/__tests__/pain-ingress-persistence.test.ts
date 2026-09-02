@@ -147,3 +147,81 @@ describe('painIngress.v1 dual-write round trip (PRI-642 §9, §13)', () => {
     expect(executed.message).toContain('ingress_payload_mismatch');
   });
 });
+
+// ── Review blocker 2: re-entry validation must equal write-time validation ──
+
+describe('painIngress.v1 re-entry invariant parity (review blocker 2)', () => {
+  const baseV1 = {
+    version: 'v1' as const,
+    origin: { kind: 'owner_manual' as const, channel: 'openclaw_command' },
+    correlation: { status: 'bound' as const, hostKind: 'openclaw' as const, sessionId: 'sess-real' },
+    evidenceClass: { status: 'available' as const, entryCount: 2 },
+  };
+
+  it('T1: bound/openclaw/sessionId="cli" → reject (session_sentinel_invalid)', () => {
+    const parsed = parsePainIngressV1Payload({
+      ...baseV1,
+      correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'cli' },
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonCode).toBe('session_sentinel_invalid');
+  });
+
+  it('T2: bound/openclaw/sessionId="unknown" → reject (session_sentinel_invalid)', () => {
+    const parsed = parsePainIngressV1Payload({
+      ...baseV1,
+      correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'unknown' },
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonCode).toBe('session_sentinel_invalid');
+  });
+
+  it('T3: evidenceClass available with entryCount 0 → reject (write-time requires >= 1)', () => {
+    const parsed = parsePainIngressV1Payload({
+      ...baseV1,
+      evidenceClass: { status: 'available', entryCount: 0 },
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonCode).toBe('ingress_evidence_class_invalid');
+  });
+
+  it('T4: owner_manual.external_cli_unbound + bound correlation → reject (impossible combination)', () => {
+    const parsed = parsePainIngressV1Payload({
+      ...baseV1,
+      origin: { kind: 'owner_manual', channel: 'external_cli_unbound' },
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonCode).toBe('origin_correlation_mismatch');
+  });
+
+  it('T5: owner_manual.cli_explicit_session + unbound correlation → reject (impossible combination)', () => {
+    const parsed = parsePainIngressV1Payload({
+      ...baseV1,
+      origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
+      correlation: { status: 'unbound', reason: 'external_cli' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonCode).toBe('origin_correlation_mismatch');
+  });
+
+  it('T6: legal bound OpenClaw v1 (real session, available entryCount > 0) → accept', () => {
+    const parsed = parsePainIngressV1Payload(baseV1);
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('T7: legal external CLI unbound v1 (unbound + not_applicable_unbound) → accept', () => {
+    const parsed = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'external_cli_unbound' },
+      correlation: { status: 'unbound', reason: 'external_cli' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    });
+    expect(parsed.ok).toBe(true);
+  });
+});

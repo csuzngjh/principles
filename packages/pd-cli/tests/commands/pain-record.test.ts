@@ -30,16 +30,22 @@ vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
   }),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
-  PainToPrincipleService: vi.fn().mockImplementation(function() {
-    return {
-      recordPain: vi.fn(async (input: PainToPrincipleInput) => {
-        lastRecordPainInput = input;
-        return mockRecordPainResult;
-      }),
-    };
-  }),
-  PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function() { return {}; }),
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  // PRI-642 review blocker 1: the CLI now evaluates ingress semantics via
+  // the REAL core evaluatePainIngress (the shared authority) — only the
+  // service/IO classes are mocked.
+  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  return {
+    ...actual,
+    PainToPrincipleService: vi.fn().mockImplementation(function() {
+      return {
+        recordPain: vi.fn(async (input: PainToPrincipleInput) => {
+          lastRecordPainInput = input;
+          return mockRecordPainResult;
+        }),
+      };
+    }),
+    PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function() { return {}; }),
   computeEffectivePdConfig: vi.fn().mockReturnValue({
     runtimeKind: 'pi-ai',
     provider: 'test-provider',
@@ -62,8 +68,8 @@ vi.mock('@principles/core/runtime-v2', () => ({
   isBuiltinPiAiProvider: vi.fn().mockReturnValue(true),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   isFeatureEnabled: vi.fn().mockReturnValue(false),
-  PAIN_INGRESS_PAYLOAD_VERSION: 'v1',
-}));
+  };
+});
 
 vi.mock('../../src/services/pd-config-loader.js', () => ({
   loadPdConfig: vi.fn().mockReturnValue({
@@ -465,7 +471,7 @@ describe('pd pain record', () => {
     exitSpy.mockRestore();
   });
 
-  it('fails/degrades with a structured reason when the trajectory DB is unreadable', async () => {
+  it('degrades exactly like the OpenClaw funnel when the trajectory DB is unreadable (shared ingress, matrix row 4)', async () => {
     vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
       status: 'unavailable',
       reasonCode: 'evidence_read_failed',
@@ -476,17 +482,24 @@ describe('pd pain record', () => {
 
     await handlePainRecord({ reason: 'test pain', session: 'sess-x', json: true });
 
+    // Bound session + unavailable evidence → the shared evaluator DEGRADES
+    // (submit with honest empty evidence + disclosure), identical to the
+    // OpenClaw funnel — the CLI does not make up its own failure semantics.
+    expect(lastRecordPainInput).not.toBeNull();
+    expect(lastRecordPainInput!.sessionId).toBe('sess-x');
+    expect(lastRecordPainInput!.evidence).toEqual([]);
+    expect(lastRecordPainInput!.provenance).toBe('host_context_bound');
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(jsonOutput.status).toBe('failed');
-    expect(jsonOutput.reason).toBe('evidence_read_failed');
-    expect(lastRecordPainInput).toBeNull();
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(jsonOutput.reason).not.toBe('session_not_found');
+    const warningsStr = JSON.stringify(jsonOutput.warnings ?? jsonOutput.warning ?? '');
+    expect(warningsStr).toContain('evidence_read_failed');
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('reports empty_trajectory explicitly when the session exists but has no usable evidence', async () => {
+  it('degrades (does not exit) when the session exists but has no usable evidence', async () => {
     vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
       status: 'unavailable',
       reasonCode: 'empty_trajectory',
@@ -497,12 +510,13 @@ describe('pd pain record', () => {
 
     await handlePainRecord({ reason: 'test pain', session: 'quiet-session', json: true });
 
+    expect(lastRecordPainInput).not.toBeNull();
+    expect(lastRecordPainInput!.sessionId).toBe('quiet-session');
+    expect(lastRecordPainInput!.evidence).toEqual([]);
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(jsonOutput.status).toBe('failed');
-    expect(jsonOutput.reason).toBe('empty_trajectory');
-    expect(jsonOutput.nextAction).toBeTruthy();
-    expect(lastRecordPainInput).toBeNull();
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    const warningsStr = JSON.stringify(jsonOutput.warnings ?? jsonOutput.warning ?? '');
+    expect(warningsStr).toContain('empty_trajectory');
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

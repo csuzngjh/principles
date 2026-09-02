@@ -404,6 +404,26 @@ export type {
   PainIngressEvidenceClassV1,
   PainIngressV1ParseResult,
 } from './pain-ingress-payload.js';
+// PRI-642 SPEC §8: THE shared ingress semantic evaluator — one authority
+// for every adapter (OpenClaw funnel, pd-cli; host-runtime re-exports it).
+export {
+  evaluatePainIngress,
+  parsePainIngressReport,
+  validateOriginCorrelationInvariant,
+  SENTINEL_SESSION_IDS,
+  isSentinelSessionId,
+} from './pain-ingress.js';
+export type {
+  PainIngressReport,
+  PainIngressDecision,
+  LegacyPainSubmission,
+  PainOrigin,
+  PainCorrelation,
+  IngressEvidenceEntry,
+  PainEvidenceBundle,
+  PainEvidenceUnavailableReason,
+  PainIngressParseResult,
+} from './pain-ingress.js';
 /** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
 export { recordPainSignalObservability } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';

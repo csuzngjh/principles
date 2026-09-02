@@ -3,12 +3,13 @@
  *
  * One seam converts the OpenClaw plugin's pain funnel facts (session from
  * the hook/command context, trajectory evidence, source) into a validated
- * PainIngressReport and delegates the decision to the shared
- * @principles/host-runtime ingress. Emitters stop assembling provenance or
- * sentinel evidence themselves (SPEC §8.3); observation-only automatic
- * signals never reach an LLM.
+ * PainIngressReport and delegates the decision to the SHARED semantic
+ * evaluator `evaluatePainIngress` (re-exported by @principles/host-runtime,
+ * owned by @principles/core/runtime-v2 — the same authority pd-cli uses).
+ * Emitters stop assembling provenance or sentinel evidence themselves
+ * (SPEC §8.3); observation-only automatic signals never reach an LLM.
  */
-import { evaluatePainIngress } from '@principles/host-runtime';
+import { evaluatePainIngress, isSentinelSessionId } from '@principles/host-runtime';
 import type { PainIngressDecision, IngressEvidenceEntry } from '@principles/host-runtime';
 import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
 import { acquireTrajectoryEvidence } from './trajectory-evidence.js';
@@ -51,7 +52,7 @@ export function ingressDecisionForPluginPain(input: PluginIngressInput): PainIng
   const { wctx, sessionId, source } = input;
   const isManual = MANUAL_SOURCES.has(source);
 
-  const correlation = sessionId && sessionId !== 'unknown' && sessionId !== 'cli'
+  const correlation = sessionId && sessionId !== 'unknown' && !isSentinelSessionId(sessionId)
     ? { status: 'bound' as const, hostKind: 'openclaw' as const, sessionId }
     : { status: 'unbound' as const, reason: 'missing_host_session' as const };
 

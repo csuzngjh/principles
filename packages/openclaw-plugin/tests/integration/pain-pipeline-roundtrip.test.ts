@@ -277,16 +277,16 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(source).toMatch(/hostKind:\s*painData\.hostKind,/);
     });
 
-    it('manual CLI pain record attributes hostKind ONLY from a validated session (never guessed)', () => {
-      // PRI-642: the unbound plan carries no hostKind; the bound plan
-      // attributes 'openclaw' because --session was validated against the
-      // OpenClaw workspace trajectory. Unit tests in pain-record.test.ts pin
-      // both branches; this source check guards that attribution is set
-      // inside the validated-acquisition branch and forwarded from the plan
-      // (never hardcoded at the recordPain call).
+    it('manual CLI pain record forwards the ingress-derived hostKind (never guessed locally)', () => {
+      // PRI-642 review blocker 1: the CLI no longer hardcodes attribution —
+      // it evaluates its acquisition facts through the SHARED core evaluator
+      // and forwards decision.legacy (provenance/hostKind) verbatim. Unit
+      // tests in pain-record.test.ts pin the bound=host_context_bound+openclaw
+      // vs unbound=owner_reported branches through the real evaluator.
       const source = read('packages/pd-cli/src/commands/pain-record.ts');
-      expect(source).toMatch(/if \(acquisition\.status === 'available'\) \{[\s\S]{0,400}hostKind: 'openclaw',/);
+      expect(source).toMatch(/evaluatePainIngress\(/);
       expect(source).toMatch(/hostKind:\s*binding\.hostKind,/);
+      expect(source).not.toMatch(/hostKind:\s*'openclaw',/);
     });
 
     it('legacy event import stays unattributed (unknown — never guessed)', () => {
