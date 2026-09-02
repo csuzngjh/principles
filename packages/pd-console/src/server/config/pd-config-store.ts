@@ -466,10 +466,13 @@ export function updateAgentBinding(
   // the merged effective map. Defaults belong in the registry, not in config —
   // snapshotting `effective.config.features` here would materialize every
   // missing default flag into an immortal override on any agent-binding change.
+  // PRI-645: the only reachable fallback is "config file absent" (a malformed
+  // features section was already rejected by loadPdConfig above) — an empty
+  // map keeps the newly created config sparse; the resolver fills defaults.
   const updatedConfig: Record<string, unknown> = {
     ...rawConfig,
     version: effective.config.version,
-    features: isRecord(rawConfig.features) ? rawConfig.features : { ...effective.config.features },
+    features: isRecord(rawConfig.features) ? rawConfig.features : {},
     runtimeProfiles: { ...effective.config.runtimeProfiles },
     internalAgents: {
       defaultRuntime: effective.config.internalAgents.defaultRuntime,
@@ -645,10 +648,12 @@ export function updateDefaultRuntime(
   // Merge: update only defaultRuntime, preserve agent overrides.
   // PRI-637: preserve the file's own `features:` section (same rationale as
   // updateAgentBinding — never re-snapshot merged defaults into config).
+  // PRI-645: config-absent fallback writes an empty map, not a default
+  // snapshot — the resolver owns defaults.
   const updatedConfig: Record<string, unknown> = {
     ...rawConfig,
     version: effective.config.version,
-    features: isRecord(rawConfig.features) ? rawConfig.features : { ...effective.config.features },
+    features: isRecord(rawConfig.features) ? rawConfig.features : {},
     runtimeProfiles: { ...effective.config.runtimeProfiles },
     internalAgents: {
       defaultRuntime: defaultRuntimeRaw,

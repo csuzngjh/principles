@@ -1,21 +1,31 @@
 # Feature Flag Governance (PRI-574)
 
-> 2026-08-24。目标：让每个注册 flag 的 consumer、默认值、回滚路径可审计，
-> 并用契约测试阻止 silent drift。按工单 Non-goal 约束，不做架构重构。
+> 2026-08-24 初版；2026-09-02 PRI-645 修订 bootstrap 表示层。目标：让每个注册 flag 的
+> consumer、默认值、回滚路径可审计，并用契约测试阻止 silent drift。按工单 Non-goal
+> 约束，不做架构重构。
 
 ## 1. 注册表事实源与消费链
 
 单一事实源：`packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts`
-的 `DEFAULT_FEATURE_FLAGS`。派生链：
+的 `DEFAULT_FEATURE_FLAGS`。派生链（PRI-645 收敛后）：
 
 ```
 feature-flag-contract.ts (registry)
   ├─ principles-core config/pd-config-defaults.ts → getDefaultPdConfig()
   │    └─ host-runtime pd-config.ts → loadPdConfigForPlugin / loadFeatureFlagFromConfig
   │         └─ openclaw-plugin hooks (gate/prompt/…) + pd-cli commands + pd-console server
-  └─ create-principles-disciple mvp-config.ts → 安装器生成的 .pd/config.yaml 模板
-       （独立硬编码，无 core 依赖 —— 由 installer-config-parity.test.ts 双向对账）
+  ├─ runtime/default authority（唯一默认值所有者）
+  │
+  └─ create-principles-disciple mvp-config.ts
+       └─ fresh .pd/config.yaml 只写 sparse shell：features: {}（零默认值快照；
+          任何 bootstrap override 必须与 registry default 不同 —— 由
+          installer-config-parity.test.ts 强制）
 ```
+
+**Registry owns defaults; config records intent.** `.pd/config.yaml.features` 的
+entry absence ≠ capability disabled —— 缺失由 registry default 决定
+（`computeEffectivePdConfig` 读时补齐）。config entry presence 也不是注册能力的证据
+（unknown flag 只产生告警，PRI-609）。
 
 两套消费 API 并存（`computeEffectiveFlags` vs `computeFeatureFlagsFromConfig/loadFeatureFlagFromConfig`）
 属已知债务；两者都从同一 registry 取默认值，语义一致。统一 API 属重构，超出本任务范围。
@@ -61,13 +71,50 @@ flag（quiet/off，gate 服务启动）与 `internalAgents.empathyObserver.enabl
 （empathy_observer 在 prompt.ts 的旧消费点已废弃）。处置：维持现状 + 本文档澄清；
 如 Owner 同意可在后续 MVP-Gone 清理波次中评估合并。
 
-### 3.3 installer MVP flag 列表硬编码漂移风险 — 已闭合
+### 3.3 installer 默认值快照 — 已按 PRI-645 收敛为 sparse shell
 
-新增 `packages/principles-core/src/runtime-v2/feature-flags/__tests__/installer-config-parity.test.ts`：
-- installer 模板写入的每个 flag 必须存在于 registry（防孤儿条目）；
-- category 必须与 registry 一致；
-- enabled 必须与 registry 默认值一致，防止真实新用户配置绕过实验性能力的默认关闭契约。
-双向 silent drift 从此被 CI 阻断。
+历史（PRI-574）：installer 模板硬编码 18 条与 registry 对齐的默认 entry，
+`installer-config-parity.test.ts` 用三向对账（存在性/category/enabled）防漂移。
+
+PRI-645（2026-09-02）后：对齐本身不再是目标 —— **重复的默认值不得存在**。
+
+- installer fresh config 输出 `features: {}`；`pd runtime init` 同样输出 sparse map
+  （此前物化全部 46 条 registry 快照）；
+- PRI-523 的 existing-config host-flag 补写 migration（host.codex /
+  abstraction_layer_v1）已退休 —— 它只写 registry-default 等值 entry，effective
+  值从未依赖它们；existing config 现在逐字节保留，不做任何归一化（PRI-637：
+  `source: system` 只是 origin hint，不是自动删除许可）；
+- `installer-config-parity.test.ts` 改为保护新 contract：
+  - installer 不得物化任何 registry-default-equivalent entry（默认值快照禁止）；
+  - 若未来出现 bootstrap override：id 必须注册于 registry，且
+    category/enabled 必须与 registry default 不同（真 override，无 allowlist）；
+- effective parity 由 `pd-config-sparse-bootstrap.test.ts` 锁定：
+  `features: {}` 的 effective map 与旧全量快照逐 flag 相同（46/46），
+  且 registry default flip 时 sparse config 跟随新默认值而旧快照会冻结旧值
+  （这正是本收敛消除的隐患）。
+
+### 3.4 Console writer 的 sparse 安全（PRI-637 / PRI-645）
+
+- `updateFeatureFlag()`：只写 Owner 明确 toggle 的一个 entry（`source: 'owner'`），
+  在 `features: {}` 或 section 缺失的 workspace 上也不会快照默认值；
+- `updateAgentBinding()` / `updateDefaultRuntime()`：保留文件自身 features section；
+  config 文件不存在时新建 sparse `features: {}`（不再物化 effective 全量 map）；
+- runtime profile CRUD / outputLanguage writer：逐字节保留无关 section。
+
+### 3.5 raw-config consumer census（PRI-645 评审后修正）
+
+runtime 消费全部走 effective resolver（`computeEffectivePdConfig` /
+`computeFeatureFlagsFromConfig`）；**不经 resolver 的 raw-presence reader 是
+Owner-facing 控制面的已知例外**，sparse 语义由各自显式建模：
+
+| consumer | sparse 语义（PRI-645 review 修复后） |
+| --- | --- |
+| `plugins/principles-disciple/scripts/pd-disable.cjs`（`$pd-disable` kill switch） | `host.codex` entry 缺失/enabled-less → **插入显式 Owner override**（block YAML + JSON flow，sibling-safe + atomic write）；仅无法安全行编辑的形态 fail loud |
+| `plugins/principles-disciple/scripts/pd-status.cjs`（`$pd-status`） | 三态：合法显式 override → true/false；**合法 sparse absence**（features section 合法且无 host.codex key）→ `follows registry default`（非 degraded）；entry malformed / features section invalid → **degraded**（对齐 validatePdConfig fail-loud）；有效值可经 `--pd-health`（`pd health --host codex --json`）取 runtime 权威面，不在脚本里硬编码默认值 |
+| installer `readEnabledChannelsFromConfigYaml()` | MVP channel 按 **registry default + sparse override** 计算（absent=ON；显式 false 才是 OFF）；installer 不再用 `options.channels` 掩盖实际状态（ERR-042） |
+
+新增 raw-presence reader 必须在此登记并显式定义 sparse 语义，不得把
+"entry 缺失" 当作 disabled 或错误。
 
 ## 4. 防漂移检查清单（现有机制盘点）
 
@@ -77,7 +124,7 @@ flag（quiet/off，gate 服务启动）与 `internalAgents.empathyObserver.enabl
 | gone flag 复活拒绝 | computeEffectiveFlags gone 分支 | 退役 flag 无法被配置复活 |
 | core flag 应急关闭可观测 | computeEffectiveFlags core 分支 warning | 显式 disable 记录在 warnings |
 | registry↔surface registry 对账 | evolution-worker-slimming.test.ts (PRI-294) | evolution_worker/empathy_observer/gone 组 |
-| **registry↔installer 模板对账** | installer-config-parity.test.ts（本任务新增） | installer 全部 17 条 features |
+| **registry↔installer 模板对账** | installer-config-parity.test.ts | 0 default-equivalent bootstrap entries；任何 bootstrap override 必须注册于 registry 且异于 registry default（无 allowlist） |
 | 默认值毕业状态锁定 | feature-flag-contract.test.ts PRI-571 块 + PRI-621 块 | 5 个毕业 flag 默认开+quiet+可关 |
 
 ## 5. 明确不做（Non-goal）

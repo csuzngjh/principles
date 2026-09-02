@@ -2,8 +2,7 @@ import * as yaml from 'js-yaml';
 import * as path from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
-import { atomicReplaceTextFile, errnoCode, withConfigFileLock } from './utils/config-file-io.js';
-
+import { errnoCode } from './utils/config-file-io.js';
 export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
 export type MvpChannel = (typeof MVP_CHANNELS)[number];
 
@@ -338,48 +337,18 @@ export function generateConfigYamlContent(
 ): string {
   const config: Record<string, unknown> = {
     version: 1,
-    features: {
-      // PRI-637: every entry here records `source: 'system'` — the installer is
-      // PD machinery scaffolding a fresh workspace. This is an ORIGIN HINT, not
-      // proof of absent Owner intent: direct `.pd/config.yaml` editing is a
-      // supported path, so an Owner may later pin behavior on top of these
-      // entries. Labels are metadata only (effective values unchanged); a future
-      // normalization may SUGGEST system-origin entries for cleanup but must
-      // require explicit Owner confirmation. Owner toggles via the Console
-      // rewrite entries as `source: 'owner'` (strong Owner-intent evidence).
-      // MVP-Core (ADR-0014 §2.4)
-      prompt:             { category: 'core',  enabled: true, source: 'system' },
-      code_tool_hook:     { category: 'core',  enabled: true, source: 'system' },
-      defer_archive:      { category: 'core',  enabled: true, source: 'system' },
-      // PRI-435: Code-rule capability promoted to MVP-Core, default ON.
-      code_rule_capability: { category: 'core', enabled: true, source: 'system' },
-      'host.codex':        { category: 'core', enabled: true, source: 'system' },
-      // MVP-Quiet (ADR-0014 §2.5)
-      correction_observer:{ category: 'quiet', enabled: false, source: 'system' },
-      feedback_channel:   { category: 'quiet', enabled: true, source: 'system' },
-      // Task 17: Failed tasks observability — quiet flag, default-on so operators
-      // can list failed pipeline tasks out of the box. Disable via .pd/config.yaml.
-      failed_tasks_observability: { category: 'quiet', enabled: true, source: 'system' },
-      // PRI-535 (SPEC §10): Principle Receipt — owner-visible evidence that
-      // approved principles change agent behavior (block copy attribution,
-      // durable application ledger). Deterministic receipt capabilities are
-      // default-on; experimental agent self-report stays default-off.
-      principle_receipt_block_copy:  { category: 'quiet', enabled: true, source: 'system' },
-      principle_receipt_ledger:      { category: 'quiet', enabled: true, source: 'system' },
-      principle_receipt_self_report: { category: 'quiet', enabled: false, source: 'system' },
-      // Anonymous Product Telemetry v1 (PRI-595~603) — maintainer release
-      // gate, INDEPENDENT of user consent (~/.pd/product-telemetry.json).
-      // Export requires this flag AND explicit consent AND production
-      // eligibility. Default off = zero export attempts from any surface.
-      anonymous_product_telemetry:   { category: 'quiet', enabled: false, source: 'system' },
-      gfi:                { category: 'quiet', enabled: false, source: 'system' },
-      evolution_worker:   { category: 'quiet', enabled: false, source: 'system' },
-      empathy_observer:   { category: 'quiet', enabled: false, source: 'system' },
-      abstraction_layer_v1: { category: 'quiet', enabled: false, source: 'system' },
-      // MVP-Gone (ADR-0014 §2.6)
-      nocturnal:          { category: 'gone',  enabled: false, source: 'system' },
-      idle_trigger:       { category: 'gone',  enabled: false, source: 'system' },
-    },
+    // PRI-645: the feature registry (principles-core feature-flag-contract.ts)
+    // owns ALL default values. A fresh config records only explicit intent —
+    // an empty map means "every flag follows its registry default", which the
+    // effective resolver (computeEffectivePdConfig) fills at read time. Do NOT
+    // add registry-default-equivalent entries here: a default snapshot would
+    // freeze today's defaults against future graduation flips and re-create
+    // the DEFAULT_FEATURE_FLAGS duplicate this file must not own. If a fresh
+    // install ever needs a deliberate bootstrap override (value differing from
+    // the registry default), document the product/safety reason inline — the
+    // core-side installer-config-parity contract test enforces registration +
+    // non-default value for any entry added here.
+    features: {},
     runtimeProfiles: {
       // M9 default: pi-ai profile. Fix-4: when the installer collected
       // provider/model/apiKeyEnv from the user, pre-fill them here so
@@ -516,95 +485,51 @@ export function validateConfigYamlFull(workspaceDir: string): void {
 }
 
 /**
- * PRI-523: add the two explicit host rollout flags to an existing valid config.
- * Existing values are authoritative and are never overwritten.
+ * PRI-645: structural validation of an existing config.yaml the installer is
+ * about to preserve (PRI-308 preserve contract).
+ *
+ * The PRI-523 migration that used to live here (adding `host.codex` /
+ * `abstraction_layer_v1` to existing configs) is retired: both entries were
+ * exactly registry defaults, and writing them re-created the default snapshot
+ * PRI-645 removes. Effective values never depended on those entries — the
+ * registry (DEFAULT_FEATURE_FLAGS) resolves both at read time — so retiring
+ * the write changes representation only, never behavior. Existing configs are
+ * now preserved verbatim: no normalization, no cleanup (source=system is an
+ * origin hint, not an auto-delete license — PRI-637).
  */
-export interface HostRuntimeConfigMigrationDeps {
-  withLock<T>(filePath: string, action: () => T): T;
-  atomicReplace(filePath: string, content: string): void;
-}
-
-/**
- * Migration infrastructure failure (config lock unavailable, atomic write
- * EPERM/ENOSPC/...). The config file itself is NOT necessarily malformed —
- * callers must not advise deleting it. Contrast with validation errors
- * thrown from inside the lock, which do indicate a malformed config.
- */
-export class HostRuntimeConfigMigrationInfraError extends Error {
+export class ExistingConfigVerifyInfraError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
-    this.name = 'HostRuntimeConfigMigrationInfraError';
+    this.name = 'ExistingConfigVerifyInfraError';
   }
 }
 
-function isMigrationInfraFailure(error: unknown): boolean {
-  if (error instanceof HostRuntimeConfigMigrationInfraError) return true;
-  // atomicReplaceTextFile pairs a failed replace with a failed cleanup this way.
-  if (error instanceof AggregateError) return true;
-  if (typeof errnoCode(error) === 'string') return true;
-  const message = error instanceof Error ? error.message : String(error);
-  return message.startsWith('Failed to acquire config lock');
-}
-
-const HOST_RUNTIME_CONFIG_MIGRATION_DEPS: HostRuntimeConfigMigrationDeps = {
-  withLock: withConfigFileLock,
-  atomicReplace: atomicReplaceTextFile,
-};
-
-export function migrateHostRuntimeFlagsInConfigYaml(
-  workspaceDir: string,
-  deps: HostRuntimeConfigMigrationDeps = HOST_RUNTIME_CONFIG_MIGRATION_DEPS,
-): boolean {
-  const configPath = getConfigYamlPath(workspaceDir);
+export function validateExistingConfigYamlForPreserve(workspaceDir: string): void {
   try {
-    return deps.withLock(configPath, () => {
-      // The locked reread is authoritative; validation before lock acquisition
-      // would leave a lost-update window for an Owner edit.
-      validateConfigYamlFull(workspaceDir);
-      const parsed: unknown = yaml.load(readFileSync(configPath, 'utf8'));
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        throw new Error(`config.yaml at ${configPath} must be an object. Fix it before retrying migration.`);
-      }
-      const featuresValue = Object.getOwnPropertyDescriptor(parsed, 'features')?.value;
-      if (typeof featuresValue !== 'object' || featuresValue === null || Array.isArray(featuresValue)) {
-        throw new Error(`config.yaml at ${configPath}: 'features' must be an object. Fix it before retrying migration.`);
-      }
-
-      let changed = false;
-      if (!Object.hasOwn(featuresValue, 'host.codex')) {
-        Object.defineProperty(featuresValue, 'host.codex', {
-          // PRI-637: migration writes are PD machinery (system), never Owner
-          // intent — label `source: 'system'` so graduation can clean them.
-          value: { category: 'core', enabled: true, source: 'system' }, enumerable: true, writable: true, configurable: true,
-        });
-        changed = true;
-      }
-      if (!Object.hasOwn(featuresValue, 'abstraction_layer_v1')) {
-        Object.defineProperty(featuresValue, 'abstraction_layer_v1', {
-          value: { category: 'quiet', enabled: false, source: 'system' }, enumerable: true, writable: true, configurable: true,
-        });
-        changed = true;
-      }
-      if (changed) {
-        deps.atomicReplace(configPath, yaml.dump(parsed, { lineWidth: -1, quoteStyle: 'double' }));
-      }
-      return changed;
-    });
+    validateConfigYamlFull(workspaceDir);
   } catch (error) {
-    // Distinguish infrastructure failures from malformed-config failures so
-    // the installer does not tell the Owner to delete a perfectly valid
-    // .pd/config.yaml (PRI-523 review finding: lock contention and EPERM on
-    // the atomic rename were both misreported as "malformed").
-    if (isMigrationInfraFailure(error)) {
+    // Infrastructure failure reading the file (EPERM/EBUSY/...): the config is
+    // NOT necessarily malformed — callers must not advise deleting it. Contrast
+    // with validation errors thrown by validateConfigYamlFull itself, which do
+    // indicate a malformed config (PRI-523 review finding preserved).
+    if (typeof errnoCode(error) === 'string') {
       const message = error instanceof Error ? error.message : String(error);
-      throw new HostRuntimeConfigMigrationInfraError(message, { cause: error });
+      throw new ExistingConfigVerifyInfraError(message, { cause: error });
     }
     throw error;
   }
 }
 
 /**
- * PRI-308: Read enabled MVP channels from .pd/config.yaml.
+ * PRI-308: Read the ENABLED MVP channels from .pd/config.yaml.
+ *
+ * PRI-645: computed with sparse/effective semantics, not raw presence —
+ * the MVP channels are registered core capabilities whose registry default
+ * is ON and which cannot be disabled by omission (PRI-435), so:
+ *   entry absent            → enabled (follows registry default)
+ *   entry { enabled: true }  → enabled
+ *   entry { enabled: false } → disabled (explicit Owner override)
+ * A present-but-malformed entry still fails loud (rc-3).
  *
  * Fail-loud: throws on malformed or missing required fields.
  * Returns empty array if file does not exist (first install).
@@ -636,7 +561,12 @@ export function readEnabledChannelsFromConfigYaml(workspaceDir: string): string[
   const enabled: string[] = [];
 
   for (const key of MVP_CHANNELS) {
-    if (!Object.hasOwn(features, key)) continue;
+    if (!Object.hasOwn(features, key)) {
+      // Absence ≠ disabled: the registry default (ON, core) applies — the
+      // sparse fresh config is the normal PRI-645 shape.
+      enabled.push(key);
+      continue;
+    }
     const value = features[key];
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);

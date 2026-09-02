@@ -48,36 +48,84 @@ function readInstalledVersion(runtimeDir, packageName) {
 
 /** Read host.codex.enabled from the workspace config. PD tooling writes both
  * block YAML and flow-style JSON (valid YAML); parse JSON first, then fall
- * back to a line scan of the block form. */
+ * back to a line scan of the block form.
+ *
+ * PRI-645: a fresh workspace ships `features: {}` — the host.codex entry is
+ * intentionally absent and its effective value comes from the registry
+ * default. A missing entry is therefore NOT an error: it is reported as
+ * `{ registryDefault: true }` ("follows registry default"), never as
+ * degraded. This script never hardcodes the default value itself — the
+ * runtime-resolved state can be cross-checked via `--pd-health`
+ * (`pd health --host codex --json`).
+ *
+ * PRI-645 review round 2: the three states are strictly separated, mirroring
+ * validatePdConfig's fail-loud contract (a PRESENT feature entry must be an
+ * object with a boolean `enabled`; the features section itself is required):
+ *   A. valid explicit override           → { enabled: true|false }
+ *   B. valid sparse absence              → { registryDefault: true }
+ *     (only when a VALID features section exists and has no host.codex key)
+ *   C. malformed / structurally unknown  → { enabled: 'unknown', reason }
+ *     → the workspace check degrades (never a health false-positive). */
 function readHostCodexFlag(configPath) {
   let raw;
   try { raw = fs.readFileSync(configPath, 'utf8'); } catch { return { enabled: 'unknown', reason: 'config_unreadable' }; }
+  // ── Flow-style (JSON) path ──
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
       const features = parsed.features;
-      if (typeof features === 'object' && features !== null && !Array.isArray(features) && Object.hasOwn(features, 'host.codex')) {
-        const entry = features['host.codex'];
-        if (typeof entry === 'object' && entry !== null && !Array.isArray(entry) && typeof entry.enabled === 'boolean') {
-          return { enabled: entry.enabled };
-        }
+      if (typeof features !== 'object' || features === null || Array.isArray(features)) {
+        return { enabled: 'unknown', reason: 'features_invalid' };
       }
-      return { enabled: 'unknown', reason: 'host_codex_entry_missing' };
+      if (!Object.hasOwn(features, 'host.codex')) return { registryDefault: true };
+      const entry = features['host.codex'];
+      if (typeof entry === 'object' && entry !== null && !Array.isArray(entry) && typeof entry.enabled === 'boolean') {
+        return { enabled: entry.enabled };
+      }
+      return { enabled: 'unknown', reason: 'host_codex_entry_invalid' };
     }
   } catch { /* not JSON — fall through to the block-YAML scan */ }
+  // ── Block-YAML path (line scan) ──
   const lines = raw.split(/\r?\n/);
+  // A flow-style `features:` value cannot be validated line-safely: an empty
+  // flow map is valid sparse absence, anything else is treated as unknown.
+  for (const line of lines) {
+    if (/^features:\s*\{\s*\}$/.test(line)) return { registryDefault: true };
+    if (/^features:\s*\S/.test(line)) return { enabled: 'unknown', reason: 'features_invalid' };
+  }
+  let featuresSectionSeen = false;
+  let sawFeaturesChild = false;
   let inFeatures = false;
   let inHostCodex = false;
+  let hostIndent = -1;
   for (const line of lines) {
-    if (/^features:\s*$/.test(line)) { inFeatures = true; inHostCodex = false; continue; }
+    if (line.trim().length === 0) continue;
+    if (/^features:\s*$/.test(line)) { featuresSectionSeen = true; inFeatures = true; sawFeaturesChild = false; inHostCodex = false; hostIndent = -1; continue; }
     if (/^\S/.test(line)) { inFeatures = false; inHostCodex = false; continue; }
-    if (inFeatures && /^\s+host\.codex:\s*$/.test(line)) { inHostCodex = true; continue; }
+    if (!inFeatures) continue;
+    sawFeaturesChild = true;
+    const indent = /^(\s*)/.exec(line)[1].length;
     if (inHostCodex) {
-      const match = /^\s+enabled:\s*(true|false)\s*$/.exec(line);
-      if (match) return { enabled: match[1] === 'true' };
+      if (indent > hostIndent) {
+        const enabledMatch = /^\s+enabled:\s*(true|false)\s*$/.exec(line);
+        if (enabledMatch) return { enabled: enabledMatch[1] === 'true' };
+        if (/^\s+enabled:/.test(line)) return { enabled: 'unknown', reason: 'host_codex_entry_invalid' };
+        continue; // other host.codex children (e.g. category) — keep scanning
+      }
+      // Left the host.codex block without a valid boolean enabled child.
+      return { enabled: 'unknown', reason: 'host_codex_entry_invalid' };
     }
+    const hostBlock = /^(\s+)host\.codex:\s*$/.exec(line);
+    if (hostBlock) { inHostCodex = true; hostIndent = hostBlock[1].length; continue; }
+    if (/^\s+host\.codex:\s*\S/.test(line)) return { enabled: 'unknown', reason: 'host_codex_entry_invalid' };
   }
-  return { enabled: 'unknown', reason: 'host_codex_entry_missing' };
+  // EOF inside a host.codex block that never showed a boolean enabled child.
+  if (inHostCodex) return { enabled: 'unknown', reason: 'host_codex_entry_invalid' };
+  if (featuresSectionSeen) {
+    // `features:` with no child at all parses as null → validatePdConfig-invalid.
+    return sawFeaturesChild ? { registryDefault: true } : { enabled: 'unknown', reason: 'features_invalid' };
+  }
+  return { enabled: 'unknown', reason: 'features_invalid' };
 }
 
 function detectHookTrust() {
@@ -138,9 +186,11 @@ function main() {
   const ws = locateWorkspace(workspaceDir);
   if (ws.ok) {
     const flag = readHostCodexFlag(path.join(ws.workspaceDir, '.pd', 'config.yaml'));
-    if (flag.enabled === true) push('workspace', 'ok', `${ws.workspaceDir} — host.codex enabled`);
-    else if (flag.enabled === false) push('workspace', 'degraded', `${ws.workspaceDir} — host.codex DISABLED`, 'Set features.host.codex.enabled=true in .pd/config.yaml (or run $pd-disable --enable) to activate PD.');
-    else push('workspace', 'degraded', `${ws.workspaceDir} — host.codex state unknown (${flag.reason ?? 'parse'})`, 'Inspect features.host.codex in .pd/config.yaml.');
+    if (flag.enabled === true) push('workspace', 'ok', `${ws.workspaceDir} — host.codex enabled (config override)`);
+    else if (flag.enabled === false) push('workspace', 'degraded', `${ws.workspaceDir} — host.codex DISABLED (config override)`, 'Run $pd-disable --enable (or set features.host.codex.enabled=true in .pd/config.yaml) to activate PD.');
+    else if (flag.registryDefault) push('workspace', 'ok', `${ws.workspaceDir} — host.codex not overridden in config (follows registry default; run with --pd-health for the runtime-resolved state)`);
+    else if (flag.reason === 'features_invalid') push('workspace', 'degraded', `${ws.workspaceDir} — config features section invalid (validatePdConfig would reject it)`, 'Fix the features section in .pd/config.yaml: it must be a map of flag objects ({ id: { category, enabled } }); a missing or non-map section fails config validation.');
+    else push('workspace', 'degraded', `${ws.workspaceDir} — host.codex entry invalid (${flag.reason ?? 'parse'})`, 'Fix features.host.codex in .pd/config.yaml: the entry must be an object with a boolean enabled field, or remove the entry to follow the registry default.');
   } else {
     push('workspace', 'degraded', ws.reason, ws.nextAction);
   }

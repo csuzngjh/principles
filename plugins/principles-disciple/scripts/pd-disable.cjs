@@ -15,6 +15,14 @@
  * first non-empty line at or below host.codex's own indent, so a sibling
  * feature's `enabled:` can never be touched. Flow-style (JSON) configs are
  * handled via a JSON parse path. Writes go through write-temp-then-rename.
+ *
+ * PRI-645: a fresh workspace ships `features: {}` — the host.codex entry is
+ * intentionally ABSENT and its effective value comes from the registry
+ * default. The kill switch is an explicit Owner action, so a missing (or
+ * enabled-less) host.codex entry is resolved by INSERTING an explicit
+ * `{category: core, enabled: <target>}` override — never by failing. Failure
+ * stays reserved for configs whose features section cannot be safely
+ * line-edited at all (section missing / non-empty flow style).
  */
 'use strict';
 
@@ -52,7 +60,13 @@ function rewriteBlockYaml(raw, target) {
     const indentMatch = /^(\s*)/.exec(line);
     const indent = indentMatch ? indentMatch[1].length : 0;
     // Leaving the host.codex block: any non-empty line at or above its indent.
-    if (indent <= hostIndent) return undefined; // block ended without an enabled child
+    if (indent <= hostIndent) {
+      // Block ended without an enabled child — insert one as the block's
+      // first direct child (PRI-645: entry present but enabled-less).
+      const pad = ' '.repeat(hostIndent + 2);
+      lines.splice(i, 0, `${pad}enabled: ${target}`);
+      return lines.join('\n');
+    }
     if (indent !== hostIndent + 2) continue; // deeper-nested content is not a direct child
     const enabledMatch = /^enabled:\s*(true|false)\s*$/.exec(line.trim());
     if (enabledMatch) {
@@ -61,18 +75,54 @@ function rewriteBlockYaml(raw, target) {
     }
     // Other direct children (e.g. "category: core") — keep scanning.
   }
+  // host.codex was the last block in the file without an enabled child.
+  const pad = ' '.repeat(hostIndent + 2);
+  lines.push(`${pad}enabled: ${target}`);
+  return lines.join('\n');
+}
+
+/** PRI-645 sparse bootstrap: insert a brand-new host.codex block when the
+ * features section exists but has no host.codex entry. Handles the two fresh
+ * shapes PD writes — block-style section and the empty flow map
+ * `features: {}`. Returns undefined for shapes that cannot be line-edited
+ * safely (features section absent / non-empty flow style). */
+function insertBlockYamlEntry(raw, target) {
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^features:\s*$/.test(line)) {
+      lines.splice(i + 1, 0,
+        '  host.codex:',
+        '    category: core',
+        `    enabled: ${target}`);
+      return lines.join('\n');
+    }
+    if (/^features:\s*\{\s*\}$/.test(line)) {
+      lines.splice(i, 1,
+        'features:',
+        '  host.codex:',
+        '    category: core',
+        `    enabled: ${target}`);
+      return lines.join('\n');
+    }
+  }
   return undefined;
 }
 
 /** FLOW-style (JSON) configs — our own production tests and some tools write
- * JSON, which is valid YAML the runtime reads fine. Mutate via JSON parse. */
+ * JSON, which is valid YAML the runtime reads fine. Mutate via JSON parse.
+ * PRI-645: a missing host.codex key (sparse fresh config) is resolved by
+ * inserting the explicit Owner override. */
 function rewriteJsonConfig(raw, target) {
   let parsed;
   try { parsed = JSON.parse(raw); } catch { return undefined; }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
   const features = parsed.features;
   if (typeof features !== 'object' || features === null || Array.isArray(features)) return undefined;
-  if (!Object.hasOwn(features, 'host.codex')) return undefined;
+  if (!Object.hasOwn(features, 'host.codex')) {
+    features['host.codex'] = { category: 'core', enabled: target };
+    return `${JSON.stringify(parsed, null, 2)}\n`;
+  }
   const entry = features['host.codex'];
   if (typeof entry !== 'object' || entry === null || Array.isArray(entry) || typeof entry.enabled !== 'boolean') return undefined;
   if (entry.enabled === target) return raw;
@@ -103,7 +153,7 @@ function main() {
     return;
   }
 
-  const next = rewriteBlockYaml(raw, target) ?? rewriteJsonConfig(raw, target);
+  const next = rewriteBlockYaml(raw, target) ?? insertBlockYamlEntry(raw, target) ?? rewriteJsonConfig(raw, target);
   if (next === undefined) {
     fail('host_codex_entry_missing', `Add this block under features: in ${configPath}:\n  host.codex:\n    category: core\n    enabled: ${target}`);
     return;

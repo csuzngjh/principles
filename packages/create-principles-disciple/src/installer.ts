@@ -11,8 +11,8 @@ import { t } from './i18n.js';
 import type { InstallOptions } from './prompts.js';
 import {
   generateConfigYamlContent,
-  HostRuntimeConfigMigrationInfraError,
-  migrateHostRuntimeFlagsInConfigYaml,
+  ExistingConfigVerifyInfraError,
+  validateExistingConfigYamlForPreserve,
   getConfigYamlPath,
   readEnabledChannelsFromConfigYaml,
   getOpenClawDir,
@@ -1785,11 +1785,11 @@ async function generateConfigYamlConfig(
 
   // PRI-308: preserve existing valid config.yaml (file exists — either
   // pre-existing or created concurrently between ensureDir and writeFileSync).
+  // PRI-645: the config is preserved verbatim — the PRI-523 host-flag
+  // migration that wrote registry-default entries here is retired (defaults
+  // belong to the registry; effective values are unchanged).
   try {
-    const hostFlagsMigrated = migrateHostRuntimeFlagsInConfigYaml(workspaceDir);
-    if (hostFlagsMigrated) {
-      logger.info('Added PRI-523 host rollout flags to existing .pd/config.yaml without changing explicit values');
-    }
+    validateExistingConfigYamlForPreserve(workspaceDir);
     // Existing config is structurally valid — preserve it
     logger.info(`Existing .pd/config.yaml is valid, preserving it`);
     // rc-9-no-silent-fallback: when the user supplied a runtimeProfile via
@@ -1805,14 +1805,14 @@ async function generateConfigYamlConfig(
     }
     return configPath;
   } catch (e) {
-    if (e instanceof HostRuntimeConfigMigrationInfraError) {
-      // Lock contention / atomic-write EPERM etc. while adding the host
-      // rollout flags: the config file is NOT necessarily malformed. Do NOT
-      // advise deleting it — that would destroy a valid Owner config.
+    if (e instanceof ExistingConfigVerifyInfraError) {
+      // Read failure (EPERM/EBUSY/...) while verifying the existing config:
+      // the config file is NOT necessarily malformed. Do NOT advise deleting
+      // it — that would destroy a valid Owner config.
       const reason = e instanceof Error ? e.message : String(e);
       throw new Error(
-        `Failed to add PRI-523 host rollout flags to existing .pd/config.yaml: ${reason}. ` +
-        'The existing config was left unchanged. Close other installers or tools holding .pd/config.yaml.lock, check disk permissions and free space, then re-run the installer.',
+        `Failed to verify existing .pd/config.yaml: ${reason}. ` +
+        'The existing config was left unchanged. Close other tools holding the file, check disk permissions and free space, then re-run the installer.',
         { cause: e },
       );
     }
@@ -2241,6 +2241,10 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     // /welcome for onboarding. Detached so the console survives installer exit.
     const launchResult = await autoLaunchConsole(options.workspaceDir);
 
+    // PRI-645: report the ACTUAL effective channels (registry default +
+    // sparse override). Never mask an explicit Owner disable with the
+    // requested channels — that would re-create ERR-042 (reporting the
+    // requested config instead of the actual state).
     const actualEnabledChannels = readEnabledChannelsFromConfigYaml(options.workspaceDir);
     const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
     const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
@@ -2272,7 +2276,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       templatesCount: templatesCount + principlesCount,
       components,
       verification,
-      enabledChannels: actualEnabledChannels.length > 0 ? actualEnabledChannels : options.channels,
+      enabledChannels: actualEnabledChannels,
       nextAction: nextActions.join(' | '),
       consoleUrl: launchResult.consoleUrl,
       hostResults,
