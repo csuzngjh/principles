@@ -1654,26 +1654,24 @@ describe('readEnabledChannelsFromConfigYaml', () => {
     }
   });
 
-  it('returns [] for a sparse fresh config (PRI-645) and channels for explicit entries', () => {
+  it('returns effective channels: sparse fresh config → all three ON; explicit false wins (PRI-645/ERR-042)', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
     try {
       const configDir = path.join(tmpDir, '.pd');
       fs.mkdirSync(configDir, { recursive: true });
-      fs.writeFileSync(configDir + path.sep + 'config.yaml', generateConfigYamlContent(), 'utf8');
-      // Sparse fresh config: no channel entries → no raw-enabled channels.
-      // The installer's enabledChannels output falls back to options.channels
-      // (parseChannelsOption always force-includes the three core channels),
-      // so the reported install result is unchanged.
-      expect(readEnabledChannelsFromConfigYaml(tmpDir)).toEqual([]);
+      const configPath = configDir + path.sep + 'config.yaml';
+      fs.writeFileSync(configPath, generateConfigYamlContent(), 'utf8');
+      // Sparse fresh config: absent MVP channel entries follow the registry
+      // default (ON, core) — raw absence must NOT read as disabled.
+      expect(readEnabledChannelsFromConfigYaml(tmpDir)).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
 
-      // Explicit channel entries (legacy dense configs, Owner edits) still win.
-      const dense = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
-      const features = dense.features as Record<string, unknown>;
-      for (const ch of MVP_CHANNELS) {
-        features[ch] = { category: 'core', enabled: true };
-      }
-      features.prompt = { category: 'core', enabled: false };
-      fs.writeFileSync(configDir + path.sep + 'config.yaml', yaml.dump(dense), 'utf8');
+      // Explicit Owner override wins: prompt=false + the other two absent
+      // (registry default ON) — the ERR-042 regression the effective
+      // computation must prevent (raw reader previously returned [] here and
+      // the installer fallback re-reported all channels as enabled).
+      const mixed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+      (mixed.features as Record<string, unknown>).prompt = { category: 'core', enabled: false, source: 'owner' };
+      fs.writeFileSync(configPath, yaml.dump(mixed), 'utf8');
       expect(readEnabledChannelsFromConfigYaml(tmpDir)).toEqual(['code_tool_hook', 'defer_archive']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });

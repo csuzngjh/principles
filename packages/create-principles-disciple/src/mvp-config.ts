@@ -521,7 +521,15 @@ export function validateExistingConfigYamlForPreserve(workspaceDir: string): voi
 }
 
 /**
- * PRI-308: Read enabled MVP channels from .pd/config.yaml.
+ * PRI-308: Read the ENABLED MVP channels from .pd/config.yaml.
+ *
+ * PRI-645: computed with sparse/effective semantics, not raw presence —
+ * the MVP channels are registered core capabilities whose registry default
+ * is ON and which cannot be disabled by omission (PRI-435), so:
+ *   entry absent            → enabled (follows registry default)
+ *   entry { enabled: true }  → enabled
+ *   entry { enabled: false } → disabled (explicit Owner override)
+ * A present-but-malformed entry still fails loud (rc-3).
  *
  * Fail-loud: throws on malformed or missing required fields.
  * Returns empty array if file does not exist (first install).
@@ -553,7 +561,12 @@ export function readEnabledChannelsFromConfigYaml(workspaceDir: string): string[
   const enabled: string[] = [];
 
   for (const key of MVP_CHANNELS) {
-    if (!Object.hasOwn(features, key)) continue;
+    if (!Object.hasOwn(features, key)) {
+      // Absence ≠ disabled: the registry default (ON, core) applies — the
+      // sparse fresh config is the normal PRI-645 shape.
+      enabled.push(key);
+      continue;
+    }
     const value = features[key];
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);

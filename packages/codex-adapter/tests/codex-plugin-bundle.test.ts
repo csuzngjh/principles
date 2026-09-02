@@ -303,7 +303,7 @@ describe('review-round regressions (PR #1316 review)', () => {
     expect(compareVersionDirs('not-a-version', '0.0.1')).toBeLessThanOrEqual(0);
   });
 
-  it('pd-disable never touches a sibling feature when host.codex lacks enabled (block YAML)', () => {
+  it('PRI-645: pd-disable writes the override into a host.codex block lacking enabled and never touches a sibling (block YAML)', () => {
     const workspace = tempDir('pd-disable-sibling-ws-');
     fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
     // host.codex block WITHOUT enabled; a sibling feature WITH enabled must survive.
@@ -321,9 +321,12 @@ describe('review-round regressions (PR #1316 review)', () => {
     const configPath = path.join(workspace, '.pd', 'config.yaml');
     const script = path.join(pluginDir, 'scripts', 'pd-disable.cjs');
     const result = spawnSync(process.execPath, [script], { cwd: workspace, encoding: 'utf8', timeout: 30_000 });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('host_codex_entry_missing');
+    // PRI-645: an explicit Owner kill switch must always land its override —
+    // an enabled-less host.codex block gets one INSERTED, not a failure.
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('host.codex.enabled=false');
     const after = fs.readFileSync(configPath, 'utf8');
+    expect(after).toMatch(/host\.codex:[\s\S]*?enabled:\s*false[\s\S]*?prompt:[\s\S]*?enabled:\s*true/);
     expect(after).toContain('    enabled: true'); // sibling prompt untouched
   }, 60_000);
 
@@ -481,5 +484,83 @@ describe('pd-disable.cjs kill switch', () => {
     const rewritten = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { features: Record<string, { enabled: unknown }> };
     expect(rewritten.features['host.codex'].enabled).toBe(false);
     expect(rewritten.features.prompt.enabled).toBe(true);
+  }, 60_000);
+});
+
+// ── PRI-645: fresh sparse bootstrap (`features: {}`) × bundled Owner tools ──
+//
+// The kill switch and status skill are the Owner-facing control plane. They
+// must understand sparse config semantics: an absent host.codex entry means
+// "follows registry default" (effective ON on a fresh install) — never a
+// fake degradation, and never a failed kill switch. These tests run the REAL
+// bundled scripts against the REAL fresh-config shape.
+
+describe('PRI-645 sparse fresh config × bundled $pd-status / $pd-disable', () => {
+  /** Run a bundled skill script in a temp workspace. Subprocess shape per the
+   * registered write-gate seam: dynamic import + boundary-validated entry +
+   * promisified execFile (never rejects — returns captured stdout/stderr). */
+  async function runBundledScript(scriptName: string, args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const scriptsRoot = path.join(pluginDir, 'scripts');
+    const script = path.resolve(scriptsRoot, scriptName);
+    if (!script.startsWith(scriptsRoot + path.sep) || !fs.existsSync(script)) {
+      throw new Error(`script escapes scripts root: ${script}`);
+    }
+    try {
+      return await execFileAsync(process.execPath, [script, ...args], { cwd, encoding: 'utf8', timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+    } catch (error) {
+      const err = error as { stdout?: string; stderr?: string };
+      return { stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+    }
+  }
+
+  function writeSparseConfig(workspace: string, content: string): string {
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    const configPath = path.join(workspace, '.pd', 'config.yaml');
+    fs.writeFileSync(configPath, content, 'utf8');
+    return configPath;
+  }
+
+  it('$pd-status reports registry-default (ok) instead of a fake degradation on features: {}', async () => {
+    const workspace = tempDir('pd-status-sparse-ws-');
+    writeSparseConfig(workspace, 'version: 1\nfeatures: {}\n');
+    const dataDir = tempDir('pd-status-sparse-data-');
+    const result = await runBundledScript('pd-status.cjs', ['--plugin-root', pluginDir, '--plugin-data', dataDir, '--workspace', workspace, '--json'], workspace);
+    const report = JSON.parse(result.stdout) as { checks: Array<{ name: string; state: string; detail?: string }> };
+    const wsCheck = report.checks.find((check) => check.name === 'workspace');
+    expect(wsCheck?.state).toBe('ok');
+    expect(wsCheck?.detail).toContain('follows registry default');
+    expect(result.stdout).not.toContain('host_codex_entry_missing');
+  }, 60_000);
+
+  it('$pd-disable inserts the explicit override into a sparse fresh config and re-enables (block YAML)', async () => {
+    const workspace = tempDir('pd-disable-sparse-ws-');
+    const configPath = writeSparseConfig(workspace, 'version: 1\nfeatures: {}\n');
+
+    const disable = await runBundledScript('pd-disable.cjs', [], workspace);
+    expect(disable.stdout).toContain('host.codex.enabled=false');
+    const afterDisable = fs.readFileSync(configPath, 'utf8');
+    expect(afterDisable).toMatch(/features:[\s\S]*?host\.codex:[\s\S]*?category:\s*core[\s\S]*?enabled:\s*false/);
+
+    // The written override is honored on re-run (idempotent no-change).
+    const again = await runBundledScript('pd-disable.cjs', [], workspace);
+    expect(again.stdout).toContain('already disabled');
+
+    const enable = await runBundledScript('pd-disable.cjs', ['--enable'], workspace);
+    expect(enable.stdout).toContain('host.codex.enabled=true');
+    expect(fs.readFileSync(configPath, 'utf8')).toMatch(/host\.codex:[\s\S]*?enabled:\s*true/);
+  }, 60_000);
+
+  it('$pd-disable inserts the override into a sparse flow-style (JSON) config', async () => {
+    const workspace = tempDir('pd-disable-sparse-json-ws-');
+    const configPath = writeSparseConfig(workspace, JSON.stringify({ version: 1, features: {} }));
+
+    const disable = await runBundledScript('pd-disable.cjs', [], workspace);
+    expect(disable.stdout).toContain('host.codex.enabled=false');
+    const rewritten = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { version: number; features: Record<string, { category?: string; enabled: unknown }> };
+    expect(rewritten.version).toBe(1);
+    expect(rewritten.features['host.codex']).toEqual({ category: 'core', enabled: false });
   }, 60_000);
 });

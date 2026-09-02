@@ -48,7 +48,15 @@ function readInstalledVersion(runtimeDir, packageName) {
 
 /** Read host.codex.enabled from the workspace config. PD tooling writes both
  * block YAML and flow-style JSON (valid YAML); parse JSON first, then fall
- * back to a line scan of the block form. */
+ * back to a line scan of the block form.
+ *
+ * PRI-645: a fresh workspace ships `features: {}` — the host.codex entry is
+ * intentionally absent and its effective value comes from the registry
+ * default. A missing entry is therefore NOT an error: it is reported as
+ * `{ registryDefault: true }` ("follows registry default"), never as
+ * degraded. This script never hardcodes the default value itself — the
+ * runtime-resolved state can be cross-checked via `--pd-health`
+ * (`pd health --host codex --json`). */
 function readHostCodexFlag(configPath) {
   let raw;
   try { raw = fs.readFileSync(configPath, 'utf8'); } catch { return { enabled: 'unknown', reason: 'config_unreadable' }; }
@@ -62,7 +70,7 @@ function readHostCodexFlag(configPath) {
           return { enabled: entry.enabled };
         }
       }
-      return { enabled: 'unknown', reason: 'host_codex_entry_missing' };
+      return { registryDefault: true };
     }
   } catch { /* not JSON — fall through to the block-YAML scan */ }
   const lines = raw.split(/\r?\n/);
@@ -77,7 +85,7 @@ function readHostCodexFlag(configPath) {
       if (match) return { enabled: match[1] === 'true' };
     }
   }
-  return { enabled: 'unknown', reason: 'host_codex_entry_missing' };
+  return { registryDefault: true };
 }
 
 function detectHookTrust() {
@@ -138,8 +146,9 @@ function main() {
   const ws = locateWorkspace(workspaceDir);
   if (ws.ok) {
     const flag = readHostCodexFlag(path.join(ws.workspaceDir, '.pd', 'config.yaml'));
-    if (flag.enabled === true) push('workspace', 'ok', `${ws.workspaceDir} — host.codex enabled`);
-    else if (flag.enabled === false) push('workspace', 'degraded', `${ws.workspaceDir} — host.codex DISABLED`, 'Set features.host.codex.enabled=true in .pd/config.yaml (or run $pd-disable --enable) to activate PD.');
+    if (flag.enabled === true) push('workspace', 'ok', `${ws.workspaceDir} — host.codex enabled (config override)`);
+    else if (flag.enabled === false) push('workspace', 'degraded', `${ws.workspaceDir} — host.codex DISABLED (config override)`, 'Run $pd-disable --enable (or set features.host.codex.enabled=true in .pd/config.yaml) to activate PD.');
+    else if (flag.registryDefault) push('workspace', 'ok', `${ws.workspaceDir} — host.codex not overridden in config (follows registry default; run with --pd-health for the runtime-resolved state)`);
     else push('workspace', 'degraded', `${ws.workspaceDir} — host.codex state unknown (${flag.reason ?? 'parse'})`, 'Inspect features.host.codex in .pd/config.yaml.');
   } else {
     push('workspace', 'degraded', ws.reason, ws.nextAction);

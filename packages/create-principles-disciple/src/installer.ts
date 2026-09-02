@@ -2241,6 +2241,10 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     // /welcome for onboarding. Detached so the console survives installer exit.
     const launchResult = await autoLaunchConsole(options.workspaceDir);
 
+    // PRI-645: report the ACTUAL effective channels (registry default +
+    // sparse override). Never mask an explicit Owner disable with the
+    // requested channels — that would re-create ERR-042 (reporting the
+    // requested config instead of the actual state).
     const actualEnabledChannels = readEnabledChannelsFromConfigYaml(options.workspaceDir);
     const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
     const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
@@ -2272,7 +2276,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       templatesCount: templatesCount + principlesCount,
       components,
       verification,
-      enabledChannels: actualEnabledChannels.length > 0 ? actualEnabledChannels : options.channels,
+      enabledChannels: actualEnabledChannels,
       nextAction: nextActions.join(' | '),
       consoleUrl: launchResult.consoleUrl,
       hostResults,

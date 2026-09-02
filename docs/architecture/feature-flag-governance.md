@@ -101,6 +101,21 @@ PRI-645（2026-09-02）后：对齐本身不再是目标 —— **重复的默�
   config 文件不存在时新建 sparse `features: {}`（不再物化 effective 全量 map）；
 - runtime profile CRUD / outputLanguage writer：逐字节保留无关 section。
 
+### 3.5 raw-config consumer census（PRI-645 评审后修正）
+
+runtime 消费全部走 effective resolver（`computeEffectivePdConfig` /
+`computeFeatureFlagsFromConfig`）；**不经 resolver 的 raw-presence reader 是
+Owner-facing 控制面的已知例外**，sparse 语义由各自显式建模：
+
+| consumer | sparse 语义（PRI-645 review 修复后） |
+| --- | --- |
+| `plugins/principles-disciple/scripts/pd-disable.cjs`（`$pd-disable` kill switch） | `host.codex` entry 缺失/enabled-less → **插入显式 Owner override**（block YAML + JSON flow，sibling-safe + atomic write）；仅无法安全行编辑的形态 fail loud |
+| `plugins/principles-disciple/scripts/pd-status.cjs`（`$pd-status`） | entry 缺失 → `registry default` 状态（**非 degraded**）；有效值可经 `--pd-health`（`pd health --host codex --json`）取 runtime 权威面，不在脚本里硬编码默认值 |
+| installer `readEnabledChannelsFromConfigYaml()` | MVP channel 按 **registry default + sparse override** 计算（absent=ON；显式 false 才是 OFF）；installer 不再用 `options.channels` 掩盖实际状态（ERR-042） |
+
+新增 raw-presence reader 必须在此登记并显式定义 sparse 语义，不得把
+"entry 缺失" 当作 disabled 或错误。
+
 ## 4. 防漂移检查清单（现有机制盘点）
 
 | 机制 | 位置 | 覆盖 |
