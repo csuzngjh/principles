@@ -452,7 +452,7 @@ describe('pd pain record', () => {
     exitSpy.mockRestore();
   });
 
-  it('fails before mutation on session_not_found even when process.exit is stubbed to a no-op', async () => {
+  it('fails before any mutation on session_not_found even when process.exit is stubbed to a no-op', async () => {
     vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
       status: 'unavailable',
       reasonCode: 'session_not_found',
@@ -471,7 +471,32 @@ describe('pd pain record', () => {
     exitSpy.mockRestore();
   });
 
-  it('degrades exactly like the OpenClaw funnel when the trajectory DB is unreadable (shared ingress, matrix row 4)', async () => {
+  it('fails before mutation on empty_trajectory (CLI never claims host_context_bound without a verified session)', async () => {
+    // Per Evidence Over Assumption: the CLI does not own session identity
+    // the way the OpenClaw host command context does. Unverified sessions
+    // (any acquisition that does not yield 'available') must refuse before
+    // any LLM/task/candidate mutation.
+    vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
+      status: 'unavailable',
+      reasonCode: 'empty_trajectory',
+      detail: 'session exists but no usable evidence',
+    } as any);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', session: 'quiet-session', json: true });
+
+    expect(lastRecordPainInput).toBeNull();
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('empty_trajectory');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('fails before mutation on evidence_read_failed (no LLM/no task when the CLI cannot verify binding)', async () => {
     vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
       status: 'unavailable',
       reasonCode: 'evidence_read_failed',
@@ -482,41 +507,32 @@ describe('pd pain record', () => {
 
     await handlePainRecord({ reason: 'test pain', session: 'sess-x', json: true });
 
-    // Bound session + unavailable evidence → the shared evaluator DEGRADES
-    // (submit with honest empty evidence + disclosure), identical to the
-    // OpenClaw funnel — the CLI does not make up its own failure semantics.
-    expect(lastRecordPainInput).not.toBeNull();
-    expect(lastRecordPainInput!.sessionId).toBe('sess-x');
-    expect(lastRecordPainInput!.evidence).toEqual([]);
-    expect(lastRecordPainInput!.provenance).toBe('host_context_bound');
+    expect(lastRecordPainInput).toBeNull();
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
-    expect(jsonOutput.reason).not.toBe('session_not_found');
-    const warningsStr = JSON.stringify(jsonOutput.warnings ?? jsonOutput.warning ?? '');
-    expect(warningsStr).toContain('evidence_read_failed');
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('evidence_read_failed');
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('degrades (does not exit) when the session exists but has no usable evidence', async () => {
+  it('fails before mutation on trajectory_unavailable (CLI cannot fabricate a session)', async () => {
     vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
       status: 'unavailable',
-      reasonCode: 'empty_trajectory',
-      detail: 'no turns or tool calls for session',
+      reasonCode: 'trajectory_unavailable',
+      detail: 'no trajectory.db at workspace .state',
     } as any);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
 
-    await handlePainRecord({ reason: 'test pain', session: 'quiet-session', json: true });
+    await handlePainRecord({ reason: 'test pain', session: 'sess-x', json: true });
 
-    expect(lastRecordPainInput).not.toBeNull();
-    expect(lastRecordPainInput!.sessionId).toBe('quiet-session');
-    expect(lastRecordPainInput!.evidence).toEqual([]);
+    expect(lastRecordPainInput).toBeNull();
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
-    const warningsStr = JSON.stringify(jsonOutput.warnings ?? jsonOutput.warning ?? '');
-    expect(warningsStr).toContain('empty_trajectory');
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('trajectory_unavailable');
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

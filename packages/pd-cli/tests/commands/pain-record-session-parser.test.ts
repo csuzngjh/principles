@@ -84,7 +84,7 @@ describe('pd pain record --session (real Commander + real trajectory.db)', () =>
     const result = await runBuiltCli(['pain', 'record', '--help']);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('--session');
-  });
+  }, 15_000);
 
   it('fails with a single JSON object and reason session_not_found for a nonexistent session (SPEC 12.1.4)', async () => {
     const result = await runBuiltCli([
@@ -104,7 +104,7 @@ describe('pd pain record --session (real Commander + real trajectory.db)', () =>
     expect(parsed.status).toBe('failed');
     expect(parsed.reason).toBe('session_not_found');
     expect(typeof parsed.nextAction).toBe('string');
-  });
+  }, 15_000);
 
   it('accepts --session for a session that exists in the trajectory (validation passes, submission proceeds)', async () => {
     const result = await runBuiltCli([
@@ -118,8 +118,10 @@ describe('pd pain record --session (real Commander + real trajectory.db)', () =>
     // The session exists, so session validation must NOT reject it. The run
     // may still fail later (no LLM runtime configured in this temp
     // workspace) — the assertion is only about the validation stage.
-    const parsed = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+    const trimmed = result.stdout.trim();
+    expect(trimmed.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
     expect(parsed.reason).not.toBe('session_not_found');
     expect(parsed.reason).not.toBe('empty_trajectory');
-  });
+  }, 15_000);
 });

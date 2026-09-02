@@ -225,3 +225,72 @@ describe('painIngress.v1 re-entry invariant parity (review blocker 2)', () => {
     expect(parsed.ok).toBe(true);
   });
 });
+
+// ── Review blocker 2 closure: nested/top-level consistency must catch
+// every tampered dimension (not just provenance/session/count). ─────────────
+
+describe('checkIngressTopLevelConsistency (review blocker 2 closure)', () => {
+  it('flags unavailable evidenceClass against a non-zero legacy evidence count', () => {
+    const payload: PainIngressV1Payload = {
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'openclaw_command' },
+      correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'sess-real' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    };
+    const mismatch = checkIngressTopLevelConsistency({
+      payload,
+      topLevelProvenance: 'host_context_bound',
+      topLevelSessionIdHint: 'sess-real',
+      topLevelEvidenceCount: 2, // ← forged legacy entries
+    });
+    expect(mismatch).toBe('ingress_payload_mismatch:unavailable_evidence_count');
+  });
+
+  it('flags unbound v1 with a non-empty legacy sessionIdHint', () => {
+    const payload: PainIngressV1Payload = {
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'external_cli_unbound' },
+      correlation: { status: 'unbound', reason: 'external_cli' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    };
+    const mismatch = checkIngressTopLevelConsistency({
+      payload,
+      topLevelProvenance: 'owner_reported_no_host_trace',
+      topLevelSessionIdHint: 'sess-forged',
+      topLevelEvidenceCount: 0,
+    });
+    expect(mismatch).toBe('ingress_payload_mismatch:unbound_session_hint');
+  });
+
+  it('accepts a consistent bound OpenClaw v1 with matching evidence count', () => {
+    const payload: PainIngressV1Payload = {
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'openclaw_command' },
+      correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'sess-real' },
+      evidenceClass: { status: 'available', entryCount: 2 },
+    };
+    const mismatch = checkIngressTopLevelConsistency({
+      payload,
+      topLevelProvenance: 'host_context_bound',
+      topLevelSessionIdHint: 'sess-real',
+      topLevelEvidenceCount: 2,
+    });
+    expect(mismatch).toBeNull();
+  });
+
+  it('accepts a consistent external unbound v1 with no session hint', () => {
+    const payload: PainIngressV1Payload = {
+      version: 'v1',
+      origin: { kind: 'owner_manual', channel: 'external_cli_unbound' },
+      correlation: { status: 'unbound', reason: 'external_cli' },
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    };
+    const mismatch = checkIngressTopLevelConsistency({
+      payload,
+      topLevelProvenance: 'owner_reported_no_host_trace',
+      topLevelSessionIdHint: null,
+      topLevelEvidenceCount: 0,
+    });
+    expect(mismatch).toBeNull();
+  });
+});

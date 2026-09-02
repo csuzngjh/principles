@@ -277,14 +277,17 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(source).toMatch(/hostKind:\s*painData\.hostKind,/);
     });
 
-    it('manual CLI pain record forwards the ingress-derived hostKind (never guessed locally)', () => {
-      // PRI-642 review blocker 1: the CLI no longer hardcodes attribution —
-      // it evaluates its acquisition facts through the SHARED core evaluator
-      // and forwards decision.legacy (provenance/hostKind) verbatim. Unit
-      // tests in pain-record.test.ts pin the bound=host_context_bound+openclaw
-      // vs unbound=owner_reported branches through the real evaluator.
+    it('manual CLI pain record refuses on unverified --session before any LLM/task/candidate mutation (Evidence Over Assumption)', () => {
+      // PRI-642 review: the CLI is now per-channel — cli_explicit_session
+      // with an UNVERIFIED session (session_not_found / empty_trajectory /
+      // trajectory_unavailable / evidence_read_failed) REFUSES before
+      // mutation. The shared semantic authority is still in core; the
+      // channel-level policy differs by host.
       const source = read('packages/pd-cli/src/commands/pain-record.ts');
       expect(source).toMatch(/evaluatePainIngress\(/);
+      // Explicit-session + unverified acquisition routes to unbound
+      // (then the shared evaluator refuses it).
+      expect(source).toMatch(/acquisition\.status === 'unavailable'[\s\S]{0,400}status: 'unbound'/);
       expect(source).toMatch(/hostKind:\s*binding\.hostKind,/);
       expect(source).not.toMatch(/hostKind:\s*'openclaw',/);
     });

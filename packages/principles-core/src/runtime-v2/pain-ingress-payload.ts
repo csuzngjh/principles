@@ -388,6 +388,13 @@ export function deriveProvenanceFromIngressFacts(
  * Re-entry consistency check between the nested v1 block and the legacy
  * top-level fields produced by the same builder (SPEC §9, §12.2.4).
  * Returns null when consistent; a reasonCode string otherwise.
+ *
+ * Coverage (review blocker 2 closure): every dimension of the
+ * nested/top-level contract is asserted — provenance, host session id,
+ * evidence count, evidence availability class, and host binding
+ * state. A v1 block with unavailable evidence cannot coexist with
+ * legacy top-level entries; an unbound v1 block cannot coexist with
+ * a legacy sessionIdHint.
  */
 export function checkIngressTopLevelConsistency(input: {
   payload: PainIngressV1Payload;
@@ -403,13 +410,28 @@ export function checkIngressTopLevelConsistency(input: {
     return 'ingress_payload_mismatch:provenance';
   }
 
+  // Unbound v1 must not coexist with a non-empty top-level session hint
+  // (the host would have inferred a real binding at write time).
+  if (payload.correlation.status === 'unbound') {
+    if (topLevelSessionIdHint !== null && topLevelSessionIdHint !== undefined && topLevelSessionIdHint !== '') {
+      return 'ingress_payload_mismatch:unbound_session_hint';
+    }
+  }
+
+  // Bound v1 (OpenClaw) → the host and the v1 must agree on the session id.
   if (payload.correlation.status === 'bound' && payload.correlation.hostKind === 'openclaw') {
     if (topLevelSessionIdHint !== payload.correlation.sessionId) {
       return 'ingress_payload_mismatch:session';
     }
   }
 
-  if (payload.evidenceClass.status === 'available') {
+  // evidenceClass ↔ top-level evidence count: an unavailable v1 cannot
+  // coexist with legacy entries; an available v1 must match the count.
+  if (payload.evidenceClass.status === 'unavailable') {
+    if (topLevelEvidenceCount !== 0) {
+      return 'ingress_payload_mismatch:unavailable_evidence_count';
+    }
+  } else {
     if (payload.evidenceClass.entryCount !== topLevelEvidenceCount) {
       return 'ingress_payload_mismatch:evidence_count';
     }
