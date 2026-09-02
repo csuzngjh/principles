@@ -335,6 +335,9 @@ function formatReplayEvidenceBlock(context: RepairReplayContext): string {
   for (const violation of context.globalViolations) {
     lines.push(`- Global violation | ${violation}`);
   }
+  if (context.globalViolationCount > context.globalViolations.length) {
+    lines.push(`- (global violations truncated: ${context.globalViolationCount} durable, showing ${context.globalViolations.length})`);
+  }
   for (const failure of [...context.systemFailures, ...context.traceFailures]) {
     const parts: string[] = [`Case: ${failure.caseId}`];
     if (failure.expectedDecision !== undefined) parts.push(`Expected: ${failure.expectedDecision}`);
@@ -344,7 +347,8 @@ function formatReplayEvidenceBlock(context: RepairReplayContext): string {
     lines.push(`- ${parts.join(' | ')}`);
   }
   if (context.truncated) {
-    lines.push(`- (evidence truncated: ${context.failedCaseCount} durable failures, showing ${context.systemFailures.length + context.traceFailures.length} stratified representatives)`);
+    const shown = context.systemFailures.length + context.traceFailures.length + context.globalViolations.length;
+    lines.push(`- (evidence truncated: ${context.failedCaseCount + context.globalViolationCount} durable entries, showing ${shown} stratified representatives)`);
   }
   return lines.join('\n');
 }

@@ -138,6 +138,23 @@ function findDuplicateRealCaseId(cases: readonly { readonly caseId: string }[]):
 }
 
 /**
+ * PRI-634 PR-A (review P1 2026-09-02): the `__*__` namespace is RESERVED for
+ * sandbox system sentinels (__compile__ / __return_shape__ / …). The
+ * GoldenTrace schema only requires a non-empty string, so an
+ * Artificer/LLM-supplied real case could legally collide with a sentinel and
+ * be mis-partitioned as a system failure by every downstream reader. Real
+ * cases must not enter the reserved namespace — enforced pre-sandbox.
+ */
+const RESERVED_SYSTEM_CASE_ID = /^__.*__$/;
+
+function findReservedSystemCaseId(cases: readonly { readonly caseId: string }[]): string | null {
+  for (const traceCase of cases) {
+    if (RESERVED_SYSTEM_CASE_ID.test(traceCase.caseId)) return traceCase.caseId;
+  }
+  return null;
+}
+
+/**
  * P0-B (verdict drift 完整性): rule assembly 的稳定输入。fresh 路径来自
  * buildContext 的内存结果;resume 路径从 durable lineage 重建 (store 按
  * output.sourceArtificerArtifactId 取 contentJson) — 瞬时内存 context 不得
@@ -2113,17 +2130,34 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // before the sandbox runs — a duplicate (e.g. an LLM-supplied adversarial
     // case colliding with a runtime-generated v2 case or an Artificer golden
     // case) would let the evidence Maps silently overwrite and mis-attribute
-    // failures. System sentinels (__*__) are not trace identity and are not
-    // part of this merged set. Degrade LOUD: on the approved binding path the
-    // R3 terminal-state guard turns this skipReason into a permanent fail
-    // (approved + no adversarialResult is unreachable); on the needs_revision
-    // diagnostic path the verdict stands and the conflict is observable while
-    // diagnosticReplay stays absent (fail-closed provenance).
+    // failures. Real case IDs must also stay OUT of the reserved `__*__`
+    // system-sentinel namespace (review P1 2026-09-02: the schema alone does
+    // not prevent a real case from naming itself `__compile__`, which would
+    // be mis-partitioned as a system failure downstream). Degrade LOUD: on
+    // the approved binding path the R3 terminal-state guard turns this
+    // skipReason into a permanent fail (approved + no adversarialResult is
+    // unreachable); on the needs_revision diagnostic path the verdict stands
+    // and the conflict is observable while diagnosticReplay stays absent
+    // (fail-closed provenance).
+    const reservedCaseId = findReservedSystemCaseId(mergedTrace.cases);
+    if (reservedCaseId !== null) {
+      this.emitEvent('adversarial_replay_case_id_conflict', taskId, {
+        runId,
+        caseId: reservedCaseId,
+        violationKind: 'reserved_system_namespace',
+        nextAction: 'verify_artificer_or_llm_cases_do_not_use_the_reserved___system___case_id_namespace',
+      });
+      return {
+        updatedOutput: null,
+        skipReason: `case_id_conflict: real caseId '${reservedCaseId}' uses the reserved __*__ system namespace`,
+      };
+    }
     const duplicateCaseId = findDuplicateRealCaseId(mergedTrace.cases);
     if (duplicateCaseId !== null) {
       this.emitEvent('adversarial_replay_case_id_conflict', taskId, {
         runId,
         caseId: duplicateCaseId,
+        violationKind: 'duplicate',
         nextAction: 'verify_llm_adversarial_cases_do_not_collide_with_artificer_or_v2_case_ids',
       });
       return {
@@ -2404,6 +2438,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // never stored as a decision. Message is bounded (SPEC §23).
     const fromSandbox: AdversarialFailedCase[] = gateResult.sandboxResult.failedCases.map((fc) => {
       const adv = advById.get(fc.caseId);
+      // PRI-634 PR-A (review P2 2026-09-02): BOTH message and rationale are
+      // built from the bounded form — durable safe persistence must not leak
+      // the unbounded raw message through a second field.
       const message = fc.message.length > 300 ? `${fc.message.slice(0, 300)}…` : fc.message;
       return {
         caseId: fc.caseId,
@@ -2413,8 +2450,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         errorType: fc.errorType,
         message,
         rationale: adv
-          ? `${fc.errorType}: ${fc.message}`
-          : `non-adversarial case ${fc.caseId} failed (${fc.errorType}: ${fc.message}) — likely a code defect, not an adversarial gap`,
+          ? `${fc.errorType}: ${message}`
+          : `non-adversarial case ${fc.caseId} failed (${fc.errorType}: ${message}) — likely a code defect, not an adversarial gap`,
       };
     });
     // PRI-634 PR-A (SPEC §22): forbidden-pattern rejections carry zero

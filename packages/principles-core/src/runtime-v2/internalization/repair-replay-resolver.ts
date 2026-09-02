@@ -76,13 +76,15 @@ export interface RepairReplayContext {
   readonly passed: boolean;
   /** Total durable failures (pre-selection). */
   readonly failedCaseCount: number;
-  /** Failures on real golden-trace case IDs. */
+  /** Selected trace-case failures (bounded, mismatch-first stratified). */
   readonly traceFailures: readonly ReplayFailureEvidence[];
-  /** Failures on system sentinel IDs (__compile__ / __return_shape__ / …). */
+  /** Selected system-sentinel failures (bounded; excludes forbidden patterns). */
   readonly systemFailures: readonly ReplayFailureEvidence[];
-  /** Code-level violations (forbidden patterns) — global, not case-scoped. */
+  /** Selected forbidden-pattern violations (bounded, shared budget). */
   readonly globalViolations: readonly string[];
-  /** True when bounded selection omitted any durable failure. */
+  /** Total durable forbidden-pattern violations (pre-selection). */
+  readonly globalViolationCount: number;
+  /** True when bounded selection omitted any durable failure or violation. */
   readonly truncated: boolean;
 }
 
@@ -177,34 +179,77 @@ function normalizeFailedCaseEntry(entry: unknown): ReplayFailureEvidence | null 
 }
 
 /**
- * Bounded deterministic stratified selection (SPEC §30):
- *   1. system/global representatives first (stable order);
- *   2. real failures grouped by errorType × expectedDecision — at least one
- *      representative per group (stable order), preferring true decision
- *      mismatches (actualDecision present) over structural failures;
- *      the expectedDecision axis inherently preserves allow-mismatch and
- *      block-mismatch representatives when present;
- *   3. remaining capacity filled in stable replay order;
- *   4. truncated=true when anything was omitted.
+ * Bounded deterministic stratified selection (SPEC §30 as tightened by review
+ * 2026-09-02). Trace failures, system failures, and global violations share
+ * ONE capacity budget — no evidence class can bypass the prompt bound:
+ *
+ *   1. system failure representatives (stable order);
+ *   2. one global-violation representative for the whole violation group;
+ *   3. true decision mismatches FIRST by expected axis — at least one
+ *      expected=allow, one expected=block, one expected=propose_correction
+ *      representative each (when present) — so low-value runtime failures can
+ *      never evict every behavioral mismatch from the prompt;
+ *   4. remaining errorType × expectedDecision group representatives
+ *      (stable first-occurrence order, mismatch-preferring);
+ *   5. stable-order fill over trace → system → remaining violations;
+ *   6. truncated=true when anything was omitted.
  */
 export function selectBoundedReplayFailures(params: {
   traceFailures: readonly ReplayFailureEvidence[];
   systemFailures: readonly ReplayFailureEvidence[];
+  globalViolations: readonly string[];
   capacity: number;
-}): { readonly selected: readonly ReplayFailureEvidence[]; readonly truncated: boolean } {
-  const { traceFailures, systemFailures } = params;
+}): {
+  readonly selectedTrace: readonly ReplayFailureEvidence[];
+  readonly selectedSystem: readonly ReplayFailureEvidence[];
+  readonly selectedGlobalViolations: readonly string[];
+  readonly truncated: boolean;
+} {
   const capacity = Math.max(0, params.capacity);
-  const selected: ReplayFailureEvidence[] = [];
+  let remaining = capacity;
+  const chosenFailures = new Set<ReplayFailureEvidence>();
+  const chosenViolations = new Set<string>();
+  // Selected failures are recorded in SELECTION PRIORITY order so the repair
+  // prompt renders behavioral mismatches before raw structural errors.
+  const traceIdentity = new Set(params.traceFailures);
+  const orderedSelected: ReplayFailureEvidence[] = [];
+  const takeFailure = (failure: ReplayFailureEvidence): void => {
+    if (remaining <= 0 || chosenFailures.has(failure)) return;
+    chosenFailures.add(failure);
+    orderedSelected.push(failure);
+    remaining -= 1;
+  };
+  const takeViolation = (violation: string): void => {
+    if (remaining <= 0 || chosenViolations.has(violation)) return;
+    chosenViolations.add(violation);
+    remaining -= 1;
+  };
 
-  // Step 1: system failures are few and high-signal — take them first.
-  for (const systemFailure of systemFailures) {
-    if (selected.length >= capacity) break;
-    selected.push(systemFailure);
+  // 1. system representatives first.
+  for (const systemFailure of params.systemFailures) {
+    if (remaining <= 0) break;
+    takeFailure(systemFailure);
+  }
+  // 2. one global-violation representative.
+  const [firstViolation] = params.globalViolations;
+  if (firstViolation !== undefined) takeViolation(firstViolation);
+
+  // 3. decision mismatches by expected axis (canonical decision order).
+  const mismatchByExpected = new Map<string, ReplayFailureEvidence>();
+  for (const failure of params.traceFailures) {
+    if (failure.actualDecision === undefined) continue;
+    const key = failure.expectedDecision ?? 'unknown';
+    if (!mismatchByExpected.has(key)) mismatchByExpected.set(key, failure);
+  }
+  for (const expectedKey of ['allow', 'block', 'propose_correction']) {
+    if (remaining <= 0) break;
+    const representative = mismatchByExpected.get(expectedKey);
+    if (representative !== undefined) takeFailure(representative);
   }
 
-  // Step 2: one representative per errorType × expectedDecision group.
+  // 4. remaining group representatives (mismatch-preferring, stable order).
   const groups = new Map<string, ReplayFailureEvidence>();
-  for (const failure of traceFailures) {
+  for (const failure of params.traceFailures) {
     const key = `${failure.errorType}×${failure.expectedDecision ?? 'unknown'}`;
     const existing = groups.get(key);
     if (existing === undefined || (existing.actualDecision === undefined && failure.actualDecision !== undefined)) {
@@ -212,32 +257,41 @@ export function selectBoundedReplayFailures(params: {
     }
   }
   for (const representative of groups.values()) {
-    if (selected.length >= capacity) break;
-    selected.push(representative);
+    if (remaining <= 0) break;
+    takeFailure(representative);
   }
 
-  // Step 3: fill remaining capacity in stable replay order.
-  const chosen = new Set(selected);
-  for (const failure of [...traceFailures, ...systemFailures]) {
-    if (selected.length >= capacity) break;
-    if (chosen.has(failure)) continue;
-    chosen.add(failure);
-    selected.push(failure);
+  // 5. stable-order fill: trace → system → remaining violations.
+  for (const failure of [...params.traceFailures, ...params.systemFailures]) {
+    if (remaining <= 0) break;
+    takeFailure(failure);
+  }
+  for (const violation of params.globalViolations) {
+    if (remaining <= 0) break;
+    takeViolation(violation);
   }
 
-  const truncated = selected.length < traceFailures.length + systemFailures.length;
-  return { selected, truncated };
+  const total = params.traceFailures.length + params.systemFailures.length + params.globalViolations.length;
+  const selectedCount = chosenFailures.size + chosenViolations.size;
+  return {
+    selectedTrace: orderedSelected.filter((f) => traceIdentity.has(f)),
+    selectedSystem: orderedSelected.filter((f) => !traceIdentity.has(f)),
+    selectedGlobalViolations: params.globalViolations.filter((v) => chosenViolations.has(v)),
+    truncated: selectedCount < total,
+  };
 }
 
 /**
  * Resolve the authoritative Evaluator artifact for a repair round.
  *
- * Selection authority (SPEC §26): the evaluator task's durable
- * completionIntent records the exact run that produced the verdict, and the
- * artifact ID is deterministically `pi-art-<taskId>-<runId>`. When the intent
- * is unavailable (legacy tasks), fall back to listBySourceTaskId filtered to
- * principle artifacts: exactly one → use it; zero or many → fail loud, never
- * a positional pick.
+ * Selection authority (SPEC §26, tightened by review 2026-09-02): the
+ * evaluator task's durable completionIntent records the exact run that
+ * produced the verdict, and the artifact ID is deterministically
+ * `pi-art-<taskId>-<runId>`. When the intent exists, that artifact IS the
+ * authority — if it is missing we FAIL LOUD; another run's artifact may never
+ * become a fallback authority. Only when no intent exists (legacy tasks) does
+ * the exactly-one list rule apply: zero or many → fail loud, never a
+ * positional pick.
  */
 async function resolveAuthoritativeEvaluatorArtifact(
   sourceEvaluatorTaskId: string,
@@ -258,8 +312,13 @@ async function resolveAuthoritativeEvaluatorArtifact(
     if (artifact) {
       return { ok: true, artifactId: artifact.artifactId, contentJson: artifact.contentJson };
     }
-    // Fall through to the list-based path — the artifact may exist under a
-    // different revision of the intent-write ordering.
+    // The durable authority is KNOWN — a different run's artifact must never
+    // be silently promoted into its place (P1 review 2026-09-02).
+    return {
+      ok: false,
+      reason: 'artifact_missing',
+      detail: `completionIntent names run ${intentRunId} as authoritative but artifact ${artifactId} does not exist — refusing cross-run fallback`,
+    };
   }
 
   const artifacts = (await deps.artifactStore.listBySourceTaskId(sourceEvaluatorTaskId))
@@ -268,7 +327,7 @@ async function resolveAuthoritativeEvaluatorArtifact(
     return {
       ok: false,
       reason: 'artifact_missing',
-      detail: `no principle artifact for evaluator task ${sourceEvaluatorTaskId}${intentRunId !== undefined ? ` (intent pointed at pi-art-${sourceEvaluatorTaskId}-${intentRunId})` : ''}`,
+      detail: `no principle artifact for evaluator task ${sourceEvaluatorTaskId}`,
     };
   }
   if (artifacts.length > 1) {
@@ -335,14 +394,16 @@ export async function resolveRepairReplayContext(params: {
   }
 
   // Partition by identity (SPEC §17/§18): real trace IDs vs system sentinels
-  // vs code-level global violations.
+  // vs code-level global violations. Forbidden-pattern entries are counted
+  // ONLY as global violations — never also as system failures (review P2
+  // 2026-09-02: no double-count in the prompt) — and share the bounded
+  // selection budget with everything else.
   const traceFailures: ReplayFailureEvidence[] = [];
   const systemFailures: ReplayFailureEvidence[] = [];
   const globalViolations: string[] = [];
   for (const failure of normalized) {
     if (failure.caseId === '__forbidden_pattern__') {
       globalViolations.push(failure.message ?? `forbidden pattern (${failure.errorType})`);
-      systemFailures.push(failure);
       continue;
     }
     if (isSystemSentinelCaseId(failure.caseId)) {
@@ -352,9 +413,10 @@ export async function resolveRepairReplayContext(params: {
     traceFailures.push(failure);
   }
 
-  const { selected, truncated } = selectBoundedReplayFailures({
+  const selection = selectBoundedReplayFailures({
     traceFailures,
     systemFailures,
+    globalViolations,
     capacity: MAX_REPLAY_FAILURES_IN_REPAIR,
   });
 
@@ -366,10 +428,11 @@ export async function resolveRepairReplayContext(params: {
       ran: true,
       passed: adversarialResult.passed,
       failedCaseCount: normalized.length,
-      traceFailures: selected.filter((f) => !isSystemSentinelCaseId(f.caseId)),
-      systemFailures: selected.filter((f) => isSystemSentinelCaseId(f.caseId)),
-      globalViolations,
-      truncated,
+      traceFailures: selection.selectedTrace,
+      systemFailures: selection.selectedSystem,
+      globalViolations: selection.selectedGlobalViolations,
+      globalViolationCount: globalViolations.length,
+      truncated: selection.truncated,
     },
   };
 }

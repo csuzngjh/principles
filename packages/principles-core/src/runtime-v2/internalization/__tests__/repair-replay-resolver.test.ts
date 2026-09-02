@@ -118,6 +118,21 @@ describe('PRI-634 PR-A: resolveRepairReplayContext — artifact authority select
     expect(resolution.ok).toBe(true);
   });
 
+  it('P1 review 2026-09-02: intent-named artifact missing + exactly one other-run artifact → FAIL LOUD, never cross-run fallback', async () => {
+    // The durable authority (completionIntent.sourceRunId) is KNOWN — a
+    // different run's artifact must not be silently promoted into its place.
+    const staleOtherRun = mkArtifact({ artifactId: 'pi-art-eval-t1-run-0', contentJson: evaluatorArtifactWith({ passed: true, failedCases: [] }).contentJson });
+    const resolution = await resolveRepairReplayContext({
+      sourceEvaluatorTaskId: 'eval-t1',
+      deps: depsWith({ task: intentTask('run-1'), artifacts: [staleOtherRun], byId: {} }),
+    });
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) return;
+    expect(resolution.reason).toBe('artifact_missing');
+    expect(resolution.detail).toContain('refusing cross-run fallback');
+    expect(resolution.detail).toContain('pi-art-eval-t1-run-1');
+  });
+
   it('fails loud (artifact_ambiguous) on multiple artifacts with no resolvable intent — never a positional pick', async () => {
     const a = evaluatorArtifactWith({ passed: false, failedCases: [] });
     const b = evaluatorArtifactWith({ passed: true, failedCases: [] });
@@ -237,7 +252,7 @@ describe('PRI-634 PR-A: legacy normalization + partitioning (SPEC §17/§18/§21
     expect(failure?.expectedDecision).toBe('block');
   });
 
-  it('current-shape entries: real decision mismatch keeps actualDecision; system sentinels and forbidden patterns partition correctly', async () => {
+  it('current-shape entries: real decision mismatch keeps actualDecision; sentinels and forbidden patterns partition disjointly', async () => {
     const artifact = evaluatorArtifactWith({
       passed: false,
       failedCases: [
@@ -259,13 +274,17 @@ describe('PRI-634 PR-A: legacy normalization + partitioning (SPEC §17/§18/§21
     expect(context.traceFailures).toHaveLength(1);
     expect(context.traceFailures[0]?.caseId).toBe('v2-combination');
     expect(context.traceFailures[0]?.actualDecision).toBe('allow');
-    expect(context.systemFailures).toHaveLength(2);
+    // P2 review 2026-09-02: forbidden patterns count ONLY as global
+    // violations — never double-rendered as system failures too.
+    expect(context.systemFailures).toHaveLength(1);
+    expect(context.systemFailures[0]?.caseId).toBe('__compile__');
     expect(context.globalViolations).toEqual(['forbidden pattern detected in rule code: require']);
+    expect(context.globalViolationCount).toBe(1);
     expect(context.truncated).toBe(false);
   });
 });
 
-describe('PRI-634 PR-A: bounded stratified selection (SPEC §30)', () => {
+describe('PRI-634 PR-A: bounded stratified selection (SPEC §30 + review P1/P2 2026-09-02)', () => {
   const mk = (spec: { caseId: string; errorType: string; expected: string; actual?: string }): ReplayFailureEvidence => ({
     caseId: spec.caseId,
     errorType: spec.errorType,
@@ -273,7 +292,7 @@ describe('PRI-634 PR-A: bounded stratified selection (SPEC §30)', () => {
     ...(spec.actual !== undefined ? { actualDecision: spec.actual } : {}),
   });
 
-  it('keeps one representative per errorType × expectedDecision group, preferring true decision mismatches', () => {
+  it('keeps one representative per errorType × expectedDecision group; mismatches get explicit priority', () => {
     const traceFailures = [
       mk({ caseId: 'a1', errorType: 'runtime_error', expected: 'allow' }),
       mk({ caseId: 'a2', errorType: 'runtime_error', expected: 'allow' }),
@@ -281,12 +300,14 @@ describe('PRI-634 PR-A: bounded stratified selection (SPEC §30)', () => {
       mk({ caseId: 'b2', errorType: 'validation_failed', expected: 'allow', actual: 'block' }),
       mk({ caseId: 'c1', errorType: 'validation_failed', expected: 'block', actual: 'allow' }),
     ];
-    const { selected, truncated } = selectBoundedReplayFailures({ traceFailures, systemFailures: [], capacity: 16 });
-    expect(selected.map((f) => f.caseId)).toEqual(['a1', 'b2', 'c1', 'a2', 'b1']);
+    const { selectedTrace, truncated } = selectBoundedReplayFailures({ traceFailures, systemFailures: [], globalViolations: [], capacity: 16 });
+    // Mismatch representatives first (allow-axis b2, block-axis c1), then the
+    // remaining group rep (runtime_error×allow → a1), then stable fill (a2, b1).
+    expect(selectedTrace.map((f) => f.caseId)).toEqual(['b2', 'c1', 'a1', 'a2', 'b1']);
     expect(truncated).toBe(false);
   });
 
-  it('runtime errors cannot evict decision mismatches: capacity 2 keeps both mismatch groups alive before fill', () => {
+  it('P1 review: capacity 2 keeps BOTH the expected-allow and expected-block mismatch — runtime errors cannot evict them', () => {
     const traceFailures = [
       mk({ caseId: 'r1', errorType: 'runtime_error', expected: 'allow' }),
       mk({ caseId: 'r2', errorType: 'runtime_error', expected: 'allow' }),
@@ -294,28 +315,48 @@ describe('PRI-634 PR-A: bounded stratified selection (SPEC §30)', () => {
       mk({ caseId: 'm1', errorType: 'validation_failed', expected: 'allow', actual: 'block' }),
       mk({ caseId: 'm2', errorType: 'validation_failed', expected: 'block', actual: 'allow' }),
     ];
-    const { selected } = selectBoundedReplayFailures({ traceFailures, systemFailures: [], capacity: 2 });
-    // Groups: runtime_error×allow (r1), validation_failed×allow (m1), validation_failed×block (m2)
-    // capacity 2 → first two groups in stable order; both allow- and block-mismatch
-    // survive only if they fit — with 2 slots the algorithm must still be
-    // deterministic and group-first (no first-N truncation of raw errors).
-    expect(selected).toHaveLength(2);
-    expect(new Set(selected.map((f) => f.caseId))).not.toContain('r2');
-    expect(selected.map((f) => f.errorType)).toEqual(['runtime_error', 'validation_failed']);
+    const { selectedTrace, truncated } = selectBoundedReplayFailures({ traceFailures, systemFailures: [], globalViolations: [], capacity: 2 });
+    // The exact reviewer counter-example: r1 must NOT claim a slot that
+    // starves m2. Both behavioral mismatches survive; raw errors fill later.
+    expect(selectedTrace.map((f) => f.caseId)).toEqual(['m1', 'm2']);
+    expect(truncated).toBe(true);
   });
 
-  it('system failures are selected first', () => {
+  it('P1 review: at capacity 3 the runtime-error group representative is added after both mismatches', () => {
+    const traceFailures = [
+      mk({ caseId: 'r1', errorType: 'runtime_error', expected: 'allow' }),
+      mk({ caseId: 'm1', errorType: 'validation_failed', expected: 'allow', actual: 'block' }),
+      mk({ caseId: 'm2', errorType: 'validation_failed', expected: 'block', actual: 'allow' }),
+    ];
+    const { selectedTrace, truncated } = selectBoundedReplayFailures({ traceFailures, systemFailures: [], globalViolations: [], capacity: 3 });
+    expect(selectedTrace.map((f) => f.caseId)).toEqual(['m1', 'm2', 'r1']);
+    expect(truncated).toBe(false);
+  });
+
+  it('system failures first, then the global-violation representative — one shared budget', () => {
     const systemFailures = [mk({ caseId: '__compile__', errorType: 'syntax_error', expected: 'unknown' })];
     const traceFailures: ReplayFailureEvidence[] = Array.from({ length: 20 }, (_, i) => mk({ caseId: `t${i}`, errorType: 'runtime_error', expected: 'allow' }));
-    const { selected } = selectBoundedReplayFailures({ traceFailures, systemFailures, capacity: 5 });
-    expect(selected[0]?.caseId).toBe('__compile__');
+    const globalViolations = ['forbidden pattern: require', 'forbidden pattern: eval'];
+    const { selectedTrace, selectedSystem, selectedGlobalViolations, truncated } = selectBoundedReplayFailures({ traceFailures, systemFailures, globalViolations, capacity: 5 });
+    expect(selectedSystem.map((f) => f.caseId)).toEqual(['__compile__']);
+    // One representative for the whole violation group (P2: bounded, no duplicates).
+    expect(selectedGlobalViolations).toEqual(['forbidden pattern: require']);
+    expect(selectedTrace).toHaveLength(3); // 5 capacity − 1 system − 1 violation
+    expect(truncated).toBe(true);
+  });
+
+  it('P2 review: global violations can never bypass the capacity bound (28 violations, tiny capacity)', () => {
+    const globalViolations = Array.from({ length: 28 }, (_, i) => `forbidden pattern: p${i}`);
+    const { selectedGlobalViolations, truncated } = selectBoundedReplayFailures({ traceFailures: [], systemFailures: [], globalViolations, capacity: 4 });
+    expect(selectedGlobalViolations).toHaveLength(4);
+    expect(truncated).toBe(true);
   });
 
   it('truncated=true when capacity omits durable failures; default cap is 16', () => {
     expect(MAX_REPLAY_FAILURES_IN_REPAIR).toBe(16);
     const traceFailures: ReplayFailureEvidence[] = Array.from({ length: 30 }, (_, i) => mk({ caseId: `t${i}`, errorType: i % 2 === 0 ? 'runtime_error' : 'validation_failed', expected: 'allow' }));
-    const { selected, truncated } = selectBoundedReplayFailures({ traceFailures, systemFailures: [], capacity: MAX_REPLAY_FAILURES_IN_REPAIR });
-    expect(selected).toHaveLength(16);
+    const { selectedTrace, truncated } = selectBoundedReplayFailures({ traceFailures, systemFailures: [], globalViolations: [], capacity: MAX_REPLAY_FAILURES_IN_REPAIR });
+    expect(selectedTrace).toHaveLength(16);
     expect(truncated).toBe(true);
   });
 });
