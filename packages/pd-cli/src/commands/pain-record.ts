@@ -16,7 +16,8 @@ import {
 } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
-import { buildTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
+import { acquireTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
+import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
 
 interface RecordOptions {
   reason?: string;
@@ -26,6 +27,105 @@ interface RecordOptions {
   json?: boolean;
   session?: string;
   wait?: boolean;
+}
+
+/** PRI-642 (SPEC §7.3/§7.4): structured pre-flight result for session binding. */
+interface SessionBindingPlan {
+  sessionId?: string;
+  provenance: 'host_context_bound' | 'owner_reported_no_host_trace';
+  hostKind?: 'openclaw';
+  evidence: PainEvidenceEntry[];
+  recordObservability: boolean;
+  /** Populated for the unbound path — disclosed to the operator (rc-9). */
+  unboundWarning?: string;
+}
+
+function emitSessionBindingFailure(
+  opts: RecordOptions,
+  failure: { reason: string; message: string; nextAction: string },
+): void {
+  if (opts.json) {
+    console.log(JSON.stringify({
+      status: 'failed',
+      reason: failure.reason,
+      message: failure.message,
+      nextAction: failure.nextAction,
+    }, null, 2));
+  } else {
+    console.error(`Error: ${failure.message}`);
+    console.error(`Reason: ${failure.reason}`);
+    console.error(`Next action: ${failure.nextAction}`);
+  }
+  process.exit(1);
+}
+
+/**
+ * PRI-642 Scope A: resolve the session binding plan BEFORE any task/LLM work.
+ *
+ * - explicit `--session` → validate against the workspace trajectory.db:
+ * nonexistent session / unreadable DB / empty trajectory all fail loudly with
+ * a structured reason and NO mutation (SPEC §12.1.4, cli-5);
+ * - no `--session` → explicit unbound Owner report: no `cli` sentinel session,
+ * no placeholder evidence, no trajectory projection write (SPEC §7.4).
+ */
+function resolveSessionBinding(opts: RecordOptions, stateDir: string, workspaceDir: string): SessionBindingPlan | null {
+  if (opts.session) {
+    const acquisition = acquireTrajectoryEvidenceFromDb(stateDir, opts.session, workspaceDir);
+    if (acquisition.status === 'available') {
+      return {
+        sessionId: opts.session,
+        provenance: 'host_context_bound',
+        // PRI-640/SPEC §8.3: a validated session in this workspace's
+        // trajectory is an OpenClaw-recorded session — attribute it.
+        hostKind: 'openclaw',
+        evidence: acquisition.entries,
+        recordObservability: true,
+      };
+    }
+    const { reasonCode, detail } = acquisition;
+    let failure: { reason: string; message: string; nextAction: string };
+    if (reasonCode === 'session_not_found') {
+      failure = {
+        reason: 'session_not_found',
+        message: `--session ${opts.session} does not exist in this workspace's trajectory (${detail}).`,
+        nextAction: 'Verify the session id (it must be a session recorded in this workspace), or omit --session to record an unbound Owner report (disclosed, evidence-less).',
+      };
+    } else if (reasonCode === 'trajectory_unavailable') {
+      failure = {
+        reason: 'trajectory_unavailable',
+        message: `No trajectory.db found at ${stateDir}/trajectory.db — cannot bind --session.`,
+        nextAction: 'Point --workspace at the workspace that owns the session, or omit --session to record an unbound Owner report.',
+      };
+    } else if (reasonCode === 'evidence_read_failed') {
+      failure = {
+        reason: 'evidence_read_failed',
+        message: `The trajectory database could not be read (${detail}).`,
+        nextAction: 'Ensure trajectory.db is a readable SQLite database and no other process holds an exclusive lock, or omit --session to record an unbound Owner report.',
+      };
+    } else {
+      failure = {
+        reason: 'empty_trajectory',
+        message: `Session ${opts.session} exists but contains no usable evidence (${detail}).`,
+        nextAction: 'Use a session that has recorded turns/tool calls, or omit --session to record an unbound Owner report.',
+      };
+    }
+    emitSessionBindingFailure(opts, failure);
+    return null;
+  }
+
+  return {
+    sessionId: undefined,
+    provenance: 'owner_reported_no_host_trace',
+    evidence: [],
+    // SPEC §7.4: the trajectory sessions/pain_events projection requires a
+    // real session; skipping it is disclosed below instead of fabricating
+    // the sentinel session 'cli'.
+    recordObservability: false,
+    unboundWarning: 'context_unbound: no session bound — no trajectory evidence attached and the '
+      + 'trajectory pain_events projection was skipped (it requires a real session). '
+      + 'Diagnosis relies on the Owner report text; candidates will likely be blocked by the '
+      + 'admission gate (needs_evidence). Re-run with --session <id> for trace-backed diagnosis.',
+  };
 }
 
 export async function handlePainRecord(opts: RecordOptions): Promise<void> {
@@ -65,9 +165,13 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const stateDir = `${workspaceDir}/.state`;
   const painId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-  // PRI-341: Build evidence from trajectory DB if session provided
-  const effectiveSessionId = opts.session ?? 'cli';
-  const evidence = buildTrajectoryEvidenceFromDb(stateDir, opts.session, workspaceDir);
+  // PRI-642: resolve session binding before any service/LLM/task mutation.
+  const binding = resolveSessionBinding(opts, stateDir, workspaceDir);
+  if (binding === null) {
+    // resolveSessionBinding already emitted the structured failure and
+    // exited; return keeps the no-mutation contract when exit is stubbed.
+    return;
+  }
 
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
   // PRI-306: Load .pd/config.yaml for config-driven runtime binding
@@ -104,11 +208,12 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     source: opts.source ?? 'manual',
     reason: opts.reason,
     score: opts.score ?? 80,
-    sessionId: effectiveSessionId,
+    sessionId: binding.sessionId,
     agentId: 'pd-cli',
-    provenance: 'owner_reported_no_host_trace',
-    evidence,
-    recordObservability: true,
+    provenance: binding.provenance,
+    hostKind: binding.hostKind,
+    evidence: binding.evidence,
+    recordObservability: binding.recordObservability,
   });
 
   // Show diagnostic info for config failures
@@ -181,6 +286,18 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     }
   }
 
+  // PRI-642 (SPEC §12.1.6): generated-but-unadmitted candidates must never
+  // read as completed internalization — surface the admission disposition.
+  const admissionDecisions = result.admissionResults?.map(r => r.admission.decision) ?? [];
+  const admittedCount = admissionDecisions.filter(d => d === 'admitted').length;
+  const gatedWarning = result.status === 'succeeded'
+    && result.candidateIds.length > 0
+    && admittedCount === 0
+    ? `admitted: 0 of ${result.candidateIds.length} candidates (all gated — needs_evidence/deferred); `
+      + 'nothing was internalized. See admissionResults for per-candidate reasons; add --session evidence or Owner context to raise confidence above the admission threshold.'
+    : null;
+  const cliWarnings = [binding.unboundWarning, gatedWarning].filter((w): w is string => w !== null && w !== undefined);
+
   if (opts.json) {
     const out: Record<string, unknown> = { ...result };
     // Ensure nextAction is present for actionable states
@@ -191,13 +308,22 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       if (!out.reason) {
         out.reason = out.message;
       }
-      // PRI-570: async submission has NO automatic consumer — the
-      // internalization auto-consumer's runner kinds (dreamer..rollout_reviewer)
-      // do not include 'diagnostician', so a submitted task stays pending until
-      // the owner runs the diagnose command. Never let that stay implicit (rc-9).
-      out.warning = 'Async mode: no background consumer picks up diagnostician tasks. '
+    }
+    // PRI-570: async submission has NO automatic consumer — the
+    // internalization auto-consumer's runner kinds (dreamer..rollout_reviewer)
+    // do not include 'diagnostician', so a submitted task stays pending until
+    // the owner runs the diagnose command. Never let that stay implicit (rc-9).
+    // PRI-642: unbound/gated disclosures join the same warnings channel.
+    const submittedWarning = out.status === 'submitted'
+      ? 'Async mode: no background consumer picks up diagnostician tasks. '
         + `Run ${out.nextAction} or the pain signal will remain pending indefinitely. `
-        + 'Use --wait to diagnose synchronously instead.';
+        + 'Use --wait to diagnose synchronously instead.'
+      : null;
+    const allWarnings = [...cliWarnings];
+    if (submittedWarning !== null) allWarnings.unshift(submittedWarning);
+    if (allWarnings.length > 0) {
+      out.warning = allWarnings.join(' ');
+      out.warnings = allWarnings;
     }
     console.log(JSON.stringify(out, null, 2));
     if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried' && result.status !== 'submitted') {
@@ -217,7 +343,21 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       console.log(`   Score: ${opts.score ?? 80}`);
       console.log(`   Source: ${opts.source ?? 'manual'}`);
       console.log(`   Workspace: ${workspaceDir}`);
+      if (binding.sessionId) {
+        console.log(`   Session: ${binding.sessionId} (bound, ${binding.evidence.length} evidence entries)`);
+      } else {
+        console.log('   Session: unbound (Owner report; no trajectory evidence)');
+      }
+      if (result.admissionResults && result.admissionResults.length > 0) {
+        console.log(`   Admission: ${admittedCount} of ${result.admissionResults.length} candidates admitted`);
+        for (const r of result.admissionResults) {
+          console.log(`     - ${r.candidateId}: ${r.admission.decision} (${r.admission.reason})`);
+        }
+      }
       if (result.latencyMs !== undefined) console.log(`   Latency: ${result.latencyMs}ms`);
+      for (const w of cliWarnings) {
+        console.warn(`   ⚠️  ${w}`);
+      }
       console.log(`\nDiagnostician pipeline running. Check progress with:`);
       console.log(`   pd task show ${result.taskId} --workspace "${workspaceDir}"`);
     } else if (result.status === 'submitted') {

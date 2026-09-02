@@ -335,3 +335,113 @@ describe('buildTrajectoryEvidenceFromDb — PRI-341', () => {
     });
   });
 });
+
+// ── PRI-642 Scope A — typed acquisition from trajectory.db (SPEC §7.3) ───────
+
+describe('acquireTrajectoryEvidenceFromDb — typed CLI acquisition (PRI-642 Scope A)', () => {
+  beforeEach(() => {
+    createStateDir();
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+
+  it('returns available with entries for a session that has turns', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = createTrajectoryDb();
+    // Turn writers upsert the sessions row — mirror the real DB shape.
+    db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)')
+      .run('real-session', '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
+    insertUserTurn(db, 'real-session', 'Owner correction', true, '2026-01-01T09:59:00Z');
+    insertAssistantTurn(db, 'real-session', 'assistant text', '2026-01-01T10:00:00Z');
+    db.close();
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'real-session', tmpDir);
+
+    expect(result.status).toBe('available');
+    if (result.status !== 'available') return;
+    expect(result.entries.length).toBeGreaterThan(0);
+    expect(result.entries.some(e => e.sourceRef.startsWith('owner_message:'))).toBe(true);
+    expect(result.entries.some(e => e.sourceRef.startsWith('agent_turn:'))).toBe(true);
+  });
+
+  it('returns unavailable/session_not_found for a session absent from the sessions table (SPEC 12.1.4)', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = createTrajectoryDb();
+    insertAssistantTurn(db, 'other-session', 'unrelated', '2026-01-01T10:00:00Z');
+    db.close();
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'no-such-session', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('session_not_found');
+  });
+
+  it('returns unavailable/session_not_found for the "cli" and "unknown" sentinels', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = createTrajectoryDb();
+    db.close();
+
+    const cliResult = acquireTrajectoryEvidenceFromDb(stateDir, 'cli', tmpDir);
+    const unknownResult = acquireTrajectoryEvidenceFromDb(stateDir, 'unknown', tmpDir);
+
+    expect(cliResult.status).toBe('unavailable');
+    expect(unknownResult.status).toBe('unavailable');
+    if (cliResult.status !== 'unavailable' || unknownResult.status !== 'unavailable') return;
+    expect(cliResult.reasonCode).toBe('session_not_found');
+    expect(unknownResult.reasonCode).toBe('session_not_found');
+  });
+
+  it('returns unavailable/trajectory_unavailable when trajectory.db is missing', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'some-session', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('trajectory_unavailable');
+  });
+
+  it('returns unavailable/empty_trajectory when the session exists but has no turns or tool calls', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = createTrajectoryDb();
+    db.prepare(`
+      INSERT INTO sessions (session_id, started_at, updated_at)
+      VALUES (?, ?, ?)
+    `).run('quiet-session', '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
+    db.close();
+
+    const result = acquireTrajectoryEvidenceFromDb(stateDir, 'quiet-session', tmpDir);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('empty_trajectory');
+  });
+
+  it('returns a different reasonCode for unreadable DB vs empty trajectory (exec-prompt item 5)', async () => {
+    const { acquireTrajectoryEvidenceFromDb } = await import('../../src/commands/build-trajectory-evidence.js');
+    const db = createTrajectoryDb();
+    db.close();
+    // Corrupt the DB file after close so the read-only open fails.
+    const dbPath = path.join(stateDir, 'trajectory.db');
+    fs.writeFileSync(dbPath, Buffer.from('this is not a sqlite database at all'));
+
+    const unreadable = acquireTrajectoryEvidenceFromDb(stateDir, 'some-session', tmpDir);
+
+    const stateDir2 = createStateDir();
+    const db2 = createTrajectoryDb();
+    db2.close();
+
+    expect(unreadable.status).toBe('unavailable');
+    if (unreadable.status !== 'unavailable') return;
+    // Unreadable DB must not share a reasonCode with a real-but-empty session.
+    expect(unreadable.reasonCode).not.toBe('empty_trajectory');
+    expect(unreadable.reasonCode).toBe('evidence_read_failed');
+  });
+});
