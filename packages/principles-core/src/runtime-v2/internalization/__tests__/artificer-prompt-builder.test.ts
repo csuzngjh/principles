@@ -77,9 +77,10 @@ describe('ArtificerPromptBuilder', () => {
   });
 
   it('promptContractVersion identifies the executable V2 contract', () => {
-    // PRI-484 — bumped from v1 to v2 to signal the RuleCode context surface
-    // is part of the contract the model must obey.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v2');
+    // PRI-484 — bumped v1 → v2 to signal the RuleCode context surface is part
+    // of the contract the model must obey; PRI-634 PR-A — bumped v2 → v3 for
+    // the paramsSummary-is-an-object contract + repair replay-evidence block.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v3');
   });
 
   it('instruction requires implementationSummary as a non-empty string', () => {
@@ -157,12 +158,22 @@ describe('PRI-484 Artificer prompt context modes', () => {
     expect(promptInput.artificerInstruction).toContain('empty');
   });
 
-  it('declares the v2 contract version bump v1 -> v2', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v2');
+  it('declares the contract version bump history v1 → v2 → v3 (PRI-634 PR-A)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v3');
   });
 
   it('still references input.action for v1 compatibility', () => {
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('input.action');
+  });
+
+  it('PRI-634 PR-A: states paramsSummary is an object and forbids whole-object string methods', () => {
+    // SPEC §32 — the Artificer must never emit paramsSummary.includes(...) /
+    // startsWith(...): paramsSummary is Record<string, unknown>, and path
+    // logic must prefer normalizedPath or guarded key access.
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('paramsSummary is an OBJECT');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('NEVER call string methods on paramsSummary itself');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('paramsSummary.includes(');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('prefer input.action.normalizedPath');
   });
 
   it('mentions requiresContextVersion when declaring v2 rules', () => {
