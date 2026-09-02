@@ -18,8 +18,10 @@ disable-model-invocation: false
 
 手动入口：
 ```bash
-pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --json
+pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
 ```
+`--session` 把报告绑定到已记录的会话（先校验），让诊断携带真实轨迹
+证据；不带它则是无证据的 unbound Owner 报告，候选大概率被拦。
 
 禁止入口：
 - 不要写 `.state/.pain_flag`。

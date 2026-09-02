@@ -15,13 +15,22 @@ npm install -g @principles/pd-cli
 Record a pain signal to the workspace's trajectory database via `PainToPrincipleService`.
 
 ```bash
-pd pain record --reason "edited file without reading first" --score 75
+pd pain record --reason "edited file without reading first" --score 75 --session "<session-id>"
 ```
 
 Options:
 - `--reason, -r` — Pain reason (required)
 - `--score, -s` — Pain score 0-100 (default: 80)
-- `--session-id` — Session ID (default: auto-generated)
+- `--session` — Session ID recorded in this workspace's trajectory; validated
+  up front (a missing session fails with `session_not_found` before anything
+  is written). Binding a session attaches real trajectory evidence.
+- `--workspace, -w` — Workspace directory
+- `--wait` — Diagnose synchronously (overrides the async CLI flag)
+- `--json` — Machine-readable output
+
+Without `--session` the record is an honest unbound Owner report: it carries
+no trajectory evidence and candidates will likely be gated by the admission
+threshold (`needs_evidence`); the output discloses this explicitly.
 
 ## Production Canary Validation
 

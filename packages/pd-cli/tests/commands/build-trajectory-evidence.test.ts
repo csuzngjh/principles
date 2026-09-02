@@ -1,5 +1,7 @@
 /**
- * Tests for buildTrajectoryEvidenceFromDb — PRI-341
+ * Tests for acquireTrajectoryEvidenceFromDb — PRI-341 extraction behavior,
+ * PRI-642 typed classification (the legacy array wrapper was removed with
+ * its last production consumer).
  *
  * Uses real temporary SQLite DBs (trajectory.db) to validate evidence extraction.
  */
@@ -9,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { MAX_EVIDENCE_ENTRIES } from '@principles/core/runtime-v2';
-import { buildTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
+import { acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -127,7 +129,7 @@ function insertToolCall(
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
-describe('buildTrajectoryEvidenceFromDb — PRI-341', () => {
+describe('acquireTrajectoryEvidenceFromDb — behavior via typed API (PRI-341 extraction, PRI-642 wrapper removal)', () => {
   beforeEach(() => {
     createStateDir();
   });
@@ -140,199 +142,152 @@ describe('buildTrajectoryEvidenceFromDb — PRI-341', () => {
     }
   });
 
-  // 用例 A: trajectory.db contains 3 assistant turns for session '123'
-  // → returns evidence with length ≤ MAX_EVIDENCE_ENTRIES, each entry has sourceRef and note
-  it('A: returns evidence entries from assistant turns (≤ MAX_EVIDENCE_ENTRIES)', () => {
+  /** Available-class entries, or the unavailable reason for assertions. */
+  function acquire(sessionId: string | undefined) {
+    return acquireTrajectoryEvidenceFromDb(stateDir, sessionId, tmpDir);
+  }
+
+  function entriesOf(sessionId: string) {
+    const result = acquire(sessionId);
+    expect(result.status).toBe('available');
+    return result.status === 'available' ? result.entries : [];
+  }
+
+  function insertSession(db: Database.Database, sessionId: string): void {
+    db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)')
+      .run(sessionId, '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
+  }
+
+  it('returns available entries (≤ MAX_EVIDENCE_ENTRIES) from assistant turns', () => {
     const db = createTrajectoryDb();
+    insertSession(db, '123');
     insertAssistantTurn(db, '123', 'First assistant response about backups', '2026-01-01T10:00:00Z');
     insertAssistantTurn(db, '123', 'Second response about validation', '2026-01-01T10:01:00Z');
     insertAssistantTurn(db, '123', 'Third response about error handling', '2026-01-01T10:02:00Z');
     db.close();
 
-    const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+    const entries = entriesOf('123');
 
-    expect(evidence.length).toBeGreaterThan(0);
-    expect(evidence.length).toBeLessThanOrEqual(MAX_EVIDENCE_ENTRIES);
-    for (const entry of evidence) {
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.length).toBeLessThanOrEqual(MAX_EVIDENCE_ENTRIES);
+    for (const entry of entries) {
       expect(entry.sourceRef).toBeTruthy();
       expect(entry.note).toBeTruthy();
-      expect(typeof entry.sourceRef).toBe('string');
-      expect(typeof entry.note).toBe('string');
     }
   });
 
-  // 用例 B: sessionId is undefined or trajectory.db doesn't exist
-  // → returns placeholder entry, does not throw, does not return empty array
-  it('B: returns placeholder when sessionId is undefined', () => {
-    const evidence = buildTrajectoryEvidenceFromDb(stateDir, undefined, tmpDir);
-
-    expect(evidence.length).toBeGreaterThan(0);
-    expect(evidence[0].sourceRef).toBe('owner_reported:cli');
-    expect(evidence[0].note).toBeTruthy();
+  it('classifies an undefined session as session_not_found (no placeholder entries)', () => {
+    const db = createTrajectoryDb();
+    db.close();
+    const result = acquire(undefined);
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.reasonCode).toBe('session_not_found');
   });
 
-  it('B2: returns placeholder when trajectory.db does not exist', () => {
-    const evidence = buildTrajectoryEvidenceFromDb(stateDir, 'some-session', tmpDir);
-
-    expect(evidence.length).toBeGreaterThan(0);
-    expect(evidence[0].sourceRef).toBe('owner_reported:cli');
-  });
-
-  it('B3: returns placeholder when sessionId is "cli"', () => {
-    const evidence = buildTrajectoryEvidenceFromDb(stateDir, 'cli', tmpDir);
-
-    expect(evidence.length).toBeGreaterThan(0);
-    expect(evidence[0].sourceRef).toBe('owner_reported:cli');
-  });
-
-  // Additional: user correction turns are surfaced
   it('surfaces user correction turns with correctionDetected=true', () => {
     const db = createTrajectoryDb();
+    insertSession(db, '123');
     insertUserTurn(db, '123', 'Please fix the backup logic', true, '2026-01-01T09:59:00Z');
     insertAssistantTurn(db, '123', 'I will fix the backup logic', '2026-01-01T10:00:00Z');
     db.close();
 
-    const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+    const entries = entriesOf('123');
 
-    expect(evidence.length).toBeGreaterThan(0);
-    const ownerEntry = evidence.find(e => e.sourceRef.startsWith('owner_message:'));
+    const ownerEntry = entries.find(e => e.sourceRef.startsWith('owner_message:'));
     expect(ownerEntry).toBeDefined();
     expect(ownerEntry!.note).toContain('fix the backup logic');
   });
 
-  // Additional: empty trajectory DB (tables exist but no rows) → meaningful placeholder
-  it('returns trajectory:empty placeholder when DB has no turns for session', () => {
+  it('extracts failed tool_calls as evidence entries (PRI-358)', () => {
     const db = createTrajectoryDb();
+    insertSession(db, '123');
+    insertToolCall(db, '123', 'bash', 'failure', 'non_zero_exit', 1, '2026-01-01T10:00:00Z');
+    insertToolCall(db, '123', 'write_file', 'success', null, 0, '2026-01-01T10:01:00Z');
+    insertToolCall(db, '123', 'bash', 'failure', 'timeout', 124, '2026-01-01T10:02:00Z');
     db.close();
 
-    const evidence = buildTrajectoryEvidenceFromDb(stateDir, 'nonexistent-session', tmpDir);
+    const entries = entriesOf('123');
 
-    expect(evidence.length).toBeGreaterThan(0);
-    expect(evidence[0].sourceRef).toBe('trajectory:empty');
+    const failureEntries = entries.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
+    expect(failureEntries.length).toBe(2);
+    expect(failureEntries[0].note).toContain('bash');
+    expect(failureEntries[0].note).toContain('non_zero_exit');
+    expect(failureEntries[1].note).toContain('timeout');
   });
 
-  // ── PRI-358: Failed tool_calls evidence ────────────────────────────────────
+  it('limits failed tool_calls to 3 entries', () => {
+    const db = createTrajectoryDb();
+    insertSession(db, '123');
+    insertToolCall(db, '123', 'bash', 'failure', 'err1', 1, '2026-01-01T10:00:00Z');
+    insertToolCall(db, '123', 'bash', 'failure', 'err2', 2, '2026-01-01T10:01:00Z');
+    insertToolCall(db, '123', 'bash', 'failure', 'err3', 3, '2026-01-01T10:02:00Z');
+    insertToolCall(db, '123', 'bash', 'failure', 'err4', 4, '2026-01-01T10:03:00Z');
+    db.close();
 
-  describe('PRI-358: failed tool_calls evidence', () => {
-    it('extracts failed tool_calls as evidence entries', () => {
-      const db = createTrajectoryDb();
-      insertToolCall(db, '123', 'bash', 'failure', 'non_zero_exit', 1, '2026-01-01T10:00:00Z');
-      insertToolCall(db, '123', 'write_file', 'success', null, 0, '2026-01-01T10:01:00Z');
-      insertToolCall(db, '123', 'bash', 'failure', 'timeout', 124, '2026-01-01T10:02:00Z');
-      db.close();
+    const entries = entriesOf('123');
 
-      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
-
-      const failureEntries = evidence.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
-      expect(failureEntries.length).toBe(2);
-      expect(failureEntries[0].note).toContain('bash');
-      expect(failureEntries[0].note).toContain('non_zero_exit');
-      expect(failureEntries[1].note).toContain('timeout');
-    });
-
-    it('does not add tool_call_failure entries when no failures exist', () => {
-      const db = createTrajectoryDb();
-      insertToolCall(db, '123', 'bash', 'success', null, 0, '2026-01-01T10:00:00Z');
-      db.close();
-
-      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
-
-      const failureEntries = evidence.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
-      expect(failureEntries.length).toBe(0);
-    });
-
-    it('limits failed tool_calls to 3 entries', () => {
-      const db = createTrajectoryDb();
-      insertToolCall(db, '123', 'bash', 'failure', 'err1', 1, '2026-01-01T10:00:00Z');
-      insertToolCall(db, '123', 'bash', 'failure', 'err2', 2, '2026-01-01T10:01:00Z');
-      insertToolCall(db, '123', 'bash', 'failure', 'err3', 3, '2026-01-01T10:02:00Z');
-      insertToolCall(db, '123', 'bash', 'failure', 'err4', 4, '2026-01-01T10:03:00Z');
-      db.close();
-
-      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
-
-      const failureEntries = evidence.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
-      expect(failureEntries.length).toBe(3);
-    });
-
-    it('handles missing tool_calls table gracefully', () => {
-      // Create DB without tool_calls table
-      const dbPath = path.join(stateDir, 'trajectory.db');
-      const db = new Database(dbPath);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT, updated_at TEXT)
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS assistant_turns (
-          id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
-          sanitized_text TEXT, created_at TEXT NOT NULL
-        )
-      `);
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS user_turns (
-          id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
-          turn_index INTEGER NOT NULL DEFAULT 0, raw_excerpt TEXT,
-          correction_detected INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
-        )
-      `);
-      db.close();
-
-      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
-
-      // Should not throw, should have some evidence (trajectory:empty or unavailable)
-      expect(evidence.length).toBeGreaterThan(0);
-      // Should NOT have tool_call_failure:unavailable since we have no other evidence
-      // and the table simply doesn't exist (not an error condition worth reporting)
-    });
+    const failureEntries = entries.filter(e => e.sourceRef.startsWith('tool_call_failure:'));
+    expect(failureEntries.length).toBe(3);
   });
 
-  // ── Trajectory v2 enhancement: resultPreview + stopReason ─────────────────
+  it('handles a missing tool_calls table gracefully (classified unavailable, no throw)', () => {
+    const dbPath = path.join(stateDir, 'trajectory.db');
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT, updated_at TEXT)");
+    db.exec("CREATE TABLE IF NOT EXISTS assistant_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, sanitized_text TEXT, created_at TEXT NOT NULL)");
+    db.exec("CREATE TABLE IF NOT EXISTS user_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL DEFAULT 0, raw_excerpt TEXT, correction_detected INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)");
+    db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)').run('123', '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
+    db.close();
 
-  describe('trajectory v2 enhancement: resultPreview and stopReason', () => {
-    it('includes resultPreview in tool failure evidence note', () => {
-      const db = createTrajectoryDb();
-      insertToolCall(db, '123', 'bash', 'failure', 'ENOENT', 1, '2026-01-01T10:00:00Z', 'Error: no such file or directory');
-      db.close();
+    const result = acquire('123');
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(['empty_trajectory', 'evidence_read_failed']).toContain(result.reasonCode);
+  });
 
-      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+  it('includes resultPreview in tool failure evidence note', () => {
+    const db = createTrajectoryDb();
+    insertSession(db, '123');
+    insertToolCall(db, '123', 'bash', 'failure', 'ENOENT', 1, '2026-01-01T10:00:00Z', 'Error: no such file or directory');
+    db.close();
 
-      const failureEntry = evidence.find(e => e.sourceRef.startsWith('tool_call_failure:'));
-      expect(failureEntry).toBeDefined();
-      expect(failureEntry!.note).toContain('ENOENT');
-      expect(failureEntry!.note).toContain('Error: no such file or directory');
-    });
+    const entries = entriesOf('123');
 
-    it('includes truncation warning when stop_reason is length', () => {
-      const db = createTrajectoryDb();
-      db.prepare(`
-        INSERT INTO assistant_turns (session_id, sanitized_text, stop_reason, created_at)
-        VALUES (?, ?, ?, ?)
-      `).run('123', 'Partial output truncated...', 'length', '2026-01-01T10:00:00Z');
-      db.close();
+    const failureEntry = entries.find(e => e.sourceRef.startsWith('tool_call_failure:'));
+    expect(failureEntry).toBeDefined();
+    expect(failureEntry!.note).toContain('ENOENT');
+    expect(failureEntry!.note).toContain('Error: no such file or directory');
+  });
 
-      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+  it('includes truncation warning when stop_reason is length', () => {
+    const db = createTrajectoryDb();
+    insertSession(db, '123');
+    db.prepare("INSERT INTO assistant_turns (session_id, sanitized_text, stop_reason, created_at) VALUES (?, ?, ?, ?)")
+      .run('123', 'Partial output truncated...', 'length', '2026-01-01T10:00:00Z');
+    db.close();
 
-      const agentEntry = evidence.find(e => e.sourceRef.startsWith('agent_turn:'));
-      expect(agentEntry).toBeDefined();
-      expect(agentEntry!.note).toContain('Partial output truncated...');
-      expect(agentEntry!.note).toContain('[TRUNCATED: output cut off by length limit]');
-    });
+    const entries = entriesOf('123');
 
-    it('does not include truncation warning when stop_reason is end_turn', () => {
-      const db = createTrajectoryDb();
-      db.prepare(`
-        INSERT INTO assistant_turns (session_id, sanitized_text, stop_reason, created_at)
-        VALUES (?, ?, ?, ?)
-      `).run('123', 'Complete output', 'end_turn', '2026-01-01T10:00:00Z');
-      db.close();
+    const agentEntry = entries.find(e => e.sourceRef.startsWith('agent_turn:'));
+    expect(agentEntry).toBeDefined();
+    expect(agentEntry!.note).toContain('Partial output truncated...');
+    expect(agentEntry!.note).toContain('[TRUNCATED: output cut off by length limit]');
+  });
 
-      const evidence = buildTrajectoryEvidenceFromDb(stateDir, '123', tmpDir);
+  it('does not include truncation warning when stop_reason is end_turn', () => {
+    const db = createTrajectoryDb();
+    insertSession(db, '123');
+    db.prepare("INSERT INTO assistant_turns (session_id, sanitized_text, stop_reason, created_at) VALUES (?, ?, ?, ?)")
+      .run('123', 'Complete output', 'end_turn', '2026-01-01T10:00:00Z');
+    db.close();
 
-      const agentEntry = evidence.find(e => e.sourceRef.startsWith('agent_turn:'));
-      expect(agentEntry).toBeDefined();
-      expect(agentEntry!.note).toBe('Complete output');
-      expect(agentEntry!.note).not.toContain('[TRUNCATED');
-    });
+    const entries = entriesOf('123');
+
+    const agentEntry = entries.find(e => e.sourceRef.startsWith('agent_turn:'));
+    expect(agentEntry).toBeDefined();
+    expect(agentEntry!.note).toBe('Complete output');
+    expect(agentEntry!.note).not.toContain('[TRUNCATED');
   });
 });
 

@@ -21,9 +21,6 @@ vi.mock('fs', () => ({
 }));
 
 vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
-  buildTrajectoryEvidenceFromDb: vi.fn().mockReturnValue([
-    { sourceRef: 'owner_reported:cli', note: 'No session context available' },
-  ]),
   acquireTrajectoryEvidenceFromDb: vi.fn().mockReturnValue({
     status: 'available',
     entries: [

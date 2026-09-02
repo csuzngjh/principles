@@ -18,8 +18,11 @@ Automatic:
 
 Manual:
 ```bash
-pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --json
+pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
 ```
+`--session` binds the report to a recorded session (validated up front) so
+diagnosis carries real trajectory evidence; without it the record is an
+unbound Owner report with no evidence and candidates will likely be gated.
 
 Forbidden:
 - Do not write `.state/.pain_flag`.

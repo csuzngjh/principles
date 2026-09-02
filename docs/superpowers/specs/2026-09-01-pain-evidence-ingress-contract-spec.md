@@ -1,9 +1,13 @@
 # Pain Evidence Ingress Contract SPEC
 
-**Status:** Draft rev 2 — Owner review and implementation authorization required  
-**Date:** 2026-09-01  
-**Issue:** PRI-642  
-**Base evidence:** `8a5001eb`  
+**Status:** Implemented 2026-09-02 — Scope A + Scope B delivered on branch
+`ai/PRI-642-pain-ingress-contract` (Scope A `ca5e7c9d`; B0/B1 `8de2cffc`;
+B2 `a013c581`; B3 `f4a25842`). Codex migration decided AGAINST at the B4
+gate (peer adapter, §11.2). Implementation evidence: §11.1 inventory,
+§11.2 decision, and the test suites named there.
+**Date:** 2026-09-01 (rev 2), 2026-09-02 (implementation backfill)
+**Issue:** PRI-642
+**Base evidence:** `8a5001eb`
 **Extends without replacing:** `2026-08-28-codex-governance-closure-spec.md`
 
 ## 1. Review corrections in rev 2
@@ -429,23 +433,78 @@ the survey of `8a5001eb` + this branch's changes (`ca5e7c9d`).
 |---|---|---|---|---|---|
 | 1 | `/pd-pain` command (`openclaw-plugin/src/commands/pain.ts`) | host command ctx (trusted) | typed acquisition (Scope A) | host_context_bound | **Scope A migrated** |
 | 2 | `pd pain record` (`pd-cli/src/commands/pain-record.ts`) | `--session` validated vs trajectory (Scope A) | typed acquisition (Scope A) | derived (Scope A) | **Scope A migrated** |
-| 3 | manual pain tool (`hooks/pain.ts` handleManualPain, Gate B/A) | hook ctx (`'unknown'` fallback) | `buildTrajectoryEvidence` array | ternary bound/no-trace | **Scope B, family 1 (manual/prompt)** |
-| 4 | tool-failure (`hooks/after-tool-call-helpers.ts` emitPainIfAdmitted) | hook ctx | `buildTrajectoryEvidence` array | `automatic_hook` | **Scope B, family 2 (tool failure)** |
-| 5 | shared-runtime continuation (`hooks/pain.ts` handleSharedPainEvidenceResult) | hook ctx | metadata array (≤8, from shared writer) | `automatic_hook` | **Scope B, family 2** |
-| 6 | LLM empathy (`hooks/llm.ts`, Gate B/A) | hook ctx (early-return if missing) | `buildTrajectoryEvidence` array | `host_context_bound` | **Scope B, family 3 (LLM/lifecycle)** |
+| 3 | manual pain tool (`hooks/pain.ts` handleManualPain, Gate B/A) | hook ctx (`'unknown'` fallback) | `buildTrajectoryEvidence` array | ternary bound/no-trace | **Scope B migrated (B2, funnel seam)** |
+| 4 | tool-failure (`hooks/after-tool-call-helpers.ts` emitPainIfAdmitted) | hook ctx | `buildTrajectoryEvidence` array | `automatic_hook` | **Scope B migrated (B2, funnel seam)** |
+| 5 | shared-runtime continuation (`hooks/pain.ts` handleSharedPainEvidenceResult) | hook ctx | metadata array (≤8, from shared writer) | `automatic_hook` | **Scope B migrated (B2, funnel seam)** |
+| 6 | LLM empathy (`hooks/llm.ts`, Gate B/A) | hook ctx (early-return if missing) | `buildTrajectoryEvidence` array | `host_context_bound` | **Scope B migrated (B2, funnel seam)** |
 | 7 | compaction intercept (`hooks/lifecycle.ts`) | hook ctx | **none** | absent (bridge infers `host_context_bound` when session real) | **Scope B, family 3** |
-| 8 | gate-block (`hooks/gate-block-helper.ts`, Gate B/A) | BlockContext (optional) | **none** | absent (inferred) | **Scope B, family 4 (gate/sample)** |
-| 9 | signal-collector STRONG (`core/signal-collector-host.ts` routeStrong) | prompt hook ctx | inline 1-entry excerpt | `host_context_bound` | **Scope B, family 4** |
-| 10 | correction-sample reject (`commands/samples.ts`) | sample record | inline 1-entry diff excerpt | `host_context_bound` | **Scope B, family 4** |
-| 11 | Codex governance admission (`host-runtime/src/governance-signal-admission.ts`) | Codex lineage (rootSessionId/rolloutIdentity/logicalObservationKey/hostTurnId) | admission payload evidence | `host_context_bound`, hostKind codex | **Peer adapter — B4 parity gate decides** |
-| 12 | Codex worker diagnosis execution (`codex-adapter/workspace-worker.ts`) | task payload | n/a (executor, not emitter) | `host_context_bound` default at re-entry | **B1 re-entry contract fixes the default** |
-| 13 | dead-letter replay (`pd-cli/pain-retry.ts`) | replay data | replay data | normalized legacy | **Ingest via submit path; B2 re-check only** |
+| 8 | gate-block (`hooks/gate-block-helper.ts`, Gate B/A) | BlockContext (optional) | **none** | absent (inferred) | **Scope B migrated (B2, funnel seam)** |
+| 9 | signal-collector STRONG (`core/signal-collector-host.ts` routeStrong) | prompt hook ctx | inline 1-entry excerpt | `host_context_bound` | **Scope B migrated (B2, funnel seam)** |
+| 10 | correction-sample reject (`commands/samples.ts`) | sample record | inline 1-entry diff excerpt | `host_context_bound` | **Scope B migrated (B2, funnel seam)** |
+| 11 | Codex governance admission (`host-runtime/src/governance-signal-admission.ts`) | Codex lineage (rootSessionId/rolloutIdentity/logicalObservationKey/hostTurnId) | admission payload evidence | `host_context_bound`, hostKind codex | **Peer adapter — B4 decision below** |
+| 12 | Codex worker diagnosis execution (`codex-adapter/workspace-worker.ts`) | task payload | n/a (executor, not emitter) | `host_context_bound` default at re-entry | **B1 re-entry contract fixed (no default, mismatch rejection)** |
+| 13 | dead-letter replay (`pd-cli/pain-retry.ts`) | replay data | replay data | normalized legacy | **Unchanged — replays persisted painData (no re-assembly)** |
 | 14 | diagnostics/benchmarks (`synthetic-baseline-runner.ts`, `pain-flood-simulation-runner.ts`) | synthetic | synthetic | synthetic | **Out of scope** (non-production tools) |
 
 Direct-caller search conclusions (rg over `8a5001eb`): every
 `PainToPrincipleService` caller is listed above; `PainSignalBridge` is
 constructed only by the runtime factory, the Codex worker, dead-letter
 replay, and the two benchmark tools. No undiscovered direct callers.
+
+### 11.2 B4 Codex parity decision (2026-09-02): keep the deep module as a peer adapter
+
+Decision: **do not migrate the Codex governance admission onto the shared
+ingress**; it stays a peer adapter. The safe shared parts are connected:
+
+- Re-entry: Codex worker `executePendingDiagnosis` calls now validate the
+  persisted payload facts (provenance from the task payload, legacy
+  `openclaw_context_bound` normalized, nested/top-level mismatch rejected)
+  instead of defaulting to `host_context_bound` (B1).
+- The shared ingress accepts complete Codex lineage (matrix row 11) with
+  the rollout/logical-key consistency guard (rc-6), ready if a future
+  Codex emitter family needs it; nothing in the Codex production path
+  consumes it today.
+
+Evidence basis (deletion test / real seam test / interface leverage):
+
+1. The existing module is already deep: marker-table exactly-once
+   transactions, sha256 content identity, canonical-pain dedup with
+   PRI-640 attribution backfill, rate limits inside the transaction, crash
+   reconciliation (Cases A/B/C), and promotion tails — none of which the
+   ingress could absorb without becoming a second admission authority,
+   which §6 forbids.
+2. Routing `ensureGovernanceDiagnosticianTask` through
+   `evaluatePainIngress` would add a shallow wrapper (the report would be
+   constructed only to receive a submit decision the deep module has
+   already made transactionally).
+3. Writing a `painIngress.v1` block for Codex tasks would require
+   re-parsing `logicalObservationKey` to recover `hostTurnId` — a second
+   parser of a format owned by `codex-adapter/src/ingestion/admission.ts`
+   (P4 drift risk) with no current reader.
+4. Frozen-fixture and consumer parity: codex-adapter 191/191 (incl.
+   g1-contract fixtures, pd-hook-slice-b, ingestion, catch-up, worker) and
+   host-runtime 245/245 (governance-signal-admission,
+   governance-observation-store, production-pain-evidence parity) all
+   green on this branch — lineage (root session, rollout identity,
+   logical observation key, host turn), dedup, promotion tails and
+   retry/re-entry semantics are unchanged.
+
+### 11.3 B5 cleanup record (2026-09-02)
+
+- CLI legacy array wrapper `buildTrajectoryEvidenceFromDb`: **deleted** —
+  production search proved zero callers after `pd pain record` migrated to
+  the typed API; its behavioral tests were ported to
+  `acquireTrajectoryEvidenceFromDb` (placeholder-shape assertions removed
+  with the wrapper).
+- Plugin legacy array wrapper `buildTrajectoryEvidence`
+  (`openclaw-plugin/src/hooks/trajectory-evidence.ts`): **retained** — one
+  production consumer remains (`prepareOrdinaryAfterToolCallForSharedRuntime`,
+  the shared host-runtime enrichment provider). The funnel's ingress adapter
+  re-interprets sentinel-shaped arrays through typed acquisition, so the
+  remaining consumer cannot reintroduce placeholder evidence into
+  diagnosis. Removing the wrapper requires migrating the shared enrichment
+  provider and its pinned tests (core-principles-injection,
+  prompt-golden/intent mocks) — recorded as follow-up, not blocking.
 
 ## 12. Behavioral acceptance
 

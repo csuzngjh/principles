@@ -225,11 +225,14 @@ Manually report a pain signal to PD. PD usually detects pain automatically (tool
 
 📋 Pain ID: manual_1751500000000_a1b2c3d4
 📝 Reason: Agent edited the file without reading it first, overwriting existing logic
-🔗 Provenance: openclaw_context_bound
+🔗 Provenance: host_context_bound
 📌 Session: sess_xxx
-
-The system will diagnose using current session context.
+📎 Evidence: N trajectory evidence entries
 ```
+
+When the session's trajectory has no usable evidence yet, the command says so
+explicitly instead of claiming a context-bound success — candidates may then
+be gated by the admission threshold until evidence exists.
 
 **Difference from Automatic Detection**
 
