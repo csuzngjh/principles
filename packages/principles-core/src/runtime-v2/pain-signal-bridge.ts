@@ -81,6 +81,36 @@ export interface NotInternalizableCandidate {
   reason: string;
 }
 
+/**
+ * PRI-642 SPEC §10: aggregate progress. `furthestStage` means AT LEAST ONE
+ * item reached that stage — never that all candidates did; per-candidate
+ * dispositions live in `candidateOutcomes`.
+ */
+export type PainFurthestStage =
+  | 'observed'
+  | 'diagnosis_submitted'
+  | 'diagnosis_completed'
+  | 'candidate_processing'
+  | 'internalization_seeded';
+
+export interface PainProgressReport {
+  furthestStage: PainFurthestStage;
+  generatedCandidateIds: string[];
+  admittedCandidateIds: string[];
+  ledgerEntryIds: string[];
+  seededTaskIds: string[];
+}
+
+/** PRI-642 SPEC §10: where each candidate stopped and why. */
+export interface PainCandidateOutcome {
+  candidateId: string;
+  decision: 'admitted' | 'needs_evidence' | 'deferred';
+  ledgerEntryId?: string;
+  seededTaskId?: string;
+  reason: string;
+  nextAction: string;
+}
+
 export interface PainSignalBridgeResult {
   status: PainSignalBridgeStatus;
   painId: string;
@@ -93,6 +123,10 @@ export interface PainSignalBridgeResult {
   admissionResults?: CandidateAdmissionResult[];
   /** PRI-539: candidates admitted+ledgered but not internalizable (MVP-disabled channel). */
   notInternalizable?: NotInternalizableCandidate[];
+  /** PRI-642 §10: aggregate progress (at-least-one semantics). */
+  progress?: PainProgressReport;
+  /** PRI-642 §10: per-candidate disposition — the authority for mixed results. */
+  candidateOutcomes?: PainCandidateOutcome[];
   errorCategory?: PDErrorCategory;
   message?: string;
   /**
@@ -673,6 +707,9 @@ export class PainSignalBridge {
 
     const seedFailureCandidateIds: string[] = [];
     const notInternalizable: NotInternalizableCandidate[] = [];
+    // PRI-642 §10: per-candidate ledger/seed linkage for outcome reporting.
+    const ledgerEntryByCandidate = new Map<string, string>();
+    const seededTaskByCandidate = new Map<string, string>();
 
     if (this.autoIntakeEnabled) {
       for (let i = 0; i < candidates.length; i++) {
@@ -687,6 +724,7 @@ export class PainSignalBridge {
 
         const intakeResult = await this.intakeService.intake(candidate.candidateId);
         ledgerEntryIds.push(intakeResult.id);
+        ledgerEntryByCandidate.set(candidate.candidateId, intakeResult.id);
 
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
@@ -711,6 +749,7 @@ export class PainSignalBridge {
                   maxAttempts: seed.maxAttempts,
                   diagnosticJson: seed.diagnosticJson,
                 });
+                seededTaskByCandidate.set(candidate.candidateId, seed.taskId);
                 this.eventEmitter?.emitTelemetry({
                   eventType: 'candidate_dreamer_task_seeded',
                   traceId: candidate.candidateId,
@@ -755,7 +794,48 @@ export class PainSignalBridge {
     const firstCandidate = candidates.at(0);
 
     const candidateIds = candidates.map((candidate) => candidate.candidateId);
-    return shapeBridgeResult({
+
+    // PRI-642 SPEC §10: execution status, aggregate progress and per-candidate
+    // outcomes are independent dimensions — build the latter two here so mixed
+    // results can never be read as completed internalization.
+    const candidateOutcomes: PainCandidateOutcome[] = candidates.map((candidate, i) => {
+      const admission = admissionResults[i]?.admission;
+      const decision = admission?.decision ?? 'needs_evidence';
+      const outcome: PainCandidateOutcome = {
+        candidateId: candidate.candidateId,
+        decision,
+        reason: admission?.reason ?? 'diagnostician_output_unavailable',
+        nextAction: admission?.nextAction ?? 're_run_diagnosis_or_manual_review',
+      };
+      const ledgerEntryId = ledgerEntryByCandidate.get(candidate.candidateId);
+      if (ledgerEntryId !== undefined) outcome.ledgerEntryId = ledgerEntryId;
+      const seededTaskId = seededTaskByCandidate.get(candidate.candidateId);
+      if (seededTaskId !== undefined) outcome.seededTaskId = seededTaskId;
+      if (decision === 'admitted' && outcome.seededTaskId === undefined) {
+        const notInternalizableEntry = notInternalizable.find((n) => n.candidateId === candidate.candidateId);
+        const seedFailed = seedFailureCandidateIds.includes(candidate.candidateId);
+        if (notInternalizableEntry !== undefined) {
+          outcome.reason = notInternalizableEntry.reason;
+          outcome.nextAction = 'Enable the mapped channel or archive this candidate.';
+        } else if (seedFailed) {
+          outcome.reason = 'dreamer_seed_failed';
+          outcome.nextAction = 'Inspect state.db and telemetry; re-run intake.';
+        }
+      }
+      return outcome;
+    });
+
+    const admittedCandidateIds = candidateOutcomes
+      .filter((o) => o.decision === 'admitted')
+      .map((o) => o.candidateId);
+    const seededTaskIds = [...seededTaskByCandidate.values()];
+    const furthestStage: PainFurthestStage = seededTaskIds.length > 0
+      ? 'internalization_seeded'
+      : ledgerEntryIds.length > 0
+        ? 'candidate_processing'
+        : 'diagnosis_completed';
+
+    const shaped = shapeBridgeResult({
       path: 'fresh',
       painId,
       taskId,
@@ -768,6 +848,15 @@ export class PainSignalBridge {
       seedFailureNote,
       notInternalizable: notInternalizable.length > 0 ? notInternalizable : undefined,
     });
+    shaped.progress = {
+      furthestStage,
+      generatedCandidateIds: candidateIds,
+      admittedCandidateIds,
+      ledgerEntryIds,
+      seededTaskIds,
+    };
+    shaped.candidateOutcomes = candidateOutcomes;
+    return shaped;
   }
 
   private async buildExistingResult(input: { painId: string; taskId: string }): Promise<PainSignalBridgeResult> {

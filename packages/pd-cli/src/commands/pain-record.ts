@@ -355,6 +355,9 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       if (result.artifactId) console.log(`   Artifact ID: ${result.artifactId}`);
       if (result.candidateIds.length > 0) console.log(`   Candidate IDs: ${result.candidateIds.join(', ')}`);
       if (result.ledgerEntryIds.length > 0) console.log(`   Ledger Entry IDs: ${result.ledgerEntryIds.join(', ')}`);
+      if (result.progress && result.progress.seededTaskIds.length > 0) {
+        console.log(`   Seeded Task IDs: ${result.progress.seededTaskIds.join(', ')}`);
+      }
       console.log(`   Reason: ${opts.reason}`);
       console.log(`   Score: ${opts.score ?? 80}`);
       console.log(`   Source: ${opts.source ?? 'manual'}`);

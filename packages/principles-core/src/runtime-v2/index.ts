@@ -380,6 +380,11 @@ export type {
   PainSignalBridgeStatus,
   /** Minimal interface for a diagnostician runner (monolith or split pipeline). */
   DiagnosticianRunnerLike,
+  /** PRI-642 §10: aggregate progress (at-least-one semantics). */
+  PainProgressReport,
+  PainFurthestStage,
+  /** PRI-642 §10: per-candidate disposition — the authority for mixed results. */
+  PainCandidateOutcome,
 } from './pain-signal-bridge.js';
 export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
 /** Deterministic diagnostician task id (`diagnosis_<painId>`) — the pain→task dedup key (Codex Governance Closure §13). */
