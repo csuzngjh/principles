@@ -1,10 +1,10 @@
-import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
+import type { GoldenTrace, GoldenTraceCase, GoldenTraceDecision } from '../golden-trace.js';
 import type { ReplayEvaluateFn } from '../golden-trace-replay-validator.js';
 import { diffParams } from '../golden-trace-replay-validator.js';
 import { checkForbiddenPatterns, checkReturnStatementsMissingFields } from './rule-code-validator.js';
 import { createSyntheticRuleHostInput } from '../golden-trace.js';
 import type { RuleHostHelpers } from './rule-host-helpers.js';
-import type { RuleHostResult } from './rule-host-contracts.js';
+import type { RuleHostResult, RuleHostDecision } from './rule-host-contracts.js';
 import { validateCorrectionProposal } from './correction-proposal.js';
 
 export type RefinerSandboxErrorType =
@@ -20,6 +20,22 @@ export interface RefinerSandboxFailedCase {
   errorType: RefinerSandboxErrorType;
   message: string;
   stack?: string;
+  /**
+   * PRI-634 PR-A: the trace case's expected decision. Present on every REAL
+   * trace-case failure (timeout / throw / mismatch); absent on system
+   * sentinel failures (__compile__ / __return_shape__ / …) which have no
+   * trace identity. This is the authoritative expected/actual pairing for
+   * replay evidence — it supersedes reconstructing the pair from the
+   * adversarial-case list, which cannot see merged positive-case failures.
+   */
+  expectedDecision?: GoldenTraceDecision;
+  /**
+   * PRI-634 PR-A: the decision the rule actually returned. Present ONLY when
+   * evaluate() produced a well-formed decision that mismatched the expected
+   * one. Absent for timeouts, throws, and null results — an errorType is
+   * never a decision value (SPEC §14 actualDecision semantic fix).
+   */
+  actualDecision?: RuleHostDecision;
 }
 
 export interface RefinerSandboxResult {
@@ -73,6 +89,19 @@ function classifyError(err: unknown): { errorType: RefinerSandboxErrorType; mess
   }
   if (err instanceof Error) {
     return { errorType: 'runtime_error', message: err.message, stack: err.stack };
+  }
+  // PRI-634 PR-A: errors thrown inside node:vm belong to the VM realm —
+  // `instanceof Error` is false for them. Detect the error shape structurally
+  // so a cross-realm TypeError still classifies as runtime_error instead of
+  // degrading the replay evidence to 'unknown' (SPEC §14 errorType semantics).
+  if (typeof err === 'object' && err !== null && Object.prototype.toString.call(err) === '[object Error]') {
+    const message = typeof Reflect.get(err, 'message') === 'string' ? Reflect.get(err, 'message') : safeErrorMessage(err);
+    const stack = Reflect.get(err, 'stack');
+    return {
+      errorType: 'runtime_error',
+      message: typeof message === 'string' ? message : safeErrorMessage(err),
+      ...(typeof stack === 'string' ? { stack } : {}),
+    };
   }
   return { errorType: 'unknown', message: safeErrorMessage(err) };
 }
@@ -253,6 +282,7 @@ export function evaluateInRefinerSandbox(
         caseId: traceCase.caseId,
         errorType: 'timeout',
         message: `Evaluation timed out after ${timeoutMs}ms`,
+        expectedDecision: traceCase.expectedDecision,
       });
       continue;
     }
@@ -264,6 +294,7 @@ export function evaluateInRefinerSandbox(
         errorType: classified.errorType,
         message: classified.message,
         stack: classified.stack,
+        expectedDecision: traceCase.expectedDecision,
       });
       continue;
     }
@@ -273,6 +304,7 @@ export function evaluateInRefinerSandbox(
         caseId: traceCase.caseId,
         errorType: 'validation_failed',
         message: 'Evaluator returned null/undefined result',
+        expectedDecision: traceCase.expectedDecision,
       });
       continue;
     }
@@ -283,6 +315,10 @@ export function evaluateInRefinerSandbox(
         caseId: traceCase.caseId,
         errorType: 'validation_failed',
         message: validation.failureReason ?? 'Validation failed',
+        expectedDecision: traceCase.expectedDecision,
+        // The rule produced a well-formed decision that mismatched — record
+        // the real decision. Throws/timeouts above carry NO actualDecision.
+        actualDecision: result.decision,
       });
     }
   }

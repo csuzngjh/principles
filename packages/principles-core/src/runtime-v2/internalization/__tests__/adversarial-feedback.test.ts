@@ -65,4 +65,14 @@ describe('formatAdversarialFeedback', () => {
     const b = formatAdversarialFeedback(cases);
     expect(a).toBe(b);
   });
+
+  it('PRI-634 PR-A: absent actualDecision renders the errorType, never "got undefined"', () => {
+    // SPEC §14 — a throw/timeout failure has NO actual decision. The line
+    // must surface the sandbox error classification instead.
+    const text = formatAdversarialFeedback([
+      makeFailedCase({ actualDecision: undefined, errorType: 'runtime_error', rationale: 'paramsSummary.includes is not a function' }),
+    ]);
+    expect(text).toContain('error runtime_error');
+    expect(text).not.toContain('undefined');
+  });
 });

@@ -536,4 +536,49 @@ describe('PRI-634 R4: code-bearing + needs_revision → diagnostic replay 执行
     const rp = seeded.payload as { diagnosticReplay?: unknown };
     expect(rp.diagnosticReplay).toEqual({ ran: true, passed: true, failedCaseCount: 0 });
   });
+
+  // ── PRI-634 PR-A (SPEC §16/§17): merged real case ID uniqueness guard ──
+  // An LLM-supplied adversarial case whose caseId collides with a
+  // runtime-generated v2 case must never reach the sandbox — the evidence Map
+  // would silently overwrite and mis-attribute failures. Approved binding
+  // path fails loud (R3 terminal-state guard); needs_revision keeps its
+  // verdict, records the conflict observably, and stays evidence fail-closed.
+  it('PR-A: duplicate real caseId (LLM case collides with v2-unavailable) → conflict telemetry, no sandbox run', async () => {
+    const store = await seedLineage(codeBearingArtificerContent());
+    const calls = { count: 0 };
+    const llmCollidedCases = [{
+      caseId: 'v2-unavailable', // collides with the runtime-generated v2 case
+      attackType: 'boundary',
+      toolName: 'edit_file',
+      params: { path: '/project/src/safe.ts' },
+      expectedDecision: 'block',
+      rationale: 'adversarially crafted collision',
+    }];
+    const collisionPayload = {
+      ...(v1EvaluatorOutput('needs_revision') as Record<string, unknown>),
+      adversarialCases: llmCollidedCases,
+    };
+    const runner = makeRunner(store, {
+      gateDeps: makeGateDepsStub(calls),
+      payload: collisionPayload,
+    }, {
+      isRepairLoopEnabled: () => true,
+      seedArtificerRepairTask: async (_params) => 'repair-task-collision',
+    });
+
+    const result = await runner.run(EVAL_ID);
+
+    // sandbox never ran — the conflict is detected pre-sandbox
+    expect(calls.count).toBe(0);
+    expect(emitted.some((e) => e.eventType === 'evaluator_adversarial_replay_case_id_conflict' && e.payload.caseId === 'v2-unavailable')).toBe(true);
+    // needs_revision diagnostic path: verdict stands, task completes
+    expect(result.status).toBe('succeeded');
+    // fail-closed provenance: no diagnosticReplay evidence was produced
+    const artifacts = await store.listBySourceTaskId(EVAL_ID);
+    const principle = artifacts.find((a) => a.artifactKind === 'principle');
+    expect(principle).toBeDefined();
+    if (!principle) return;
+    const parsed = JSON.parse(principle.contentJson) as { adversarialResult?: unknown };
+    expect(Object.hasOwn(parsed, 'adversarialResult')).toBe(false);
+  });
 });
