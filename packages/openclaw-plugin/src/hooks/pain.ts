@@ -200,15 +200,21 @@ export async function emitPainDetectedEvent(
           note: decision.note,
         }));
       }
-      if (decision.action === 'degrade' || (decision.warnings?.length ?? 0) > 0) {
+      if (decision.action === 'degrade') {
         // rc-9: funnel-level degradation disclosures must be observable even
         // when the caller has no Owner-facing surface (tool-invoked pains).
         SystemLogger.log(wctx.workspaceDir, 'PAIN_INGRESS_DEGRADED', JSON.stringify({
           painId: painData.painId,
           source: painData.source,
-          ...(decision.action === 'degrade'
-            ? { reasonCode: decision.reasonCode, warning: decision.warning, nextAction: decision.nextAction }
-            : { warnings: decision.warnings }),
+          reasonCode: decision.reasonCode,
+          warning: decision.warning,
+          nextAction: decision.nextAction,
+        }));
+      } else if (decision.action === 'submit' && decision.warnings.length > 0) {
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_INGRESS_DEGRADED', JSON.stringify({
+          painId: painData.painId,
+          source: painData.source,
+          warnings: decision.warnings,
         }));
       }
 
