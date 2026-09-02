@@ -75,8 +75,11 @@ Changed your mind? Undo anytime:
 If the automatic flow doesn't trigger (e.g., runtime profile not yet configured, or you used `pd pain record` in async mode), you can drive the full pipeline manually:
 
 ```bash
-# 1. Record a pain signal (returns a painId)
-pd pain record --reason "Agent forgot to confirm scope before cross-module edit" --workspace "<path>"
+# 1. Record a pain signal (returns a painId).
+#    Bind a session recorded in this workspace (--session) so diagnosis
+#    carries real trajectory evidence; without it the record is an unbound
+#    Owner report with no evidence and candidates will likely be gated.
+pd pain record --reason "Agent forgot to confirm scope before cross-module edit" --workspace "<path>" --session "<session-id>"
 
 # 2. Run diagnosis (skip if step 1 used --wait and succeeded)
 pd diagnose run --task-id <taskId> --runtime pi-ai --workspace "<path>"

@@ -12,10 +12,18 @@ vi.mock('../../src/core/intent-doc-reader-adapter.js', () => ({
   createIntentDocReader: vi.fn().mockReturnValue({ readIntentDoc: vi.fn() }),
   resolveIntentLang: vi.fn().mockReturnValue('zh-CN'),
 }));
-vi.mock('@principles/core/runtime-v2', () => ({
-  PainToPrincipleService: vi.fn(),
-  PrincipleTreeLedgerAdapter: vi.fn(function(this: any) { this.stateDir = ''; }),
-}));
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  // PRI-642: the /pd-pain path now routes through the shared ingress
+  // (@principles/host-runtime), whose barrel transitively imports many
+  // core exports — spread the actual module and override only the classes
+  // under test.
+  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  return {
+    ...actual,
+    PainToPrincipleService: vi.fn(),
+    PrincipleTreeLedgerAdapter: vi.fn(function(this: any) { this.stateDir = ''; }),
+  };
+});
 
 import { PainToPrincipleService } from '@principles/core/runtime-v2';
 
@@ -320,5 +328,116 @@ describe('Pain Report Command (/pd-pain)', () => {
         const result = await runPainReport('something broke');
         expect(result.text).toContain('Failed to record pain');
         expect(result.text).toContain('DB connection failed');
+    });
+
+    // ── PRI-642 Scope A (SPEC §7.2, §12.1.2): /pd-pain submits its trusted
+    // session AND validated non-placeholder evidence together. ────────────────
+
+    function makeEvidenceTrajectory() {
+        return {
+            listUserTurnsForSession: vi.fn().mockReturnValue([
+                { createdAt: '2026-09-01T10:00:00Z', correctionDetected: true, rawExcerpt: 'Owner correction text' },
+            ]),
+            listAssistantTurns: vi.fn().mockReturnValue([
+                { createdAt: '2026-09-01T10:01:00Z', sanitizedText: 'assistant turn text' },
+            ]),
+            listToolCallsForSession: vi.fn().mockReturnValue([]),
+        };
+    }
+
+    function makeRecordPain(status = 'succeeded') {
+        return vi.fn().mockResolvedValue({
+            status,
+            painId: 'manual_123_abc',
+            taskId: 'diagnosis_manual_123_abc',
+            candidateIds: [],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 100,
+        });
+    }
+
+    it('submits evidence from the current session together with the session ID (SPEC 12.1.2)', async () => {
+        const trajectory = makeEvidenceTrajectory();
+        const mockRecordPain = makeRecordPain();
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+            ...mockWctx,
+            trajectory,
+        } as any);
+
+        const result = await runPainReport('something broke');
+
+        expect(mockRecordPain).toHaveBeenCalledTimes(1);
+        const input = mockRecordPain.mock.calls[0][0];
+        // rc-6: the submitted session is exactly the command-context session…
+        expect(input.sessionId).toBe(sessionId);
+        // …and the evidence was acquired from that same session.
+        expect(trajectory.listUserTurnsForSession).toHaveBeenCalledWith(sessionId);
+        expect(Array.isArray(input.evidence)).toBe(true);
+        expect(input.evidence.length).toBeGreaterThan(0);
+        const refs = input.evidence.map((e: { sourceRef: string }) => e.sourceRef).join(',');
+        expect(refs).toContain('owner_message:2026-09-01T10:00:00Z');
+        expect(refs).toContain('agent_turn:2026-09-01T10:01:00Z');
+        // No placeholder entries may be submitted.
+        expect(refs).not.toContain('owner_reported:cli');
+        expect(refs).not.toContain('trajectory:empty');
+        expect(result.text).toContain('Pain recorded');
+    });
+
+    it('keeps provenance host_context_bound with hostKind openclaw on the bound path', async () => {
+        const trajectory = makeEvidenceTrajectory();
+        const mockRecordPain = makeRecordPain();
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+            ...mockWctx,
+            trajectory,
+        } as any);
+
+        await runPainReport('something broke');
+
+        const input = mockRecordPain.mock.calls[0][0];
+        expect(input.provenance).toBe('host_context_bound');
+        expect(input.hostKind).toBe('openclaw');
+    });
+
+    it('submits empty evidence (no placeholder) and warns explicitly when the session has no usable evidence', async () => {
+        const trajectory = {
+            listUserTurnsForSession: vi.fn().mockReturnValue([]),
+            listAssistantTurns: vi.fn().mockReturnValue([]),
+            listToolCallsForSession: vi.fn().mockReturnValue([]),
+        };
+        const mockRecordPain = makeRecordPain();
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+            ...mockWctx,
+            trajectory,
+        } as any);
+
+        const result = await runPainReport('something broke');
+
+        const input = mockRecordPain.mock.calls[0][0];
+        // Honest empty evidence — never a fabricated placeholder entry.
+        expect(input.evidence).toEqual([]);
+        // Explicit degradation in the Owner-facing copy — no false
+        // "will diagnose using current session context" claim (SPEC §8.2 row 2).
+        expect(result.text).toMatch(/evidence|证据/i);
+        expect(result.text).not.toContain('The system will diagnose using current session context.');
+        expect(result.text).not.toContain('系统将基于当前会话上下文进行诊断');
+    });
+
+    it('degrades explicitly when the trajectory DB is unavailable', async () => {
+        const mockRecordPain = makeRecordPain();
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+            ...mockWctx,
+            trajectory: undefined,
+        } as any);
+
+        const result = await runPainReport('something broke');
+
+        const input = mockRecordPain.mock.calls[0][0];
+        expect(input.evidence).toEqual([]);
+        expect(result.text).toMatch(/trajectory_unavailable|evidence/i);
     });
 });

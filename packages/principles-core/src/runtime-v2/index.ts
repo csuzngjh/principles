@@ -380,10 +380,50 @@ export type {
   PainSignalBridgeStatus,
   /** Minimal interface for a diagnostician runner (monolith or split pipeline). */
   DiagnosticianRunnerLike,
+  /** PRI-642 §10: aggregate progress (at-least-one semantics). */
+  PainProgressReport,
+  PainFurthestStage,
+  /** PRI-642 §10: per-candidate disposition — the authority for mixed results. */
+  PainCandidateOutcome,
 } from './pain-signal-bridge.js';
 export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
 /** Deterministic diagnostician task id (`diagnosis_<painId>`) — the pain→task dedup key (Codex Governance Closure §13). */
 export { createDiagnosticianTaskId } from './pain-signal-bridge.js';
+// PRI-642 SPEC §9: persisted `painIngress.v1` contract — written by the
+// bridge beside the legacy top-level fields, re-validated on re-entry.
+export {
+  PAIN_INGRESS_PAYLOAD_VERSION,
+  parsePainIngressV1Payload,
+  deriveProvenanceFromIngressFacts,
+  checkIngressTopLevelConsistency,
+} from './pain-ingress-payload.js';
+export type {
+  PainIngressV1Payload,
+  PainIngressOriginV1,
+  PainIngressCorrelationV1,
+  PainIngressEvidenceClassV1,
+  PainIngressV1ParseResult,
+} from './pain-ingress-payload.js';
+// PRI-642 SPEC §8: THE shared ingress semantic evaluator — one authority
+// for every adapter (OpenClaw funnel, pd-cli; host-runtime re-exports it).
+export {
+  evaluatePainIngress,
+  parsePainIngressReport,
+  validateOriginCorrelationInvariant,
+  SENTINEL_SESSION_IDS,
+  isSentinelSessionId,
+} from './pain-ingress.js';
+export type {
+  PainIngressReport,
+  PainIngressDecision,
+  LegacyPainSubmission,
+  PainOrigin,
+  PainCorrelation,
+  IngressEvidenceEntry,
+  PainEvidenceBundle,
+  PainEvidenceUnavailableReason,
+  PainIngressParseResult,
+} from './pain-ingress.js';
 /** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
 export { recordPainSignalObservability } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';

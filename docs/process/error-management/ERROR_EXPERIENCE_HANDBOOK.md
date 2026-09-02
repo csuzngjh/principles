@@ -75,6 +75,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-094 | Range-bounds assertion uses `\|\|` instead of `&&` — tautology that always passes for any value when `low <= high` | PR #1218 |
 | ERR-096 | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal | fix/installer-gateway-lock |
 | ERR-099 | Defensive ternary alternate for a contract-impossible empty state shipped uncovered — codecov/patch gate fails; prefer a branch-free join that degrades to the legacy format | PR #1341 |
+| ERR-112 | Sentinel value satisfies a downstream structural check while the operator success criterion measures generation, not admission — Owner input silently lost and reported as success | PRI-642 |
 
 ---
 
@@ -85,10 +86,8 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-001 | `as string` cast on untrusted JSON bypasses runtime validation | PRI-189 |
-| ERR-003 | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization | PRI-171 |
 | ERR-004 | `sourceTaskId` set to diagnostician task ID instead of located source task ID | PRI-190 |
 | ERR-005 | Invalid salvaged arrays bypass type contract in validate failure path | PRI-191 |
-| ERR-007 | Non-string evidenceRefs silently skipped instead of rejected in validator | PRI-192 |
 | ERR-008 | Missing lineage field validation allows agent to return trace with wrong attribution | PRI-192 |
 | ERR-009 | Validator silently skips missing/malformed required array fields instead of failing loud | PRI-192 |
 | ERR-013 | `in` operator OR direct indexing on a plain object leaks inherited Object.prototype members (`__proto__`, `constructor`, `toString`) — use `Object.hasOwn` for key checks AND to guard lookup-table value reads | PRI-201 |
@@ -96,10 +95,8 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-038 | Read-only GET paths create writable SqliteConnection; readonly breaks fresh workspace | PRI-244 |
 | ERR-039 | Test `filter(isRecord)` silently discards malformed items; `if (isRecord)` skips assertions | PRI-244 |
 | ERR-014 | `formatValidationErrorEntry` string values not truncated — evidence pack unbounded | PRI-200 |
-| ERR-016 | maxRepairAttempts not hard-capped — { maxRepairAttempts: 999 } runs 999 calls | PRI-200 |
 | ERR-017 | JSON.stringify on unknown values can throw (BigInt, circular) — preview paths crash | PRI-200 |
 | ERR-018 | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors | PRI-200 |
-| ERR-019 | schemaCheck failure branch writes next iteration's errors into current attempt's record | PRI-200 |
 | ERR-020 | Commander negated boolean `--no-intake` ignored — checking wrong property name | PRI-217 |
 | ERR-057 | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through to String(err) | PRI-285 |
 | ERR-072 | React component duplicates hook state as local state — desync causes silent feature failure | PR-971 |
@@ -167,7 +164,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | ID | Summary | Source |
 |----|---------|--------|
-| ERR-006 | Missed Codex PR review comments due to API failure + no retry | PR review |
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 | ERR-050 | Modified bundled/generated copy instead of source of truth | PRI-250 |
 | ERR-051 | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path | PRI-297 |
@@ -332,17 +328,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-003]** | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization
-
-- **What happened**: `SECRET_KEY_NAMES.includes()` performed substring matching, causing keys like `tokenizer` and `tokenCount` to be incorrectly sanitized because they contain the substring `"token"`.
-- **Why it's wrong**: `includes('token')` matches any string containing "token" as a substring, not just the exact key "token". This causes false-positive over-sanitization, stripping diagnostic context data that the diagnostician needs to operate correctly.
-- **Correct approach**: Use segment-exact matching: `keyLower === p || keyLower.endsWith('_' + p)` to match only the full key name or the key as a segment after an underscore.
-- **How to prevent**: PII sanitizer key matching must use exact match or segment-boundary match. Never use `includes()` for key matching. Every sanitization rule must have a negative test case to verify it does not over-sanitize.
-- **Source**: PRI-171
-- **Date**: 2026-05-19
-- **Recurrence**: None
-
----
 
 **[ERR-004]** | `sourceTaskId` set to diagnostician task ID instead of located source task ID
 
@@ -377,29 +362,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-006]** | Missed Codex PR review comments due to API failure + no retry
 
-- **What happened**: When asked to use `pr-review` skill on an existing PR, GitHub API calls timed out and I skipped checking for PR comments completely. Missed critical Codex review feedback on type safety issues that were already identified on the PR.
-- **Why it's wrong**: The PR already had the review information available, but I failed to persistently retrieve it. This caused duplicate work and delayed fixing an issue that was already found.
-- **Correct approach**: When working on an existing PR, **ALWAYS** try multiple ways to get PR comments/reviews (retry API, ask user, check git log). Never skip this critical step.
-- **How to prevent**: Added Rule #8 in AGENTS.md. When asked to review/fix an existing PR, FIRST fetch all comments/reviews before doing any work. Retry API at least twice, or ask user to paste comments.
-- **Source**: PRI-191 / PR #637
-- **Date**: 2026-05-19
-- **Recurrence**: No
-
----
-
-**[ERR-007]** | Non-string evidenceRefs silently skipped instead of rejected in validator
-
-- **What happened**: In `validateTraceRefinerAgentOutput()`, the `refinedTrace.evidenceRefs` and `refinedTrace.keyEvents[].evidenceRefs` validation used `if (typeof ref === 'string' && !allowedSourceRefs.has(ref))` — when `ref` was not a string, it was silently skipped instead of being rejected as invalid.
-- **Why it's wrong**: This allows structurally invalid output (e.g., `evidenceRefs: [42, null, {}]`) to pass validation and be cast as `RefinedTracePayload` via `as`. This is the same class of error as ERR-001/ERR-005 where `as` casts on untrusted data bypass runtime validation.
-- **Correct approach**: When validating untrusted data, every element must be either validated or rejected. Use `if (typeof ref !== 'string') { error } else if (!allowedSourceRefs.has(ref)) { error }` pattern.
-- **How to prevent**: In any validator that iterates over `unknown[]` arrays, never use `typeof x === 'string' && condition` — this silently skips non-string elements. Always handle the non-string case explicitly as an error.
-- **Source**: PRI-192 / PR #638 (CodeRabbit review)
-- **Date**: 2026-05-19
-- **Recurrence**: Yes - same pattern as ERR-001 and ERR-005
-
----
 
 **[ERR-008]** | Missing lineage field validation allows agent to return trace with wrong attribution
 
@@ -491,17 +454,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-016]** | maxRepairAttempts not hard-capped — { maxRepairAttempts: 999 } runs 999 calls
-
-- **What happened**: The PR contract states "repair loop is bounded: default 1, maximum 2" but `attemptStructuredOutputRepair()` used `cfg.maxRepairAttempts` directly from the spread config without clamping. Passing `{ maxRepairAttempts: 999 }` would run 999 repair calls, violating the contract.
-- **Why it's wrong**: The contract's "maximum 2" promise was only documented, not enforced in code. Any caller (including misconfigured adapters) could bypass the bound. This is the same class as ERR-001/ERR-005/ERR-014 where validation exists in prose but not in code.
-- **Correct approach**: Add `MAX_REPAIR_ATTEMPTS = 2` as a hard cap constant. Add `normalizeMaxRepairAttempts()` helper that clamps, floors, handles NaN/Infinity/negative, and caps at MAX_REPAIR_ATTEMPTS. Apply normalization when building the config, not just at the loop boundary.
-- **How to prevent**: When a contract specifies a numeric bound ("max N"), always enforce it with a constant and a normalization function — never trust caller input. Add tests for extreme values (999, Infinity, NaN, negative, decimal).
-- **Source**: PRI-200 / PR #665 (final review)
-- **Date**: 2026-05-21
-- **Recurrence**: Yes - same class as ERR-001/ERR-005/ERR-014 where validation is in prose but not in code
-
----
 
 **[ERR-017]** | JSON.stringify on unknown values can throw (BigInt, circular) — preview paths crash
 
@@ -527,17 +479,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-019]** | schemaCheck failure branch writes next iteration's errors into current attempt's record — evidence timeline misalignment
-
-- **What happened**: In `attemptStructuredOutputRepair()`, the schemaCheck-fail branch used `buildValidationErrorEntries(nextErrors)` for `repairAttempts.push()`. This wrote the NEXT iteration's errors into the CURRENT attempt's `validationErrors` field. For example, when attempt 1 had `/confidence` errors and `schemaErrors()` returned `/summary` for the failed candidate, attempt 1's record would show `/summary` instead of `/confidence`. This is a timeline misalignment — the evidence pack says "attempt 1 was trying to fix /summary" when it was actually fixing `/confidence`.
-- **Why it's wrong**: The evidence pack is the primary observability artifact when repair fails. Each repairAttempt must record the errors that THIS attempt was trying to fix, not the errors the NEXT attempt will face. Writing nextErrors into the current record conflates "what this attempt saw" with "what the next attempt will see", making the timeline impossible to follow during incident analysis.
-- **Correct approach**: Use `attemptValidationErrors` (computed from `currentErrors` at the top of each iteration) for the `repairAttempts.push()` call. `nextErrors` should only be used to update `currentErrors` for the next iteration. The sequence should be: push with `attemptValidationErrors` → update `invalidOutput` → update `currentErrors = nextErrors`.
-- **How to prevent**: When a loop accumulates per-iteration records, each record must use data derived from the current iteration's state ONLY. Never write state that belongs to the next iteration into the current iteration's record. Add tests that verify each attempt's record contains exactly the errors from that attempt, not from adjacent attempts.
-- **Source**: PRI-200 / PR #665
-- **Date**: 2026-05-21
-- **Recurrence**: Yes - same class as ERR-015/ERR-018 where loop iteration state is incorrectly scoped
-
----
 
 **[ERR-020]** | Commander negated boolean `--no-intake` ignored — checking wrong property name
 
@@ -1664,3 +1605,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-581; environment diagnosis 2026-08-28 (Windows + global TUN VPN, WFP EACCES on ::1)
 - **Date**: 2026-08-28
 - **Recurrence**: None
+
+---
+
+**[ERR-112]** | Sentinel values silently substitute for missing evidence while the success criterion measures the wrong dimension — three individually-correct layers compound into losing the Owner's report
+
+- **What happened**: PRI-642 (2026-09-01). The published `pd-pain-signal` skill taught `pd pain record` without `--session`; the CLI substituted the sentinel session `'cli'` and the evidence builder returned a NON-EMPTY placeholder array (`owner_reported:cli / "No session context available"`); the diagnostician honestly scored the evidence-less report at confidence 0.45; the admission gate (threshold 0.5) gated every candidate `needs_evidence`. Every layer behaved "correctly" in isolation, but the composition silently discarded the Owner's correction: the pain persisted, diagnosis "completed", nothing internalized — and the skill's own success check (non-empty `candidateIds`) reported SUCCESS because it measured GENERATION, not ADMISSION. A control experiment (same reason + `--session <real>`) admitted 4/4 candidates at 0.62 and drove the full chain.
+- **Why it's wrong**: A sentinel that satisfies a "non-empty" structural check is a forged truth value (rc-9/no-silent-fallback at the DATA level, not the control-flow level): downstream code cannot distinguish "no evidence" from "placeholder evidence", so honest gates make honest rejections on forged inputs. And a success criterion that measures an earlier pipeline dimension (candidates generated) than the outcome the user cares about (candidates admitted/internalized) converts a silent loss into a FALSE success report — the worst compound: data lost AND the operator told it worked.
+- **Generalized failure mode**: Whenever a required fact (session, evidence, identity, config) is missing and code substitutes a placeholder/sentinel, ask: which downstream consumer performs a STRUCTURAL check (non-empty, non-null, type-valid) that the sentinel satisfies? That consumer is now checking a lie. Whenever an operator-facing success criterion is defined (docs, skills, dashboards), ask: does it measure the OUTCOME dimension (admitted/ledgered/internalized/delivered) or an upstream dimension (generated/submitted/present)? Upstream dimensions pass exactly when the outcome silently fails.
+- **Correct approach** (PRI-642): classify missing evidence as a first-class discriminated result (`available | unavailable{reasonCode}`) instead of a sentinel-shaped entry; validate explicit bindings against the authoritative store before any mutation (`session_not_found` fails loud); never write sentinel values where a real value is semantically required (no `cli` session rows, no placeholder evidence, no default `host_context_bound` provenance at re-entry); surface per-item outcomes (`candidateOutcomes`, admission decisions) so mixed results are individually visible; and define operator success criteria over the outcome dimension only.
+- **How to prevent**: In review of any `?? 'default'` / placeholder-push on a semantically-required field, name the consumer that checks non-emptiness — if one exists, the substitution is a bug. In review of any doc/skill success checklist, strike criteria that can be true while the user-visible outcome is failure. Under 30 seconds: grep for sentinel branches (`?? 'cli'`, `'No session context available'`, `?? 'unknown'`) in paths feeding admission/acceptance gates.
+- **Regression guard**: PRI-642 branch `ai/PRI-642-pain-ingress-contract` — typed-acquisition tests (plugin+CLI, distinct reasonCodes for unreadable vs empty), matrix contract tests (unavailable automatic ⇒ observation-only, never placeholder-evidence submit), `/pd-pain` lineage tests, published-skill contract test forbidding candidateIds-alone success, re-entry tests (no provenance default, nested/top-level mismatch rejection).
+- **Related ERRs**: ERR-002 (silent degradation, control-flow level), ERR-088 (non-unique success signals in tests — the same wrong-dimension problem in verification code), ERR-078-family (misclassified outcomes), rc-9
+- **Source**: PRI-642 (production-escaped; live-DB contrast experiment 2026-09-01, remediation branch 2026-09-02)
+- **Date**: 2026-09-02
+- **Recurrence**: None (first root-cause recording of the sentinel+wrong-dimension-success compound)

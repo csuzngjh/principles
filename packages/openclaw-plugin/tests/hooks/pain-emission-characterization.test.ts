@@ -99,12 +99,13 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/painId\s*=\s*`pain_\$\{Date\.now\(\)\}_\$\{observation\.errorHash\.slice\(0,\s*8\)\}`/);
     });
 
-    it('sets provenance to "automatic_hook"', () => {
-      expect(source).toMatch(/provenance:\s*'automatic_hook'/);
+    it('does NOT assemble provenance at the emit site (PRI-642: the funnel ingress derives it)', () => {
+      // SPEC §8.3: adapters no longer supply provenance independently.
+      expect(source).not.toMatch(/provenance:/);
     });
 
-    it('includes evidence field via buildTrajectoryEvidence', () => {
-      expect(source).toMatch(/evidence:\s*buildTrajectoryEvidence\(wctx,\s*sessionId\)/);
+    it('does NOT assemble evidence at the emit site (PRI-642: typed acquisition in the funnel)', () => {
+      expect(source).not.toMatch(/evidence:\s*buildTrajectoryEvidence/);
     });
 
     it('includes traceId from observation', () => {
@@ -146,16 +147,19 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/const\s+painId\s*=\s*`llm_\$\{Date\.now\(\)\}`/);
     });
 
-    it('sets provenance to "openclaw_context_bound"', () => {
-      expect(source).toMatch(/provenance:\s*'host_context_bound'/);
+    it('does NOT assemble provenance at the emit site (PRI-642: funnel ingress derives automatic_hook)', () => {
+      // PRI-642/SPEC §8.3 + §12.2.3: an LLM-detected signal is an automatic
+      // hook — never host-context-bound, and emitters no longer state
+      // provenance at all; the shared ingress derives it in the funnel.
+      expect(source).not.toMatch(/provenance:/);
     });
 
     it('sets painType to "user_frustration" (as const)', () => {
       expect(source).toMatch(/painType:\s*'user_frustration'\s+as\s+const/);
     });
 
-    it('includes evidence field via buildTrajectoryEvidence', () => {
-      expect(source).toMatch(/evidence,\s*\n\s*}/);
+    it('does NOT assemble evidence at the emit site (PRI-642: typed acquisition in the funnel)', () => {
+      expect(source).not.toMatch(/buildTrajectoryEvidence/);
     });
 
     it('does NOT include traceId field (known inconsistency)', () => {

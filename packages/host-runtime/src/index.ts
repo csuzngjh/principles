@@ -17,6 +17,9 @@ export * from './rule-implementation-runtime.js';
 export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
 export * from './governance-signal-admission.js';
+// PRI-642 Scope B: shared Pain Evidence Ingress — one validated gate for
+// every emitter (OpenClaw / Codex / CLI adapters).
+export * from './pain-evidence-ingress.js';
 export * from './host-liveness-contract.js';
 // PRI-624 Slice C: shared internalization consumer execution (OpenClaw
 // auto-consumer + Companion workspace worker call the same cycle).

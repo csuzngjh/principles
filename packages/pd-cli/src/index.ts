@@ -122,7 +122,7 @@ painCmd
   .option('-s, --score <number>', 'Pain score 0-100', parseInt)
   .option('-S, --source <text>', 'Source of the pain signal', 'manual')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--session <id>', 'OpenClaw session ID for trajectory evidence extraction')
+  .option('--session <id>', 'Session ID to bind (validated against this workspace\'s trajectory.db; without it the record is unbound: no trajectory evidence, candidates likely gated by the admission threshold)')
   .option('--wait', 'Wait for diagnosis to complete (sync mode, overrides async flag)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {

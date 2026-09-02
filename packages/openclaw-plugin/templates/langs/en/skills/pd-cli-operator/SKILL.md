@@ -10,15 +10,22 @@ Use the `pd` CLI as the supported operator surface. Do not modify PD state files
 
 ## Runtime V2 Pain Diagnosis
 
-Manual pain diagnosis:
+Manual pain diagnosis (bind a recorded session so diagnosis carries real
+trajectory evidence):
 ```bash
-pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --json
+pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
 ```
+
+- Without `--session` the record is an honest unbound Owner report: no
+  trajectory evidence, candidates likely gated (`needs_evidence`) by the
+  admission threshold — the CLI output warns about this.
+- `--session <id>` is validated up front; a missing session fails with
+  `session_not_found` before anything is written.
 
 Success requires:
 - `status` is `succeeded`
-- `candidateIds` is non-empty
-- `ledgerEntryIds` is non-empty
+- candidates are ADMITTED, not merely generated: check `admissionResults` /
+  `candidateOutcomes` for `admitted` decisions and non-empty `ledgerEntryIds`
 
 Forbidden:
 - Do not write `.state/.pain_flag`.

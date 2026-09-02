@@ -118,8 +118,12 @@ describe('SignalCollectorHost.detectSync', () => {
     // correction pain id is the content-derived canonical id from the single
     // pain identity authority — never a random `correction_<traceId>`.
     expect(callArg.data.painId).toMatch(/^pain_host_[0-9a-f]{64}$/);
-    expect(callArg.data.provenance).toBe('host_context_bound');
-    expect(callArg.data.hostKind).toBe('openclaw');
+    // PRI-642: emitters no longer assemble provenance/hostKind — the shared
+    // ingress in the pain funnel derives them (automatic hook →
+    // automatic_hook, hostKind openclaw). The emitter payload carries only
+    // correlation facts + inline evidence.
+    expect(callArg.data.provenance).toBeUndefined();
+    expect(callArg.data.hostKind).toBeUndefined();
   });
 
   // ══ P1-3 (review round): correction OCCURRENCE identity ═══════════════════

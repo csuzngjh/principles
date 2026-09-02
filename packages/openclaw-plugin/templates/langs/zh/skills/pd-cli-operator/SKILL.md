@@ -10,15 +10,20 @@ disable-model-invocation: false
 
 ## Runtime V2 痛苦诊断
 
-手动痛苦诊断：
+手动痛苦诊断（绑定已记录的会话，让诊断携带真实轨迹证据）：
 ```bash
-pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --json
+pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
 ```
+
+- 不带 `--session` 的记录是诚实的 unbound Owner 报告：没有轨迹证据，
+  候选大概率被准入阈值拦为 `needs_evidence` —— CLI 输出会明确警告。
+- `--session <id>` 会先校验；会话不存在时以 `session_not_found` 失败，
+  不会写入任何内容。
 
 成功标准：
 - `status` 是 `succeeded`
-- `candidateIds` 非空
-- `ledgerEntryIds` 非空
+- 候选被**准入**而非仅被生成：检查 `admissionResults` /
+  `candidateOutcomes` 中的 `admitted` 决策和 `ledgerEntryIds` 非空
 
 禁止：
 - 不要写 `.state/.pain_flag`。

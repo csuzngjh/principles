@@ -9,6 +9,8 @@ import { computeHash } from '../utils/hashing.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
+import { ingressDecisionForPluginPain } from '../hooks/pain-ingress-adapter.js';
+import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
 
 /**
  * Creates a visual progress bar (e.g., [██████░░░░])
@@ -321,6 +323,31 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
   }
 
   const painId = `manual_${Date.now()}_${computeHash(sessionId).slice(0, 8)}`;
+
+  // PRI-642 Scope B: route through the shared ingress so provenance,
+  // evidence classification and the persisted painIngress.v1 facts are
+  // derived in ONE place for every emitter (SPEC §8.3, §9).
+  const decision = ingressDecisionForPluginPain({
+    wctx,
+    painId,
+    painType: 'user_frustration',
+    source: 'manual',
+    reason: args,
+    score: 90,
+    sessionId,
+  });
+  if (decision.action === 'refuse') {
+    return {
+      text: isZh
+        ? `❌ Pain 报告被拒绝 (${decision.reasonCode})。${decision.nextAction}`
+        : `❌ Pain report refused (${decision.reasonCode}). ${decision.nextAction}`,
+    };
+  }
+  const evidence: PainEvidenceEntry[] = decision.legacy.evidence;
+  const evidenceDegradation = decision.action === 'degrade'
+    ? { reasonCode: decision.reasonCode, detail: decision.warning }
+    : null;
+
   const painData = {
     painId,
     painType: 'user_frustration' as const,
@@ -329,8 +356,10 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
     score: 90,
     sessionId,
     agentId: 'openclaw-host',
-    provenance: 'host_context_bound' as const,
-    hostKind: 'openclaw' as const,
+    provenance: decision.legacy.provenance,
+    hostKind: decision.legacy.hostKind,
+    evidence,
+    painIngress: decision.legacy.painIngress,
   };
 
   try {
@@ -358,6 +387,8 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
       agentId: painData.agentId,
       provenance: painData.provenance,
       hostKind: painData.hostKind,
+      evidence: painData.evidence,
+      painIngress: painData.painIngress,
       recordObservability: true,
     });
 
@@ -368,10 +399,22 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
         data: painData,
       } as EvolutionLoopEvent);
 
+      // PRI-642: honest evidence disclosure. With unavailable evidence the
+      // report stays bound to the real session, but the Owner must see that
+      // the diagnosis lacks trajectory evidence and admission may gate
+      // candidates — never a false "context-bound success" claim (SPEC §8.2).
+      const evidenceNote = evidenceDegradation
+        ? (isZh
+          ? `\n\n⚠️ **会话轨迹证据不可用** (${evidenceDegradation.reasonCode}: ${evidenceDegradation.detail})。诊断将缺少轨迹证据，候选可能被 admission gate 拦截。`
+          : `\n\n⚠️ **Session trajectory evidence unavailable** (${evidenceDegradation.reasonCode}: ${evidenceDegradation.detail}). The diagnosis will lack trajectory evidence; candidates may be blocked by the admission gate.`)
+        : (isZh
+          ? `\n📎 **Evidence**: ${evidence.length} 条轨迹证据`
+          : `\n📎 **Evidence**: ${evidence.length} trajectory evidence entries`);
+
       return {
         text: isZh
-          ? `✅ Pain 已记录 (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\n系统将基于当前会话上下文进行诊断。`
-          : `✅ Pain recorded (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\nThe system will diagnose using current session context.`,
+          ? `✅ Pain 已记录 (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: host_context_bound\n📌 **Session**: ${sessionId}${evidenceNote}`
+          : `✅ Pain recorded (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: host_context_bound\n📌 **Session**: ${sessionId}${evidenceNote}`,
       };
     }
 

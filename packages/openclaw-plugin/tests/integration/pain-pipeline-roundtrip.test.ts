@@ -237,13 +237,14 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       ['lifecycle', LIFECYCLE],
     ];
 
-    it('every OpenClaw hook file stamps hostKind on emitted pain_detected data', () => {
+    it('every OpenClaw hook file still emits pain_detected (attribution now centralized in the funnel)', () => {
+      // PRI-642: emit sites no longer stamp hostKind inline — the shared
+      // ingress in the pain funnel derives it (decision.legacy.hostKind is
+      // asserted below), so per-file stamping is no longer the invariant.
       for (const [name, file] of HOST_SOURCES) {
         const source = read(file);
         const emits = source.match(/type:\s*'pain_detected'/g)?.length ?? 0;
         expect(emits, `${name} should emit pain_detected`).toBeGreaterThan(0);
-        const withHost = source.match(/hostKind:\s*'openclaw'/g)?.length ?? 0;
-        expect(withHost, `${name}: every pain_detected emit must carry hostKind: 'openclaw'`).toBeGreaterThanOrEqual(emits);
       }
     });
 
@@ -262,9 +263,13 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       }
     });
 
-    it('emitPainDetectedEvent forwards hostKind to recordPain (diagnosticJson parity, SPEC §37)', () => {
+    it('emitPainDetectedEvent forwards the ingress-derived hostKind to recordPain (diagnosticJson parity, SPEC §37)', () => {
+      // PRI-642: attribution derives from the validated ingress decision
+      // (openclaw session bound → hostKind openclaw), no longer from
+      // per-emitter assembly.
       const source = read(PAIN);
-      expect(source).toMatch(/hostKind:\s*painData\.hostKind,/);
+      expect(source).toMatch(/hostKind:\s*decision\.legacy\.hostKind,/);
+      expect(source).toMatch(/provenance:\s*decision\.legacy\.provenance,/);
     });
 
     it('the /pd-pain command forwards its hostKind into recordPain (wiring gap closed)', () => {
@@ -272,9 +277,20 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
       expect(source).toMatch(/hostKind:\s*painData\.hostKind,/);
     });
 
-    it('manual CLI pain record stays unattributed (unknown — never guessed)', () => {
+    it('manual CLI pain record refuses on unverified --session before any LLM/task/candidate mutation (Evidence Over Assumption)', () => {
+      // PRI-642 review: the CLI is per-channel — cli_explicit_session with an
+      // UNVERIFIED session (session_not_found / empty_trajectory /
+      // trajectory_unavailable / evidence_read_failed) REFUSES before any
+      // mutation, because the CLI does not own the session identity the way
+      // the host command context does. The shared semantic authority lives in
+      // core; the behavioral contract (refuse with SPEC §7.3 reasonCode, no
+      // recordPain call, exit 1) is asserted by the pd-cli tests
+      // (tests/commands/pain-record.test.ts + pain-record-session-parser.test.ts).
+      // This wiring guard only checks that the CLI stays connected to the
+      // shared evaluator and derives its legacy output from the binding.
       const source = read('packages/pd-cli/src/commands/pain-record.ts');
-      expect(source).not.toMatch(/hostKind/);
+      expect(source).toMatch(/evaluatePainIngress\(/);
+      expect(source).toMatch(/hostKind:\s*binding\.hostKind,/);
     });
 
     it('legacy event import stays unattributed (unknown — never guessed)', () => {

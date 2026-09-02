@@ -155,13 +155,17 @@ The `pd` command-line tool provides additional capabilities outside of OpenClaw 
 ### Record a Pain Signal
 
 ```bash
-pd pain record --reason "edited file without reading first" --score 75
+pd pain record --reason "edited file without reading first" --score 75 --session "<session-id>"
 ```
 
 Options:
 - `--reason, -r` — Why the pain occurred (required)
 - `--score, -s` — Pain severity, 0–100 (default: 80)
-- `--session-id` — Session ID (default: auto-generated)
+- `--session` — Session ID recorded in this workspace's trajectory; validated
+  up front (a missing session fails with `session_not_found` before anything
+  is written). Binding a session attaches real trajectory evidence; without
+  it the record is an unbound Owner report with no evidence, and candidates
+  will likely be gated by the admission threshold.
 
 ### Health Check (Canary)
 

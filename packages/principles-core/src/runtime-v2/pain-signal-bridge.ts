@@ -5,12 +5,19 @@ import type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
-import { evaluateCandidateAdmissions } from './admission-gate.js';
+import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
 import { buildDreamerSeedFromCandidate, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
 import { shapeBridgeResult } from './bridge-result-shaper.js';
+import {
+  parsePainIngressV1Payload,
+  checkIngressTopLevelConsistency,
+  deriveProvenanceFromIngressFacts,
+  isRecord,
+} from './pain-ingress-payload.js';
+import type { PainIngressV1Payload } from './pain-ingress-payload.js';
 
 export type { PainProvenance };
 
@@ -53,6 +60,13 @@ export interface PainDetectedData {
   /** Codex Governance Closure SPEC §12: provenance `host_context_bound` names the host. */
   hostKind?: GovernanceHostKind;
   evidence?: PainEvidenceEntry[];
+  /**
+   * PRI-642 SPEC §9: validated rev-2 ingress facts. When present,
+   * buildDiagnosticJson writes them under the versioned `painIngress`
+   * namespace next to the legacy top-level fields (one builder), and
+   * re-entry validates the two against each other.
+   */
+  painIngress?: PainIngressV1Payload;
 }
 
 export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded';
@@ -68,6 +82,36 @@ export interface NotInternalizableCandidate {
   reason: string;
 }
 
+/**
+ * PRI-642 SPEC §10: aggregate progress. `furthestStage` means AT LEAST ONE
+ * item reached that stage — never that all candidates did; per-candidate
+ * dispositions live in `candidateOutcomes`.
+ */
+export type PainFurthestStage =
+  | 'observed'
+  | 'diagnosis_submitted'
+  | 'diagnosis_completed'
+  | 'candidate_processing'
+  | 'internalization_seeded';
+
+export interface PainProgressReport {
+  furthestStage: PainFurthestStage;
+  generatedCandidateIds: string[];
+  admittedCandidateIds: string[];
+  ledgerEntryIds: string[];
+  seededTaskIds: string[];
+}
+
+/** PRI-642 SPEC §10: where each candidate stopped and why. */
+export interface PainCandidateOutcome {
+  candidateId: string;
+  decision: 'admitted' | 'needs_evidence' | 'deferred';
+  ledgerEntryId?: string;
+  seededTaskId?: string;
+  reason: string;
+  nextAction: string;
+}
+
 export interface PainSignalBridgeResult {
   status: PainSignalBridgeStatus;
   painId: string;
@@ -80,6 +124,10 @@ export interface PainSignalBridgeResult {
   admissionResults?: CandidateAdmissionResult[];
   /** PRI-539: candidates admitted+ledgered but not internalizable (MVP-disabled channel). */
   notInternalizable?: NotInternalizableCandidate[];
+  /** PRI-642 §10: aggregate progress (at-least-one semantics). */
+  progress?: PainProgressReport;
+  /** PRI-642 §10: per-candidate disposition — the authority for mixed results. */
+  candidateOutcomes?: PainCandidateOutcome[];
   errorCategory?: PDErrorCategory;
   message?: string;
   /**
@@ -151,14 +199,102 @@ function countSubmittedEvidence(diagnosticJson: string | undefined): number {
   }
 }
 
+/** Owner-explicit sources — mirrors shouldShortCircuitEmptyEvidence and the plugin funnel's MANUAL_SOURCES (PRI-642). */
+const OWNER_MANUAL_SOURCES = new Set(['manual', 'pain', 'skill:pain']);
+
 function inferProvenance(data: PainDetectedData): PainProvenance {
-  if (data.source === 'manual' && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
+  if (OWNER_MANUAL_SOURCES.has(data.source) && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
     return 'owner_reported_no_host_trace';
   }
   if (data.sessionId && data.sessionId !== 'cli' && data.sessionId !== 'unknown') {
     return 'host_context_bound';
   }
   return 'automatic_hook';
+}
+
+/**
+ * PRI-642 SPEC §9: re-entry validation of the persisted diagnostic payload.
+ *
+ * The payload is the single authority for admission provenance and the
+ * input-evidence count; when the versioned `painIngress` namespace is
+ * present it must agree with the legacy top-level fields produced by the
+ * same builder.
+ *
+ * A payload WITHOUT top-level provenance (pre-PRI-453-style raw rows) goes
+ * through the SPEC §9 legacy normalization branch: `inferProvenance`
+ * re-derives the classification from the payload's OWN persisted fields
+ * (`source`, `sessionIdHint`) exactly as the historical writer did. It
+ * never fabricates `host_context_bound` — binding is derived only when the
+ * payload itself carries a real (non-sentinel) session hint; a manual
+ * source without a session normalizes to `owner_reported_no_host_trace`.
+ */
+function validatePersistedIngressFacts(diagnosticJson: string | undefined): { provenance: PainProvenance; evidenceCount: number; errorCode: null } | { provenance: null; evidenceCount: null; errorCode: string } {
+  if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:missing' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:unparseable' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:not_an_object' };
+  }
+  if (!isRecord(parsed)) {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:not_an_object' };
+  }
+  const record = parsed;
+
+  const evidenceCount = countSubmittedEvidence(diagnosticJson);
+  const hasProvenanceField = Object.hasOwn(record, 'provenance');
+  const provenance = hasProvenanceField ? normalizePainProvenance(record.provenance) : undefined;
+
+  if (Object.hasOwn(record, 'painIngress')) {
+    if (provenance === undefined) {
+      // A rev-2 payload must carry both namespaces consistently; a missing
+      // top-level provenance beside a painIngress block is a contradiction
+      // (rc-3), not a legacy row.
+      return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:provenance_missing' };
+    }
+    const ingress = parsePainIngressV1Payload(record.painIngress);
+    if (!ingress.ok) {
+      return { provenance: null, evidenceCount: null, errorCode: ingress.reasonCode };
+    }
+    const mismatch = checkIngressTopLevelConsistency({
+      payload: ingress.payload,
+      topLevelProvenance: record.provenance,
+      topLevelSessionIdHint: Object.hasOwn(record, 'sessionIdHint') ? record.sessionIdHint : null,
+      topLevelEvidenceCount: evidenceCount,
+    });
+    if (mismatch !== null) {
+      return { provenance: null, evidenceCount: null, errorCode: mismatch };
+    }
+    return {
+      provenance: deriveProvenanceFromIngressFacts(ingress.payload.origin, ingress.payload.correlation),
+      evidenceCount,
+      errorCode: null,
+    };
+  }
+
+  // Legacy payload without the v1 namespace: the persisted top-level
+  // provenance is the authority. This branch fabricates nothing — it only
+  // reads what the writer persisted.
+  if (provenance !== undefined) {
+    return { provenance, evidenceCount, errorCode: null };
+  }
+
+  // Legacy normalization branch (SPEC §9): no top-level provenance and no
+  // painIngress block — re-derive from the payload's own persisted fields
+  // exactly as the historical writer did (never a host-bound default).
+  const recordData: PainDetectedData = {
+    painId: typeof record.sourcePainId === 'string' ? record.sourcePainId : '',
+    painType: 'user_frustration',
+    source: typeof record.source === 'string' ? record.source : '',
+    reason: typeof record.reasonSummary === 'string' ? record.reasonSummary : '',
+    sessionId: typeof record.sessionIdHint === 'string' ? record.sessionIdHint : undefined,
+  };
+  return { provenance: inferProvenance(recordData), evidenceCount, errorCode: null };
 }
 
 function provenanceReason(provenance: PainProvenance): string {
@@ -186,6 +322,9 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     ...(data.hostKind ? { hostKind: data.hostKind } : {}),
     evidence: data.evidence ?? [],
     workspaceDir: workspaceDir ?? null,
+    // PRI-642 SPEC §9: one builder produces BOTH the legacy top-level fields
+    // and the versioned nested namespace; re-entry validates consistency.
+    ...(data.painIngress ? { painIngress: data.painIngress } : {}),
   });
 }
 
@@ -419,7 +558,11 @@ export class PainSignalBridge {
    */
   async executePendingDiagnosis(input: {
     taskId: string;
-    /** Provenance used for admission metadata; submitted pains are host-context-bound by construction. */
+    /**
+     * @deprecated PRI-642 SPEC §9: re-entry reads the provenance from the
+     * persisted task payload; a caller-supplied value no longer overrides
+     * it (no host-binding defaults, single authority).
+     */
     provenance?: PainProvenance;
   }): Promise<PainSignalBridgeResult> {
     const { taskId } = input;
@@ -457,6 +600,23 @@ export class PainSignalBridge {
       return { status: 'skipped', painId, taskId, candidateIds: [], ledgerEntryIds: [], message: 'retry_wait_pending' };
     }
 
+    // PRI-642 SPEC §9: re-entry validates the persisted rev-2 facts BEFORE
+    // any LLM run — the payload is the authority for provenance/correlation
+    // (never a host_context_bound default), and a nested/top-level
+    // contradiction is rejected instead of silently resolved.
+    const reentry = validatePersistedIngressFacts(task.diagnosticJson);
+    if (reentry.errorCode !== null) {
+      return {
+        status: 'failed',
+        painId,
+        taskId,
+        candidateIds: [],
+        ledgerEntryIds: [],
+        errorCategory: 'input_invalid',
+        message: reentry.errorCode,
+      };
+    }
+
     const result = await this.runner.run(taskId);
     if (result.status !== 'succeeded') {
       // PRI-638: the task is deliberately left in its prior state (pending /
@@ -478,11 +638,8 @@ export class PainSignalBridge {
       taskId,
       diagnosticianOutput: result.output,
       painId,
-      provenance: input.provenance ?? 'host_context_bound',
-      // The submitted pain's evidence count lives in the task payload
-      // (buildDiagnosticJson). Admission gates on it (needs_evidence), so
-      // parse it back — validated, bounded, best-effort with explicit 0.
-      inputEvidenceCount: countSubmittedEvidence(task.diagnosticJson),
+      provenance: reentry.provenance,
+      inputEvidenceCount: reentry.evidenceCount,
     });
   }
 
@@ -581,6 +738,9 @@ export class PainSignalBridge {
 
     const seedFailureCandidateIds: string[] = [];
     const notInternalizable: NotInternalizableCandidate[] = [];
+    // PRI-642 §10: per-candidate ledger/seed linkage for outcome reporting.
+    const ledgerEntryByCandidate = new Map<string, string>();
+    const seededTaskByCandidate = new Map<string, string>();
 
     if (this.autoIntakeEnabled) {
       for (let i = 0; i < candidates.length; i++) {
@@ -595,6 +755,7 @@ export class PainSignalBridge {
 
         const intakeResult = await this.intakeService.intake(candidate.candidateId);
         ledgerEntryIds.push(intakeResult.id);
+        ledgerEntryByCandidate.set(candidate.candidateId, intakeResult.id);
 
         try {
           const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''];
@@ -619,6 +780,7 @@ export class PainSignalBridge {
                   maxAttempts: seed.maxAttempts,
                   diagnosticJson: seed.diagnosticJson,
                 });
+                seededTaskByCandidate.set(candidate.candidateId, seed.taskId);
                 this.eventEmitter?.emitTelemetry({
                   eventType: 'candidate_dreamer_task_seeded',
                   traceId: candidate.candidateId,
@@ -663,7 +825,48 @@ export class PainSignalBridge {
     const firstCandidate = candidates.at(0);
 
     const candidateIds = candidates.map((candidate) => candidate.candidateId);
-    return shapeBridgeResult({
+
+    // PRI-642 SPEC §10: execution status, aggregate progress and per-candidate
+    // outcomes are independent dimensions — build the latter two here so mixed
+    // results can never be read as completed internalization.
+    const candidateOutcomes: PainCandidateOutcome[] = candidates.map((candidate, i) => {
+      const admission = admissionResults[i]?.admission;
+      const decision = admission?.decision ?? 'needs_evidence';
+      const outcome: PainCandidateOutcome = {
+        candidateId: candidate.candidateId,
+        decision,
+        reason: admission?.reason ?? 'diagnostician_output_unavailable',
+        nextAction: admission?.nextAction ?? 're_run_diagnosis_or_manual_review',
+      };
+      const ledgerEntryId = ledgerEntryByCandidate.get(candidate.candidateId);
+      if (ledgerEntryId !== undefined) outcome.ledgerEntryId = ledgerEntryId;
+      const seededTaskId = seededTaskByCandidate.get(candidate.candidateId);
+      if (seededTaskId !== undefined) outcome.seededTaskId = seededTaskId;
+      if (decision === 'admitted' && outcome.seededTaskId === undefined) {
+        const notInternalizableEntry = notInternalizable.find((n) => n.candidateId === candidate.candidateId);
+        const seedFailed = seedFailureCandidateIds.includes(candidate.candidateId);
+        if (notInternalizableEntry !== undefined) {
+          outcome.reason = notInternalizableEntry.reason;
+          outcome.nextAction = 'Enable the mapped channel or archive this candidate.';
+        } else if (seedFailed) {
+          outcome.reason = 'dreamer_seed_failed';
+          outcome.nextAction = 'Inspect state.db and telemetry; re-run intake.';
+        }
+      }
+      return outcome;
+    });
+
+    const admittedCandidateIds = candidateOutcomes
+      .filter((o) => o.decision === 'admitted')
+      .map((o) => o.candidateId);
+    const seededTaskIds = [...seededTaskByCandidate.values()];
+    const furthestStage: PainFurthestStage = seededTaskIds.length > 0
+      ? 'internalization_seeded'
+      : ledgerEntryIds.length > 0
+        ? 'candidate_processing'
+        : 'diagnosis_completed';
+
+    const shaped = shapeBridgeResult({
       path: 'fresh',
       painId,
       taskId,
@@ -676,6 +879,15 @@ export class PainSignalBridge {
       seedFailureNote,
       notInternalizable: notInternalizable.length > 0 ? notInternalizable : undefined,
     });
+    shaped.progress = {
+      furthestStage,
+      generatedCandidateIds: candidateIds,
+      admittedCandidateIds,
+      ledgerEntryIds,
+      seededTaskIds,
+    };
+    shaped.candidateOutcomes = candidateOutcomes;
+    return shaped;
   }
 
   private async buildExistingResult(input: { painId: string; taskId: string }): Promise<PainSignalBridgeResult> {

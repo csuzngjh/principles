@@ -16,6 +16,20 @@ import type { RunnerResult } from '../runner/runner-result.js';
 const TASK_ID = 'diagnosis_pain-1';
 const PAIN_ID = 'pain-1';
 
+/** Realistic payload as buildDiagnosticJson writes it (PRI-642: re-entry reads it). */
+const DIAGNOSTIC_JSON = JSON.stringify({
+  sourcePainId: PAIN_ID,
+  reasonSummary: 'test pain',
+  source: 'manual',
+  severity: 'moderate',
+  sessionIdHint: null,
+  agentIdHint: null,
+  provenance: 'host_context_bound',
+  provenanceReason: 'Pain reported from an authenticated host session with a bound host context',
+  evidence: [],
+  workspaceDir: null,
+});
+
 function taskRecord(overrides: Partial<TaskRecord>): TaskRecord {
   return {
     taskId: TASK_ID,
@@ -26,6 +40,7 @@ function taskRecord(overrides: Partial<TaskRecord>): TaskRecord {
     attemptCount: 0,
     maxAttempts: 3,
     inputRef: PAIN_ID,
+    diagnosticJson: DIAGNOSTIC_JSON,
     ...overrides,
   };
 }
@@ -118,5 +133,93 @@ describe('PainSignalBridge.executePendingDiagnosis (PRI-624)', () => {
     expect(run).not.toHaveBeenCalled();
     expect(result.status).toBe('failed');
     expect(result.message).toBe('task_not_found');
+  });
+
+  // ── PRI-642 SPEC §9: re-entry reads persisted facts; no host-binding
+  // defaults, nested/top-level mismatch rejected before the LLM. ────────────
+
+  it('a payload without provenance uses the legacy normalization branch — never host_context_bound without a session hint', async () => {
+    // No provenance, no session hint → automatic_hook (not a fabricated binding).
+    const payload = JSON.stringify({ sourcePainId: PAIN_ID, source: 'write_file', evidence: [] });
+    const { bridge, run } = createBridge(taskRecord({ diagnosticJson: payload }), SUCCESS);
+    const result = await bridge.executePendingDiagnosis({ taskId: TASK_ID });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(result.message).not.toContain('diagnostic_payload_invalid');
+
+    // A rev-2 payload (painIngress block present) with missing top-level
+    // provenance is a contradiction — still rejected (rc-3).
+    const contradiction = JSON.stringify({
+      sourcePainId: PAIN_ID,
+      evidence: [],
+      painIngress: {
+        version: 'v1',
+        origin: { kind: 'owner_manual', channel: 'openclaw_command' },
+        correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'sess-1' },
+        evidenceClass: { status: 'available', entryCount: 0 },
+      },
+    });
+    const { bridge: bridge2, run: run2 } = createBridge(taskRecord({ diagnosticJson: contradiction }), SUCCESS);
+    const result2 = await bridge2.executePendingDiagnosis({ taskId: TASK_ID });
+    expect(run2).not.toHaveBeenCalled();
+    expect(result2.status).toBe('failed');
+    expect(result2.message).toBe('diagnostic_payload_invalid:provenance_missing');
+  });
+
+  it('an unparseable payload fails loud before the runner', async () => {
+    const { bridge, run } = createBridge(taskRecord({ diagnosticJson: '{not-json' }), SUCCESS);
+    const result = await bridge.executePendingDiagnosis({ taskId: TASK_ID });
+    expect(run).not.toHaveBeenCalled();
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('diagnostic_payload_invalid');
+  });
+
+  it('a nested painIngress.v1 block contradicting the top-level fields is rejected before the LLM (SPEC 12.2.4)', async () => {
+    // Nested says unbound external CLI; top-level claims host_context_bound.
+    const payload = JSON.stringify({
+      sourcePainId: PAIN_ID,
+      provenance: 'host_context_bound',
+      sessionIdHint: null,
+      evidence: [],
+      painIngress: {
+        version: 'v1',
+        origin: { kind: 'owner_manual', channel: 'external_cli_unbound' },
+        correlation: { status: 'unbound', reason: 'external_cli' },
+        evidenceClass: { status: 'unavailable', reason: 'trajectory_unavailable' },
+      },
+    });
+    const { bridge, run } = createBridge(taskRecord({ diagnosticJson: payload }), SUCCESS);
+    const result = await bridge.executePendingDiagnosis({ taskId: TASK_ID });
+    expect(run).not.toHaveBeenCalled();
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('ingress_payload_mismatch');
+  });
+
+  it('a consistent painIngress.v1 block is honored: persisted correlation derives the provenance', async () => {
+    const entries = [{ sourceRef: 'owner_message:t1', note: 'fix it' }];
+    const payload = JSON.stringify({
+      sourcePainId: PAIN_ID,
+      provenance: 'host_context_bound',
+      sessionIdHint: 'sess-1',
+      evidence: entries,
+      painIngress: {
+        version: 'v1',
+        origin: { kind: 'owner_manual', channel: 'openclaw_command' },
+        correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'sess-1' },
+        evidenceClass: { status: 'available', entryCount: entries.length },
+      },
+    });
+    const { bridge, run } = createBridge(taskRecord({ diagnosticJson: payload }), SUCCESS);
+    const result = await bridge.executePendingDiagnosis({ taskId: TASK_ID });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('failed'); // no candidates in this fixture
+    expect(result.message).toBe('Diagnostician succeeded but produced no principle candidates');
+  });
+
+  it('legacy openclaw_context_bound spelling is normalized, not rejected', async () => {
+    const payload = JSON.stringify({ sourcePainId: PAIN_ID, provenance: 'openclaw_context_bound', evidence: [] });
+    const { bridge, run } = createBridge(taskRecord({ diagnosticJson: payload }), SUCCESS);
+    const result = await bridge.executePendingDiagnosis({ taskId: TASK_ID });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(result.message).not.toContain('diagnostic_payload_invalid');
   });
 });

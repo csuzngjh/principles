@@ -21,21 +21,31 @@ vi.mock('fs', () => ({
 }));
 
 vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
-  buildTrajectoryEvidenceFromDb: vi.fn().mockReturnValue([
-    { sourceRef: 'owner_reported:cli', note: 'No session context available' },
-  ]),
+  acquireTrajectoryEvidenceFromDb: vi.fn().mockReturnValue({
+    status: 'available',
+    entries: [
+      { sourceRef: 'owner_message:2026-01-01T10:00:00Z', note: 'Owner correction' },
+      { sourceRef: 'agent_turn:2026-01-01T10:01:00Z', note: 'assistant evidence' },
+    ],
+  }),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
-  PainToPrincipleService: vi.fn().mockImplementation(function() {
-    return {
-      recordPain: vi.fn(async (input: PainToPrincipleInput) => {
-        lastRecordPainInput = input;
-        return mockRecordPainResult;
-      }),
-    };
-  }),
-  PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function() { return {}; }),
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  // PRI-642 review blocker 1: the CLI now evaluates ingress semantics via
+  // the REAL core evaluatePainIngress (the shared authority) — only the
+  // service/IO classes are mocked.
+  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  return {
+    ...actual,
+    PainToPrincipleService: vi.fn().mockImplementation(function() {
+      return {
+        recordPain: vi.fn(async (input: PainToPrincipleInput) => {
+          lastRecordPainInput = input;
+          return mockRecordPainResult;
+        }),
+      };
+    }),
+    PrincipleTreeLedgerAdapter: vi.fn().mockImplementation(function() { return {}; }),
   computeEffectivePdConfig: vi.fn().mockReturnValue({
     runtimeKind: 'pi-ai',
     provider: 'test-provider',
@@ -58,7 +68,8 @@ vi.mock('@principles/core/runtime-v2', () => ({
   isBuiltinPiAiProvider: vi.fn().mockReturnValue(true),
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
   isFeatureEnabled: vi.fn().mockReturnValue(false),
-}));
+  };
+});
 
 vi.mock('../../src/services/pd-config-loader.js', () => ({
   loadPdConfig: vi.fn().mockReturnValue({
@@ -77,8 +88,9 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
 }));
 
 import { handlePainRecord } from '../../src/commands/pain-record.js';
-import { isBuiltinPiAiProvider } from '@principles/core/runtime-v2';
-import type { PainToPrincipleOutput, PainToPrincipleInput, FailureCategory } from '@principles/core/runtime-v2';
+import { isBuiltinPiAiProvider, type PainToPrincipleOutput, type PainToPrincipleInput } from '@principles/core/runtime-v2';
+import type { FailureCategory } from '@principles/core/runtime-v2';
+import { acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -351,51 +363,207 @@ describe('pd pain record', () => {
     expect(lastRecordPainInput!.source).toBe('ci');
     expect(lastRecordPainInput!.reason).toBe('test pain');
     expect(lastRecordPainInput!.score).toBe(90);
-    expect(lastRecordPainInput!.sessionId).toBe('cli');
+    // PRI-642: no --session means an explicit unbound Owner report — the
+    // 'cli' sentinel session must NOT be fabricated (SPEC §7.4).
+    expect(lastRecordPainInput!.sessionId).toBeUndefined();
     expect(lastRecordPainInput!.agentId).toBe('pd-cli');
-    // PRI-341: evidence field is now always provided
-    expect(lastRecordPainInput!.evidence).toBeTruthy();
-    expect(lastRecordPainInput!.evidence!.length).toBeGreaterThan(0);
+    // …and no placeholder evidence entry may be submitted.
+    expect(lastRecordPainInput!.evidence).toEqual([]);
+    expect(lastRecordPainInput!.recordObservability).toBe(false);
+    expect(lastRecordPainInput!.provenance).toBe('owner_reported_no_host_trace');
   });
 
-  // ── PRI-341: evidence passthrough and --session flag ──────────────────────
+  // ── PRI-341 → PRI-642: evidence passthrough and --session flag ─────────────
 
-  // 用例 C: recordPain receives non-empty evidence field when session provided
-  it('C: passes evidence to recordPain when --session is provided', async () => {
-    // Mock buildTrajectoryEvidenceFromDb to return evidence
-    const mockEvidence = [
-      { sourceRef: 'agent_turn:2026-01-01T10:00:00Z', note: 'assistant text evidence' },
-    ];
-    vi.doMock('../../src/commands/build-trajectory-evidence.js', () => ({
-      buildTrajectoryEvidenceFromDb: vi.fn().mockReturnValue(mockEvidence),
-    }));
-
+  // 用例 C: recordPain receives bound provenance + validated evidence when a real session is provided
+  it('C: passes bound provenance and evidence to recordPain when --session resolves available', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
 
     await handlePainRecord({ reason: 'test pain', session: 'sess-123', json: true });
 
     expect(lastRecordPainInput).toBeTruthy();
+    expect(acquireTrajectoryEvidenceFromDb).toHaveBeenCalled();
     expect(lastRecordPainInput!.evidence).toBeTruthy();
     expect(lastRecordPainInput!.evidence!.length).toBeGreaterThan(0);
+    expect(lastRecordPainInput!.evidence![0].sourceRef).not.toBe('owner_reported:cli');
     expect(lastRecordPainInput!.sessionId).toBe('sess-123');
+    // SPEC §7.3: provenance must be derived from the validated result —
+    // a real session is host-context-bound, never owner_reported_no_host_trace.
+    expect(lastRecordPainInput!.provenance).toBe('host_context_bound');
+    // PRI-640/SPEC §8.3: the bound path attributes the OpenClaw trajectory.
+    expect(lastRecordPainInput!.hostKind).toBe('openclaw');
+    expect(lastRecordPainInput!.recordObservability).toBe(true);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  // 用例 C2: without session, evidence field still has a placeholder (not empty)
-  it('C2: passes placeholder evidence when no --session provided', async () => {
+  // 用例 C2 (PRI-642 rewrite): without session, no sentinel session, no
+  // placeholder evidence — an honest unbound Owner report (SPEC §7.4).
+  it('C2: submits an honest unbound report when no --session provided', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
 
     await handlePainRecord({ reason: 'test pain', json: true });
 
     expect(lastRecordPainInput).toBeTruthy();
-    expect(lastRecordPainInput!.evidence).toBeTruthy();
-    expect(lastRecordPainInput!.evidence!.length).toBeGreaterThan(0);
-    // Default evidence should be a CLI placeholder
-    expect(lastRecordPainInput!.evidence![0].sourceRef).toBe('owner_reported:cli');
+    expect(lastRecordPainInput!.sessionId).toBeUndefined();
+    expect(lastRecordPainInput!.evidence).toEqual([]);
+    expect(lastRecordPainInput!.recordObservability).toBe(false);
+    expect(lastRecordPainInput!.provenance).toBe('owner_reported_no_host_trace');
+
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    // SPEC §7.4: disclose context_unbound and recommend --session.
+    const warnings = JSON.stringify(jsonOutput);
+    expect(warnings).toMatch(/context_unbound/);
+    expect(warnings).toMatch(/--session/);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // ── PRI-642 Scope A: explicit-session validation (SPEC §7.3, §12.1.3–12.1.4) ─
+
+  it('fails with session_not_found before any task/candidate mutation when --session does not exist', async () => {
+    vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
+      status: 'unavailable',
+      reasonCode: 'session_not_found',
+      detail: 'session not present in trajectory.db sessions table',
+    } as any);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', session: 'missing-session', json: true });
+
+    // cli-1: exactly one JSON object on stdout
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('session_not_found');
+    expect(jsonOutput.nextAction).toBeTruthy();
+    // cli-2/cli-5: execution stopped — no service mutation, exit 1
+    expect(lastRecordPainInput).toBeNull();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('fails before any mutation on session_not_found even when process.exit is stubbed to a no-op', async () => {
+    vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
+      status: 'unavailable',
+      reasonCode: 'session_not_found',
+      detail: 'session not present',
+    } as any);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', session: 'missing-session', json: true });
+
+    // cli-2: with process.exit stubbed, control flow must still stop —
+    // recordPain was never invoked and stdout carries exactly one object.
+    expect(lastRecordPainInput).toBeNull();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('fails before mutation on empty_trajectory (CLI never claims host_context_bound without a verified session)', async () => {
+    // Per Evidence Over Assumption: the CLI does not own session identity
+    // the way the OpenClaw host command context does. Unverified sessions
+    // (any acquisition that does not yield 'available') must refuse before
+    // any LLM/task/candidate mutation.
+    vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
+      status: 'unavailable',
+      reasonCode: 'empty_trajectory',
+      detail: 'session exists but no usable evidence',
+    } as any);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', session: 'quiet-session', json: true });
+
+    expect(lastRecordPainInput).toBeNull();
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('empty_trajectory');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('fails before mutation on evidence_read_failed (no LLM/no task when the CLI cannot verify binding)', async () => {
+    vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
+      status: 'unavailable',
+      reasonCode: 'evidence_read_failed',
+      detail: 'trajectory.db unreadable',
+    } as any);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', session: 'sess-x', json: true });
+
+    expect(lastRecordPainInput).toBeNull();
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('evidence_read_failed');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('fails before mutation on trajectory_unavailable (CLI cannot fabricate a session)', async () => {
+    vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
+      status: 'unavailable',
+      reasonCode: 'trajectory_unavailable',
+      detail: 'no trajectory.db at workspace .state',
+    } as any);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', session: 'sess-x', json: true });
+
+    expect(lastRecordPainInput).toBeNull();
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe('trajectory_unavailable');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // ── PRI-642 Scope A (SPEC §12.1.6): generated-but-unadmitted candidates must
+  // not be reported as completed internalization. ─────────────────────────────
+
+  it('warns that no candidate was admitted/internalized when all candidates are gated', async () => {
+    mockRecordPainResult = {
+      ...SUCCEEDED_RESULT,
+      candidateIds: ['c1', 'c2', 'c3', 'c4'],
+      ledgerEntryIds: [],
+      admissionResults: [
+        { candidateId: 'c1', recommendationKind: 'prompt', admission: { decision: 'needs_evidence', reason: 'confidence_below_threshold:0.45<0.50', nextAction: 'add evidence', evidenceStatus: 'host_context_bound' } },
+        { candidateId: 'c2', recommendationKind: 'prompt', admission: { decision: 'deferred', reason: 'recommendation_kind_defer_not_actionable', nextAction: 'none', evidenceStatus: 'host_context_bound' } },
+        { candidateId: 'c3', recommendationKind: 'prompt', admission: { decision: 'needs_evidence', reason: 'input_evidence_empty', nextAction: 'add evidence', evidenceStatus: 'host_context_bound' } },
+        { candidateId: 'c4', recommendationKind: 'prompt', admission: { decision: 'needs_evidence', reason: 'confidence_below_threshold:0.45<0.50', nextAction: 'add evidence', evidenceStatus: 'host_context_bound' } },
+      ],
+    } as PainToPrincipleOutput;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', json: true });
+
+    const allOutput = logSpy.mock.calls.map(c => c.join(' ')).join(' ');
+    // Explicit admission summary; must not read as completed internalization.
+    expect(allOutput).toMatch(/0 (?:of|\/) 4|admitted.*0|0.*admitted/i);
+    const jsonOutput = JSON.parse(logSpy.mock.calls.at(-1)![0] ?? '{}');
+    const jsonStr = JSON.stringify(jsonOutput);
+    expect(jsonStr).toMatch(/no candidate was admitted|admitted:\s*0/i);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

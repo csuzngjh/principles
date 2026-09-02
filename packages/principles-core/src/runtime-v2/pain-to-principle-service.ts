@@ -11,7 +11,8 @@ import { createPainSignalBridge } from './pain-signal-runtime-factory.js';
 import { recordPainSignalObservability } from './pain-signal-observability.js';
 import { FAILURE_CATEGORY_MAP } from './error-categories.js';
 import { createDiagnosticianTaskId } from './pain-signal-bridge.js';
-import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvidenceEntry } from './pain-signal-bridge.js';
+import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvidenceEntry, PainProgressReport, PainCandidateOutcome } from './pain-signal-bridge.js';
+import type { PainIngressV1Payload } from './pain-ingress-payload.js';
 import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { EffectivePdConfig } from './config/pd-config-types.js';
@@ -73,6 +74,8 @@ export interface PainToPrincipleInput {
   hostKind?: PainDetectedData['hostKind'];
   evidence?: PainEvidenceEntry[];
   recordObservability?: boolean;
+  /** PRI-642 SPEC §9: validated rev-2 ingress facts persisted under painIngress.v1. */
+  painIngress?: PainIngressV1Payload;
 }
 
 export interface PainToPrincipleOutput {
@@ -88,6 +91,10 @@ export interface PainToPrincipleOutput {
     recommendationKind: string;
     admission: { decision: string; reason: string; nextAction: string; evidenceStatus: string };
   }[];
+  /** PRI-642 §10: aggregate progress (at-least-one semantics). */
+  progress?: PainProgressReport;
+  /** PRI-642 §10: per-candidate disposition — the authority for mixed results. */
+  candidateOutcomes?: PainCandidateOutcome[];
   message?: string;
   observabilityWarnings: string[];
   failureCategory?: FailureCategory;
@@ -159,6 +166,7 @@ export class PainToPrincipleService {
       provenance: input.provenance,
       hostKind: input.hostKind,
       evidence: input.evidence,
+      painIngress: input.painIngress,
     };
 
     try {
@@ -246,6 +254,8 @@ export class PainToPrincipleService {
         candidateIds: bridgeResult.candidateIds,
         ledgerEntryIds: bridgeResult.ledgerEntryIds,
         admissionResults: bridgeResult.admissionResults,
+        progress: bridgeResult.progress,
+        candidateOutcomes: bridgeResult.candidateOutcomes,
         message: bridgeResult.message,
         observabilityWarnings,
         // PRI-638 P1-D: classification comes from the bridge result itself —
