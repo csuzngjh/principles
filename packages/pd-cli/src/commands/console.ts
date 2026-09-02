@@ -64,6 +64,39 @@ function getConsoleDir(): { dir: string; mode: InstallLayoutMode } | null {
   return { dir, mode: resolved.mode };
 }
 
+/**
+ * Verify the console server's runtime dependency slots are resolvable.
+ *
+ * The console's dist statically imports `@principles/core/runtime-v2` and
+ * `@principles/host-runtime`, and reads plugin governance exports from
+ * `principles-disciple`. Each slot must be a real package (package.json present
+ * AND dist/index.js present) — a dangling junction or an empty shell (package.json
+ * without dist) makes the server crash with ERR_MODULE_NOT_FOUND at startup.
+ *
+ * Returns a human-readable description of the first broken slot, or undefined
+ * when everything is resolvable.
+ */
+export function checkConsoleRuntimeDependencies(consoleDir: string): string | undefined {
+  const slots: { name: string; pkg: string }[] = [
+    { name: '@principles/core', pkg: '@principles/core' },
+    { name: '@principles/host-runtime', pkg: '@principles/host-runtime' },
+    { name: '@principles/install-layout', pkg: '@principles/install-layout' },
+    { name: 'principles-disciple', pkg: 'principles-disciple' },
+  ];
+  for (const slot of slots) {
+    const base = path.join(consoleDir, 'node_modules', slot.pkg);
+    const pkgJson = path.join(base, 'package.json');
+    const distEntry = path.join(base, 'dist', 'index.js');
+    if (!fs.existsSync(pkgJson)) {
+      return `console/node_modules/${slot.pkg}/package.json is missing`;
+    }
+    if (!fs.existsSync(distEntry)) {
+      return `console/node_modules/${slot.pkg}/dist/index.js is missing (incomplete package)`;
+    }
+  }
+  return undefined;
+}
+
 export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
@@ -99,6 +132,27 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
   const webIndex = getConsoleWebIndex(paths, consoleLocation.mode);
   if (!fs.existsSync(webIndex)) {
     const msg = `Console web UI not found at ${webIndex}. The console bundle is corrupted. Re-run installer.`;
+    if (opts.json) {
+      console.log(JSON.stringify({ success: false, reason: msg, nextAction: 'npx create-principles-disciple' }));
+    } else {
+      console.error(msg);
+    }
+    process.exit(1);
+    return;
+  }
+
+  // Runtime dependency integrity check: the console server statically imports
+  // @principles/core/runtime-v2 and @principles/host-runtime, and the console
+  // reads plugin governance exports from principles-disciple. When the OpenClaw
+  // upgrade path refreshes the plugin bundle without re-running the PD installer
+  // (2026-09: console_cli_exited_before_result), these node_modules slots can be
+  // left as an empty shell (package.json without dist) or a dangling junction.
+  // The server then crashes with ERR_MODULE_NOT_FOUND at startup, which the
+  // Companion reports as the opaque console_cli_exited_before_result. Fail loud
+  // here with the actionable repair command instead.
+  const integrityError = checkConsoleRuntimeDependencies(consoleLocation.dir);
+  if (integrityError) {
+    const msg = `Console runtime dependency broken: ${integrityError}. Re-run installer to repair.`;
     if (opts.json) {
       console.log(JSON.stringify({ success: false, reason: msg, nextAction: 'npx create-principles-disciple' }));
     } else {
@@ -331,6 +385,37 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       browserOpened: false,
       reason: 'console_server_entry_missing',
       nextAction: `Re-run installer: npx create-principles-disciple (expected ${serverEntry})`,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`error: ${result.reason}`);
+      console.error(`next:   ${result.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
+
+  // Runtime dependency integrity check: the console server statically imports
+  // @principles/core/runtime-v2 and @principles/host-runtime, and reads plugin
+  // governance exports from principles-disciple. When the OpenClaw upgrade path
+  // refreshes the plugin bundle without re-running the PD installer, these
+  // node_modules slots can be left as an empty shell (package.json without dist)
+  // or a dangling junction. The server then crashes with ERR_MODULE_NOT_FOUND
+  // at startup, which the Companion reports as opaque console_cli_exited_before_result.
+  // Fail loud here with the actionable repair command instead.
+  const integrityError = checkConsoleRuntimeDependencies(consoleLocation.dir);
+  if (integrityError) {
+    const result: ConsoleLaunchResult = {
+      status: 'failed',
+      url: '',
+      port: 0,
+      host: '127.0.0.1',
+      workspaceDir,
+      reused: false,
+      browserOpened: false,
+      reason: 'console_runtime_dependency_broken',
+      nextAction: `Re-run installer: npx create-principles-disciple (${integrityError})`,
     };
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));

@@ -569,6 +569,19 @@ describe('CLI command wiring (pd console open)', () => {
     fs.writeFileSync(path.join(consoleDir, 'package.json'), JSON.stringify({ name: 'fake-pd-console', version: '0.0.0', type: 'module' }, null, 2));
     // EP-06 regression guard: dist/web/index.html must exist (PR #1169 fix)
     fs.writeFileSync(path.join(consoleDir, 'dist', 'web', 'index.html'), '<!DOCTYPE html><html></html>');
+    // Runtime dependency integrity check: fake console needs minimal node_modules
+    // slots so the launcher passes the integrity gate and reaches spawn/health logic.
+    // Four packages: @principles/core, @principles/host-runtime, @principles/install-layout, principles-disciple.
+    const mkDep = (pkgDir: string) => {
+      fs.mkdirSync(path.join(pkgDir, 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0' }, null, 2));
+      fs.writeFileSync(path.join(pkgDir, 'dist', 'index.js'), 'export {};\n');
+    };
+    const nm = path.join(consoleDir, 'node_modules');
+    mkDep(path.join(nm, 'principles-disciple'));
+    mkDep(path.join(nm, '@principles', 'core'));
+    mkDep(path.join(nm, '@principles', 'host-runtime'));
+    mkDep(path.join(nm, '@principles', 'install-layout'));
     fs.writeFileSync(path.join(consoleDir, 'dist', 'server.js'), `
       import http from 'node:http';
       const args = process.argv.slice(2);
@@ -1115,3 +1128,90 @@ function killTreeForce(child: childProcessModule.ChildProcess): void {
     child.kill('SIGKILL');
   } catch { /* already gone */ }
 }
+
+import { checkConsoleRuntimeDependencies } from '../../src/commands/console.js';
+
+describe('checkConsoleRuntimeDependencies', () => {
+  it('returns undefined when all deps are intact', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
+    try {
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'index.js'), '');
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist', 'index.js'), '');
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'), '');
+      fs.mkdirSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist', 'index.js'), '');
+
+      expect(checkConsoleRuntimeDependencies(tmp)).toBeUndefined();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns error when a dep is missing package.json', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
+    try {
+      // Create all deps intact except host-runtime (no package.json)
+      for (const pkg of ['@principles/core', '@principles/install-layout', 'principles-disciple']) {
+        fs.mkdirSync(path.join(tmp, 'node_modules', pkg.split('/')[0], pkg.split('/')[1] || '', 'dist'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, 'node_modules', pkg, 'package.json'), '{}');
+        fs.writeFileSync(path.join(tmp, 'node_modules', pkg, 'dist', 'index.js'), '');
+      }
+      // @principles/host-runtime without package.json — the broken-shell case
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist', 'index.js'), '');
+
+      const err = checkConsoleRuntimeDependencies(tmp);
+      expect(err).toContain('host-runtime');
+      expect(err).toContain('package.json');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns error when a dep has package.json but no dist (empty shell)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
+    try {
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'index.js'), '');
+      // host-runtime exists but has no dist/index.js
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime'));
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'package.json'), '{}');
+
+      const err = checkConsoleRuntimeDependencies(tmp);
+      expect(err).toContain('host-runtime');
+      expect(err).toContain('dist/index.js');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns error when a dep junction is dangling (directory missing)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
+    try {
+      // Only create @principles/core, leave host-runtime missing entirely
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'index.js'), '');
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'), '');
+      fs.mkdirSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist', 'index.js'), '');
+
+      const err = checkConsoleRuntimeDependencies(tmp);
+      expect(err).toContain('host-runtime');
+      expect(err).toContain('package.json');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
