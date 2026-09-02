@@ -66,14 +66,18 @@ function toIngressEntry(entry: PainEvidenceEntry): IngressEvidenceEntry {
  * PRI-642 (SPEC §7.3/§7.4, review blocker 1): build the report from this
  * adapter's host-specific facts and let the SHARED evaluator decide.
  *
- * - explicit `--session` → acquisition against the workspace trajectory.db:
- *   · session_not_found  → the claimed binding does not exist → the shared
- *     evaluator refuses it (matrix row 5, reason origin_correlation_mismatch;
- *     the CLI labels the failure with the SPEC §7.3 reason session_not_found);
- *   · other unavailable evidence (empty / unreadable / missing trajectory)
- *     → bound + unavailable → the evaluator DEGRADES (submit with honest
- *     empty evidence + warning), identical to the OpenClaw funnel;
- *   · available → bound submit with the real evidence entries.
+ * Per-channel policy (SPEC §7.3 vs OpenClaw):
+ *
+ * - explicit `--session` + acquisition available (real session + real entries):
+ *     → cli_explicit_session + bound → submit with real evidence.
+ * - explicit `--session` + acquisition unavailable (session_not_found /
+ *     empty_trajectory / trajectory_unavailable / evidence_read_failed):
+ *     → cli_explicit_session + unbound → shared evaluator REFUSES
+ *       (row 5) before any LLM/task/candidate mutation.
+ *     The CLI does NOT share the OpenClaw funnel's "degrade" semantics
+ *     because the CLI does not own the session identity the way the host
+ *     command context does (Evidence Over Assumption — an unverified
+ *     session claimed as bound would be a PRI-642 recurrence).
  * - no `--session` → unbound Owner report (matrix row 6) → submit with
  *   disclosure; no sentinel session, no placeholder evidence, no trajectory
  *   projection (the CLI skips observability when the ingress yields no

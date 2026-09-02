@@ -278,18 +278,19 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
     });
 
     it('manual CLI pain record refuses on unverified --session before any LLM/task/candidate mutation (Evidence Over Assumption)', () => {
-      // PRI-642 review: the CLI is now per-channel — cli_explicit_session
-      // with an UNVERIFIED session (session_not_found / empty_trajectory /
-      // trajectory_unavailable / evidence_read_failed) REFUSES before
-      // mutation. The shared semantic authority is still in core; the
-      // channel-level policy differs by host.
+      // PRI-642 review: the CLI is per-channel — cli_explicit_session with an
+      // UNVERIFIED session (session_not_found / empty_trajectory /
+      // trajectory_unavailable / evidence_read_failed) REFUSES before any
+      // mutation, because the CLI does not own the session identity the way
+      // the host command context does. The shared semantic authority lives in
+      // core; the behavioral contract (refuse with SPEC §7.3 reasonCode, no
+      // recordPain call, exit 1) is asserted by the pd-cli tests
+      // (tests/commands/pain-record.test.ts + pain-record-session-parser.test.ts).
+      // This wiring guard only checks that the CLI stays connected to the
+      // shared evaluator and derives its legacy output from the binding.
       const source = read('packages/pd-cli/src/commands/pain-record.ts');
       expect(source).toMatch(/evaluatePainIngress\(/);
-      // Explicit-session + unverified acquisition routes to unbound
-      // (then the shared evaluator refuses it).
-      expect(source).toMatch(/acquisition\.status === 'unavailable'[\s\S]{0,400}status: 'unbound'/);
       expect(source).toMatch(/hostKind:\s*binding\.hostKind,/);
-      expect(source).not.toMatch(/hostKind:\s*'openclaw',/);
     });
 
     it('legacy event import stays unattributed (unknown — never guessed)', () => {
