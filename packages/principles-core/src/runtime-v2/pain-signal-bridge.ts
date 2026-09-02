@@ -15,6 +15,7 @@ import {
   parsePainIngressV1Payload,
   checkIngressTopLevelConsistency,
   deriveProvenanceFromIngressFacts,
+  isRecord,
 } from './pain-ingress-payload.js';
 import type { PainIngressV1Payload } from './pain-ingress-payload.js';
 
@@ -220,7 +221,10 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:not_an_object' };
   }
-  const record = parsed as Record<string, unknown>;
+  if (!isRecord(parsed)) {
+    return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:not_an_object' };
+  }
+  const record = parsed;
 
   const provenance = normalizePainProvenance(record.provenance);
   if (provenance === undefined) {

@@ -72,7 +72,7 @@ export type PainIngressV1ParseResult =
   | { ok: true; payload: PainIngressV1Payload }
   | { ok: false; reasonCode: string };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
