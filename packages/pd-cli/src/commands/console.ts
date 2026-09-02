@@ -77,29 +77,39 @@ function getConsoleDir(): { dir: string; mode: InstallLayoutMode } | null {
  * when everything is resolvable.
  */
 export function checkConsoleRuntimeDependencies(consoleDir: string): string | undefined {
-  // These are the exact entry files the console server resolves at startup:
-  //   console/src imports → node_modules entry
-  //   @principles/core/principle-tree-ledger → dist/principle-tree-ledger/index.js
-  //   @principles/host-runtime                 → dist/index.js
-  //   @principles/install-layout               → dist/index.js
-  //   principles-disciple/governance-audit     → dist/governance-audit.js
-  // Checking the real resolved entry (not just dist/index.js) catches broken
+  // These are the exact entry files the console server resolves at startup,
+  // derived from each package's real `exports` map (not assumed dist/index.js):
+  //   @principles/core/principle-tree-ledger → dist/principle-tree-ledger.js
+  //   @principles/core/runtime-v2            → dist/runtime-v2/index.js
+  //   @principles/host-runtime               → dist/index.js
+  //   @principles/install-layout             → dist/index.js
+  //   principles-disciple/governance-audit   → dist/governance-audit.js
+  // Checking the real resolved entries (not just dist/index.js) catches broken
   // shells where package.json exists but the actual import target is missing.
-  const slots: { pkg: string; entry: string }[] = [
-    { pkg: '@principles/core', entry: path.join('dist', 'principle-tree-ledger', 'index.js') },
-    { pkg: '@principles/host-runtime', entry: path.join('dist', 'index.js') },
-    { pkg: '@principles/install-layout', entry: path.join('dist', 'index.js') },
-    { pkg: 'principles-disciple', entry: path.join('dist', 'governance-audit.js') },
+  // One package can have multiple required entries (@principles/core).
+  const slots: { pkg: string; entries: string[] }[] = [
+    {
+      pkg: '@principles/core',
+      entries: [
+        path.join('dist', 'principle-tree-ledger.js'),
+        path.join('dist', 'runtime-v2', 'index.js'),
+      ],
+    },
+    { pkg: '@principles/host-runtime', entries: [path.join('dist', 'index.js')] },
+    { pkg: '@principles/install-layout', entries: [path.join('dist', 'index.js')] },
+    { pkg: 'principles-disciple', entries: [path.join('dist', 'governance-audit.js')] },
   ];
   for (const slot of slots) {
     const base = path.join(consoleDir, 'node_modules', slot.pkg);
     const pkgJson = path.join(base, 'package.json');
-    const entryFile = path.join(base, slot.entry);
     if (!fs.existsSync(pkgJson)) {
       return `console/node_modules/${slot.pkg}/package.json is missing`;
     }
-    if (!fs.existsSync(entryFile)) {
-      return `console/node_modules/${slot.pkg}/${slot.entry.replaceAll('\\', '/')} is missing (incomplete package)`;
+    for (const entry of slot.entries) {
+      const entryFile = path.join(base, entry);
+      if (!fs.existsSync(entryFile)) {
+        return `console/node_modules/${slot.pkg}/${entry.replaceAll('\\', '/')} is missing (incomplete package)`;
+      }
     }
   }
   return undefined;
