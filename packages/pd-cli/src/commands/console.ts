@@ -64,6 +64,57 @@ function getConsoleDir(): { dir: string; mode: InstallLayoutMode } | null {
   return { dir, mode: resolved.mode };
 }
 
+/**
+ * Verify the console server's runtime dependency slots are resolvable.
+ *
+ * The console's dist statically imports `@principles/core/runtime-v2` and
+ * `@principles/host-runtime`, and reads plugin governance exports from
+ * `principles-disciple`. Each slot must be a real package (package.json present
+ * AND dist/index.js present) — a dangling junction or an empty shell (package.json
+ * without dist) makes the server crash with ERR_MODULE_NOT_FOUND at startup.
+ *
+ * Returns a human-readable description of the first broken slot, or undefined
+ * when everything is resolvable.
+ */
+export function checkConsoleRuntimeDependencies(consoleDir: string): string | undefined {
+  // These are the exact entry files the console server resolves at startup,
+  // derived from each package's real `exports` map (not assumed dist/index.js):
+  //   @principles/core/principle-tree-ledger → dist/principle-tree-ledger.js
+  //   @principles/core/runtime-v2            → dist/runtime-v2/index.js
+  //   @principles/host-runtime               → dist/index.js
+  //   @principles/install-layout             → dist/index.js
+  //   principles-disciple/governance-audit   → dist/governance-audit.js
+  // Checking the real resolved entries (not just dist/index.js) catches broken
+  // shells where package.json exists but the actual import target is missing.
+  // One package can have multiple required entries (@principles/core).
+  const slots: { pkg: string; entries: string[] }[] = [
+    {
+      pkg: '@principles/core',
+      entries: [
+        path.join('dist', 'principle-tree-ledger.js'),
+        path.join('dist', 'runtime-v2', 'index.js'),
+      ],
+    },
+    { pkg: '@principles/host-runtime', entries: [path.join('dist', 'index.js')] },
+    { pkg: '@principles/install-layout', entries: [path.join('dist', 'index.js')] },
+    { pkg: 'principles-disciple', entries: [path.join('dist', 'governance-audit.js')] },
+  ];
+  for (const slot of slots) {
+    const base = path.join(consoleDir, 'node_modules', slot.pkg);
+    const pkgJson = path.join(base, 'package.json');
+    if (!fs.existsSync(pkgJson)) {
+      return `console/node_modules/${slot.pkg}/package.json is missing`;
+    }
+    for (const entry of slot.entries) {
+      const entryFile = path.join(base, entry);
+      if (!fs.existsSync(entryFile)) {
+        return `console/node_modules/${slot.pkg}/${entry.replaceAll('\\', '/')} is missing (incomplete package)`;
+      }
+    }
+  }
+  return undefined;
+}
+
 export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
@@ -99,6 +150,27 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
   const webIndex = getConsoleWebIndex(paths, consoleLocation.mode);
   if (!fs.existsSync(webIndex)) {
     const msg = `Console web UI not found at ${webIndex}. The console bundle is corrupted. Re-run installer.`;
+    if (opts.json) {
+      console.log(JSON.stringify({ success: false, reason: msg, nextAction: 'npx create-principles-disciple' }));
+    } else {
+      console.error(msg);
+    }
+    process.exit(1);
+    return;
+  }
+
+  // Runtime dependency integrity check: the console server statically imports
+  // @principles/core/runtime-v2 and @principles/host-runtime, and the console
+  // reads plugin governance exports from principles-disciple. When the OpenClaw
+  // upgrade path refreshes the plugin bundle without re-running the PD installer
+  // (2026-09: console_cli_exited_before_result), these node_modules slots can be
+  // left as an empty shell (package.json without dist) or a dangling junction.
+  // The server then crashes with ERR_MODULE_NOT_FOUND at startup, which the
+  // Companion reports as the opaque console_cli_exited_before_result. Fail loud
+  // here with the actionable repair command instead.
+  const integrityError = checkConsoleRuntimeDependencies(consoleLocation.dir);
+  if (integrityError) {
+    const msg = `Console runtime dependency broken: ${integrityError}. Re-run installer to repair.`;
     if (opts.json) {
       console.log(JSON.stringify({ success: false, reason: msg, nextAction: 'npx create-principles-disciple' }));
     } else {
@@ -485,6 +557,39 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   }
 
   // 5) Fresh spawn path
+  // Runtime dependency integrity check — only here, NOT before the reuse
+  // probe above. A healthy console already running (reused) has its modules
+  // loaded in memory; broken disk slots (dangling junction / empty shell left
+  // by an interrupted update) must not prevent reusing it. Only when we are
+  // about to execute the local console bytes do the local bytes need to be
+  // resolvable. The server statically imports @principles/core/runtime-v2 and
+  // @principles/host-runtime, and reads plugin governance exports from
+  // principles-disciple; without this check a broken install crashes with
+  // ERR_MODULE_NOT_FOUND which the Companion reports as the opaque
+  // console_cli_exited_before_result.
+  const integrityError = checkConsoleRuntimeDependencies(consoleLocation.dir);
+  if (integrityError) {
+    const result: ConsoleLaunchResult = {
+      status: 'failed',
+      url: '',
+      port: plan.port,
+      host: plan.host,
+      workspaceDir,
+      reused: false,
+      browserOpened: false,
+      reason: 'console_runtime_dependency_broken',
+      nextAction: `Re-run installer: npx create-principles-disciple (${integrityError})`,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`error: ${result.reason}`);
+      console.error(`next:   ${result.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
+
   const args = [serverEntry, '--workspace', workspaceDir, '--port', String(plan.port), '--host', plan.host];
   if (opts.noAuth) args.push('--no-auth');
   if (opts.token) args.push('--token', opts.token);
