@@ -571,17 +571,23 @@ describe('CLI command wiring (pd console open)', () => {
     fs.writeFileSync(path.join(consoleDir, 'dist', 'web', 'index.html'), '<!DOCTYPE html><html></html>');
     // Runtime dependency integrity check: fake console needs minimal node_modules
     // slots so the launcher passes the integrity gate and reaches spawn/health logic.
-    // Four packages: @principles/core, @principles/host-runtime, @principles/install-layout, principles-disciple.
-    const mkDep = (pkgDir: string) => {
-      fs.mkdirSync(path.join(pkgDir, 'dist'), { recursive: true });
-      fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0' }, null, 2));
-      fs.writeFileSync(path.join(pkgDir, 'dist', 'index.js'), 'export {};\n');
-    };
     const nm = path.join(consoleDir, 'node_modules');
-    mkDep(path.join(nm, 'principles-disciple'));
-    mkDep(path.join(nm, '@principles', 'core'));
-    mkDep(path.join(nm, '@principles', 'host-runtime'));
-    mkDep(path.join(nm, '@principles', 'install-layout'));
+    // principles-disciple: server imports principles-disciple/governance-audit
+    fs.mkdirSync(path.join(nm, 'principles-disciple', 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(nm, 'principles-disciple', 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0' }, null, 2));
+    fs.writeFileSync(path.join(nm, 'principles-disciple', 'dist', 'governance-audit.js'), 'export {};\n');
+    // @principles/core: server imports @principles/core/principle-tree-ledger
+    fs.mkdirSync(path.join(nm, '@principles', 'core', 'dist', 'principle-tree-ledger'), { recursive: true });
+    fs.writeFileSync(path.join(nm, '@principles', 'core', 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0' }, null, 2));
+    fs.writeFileSync(path.join(nm, '@principles', 'core', 'dist', 'principle-tree-ledger', 'index.js'), 'export {};\n');
+    // @principles/host-runtime: uses root entry dist/index.js
+    fs.mkdirSync(path.join(nm, '@principles', 'host-runtime', 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(nm, '@principles', 'host-runtime', 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0' }, null, 2));
+    fs.writeFileSync(path.join(nm, '@principles', 'host-runtime', 'dist', 'index.js'), 'export {};\n');
+    // @principles/install-layout: uses root entry dist/index.js
+    fs.mkdirSync(path.join(nm, '@principles', 'install-layout', 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(nm, '@principles', 'install-layout', 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0' }, null, 2));
+    fs.writeFileSync(path.join(nm, '@principles', 'install-layout', 'dist', 'index.js'), 'export {};\n');
     fs.writeFileSync(path.join(consoleDir, 'dist', 'server.js'), `
       import http from 'node:http';
       const args = process.argv.slice(2);
@@ -1135,18 +1141,22 @@ describe('checkConsoleRuntimeDependencies', () => {
   it('returns undefined when all deps are intact', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
     try {
-      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist'), { recursive: true });
+      // @principles/core: entry is dist/principle-tree-ledger/index.js
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
-      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'index.js'), '');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger', 'index.js'), '');
+      // @principles/host-runtime: entry is dist/index.js
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'package.json'), '{}');
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist', 'index.js'), '');
+      // @principles/install-layout: entry is dist/index.js
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'), '');
+      // principles-disciple: entry is dist/governance-audit.js
       fs.mkdirSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'package.json'), '{}');
-      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist', 'index.js'), '');
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist', 'governance-audit.js'), '');
 
       expect(checkConsoleRuntimeDependencies(tmp)).toBeUndefined();
     } finally {
@@ -1158,11 +1168,18 @@ describe('checkConsoleRuntimeDependencies', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
     try {
       // Create all deps intact except host-runtime (no package.json)
-      for (const pkg of ['@principles/core', '@principles/install-layout', 'principles-disciple']) {
-        fs.mkdirSync(path.join(tmp, 'node_modules', pkg.split('/')[0], pkg.split('/')[1] || '', 'dist'), { recursive: true });
-        fs.writeFileSync(path.join(tmp, 'node_modules', pkg, 'package.json'), '{}');
-        fs.writeFileSync(path.join(tmp, 'node_modules', pkg, 'dist', 'index.js'), '');
-      }
+      // core
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger', 'index.js'), '');
+      // install-layout
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'), '');
+      // principles-disciple
+      fs.mkdirSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist', 'governance-audit.js'), '');
       // @principles/host-runtime without package.json — the broken-shell case
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist', 'index.js'), '');
@@ -1175,13 +1192,22 @@ describe('checkConsoleRuntimeDependencies', () => {
     }
   });
 
-  it('returns error when a dep has package.json but no dist (empty shell)', () => {
+  it('returns error when a dep has package.json but no dist entry (empty shell)', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
     try {
-      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist'), { recursive: true });
+      // core intact
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
-      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'index.js'), '');
-      // host-runtime exists but has no dist/index.js
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger', 'index.js'), '');
+      // install-layout intact
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'), '');
+      // principles-disciple intact
+      fs.mkdirSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'package.json'), '{}');
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist', 'governance-audit.js'), '');
+      // host-runtime exists but has no dist/index.js (root entry missing)
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime'));
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'package.json'), '{}');
 
@@ -1196,16 +1222,16 @@ describe('checkConsoleRuntimeDependencies', () => {
   it('returns error when a dep junction is dangling (directory missing)', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
     try {
-      // Only create @principles/core, leave host-runtime missing entirely
-      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist'), { recursive: true });
+      // Create core, install-layout, principles-disciple; leave host-runtime missing
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
-      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'index.js'), '');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger', 'index.js'), '');
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'), '');
       fs.mkdirSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'package.json'), '{}');
-      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist', 'index.js'), '');
+      fs.writeFileSync(path.join(tmp, 'node_modules', 'principles-disciple', 'dist', 'governance-audit.js'), '');
 
       const err = checkConsoleRuntimeDependencies(tmp);
       expect(err).toContain('host-runtime');

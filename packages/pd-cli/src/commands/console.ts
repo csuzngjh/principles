@@ -77,21 +77,29 @@ function getConsoleDir(): { dir: string; mode: InstallLayoutMode } | null {
  * when everything is resolvable.
  */
 export function checkConsoleRuntimeDependencies(consoleDir: string): string | undefined {
-  const slots: { name: string; pkg: string }[] = [
-    { name: '@principles/core', pkg: '@principles/core' },
-    { name: '@principles/host-runtime', pkg: '@principles/host-runtime' },
-    { name: '@principles/install-layout', pkg: '@principles/install-layout' },
-    { name: 'principles-disciple', pkg: 'principles-disciple' },
+  // These are the exact entry files the console server resolves at startup:
+  //   console/src imports → node_modules entry
+  //   @principles/core/principle-tree-ledger → dist/principle-tree-ledger/index.js
+  //   @principles/host-runtime                 → dist/index.js
+  //   @principles/install-layout               → dist/index.js
+  //   principles-disciple/governance-audit     → dist/governance-audit.js
+  // Checking the real resolved entry (not just dist/index.js) catches broken
+  // shells where package.json exists but the actual import target is missing.
+  const slots: { pkg: string; entry: string }[] = [
+    { pkg: '@principles/core', entry: path.join('dist', 'principle-tree-ledger', 'index.js') },
+    { pkg: '@principles/host-runtime', entry: path.join('dist', 'index.js') },
+    { pkg: '@principles/install-layout', entry: path.join('dist', 'index.js') },
+    { pkg: 'principles-disciple', entry: path.join('dist', 'governance-audit.js') },
   ];
   for (const slot of slots) {
     const base = path.join(consoleDir, 'node_modules', slot.pkg);
     const pkgJson = path.join(base, 'package.json');
-    const distEntry = path.join(base, 'dist', 'index.js');
+    const entryFile = path.join(base, slot.entry);
     if (!fs.existsSync(pkgJson)) {
       return `console/node_modules/${slot.pkg}/package.json is missing`;
     }
-    if (!fs.existsSync(distEntry)) {
-      return `console/node_modules/${slot.pkg}/dist/index.js is missing (incomplete package)`;
+    if (!fs.existsSync(entryFile)) {
+      return `console/node_modules/${slot.pkg}/${slot.entry.replaceAll('\\', '/')} is missing (incomplete package)`;
     }
   }
   return undefined;
@@ -396,37 +404,6 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     return;
   }
 
-  // Runtime dependency integrity check: the console server statically imports
-  // @principles/core/runtime-v2 and @principles/host-runtime, and reads plugin
-  // governance exports from principles-disciple. When the OpenClaw upgrade path
-  // refreshes the plugin bundle without re-running the PD installer, these
-  // node_modules slots can be left as an empty shell (package.json without dist)
-  // or a dangling junction. The server then crashes with ERR_MODULE_NOT_FOUND
-  // at startup, which the Companion reports as opaque console_cli_exited_before_result.
-  // Fail loud here with the actionable repair command instead.
-  const integrityError = checkConsoleRuntimeDependencies(consoleLocation.dir);
-  if (integrityError) {
-    const result: ConsoleLaunchResult = {
-      status: 'failed',
-      url: '',
-      port: 0,
-      host: '127.0.0.1',
-      workspaceDir,
-      reused: false,
-      browserOpened: false,
-      reason: 'console_runtime_dependency_broken',
-      nextAction: `Re-run installer: npx create-principles-disciple (${integrityError})`,
-    };
-    if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.error(`error: ${result.reason}`);
-      console.error(`next:   ${result.nextAction}`);
-    }
-    process.exit(1);
-    return;
-  }
-
   // EP-06 regression guard (PR #1169): verify web UI bundle exists before launch.
   // Without dist/web/index.html the server returns 404 "Run npm run build:ui first"
   // — a fatal first-impression bug for new users.
@@ -570,6 +547,39 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   }
 
   // 5) Fresh spawn path
+  // Runtime dependency integrity check — only here, NOT before the reuse
+  // probe above. A healthy console already running (reused) has its modules
+  // loaded in memory; broken disk slots (dangling junction / empty shell left
+  // by an interrupted update) must not prevent reusing it. Only when we are
+  // about to execute the local console bytes do the local bytes need to be
+  // resolvable. The server statically imports @principles/core/runtime-v2 and
+  // @principles/host-runtime, and reads plugin governance exports from
+  // principles-disciple; without this check a broken install crashes with
+  // ERR_MODULE_NOT_FOUND which the Companion reports as the opaque
+  // console_cli_exited_before_result.
+  const integrityError = checkConsoleRuntimeDependencies(consoleLocation.dir);
+  if (integrityError) {
+    const result: ConsoleLaunchResult = {
+      status: 'failed',
+      url: '',
+      port: plan.port,
+      host: plan.host,
+      workspaceDir,
+      reused: false,
+      browserOpened: false,
+      reason: 'console_runtime_dependency_broken',
+      nextAction: `Re-run installer: npx create-principles-disciple (${integrityError})`,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`error: ${result.reason}`);
+      console.error(`next:   ${result.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
+
   const args = [serverEntry, '--workspace', workspaceDir, '--port', String(plan.port), '--host', plan.host];
   if (opts.noAuth) args.push('--no-auth');
   if (opts.token) args.push('--token', opts.token);
