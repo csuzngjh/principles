@@ -15,6 +15,7 @@ import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvid
 import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { EffectivePdConfig } from './config/pd-config-types.js';
+import { resolveDiagnosticianCapability } from './diagnostician-capability.js';
 import type { IntentDocReader } from './intent/intent-doc-reader-port.js';
 import type { TrajectoryTurnReader } from './store/context/trajectory-turn-reader.js';
 
@@ -25,7 +26,13 @@ export type FailureCategory =
   | 'output_invalid'
   | 'artifact_missing'
   | 'ledger_write_failed'
-  | 'candidate_missing';
+  | 'candidate_missing'
+  /**
+   * PRI-638: the Owner disabled the Diagnostician capability. Distinct from
+   * `config_missing` on purpose — a deliberate kill switch must never be
+   * reported to the Owner as a broken runtime or a bad configuration.
+   */
+  | 'capability_disabled';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -91,6 +98,13 @@ export interface PainToPrincipleOutput {
 // ── Error classification ───────────────────────────────────────────────────
 
 function classifyFromBridge(result: PainSignalBridgeResult): FailureCategory | undefined {
+  // PRI-638 P1-D: ONLY a DisabledDiagnosticianRunner result — which uniquely
+  // carries a nextAction — is an Owner capability decision. A
+  // `capability_missing` from a real runner stage (e.g. a missing intent
+  // capability) must NOT be relabeled as an Owner disable.
+  if (result.errorCategory === 'capability_missing' && result.nextAction !== undefined) {
+    return 'capability_disabled';
+  }
   if (result.errorCategory) {
     return (FAILURE_CATEGORY_MAP[result.errorCategory] as FailureCategory) ?? 'runtime_unavailable';
   }
@@ -125,6 +139,12 @@ export class PainToPrincipleService {
     const startTime = Date.now();
     const {painId} = input;
     const taskId = input.taskId ?? createDiagnosticianTaskId(painId);
+
+    // PRI-638: read the canonical capability authority once per call. The
+    // factory applies the same resolver, so this is a consistent second read of
+    // one truth, not a second authority. It is what lets this service report
+    // "Owner disabled" instead of misclassifying it as a runtime fault.
+    const capability = resolveDiagnosticianCapability(this.opts.effectiveConfig);
 
     const painData: PainDetectedData = {
       painId,
@@ -183,6 +203,9 @@ export class PainToPrincipleService {
           observabilityWarnings,
           latencyMs,
           message: `Diagnosis submitted. Use 'pd task show ${taskIdResult.taskId}' to check progress.`,
+          // PRI-638: an async submission against a disabled capability stays
+          // durable but will not progress until the Owner re-enables the agent.
+          ...(capability.available ? {} : { nextAction: capability.nextAction, failureCategory: 'capability_disabled' as const }),
         };
       }
 
@@ -225,7 +248,13 @@ export class PainToPrincipleService {
         admissionResults: bridgeResult.admissionResults,
         message: bridgeResult.message,
         observabilityWarnings,
+        // PRI-638 P1-D: classification comes from the bridge result itself —
+        // `capability_disabled` only when DisabledDiagnosticianRunner returned
+        // (errorCategory capability_missing + nextAction). A real persistence /
+        // runtime exception below must keep its own category; the capability
+        // state is context, never an exception-classification override.
         failureCategory: classifyFromBridge(bridgeResult),
+        ...(bridgeResult.nextAction !== undefined ? { nextAction: bridgeResult.nextAction } : {}),
         latencyMs,
       };
     } catch (err: unknown) {
@@ -238,6 +267,9 @@ export class PainToPrincipleService {
         ledgerEntryIds: [],
         message: err instanceof Error ? err.message : String(err),
         observabilityWarnings: [],
+        // PRI-638 P1-D: a real throw (SQLite write failure, state init failure,
+        // storage_unavailable, malformed config, …) is classified on its own
+        // terms — the capability being disabled must not mask it.
         failureCategory: classifyFromError(err),
         latencyMs,
       };

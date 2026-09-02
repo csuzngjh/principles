@@ -16,6 +16,12 @@ export interface RunnerResult {
   readonly errorCategory?: PDErrorCategory;
   /** Human-readable failure explanation. */
   readonly failureReason?: string;
+  /**
+   * PRI-638: recovery action for the Owner / CLI operator. Only set by
+   * `DisabledDiagnosticianRunner`, where the failure is an Owner decision
+   * rather than a runtime fault.
+   */
+  readonly nextAction?: string;
   /** Number of attempts made on this task so far. */
   readonly attemptCount: number;
 }

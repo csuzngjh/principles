@@ -170,6 +170,7 @@ export async function handleConfigRoute(
       agent: result.agent,
       runtimeProfile: result.runtimeProfile,
       enabled: result.enabled,
+      ...(result.warning !== undefined ? { warning: result.warning } : {}),
     });
     return;
   }

@@ -24,7 +24,6 @@ import {
   DiagRouterRunner,
   DefaultDiagRootCauseValidator,
   DefaultDiagDistillerValidator,
-  DisabledDiagnosticianRunner,
   type DiagnosticianRunnerLike,
   TestDoubleRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
@@ -33,8 +32,8 @@ import {
   isRuntimeConfigError,
   CandidateIntakeService,
   run as diagnoseRun,
-  isFeatureEnabled,
   SPLIT_PIPELINE_TOTAL_TIMEOUT_MS,
+  resolveDiagnosticianCapability,
   PrincipleTreeLedgerAdapter,
   SqliteDeadLetterStore,
   PainSignalBridge,
@@ -44,7 +43,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
 import type { Command } from 'commander';
-import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
+import { loadPdConfig } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { createHash } from 'node:crypto';
 /** Layer 0 content-hash (design §6.1); injected so diag writers can attach predecessorSummary hashes. */
@@ -226,6 +225,9 @@ function refuseExit(opts: PainRetryOptions, payload: { status?: string; painId: 
     }));
   } else {
     console.error(`error: ${payload.message ?? payload.reason}`);
+    // PRI-638: the reason must be visible in text mode too — an Owner kill
+    // switch (capability_disabled) must not read like a runtime fault.
+    console.error(`reason: ${payload.reason}`);
     console.error(`nextAction: ${payload.nextAction}`);
   }
   process.exit(1);
@@ -244,6 +246,28 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
   }
 
   const { taskId } = resolution;
+
+  // PRI-638: the capability gate comes BEFORE runtime resolution. Previously an
+  // Owner-disabled Diagnostician surfaced here as `missing_runtime` ("no
+  // .pd/config.yaml runtime binding found"), which told the Owner their config
+  // was broken when they had deliberately switched the agent off. This reads the
+  // same canonical authority (`internalAgents.agents.diagnostician.enabled`) the
+  // runtime factory uses — the CLI owns no kill switch of its own.
+  const capability = resolveDiagnosticianCapability(
+    (() => {
+      const loaded = loadPdConfig(workspaceDir);
+      return loaded.ok ? loaded.effective : loaded.defaults;
+    })(),
+  );
+  if (!capability.available) {
+    return refuseExit(opts, {
+      painId: opts.painId,
+      taskId,
+      reason: capability.reason,
+      message: capability.message,
+      nextAction: capability.nextAction,
+    });
+  }
 
   // Step 2: Look up task and validate
   const stateManager = new RuntimeStateManager({ workspaceDir });
@@ -522,17 +546,18 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
     const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
 
-    // Check if split pipeline is enabled — 3 serial LLM calls need more time
-    const configLoadResult = loadPdConfig(workspaceDir);
-    const featureFlags = computeFlagsFromLoadResult(configLoadResult);
-    const isSplitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
-    const pipelineTimeoutMs = isSplitPipeline ? SPLIT_PIPELINE_TOTAL_TIMEOUT_MS : 300_000;
+    // PRI-638: implementation selection is gone. The split pipeline is the only
+    // Diagnostician implementation, so it always runs with its documented
+    // 3-stage budget; `diagnostician_split_pipeline` no longer selects a runner
+    // nor disables capability (the capability gate above owns that).
+    const pipelineTimeoutMs = SPLIT_PIPELINE_TOTAL_TIMEOUT_MS;
     // BUG-1 (PRI-442): extract effectiveConfig so ADR-0019 LLM rate-limit
     // degradation (isDegradationEnabled in base-peer-runner) can read the
     // diagnostician_llm_degradation feature flag. Without this, the runners
     // receive no effectiveConfig and degradation silently never fires.
     // CR-1 (CodeRabbit P2, rc-9): warn when config load failed so the
     // fallback to defaults is observable — no silent degradation.
+    const configLoadResult = loadPdConfig(workspaceDir);
     if (!configLoadResult.ok) {
       const errSummary = configLoadResult.errors
         .map((e) => `${e.path}: ${e.reason}`)
@@ -543,34 +568,29 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
     const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
 
-    let runner: DiagnosticianRunnerLike;
-    if (isSplitPipeline) {
-      const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
-      const perStageTimeoutMs = pipelineTimeoutMs / 3;
-      const rootCauseRunner = new DiagRootCauseRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, contentHashFn },
-        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-      );
-      const distillerRunner = new DiagDistillerRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), contentHashFn },
-        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-      );
-      const routerRunner = new DiagRouterRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, contentHashFn },
-        { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-      );
+    const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
+    const perStageTimeoutMs = pipelineTimeoutMs / 3;
+    const rootCauseRunner = new DiagRootCauseRunner(
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, contentHashFn },
+      { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
+    );
+    const distillerRunner = new DiagDistillerRunner(
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), contentHashFn },
+      { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
+    );
+    const routerRunner = new DiagRouterRunner(
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, contentHashFn },
+      { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
+    );
 
-      runner = new SplitDiagnosticianRunner({
-        rootCauseRunner,
-        distillerRunner,
-        routerRunner,
-        stateManager,
-        committer,
-        perStageTimeoutMs,
-      });
-    } else {
-      runner = new DisabledDiagnosticianRunner();
-    }
+    const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
+      stateManager,
+      committer,
+      perStageTimeoutMs,
+    });
 
     // ── Dead letter replay branch ──────────────────────────────────────────
     // When task was null but a dead letter was found, replay the pain signal

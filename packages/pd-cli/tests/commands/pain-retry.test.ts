@@ -13,7 +13,7 @@
  * - Wrong taskKind: rejected with reason + nextAction
  * - Missing pi-ai config: rejected with reason + nextAction
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
@@ -144,6 +144,8 @@ vi.mock('@principles/core/runtime-v2', () => {
     OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PiAiRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     SPLIT_PIPELINE_TOTAL_TIMEOUT_MS: 300000,
+    // PRI-638: capability gate — available by default; disabled cases override this.
+    resolveDiagnosticianCapability: vi.fn((): { available: boolean; reason?: string; message?: string; nextAction?: string } => ({ available: true })),
     PDRuntimeError: class PDRuntimeError extends Error {
       constructor(public category: string, message: string) {
         super(message);
@@ -1045,6 +1047,75 @@ describe('BUG-1 (PRI-442): pain retry — effectiveConfig wiring to split-pipeli
     expect(routerOptions?.effectiveConfig).toBeDefined();
 
     logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ── PRI-638: unified capability-disabled semantics ───────────────────────────
+//
+// On main, an Owner-disabled Diagnostician surfaced from `pd pain retry` as
+// `missing_runtime` ("no .pd/config.yaml runtime binding found") — telling the
+// Owner their config was broken when they had deliberately switched the agent
+// off. The capability gate now runs BEFORE runtime resolution and reads the
+// same canonical authority the runtime factory uses.
+
+describe('PRI-638: pd pain retry when Diagnostician capability is disabled', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.resolveDiagnosticianCapability).mockReturnValue({
+      available: false,
+      reason: 'capability_disabled',
+      message: "Agent 'diagnostician' is disabled",
+      nextAction: "Enable agent 'diagnostician' in .pd/config.yaml internalAgents.agents.diagnostician.enabled",
+    });
+  });
+
+  afterEach(async () => {
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.resolveDiagnosticianCapability).mockReset();
+  });
+
+  it('RETRY-638-01: --json refuses with capability_disabled, not missing_runtime', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'pain-638',
+      workspace: '/tmp/fake-workspace',
+      json: true,
+    });
+
+    const jsonCall = logSpy.mock.calls.find((call) => String(call[0]).trim().startsWith('{'));
+    expect(jsonCall).toBeDefined();
+    const parsed = JSON.parse(String(jsonCall?.[0]));
+    expect(parsed.reason).toBe('capability_disabled');
+    expect(parsed.reason).not.toBe('missing_runtime');
+    expect(parsed.nextAction).toContain('internalAgents.agents.diagnostician.enabled');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('RETRY-638-02: capability gate fires before the runtime adapter is built', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handlePainRetry({
+      painId: 'pain-638',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    });
+
+    const out = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(out).toContain('capability_disabled');
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    expect(runtimeV2.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
+    expect(runtimeV2.SplitDiagnosticianRunner).not.toHaveBeenCalled();
+
+    errSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });

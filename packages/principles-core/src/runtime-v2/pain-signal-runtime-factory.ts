@@ -23,7 +23,6 @@ import { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-ou
 import { resolveOutputLanguage } from './language-directive.js';
 import type { OutputLanguage } from './language-directive.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from './config/pd-config-feature-flags.js';
-import { PDRuntimeError } from './error-categories.js';
 import { CandidateIntakeService } from './candidate-intake-service.js';
 import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
@@ -47,6 +46,13 @@ import {
   createAdapterConfigFromProfile,
 } from './config/pd-config-agent-binding.js';
 import type { EffectivePdConfig } from './config/pd-config-types.js';
+import {
+  resolveDiagnosticianCapability,
+  type DiagnosticianCapability,
+} from './diagnostician-capability.js';
+
+/** PRI-638: cache slot for the Owner-disabled bridge (no runtime kind applies). */
+const DISABLED_BRIDGE_CACHE_SLOT = 'capability-disabled';
 
 export interface PainSignalRuntimeFactoryOptions {
   workspaceDir: string;
@@ -378,18 +384,52 @@ export function resolveRuntimeConfigFromPdConfig(
 // Key format: `${workspaceDir}:${runtimeKind}:${openclawMode ?? ''}` (D-03)
 const bridgeCache = new Map<string, PainSignalBridge>();
 
+export interface DisabledDiagnosticianRunnerOptions {
+  /** Human-readable reason. Defaults to the canonical Owner-disable message. */
+  readonly failureReason?: string;
+  /** Recovery action surfaced to the Owner / CLI operator. */
+  readonly nextAction?: string;
+}
+
+export const DIAGNOSTICIAN_DISABLED_FAILURE_REASON =
+  'Diagnostician capability is disabled by Owner configuration (internalAgents.agents.diagnostician.enabled=false)';
+
+export const DIAGNOSTICIAN_DISABLED_NEXT_ACTION =
+  'Enable internalAgents.agents.diagnostician.enabled in .pd/config.yaml (or Console → Control Center), then retry.';
+
 /**
- * DisabledDiagnosticianRunner — used when the split pipeline feature flag is disabled (PRI-373).
- * Fails loud with capability_missing, preventing silent monlith fallback.
+ * DisabledDiagnosticianRunner — the single representation of "Diagnostician is
+ * not available" (PRI-638).
+ *
+ * Before PRI-638 this class was selected by the `diagnostician_split_pipeline`
+ * feature flag, which made a rollout flag act as a second kill switch. The
+ * Owner capability authority (`internalAgents.agents.diagnostician.enabled`) is
+ * now the only thing that produces this runner.
+ *
+ * Contract (identical for every entrypoint):
+ *   - status: 'failed'
+ *   - errorCategory: 'capability_missing' (existing PDErrorCategory — reuse, do
+ *     not invent a new enum)
+ *   - zero provider/LLM calls: the runner never touches an adapter
+ *   - attemptCount stays informational; the task is not marked failed by this
+ *     runner, so no LLM retry budget is consumed (see PainSignalBridge)
  */
 export class DisabledDiagnosticianRunner implements DiagnosticianRunnerLike {
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private readonly failureReason: string;
+  private readonly nextAction: string;
+
+  constructor(opts: DisabledDiagnosticianRunnerOptions = {}) {
+    this.failureReason = opts.failureReason ?? DIAGNOSTICIAN_DISABLED_FAILURE_REASON;
+    this.nextAction = opts.nextAction ?? DIAGNOSTICIAN_DISABLED_NEXT_ACTION;
+  }
+
   async run(taskId: string): Promise<RunnerResult> {
     return {
       status: 'failed',
       taskId,
       errorCategory: 'capability_missing',
-      failureReason: 'Diagnostician pipeline is disabled by feature flag (diagnostician_split_pipeline=false)',
+      failureReason: this.failureReason,
+      nextAction: this.nextAction,
       attemptCount: 1,
     };
   }
@@ -433,7 +473,7 @@ export function mapBridgeTelemetryToStoreEvent(event: {
 async function constructBridge(
   opts: PainSignalRuntimeFactoryOptions,
   runtimeConfig: RuntimeConfig,
-  pipeline: { useSplitPipeline: boolean; diagnosisPersistenceEnabled: boolean },
+  pipeline: { diagnosisPersistenceEnabled: boolean },
 ): Promise<PainSignalBridge> {
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
   await stateManager.initialize();
@@ -489,36 +529,35 @@ async function constructBridge(
     });
   }
 
-  let runner: DiagnosticianRunnerLike;
+  // PRI-638: implementation selection is no longer a decision this factory
+  // makes. `diagnostician_split_pipeline` used to gate this on a second,
+  // non-canonical kill switch; the split pipeline is the only implementation
+  // left in the tree (no monolithic DiagnosticianRunner exists any more), so
+  // the flag retains no implementation-selection or disable responsibility.
+  //
+  // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
+  // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
+  const rootCauseRunner = new DiagRootCauseRunner(
+    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
+    { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+  );
+  const distillerRunner = new DiagDistillerRunner(
+    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+    { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
+  );
+  const routerRunner = new DiagRouterRunner(
+    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer },
+    { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
+  );
 
-  if (pipeline.useSplitPipeline) {
-    // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
-    // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
-
-    const rootCauseRunner = new DiagRootCauseRunner(
-      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
-      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
-    );
-    const distillerRunner = new DiagDistillerRunner(
-      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
-      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
-    );
-    const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer },
-      { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage },
-    );
-
-    runner = new SplitDiagnosticianRunner({
-      rootCauseRunner,
-      distillerRunner,
-      routerRunner,
-      stateManager,
-      committer,
-      perStageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    });
-  } else {
-    runner = new DisabledDiagnosticianRunner();
-  }
+  const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({
+    rootCauseRunner,
+    distillerRunner,
+    routerRunner,
+    stateManager,
+    committer,
+    perStageTimeoutMs: runtimeConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  });
 
   const intakeService = new CandidateIntakeService({
     stateManager,
@@ -581,9 +620,71 @@ export async function disposePainSignalBridgesForWorkspace(workspaceDir: string)
  *
  * Cache key is workspaceDir — one bridge per workspace per process.
  */
+
+async function createDisabledBridge(
+  opts: PainSignalRuntimeFactoryOptions,
+  capability: Extract<DiagnosticianCapability, { available: false }>,
+): Promise<PainSignalBridge> {
+  const disabledCacheKey = `${opts.workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`;
+  const cached = bridgeCache.get(disabledCacheKey);
+  if (cached) return cached;
+
+  const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
+  await stateManager.initialize();
+
+  const intakeService = new CandidateIntakeService({
+    stateManager,
+    ledgerAdapter: opts.ledgerAdapter,
+  });
+
+  const bridge = new PainSignalBridge({
+    stateManager,
+    runner: new DisabledDiagnosticianRunner({
+      failureReason: `${capability.message} (${DIAGNOSTICIAN_DISABLED_FAILURE_REASON})`,
+      nextAction: capability.nextAction,
+    }),
+    intakeService,
+    ledgerAdapter: opts.ledgerAdapter,
+    autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
+    workspaceDir: opts.workspaceDir,
+    // No diagnosis runs, so nothing can be persisted by the persistence path.
+    diagnosisPersistenceEnabled: false,
+    // PRI-638 P1-A: mark this bridge so onPainDetected / executePendingDiagnosis
+    // only ENSURE a durable task exists and never reset existing task state.
+    capabilityDisabled: { reason: capability.message, nextAction: capability.nextAction },
+    ownedResources: [],
+  });
+
+  const winner = bridgeCache.get(disabledCacheKey);
+  if (winner !== undefined && winner !== bridge) {
+    await bridge.dispose().catch(() => undefined);
+    return winner;
+  }
+  bridgeCache.set(disabledCacheKey, bridge);
+  return bridge;
+}
+
+
+
 export async function createPainSignalBridge(
   opts: PainSignalRuntimeFactoryOptions,
 ): Promise<PainSignalBridge> {
+  // PRI-638: the capability decision comes FIRST and from ONE authority.
+  //
+  // Previously an Owner-disabled Diagnostician made this function throw, which
+  // (a) was interpreted by every caller as an unexpected runtime failure and
+  // (b) destroyed the Pain: `PainToPrincipleService.recordPain` calls this
+  // before `onPainDetected`/`submitPainSignal`, and those are the only writers
+  // of the durable diagnosis task. Owner-disabling the agent therefore meant
+  // the Pain never reached the task store and could never be recovered.
+  //
+  // The disabled bridge keeps the durable path alive while guaranteeing zero
+  // provider calls, so re-enabling the agent is enough to resume.
+  const capability = resolveDiagnosticianCapability(opts.effectiveConfig);
+  if (!capability.available) {
+    return createDisabledBridge(opts, capability);
+  }
+
   // PRI-306: Prefer config-driven binding when effectiveConfig is provided
   let runtimeConfig: RuntimeConfigResult;
   if (opts.effectiveConfig) {
@@ -601,38 +702,19 @@ export async function createPainSignalBridge(
   }
   validateRuntimeConfig(runtimeConfig);
 
-  // PRI-373: Resolve split pipeline flag BEFORE cache key to include it in the key.
-  // This prevents cache collision when same workspaceDir+runtimeKind+openclawMode
-  // is called with different effectiveConfig (e.g., split on vs off).
-  let useSplitPipeline = true;
-  // Pain Diagnosis Persistence: resolve the flag before the cache key for the
-  // same collision reason (same workspace, flag toggled between calls).
+  // Pain Diagnosis Persistence: resolve the flag before the cache key so a
+  // later call with the flag toggled cannot collide with a cached bridge.
   let diagnosisPersistenceEnabled = false;
   if (opts.effectiveConfig) {
     const featureFlags = computeFeatureFlagsFromConfig(opts.effectiveConfig);
-    const splitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
-    const asyncCli = isFeatureEnabled(featureFlags, 'diagnostician_async_cli');
     diagnosisPersistenceEnabled = isFeatureEnabled(featureFlags, 'pain_diagnosis_persistence');
-
-    if (splitPipeline && !asyncCli) {
-      const isExplicitSplit = opts.effectiveConfig.featuresChangedFromDefault?.includes('diagnostician_split_pipeline') ?? false;
-      const isExplicitAsync = opts.effectiveConfig.featuresChangedFromDefault?.includes('diagnostician_async_cli') ?? false;
-      if (isExplicitSplit || isExplicitAsync) {
-        throw new PDRuntimeError(
-          'input_invalid',
-          'diagnostician_split_pipeline requires diagnostician_async_cli=on (3 serial LLM calls would block the sync CLI 540s+)',
-        );
-      }
-    }
-
-    useSplitPipeline = splitPipeline;
   }
 
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${useSplitPipeline ? 'split' : 'disabled'}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}`;
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}:${diagnosisPersistenceEnabled ? 'pdp' : 'nopdp'}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
-  const bridge = await constructBridge(opts, runtimeConfig, { useSplitPipeline, diagnosisPersistenceEnabled });
+  const bridge = await constructBridge(opts, runtimeConfig, { diagnosisPersistenceEnabled });
   // PRI-624: a concurrent constructor may have won the cache slot while we
   // were building — the loser self-disposes so its handles never leak.
   const winner = bridgeCache.get(cacheKey);
@@ -644,13 +726,20 @@ export async function createPainSignalBridge(
   return bridge;
 }
 
+/**
+ * PRI-638: bridge for the "Owner disabled the Diagnostician" state.
+ *
+ * Deliberately built WITHOUT a runtime adapter — there is nothing to call, and
+ * constructing one is what previously forced a hard throw. Everything the
+ * durable Pain path needs (state manager + intake) is still wired, so pains
+ * keep landing and can be diagnosed after the Owner re-enables the agent.
+ */
 export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
   const effectiveKind = runtimeKind ?? 'pi-ai';
+  bridgeCache.delete(`${workspaceDir}:${DISABLED_BRIDGE_CACHE_SLOT}`);
   for (const mode of ['local', 'gateway', '']) {
-    for (const pipeline of ['split', 'disabled']) {
-      for (const pdp of ['pdp', 'nopdp']) {
-        bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pipeline}:${pdp}`);
-      }
+    for (const pdp of ['pdp', 'nopdp']) {
+      bridgeCache.delete(`${workspaceDir}:${effectiveKind}:${mode}:${pdp}`);
     }
   }
 }

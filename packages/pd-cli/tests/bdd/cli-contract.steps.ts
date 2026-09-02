@@ -133,6 +133,9 @@ vi.mock('@principles/core/runtime-v2', () => {
     OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PiAiRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     SPLIT_PIPELINE_TOTAL_TIMEOUT_MS: 300000,
+    // PRI-638: capability gate — available by default so the BDD scenarios
+    // exercise the pre-existing success/failure JSON contracts unchanged.
+    resolveDiagnosticianCapability: vi.fn(() => ({ available: true })),
     PDRuntimeError: class PDRuntimeError extends Error {
       constructor(public category: string, message: string) {
         super(message);

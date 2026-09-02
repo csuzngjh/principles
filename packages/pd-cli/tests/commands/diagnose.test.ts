@@ -108,6 +108,8 @@ vi.mock('@principles/core/runtime-v2', () => {
     OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PiAiRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     SPLIT_PIPELINE_TOTAL_TIMEOUT_MS: 300000,
+    // PRI-638: capability gate — available by default; disabled cases override this.
+    resolveDiagnosticianCapability: vi.fn((): { available: boolean; reason?: string; message?: string; nextAction?: string } => ({ available: true })),
     PDRuntimeError: class PDRuntimeError extends Error {
       constructor(public category: string, message: string) {
         super(message);
@@ -1711,6 +1713,86 @@ describe('BUG-2 (PRI-442): sourcePainId resolution for dreamer seed', () => {
     expect(buildDreamerSeedCalls[0].sourcePainId).toBe('pain_test-source-1');
 
     consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+// ── PRI-638: unified capability-disabled semantics ───────────────────────────
+//
+// The CLI owns no kill switch of its own: it reads the canonical authority
+// (internalAgents.agents.diagnostician.enabled) through the same resolver the
+// runtime factory uses. Owner-disabled must come out as a structured
+// `capability_disabled` result — never as missing_runtime / config failure —
+// with no adapter constructed and no provider contacted.
+
+describe('PRI-638: pd diagnose run when Diagnostician capability is disabled', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.resolveDiagnosticianCapability).mockReturnValue({
+      available: false,
+      reason: 'capability_disabled',
+      message: "Agent 'diagnostician' is disabled",
+      nextAction: "Enable agent 'diagnostician' in .pd/config.yaml internalAgents.agents.diagnostician.enabled",
+    });
+  });
+
+  afterEach(async () => {
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    vi.mocked(runtimeV2.resolveDiagnosticianCapability).mockReset();
+  });
+
+  it('DIAG-638-01: --json emits a structured capability_disabled result and exits 1', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'diag_task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    const jsonLine = logSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((line) => line.trim().startsWith('{'));
+    expect(jsonLine).toBeDefined();
+    const parsed = JSON.parse(jsonLine as string);
+    expect(parsed.reason).toBe('capability_disabled');
+    expect(parsed.nextAction).toContain('internalAgents.agents.diagnostician.enabled');
+    expect(parsed.message).toContain('disabled');
+
+    // Kill switch fires before any runtime machinery: no adapter, no runner.
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    expect(runtimeV2.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
+    expect(runtimeV2.SplitDiagnosticianRunner).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DIAG-638-02: human-readable output names the reason and the recovery action', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'diag_task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: false,
+    } as DiagnoseRunOptions);
+
+    const out = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(out).toContain('diagnostician');
+    expect(out).toContain('capability_disabled');
+    expect(out).toContain('internalAgents.agents.diagnostician.enabled');
+
+    const runtimeV2b = await import('@principles/core/runtime-v2');
+    expect(runtimeV2b.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });

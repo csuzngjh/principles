@@ -20,7 +20,6 @@ import {
   DiagRouterRunner,
   DefaultDiagRootCauseValidator,
   DefaultDiagDistillerValidator,
-  DisabledDiagnosticianRunner,
   type DiagnosticianRunnerLike,
   TestDoubleRuntimeAdapter,
   PDRuntimeError,
@@ -37,8 +36,8 @@ import {
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
-import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
-import { isFeatureEnabled, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS } from '@principles/core/runtime-v2';
+import { loadPdConfig } from '../services/pd-config-loader.js';
+import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime-v2';
 import { createHash } from 'node:crypto';
 /** Layer 0 content-hash (design §6.1); injected so diag writers can attach predecessorSummary hashes. */
 const contentHashFn = (input: string): string => createHash('sha256').update(input).digest('hex');
@@ -204,6 +203,35 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
   // Validate mutually exclusive flags (HG-03)
   if (opts.openclawLocal && opts.openclawGateway) {
     console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
+    process.exit(1);
+    return;
+  }
+
+  // PRI-638: this is the CLI's ONLY capability disable check. It reads the
+  // canonical authority (internalAgents.agents.diagnostician.enabled) through
+  // the same resolver the runtime factory uses, so `pd diagnose` can never
+  // mislabel a deliberate Owner kill switch as a missing runtime, a provider
+  // failure or a malformed config. No runtime adapter is constructed and no
+  // provider is contacted on this path.
+  const configLoadResult = loadPdConfig(workspaceDir);
+  const capability = resolveDiagnosticianCapability(
+    configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults,
+  );
+  if (!capability.available) {
+    const disabledResult = {
+      ok: false,
+      status: 'failed',
+      reason: capability.reason,
+      message: capability.message,
+      nextAction: capability.nextAction,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(disabledResult, null, 2));
+    } else {
+      console.error(`error: ${capability.message}`);
+      console.error(`reason: ${capability.reason}`);
+      console.error(`nextAction: ${capability.nextAction}`);
+    }
     process.exit(1);
     return;
   }
@@ -389,11 +417,11 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
     const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
 
-    // Check if split pipeline is enabled — 3 serial LLM calls need more time
-    const configLoadResult = loadPdConfig(workspaceDir);
-    const featureFlags = computeFlagsFromLoadResult(configLoadResult);
-    const isSplitPipeline = isFeatureEnabled(featureFlags, 'diagnostician_split_pipeline');
-    const pipelineTimeoutMs = isSplitPipeline ? SPLIT_PIPELINE_TOTAL_TIMEOUT_MS : 300_000;
+    // PRI-638: implementation selection is gone. The split pipeline is the only
+    // Diagnostician implementation in the tree, so it always runs with its
+    // documented 3-stage budget; `diagnostician_split_pipeline` no longer
+    // selects a runner nor disables capability.
+    const pipelineTimeoutMs = SPLIT_PIPELINE_TOTAL_TIMEOUT_MS;
     // BUG-1 (PRI-442): extract effectiveConfig so ADR-0019 LLM rate-limit
     // degradation (isDegradationEnabled in base-peer-runner) can read the
     // diagnostician_llm_degradation feature flag. Without this, the runners
@@ -410,34 +438,29 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
     const effectiveConfig = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
 
-    let runner: DiagnosticianRunnerLike;
-    if (isSplitPipeline) {
-      const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
-      const perStageTimeoutMs = pipelineTimeoutMs / 3;
-      const rootCauseRunner = new DiagRootCauseRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, contentHashFn },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-      );
-      const distillerRunner = new DiagDistillerRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), contentHashFn },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-      );
-      const routerRunner = new DiagRouterRunner(
-        { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, contentHashFn },
-        { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
-      );
+    const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
+    const perStageTimeoutMs = pipelineTimeoutMs / 3;
+    const rootCauseRunner = new DiagRootCauseRunner(
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, contentHashFn },
+      { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
+    );
+    const distillerRunner = new DiagDistillerRunner(
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator(), contentHashFn },
+      { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
+    );
+    const routerRunner = new DiagRouterRunner(
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, contentHashFn },
+      { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
+    );
 
-      runner = new SplitDiagnosticianRunner({
-        rootCauseRunner,
-        distillerRunner,
-        routerRunner,
-        stateManager,
-        committer,
-        perStageTimeoutMs,
-      });
-    } else {
-      runner = new DisabledDiagnosticianRunner();
-    }
+    const runner: DiagnosticianRunnerLike = new SplitDiagnosticianRunner({
+      rootCauseRunner,
+      distillerRunner,
+      routerRunner,
+      stateManager,
+      committer,
+      perStageTimeoutMs,
+    });
 
     if (!opts.json) {
       console.log(`\nRunning diagnostician for task: ${opts.taskId}`);

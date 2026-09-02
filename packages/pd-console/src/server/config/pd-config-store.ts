@@ -82,6 +82,12 @@ export interface AgentBindingUpdateResultOk {
   agent: InternalAgentName;
   runtimeProfile: string;
   enabled: boolean;
+  /**
+   * PRI-638 (reviewer P1): set when the write retired a conflicting legacy
+   * `diagnostician_split_pipeline=false` override so the canonical toggle is
+   * authoritative after reload.
+   */
+  warning?: string;
 }
 
 export interface AgentBindingUpdateResultErr {
@@ -428,18 +434,31 @@ export function updateAgentBinding(
     rawConfig = {};
   }
 
+  // PRI-638 (reviewer P1 #2): rebuild only what the Owner explicitly changed.
+  // Untouched agents keep their RAW binding from the config file verbatim.
+  // Defaults / inheritance resolution / compatibility transforms (e.g. the
+  // legacy split=false shim folding effective diagnostician to false) belong
+  // to the resolver — materializing them back into config would turn the
+  // documented read-time cutover into an implicit persistent migration.
+  const rawInternalAgents = isRecord(rawConfig.internalAgents) ? rawConfig.internalAgents : {};
+  const rawAgents = isRecord(rawInternalAgents.agents) ? rawInternalAgents.agents : {};
+
   // Update only the agent binding section
   const agentsMap: Record<string, AgentBindingEntry> = {};
   for (const name of INTERNAL_AGENT_NAMES) {
-    const existing = effective.config.internalAgents.agents[name];
     if (name === agentName) {
       agentsMap[name] = { enabled, runtimeProfile };
-    } else if (existing) {
+      continue;
+    }
+    const rawEntry = rawAgents[name];
+    if (isRecord(rawEntry) && typeof rawEntry.enabled === 'boolean') {
       agentsMap[name] = {
-        enabled: existing.enabled,
-        ...(existing.runtimeProfile ? { runtimeProfile: existing.runtimeProfile } : {}),
+        enabled: rawEntry.enabled,
+        ...(typeof rawEntry.runtimeProfile === 'string' ? { runtimeProfile: rawEntry.runtimeProfile } : {}),
       };
     }
+    // Agent absent from raw config → keep it absent (defaults belong to the
+    // resolver, never snapshot into config).
   }
 
   // Merge: start from raw config, overlay known sections, update internalAgents.agents.
@@ -458,6 +477,23 @@ export function updateAgentBinding(
     },
     ui: { ...effective.config.ui },
   };
+
+  // PRI-638 (reviewer P1 #1): an explicit Owner write to the canonical
+  // Diagnostician binding supersedes the legacy compatibility override. While
+  // `diagnostician_split_pipeline=false` remains in the raw features section,
+  // the read-time shim folds the effective binding back to disabled — a
+  // Console ON toggle would otherwise return success while a reload silently
+  // disables the agent again. Retire the conflicting legacy override in the
+  // SAME atomic write; no new authority, DB or migration subsystem is added.
+  let retiredLegacySplit = false;
+  if (agentName === 'diagnostician') {
+    const features = isRecord(updatedConfig.features) ? updatedConfig.features : {};
+    const legacySplit = isRecord(features) ? features.diagnostician_split_pipeline : undefined;
+    if (isRecord(legacySplit) && legacySplit.enabled === false) {
+      delete features.diagnostician_split_pipeline;
+      retiredLegacySplit = true;
+    }
+  }
 
   // 7. Validate the updated config before writing
   const validation = validatePdConfig(updatedConfig);
@@ -478,6 +514,13 @@ export function updateAgentBinding(
     agent: agentName,
     runtimeProfile,
     enabled,
+    ...(retiredLegacySplit
+      ? {
+          warning:
+            'Retired the conflicting legacy diagnostician_split_pipeline=false override so the canonical ' +
+            'Diagnostician toggle is authoritative after reload.',
+        }
+      : {}),
   };
 }
 

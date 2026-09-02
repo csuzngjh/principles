@@ -148,13 +148,17 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     techDetailZh: {
       '输入': '`DiagnosticianContextPayload`（pain 信号上下文）',
       '输出': '`DiagnosticianOutputV1` · rootCause / violatedPrinciples / recommendations[] / confidence',
-      '编排': '由 `PainSignalBridge` 触发；`diagnostician_split_pipeline` flag 控制单体 vs 3 段拆分',
+      // PRI-638: the split flag no longer selects an implementation nor
+      // disables anything — the capability switch is the agent binding here.
+      '编排': '由 `PainSignalBridge` 触发；开关 = 本页面的代理启用开关（`internalAgents.agents.diagnostician.enabled`）',
       '阶段': '`diag_rootcause` → `diag_distiller` → `diag_router`',
     },
     techDetailEn: {
       'Input': '`DiagnosticianContextPayload` (pain signal context)',
       'Output': '`DiagnosticianOutputV1` · rootCause / violatedPrinciples / recommendations[] / confidence',
-      'Orchestration': 'Triggered by `PainSignalBridge`; `diagnostician_split_pipeline` flag controls monolithic vs 3-stage split',
+      // PRI-638: the split flag no longer selects an implementation nor
+      // disables anything — the capability switch is the agent binding here.
+      'Orchestration': 'Triggered by `PainSignalBridge`; switch = this agent\'s enable toggle (`internalAgents.agents.diagnostician.enabled`)',
       'Stages': '`diag_rootcause` → `diag_distiller` → `diag_router`',
     },
     isCore: true,

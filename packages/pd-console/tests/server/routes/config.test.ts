@@ -2208,3 +2208,133 @@ describe('PRI-637: config writers do not snapshot merged defaults (sparse overri
     expect(features.custom_flag).toEqual({ category: 'quiet', enabled: true });
   });
 });
+
+// ── PRI-638 (reviewer P1): canonical Console writer vs legacy split=false ────
+//
+// 1. An explicit Owner write to the canonical Diagnostician binding must
+//    retire the conflicting legacy `diagnostician_split_pipeline=false` in the
+//    SAME atomic write, so the Console ON toggle is authoritative on reload.
+// 2. Updating another agent must NOT materialize the read-time compatibility
+//    shim (effective diagnostician=false) into the raw canonical binding.
+// 3. Before any Owner canonical write, the conservative read remains.
+
+describe('PRI-638: canonical Console writer vs legacy split=false', () => {
+  function readRawConfig(): Record<string, unknown> {
+    return yaml.load(fs.readFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), 'utf8')) as Record<string, unknown>;
+  }
+
+  function effectiveDiagnosticianEnabled(): boolean {
+    const loaded = store.loadPdConfig(workspaceDir);
+    return loaded.effective.config.internalAgents.agents.diagnostician?.enabled ?? false;
+  }
+
+  function legacySplitRaw(): Record<string, unknown> | undefined {
+    const raw = readRawConfig();
+    const features = isRecord(raw.features) ? raw.features : {};
+    return isRecord(features.diagnostician_split_pipeline)
+      ? (features.diagnostician_split_pipeline as Record<string, unknown>)
+      : undefined;
+  }
+
+  it('WRITER-638-1: Console diagnostician ON on a legacy split=false workspace stays ON after reload', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        diagnostician_split_pipeline: { category: 'quiet', enabled: false },
+      },
+      internalAgents: {
+        ...VALID_CONFIG.internalAgents,
+        agents: {
+          ...VALID_CONFIG.internalAgents.agents,
+          diagnostician: { enabled: false, runtimeProfile: 'lmstudio-local' },
+        },
+      },
+    });
+    // Precondition: conservative read keeps it disabled.
+    expect(effectiveDiagnosticianEnabled()).toBe(false);
+
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/diagnostician/binding',
+      body: { runtimeProfile: 'lmstudio-local', enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/diagnostician/binding',
+    });
+    expect(res.statusCode).toBe(200);
+
+    // The conflicting legacy override was retired in the same write…
+    expect(legacySplitRaw()).toBeUndefined();
+    // …and a fresh load resolves the canonical toggle as authoritative.
+    expect(effectiveDiagnosticianEnabled()).toBe(true);
+
+    // The write itself reports the retirement so the Console can surface it.
+    const data = okEnvelope<{ agent: string; enabled: boolean; warning?: string }>(res);
+    expect(data.agent).toBe('diagnostician');
+    expect(data.enabled).toBe(true);
+    expect(data.warning).toContain('legacy diagnostician_split_pipeline=false');
+  });
+
+  it('WRITER-638-2: updating another agent does not persist the effective shim into raw binding', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        diagnostician_split_pipeline: { category: 'quiet', enabled: false },
+      },
+      internalAgents: {
+        ...VALID_CONFIG.internalAgents,
+        agents: {
+          ...VALID_CONFIG.internalAgents.agents,
+          // canonical raw intent is TRUE; the shim makes effective FALSE.
+          diagnostician: { enabled: true, runtimeProfile: 'lmstudio-local' },
+        },
+      },
+    });
+    // Precondition: read-time shim yields effective disabled.
+    expect(effectiveDiagnosticianEnabled()).toBe(false);
+
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/dreamer/binding',
+      body: { runtimeProfile: 'openclaw.default', enabled: false },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/dreamer/binding',
+    });
+    expect(res.statusCode).toBe(200);
+
+    const raw = readRawConfig();
+    const agents = (raw.internalAgents as Record<string, unknown>).agents as Record<string, { enabled?: boolean; runtimeProfile?: string }>;
+    // Raw canonical binding is byte-identical to the pre-write intent: no
+    // effective-only materialization (must NOT have become enabled=false).
+    expect(agents.diagnostician).toEqual({ enabled: true, runtimeProfile: 'lmstudio-local' });
+    // The legacy flag is NOT retired by an unrelated agent write.
+    expect(legacySplitRaw()?.enabled).toBe(false);
+  });
+
+  it('WRITER-638-3: conservative read remains before any canonical write', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      features: {
+        ...VALID_CONFIG.features,
+        diagnostician_split_pipeline: { category: 'quiet', enabled: false },
+      },
+      internalAgents: {
+        ...VALID_CONFIG.internalAgents,
+        agents: {
+          ...VALID_CONFIG.internalAgents.agents,
+          diagnostician: { enabled: true, runtimeProfile: 'lmstudio-local' },
+        },
+      },
+    });
+
+    // No write happened: legacy split=false still folds effective to disabled
+    // (upgrade protection intact).
+    expect(effectiveDiagnosticianEnabled()).toBe(false);
+    expect(legacySplitRaw()?.enabled).toBe(false);
+  });
+});
