@@ -21,7 +21,7 @@
  */
 
 import * as vm from 'node:vm';
-import type { RuleHostInput, RuleHostResult, RuleHostDecision } from '../internalization/rule-host-contracts.js';
+import type { RuleHostInput, RuleHostResult } from '../internalization/rule-host-contracts.js';
 import type { RuleHostHelpers } from '../internalization/rule-host-helpers.js';
 import type { ReplayEvaluateFn } from '../golden-trace-replay-validator.js';
 import type { GoldenTrace } from '../golden-trace.js';
@@ -31,57 +31,19 @@ import type {
 import type { RefinerSandboxResult, RefinerSandboxOptions } from '../internalization/refiner-sandbox-wrapper.js';
 import { evaluateInRefinerSandbox } from '../internalization/refiner-sandbox-wrapper.js';
 import { checkForbiddenPatterns, checkReturnStatementsMissingFields, checkMatchedFalseDecisions } from '../internalization/rule-code-validator.js';
-import { validateCorrectionProposal } from '../internalization/correction-proposal.js';
+import { validateRuleHostResult } from '../internalization/rule-host-validator.js';
 import { safeStringifyPreview } from '../feedback/safe-stringify.js';
 
 /**
- * Valid decision enum values for RuleHostResult.
- * Used to validate untrusted vm sandbox output (P2 #6 fix).
- */
-const VALID_DECISIONS = new Set<RuleHostDecision>(['allow', 'block', 'requireApproval', 'auto_correct']);
-
-/**
- * Type guard: validate that a value from the untrusted vm sandbox has the
- * full RuleHostResult shape. Treats all sandbox output as unknown.
- *
- * P2 #6 fix: previously the code only checked `decision` was a string, then
- * used `as RuleHostResult` to accept the entire object. This bypassed
- * validation of the decision enum value and other required fields.
+ * PRI-634 PR-A (Slice A): type-narrowing adapter over the canonical
+ * validateRuleHostResult — the ONE RuleHostResult semantic authority, shared
+ * with the live RuleHost (rule-host-evaluator.ts). This adapter adds no
+ * semantic checks of its own; verdict parity with the canonical validator is
+ * structural (pure delegation) and pinned by the table-driven regression in
+ * production-gate-deps.test.ts.
  */
 function isValidRuleHostResult(value: unknown): value is RuleHostResult {
-  if (typeof value !== 'object' || value === null) return false;
-
-  // decision: required, must be one of the 4 valid enum values
-  const decision = Reflect.get(value, 'decision');
-  if (typeof decision !== 'string' || !VALID_DECISIONS.has(decision as RuleHostDecision)) {
-    return false;
-  }
-
-  // matched: required, must be a boolean
-  const matched = Reflect.get(value, 'matched');
-  if (typeof matched !== 'boolean') return false;
-
-  // reason: required, must be a string
-  const reason = Reflect.get(value, 'reason');
-  if (typeof reason !== 'string') return false;
-
-  // When decision is 'auto_correct', correctionProposal must be present
-  // AND pass full structural validation (P2 #6 fix: previously only checked
-  // presence + typeof object, allowing malformed proposals with missing
-  // required fields like proposedParams, correctedFields, applicationMode,
-  // confidence, ruleId, notifyAgent to flow into the activation path).
-  if (decision === 'auto_correct') {
-    const correctionProposal = Reflect.get(value, 'correctionProposal');
-    if (correctionProposal === undefined || correctionProposal === null) {
-      return false;
-    }
-    const proposalValidation = validateCorrectionProposal(correctionProposal);
-    if (!proposalValidation.valid) {
-      return false;
-    }
-  }
-
-  return true;
+  return validateRuleHostResult(value).valid;
 }
 
 /**
@@ -147,11 +109,13 @@ function compileRuleCode(code: string, sourceLabel: string): ReplayEvaluateFn {
 
   return (input: RuleHostInput, helpers: RuleHostHelpers): RuleHostResult => {
     const result = Reflect.apply(evaluateFn, undefined, [input, helpers]) as unknown;
-    // P2 #6 fix: validate the full RuleHostResult shape, not just `decision` is a string.
-    // Previously used `as RuleHostResult` which bypassed enum + required field validation.
+    // PRI-634 PR-A (Slice A): canonical RuleHostResult authority. The failure
+    // message carries the canonical validator's specific errors so the
+    // write-test-fix loop receives actionable evidence (P-03).
     if (!isValidRuleHostResult(result)) {
+      const { errors } = validateRuleHostResult(result);
       throw new Error(
-        `[${sourceLabel}]: evaluate returned invalid RuleHostResult (got ${typeof result === 'object' && result !== null ? safeStringifyPreview(result) : String(result)})`,
+        `[${sourceLabel}]: evaluate returned invalid RuleHostResult (${errors.join('; ')}) — got ${typeof result === 'object' && result !== null ? safeStringifyPreview(result) : String(result)}`,
       );
     }
     return result;

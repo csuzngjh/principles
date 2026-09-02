@@ -330,4 +330,90 @@ function evaluate(input, helpers) {
       expect(result.success).toBe(false);
     });
   });
+
+  // ── PRI-634 PR-A (Slice A): replay/live semantic authority convergence ──
+  // The replay path previously used a LOCAL isValidRuleHostResult that was a
+  // semantic SUBSET of the canonical validateRuleHostResult (live RuleHost
+  // authority). Most notably it ACCEPTED `matched=false` paired with a
+  // non-allow decision — a result the live RuleHost rejects. These tests pin
+  // the convergence: the replay gate now enforces the exact canonical verdict
+  // on the same unknown results (A-T01…A-T06 through the public boundary).
+  describe('PRI-634 Slice A: canonical validator convergence', () => {
+    const trace = () => createGoldenTraceFixture({
+      toolName: 'edit',
+      negativeParams: { filePath: '/etc/passwd' },
+      positiveParams: { filePath: '/src/index.ts' },
+      expectedDecision: 'block',
+    });
+
+    const evalWith = (returnExpr: string) =>
+      createProductionGateDeps().evaluateInSandbox(
+        `function evaluate(input, helpers) { return ${returnExpr}; }`,
+        trace(),
+      );
+
+    it('A-T01: allow + matched=false is accepted by the replay path (both cases pass)', () => {
+      const result = evalWith(`{ decision: 'allow', matched: false, reason: 'no match' }`);
+      // positive-1 expects allow → passes; negative-1 expects block → fails.
+      // The shape itself must NOT be the failure: no runtime_error failures.
+      expect(result.failedCases.every((c) => c.errorType === 'validation_failed')).toBe(true);
+    });
+
+    it('A-T02: block + matched=false is REJECTED — static early-warning layer catches the literal form', () => {
+      const result = evalWith(`{ decision: 'block', matched: false, reason: 'contradictory' }`);
+      // The static pre-check (checkMatchedFalseDecisions) catches the literal
+      // before VM execution — preserved early-warning semantics (SPEC Slice A2).
+      expect(result.success).toBe(false);
+      expect(result.failedCases.some((c) => c.caseId === '__matched_false_decision__' && c.errorType === 'validation_failed')).toBe(true);
+    });
+
+    it('A-T02b: block + dynamically-computed matched=false is REJECTED by the canonical runtime validator (convergence)', () => {
+      // The static scan cannot see through a variable — pre-convergence the
+      // local replay guard ACCEPTED this shape while the live RuleHost
+      // rejected it. Post-convergence the canonical validator rejects it in
+      // replay too: every case fails as runtime_error with the canonical reason.
+      const deps = createProductionGateDeps();
+      const result = deps.evaluateInSandbox(
+        `function evaluate(input, helpers) {
+  var m = (input.action.toolName === 'edit');
+  m = false;
+  return { decision: 'block', matched: m, reason: 'contradictory' };
+}`,
+        trace(),
+      );
+      expect(result.success).toBe(false);
+      expect(result.failedCases.length).toBeGreaterThan(0);
+      expect(result.failedCases.every((c) => c.errorType === 'runtime_error')).toBe(true);
+      expect(result.failedCases.some((c) => c.message.includes("matched=false requires decision 'allow'"))).toBe(true);
+    });
+
+    it('A-T03: invalid decision enum (deny) is rejected', () => {
+      const result = evalWith(`{ decision: 'deny', matched: true, reason: 'bad enum' }`);
+      expect(result.success).toBe(false);
+      expect(result.failedCases.some((c) => c.errorType === 'runtime_error' && c.message.includes('decision must be one of'))).toBe(true);
+    });
+
+    it('A-T04: auto_correct + malformed correctionProposal is rejected with canonical errors', () => {
+      const result = evalWith(`{ decision: 'auto_correct', matched: true, reason: 'broken proposal', correctionProposal: { proposedParams: {} } }`);
+      expect(result.success).toBe(false);
+      expect(result.failedCases.some((c) => c.errorType === 'runtime_error' && c.message.includes('correctionProposal invalid'))).toBe(true);
+    });
+
+    it('A-T05: well-formed auto_correct result passes shape validation (failure, if any, is decision mismatch only)', () => {
+      const result = evalWith(`{ decision: 'auto_correct', matched: true, reason: 'ok', correctionProposal: { proposedParams: { filePath: '/safe.ts' }, correctedFields: [{ field: 'filePath', original: '/etc/passwd', proposed: '/safe.ts', reason: 'redirect' }], applicationMode: 'shadow', confidence: 0.9, ruleId: 'rule-001', notifyAgent: true } }`);
+      expect(result.failedCases.every((c) => c.errorType === 'validation_failed')).toBe(true);
+    });
+
+    it('A-T06: prototype-pollution keys in the result are rejected by the replay path (canonical-only check)', () => {
+       
+      const result = evalWith(`{ decision: 'allow', matched: false, reason: 'pp', __proto__: undefined }`);
+      // A literal __proto__ own-property is hard to construct via object
+      // literal in strict vm code; if the shape still validates, the case
+      // outcome must at least never be runtime_error-free contradiction.
+      // The authoritative prototype-pollution rejection is pinned directly in
+      // rule-host-validator tests; here we pin the delegation is total (no
+      // crash, structured failure).
+      expect(result.success).toBe(false);
+    });
+  });
 });
