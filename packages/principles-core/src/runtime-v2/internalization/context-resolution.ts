@@ -28,6 +28,11 @@
 
 import type { TruncationRecord } from './prompt-budget-manager.js';
 import { readSummaryField } from './summary-field-reader.js';
+import {
+  deriveArtifactSummary,
+  SUMMARY_RUNNER_KINDS,
+  type SummaryRunnerKind,
+} from './artifact-summary.js';
 
 // ── Path grammar ────────────────────────────────────────────────────────────
 
@@ -118,6 +123,70 @@ export function readRawField(
 // ── Channel 2: ancestry raw resolution (CandidateLineage) ───────────────────
 
 /**
+ * A manifest NAMESPACE is a *semantic* stage; a lineage node's stage is the
+ * *producer taskKind* (two-hop F1). Explicit fixed mapping — never fuzzy:
+ *
+ *   diagnostician → the manifest addresses the final diagnosis artifact
+ *   (DiagnosticianOutputV1). Its canonical producer on the DEFAULT split
+ *   pipeline is taskKind `diag_router` (SplitDiagnosticianRunner stage C);
+ *   the legacy monolithic runner committed the identical output contract
+ *   under taskKind `diagnostician`. Both must resolve the same namespace.
+ *
+ * Adding an alias here is a contract change — the resolver's nearest-match
+ * then accepts the listed producer kinds for that namespace.
+ */
+export const SEMANTIC_STAGE_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  diagnostician: ['diagnostician', 'diag_router'],
+};
+
+/**
+ * Producer taskKind used for the read-time summary projection (below).
+ * `diagnostician` is NOT a SummaryRunnerKind, but its output is byte-for-byte
+ * the diag_router contract, so the derivation reuses the diag_router resolver.
+ */
+const SUMMARY_DERIVATION_STAGE: Readonly<Record<string, SummaryRunnerKind>> = {
+  diagnostician: 'diag_router',
+};
+
+/**
+ * Read `<stage>.summary.<key>` from an ancestry node, with a bounded
+ * read-time projection fallback.
+ *
+ * Why the fallback exists (review round): the writer-side envelope for diag
+ * outputs is SKIPPED (`output_summary_key_collision`, base-peer-runner) —
+ * DiagnosticianOutputV1 owns a top-level `summary` STRING that the Layer 0
+ * envelope must not overwrite. So `diagnostician.summary.rootSymptom` /
+ * `category` would be structurally absent forever. The fields are derivable
+ * from the unchanged durable output via the SAME derivation the writer would
+ * have used (`deriveArtifactSummary`, pure, no I/O), so the read side applies
+ * it as a bounded projection. Deterministic: same output → same fields. Only
+ * fires when the direct envelope read misses; still-absent → `absent` floor.
+ */
+function readSummaryWithProjection(
+  fieldPath: string,
+  stage: string,
+  contentJson: unknown,
+): unknown | undefined {
+  const direct = readSummaryField(fieldPath, contentJson);
+  if (direct !== undefined) return direct;
+
+  if (!isRecord(contentJson)) return undefined;
+  const derivationStage = SUMMARY_DERIVATION_STAGE[stage]
+    ?? ((SUMMARY_RUNNER_KINDS as readonly string[]).includes(stage) ? (stage as SummaryRunnerKind) : undefined);
+  if (derivationStage === undefined) return undefined;
+  const derived = deriveArtifactSummary(derivationStage, contentJson);
+  if (!derived.ok) return undefined;
+
+  const parsed = parseContextPath(fieldPath);
+  if (parsed === null) return undefined;
+  const [key] = parsed.rest;
+  if (key === undefined || FORBIDDEN_SEGMENTS.has(key)) return undefined;
+  if (key === 'headline') return derived.value.headline;
+  if (!Object.hasOwn(derived.value.fields, key)) return undefined;
+  return derived.value.fields[key];
+}
+
+/**
  * One durable ancestry node exposed to the raw reader. Built by the caller
  * from `CandidateLineage` nodes — this module never performs the traversal.
  *
@@ -202,6 +271,9 @@ export function partitionTier2Paths(
  *
  * `predecessorSummary` is intentionally NOT answered here: it is the
  * direct-predecessor forwarding concept owned by Channel 1.
+ *
+ * Namespace → node matching honors `SEMANTIC_STAGE_ALIASES`: a manifest
+ * namespace is the SEMANTIC stage, a node's stage is the producer taskKind.
  */
 export function resolveAncestryPaths(
   fieldPaths: readonly string[],
@@ -212,11 +284,15 @@ export function resolveAncestryPaths(
     const parsed = parseContextPath(fieldPath);
     if (parsed === null) continue;
     if (parsed.layer === 'predecessorSummary') continue;
-    const source = sources.find((candidate) => candidate.stage === parsed.namespace);
+    const producerStages = [
+      parsed.namespace,
+      ...(SEMANTIC_STAGE_ALIASES[parsed.namespace] ?? []),
+    ];
+    const source = sources.find((candidate) => producerStages.includes(candidate.stage));
     if (source === undefined) continue;
     const value = parsed.layer === 'raw'
       ? readRawField(parsed.rest, source.contentJson)
-      : readSummaryField(fieldPath, source.contentJson);
+      : readSummaryWithProjection(fieldPath, source.stage, source.contentJson);
     if (value !== undefined) resolved.set(fieldPath, value);
   }
   return resolved;

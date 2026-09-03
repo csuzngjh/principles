@@ -208,6 +208,83 @@ describe('resolveAncestryPaths — CandidateLineage stage selection', () => {
     ]);
     expect(resolveAncestryPaths(['scribe.predecessorSummary.headline'], sources).size).toBe(0);
   });
+
+  it('SEMANTIC_STAGE_ALIASES: diagnostician.* resolves from the split diag_router producer', () => {
+    // Default split-pipeline identity: the durable DiagnosticianOutputV1 is
+    // committed by the diag_router SUB-TASK (SplitDiagnosticianRunner stage C).
+    // The manifest namespace `diagnostician` must answer from that node.
+    const sources = toRawStageSources([
+      { taskKind: 'philosopher', contentJson: {} },
+      { taskKind: 'diag_rootcause', contentJson: { evidence: [{ ref: 'stage-a' }] } },
+      {
+        taskKind: 'diag_router',
+        contentJson: { evidence: [{ ref: 'tool_call:Edit:auth.ts', note: 'n' }] },
+      },
+    ]);
+    const resolved = resolveAncestryPaths(['diagnostician.raw.evidence'], sources);
+    expect(resolved.get('diagnostician.raw.evidence')).toEqual([{ ref: 'tool_call:Edit:auth.ts', note: 'n' }]);
+  });
+
+  it('SEMANTIC_STAGE_ALIASES: unrelated diag stages never answer the namespace', () => {
+    // Even when a diag_rootcause node appears FIRST (nearest), it is not an
+    // alias producer for `diagnostician` — only {diagnostician, diag_router}
+    // are. Its stage-A evidence must not masquerade as the final diagnosis.
+    const sources = toRawStageSources([
+      { taskKind: 'diag_rootcause', contentJson: { evidence: [{ ref: 'stage-a' }] } },
+      { taskKind: 'diag_distiller', contentJson: { evidence: [{ ref: 'stage-b' }] } },
+    ]);
+    expect(resolveAncestryPaths(['diagnostician.raw.evidence'], sources).size).toBe(0);
+    expect(resolveAncestryPaths(['diagnostician.summary.rootSymptom'], sources).size).toBe(0);
+  });
+
+  it('read-time projection: diagnostician.summary.* derives from a top-level-summary output (no Layer-0 envelope)', () => {
+    // DiagnosticianOutputV1 owns a top-level `summary` STRING, so the writer
+    // SKIPPED the Layer-0 envelope (output_summary_key_collision). The bounded
+    // read-time projection derives {rootSymptom, category} from the unchanged
+    // durable output — the review-round contract fix for the always-absent
+    // Stage1 pain-summary fields.
+    const sources = toRawStageSources([
+      {
+        taskKind: 'diag_router',
+        contentJson: {
+          valid: true, diagnosisId: 'd1',
+          summary: 'Agent wrote a file without reading it first.',
+          rootCause: 'Tooling: write path skipped the read-before-write check.',
+          violatedPrinciples: [],
+          evidence: [{ ref: 'e1' }],
+          recommendations: [{ kind: 'internalize', description: 'read before write' }],
+          confidence: 0.9,
+        },
+      },
+    ]);
+    const resolved = resolveAncestryPaths(
+      ['diagnostician.summary.rootSymptom', 'diagnostician.summary.category'],
+      sources,
+    );
+    expect(resolved.get('diagnostician.summary.rootSymptom')).toBe('Agent wrote a file without reading it first.');
+    expect(resolved.get('diagnostician.summary.category')).toBe('internalize');
+    // Not in the diag_router derivation → stays absent (never invented).
+    expect(resolveAncestryPaths(['diagnostician.summary.strategicPerspective'], sources).size).toBe(0);
+  });
+
+  it('read-time projection also serves the legacy `diagnostician` producer', () => {
+    const legacyContent = {
+      valid: true, diagnosisId: 'd1',
+      summary: 'legacy pain summary',
+      rootCause: 'Design: assumption.',
+      violatedPrinciples: [],
+      evidence: [],
+      recommendations: [{ kind: 'defer', description: 'no action' }],
+      confidence: 0.8,
+    };
+    const sources = toRawStageSources([{ taskKind: 'diagnostician', contentJson: legacyContent }]);
+    const resolved = resolveAncestryPaths(
+      ['diagnostician.raw.evidence', 'diagnostician.summary.rootSymptom'],
+      sources,
+    );
+    expect(resolved.get('diagnostician.summary.rootSymptom')).toBe('legacy pain summary');
+    expect(resolved.get('diagnostician.raw.evidence')).toEqual([]);
+  });
 });
 
 // ── Ancestry vs related separation (INV-LINEAGE-SCOPE, design §33) ──────────

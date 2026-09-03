@@ -189,11 +189,16 @@ export const ARTIFICER_REPAIR_MANIFEST: ContextManifest = {
  * the chain). Layer 1's `readSummaryField` strips the leading `<stage>.`
  * segment and reads only the single loaded predecessor, so those ancestor
  * namespaces are resolved by the PR-B ancestry channel (`resolveAncestryPaths`,
- * which matches a lineage node by taskKind) — not by Channel 1.
+ * which matches a lineage node by producer taskKind) — not by Channel 1.
  *
- * `pain.*` becomes `diagnostician.*`: `pain` is a LOGICAL namespace inside the
- * Layer 1 reader, never a lineage node (see the Stage 2 note below for the same
- * correction on the raw side).
+ * `pain.*` becomes `diagnostician.*` and is resolved through
+ * `SEMANTIC_STAGE_ALIASES` (diagnostician → {diagnostician, diag_router}):
+ * `pain` is a LOGICAL Layer-1 namespace, never a lineage node; the durable
+ * DiagnosticianOutputV1 is owned by the split pipeline's `diag_router`
+ * sub-task on the DEFAULT chain (legacy monolith committed it under
+ * `diagnostician`). Summary fields on this stage are served by the bounded
+ * read-time projection when the writer had to skip the Layer-0 envelope
+ * (the output itself owns a top-level `summary` string).
  *
  * If an ancestor summary is absent the path enters `absent` and surfaces as a
  * `summary_absent` degradation, never a silent empty.
@@ -242,12 +247,19 @@ export const EVALUATOR_STAGE1_MANIFEST: ContextManifest = {
  *
  * SPEC ASSUMPTION STALE (PR B Phase 0, fresh-code verification): the SPEC's
  * example path `pain.raw.evidence` assumed a `pain` stage node on the lineage.
- * The real durable chain has taskKind `diagnostician`, and the pain evidence's
- * durable form is `DiagnosticianOutputV1.evidence` — so the ancestry raw path
- * is `diagnostician.raw.evidence` (ancestry matching is by taskKind, and
- * `pain` is only a LOGICAL summary-namespace in the Layer 1 reader, never a
- * lineage node). `dreamer.raw.candidates` addresses `DreamerOutput.candidates`
- * directly — the whole array, exactly what the deep-evidence stage reviews.
+ * `pain` is only a LOGICAL summary namespace — never a lineage node. The
+ * ancestry namespace is `diagnostician` (mapped via SEMANTIC_STAGE_ALIASES to
+ * the real producer taskKinds):
+ *
+ *   - DEFAULT split chain: the durable DiagnosticianOutputV1 is committed by
+ *     the `diag_router` sub-task (SplitDiagnosticianRunner stage C) — the node
+ *     the dreamer lineage actually depends on (candidate.taskId);
+ *   - legacy monolith: the same contract was committed under taskKind
+ *     `diagnostician`.
+ *
+ * So `diagnostician.raw.evidence` reads `DiagnosticianOutputV1.evidence`, and
+ * `dreamer.raw.candidates` addresses `DreamerOutput.candidates` directly — the
+ * whole array, exactly what the deep-evidence stage reviews.
  */
 export const EVALUATOR_STAGE2_MANIFEST: ContextManifest = {
   ...EVALUATOR_STAGE1_MANIFEST,

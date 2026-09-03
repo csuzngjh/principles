@@ -539,7 +539,12 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
               artifactStore,
               workspaceDir,
             }),
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            // PR B review round: effectiveConfig was missing here (only the
+            // Artificer branch passed it), so `progressive_evaluator` /
+            // `context_manifest_budget` were structurally unreadable on this
+            // path — the two-stage evaluator could never be enabled from the
+            // CLI. Mirrors line 525 (artificer) and rulehost runnerOptsFor.
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, effectiveConfig },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'rollout_reviewer') {

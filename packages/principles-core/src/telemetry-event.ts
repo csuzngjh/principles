@@ -258,6 +258,14 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('artificer_required_context_evidence_unresolved'),
   Type.Literal('evaluator_context_lineage_unavailable'),
   Type.Literal('evaluator_required_context_evidence_unresolved'),
+  // - evaluator_stage2_required_evidence_unavailable: the progressive
+  //   evaluator reached Stage 2 (deep-evidence re-evaluation) but the REQUIRED
+  //   tier2 evidence could not be resolved from the durable lineage. The
+  //   runner REFUSES the Stage-2 LLM round (0 extra calls) and fails loud
+  //   (input_invalid, permanent) — telemetry alone is not correctness, and no
+  //   legacy fallback can carry the missing deep evidence (payload:
+  //   requiredPaths). Mirror of PR-A's repair-evidence-unavailable contract.
+  Type.Literal('evaluator_stage2_required_evidence_unavailable'),
   // Layer 1 allocation degradations, emitted by the shared
   // `runResolveInjection` core and therefore reachable from ALL FOUR
   // manifest-owning runners. These were already emitted but missing from this

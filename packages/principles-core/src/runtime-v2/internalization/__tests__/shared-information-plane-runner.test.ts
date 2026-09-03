@@ -145,8 +145,17 @@ async function upsertArtifact(artifactId: string, sourceTaskId: string, lineageA
   });
 }
 
-/** Durable ancestry chain: diagnostician → dreamer → philosopher → scribe. */
-async function seedInternalizationChain(): Promise<void> {
+/**
+ * Durable ancestry chain: diagnostician → dreamer → philosopher → scribe.
+ *
+ * The final diagnostic node defaults to the REAL split-pipeline identity:
+ * taskKind `diag_router` (SplitDiagnosticianRunner stage C — the task that
+ * owns the durable DiagnosticianOutputV1 artifact on the default chain). The
+ * manifest namespace `diagnostician` resolves to it via SEMANTIC_STAGE_ALIASES.
+ * Pass `'diagnostician'` to model the legacy monolithic identity (same output
+ * contract, pre-PRI-373 workspaces).
+ */
+async function seedInternalizationChain(diagKind: 'diag_router' | 'diagnostician' = 'diag_router'): Promise<void> {
   const mk = async (id: string, kind: string, deps: string[]): Promise<void> => {
     await stateManager.createTask({
       taskId: id, taskKind: kind, status: 'pending', attemptCount: 0, maxAttempts: 3,
@@ -159,7 +168,7 @@ async function seedInternalizationChain(): Promise<void> {
     await stateManager.markTaskSucceeded(id);
   };
 
-  await mk(DIAG_ID, 'diagnostician', []);
+  await mk(DIAG_ID, diagKind, []);
   await upsertArtifact(DIAG_ART, DIAG_ID, [], {
     valid: true, diagnosisId: 'diag-sip-1',
     summary: 'Agent wrote a controlled file without reading it first.',
@@ -426,26 +435,32 @@ describe('PR B T-A: normal Artificer resolves tier2 through durable CandidateLin
   });
 });
 
+/** Shared T-B family setup: durable Round-1 Artificer artifact + Evaluator task. */
+async function seedEvaluatorChain(): Promise<void> {
+  await stateManager.createTask({
+    taskId: ART1_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+    diagnosticJson: meta({ dependencyTaskIds: [SCRIBE_ID] }),
+  });
+  await stateManager.acquireLease({ taskId: ART1_ID, owner: 'sip-test', runtimeKind: 'test-double' });
+  await stateManager.markTaskSucceeded(ART1_ID);
+  await upsertArtifact(
+    ART1_ART, ART1_ID, [SCRIBE_ART],
+    artificerArtifactContent(artificerOutput(GOOD_RULE_CODE, SCRIBE_ART, ART1_ID), SCRIBE_ART),
+  );
+
+  await stateManager.createTask({
+    taskId: EVAL1_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
+    diagnosticJson: meta({ dependencyTaskIds: [ART1_ID] }),
+  });
+}
+
 describe('PR B T-B: Evaluator Stage2 resolves required tier2 raw evidence (flags ON)', () => {
-  it('Stage2 prompt carries diagnostician.raw.evidence + dreamer.raw.candidates from the durable chain', async () => {
-    await seedInternalizationChain();
-
-    // Artificer task + artifact (durable Round-1 output the evaluator reviews).
-    await stateManager.createTask({
-      taskId: ART1_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: meta({ dependencyTaskIds: [SCRIBE_ID] }),
-    });
-    await stateManager.acquireLease({ taskId: ART1_ID, owner: 'sip-test', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ART1_ID);
-    await upsertArtifact(
-      ART1_ART, ART1_ID, [SCRIBE_ART],
-      artificerArtifactContent(artificerOutput(GOOD_RULE_CODE, SCRIBE_ART, ART1_ID), SCRIBE_ART),
-    );
-
-    await stateManager.createTask({
-      taskId: EVAL1_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: meta({ dependencyTaskIds: [ART1_ID] }),
-    });
+  it('Stage2 prompt carries diagnostician.raw.evidence + dreamer.raw.candidates from the real split lineage', async () => {
+    // Default split-pipeline identity: the diag artifact node is taskKind
+    // `diag_router` (SplitDiagnosticianRunner stage C) — the manifest
+    // namespace `diagnostician` must resolve to it via SEMANTIC_STAGE_ALIASES.
+    await seedInternalizationChain('diag_router');
+    await seedEvaluatorChain();
 
     // Stage 1 output: contract-valid, but flagged (painCoverage.fullyCovered=false)
     // → Stage 2 must run. Stage 2 output: approved → real replay passes → pi-rule.
@@ -470,15 +485,24 @@ describe('PR B T-B: Evaluator Stage2 resolves required tier2 raw evidence (flags
     expect(stage1Prompt).not.toContain('dreamer.raw.candidates');
     expect(stage1Prompt).not.toContain('diagnostician.raw.evidence');
     expect(stage1Prompt).not.toContain(PAIN_EVIDENCE_MARKER);
-    // Stage 1 now resolves ANCESTOR summaries (scribe/dreamer) through the
-    // ancestry channel instead of falling back — the namespace-unreachability
-    // that used to force `manifest_resolution_insufficient` on every run.
+    // Stage 1 resolves ANCESTOR summaries (scribe/dreamer) + the read-time
+    // projected diagnostician summary through the ancestry channel instead of
+    // falling back — the namespace-unreachability that used to force
+    // `manifest_resolution_insufficient` on every run is gone.
     expect(emitted.some((e) => e.eventType === 'evaluator_manifest_resolution_insufficient'
       && (e.payload as { manifestId?: string }).manifestId === 'evaluator.stage1.v1')).toBe(false);
     expect(stage1Prompt).toContain('dreamer.summary.betterDecision');
     expect(stage1Prompt).toContain(BETTER_DECISION_MARKER);
+    // Pain context is genuinely present at Stage 1 (bounded read-time
+    // projection of the diag_router DiagnosticianOutputV1) — never a
+    // "known always absent" contract (review round).
+    expect(stage1Prompt).toContain('diagnostician.summary.rootSymptom');
+    expect(stage1Prompt).toContain('Agent wrote a controlled file without reading it first.');
+    expect(stage1Prompt).toContain('diagnostician.summary.category');
+    expect(stage1Prompt).toContain('internalize');
 
-    // Stage 2 REQUIRED tier2 fields resolved from durable ancestry.
+    // Stage 2 REQUIRED tier2 fields resolved from durable ancestry — the
+    // split-chain diag_router node answers the `diagnostician` namespace.
     expect(stage2Prompt).toContain('dreamer.raw.candidates');
     expect(stage2Prompt).toContain(BETTER_DECISION_MARKER);
     expect(stage2Prompt).toContain('diagnostician.raw.evidence');
@@ -496,17 +520,47 @@ describe('PR B T-B: Evaluator Stage2 resolves required tier2 raw evidence (flags
   });
 });
 
+describe('PR B T-B3: legacy monolithic diagnostician identity resolves the same namespace', () => {
+  it('Stage2 evidence also resolves when the diag node taskKind is `diagnostician`', async () => {
+    // Legacy (pre-split / old workspace) identity: durable DiagnosticianOutputV1
+    // committed under taskKind `diagnostician`. The alias table must cover it.
+    await seedInternalizationChain('diagnostician');
+    await seedEvaluatorChain();
+
+    const prompts: string[] = [];
+    const evaluator = makeEvaluatorRunner(
+      [
+        evaluatorOutput(EVAL1_ID, ART1_ART, 'approved', {
+          painCoverage: { fullyCovered: false },
+          compressionFidelity: { missingDimensions: [] },
+        }),
+        evaluatorOutput(EVAL1_ID, ART1_ART, 'approved'),
+      ],
+      prompts, 'run-sip-eval-legacy', FLAGS_ON,
+    );
+    expect((await evaluator.run(EVAL1_ID)).status).toBe('succeeded');
+
+    expect(prompts.length).toBe(2);
+    const stage2Prompt = prompts[1] ?? '';
+    expect(stage2Prompt).toContain('diagnostician.raw.evidence');
+    expect(stage2Prompt).toContain(PAIN_EVIDENCE_MARKER);
+    expect(emitted.some((e) => e.eventType === 'evaluator_required_context_evidence_unresolved'
+      && (e.payload as { manifestId?: string }).manifestId === 'evaluator.stage2.v1')).toBe(false);
+  });
+});
+
 /**
- * T-B2 — the information floor in its negative form (design §34/§35).
- *
- * Same run as T-B, but the durable diagnostician EVIDENCE is missing from the
- * lineage. Stage 2 declares `diagnostician.raw.evidence` REQUIRED, so the
- * runner must NOT emit a focused context with that field silently absent — it
- * must degrade observably to the authoritative full-predecessor injection.
+ * T-B2 — the information floor in its negative form (design §34/§35, review
+ * round). Same run as T-B, but the durable diagnostician EVIDENCE is missing.
+ * Stage 2 declares `diagnostician.raw.evidence` REQUIRED; since Stage 2 is the
+ * deep-evidence stage there is NO safe legacy fallback that carries the
+ * missing evidence — the runner must REFUSE the Stage-2 LLM round entirely and
+ * fail loud. The scripted Stage-2 output WOULD approve; the assertion is that
+ * it is never consumed.
  */
-describe('PR B T-B2: Stage2 required tier2 missing → observable fallback, never a thin prompt', () => {
-  it('emits required_context_evidence_unresolved and falls back instead of dropping the field', async () => {
-    await seedInternalizationChain();
+describe('PR B T-B2: Stage2 required evidence missing → no Stage2 LLM, fail loud (never a silent verdict)', () => {
+  it('emits required_context_evidence_unresolved + abort, sends exactly ONE prompt, and assembles no pi-rule', async () => {
+    await seedInternalizationChain('diag_router');
     // Strip ONLY the durable diagnostician evidence: the task node and the
     // artifact stay, so the lineage walk succeeds but cannot serve the
     // required raw path (a corruption short of a missing row).
@@ -516,45 +570,39 @@ describe('PR B T-B2: Stage2 required tier2 missing → observable fallback, neve
       rootCause: 'Tooling: write path skipped the read-before-write check.',
       violatedPrinciples: [], recommendations: [], confidence: 0.9,
     });
-
-    await stateManager.createTask({
-      taskId: ART1_ID, taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: meta({ dependencyTaskIds: [SCRIBE_ID] }),
-    });
-    await stateManager.acquireLease({ taskId: ART1_ID, owner: 'sip-test', runtimeKind: 'test-double' });
-    await stateManager.markTaskSucceeded(ART1_ID);
-    await upsertArtifact(
-      ART1_ART, ART1_ID, [SCRIBE_ART],
-      artificerArtifactContent(artificerOutput(GOOD_RULE_CODE, SCRIBE_ART, ART1_ID), SCRIBE_ART),
-    );
-
-    await stateManager.createTask({
-      taskId: EVAL1_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
-      diagnosticJson: meta({ dependencyTaskIds: [ART1_ID] }),
-    });
+    await seedEvaluatorChain();
 
     const prompts: string[] = [];
     const evaluator = makeEvaluatorRunner(
       [
         evaluatorOutput(EVAL1_ID, ART1_ART, 'approved', { painCoverage: { fullyCovered: false } }),
+        // WOULD approve — must NEVER be consumed (regression guard).
         evaluatorOutput(EVAL1_ID, ART1_ART, 'approved'),
       ],
       prompts, 'run-sip-eval-floor', FLAGS_ON,
     );
-    expect((await evaluator.run(EVAL1_ID)).status).toBe('succeeded');
+    const result = await evaluator.run(EVAL1_ID);
 
-    // The gate FIRED — and it names the exact unresolved required path.
+    // Fail loud, permanent, NO authoritative verdict.
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+
+    // The gate FIRED (information floor) AND the abort is observable.
     const gate = emitted.find((e) => e.eventType === 'evaluator_required_context_evidence_unresolved');
     expect(gate).toBeDefined();
     expect(gate?.payload.manifestId).toBe('evaluator.stage2.v1');
     expect(gate?.payload.requiredPaths).toEqual(['diagnostician.raw.evidence']);
+    const abort = emitted.find((e) => e.eventType === 'evaluator_stage2_required_evidence_unavailable');
+    expect(abort).toBeDefined();
+    expect(abort?.payload.requiredPaths).toEqual(['diagnostician.raw.evidence']);
 
-    // …and the consequence is the FALLBACK, not a silently thinner prompt:
-    // the Stage 2 prompt carries neither the raw path nor a half-resolved set.
-    expect(prompts.length).toBe(2);
-    const stage2Prompt = prompts[1] ?? '';
-    expect(stage2Prompt).not.toContain('diagnostician.raw.evidence');
-    expect(stage2Prompt).not.toContain(PAIN_EVIDENCE_MARKER);
+    // Stage 2 LLM was NEVER sent: exactly 1 prompt (Stage 1 only).
+    expect(prompts.length).toBe(1);
+
+    // No authoritative verdict artifact of any kind was produced.
+    const evalArtifacts = await store.listBySourceTaskId(EVAL1_ID);
+    expect(evalArtifacts.find((a) => a.artifactKind === 'rule')).toBeUndefined();
+    expect(evalArtifacts.find((a) => a.artifactKind === 'principle')).toBeUndefined();
   });
 });
 

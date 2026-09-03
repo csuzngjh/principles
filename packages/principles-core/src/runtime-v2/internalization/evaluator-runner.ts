@@ -346,6 +346,14 @@ export interface SeedArtificerRepairParams {
   readonly inheritedInputArtifactRefs: readonly ArtifactRef[];
 }
 
+/**
+ * Outcome of resolving a Stage-2 prompt's required deep evidence (review
+ * round). Drives the fail-loud gate in the progressive path.
+ */
+export type EvaluatorStage2Evidence =
+  | { readonly state: 'not_stage2' | 'focused' | 'fallback_other' }
+  | { readonly state: 'required_unavailable'; readonly unresolvedRequired: readonly string[] };
+
 export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
   readonly validator: EvaluatorValidator;
   /**
@@ -526,7 +534,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // ── Two-stage progressive evaluation ──
     // Stage 1: summary-level evaluation (same prompt as single-stage, but
     // uses EVALUATOR_STAGE1_MANIFEST for focused context).
-    const stage1Message = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
+    const { message: stage1Message } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
     const stage1Output = await this.runSingleEvaluation(taskId, stage1Message);
 
     // 9.4c (design §6.5.4): Stage 1 output contract violation check.
@@ -566,7 +574,27 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // Stage 2 triggered: independent re-evaluation with tier2 context.
     // rc-7 / ERR-015 / ERR-018 / ERR-019: Stage 2 does NOT receive Stage 1
     // output, concerns, or the FlaggedDecision. It is a fully independent call.
-    const stage2Message = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE2_MANIFEST);
+    const { message: stage2Message, stage2Evidence } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE2_MANIFEST);
+    if (stage2Evidence.state === 'required_unavailable') {
+      // Review round (information floor): Stage 2 is the deep-evidence stage;
+      // its REQUIRED evidence is unavailable, so there is NO safe fallback
+      // that still carries it — the full artificer artifact is the
+      // implementer's view, not the pain/dreamer deep evidence. Telemetry
+      // alone is not correctness: issuing an authoritative verdict from a
+      // Stage-2 prompt that lacks its declared evidence would silently
+      // proceed. Refuse the LLM round entirely (0 extra calls) and fail
+      // loud (input_invalid is permanent — no blind retry), mirroring the
+      // PR-A repair-evidence-unavailable contract.
+      this.emitEvent('stage2_required_evidence_unavailable', taskId, {
+        manifestId: EVALUATOR_STAGE2_MANIFEST.manifestId,
+        requiredPaths: stage2Evidence.unresolvedRequired,
+        nextAction: 'verify_durable_diagnosis_and_dreamer_ancestry_before_reevaluation',
+      });
+      throw new PDRuntimeError(
+        'input_invalid',
+        `evaluator stage2: required tier2 evidence unavailable (${stage2Evidence.unresolvedRequired.join(', ')}) — refusing to issue a deep-evidence verdict without it.`,
+      );
+    }
     const stage2Output = await this.runSingleEvaluation(taskId, stage2Message);
 
     this.progressiveFinalOutput = stage2Output;
@@ -715,7 +743,24 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     };
   }
 
-  private async buildEvaluatorPrompt(taskId: string, context: EvaluatorContext, manifest: typeof EVALUATOR_STAGE1_MANIFEST): Promise<string> {
+  /**
+   * Stage 2 required-evidence outcome (review round / information floor):
+   *  - `focused`            — required tier2 (`diagnostician.raw.evidence`,
+   *                           `dreamer.raw.candidates`) resolved from the
+   *                           durable CandidateLineage.
+   *  - `fallback_other`     — non-required fallback (envelope sparsity, budget
+   *                           flag off): the full artificer artifact is used,
+   *                           which is the pre-PR-B legacy assembly.
+   *  - `required_unavailable` — REQUIRED deep evidence is absent/truncated or
+   *                           the lineage is corrupt. No safe legacy fallback
+   *                           exists for a deep-evidence stage: the caller MUST
+   *                           refuse to send the Stage 2 prompt.
+   */
+  private async buildEvaluatorPrompt(
+    taskId: string,
+    context: EvaluatorContext,
+    manifest: typeof EVALUATOR_STAGE1_MANIFEST,
+  ): Promise<{ readonly message: string; readonly stage2Evidence: EvaluatorStage2Evidence }> {
     let parsedArtificerArtifact: unknown = null;
     if (context.artificerArtifact) {
       try { parsedArtificerArtifact = JSON.parse(context.artificerArtifact); } catch { parsedArtificerArtifact = context.artificerArtifact; }
@@ -726,6 +771,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     }
     // Resolve manifest-injected focused fields (Layer 1 + PR B tier2).
     const artificerPred = toArtificerPredecessor(context);
+    const isStage2 = manifest.manifestId === EVALUATOR_STAGE2_MANIFEST.manifestId;
+    let resolutionOutcome: EvaluatorStage2Evidence = isStage2
+      ? { state: 'fallback_other' }
+      : { state: 'not_stage2' };
     if (artificerPred !== null) {
       // Stage 2 is by definition the deep-evidence stage, so its tier2 raw
       // fields (`diagnostician.raw.evidence`, `dreamer.raw.candidates`) are
@@ -733,9 +782,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // — or the budget cannot carry them — resolution falls back to the
       // authoritative full artificer artifact rather than injecting a silently
       // thinner context (design §34/§35: no silent required-field loss).
-      const requiredPaths = manifest.manifestId === EVALUATOR_STAGE2_MANIFEST.manifestId
-        ? [...EVALUATOR_STAGE2_MANIFEST.tier2]
-        : [];
+      const requiredPaths = isStage2 ? [...EVALUATOR_STAGE2_MANIFEST.tier2] : [];
       const resolved = await this.resolveContextInjectionAsync({
         taskId,
         manifest,
@@ -745,6 +792,21 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
       if (resolved.mode === 'focused') {
         parsedArtificerArtifact = resolved.fields;
+        if (isStage2) resolutionOutcome = { state: 'focused' };
+      } else if (
+        isStage2
+        && resolved.mode === 'fallback'
+        && (resolved.reason === 'required_evidence_unresolved' || resolved.reason === 'lineage_unavailable')
+      ) {
+        // Review round: telemetry alone is not correctness. A deep-evidence
+        // stage whose REQUIRED evidence is unavailable must NOT proceed —
+        // there is no safe legacy fallback that contains the missing evidence
+        // (the full artificer artifact is the implementer's view, not the
+        // pain/dreamer deep evidence). The caller aborts before any LLM call.
+        resolutionOutcome = {
+          state: 'required_unavailable',
+          unresolvedRequired: resolved.unresolvedRequired,
+        };
       }
     }
     const builder = new EvaluatorPromptBuilder();
@@ -757,12 +819,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       previousEvaluation: context.previousEvaluation,
       hostToolCatalog: this.hostToolCatalog ?? undefined,
     });
-    return message;
+    return { message, stage2Evidence: resolutionOutcome };
   }
 
   /** Original single-stage invokeRuntime (flag-off path). */
   private async invokeRuntimeSingleStage(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
-    const message = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
+    const { message } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
     return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
