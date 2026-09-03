@@ -30,8 +30,14 @@ import {
   reservePdBackupDestination,
   resolvePdBackupsRoot,
 } from '../utils/pd-backups.js';
+import {
+  resolveExtensionsDir,
+  resolveUpdateLayout,
+  resolvePluginDir,
+  readCurrentVersion,
+  type UpdateLayout,
+} from '../utils/installed-layout.js';
 import { ActivationCompatibilityReadModel } from '@principles/core/runtime-v2';
-import { getInstallLayoutPaths, resolveInstallLayout, type InstallHost } from '@principles/install-layout';
 import { collectFileDepLinkSpecs, type StagedComponent } from '../utils/update-links.js';
 
 /**
@@ -77,96 +83,13 @@ const SKIP_DIRS = new Set(['node_modules']);
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve the OpenClaw installation home.
- *
- * Priority:
- * 1. `OPENCLAW_HOME` env var (explicit override)
- * 2. `~/.openclaw` (default install location)
- *
- * Note: the workspace (where PD state lives) and the OpenClaw install home
- * (where extensions live) are NOT necessarily the same directory or even
- * siblings — the workspace can be on a different drive. Do not derive the
- * extensions dir from `path.dirname(workspaceDir)`.
- */
-function resolveOpenclawHome(): string {
-  const envHome = process.env.OPENCLAW_HOME;
-  if (envHome && envHome.trim().length > 0) return path.resolve(envHome);
-  return path.join(os.homedir(), '.openclaw');
-}
-
-function resolveExtensionsDir(): string {
-  return path.join(resolveOpenclawHome(), 'extensions');
-}
-
-interface UpdateLayout {
-  pluginDir: string;
-  consoleDir: string;
-  coreDir: string;
-  hostRuntimeDir: string;
-  pdCliDir: string;
-  installLayoutDir: string;
-  hosts: InstallHost[];
-}
-
-function resolveUpdateLayout(): UpdateLayout | undefined {
-  const homeDir = os.homedir();
-  const paths = getInstallLayoutPaths(homeDir);
-  const legacyPluginDir = path.join(resolveExtensionsDir(), 'principles-disciple');
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
-  } catch {
-    manifest = undefined;
-  }
-  const resolution = resolveInstallLayout({
-    homeDir,
-    manifest,
-    canonicalRuntimeExists: fs.existsSync(paths.runtimeDir),
-    legacyExtensionExists: fs.existsSync(legacyPluginDir),
-  });
-  if (resolution.mode === 'missing') return undefined;
-  if (resolution.mode === 'canonical') {
-    return {
-      pluginDir: paths.pluginDir,
-      consoleDir: paths.consoleDir,
-      coreDir: paths.coreDir,
-      hostRuntimeDir: paths.hostRuntimeDir,
-      pdCliDir: paths.pdCliDir,
-      installLayoutDir: paths.installLayoutDir,
-      hosts: resolution.manifest?.hosts ?? [],
-    };
-  }
-  return {
-    pluginDir: legacyPluginDir,
-    consoleDir: path.join(legacyPluginDir, 'console'),
-    coreDir: path.join(legacyPluginDir, 'core'),
-    hostRuntimeDir: path.join(legacyPluginDir, 'host-runtime'),
-    pdCliDir: path.join(legacyPluginDir, 'pd-cli'),
-    installLayoutDir: path.join(legacyPluginDir, 'install-layout'),
-    hosts: ['openclaw'],
-  };
-}
-
-function resolvePluginDir(_workspaceDir: string): string {
-  return resolveUpdateLayout()?.pluginDir ?? path.join(resolveExtensionsDir(), 'principles-disciple');
-}
-
-function readCurrentVersion(pluginDir: string): string | undefined {
-  const pkgPath = path.join(pluginDir, 'package.json');
-  try {
-    if (!fs.existsSync(pkgPath)) return undefined;
-    const raw = fs.readFileSync(pkgPath, 'utf-8');
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed !== null && Object.hasOwn(parsed, 'version')) {
-      const { version } = parsed as Record<string, unknown>;
-      if (typeof version === 'string') return version;
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
+// Installed-layout resolution (OpenClaw home, extensions dir, plugin dir,
+// installed version) moved verbatim to utils/installed-layout.ts so the
+// health diagnostics read the SAME authority as the update page (P4).
+// The workspace (where PD state lives) and the OpenClaw install home (where
+// extensions live) are NOT necessarily the same directory or even siblings —
+// the workspace can be on a different drive — so the extensions dir is never
+// derived from `path.dirname(workspaceDir)`.
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   let body = '';

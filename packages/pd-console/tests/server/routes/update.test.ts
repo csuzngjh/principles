@@ -23,6 +23,15 @@ vi.mock('fs', async (importOriginal) => {
   };
 });
 
+// os.homedir() drives canonical layout resolution (getInstallLayoutPaths).
+// Mock it so a canonical install on the dev machine (~/.pd/install.json)
+// cannot leak into these legacy-layout fixture tests.
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  const realHomedir = actual.homedir.bind(actual);
+  return { ...actual, homedir: vi.fn(() => realHomedir()) };
+});
+
 // ---------------------------------------------------------------------------
 // Test utilities
 // ---------------------------------------------------------------------------
@@ -157,6 +166,11 @@ beforeEach(() => {
   // Without this, tests would hit (and damage) the real PD install.
   savedOpenclawHome = process.env.OPENCLAW_HOME;
   process.env.OPENCLAW_HOME = tmpDir;
+
+  // Pin homedir to the fixture home: canonical resolution
+  // (getInstallLayoutPaths) stays inert because tmpDir/.pd/runtime does not
+  // exist, so a real canonical install on the dev machine cannot leak in.
+  vi.mocked(os.homedir).mockImplementation(() => tmpDir);
 });
 
 afterEach(() => {

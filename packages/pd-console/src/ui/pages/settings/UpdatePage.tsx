@@ -38,6 +38,7 @@ import {
 } from "../../components/ui/alert-dialog.js";
 import { Loader2, RotateCcw, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { formatDate } from "../../utils/format-date.js";
+import { MarkdownRenderer } from "../../components/ui/markdown.js";
 
 // ── Main page component ──────────────────────────────────────────────────────
 
@@ -326,8 +327,8 @@ export function UpdatePage() {
               <p className="text-[12px] font-mono text-ink-3 uppercase tracking-wide mb-2">
                 {t("pages.update.whatsNew")}
               </p>
-              <div className="text-[13px] text-ink-2 leading-relaxed max-h-[300px] overflow-y-auto whitespace-pre-wrap">
-                {statusData.changelog}
+              <div className="text-[13px] text-ink-2 leading-relaxed max-h-[300px] overflow-y-auto">
+                <MarkdownRenderer content={statusData.changelog} />
               </div>
             </div>
           )}
@@ -458,11 +459,16 @@ export function UpdatePage() {
                       {t("pages.update.version")}
                     </span>
                     <span className="font-mono text-[13px] text-ink">
-                      {entry.fromVersion} → {entry.toVersion}
+                      {/* Failure entries persist toVersion as the literal
+                          "failed" (routes/update.ts) — not a version; show a
+                          dash and let the red badge carry the failure signal. */}
+                      {entry.fromVersion} → {entry.toVersion === "failed" ? "—" : entry.toVersion}
                     </span>
-                    <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
-                      {t(`pages.update.historyKind.${entry.kind}`)}
-                    </span>
+                    {entry.kind !== "failure" && (
+                      <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
+                        {t(`pages.update.historyKind.${entry.kind}`)}
+                      </span>
+                    )}
                     {!entry.success && entry.kind !== 'refusal' && (
                       <span className="inline-flex items-center border border-red/35 text-red rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
                         {t("pages.update.failed")}

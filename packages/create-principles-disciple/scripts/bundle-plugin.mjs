@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname, sep } from 'path';
+import { join, dirname, sep, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { execFile, execFileSync, execSync } from 'child_process';
 import { promisify } from 'util';
@@ -578,6 +578,56 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   } catch {
     console.log('  ⚠️  openclaw.plugin.json not found or unreadable — skipping version stamp');
   }
+}
+
+// Stamp the bundled component payloads with the latest published npm version
+// of each component. Same rationale as the plugin stamp above: the working
+// tree's version fields are permanently stale (CI bumps at publish time but
+// never writes back to main), and installed consumers read these payload
+// package.json files — console `/api/health` reports `versions.core` from the
+// bundled core, so an unstamped payload advertises a years-old version even
+// when the delivered code is current. The console payload is not stamped: it
+// is a private package with no npm registry line to sync from. A fetch
+// failure only degrades to the working-tree version (warn + continue) — same
+// rc-9 posture as the plugin stamp.
+console.log('\n🔢 Syncing bundled component versions to their npm registry latest...');
+for (const { npmName, destDir } of [
+  { npmName: '@principles/core', destDir: CORE_DEST },
+  { npmName: '@principles/pd-cli', destDir: PD_CLI_DEST },
+  { npmName: '@principles/host-runtime', destDir: HOST_RUNTIME_DEST },
+  { npmName: '@principles/codex-adapter', destDir: CODEX_ADAPTER_DEST },
+  { npmName: '@principles/install-layout', destDir: INSTALL_LAYOUT_DEST },
+]) {
+  let npmVersion = null;
+  try {
+    npmVersion = execSync(`npm view ${npmName} version`, {
+      encoding: 'utf-8',
+      timeout: 15000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch (e) {
+    console.warn(`  ⚠️  Could not fetch ${npmName} version from npm — using working-tree version.`);
+    console.warn(`      (${e instanceof Error ? e.message : String(e)})`);
+    continue;
+  }
+  if (!/^\d+\.\d+\.\d+/.test(npmVersion)) {
+    console.warn(`  ⚠️  Registry returned a non-semver version for ${npmName} — using working-tree version.`);
+    continue;
+  }
+const componentPkgPath = join(destDir, 'package.json');
+	  try {
+	    // CodeQL: TOCTOU false positive — single-threaded build script, same as
+	    // the plugin stamp above. The try-catch replaces the existsSync-implies-
+	    // safe pattern (which would trigger a separate CodeQL TOCTOU rule).
+	    const componentPkg = JSON.parse(readFileSync(componentPkgPath, 'utf-8'));
+	    const oldComponentVersion = componentPkg.version;
+	    componentPkg.version = npmVersion;
+	    writeFileSync(componentPkgPath, JSON.stringify(componentPkg, null, 2) + '\n');
+	    console.log(`  ✅ ${relative(OUTPUT_ROOT, componentPkgPath)} (${npmName}): ${oldComponentVersion} → ${npmVersion}`);
+	  } catch (e) {
+	    console.warn(`  ⚠️  Could not stamp ${npmName} version at ${relative(OUTPUT_ROOT, componentPkgPath)} — using working-tree version.`);
+	    console.warn(`      (${e instanceof Error ? e.message : String(e)})`);
+	  }
 }
 }
 
