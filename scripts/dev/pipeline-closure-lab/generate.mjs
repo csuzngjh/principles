@@ -18,7 +18,7 @@
 // GROUND_TRUTH.md expectations hold indefinitely.
 
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -148,28 +148,48 @@ function writeScenarioFiles(root, files) {
   }
 }
 
+// Regenerate a scenario directory from scratch: stale files from a previous
+// generation (or an interrupted run) would otherwise survive and silently
+// break the fixed file counts / manifest consistency the ground truth relies
+// on (16 raw files for C, exactly 8 service files + 1 baseline for D).
+function resetScenarioDir(root) {
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(root, { recursive: true });
+}
+
 function regenerateCanonical() {
-  // A: data only (code files are static, committed as-is)
+  // A: data only (code files are static, committed as-is). The data dir is
+  // single-file, but reset anyway for symmetry.
   const aData = generateScenarioAData();
-  mkdirSync(join(scenariosDir, 'a-inventory-cli', 'data'), { recursive: true });
-  writeFileSync(join(scenariosDir, 'a-inventory-cli', 'data', 'inventory.jsonl'), aData);
+  const aDataDir = join(scenariosDir, 'a-inventory-cli', 'data');
+  resetScenarioDir(aDataDir);
+  writeFileSync(join(aDataDir, 'inventory.jsonl'), aData);
 
   // C: raw files + canonical hash manifest
+  const cDir = join(scenariosDir, 'c-sensor-archive');
+  rmSync(join(cDir, 'raw-manifest.json'), { force: true });
+  resetScenarioDir(join(cDir, 'raw'));
   const cFiles = generateScenarioCRaw();
-  writeScenarioFiles(join(scenariosDir, 'c-sensor-archive'), cFiles);
+  writeScenarioFiles(cDir, cFiles);
   const cManifest = { scenario: 'c-sensor-archive', files: {} };
   for (const name of Object.keys(cFiles).sort()) {
     cManifest.files[name] = { sha256: sha256(cFiles[name]), bytes: Buffer.byteLength(cFiles[name]) };
   }
-  writeFileSync(join(scenariosDir, 'c-sensor-archive', 'raw-manifest.json'), `${JSON.stringify(cManifest, null, 1)}\n`);
+  writeFileSync(join(cDir, 'raw-manifest.json'), `${JSON.stringify(cManifest, null, 1)}\n`);
 
-  // D: services + pre-drift baseline + planted drift
+  // D: services + pre-drift baseline + planted drift (drop the whole tree so
+  // no stale svc-* config can survive outside manifest-baseline.json)
+  const dDir = join(scenariosDir, 'd-config-drift');
+  resetScenarioDir(dDir);
   const dFiles = generateScenarioD();
-  writeScenarioFiles(join(scenariosDir, 'd-config-drift'), dFiles);
+  writeScenarioFiles(dDir, dFiles);
 
-  // B: static fixture — verify it is intact (no generation).
-  const bEntry = join(scenariosDir, 'b-report-exporter', 'export-report.js');
-  const bSrc = readFileSync(bEntry, 'utf-8');
+  // B: static fixture — verify it is intact (no generation). Also strip any
+  // runtime artifacts (data/, out/) that leaked into the canonical tree.
+  const bDir = join(scenariosDir, 'b-report-exporter');
+  rmSync(join(bDir, 'data'), { recursive: true, force: true });
+  rmSync(join(bDir, 'out'), { recursive: true, force: true });
+  const bSrc = readFileSync(join(bDir, 'export-report.js'), 'utf-8');
   if (!bSrc.includes('setImmediate(() => process.exit(0))')) {
     throw new Error('scenario-b fixture drifted from its committed ground-truth shape');
   }
@@ -179,9 +199,34 @@ function regenerateCanonical() {
   console.log(`     d: ${Object.keys(dFiles).length} files (incl. manifest-baseline.json + planted drift)`);
 }
 
+// B's runtime artifacts must never enter a deployed copy — verify.js reads
+// them and a stale/empty report.csv would change the task's initial state.
+const DEPLOY_EXCLUDE = new Set([join('b-report-exporter', 'data'), join('b-report-exporter', 'out')]);
+
 function deployCopy() {
   mkdirSync(deployDir, { recursive: true });
-  cpSync(scenariosDir, deployDir, { recursive: true });
+  // Reset each scenario subtree in the TARGET so stale files from a previous
+  // deployment cannot survive. The --out root itself is never wiped — it may
+  // be a workspace containing unrelated user files. Iterate the TARGET's
+  // entries (not the source): artifacts like b's data/out only exist there
+  // after a prior round, so the source listing would miss them.
+  if (existsSync(deployDir)) {
+    for (const entry of readdirSync(deployDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) rmSync(join(deployDir, entry.name), { recursive: true, force: true });
+    }
+  }
+  cpSync(scenariosDir, deployDir, {
+    recursive: true,
+    filter: (src) => {
+      const relFromScenarios = src.slice(scenariosDir.length + 1);
+      for (const excluded of DEPLOY_EXCLUDE) {
+        if (relFromScenarios === excluded || relFromScenarios.startsWith(excluded + '\\') || relFromScenarios.startsWith(excluded + '/')) {
+          return false;
+        }
+      }
+      return true;
+    },
+  });
   // Deployed copies start clean: strip in-repo bookkeeping that only matters
   // for repo-side verification.
   rmSync(join(deployDir, 'c-sensor-archive', 'raw-manifest.json'), { force: true });

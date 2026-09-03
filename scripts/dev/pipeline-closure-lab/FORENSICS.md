@@ -1,7 +1,8 @@
 # FORENSICS — PD 管道取证查询 Runbook
 
-PRI-634-C/E 两轮验证中反复使用、被证明有效的只读取证查询。全部只读
-（sqlite 一律 `mode=ro`），可安全对 live workspace 执行。
+PRI-634-C/E 两轮验证中反复使用、被证明有效的取证查询。§1–3 与 §5 的 SQLite/文件
+查询全部只读（sqlite 一律 `mode=ro`），可安全对 live workspace 执行；§4 的 pd CLI
+命令**分只读与写操作两类**（写操作有副作用，已单独标注，见 §4.2）。
 
 约定：`WS` = PD workspace 目录（如 `D:\.openclaw\workspace`）。
 
@@ -62,19 +63,40 @@ grep evaluator_adversarial "$WS/.pd/telemetry/critical-events.jsonl" \
 #          evaluator_adversarial_replay_skipped → reason=no_adversarial_cases_after_merge（不可达）
 ```
 
-## 4. PD CLI 面（operator 正道）
+## 4. PD CLI 面
+
+> ⚠️ 本节分两类。**只读命令**可安全对 live workspace 执行；
+> **写操作命令**（§4.2）会改变 live workspace 状态——只在明确要做管道操作时使用，
+> 不要在纯取证时顺手执行。
+
+### 4.1 只读命令
 
 ```bash
 pd pain list -w "$WS" --json                                  # pain 清单
-pd pain record -w "$WS" --session <sid> --score 85 -r "<纠正描述>" --json   # 绑定真实会话（必须 --session）
 pd task list -w "$WS" --json                                  # 任务队列
-pd runtime internalization run-once -w "$WS" --json           # 手动推进一步（gateway auto-consumer 120s 自走）
 pd runtime internalization context-trace -t <taskId> -w "$WS" # 上下文链诊断（634-C P0 的定位工具）
 pd runtime internalization integrity -w "$WS" --json          # 断链清单
+pd runtime internalization wake-once -w "$WS" --dry-run --json # 租约评估（不取得租约）
 pd runtime features -w "$WS" --json                           # flag 生效面
 pd activation list -w "$WS" --json                            # 激活清单
 pd runtime canary -w "$WS" --json                             # 健康金丝雀
 ```
+
+### 4.2 写操作命令（有副作用，影响 live workspace）
+
+```bash
+# ⚠️ 写入一条 pain 记录并触发诊断链（workspace 状态变更）
+pd pain record -w "$WS" --session <sid> --score 85 -r "<纠正描述>" --json   # 必须绑定 --session
+
+# ⚠️ 租用一个任务并执行（推进内化管道状态；不传 --runner 用 config 默认）
+pd runtime internalization run-once -w "$WS" --json
+
+# ⚠️ 审批/激活等治理动作（Owner 决策面）
+pd activation approve --approval-id <id> -w "$WS" --json
+```
+
+> 网关内 auto-consumer 每 120 秒自行推进队列——取证时通常**无需** run-once，
+> 等待即可；run-once 仅用于需要立即观察下一步的调试场景。
 
 ## 5. 行为级验证 one-liner
 

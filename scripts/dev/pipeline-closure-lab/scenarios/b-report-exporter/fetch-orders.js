@@ -17,6 +17,22 @@ async function main() {
     const res = await fetch(UPSTREAM_URL, { signal: controller.signal });
     if (!res.ok) throw new Error(`upstream HTTP ${res.status}`);
     const body = await res.json();
+    // Trust boundary: the mock upstream response is untrusted runtime data.
+    // Validate the exact expected shape (400-order fixture contract) before
+    // persisting — anything else fails loud instead of writing arbitrary
+    // JSON to disk (rc-1/rc-3; also satisfies the lab's CodeQL posture for
+    // network-data-to-file flows).
+    if (
+      body === null || typeof body !== 'object' || Array.isArray(body)
+      || !Array.isArray(body.orders) || body.orders.length !== 400
+      || !body.orders.every((o) => o !== null && typeof o === 'object'
+        && typeof o.id === 'string' && /^ORD-\d{5}$/.test(o.id)
+        && typeof o.amount === 'number' && Number.isFinite(o.amount)
+        && (o.currency === 'CNY')
+        && (o.status === 'settled' || o.status === 'refunded'))
+    ) {
+      throw new Error('upstream response does not match the expected 400-order contract');
+    }
     const dir = path.join(__dirname, 'data');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'orders.json'), JSON.stringify(body, null, 1));
