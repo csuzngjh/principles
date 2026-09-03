@@ -22,8 +22,8 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npm install
 
-      - name: Build principles-core
-        run: npm run build --workspace=@principles/core
+      - name: Build repository (authoritative build graph)
+        run: npm run build
 
       - name: Run regression tests
         working-directory: packages/openclaw-plugin
