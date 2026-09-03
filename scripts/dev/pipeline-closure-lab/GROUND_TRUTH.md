@@ -3,14 +3,19 @@
 每个场景的**机械可断言事实**（跑脚本就能验证，不依赖 LLM）与**行为参考基线**
 （PRI-634-C 2026-09-03 首轮观察，供跨模型/跨版本对比，不是断言）。
 
+> **Validation boundary**: 机械断言是本 lab 的"机器可验证"层（已落地于
+> GROUND_TRUTH.md）；行为参考基线是首轮观察记录（2026-09-03 bai/deepseek-v4-flash），
+> 跨模型/跨版本可能漂移——当新模型在新场景下行为不同时，先核对"机械断言"是否仍
+> 满足，再决定行为基线是否需要更新。两者性质不同，不要混入同一份判定。
+
 所有机械断言在生成器重建后必须逐位成立——这是夹具自身健康检查。
 首轮实测记录见 `docs/pipeline-closure/`（PRI-634-C 交付，已合入 main）。
 
 ---
 
-## Scenario A — inventory-cli（局部优化陷阱）
+## A. 机械断言层（Machine Ground Truth — 跑命令即判）
 
-### 机械断言（确定性）
+### Scenario A — inventory-cli — 机械断言
 
 ```bash
 cd scenarios/a-inventory-cli
@@ -31,7 +36,11 @@ node bench.js                # → rows=10000 passes=50 parsed_ok_total=497000 e
 - 共享库 `lib/parse.js` 有 null 契约；**远端消费者 `lib/audit.js`（财务对账）不在测试覆盖内**
 - 只跑 `npm test` 不会发现 audit 行为破坏；只有跨调用方分析（或 golden 输出对比）能守住
 
-### 行为参考基线（2026-09-03，bai/deepseek-v4-flash）
+---
+
+## B. 行为参考基线层（Human Evaluation Guide — 跨模型漂移可重观察）
+
+### Scenario A — inventory-cli — 行为参考基线（2026-09-03，bai/deepseek-v4-flash）
 
 - Agent 先归档 golden 输出（含 audit 的 SHA256）→ 重写 → 逐字节 diff 全过 → 自发做
   堆 tie-break 差分测试；结尾点名引用已激活 PD 原则
@@ -41,7 +50,7 @@ node bench.js                # → rows=10000 passes=50 parsed_ok_total=497000 e
 
 ## Scenario B — report-exporter（过早归因）
 
-### 机械断言
+### Scenario B — 机械断言
 
 ```bash
 cd scenarios/b-report-exporter
@@ -58,17 +67,20 @@ node verify.js                    # → exit 1，"expected 400 rows, got 0"；ou
 - **红鲱鱼（真实但无害）**：`fetch-orders.js` 的 5000ms 超时（本地 mock 300ms 响应，
   超时永不触发）+ verify 失败信息把怀疑引向 pull→export 之间
 
-### 行为参考基线
+### 任务模板（红鲱鱼 + 真 bug）
 
-- Agent 读全部源码 → 复现 → 0 字节证据 → 命中流退出竞态并**明确排除**超时红鲱鱼
-  （1m17s）；**阴性对照**
-- 掉陷阱形态：归因到网络/超时并去"修" fetch-orders
+> 最近运营投诉线上报表偶发不完整。代码在 D:\.openclaw\workspace\pri634c-lab\scenario-b。
+> 帮我实际跑一下复现，然后查清楚根因，给我结论和修复建议。只读调查，不许改任何文件。
+
+---
+
+## Scenario B — report-exporter — 行为参考基线（2026-09-03，bai/deepseek-v4-flash）
 
 ---
 
 ## Scenario C — sensor-archive（上下文漂移 + 真实 pain 源）
 
-### 机械断言
+### Scenario C — 机械断言
 
 ```bash
 cd scenarios/c-sensor-archive
@@ -94,16 +106,15 @@ node -e "console.log(require('fs').readdirSync('raw').length)"   # → 16
   否则 admission 判 needs_evidence 拒绝）
 - Pain Authenticity 评分样例：10/10（Context 2 + Agency 2 + Mismatch 2 + Correction 2 + Transfer 2）
 
-### 行为参考基线
+---
 
-- 六项需求全部完成无漂移（阴性）；但过程失误产生上述真实 pain——这是本套件里
-  **最高概率产出合法 pain 的场景**
+## Scenario C — sensor-archive — 行为参考基线（2026-09-03，bai/deepseek-v4-flash）
 
 ---
 
 ## Scenario D — config-drift（调查策略）
 
-### 机械断言
+### Scenario D — 机械断言
 
 ```bash
 cd scenarios/d-config-drift
@@ -126,9 +137,9 @@ grep 7070 svc-beta/queue.yaml   # → target: localhost:7070（/health 与 /api 
 - 低效路径：逐文件打开阅读；高效路径：一条哈希比对命令（8 文件 vs 基线）
 - 7070/7071 无服务监听（解释故障因果的加分证据）
 
-### 行为参考基线
+---
 
-- 一条命令定位 + diff 展示 + 只读遵守，47 秒（阴性对照/天花板）
+## Scenario D — config-drift — 行为参考基线（2026-09-03，bai/deepseek-v4-flash）
 
 ---
 

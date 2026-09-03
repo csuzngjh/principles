@@ -30,12 +30,20 @@ live workspace（一次 reset 即丢失）。Owner 明确：这是项目重要�
 ### Phase 0 — 资产保全（本 PR，已交付）
 
 - `scripts/dev/pipeline-closure-lab/`：四场景夹具 + `generate.mjs`（公式种子，
-  `--out` 部署一次性副本）+ `GROUND_TRUTH.md`（机械断言/行为基线/管道断言）
-  + `FORENSICS.md`（state.db / trajectory.db / telemetry / pd CLI 取证 runbook）
+  `--out` 部署一次性副本）+ `GROUND_TRUTH.md`（机械断言/行为参考基线/管道断言）
+  + `FORENSICS.md`（state.db/trajectory.db/telemetry/pd CLI 取证 runbook）
+- `GROUND_TRUTH.md` 显式分 A/B 两层：机械断言（哈希/计数/退出码，跑命令即判）vs
+  行为参考基线（首轮观察记录，跨模型可能漂移）——避免机器判定与人类评估混源
 - 验证：A 的 audit 数字与 634-C 基线逐位一致；B 的 bug 端到端复现（verify exit 1、
   0 字节报告）；D 的 drift 唯一且与基线哈希不符
 - Complexity Delta：全部 NO（纯 dev 资产，无运行时变更；新增一个 `dev:closure-lab`
   npm script）
+
+> **Validation boundary (Owner 评审要求显式标注)**: 本 harness 验证的是"管道
+> 验证可重复执行"的能力（fixture 确定性、ground truth 稳定、取证查询可复现），**不**
+> 断言 runtime 管道本身正确。runtime 正确性仍需真实 OpenClaw 会话实测（见
+> PRI-634-C 报告与 PIPELINE_FINDING.md）。任何"Lab PASS"表述都指验证流程通过，
+> 不指 PD runtime 通过。
 
 ### Phase 1 — 断言化检查脚本（下 PR，小）
 
@@ -94,3 +102,27 @@ N/A — internal engineering change（dev 工具资产）。
 - 无 `antipattern-prep-next-phase`：Phase 1+ 均为独立 PR，未提前实现
 - 与 `pd runtime-uat` 的边界：后者是 repo 内单元级 UAT；本套件是真实宿主会话级
   闭环验证——职责不重叠（Phase 3 若收敛再评估合并）
+
+## 7. 场景分类原则（Owner 评审要求显式记录）
+
+未来扩展场景**不按技术分类**（不要新增 "SQL scenario / API scenario / Docker
+scenario" 等），而是**按 agent 失败模式**分类——这才是 PD 的产品价值对应面（PD
+的存在理由是纠正 agent 行为模式，而非测 PD runtime 的某项技术能力）。
+
+当前四个场景已覆盖的失败模式为基线（每场景对应一个行为陷阱）：
+
+- **A 局部优化陷阱** — "对共享函数的改动破坏远端调用方行为"
+- **B 过早归因** — "对弱/误导性证据做强假设"
+- **C 上下文漂移** — "长任务中段忘记早期约束"
+- **D 调查策略** — "不建立基线 / 不读既有资产直接动手"
+
+未来按 PD 关心的失败模式扩展（每加一场景应同时回答"PD 想约束哪类 agent 行为"，
+不是"哪类技术场景会暴露 bug"）：
+
+- **E premature confidence**："我确定原因了"，但缺证据就下断言
+- **F scope creep**：用一个改动"顺手"修了 10 个未要求问题
+- **G authority confusion**：跨过 Owner 确认直接做不可逆操作（删分支 / 合并 / 部署）
+- **H intent override**：Owner 已声明的意图被自推导覆盖
+
+新增场景时，机械断言与行为参考基线必须分两层（如 GROUND_TRUTH.md §A/§B），
+避免自动判定与人类评估混源。
