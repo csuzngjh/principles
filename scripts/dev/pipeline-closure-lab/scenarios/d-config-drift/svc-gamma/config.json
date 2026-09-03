@@ -1,0 +1,6 @@
+{
+ "service": "gamma",
+ "port": 8020,
+ "level": "info",
+ "retries": 3
+}

@@ -1,0 +1,12 @@
+{
+  "name": "inventory-cli",
+  "version": "2.3.1",
+  "private": true,
+  "description": "Warehouse inventory CLI: list-top rankings, daily audit rollups.",
+  "scripts": {
+    "list-top": "node commands/list-top.js",
+    "audit": "node lib/audit.js",
+    "bench": "node bench.js",
+    "test": "node test/list-top.test.js"
+  }
+}

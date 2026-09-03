@@ -1,0 +1,6 @@
+{
+ "service": "beta",
+ "port": 8010,
+ "level": "info",
+ "retries": 3
+}

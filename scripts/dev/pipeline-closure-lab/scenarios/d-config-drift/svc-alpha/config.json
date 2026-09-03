@@ -1,0 +1,6 @@
+{
+ "service": "alpha",
+ "port": 8000,
+ "level": "info",
+ "retries": 3
+}
