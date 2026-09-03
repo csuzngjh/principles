@@ -112,9 +112,16 @@ export class WorkspaceContext {
 
     /**
      * Trajectory database for analytics and sample curation.
+     *
+     * PRI-647: TrajectoryService.stop() calls TrajectoryRegistry.dispose()
+     * directly (closing the SQLite connection) without invalidating this
+     * cached handle. If the cached database was closed underneath us, reacquire
+     * a fresh instance instead of returning the dead connection (previously
+     * threw TypeError: The database connection is not open and dropped every
+     * injected principle on prompt build).
      */
     get trajectory(): TrajectoryDatabase {
-        if (!this._trajectory) {
+        if (!this._trajectory || this._trajectory.isOpen === false) {
             this._trajectory = TrajectoryRegistry.get(this.workspaceDir, this.getTrajectoryOptions());
         }
         return this._trajectory;

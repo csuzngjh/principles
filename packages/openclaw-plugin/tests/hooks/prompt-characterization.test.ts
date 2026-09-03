@@ -527,4 +527,22 @@ describe('Size guard: never exceeds 9000 chars', () => {
     await expect(handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ trigger: 'user' })))
       .resolves.toBeDefined();
   });
+
+  it('continues the prompt build when trajectory observability throws (PRI-647)', async () => {
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const mockWctx = (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>)();
+    const recordSession = mockWctx.trajectory.recordSession as ReturnType<typeof vi.fn>;
+    recordSession.mockImplementationOnce(() => {
+      throw new Error('The database connection is not open');
+    });
+
+    const result = await handleBeforePromptBuild(
+      makeMinimalEvent({ prompt: '继续，不要中断', messages: [] }),
+      makeCtx({ trigger: 'user', sessionId: 'obs-fail-open', runId: 'run-obs-fail-open' }),
+    );
+
+    expect(result).toBeDefined();
+    expect(mockDetectSync).toHaveBeenCalled();
+  });
 });

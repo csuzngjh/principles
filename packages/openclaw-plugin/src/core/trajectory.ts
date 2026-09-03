@@ -552,6 +552,20 @@ export class TrajectoryDatabase {
     this.db.close();
   }
 
+  /**
+   * PRI-647: whether the underlying SQLite connection is still open.
+   *
+   * Plugin service stop() (e.g. OpenClaw config hot-reload) calls
+   * TrajectoryRegistry.dispose() which closes this connection without
+   * invalidating a leaked WorkspaceContext handle. Cached owners must check
+   * this before reuse and reacquire a fresh instance instead of returning a
+   * dead connection (previously threw TypeError: The database connection is
+   * not open on every prompt build).
+   */
+  get isOpen(): boolean {
+    return this.db.open;
+  }
+
   recordSession(input: TrajectorySessionInput): void {
     const startedAt = input.startedAt ?? nowIso();
     this.withWrite(() => {

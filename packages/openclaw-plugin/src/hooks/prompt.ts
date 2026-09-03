@@ -302,17 +302,27 @@ export async function handleBeforePromptBuild(
   const { runId, sessionKey, trigger, sessionId } = ctx;
   const isUserInteraction = isUserInteractionTrigger(trigger);
   const api = ctx.api;
-  if (sessionId) {
-    wctx.trajectory?.recordSession?.({ sessionId });
-  }
-
-  // OpenClaw sends the current model-visible user input in event.prompt. event.messages
-  // contains prepared history and must only be used for lineage and turn indexing.
+  // PRI-647: trajectory session recording and assistant-turn anchoring are
+  // observability side-effects only. A closed/disposed trajectory connection
+  // (plugin service stop during config hot-reload) must never abort the prompt
+  // build and drop every injected principle - fail open like the other side
+  // channels (evolution, Runtime V2, INTENT). OpenClaw sends the current
+  // model-visible user input in event.prompt; event.messages contains prepared
+  // history and must only be used for lineage and turn indexing.
   let correctionReferencesAssistantTurnId: number | null = null;
-  if (sessionId && isUserInteraction && event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
-    const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
-    const lastAssistant = turns[turns.length - 1];
-    correctionReferencesAssistantTurnId = lastAssistant?.id ?? null;
+  try {
+    if (sessionId) {
+      wctx.trajectory?.recordSession?.({ sessionId });
+    }
+    if (sessionId && isUserInteraction && event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
+      const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
+      const lastAssistant = turns[turns.length - 1];
+      correctionReferencesAssistantTurnId = lastAssistant?.id ?? null;
+    }
+  } catch (trajectoryErr) {
+    logger?.warn?.(
+      `[PD:Prompt] Trajectory observability unavailable, continuing without turn anchoring: ${String(trajectoryErr)}`
+    );
   }
 
   // Load context injection configuration
