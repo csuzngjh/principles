@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OperatorHealthReadModel, PruningReadModel, RuntimeStateManager } from '@principles/core/runtime-v2';
 import type { OperatorHealthSnapshot } from '@principles/core/runtime-v2';
 import { HealthCheckModel } from '../../src/server/models/HealthCheckModel.js';
@@ -12,14 +12,41 @@ import {
   type TestWorkspace,
 } from '../test-utils.js';
 
+// os.homedir() drives canonical layout resolution (getInstallLayoutPaths).
+// Mock the module so a canonical fixture home can be installed per-test
+// without touching the real ~/.pd of the machine running the tests.
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  const realHomedir = actual.homedir.bind(actual);
+  return { ...actual, homedir: vi.fn(() => realHomedir()) };
+});
+
 describe('HealthCheckModel', () => {
   let ws: TestWorkspace | null = null;
+  let homedirPin: string | undefined;
+  let homedirRealImpl: (() => string) | undefined;
+
+  beforeEach(() => {
+    // Pin os.homedir() to an empty temp home so a real canonical install on
+    // the dev machine (~/.pd/install.json) cannot leak into layout resolution.
+    homedirPin = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-health-homedir-'));
+    const homedirMock = vi.mocked(os.homedir);
+    homedirRealImpl = homedirMock.getMockImplementation();
+    homedirMock.mockImplementation(() => homedirPin!);
+  });
 
   afterEach(() => {
+    const homedirMock = vi.mocked(os.homedir);
+    if (homedirRealImpl) homedirMock.mockImplementation(homedirRealImpl);
+    else homedirMock.mockReset();
     vi.restoreAllMocks();
     if (ws) {
       cleanupTestWorkspace(ws);
       ws = null;
+    }
+    if (homedirPin) {
+      fs.rmSync(homedirPin, { recursive: true, force: true });
+      homedirPin = undefined;
     }
   });
 
@@ -97,6 +124,42 @@ describe('HealthCheckModel', () => {
       if (savedHome === undefined) delete process.env.OPENCLAW_HOME;
       else process.env.OPENCLAW_HOME = savedHome;
       fs.rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('versions.pd flows through the real canonical layout resolution path (PRI-649)', async () => {
+    // Canonical fixture: <home>/.pd/install.json (mode canonical, layout v1)
+    // + <home>/.pd/runtime/plugin/package.json. NOT mocked: installed-layout,
+    // resolveInstallLayout or HealthCheckModel — only os.homedir() is pointed
+    // at the fixture home so canonical path resolution stays on the fixture.
+    ws = await createTestWorkspace();
+    const canonicalHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-health-canonical-'));
+    const runtimeDir = path.join(canonicalHome, '.pd', 'runtime');
+    const pluginDir = path.join(runtimeDir, 'plugin');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(canonicalHome, '.pd', 'install.json'),
+      JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['openclaw'] }),
+    );
+    fs.writeFileSync(
+      path.join(pluginDir, 'package.json'),
+      JSON.stringify({ name: 'principles-disciple', version: '9.9.9' }),
+    );
+
+    const homedirMock = vi.mocked(os.homedir);
+    homedirMock.mockImplementation(() => canonicalHome);
+    try {
+      const model = new HealthCheckModel(ws.workspaceDir);
+      try {
+        const health = await model.checkSystemHealth();
+        expect(health.versions?.pd).toBe('9.9.9');
+      } finally {
+        model.dispose();
+      }
+    } finally {
+      // Back to the beforeEach pin; afterEach restores the real homedir.
+      homedirMock.mockImplementation(() => homedirPin!);
+      fs.rmSync(canonicalHome, { recursive: true, force: true });
     }
   });
 
