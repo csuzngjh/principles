@@ -1231,9 +1231,13 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     // `readSummaryField` only ever reads the single loaded predecessor, so a
     // manifest naming an ancestor further up the chain (the Evaluator's
     // `scribe.*` / `dreamer.*` / `diagnostician.*`) resolves here or never.
+    // Related namespaces are excluded here too — the same INV-LINEAGE-SCOPE
+    // discipline partitionTier2Paths applies to tier2 must hold for tier0/1
+    // summary declarations (e.g. a repair manifest's `replay.summary.*`).
+    const relatedNamespaceSet = new Set(relatedNamespaces);
     const summaryAncestryPaths = [...manifest.tier0, ...manifest.tier1].filter((fieldPath) => {
       const parsed = parseContextPath(fieldPath);
-      return parsed !== null && parsed.layer === 'summary';
+      return parsed !== null && parsed.layer === 'summary' && !relatedNamespaceSet.has(parsed.namespace);
     });
     const ancestryPaths = [...rawAncestryPaths, ...summaryAncestryPaths];
 
