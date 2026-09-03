@@ -60,6 +60,48 @@ import type { ContextManifest } from '../internalization/context-manifest.js';
 import { declaredFields } from '../internalization/context-manifest.js';
 import { resolveInjection, type ResolveInjectionEmit, type ResolveInjectionResult } from '../internalization/resolve-injection.js';
 import { buildAvailableMap } from '../internalization/summary-field-reader.js';
+import { CandidateLineage } from '../internalization/candidate-lineage.js';
+import {
+  findUnresolvedRequiredPaths,
+  mergeContextFields,
+  parseContextPath,
+  partitionTier2Paths,
+  resolveAncestryPaths,
+  resolveRelatedPaths,
+  toRawStageSources,
+  type RelatedContextSource,
+} from '../internalization/context-resolution.js';
+
+// ── Context injection outcome (design §6.2/§6.2.2, PR B §33–§37) ────────────
+
+/**
+ * Outcome of a Layer 1 context-injection resolution.
+ *
+ * - `focused`  — use `fields` (path → preview text) as the focused context.
+ * - `fallback` — the caller MUST fall back to the legacy full-predecessor
+ *   injection (F13). The three original triggers come from `resolveInjection`;
+ *   PR B adds two:
+ *     - `required_evidence_unresolved` — the allocation looked healthy but a
+ *       caller-declared required field never reached the prompt (absent or
+ *       budget-truncated). This is the "Stage2 enabled + raw silently absent"
+ *       guard (design §35: no silent thin context).
+ *     - `lineage_unavailable` — CandidateLineage hit data corruption or a store
+ *       failure, so required tier2 evidence cannot be served at all (§21).
+ * - `disabled` — `context_manifest_budget` is off; caller keeps its assembly.
+ */
+export type ContextInjectionOutcome =
+  | { readonly mode: 'focused'; readonly fields: Readonly<Record<string, string>> }
+  | {
+      readonly mode: 'fallback';
+      readonly reason:
+        | 'empty_allocation'
+        | 'tier1_all_absent'
+        | 'absent_ratio_exceeded'
+        | 'required_evidence_unresolved'
+        | 'lineage_unavailable';
+      readonly unresolvedRequired: readonly string[];
+    }
+  | { readonly mode: 'disabled' };
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -1119,18 +1161,14 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * Resolve the cross-level context injection for a runner via the Layer 1
    * manifest + budget path (design §6.2/§6.3/§6.2.2).
    *
-   * Single wiring point shared by the 4 peer runners (task 5.9). Returns:
-   *   - `{ mode: 'focused', fields }` — use the manifest-allocated fields as
-   *     the focused context (a `Record<string,string>` of path → preview text)
-   *   - `{ mode: 'fallback' }` — resolution was too sparse; the caller MUST
-   *     fall back to the legacy full-predecessor injection (F13). The fallback
-   *     emits exactly one `manifest_resolution_insufficient` event (rc-9).
-   *   - `{ mode: 'disabled' }` — flag off; caller uses the existing assembly.
+   * Single wiring point shared by the peer runners (task 5.9). This SYNC
+   * variant resolves only Channel 1 (the predecessor's Layer 0
+   * summary/predecessorSummary envelope); it is correct for runners whose
+   * manifest declares no tier2 raw field and no related reference. Runners
+   * that need tier2/related evidence use `resolveContextInjectionAsync`.
    *
    * `predecessorContentJson` is the loaded predecessor artifact's contentJson
    * (the same object buildContext already holds — zero extra store reads, F3).
-   * It carries the Layer 0 `summary` / `predecessorSummary` envelope; the
-   * summary-field-reader extracts the manifest-declared paths from it.
    *
    * budgetTokens scope (design §6.2.1): covers ONLY manifest-declared fields.
    *
@@ -1141,12 +1179,116 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     taskId: string,
     manifest: ContextManifest,
     predecessorContentJson: unknown,
-  ): { mode: 'focused'; fields: Readonly<Record<string, string>> } | { mode: 'fallback' } | { mode: 'disabled' } {
+  ): ContextInjectionOutcome {
     if (!this.isContextManifestBudgetEnabled()) {
       return { mode: 'disabled' };
     }
     const paths = declaredFields(manifest);
     const available = buildAvailableMap(paths, predecessorContentJson);
+    return this.runResolveInjection({ taskId, manifest, available, requiredPaths: [] });
+  }
+
+  /**
+   * Async variant: resolves ALL THREE fact-acquisition channels before running
+   * the same allocation + information-floor core (design §6.4/§6.6, PR B).
+   *
+   *   1. predecessor summary envelope — pure, from `predecessorContentJson`
+   *   2. ancestry raw (`<stage>.raw.*`) — `CandidateLineage` from
+   *      `startArtifactId`; the nearest ancestor of a stage wins
+   *   3. related references (`<ns>.summary.*` / `<ns>.raw.*`) — caller-supplied
+   *      causal references, e.g. the PR-A replay evidence
+   *
+   * `requiredPaths` is the required-evidence gate (design §33–§37): a listed
+   * path that ends up absent OR budget-truncated forces an observable fallback
+   * instead of a silently thin focused context. Pass an empty list (or omit it)
+   * when tier2 is genuinely optional.
+   */
+  protected async resolveContextInjectionAsync(params: {
+    readonly taskId: string;
+    readonly manifest: ContextManifest;
+    readonly predecessorContentJson: unknown;
+    /** Lineage traversal start — normally the predecessor artifact id. */
+    readonly startArtifactId?: string;
+    readonly relatedSources?: readonly RelatedContextSource[];
+    readonly requiredPaths?: readonly string[];
+  }): Promise<ContextInjectionOutcome> {
+    const { taskId, manifest } = params;
+    if (!this.isContextManifestBudgetEnabled()) {
+      return { mode: 'disabled' };
+    }
+
+    const paths = declaredFields(manifest);
+    const requiredPaths = params.requiredPaths ?? [];
+    const summaryFields = buildAvailableMap(paths, params.predecessorContentJson);
+    const extras: ReadonlyMap<string, unknown>[] = [];
+
+    // Channel 2 — ancestry. Related namespaces are excluded explicitly so a
+    // related reference can never be mistaken for an ancestor stage
+    // (INV-LINEAGE-SCOPE, design §33).
+    const relatedNamespaces = (params.relatedSources ?? []).map((s) => s.namespace);
+    const { ancestry: rawAncestryPaths } = partitionTier2Paths(manifest.tier2, relatedNamespaces);
+    // Ancestor-declared SUMMARY paths travel the same walk as the raw ones:
+    // `readSummaryField` only ever reads the single loaded predecessor, so a
+    // manifest naming an ancestor further up the chain (the Evaluator's
+    // `scribe.*` / `dreamer.*` / `diagnostician.*`) resolves here or never.
+    const summaryAncestryPaths = [...manifest.tier0, ...manifest.tier1].filter((fieldPath) => {
+      const parsed = parseContextPath(fieldPath);
+      return parsed !== null && parsed.layer === 'summary';
+    });
+    const ancestryPaths = [...rawAncestryPaths, ...summaryAncestryPaths];
+
+    if (ancestryPaths.length > 0 && params.startArtifactId !== undefined) {
+      const lineage = new CandidateLineage({
+        artifacts: this.artifactStore,
+        tasks: {
+          getTaskById: async (id: string) => {
+            const task = await this.stateManager.getTask(id);
+            return task === null ? null : { taskId: id, taskKind: task.taskKind };
+          },
+        },
+      });
+      const chain = await lineage.resolve(params.startArtifactId);
+      if (!chain.ok) {
+        // rc-9: corruption / store failure is observable, never a silent
+        // "no tier2 today". Required evidence cannot be served without it.
+        this.emitEvent('context_lineage_unavailable', taskId, {
+          runnerKind: manifest.runnerKind,
+          manifestId: manifest.manifestId,
+          errorKind: chain.error.kind,
+          detail: chain.error.detail,
+          fallback: 'full_predecessor_injection',
+          nextAction: 'verify_durable_artifact_ancestry_before_tier2_resolution',
+        });
+        if (requiredPaths.length > 0) {
+          return { mode: 'fallback', reason: 'lineage_unavailable', unresolvedRequired: [...requiredPaths] };
+        }
+      } else {
+        extras.push(resolveAncestryPaths(ancestryPaths, toRawStageSources(chain.value.nodes)));
+      }
+    }
+
+    // Channel 3 — related (causal) references. Never ancestry: a related source
+    // is supplied explicitly by the caller and is not part of the lineage walk.
+    if (params.relatedSources !== undefined && params.relatedSources.length > 0) {
+      extras.push(resolveRelatedPaths(paths, params.relatedSources));
+    }
+
+    const available = mergeContextFields(summaryFields, extras);
+    return this.runResolveInjection({ taskId, manifest, available, requiredPaths });
+  }
+
+  /**
+   * Allocation + information-floor core shared by both variants (design
+   * §6.2.2). Allocates, emits the Layer 1 events, then applies PR B's
+   * required-evidence gate before reporting `focused`.
+   */
+  private runResolveInjection(params: {
+    readonly taskId: string;
+    readonly manifest: ContextManifest;
+    readonly available: ReadonlyMap<string, unknown>;
+    readonly requiredPaths: readonly string[];
+  }): ContextInjectionOutcome {
+    const { taskId, manifest, available, requiredPaths } = params;
     const emit = (event: ResolveInjectionEmit): void => {
       if (event.type === 'manifest_resolution_insufficient') {
         this.emitEvent('manifest_resolution_insufficient', taskId, {
@@ -1169,10 +1311,31 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       }
     };
     const result: ResolveInjectionResult = resolveInjection(manifest, available, emit);
+
+    // Required-evidence gate (design §33–§37): the allocation can look healthy
+    // while a caller-declared required field is absent OR was dropped by the
+    // budget. That is exactly the "Stage2 enabled + raw silently absent" hole —
+    // it degrades observably, never becomes a thinner prompt.
+    const unresolvedRequired = findUnresolvedRequiredPaths({
+      required: requiredPaths,
+      absent: result.allocated.absent,
+      truncated: result.allocated.truncated,
+    });
+    if (unresolvedRequired.length > 0) {
+      this.emitEvent('required_context_evidence_unresolved', taskId, {
+        runnerKind: manifest.runnerKind,
+        manifestId: manifest.manifestId,
+        requiredPaths: unresolvedRequired,
+        fallback: 'full_predecessor_injection',
+        nextAction: 'verify_durable_ancestry_or_related_reference_availability',
+      });
+      return { mode: 'fallback', reason: 'required_evidence_unresolved', unresolvedRequired };
+    }
+
     if (result.kind === 'focused') {
       return { mode: 'focused', fields: result.allocated.fields };
     }
-    return { mode: 'fallback' };
+    return { mode: 'fallback', reason: result.reason, unresolvedRequired: [] };
   }
 
   // ── Agent draft injection (Task 12) ────────────────────────────────────────

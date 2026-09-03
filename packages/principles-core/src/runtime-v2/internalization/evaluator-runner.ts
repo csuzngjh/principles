@@ -57,6 +57,7 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { EVALUATOR_STAGE1_MANIFEST, EVALUATOR_STAGE2_MANIFEST } from './context-manifests.js';
 import { evaluateFlaggedCriteria, isForcedStage2 } from './progressive-evaluator.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
@@ -283,6 +284,14 @@ export interface EvaluatorRunnerOptions extends PeerRunnerOptions {
    * 工具名差异不得成为 hard blocker。
    */
   readonly hostToolCatalog?: HostToolCatalogFacts;
+  /**
+   * PR B (ADR-0019 pattern, mirrors ArtificerRunner): effective config for
+   * feature flag resolution. Without it the evaluator's flag helpers
+   * (progressive_evaluator / context_manifest_budget) always saw undefined and
+   * silently stayed legacy — the two-stage path could never be enabled even
+   * when the config asked for it.
+   */
+  readonly effectiveConfig?: EffectivePdConfig;
 }
 
 export interface ResolvedEvaluatorRunnerOptions {
@@ -393,6 +402,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       expectedTaskKind: 'evaluator',
       defaultAgentId: 'evaluator',
       resultRefPrefix: 'evaluator',
+      // PR B: forward effectiveConfig so the flag helpers (progressive
+      // evaluator / manifest budget) can actually read the config (ADR-0019).
+      effectiveConfig: options.effectiveConfig,
     });
     this.validator = deps.validator;
     this.gateDeps = options.gateDeps ?? null;
@@ -514,7 +526,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // ── Two-stage progressive evaluation ──
     // Stage 1: summary-level evaluation (same prompt as single-stage, but
     // uses EVALUATOR_STAGE1_MANIFEST for focused context).
-    const stage1Message = this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
+    const stage1Message = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
     const stage1Output = await this.runSingleEvaluation(taskId, stage1Message);
 
     // 9.4c (design §6.5.4): Stage 1 output contract violation check.
@@ -554,7 +566,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // Stage 2 triggered: independent re-evaluation with tier2 context.
     // rc-7 / ERR-015 / ERR-018 / ERR-019: Stage 2 does NOT receive Stage 1
     // output, concerns, or the FlaggedDecision. It is a fully independent call.
-    const stage2Message = this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE2_MANIFEST);
+    const stage2Message = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE2_MANIFEST);
     const stage2Output = await this.runSingleEvaluation(taskId, stage2Message);
 
     this.progressiveFinalOutput = stage2Output;
@@ -703,7 +715,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     };
   }
 
-  private buildEvaluatorPrompt(taskId: string, context: EvaluatorContext, manifest: typeof EVALUATOR_STAGE1_MANIFEST): string {
+  private async buildEvaluatorPrompt(taskId: string, context: EvaluatorContext, manifest: typeof EVALUATOR_STAGE1_MANIFEST): Promise<string> {
     let parsedArtificerArtifact: unknown = null;
     if (context.artificerArtifact) {
       try { parsedArtificerArtifact = JSON.parse(context.artificerArtifact); } catch { parsedArtificerArtifact = context.artificerArtifact; }
@@ -712,10 +724,25 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     if (context.scribeArtifact) {
       try { parsedScribeArtifact = JSON.parse(context.scribeArtifact); } catch { parsedScribeArtifact = context.scribeArtifact; }
     }
-    // Resolve manifest-injected focused fields (Layer 1).
+    // Resolve manifest-injected focused fields (Layer 1 + PR B tier2).
     const artificerPred = toArtificerPredecessor(context);
     if (artificerPred !== null) {
-      const resolved = this.resolveContextInjection(taskId, manifest, artificerPred.contentJson);
+      // Stage 2 is by definition the deep-evidence stage, so its tier2 raw
+      // fields (`diagnostician.raw.evidence`, `dreamer.raw.candidates`) are
+      // REQUIRED. When they cannot be resolved from the durable CandidateLineage
+      // — or the budget cannot carry them — resolution falls back to the
+      // authoritative full artificer artifact rather than injecting a silently
+      // thinner context (design §34/§35: no silent required-field loss).
+      const requiredPaths = manifest.manifestId === EVALUATOR_STAGE2_MANIFEST.manifestId
+        ? [...EVALUATOR_STAGE2_MANIFEST.tier2]
+        : [];
+      const resolved = await this.resolveContextInjectionAsync({
+        taskId,
+        manifest,
+        predecessorContentJson: artificerPred.contentJson,
+        startArtifactId: context.sourceArtificerArtifactId ?? undefined,
+        requiredPaths,
+      });
       if (resolved.mode === 'focused') {
         parsedArtificerArtifact = resolved.fields;
       }
@@ -735,7 +762,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
   /** Original single-stage invokeRuntime (flag-off path). */
   private async invokeRuntimeSingleStage(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
-    const message = this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
+    const message = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
     return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },

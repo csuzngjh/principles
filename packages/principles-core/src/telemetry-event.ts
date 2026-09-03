@@ -239,6 +239,45 @@ export const TelemetryEventType = Type.Union([
   //   refuses to blind-retry and fails loud (payload: reason, detail).
   Type.Literal('artificer_repair_replay_evidence_resolved'),
   Type.Literal('artificer_repair_replay_evidence_unavailable'),
+  // PRI-634 PR-B: Shared Information Plane context-resolution telemetry.
+  // NOTE ON NAMING: `BasePeerRunner.emitEvent` prefixes every event with
+  // `runnerName` (`evaluator_manifest_resolution_insufficient`), so this union
+  // must list the PREFIXED literal — an unprefixed entry can never match and
+  // the event is silently rewritten to `degradation_triggered`.
+  // - <kind>_context_lineage_unavailable: CandidateLineage hit data corruption
+  //   or a store failure while resolving ancestry evidence (payload: errorKind,
+  //   detail). The runner degrades to the legacy full-predecessor injection —
+  //   never a silently thinner context.
+  // - <kind>_required_context_evidence_unresolved: a caller-declared required
+  //   field (e.g. Stage2's `diagnostician.raw.evidence`, or a repair's replay
+  //   evidence) was absent OR budget-truncated, so the focused context was
+  //   rejected in favor of the authoritative fallback (payload: requiredPaths).
+  //   Only artificer/evaluator declare required paths today, so only those two
+  //   prefixes are registered.
+  Type.Literal('artificer_context_lineage_unavailable'),
+  Type.Literal('artificer_required_context_evidence_unresolved'),
+  Type.Literal('evaluator_context_lineage_unavailable'),
+  Type.Literal('evaluator_required_context_evidence_unresolved'),
+  // Layer 1 allocation degradations, emitted by the shared
+  // `runResolveInjection` core and therefore reachable from ALL FOUR
+  // manifest-owning runners. These were already emitted but missing from this
+  // union, so schema validation silently rewrote every one of them to
+  // `degradation_triggered` — the Layer 3 surface could never see which
+  // manifest went thin or which field the budget dropped. Registered so the
+  // information floor stays observable (rc-9).
+  // - <kind>_manifest_resolution_insufficient: too many declared fields were
+  //   absent; the runner fell back to the full-predecessor injection (payload:
+  //   absentCount, declaredCount, absentRatio).
+  // - <kind>_context_truncated: the budget dropped or truncated a field
+  //   (payload: fieldPath, reason, remainingBudgetTokens).
+  Type.Literal('dreamer_manifest_resolution_insufficient'),
+  Type.Literal('dreamer_context_truncated'),
+  Type.Literal('scribe_manifest_resolution_insufficient'),
+  Type.Literal('scribe_context_truncated'),
+  Type.Literal('artificer_manifest_resolution_insufficient'),
+  Type.Literal('artificer_context_truncated'),
+  Type.Literal('evaluator_manifest_resolution_insufficient'),
+  Type.Literal('evaluator_context_truncated'),
   // PRI-426: Evaluator single-round adversarial sandbox replay telemetry.
   // - evaluator_adversarial_replay: emitted after each gate invocation with the
   //   gate decision, case count, and failed-case count.

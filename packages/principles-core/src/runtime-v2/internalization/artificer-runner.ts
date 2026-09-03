@@ -40,13 +40,14 @@ import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../erro
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
-import { ARTIFICER_MANIFEST } from './context-manifests.js';
+import { ARTIFICER_MANIFEST, ARTIFICER_REPAIR_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import {
   resolveRepairReplayContext,
   type RepairReplayContext,
 } from './repair-replay-resolver.js';
+import type { RelatedContextSource } from './context-resolution.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -97,8 +98,29 @@ interface ArtificerContext {
    * Loop state freshness (rc-7, EP-05): repairPayload.repairIteration is
    * written at task creation time, never inferred at read. Each repair round
    * reads the current evaluator's feedback — never a cached value.
+   *
+   * PR B: this is the NO-REPLAY base string (concerns + required changes).
+   * The deterministic replay evidence is carried separately by `replayContext`
+   * so the Shared Information Plane can choose its channel (design §26/§35):
+   *   - manifest focused  → `replay.*` fields carry it, base string is used;
+   *   - flag off/fallback → the PR-A evidence block is appended here, because
+   *     the replay evidence MUST survive the flag-off production path.
    */
   readonly repairFeedback: string | null;
+  /**
+   * The current task's validated RepairPayload (PR B). Ephemeral — it is the
+   * already-durable task metadata, re-read here only so invokeRuntime can
+   * re-render the feedback string with the channel-appropriate replay block.
+   * It is never re-persisted and never gains `failedCases` (design §21).
+   */
+  readonly repairPayload?: RepairPayload;
+  /**
+   * PR-A resolved deterministic replay evidence (PR B). Present only when this
+   * repair round's source replay ran and FAILED. Ephemeral: exists for this
+   * buildContext/invokeRuntime pair, never persisted, never a second fact store
+   * — the durable authority remains the source Evaluator artifact.
+   */
+  readonly replayContext?: RepairReplayContext;
 }
 
 /**
@@ -348,9 +370,61 @@ function formatReplayEvidenceBlock(context: RepairReplayContext): string {
   }
   if (context.truncated) {
     const shown = context.systemFailures.length + context.traceFailures.length + context.globalViolations.length;
-    lines.push(`- (evidence truncated: ${context.failedCaseCount + context.globalViolationCount} durable entries, showing ${shown} stratified representatives)`);
+    // `failedCaseCount` is the pre-selection durable total and ALREADY includes
+    // the forbidden-pattern entries that were partitioned into
+    // `globalViolations` — adding `globalViolationCount` would double-count
+    // them (P2 review finding, carried into PR B).
+    lines.push(`- (evidence truncated: ${context.failedCaseCount} durable entries, showing ${shown} stratified representatives)`);
   }
   return lines.join('\n');
+}
+
+/**
+ * PR B: expose the RepairPayload and the PR-A replay evidence as RELATED
+ * context sources (design §33). They are causal references — NOT ancestry — so
+ * nothing here reaches into `lineageArtifactIds`.
+ *
+ * The replay values come straight from the already-bounded
+ * `RepairReplayContext`: the information plane therefore inherits PR A's ≤16
+ * selection (`MAX_REPLAY_FAILURES_IN_REPAIR`) and never re-expands the durable
+ * `failedCases` array (design §43).
+ */
+function buildRepairRelatedSources(context: ArtificerContext): readonly RelatedContextSource[] {
+  const sources: RelatedContextSource[] = [];
+  const { replayContext, repairPayload } = context;
+
+  if (repairPayload !== undefined) {
+    sources.push({
+      namespace: 'repair',
+      summary: {
+        requiredChanges: repairPayload.requiredChanges,
+        concerns: repairPayload.concerns,
+      },
+    });
+  }
+
+  if (replayContext !== undefined) {
+    const failureTypes = new Set<string>();
+    for (const failure of [...replayContext.systemFailures, ...replayContext.traceFailures]) {
+      failureTypes.add(failure.errorType);
+    }
+    sources.push({
+      namespace: 'replay',
+      summary: {
+        passed: replayContext.passed,
+        failedCaseCount: replayContext.failedCaseCount,
+        // Deterministic: sorted, so the same context always renders identically.
+        failureTypes: [...failureTypes].sort(),
+      },
+      raw: {
+        traceFailures: replayContext.traceFailures,
+        systemFailures: replayContext.systemFailures,
+        globalViolations: replayContext.globalViolations,
+      },
+    });
+  }
+
+  return sources;
 }
 
 /**
@@ -572,9 +646,11 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // (repair_replay_evidence_unavailable) instead of consuming a blind LLM
     // retry — failure must increase information (SPEC §27).
     let repairFeedback: string | null = null;
+    let repairPayload: RepairPayload | undefined;
+    let replayContext: RepairReplayContext | undefined;
     if (piTask?.repairPayload) {
       const payload = piTask.repairPayload;
-      let replayEvidence: string | undefined;
+      repairPayload = payload;
       if (payload.diagnosticReplay?.ran === true && payload.diagnosticReplay.passed === false) {
         const resolution = await resolveRepairReplayContext({
           sourceEvaluatorTaskId: payload.sourceEvaluatorTaskId,
@@ -584,7 +660,9 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           },
         });
         if (resolution.ok) {
-          replayEvidence = formatReplayEvidenceBlock(resolution.context);
+          // PR B: keep the resolved evidence object ephemeral on the context.
+          // The prompt channel is chosen in invokeRuntime (design §26).
+          replayContext = resolution.context;
           this.emitEvent('repair_replay_evidence_resolved', taskId, {
             sourceEvaluatorTaskId: payload.sourceEvaluatorTaskId,
             sourceEvaluatorArtifactId: resolution.context.sourceEvaluatorArtifactId,
@@ -604,8 +682,18 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           );
         }
       }
-      repairFeedback = formatRepairFeedback(payload, replayEvidence);
+      // Base string carries concerns + required changes only; the replay
+      // evidence is appended in invokeRuntime according to the chosen channel.
+      repairFeedback = formatRepairFeedback(payload);
     }
+
+    // PR B: ephemeral repair/replay evidence for the Shared Information Plane.
+    // Both are read-only views of already-durable facts; neither is persisted
+    // here and neither widens RepairPayload (design §21/§28).
+    const repairEvidenceExtras = {
+      ...(repairPayload !== undefined ? { repairPayload } : {}),
+      ...(replayContext !== undefined ? { replayContext } : {}),
+    };
 
     // P1-1 (外部复核): rollout needs_revision 路由到 artificer (code 渠道) 时,
     // revisionFeedback 携带 reviewer requiredChanges — 与 repairPayload 同等
@@ -616,7 +704,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
 
     if (deps.length === 0) {
       this.emitEvent('no_dependencies', taskId, {});
-      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, revisionFeedback };
+      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, revisionFeedback, ...repairEvidenceExtras };
     }
 
     for (const depId of deps) {
@@ -659,13 +747,14 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           adversarialFeedback,
           repairFeedback,
           revisionFeedback,
+          ...repairEvidenceExtras,
           ...(dreamerContext !== undefined ? { dreamerContext } : {}),
         };
       }
     }
 
     this.emitEvent('no_scribe_artifact', taskId, {});
-    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback };
+    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, ...repairEvidenceExtras };
   }
 
   async invokeRuntime(taskId: string, context: ArtificerContext): Promise<RunHandle> {
@@ -680,16 +769,45 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       scribeArtifactInput = context.scribeArtifact;
     }
 
-    // Layer 1 (design §6.2/§6.3, task 5.9): resolve the artificer manifest
-    // against the loaded scribe predecessor. Focused → inject only allocated
-    // summary fields (dreamer 5-dim still flows via dreamerContext below);
-    // fallback → legacy full scribeArtifact; disabled → unchanged.
+    // Layer 1 (design §6.2/§6.3, task 5.9) + PR B Shared Information Plane:
+    // resolve the manifest against the scribe predecessor's summary envelope,
+    // the durable CandidateLineage ancestry (tier2 raw), and — for repair
+    // rounds — the related replay evidence. Focused → inject only the
+    // allocated fields; fallback/disabled → legacy full scribeArtifact (F13).
     const scribePred = toScribePredecessor(context);
+    let replayViaManifest = false;
     if (scribePred !== null) {
-      const resolved = this.resolveContextInjection(taskId, ARTIFICER_MANIFEST, scribePred.contentJson);
+      const isRepair = context.replayContext !== undefined;
+      const manifest = isRepair ? ARTIFICER_REPAIR_MANIFEST : ARTIFICER_MANIFEST;
+      const relatedSources = isRepair ? buildRepairRelatedSources(context) : undefined;
+      // Required-evidence gate (design §35/§43): on a repair round the replay
+      // evidence MUST reach the prompt. If the manifest budget cannot carry it,
+      // resolution falls back and the bounded PR-A string channel is used
+      // instead of injecting a thinner prompt. Normal artificer tier2 stays
+      // optional — `dreamerContext` (PRI-508, F2) is its safety net.
+      const resolved = await this.resolveContextInjectionAsync({
+        taskId,
+        manifest,
+        predecessorContentJson: scribePred.contentJson,
+        startArtifactId: context.sourceScribeArtifactId ?? undefined,
+        ...(relatedSources !== undefined ? { relatedSources } : {}),
+        requiredPaths: isRepair ? [...ARTIFICER_REPAIR_MANIFEST.tier2] : [],
+      });
       if (resolved.mode === 'focused') {
         scribeArtifactInput = resolved.fields;
+        replayViaManifest = isRepair;
       }
+    }
+
+    // PR B (design §26): pick the replay-evidence channel. When the manifest
+    // carried it, the base string keeps concerns + required changes only; when
+    // the flag is off (or the budget could not carry the evidence) the PR-A
+    // bounded evidence block is appended — exactly the pre-PR-B behavior, so
+    // the replay evidence never depends on a quiet flag being on.
+    let { repairFeedback } = context;
+    const { replayContext, repairPayload } = context;
+    if (replayContext !== undefined && repairPayload !== undefined && !replayViaManifest) {
+      repairFeedback = formatRepairFeedback(repairPayload, formatReplayEvidenceBlock(replayContext));
     }
 
     const builder = new ArtificerPromptBuilder();
@@ -707,7 +825,8 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // PRI-509: forward evaluator repair feedback so artificer addresses each
       // requiredChange instead of regenerating blind. Undefined when absent
       // (prompt builder treats undefined as backward-compatible no-op).
-      repairFeedback: context.repairFeedback ?? undefined,
+      // PR B: channel-resolved — see the block above.
+      repairFeedback: repairFeedback ?? undefined,
     });
     // P1-1: rollout revision feedback 注入 (与 scribe 同模式; repairFeedback
     // 走 prompt builder 字段,revisionFeedback 是路由文本,直接附加)
