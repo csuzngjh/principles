@@ -30,6 +30,7 @@ import type {
   RuntimeV2PromptActivationsInjectedEventData,
   RuleHostUnhealthyEventData,
   RuleHostSkippedEventData,
+  TrajectoryObservabilityFailureEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -241,6 +242,16 @@ export class EventLog {
   }
 
   /**
+   * PRI-647: trajectory observability side-channel failed (closed/disposed
+   * SQLite connection) while the prompt build continued (fail-open). Recorded
+   * as a structured event so the unavailable state stays observable via the
+   * existing events read model — never logged silently.
+   */
+  recordTrajectoryObservabilityFailure(data: TrajectoryObservabilityFailureEventData): void {
+    this.record('trajectory_observability_failure', 'failure', data.sessionId, data);
+  }
+
+  /**
    * Redact telemetry-sensitive string values in event data before persistence.
    * Applies redactTelemetryString to known high-risk fields (filePath, command,
    * reason, args, new_string, old_string, text, paramsSummary values) and to all
@@ -263,6 +274,7 @@ export class EventLog {
         'rulehost_auto_correct_proposed',
         'rulehost_auto_correct_applied',
         'rulehost_skipped',
+        'trajectory_observability_failure',
         'rule_enforced',
         'hook_execution',
         'gate_block',

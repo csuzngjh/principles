@@ -33,7 +33,9 @@ export type EventType =
       // PRI-437: RuleHost health — approved rule failed to compile/load
       | 'rulehost_unhealthy'
       // PRI-491: RuleHost skipped — active activation skipped at load (flag-off, unsupported action, etc.)
-      | 'rulehost_skipped';
+      | 'rulehost_skipped'
+      // PRI-647: trajectory observability failed (closed/disposed connection) but prompt build continued (fail-open)
+      | 'trajectory_observability_failure';
 
 export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
@@ -60,6 +62,7 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('runtime_v2_prompt_activations_injected'),
   Type.Literal('rulehost_unhealthy'),
   Type.Literal('rulehost_skipped'),
+  Type.Literal('trajectory_observability_failure'),
 ]);
 
 export type EventCategory =
@@ -719,6 +722,34 @@ export const RuleHostSkippedEventDataSchema = Type.Object({
   nextAction: Type.String(),
 });
 export type RuleHostSkippedEventDataStatic = Static<typeof RuleHostSkippedEventDataSchema>;
+
+// ============== Trajectory Observability Failure (PRI-647) ==============
+
+/**
+ * trajectory_observability_failure — trajectory side-channel recording failed
+ * during before_prompt_build (e.g. SQLite connection closed by plugin service
+ * stop) but the prompt build continued (fail-open).
+ *
+ * PRI-647: previously this failure class only surfaced as logger.warn; it is
+ * now a structured EventLog row so the trajectory-unavailable state stays
+ * observable to the owner via the existing events read model without any new
+ * health subsystem.
+ */
+export interface TrajectoryObservabilityFailureEventData {
+  /** Session being processed when the observability call failed. */
+  sessionId?: string;
+  /** What went wrong (closed connection, transient IO error, ...). */
+  reason: string;
+  /** What the operator should do to restore trajectory observability. */
+  nextAction: string;
+}
+
+export const TrajectoryObservabilityFailureEventDataSchema = Type.Object({
+  sessionId: Type.Optional(Type.String()),
+  reason: Type.String(),
+  nextAction: Type.String(),
+});
+export type TrajectoryObservabilityFailureEventDataStatic = Static<typeof TrajectoryObservabilityFailureEventDataSchema>;
 
 // ============== Daily Statistics ==============
 

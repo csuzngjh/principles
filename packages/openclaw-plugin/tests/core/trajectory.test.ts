@@ -3,6 +3,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { TrajectoryDatabase } from '../../src/core/trajectory.js';
+import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { TrajectoryRegistry } from '../../src/core/trajectory.js';
 
 describe('TrajectoryDatabase', () => {
   let workspaceDir: string | null = null;
@@ -963,5 +965,41 @@ describe('TrajectoryDatabase', () => {
       expect(otherResult!.runtimeTaskId).toBe('task-related');
       db.dispose();
     });
+  });
+});
+
+
+describe('PRI-647 workspace reacquisition after trajectory dispose', () => {
+  let reopenDir: string | null = null;
+
+  afterEach(() => {
+    if (reopenDir) {
+      fs.rmSync(reopenDir, { recursive: true, force: true });
+      reopenDir = null;
+    }
+    WorkspaceContext.clearCache();
+  });
+
+  it('reacquires a live trajectory connection after registry dispose (getter self-heal)', () => {
+    reopenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-reopen-'));
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir: reopenDir });
+
+    const first = wctx.trajectory;
+    expect(first.isOpen).toBe(true);
+
+    // Plugin service stop(): TrajectoryService.stop() disposes the registry
+    // instance directly without invalidating the WorkspaceContext cache.
+    TrajectoryRegistry.dispose(wctx.workspaceDir);
+    expect(first.isOpen).toBe(false);
+
+    // The next prompt build reads wctx.trajectory again: it must return a LIVE
+    // connection instead of the closed handle (PRI-647 regression).
+    const second = wctx.trajectory;
+    expect(second).not.toBe(first);
+    expect(second.isOpen).toBe(true);
+
+    // A real write must succeed on the reacquired connection.
+    expect(() => second.recordSession({ sessionId: 's-pri647-reopen' })).not.toThrow();
+    second.dispose();
   });
 });
