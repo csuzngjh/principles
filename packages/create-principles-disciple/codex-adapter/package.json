@@ -1,0 +1,52 @@
+{
+  "name": "@principles/codex-adapter",
+  "version": "0.1.0",
+  "description": "Codex CLI host adapter for Principles Disciple — implements HostAdapter interface for OpenAI Codex CLI's stdin/stdout JSON hook model (ADR-0020).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./pd-hook": {
+      "types": "./dist/pd-hook.d.ts",
+      "default": "./dist/pd-hook.js"
+    },
+    "./host-adapter": {
+      "types": "./dist/host-adapter.d.ts",
+      "default": "./dist/host-adapter.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@principles/core": "file:../core",
+    "@principles/host-runtime": "file:../host-runtime"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.10"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csuzngjh/principles.git",
+    "directory": "packages/codex-adapter"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

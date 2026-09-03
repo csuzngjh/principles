@@ -330,6 +330,60 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       throw commitErr;
     }
 
+    // 2b. Mirror the committed diagnostician_output into the PI artifact
+    // store. Every internalization runner (dreamer and below) reads its
+    // predecessor artifact via artifactStore.listBySourceTaskId — the
+    // committer only writes the legacy `artifacts` registry, so without this
+    // mirror the dreamer resolves its diag_router dependency to an empty list
+    // and runs with predecessorOutput === null, and every downstream stage
+    // derives candidates from the missing context instead of the pain
+    // (PRI-634-C closure validation finding, 2026-09-03). Same artifactId as
+    // the legacy row keeps one identity across both stores; contentJson is
+    // the same Layer 0 envelope string handed to the committer, so both
+    // stores stay byte-identical (Requirement 11.5/11.9).
+    let lineageArtifactIds: string[] = [];
+    let lineageHasRejected = false;
+    try {
+      const lineageResult = await this.resolveLineageArtifactIds(taskId);
+      lineageArtifactIds = lineageResult.ids;
+      lineageHasRejected = lineageResult.hasRejected;
+    } catch (lineageErr) {
+      this.emitEvent('lineage_resolve_failed', taskId, {
+        runId,
+        errorMessage: lineageErr instanceof Error ? lineageErr.message : String(lineageErr),
+      });
+    }
+    if (lineageHasRejected) {
+      this.emitEvent('lineage_partial', taskId, {
+        resolvedCount: lineageArtifactIds.length,
+        warning: 'Some dependency artifact queries were rejected; lineage may be incomplete',
+      });
+    }
+    const piNow = new Date().toISOString();
+    try {
+      await this.artifactStore.upsertArtifact({
+        artifactId: commitResult.artifactId,
+        artifactKind: 'principle',
+        sourceTaskId: taskId,
+        lineageArtifactIds,
+        validationStatus: 'pending',
+        contentJson: routerContentJson,
+        createdAt: piNow,
+        updatedAt: piNow,
+      });
+    } catch (piArtifactErr) {
+      this.emitEvent('artifact_write_failed', taskId, {
+        runId,
+        errorMessage: piArtifactErr instanceof Error ? piArtifactErr.message : String(piArtifactErr),
+      });
+      return this.retryOrFail({
+        taskId,
+        task,
+        errorCategory: 'artifact_commit_failed',
+        failureReason: `PIArtifact mirror of diagnostician_output failed: ${piArtifactErr instanceof Error ? piArtifactErr.message : String(piArtifactErr)}`,
+      });
+    }
+
     // Emit: principle_candidate_registered per recommendation
     for (let i = 0; i < output.recommendations.length; i++) {
       const rec = output.recommendations[i];

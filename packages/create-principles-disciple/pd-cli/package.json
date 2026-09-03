@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@principles/core": "file:../core",
-    "@principles/codex-adapter": "^0.1.0",
+    "@principles/codex-adapter": "file:../codex-adapter",
     "@principles/host-runtime": "file:../host-runtime",
     "@principles/install-layout": "file:../install-layout",
     "principles-disciple": "file:../plugin",

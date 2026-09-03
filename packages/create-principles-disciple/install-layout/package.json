@@ -12,6 +12,10 @@
   },
   "files": ["dist"],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csuzngjh/principles.git"
+  },
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsc",

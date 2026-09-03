@@ -251,6 +251,70 @@ describe('DiagRouterRunner V-slice', () => {
     );
   });
 
+  // PRI-634-C regression (2026-09-03): the dreamer reads its diag_router
+  // predecessor artifact via the PI artifact store. Before this fix the
+  // router only wrote the legacy `artifacts` registry through the committer,
+  // so listBySourceTaskId(diag_router) resolved empty and the dreamer ran
+  // with predecessorOutput === null on every path (CLI run-once and the
+  // gateway auto-consumer alike).
+  it('succeed mirrors the diagnostician_output into the PI artifact store (dreamer predecessor edge)', async () => {
+    const deps = createMockDeps();
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROUTER_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // The dreamer's buildContext does exactly this lookup:
+    const mirrored = await deps.artifactStore.listBySourceTaskId(ROUTER_TASK_ID);
+    expect(mirrored.length).toBeGreaterThan(0);
+    const [first] = mirrored;
+    expect(first).toBeDefined();
+    // Same artifact identity as the legacy commit — one id across both stores.
+    expect(first?.artifactId).toBe('art-001');
+    // Byte-identical contentJson to what the committer persisted.
+    const commitCall = deps._committer.commit?.mock.calls[0]?.[0] as
+      | { contentJson?: string }
+      | undefined;
+    expect(commitCall?.contentJson).toBeDefined();
+    expect(first?.contentJson).toBe(commitCall?.contentJson);
+    // The mirrored payload parses as a non-null object (the diagnostician
+    // output, optionally wrapped in the Layer 0 summary envelope).
+    const parsed: unknown = first ? JSON.parse(first.contentJson) : undefined;
+    expect(typeof parsed).toBe('object');
+    expect(parsed).not.toBeNull();
+  });
+
+  it('PI artifact mirror failure → task retries/fails, not silently succeeded', async () => {
+    const base = createMockDeps();
+    const failingStore = base.artifactStore as MemoryPIArtifactStore;
+    let upsertCalls = 0;
+    failingStore.upsertArtifact = async () => {
+      upsertCalls += 1;
+      // Only the router's own mirror write fails; lineage writes are not
+      // expected here (resolveLineageArtifactIds only reads).
+      throw new Error('pi store unavailable');
+    };
+    const deps = { ...base, artifactStore: failingStore };
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    await runner.run(ROUTER_TASK_ID);
+
+    expect(upsertCalls).toBeGreaterThan(0);
+    // rc-3 fail loud: the task must NOT be reported as succeeded when the
+    // mirror write failed.
+    expect(deps._stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
   it('dependency not succeeded → blocked', async () => {
     // Empty artifact store — no distiller artifact
     const emptyStore = new MemoryPIArtifactStore();
