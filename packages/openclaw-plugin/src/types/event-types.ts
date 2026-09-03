@@ -24,6 +24,7 @@ export type {
   RuntimeV2PromptActivationsInjectedEventData,
   RuleHostUnhealthyEventData,
   RuleHostSkippedEventData,
+  TrajectoryObservabilityFailureEventData,
   ToolCallStats,
   ErrorStats,
   // PainStats re-export removed (PRI-451 Wave 1.5): no live reader.

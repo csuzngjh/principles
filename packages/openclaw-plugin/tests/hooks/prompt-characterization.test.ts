@@ -79,6 +79,12 @@ vi.mock('../../src/core/workspace-context.js', () => {
       listUserTurnsForSession: mockListUserTurnsForSession,
     },
     config: { get: vi.fn() },
+    eventLog: {
+      recordPainSignal: vi.fn(),
+      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordHeartbeatDiagnosis: vi.fn(),
+      recordTrajectoryObservabilityFailure: vi.fn(),
+    },
     evolutionReducer: {
       getActivePrinciples: vi.fn().mockReturnValue([]),
       getProbationPrinciples: vi.fn().mockReturnValue([]),
@@ -531,10 +537,32 @@ describe('Size guard: never exceeds 9000 chars', () => {
   it('continues the prompt build when trajectory observability throws (PRI-647)', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const mockWctx = (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>)();
-    const recordSession = mockWctx.trajectory.recordSession as ReturnType<typeof vi.fn>;
-    recordSession.mockImplementationOnce(() => {
+    const recordTrajectoryObservabilityFailure = vi.fn();
+    const recordSession = vi.fn(() => {
       throw new Error('The database connection is not open');
+    });
+    // Fully self-contained wctx: do not depend on the shared mock factory so a
+    // prior mockReturnValue override in this file cannot change the input.
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir: '/fake/workspace',
+      stateDir: '/fake/state',
+      trajectory: {
+        recordSession,
+        recordUserTurn: vi.fn(),
+        listAssistantTurns: vi.fn().mockReturnValue([]),
+        listUserTurnsForSession: vi.fn().mockReturnValue([]),
+      },
+      eventLog: {
+        recordPainSignal: vi.fn(),
+        recordRuntimeV2ActivationsInjected: vi.fn(),
+        recordHeartbeatDiagnosis: vi.fn(),
+        recordTrajectoryObservabilityFailure,
+      },
+      config: { get: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
     });
 
     const result = await handleBeforePromptBuild(
@@ -544,5 +572,11 @@ describe('Size guard: never exceeds 9000 chars', () => {
 
     expect(result).toBeDefined();
     expect(mockDetectSync).toHaveBeenCalled();
+    expect(recordTrajectoryObservabilityFailure).toHaveBeenCalledTimes(1);
+    expect(recordTrajectoryObservabilityFailure).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'obs-fail-open',
+      reason: expect.stringContaining('database connection'),
+      nextAction: expect.any(String),
+    }));
   });
 });

@@ -320,6 +320,14 @@ export async function handleBeforePromptBuild(
       correctionReferencesAssistantTurnId = lastAssistant?.id ?? null;
     }
   } catch (trajectoryErr) {
+    // PRI-647 observability: record the trajectory side-channel failure as a
+    // structured event (never throws) so the state stays observable without
+    // changing the fail-open behavior.
+    wctx.eventLog.recordTrajectoryObservabilityFailure({
+      sessionId,
+      reason: String(trajectoryErr).slice(0, 200),
+      nextAction: 'Restart the plugin services or repair the trajectory database connection; prompt injection continues without turn anchoring.',
+    });
     logger?.warn?.(
       `[PD:Prompt] Trajectory observability unavailable, continuing without turn anchoring: ${String(trajectoryErr)}`
     );
