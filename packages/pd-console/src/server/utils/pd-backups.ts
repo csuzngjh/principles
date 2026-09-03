@@ -26,8 +26,12 @@ export interface LegacyBackupMigrationResult {
 /**
  * Resolve the OpenClaw install home.
  * Priority: OPENCLAW_HOME env var (explicit override) > ~/.openclaw
+ *
+ * Single authority for home resolution — backup placement
+ * (`resolvePdBackupsRoot`) and installed-layout resolution
+ * (`utils/installed-layout.ts`) both derive from it.
  */
-function resolveOpenClawHome(): string {
+export function resolveOpenClawHome(): string {
   const envHome = process.env.OPENCLAW_HOME;
   if (envHome && envHome.trim().length > 0) return path.resolve(envHome);
   return path.join(os.homedir(), '.openclaw');

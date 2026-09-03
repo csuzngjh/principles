@@ -55,6 +55,10 @@ const html = `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PD Console</title>
+    <!-- Same PD mark the runtime favicon badge draws on canvas (favicon-badge.ts);
+         without a static link the browser requests /favicon.ico and logs a 404
+         before the app JS mounts. -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231a1a1a'/%3E%3Ctext x='16' y='17' font-family='sans-serif' font-size='14' font-weight='bold' fill='%23d4a853' text-anchor='middle' dominant-baseline='central'%3EPD%3C/text%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/assets/app.css" />
   </head>
   <body>

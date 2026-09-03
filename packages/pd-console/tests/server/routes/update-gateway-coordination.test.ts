@@ -27,6 +27,15 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
+// os.homedir() drives canonical layout resolution (getInstallLayoutPaths).
+// Mock it so a canonical install on the dev machine (~/.pd/install.json)
+// cannot leak into these legacy-layout fixture tests.
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  const realHomedir = actual.homedir.bind(actual);
+  return { ...actual, homedir: vi.fn(() => realHomedir()) };
+});
+
 function createMockRequest(method: string, body?: unknown): IncomingMessage {
   const bodyStr = body !== undefined ? JSON.stringify(body) : '';
   return {
@@ -83,6 +92,11 @@ beforeEach(() => {
 
   savedOpenclawHome = process.env.OPENCLAW_HOME;
   process.env.OPENCLAW_HOME = tmpDir;
+
+  // Pin homedir to the fixture home so canonical resolution stays inert
+  // (tmpDir/.pd/runtime does not exist) — a real canonical install on the
+  // dev machine must not leak into these legacy-layout fixtures.
+  vi.mocked(os.homedir).mockImplementation(() => tmpDir);
 });
 
 afterEach(async () => {
