@@ -11,6 +11,7 @@
  */
 import type { OpenClawPluginServiceContext, PluginLogger } from '../openclaw-sdk.js';
 import { READ_ONLY_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, AGENT_TOOL_NAMES } from '../constants/tools.js';
+import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
 import { runInternalizationConsumerCycle, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID } from '@principles/host-runtime';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -57,6 +58,9 @@ export async function runConsumerCycle(
       readOnlyTools: READ_ONLY_TOOL_NAMES,
       writeTools: [...LOW_RISK_WRITE_TOOL_NAMES, ...HIGH_RISK_TOOL_NAMES, ...AGENT_TOOL_NAMES],
     },
+    // PRI-634-F: OpenClaw tool semantics (derived from constants/tools.ts) —
+    // the activation gate replays with production-identical tool resolution.
+    toolSemantics: OPENCLAW_TOOL_SEMANTICS,
   });
 }
 

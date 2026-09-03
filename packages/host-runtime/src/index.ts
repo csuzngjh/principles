@@ -8,7 +8,7 @@ import { buildActivePrinciplePromptContext } from './active-principle-prompt.js'
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
 import { createProductionPainEvidenceHandler, type PainDatabaseFactory, type PainEnrichmentProvider } from './production-pain-evidence.js';
-import type { GovernanceHostKind } from '@principles/core/runtime-v2';
+import type { GovernanceHostKind, ToolSemanticRegistry } from '@principles/core/runtime-v2';
 
 export * from './active-principle-prompt.js';
 export * from './pd-config.js';
@@ -198,12 +198,15 @@ export function createProductionHostRuntime(
     painDatabaseFactory?: PainDatabaseFactory;
     /** PRI-640: host attribution supplied by the constructing host adapter (OpenClaw / Codex). */
     hostKind?: GovernanceHostKind;
+    /** PRI-634-F: host-declared tool semantics supplied by the constructing host adapter. */
+    toolSemantics?: ToolSemanticRegistry;
   } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
     ...(options.ruleContextProvider ? { ruleContextProvider: options.ruleContextProvider } : {}),
     ...(options.ruleInputEnrichmentProvider ? { ruleInputEnrichmentProvider: options.ruleInputEnrichmentProvider } : {}),
     ...(options.ruleImplementationRuntime ? { implementationRuntime: options.ruleImplementationRuntime } : {}),
+    ...(options.toolSemantics ? { toolSemantics: options.toolSemantics } : {}),
   });
   return createHostRuntime({
     afterToolCall: options.afterToolCall ?? createProductionPainEvidenceHandler({

@@ -296,8 +296,11 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
         writers: [
           new PromptWriter(),
           new RuleHostWriter({
-            gateDeps: createProductionGateDeps(),
+            // PRI-634-F: replay normalizes against the real workspace root —
+            // production-identical normalizedPath for golden-trace cases.
+            gateDeps: createProductionGateDeps({ projectDir: workspaceDir }),
             featureFlagProbe: (flagId) => featureFlags.flags[flagId]?.enabled === true,
+            projectDir: workspaceDir,
           }),
           new DeferArchiveWriter(),
         ],
@@ -530,8 +533,10 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
         const manager = await getStateManager();
         const activationStore = new SqliteActivationStateStore(manager.connection);
         const writer = new RuleHostWriter({
-          gateDeps: createProductionGateDeps(),
+          // PRI-634-F: readiness replay normalizes against the real workspace root.
+          gateDeps: createProductionGateDeps({ projectDir: workspaceDir }),
           featureFlagProbe: flagId => isFeatureEnabled(flags, flagId),
+          projectDir: workspaceDir,
         });
         const reader = new PromotionReadinessReader({
           listCodeToolHookActivations: () => activationStore.listCodeToolHookActivations(false),
@@ -1305,8 +1310,11 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         writers: [
           new PromptWriter(),
           new RuleHostWriter({
-            gateDeps: createProductionGateDeps(),
+            // PRI-634-F: replay normalizes against the real workspace root —
+            // production-identical normalizedPath for golden-trace cases.
+            gateDeps: createProductionGateDeps({ projectDir: workspaceDir }),
             featureFlagProbe: (flagId) => featureFlags.flags[flagId]?.enabled === true,
+            projectDir: workspaceDir,
           }),
           new DeferArchiveWriter(),
         ],

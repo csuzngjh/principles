@@ -1,6 +1,8 @@
 import type { PIArtifactSnapshot, CanActivateResult, ChannelWriter, WriterInput, WriterResult, ActivationRiskLevel, ApprovalEnqueueInput } from '../activation-types.js';
 import type { RefinerRuleHostGateDeps, RefinerRuleHostGateResult } from '../../internalization/refiner-rulehost-gate.js';
 import { evaluateRefinerRuleHostGate } from '../../internalization/refiner-rulehost-gate.js';
+import type { ToolSemanticRegistry } from '../../internalization/tool-semantic-registry.js';
+import { validateRuleReliability } from '../../internalization/rule-reliability-validation.js';
 import type { GoldenTrace } from '../../golden-trace.js';
 import { validateGoldenTrace } from '../../golden-trace.js';
 
@@ -18,6 +20,21 @@ export interface RuleHostWriterConfig {
    * logic — no I/O, no YAML loader.
    */
   featureFlagProbe?: (flagId: string) => boolean;
+  /**
+   * PRI-634-F — ToolSemanticRegistry supplied by the constructing host.
+   * When present: (1) canActivate runs the deterministic Rule Reliability
+   * Validation (affectedTools + golden-trace toolNames must resolve —
+   * SPEC §9 Tool存在性, adapter/tool_alias_unknown on failure); (2) the
+   * activation gate replays with production-identical tool semantics.
+   * Absent → legacy behavior (no reliability check, baseline replay inputs).
+   */
+  toolSemantics?: ToolSemanticRegistry;
+  /**
+   * PRI-634-F — replay path-normalization root (the workspace the gate
+   * replays for). When present, golden-trace cases normalize exactly like
+   * the production gate. Absent → legacy null normalizedPath replay.
+   */
+  projectDir?: string;
 }
 
 /** PRI-484 — the feature flag id that gates v2 rule artifacts. */
@@ -173,10 +190,14 @@ export class RuleHostWriter implements ChannelWriter {
 
   private readonly gateDeps: RefinerRuleHostGateDeps;
   private readonly featureFlagProbe?: (flagId: string) => boolean;
+  private readonly toolSemantics?: ToolSemanticRegistry;
+  private readonly projectDir?: string;
 
   constructor(config: RuleHostWriterConfig) {
     this.gateDeps = config.gateDeps;
     this.featureFlagProbe = config.featureFlagProbe;
+    this.toolSemantics = config.toolSemantics;
+    this.projectDir = config.projectDir;
   }
 
   async canActivate(artifact: PIArtifactSnapshot): Promise<CanActivateResult> {
@@ -248,8 +269,37 @@ export class RuleHostWriter implements ChannelWriter {
       }
     }
 
+    // PRI-634-F Phase 3 — deterministic Rule Reliability Validation before the
+    // sandbox (SPEC §9 V1: Tool存在性). A rule referencing tools the registry
+    // cannot resolve would pass replay against fictional inputs while never
+    // matching production dispatch — fail loud at activation with the layered
+    // attribution instead. Only runs when the host supplied a registry.
+    if (this.toolSemantics) {
+      const declaredTools = Array.isArray(parsed.affectedTools)
+        ? parsed.affectedTools.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+      const reliability = validateRuleReliability({
+        affectedTools: declaredTools,
+        goldenTraceCaseToolNames: goldenTrace.cases.map((c) => c.toolName),
+        toolSemantics: this.toolSemantics,
+      });
+      if (!reliability.valid && reliability.failure) {
+        const {failure} = reliability;
+        return {
+          ok: false,
+          reason: `rule_reliability_${failure.reasonCode}:${failure.layer} — ${failure.evidence} (nextAction=${failure.nextAction})`,
+          riskLevel: 'high',
+        };
+      }
+    }
+
     const gateResult: RefinerRuleHostGateResult = evaluateRefinerRuleHostGate(
-      { code: implementationCode, goldenTrace },
+      {
+        code: implementationCode,
+        goldenTrace,
+        ...(this.toolSemantics ? { toolSemantics: this.toolSemantics } : {}),
+        ...(this.projectDir ? { projectDir: this.projectDir } : {}),
+      },
       this.gateDeps,
     );
 

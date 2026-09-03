@@ -40,8 +40,12 @@ function evaluatorCase(): string {
 }
 
 describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction site)', () => {
-  it('Guard A: shared cycle evaluator case 注入 gateDeps: createProductionGateDeps()', () => {
-    expect(evaluatorCase()).toContain('gateDeps: createProductionGateDeps()');
+  it('Guard A: shared cycle evaluator case 注入 gateDeps: createProductionGateDeps(...)', () => {
+    // PRI-634-F: the call now carries replay-parity options (toolSemantics
+    // when the host declared them + the workspace root for path
+    // normalization). The guarded invariant is the WIRING itself — the
+    // canonical production gateDeps must be constructed at this site.
+    expect(evaluatorCase()).toContain('gateDeps: createProductionGateDeps(');
   });
 
   it('Guard B: gateDeps 位于 OPTIONS 参数（第二个构造参数）且在 ...runnerOptions 之后', () => {
@@ -53,7 +57,7 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction 
     const optsStart = slice.indexOf('...runnerOptions');
     expect(optsStart).toBeGreaterThan(-1);
     const afterOpts = slice.slice(optsStart);
-    expect(afterOpts).toContain('gateDeps: createProductionGateDeps()');
+    expect(afterOpts).toContain('gateDeps: createProductionGateDeps(');
   });
 
   it('Guard C: 第一个 Evaluator deps object 中不得出现 gateDeps', () => {

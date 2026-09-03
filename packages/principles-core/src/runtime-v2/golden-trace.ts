@@ -4,6 +4,7 @@ import type { RuleHostInput } from './internalization/rule-host-contracts.js';
 import type { RuleContextV2 } from './internalization/rule-context-v2.js';
 import type { GoldenTraceCaseInput } from './internalization/artificer-output.js';
 import { buildRuleHostAction } from './internalization/rule-host-input-builder.js';
+import type { ToolSemanticRegistry } from './internalization/tool-semantic-registry.js';
 
 const UnknownRecordSchema = Type.Record(Type.String(), Type.Unknown());
 const ISO_8601_UTC_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$';
@@ -95,9 +96,17 @@ export interface SyntheticRuleHostInputOverrides {
  *
  * When `projectDir` is NOT provided, `normalizedPath` falls back to `null`
  * (backwards compat with existing callers that don't have a project dir).
+ *
+ * PRI-634-F Phase 2: when `toolSemantics` is provided, the canonical kind is
+ * resolved from the SAME registry the production gate uses, echoed onto
+ * `action.canonicalKind`, and used to derive the bash/write extraction hints
+ * inside buildRuleHostAction — closing the replay/production divergence where
+ * bash command extraction and write-tool synthetic paths never fired in
+ * replay. Absent → legacy behavior (no canonicalKind, no derived hints).
  */
 export interface CreateSyntheticRuleHostInputOptions {
   projectDir?: string;
+  toolSemantics?: ToolSemanticRegistry;
 }
 
 export interface GoldenTraceFixtureInput {
@@ -183,13 +192,20 @@ export function createSyntheticRuleHostInput(
   // buildRuleHostAction function — extracting the file path from params and
   // normalizing it. This produces the same normalizedPath as the production
   // OpenClaw Gate, so path-based rules can be validated in Golden Trace replay.
+  //
+  // PRI-634-F Phase 2: with toolSemantics, the canonical kind flows into the
+  // same builder call production makes, so hint derivation + canonicalKind
+  // echo are identical on both paths.
+  const canonicalKind = options.toolSemantics?.resolve(snapshot.toolName);
   const action =
     options.projectDir && overrides.normalizedPath === undefined
-      ? buildRuleHostAction(snapshot.toolName, snapshot.params, options.projectDir)
+      ? buildRuleHostAction(snapshot.toolName, snapshot.params, options.projectDir,
+        canonicalKind !== undefined ? { canonicalKind } : {})
       : {
           toolName: snapshot.toolName,
           normalizedPath: overrides.normalizedPath ?? null,
           paramsSummary: { ...snapshot.params },
+          ...(canonicalKind !== undefined ? { canonicalKind } : {}),
         };
 
   return {

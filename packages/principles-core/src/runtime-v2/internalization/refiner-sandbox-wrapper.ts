@@ -5,6 +5,7 @@ import { checkForbiddenPatterns, checkReturnStatementsMissingFields } from './ru
 import { createSyntheticRuleHostInput } from '../golden-trace.js';
 import type { RuleHostHelpers } from './rule-host-helpers.js';
 import type { RuleHostResult, RuleHostDecision } from './rule-host-contracts.js';
+import type { ToolSemanticRegistry } from './tool-semantic-registry.js';
 import { validateCorrectionProposal } from './correction-proposal.js';
 
 export type RefinerSandboxErrorType =
@@ -48,6 +49,23 @@ export interface RefinerSandboxResult {
 export interface RefinerSandboxOptions {
   /** Elapsed-time classification threshold (NOT hard cancellation). See evaluateInRefinerSandbox JSDoc. */
   softTimeoutMs?: number;
+  /**
+   * PRI-634-F Phase 2: the ToolSemanticRegistry used by the production gate.
+   * When provided, replay synthetic inputs resolve canonicalKind and
+   * bash/write extraction hints from the SAME registry, closing the
+   * replay/production divergence (baseline: replay built every input with
+   * no hints, so bash command extraction never fired and normalizedPath
+   * stayed null). Absent → legacy behavior.
+   */
+  toolSemantics?: ToolSemanticRegistry;
+  /**
+   * PRI-634-F Phase 2: workspace root for path normalization. The production
+   * gate normalizes against the live workspace dir; replay normalizes against
+   * this. Same root + same pure function ⇒ identical normalizedPath for
+   * every case shape (absolute-under-root relativizes, escape paths return
+   * as-is, relative paths and synthetic <tool:X> paths are root-invariant).
+   */
+  projectDir?: string;
 }
 
 export interface RefinerSandboxDependencies {
@@ -119,14 +137,25 @@ function resolveTimeoutMs(timeoutMs: number): number {
   return timeoutMs;
 }
 
+interface ReplayInputContext {
+  timeoutMs: number;
+  projectDir?: string;
+  toolSemantics?: ToolSemanticRegistry;
+}
+
 function evaluateCaseWithTimeout(
   evaluateFn: ReplayEvaluateFn,
   traceCase: GoldenTraceCase,
-  timeoutMs: number,
+  replayContext: ReplayInputContext,
 ): { result: RuleHostResult | null; error: unknown; timedOut: boolean; threw: boolean } {
+  const { projectDir, toolSemantics, timeoutMs } = replayContext;
+  const hasOptions = projectDir !== undefined || toolSemantics !== undefined;
   const input = createSyntheticRuleHostInput(
     { toolName: traceCase.toolName, params: traceCase.params },
     traceCase.ruleContext !== undefined ? { context: traceCase.ruleContext } : {},
+    hasOptions
+      ? { ...(projectDir !== undefined ? { projectDir } : {}), ...(toolSemantics !== undefined ? { toolSemantics } : {}) }
+      : {},
   );
 
   const helpers: RuleHostHelpers = {
@@ -275,7 +304,11 @@ export function evaluateInRefinerSandbox(
   const failedCases: RefinerSandboxFailedCase[] = [];
 
   for (const traceCase of goldenTrace.cases) {
-    const { result, error, timedOut, threw } = evaluateCaseWithTimeout(evaluateFn, traceCase, timeoutMs);
+    const { result, error, timedOut, threw } = evaluateCaseWithTimeout(evaluateFn, traceCase, {
+      timeoutMs,
+      ...(deps.projectDir !== undefined ? { projectDir: deps.projectDir } : {}),
+      ...(deps.toolSemantics !== undefined ? { toolSemantics: deps.toolSemantics } : {}),
+    });
 
     if (timedOut) {
       failedCases.push({

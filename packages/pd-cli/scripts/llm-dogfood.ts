@@ -282,7 +282,8 @@ async function main(): Promise<void> {
     {
       writers: [
         new PromptWriter(),
-        new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+        // PRI-634-F: dogfood replay normalizes against the dogfood workspace root.
+        new RuleHostWriter({ gateDeps: createProductionGateDeps({ projectDir: tmpDir }), projectDir: tmpDir }),
         new DeferArchiveWriter(),
       ],
       approvalQueueStore: approvalStore,
