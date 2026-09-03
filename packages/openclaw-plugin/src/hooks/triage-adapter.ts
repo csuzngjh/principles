@@ -6,10 +6,10 @@
  *
  * This file lives in openclaw-plugin because it:
  * - Maps hook-specific context (source strings, session state) to SourceKind
- * - Wraps evaluatePainDiagnosticGate as a compatibility sub-policy
  * - Knows about OpenClaw hook conventions (sessionId, toolName, etc.)
  *
- * It does NOT expose evaluatePainDiagnosticGate to core.
+ * PRI-651-B1: hooks are Gate B only — this adapter feeds TriggerController.
+ * Gate A (evaluatePainDiagnosticGate) retired from runtime; remains archived.
  * Core only sees SourceKind and TriageResult.
  *
  * ERR checklist:

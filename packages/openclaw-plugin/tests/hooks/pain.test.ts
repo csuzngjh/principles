@@ -511,7 +511,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     }));
   });
 
-  it('PEAT-B1: triage evidence_only returns early before PainDiagnosticGate (no cooldown pollution)', () => {
+  it('PEAT-B1: triage evidence_only returns early before TriggerController (no cooldown pollution)', () => {
     // Enable the evidence triage feature flag
     vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'test' });
 
@@ -543,7 +543,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     }));
   });
 
-  it('PEAT-B1: triage admit proceeds to PainDiagnosticGate and cooldown', () => {
+  it('PEAT-B1: triage admit proceeds to TriggerController and cooldown', () => {
     // For owner_reported source kinds, triage admits, so gate IS reached
     vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'test' });
 
