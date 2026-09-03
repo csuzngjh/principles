@@ -27,8 +27,7 @@ import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, SqliteConnection, SqliteDeadLetterStore, type PainDetectedData, type TrajectoryTurnReader } from '@principles/core/runtime-v2';
-import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
-import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
+import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
@@ -569,106 +568,37 @@ function handleManualPain(
     sessionId,
   });
 
-  // PRI-454: Dual-gate migration. When both flags ON → Gate B (TriggerController).
-  // When either OFF → Gate A (PainDiagnosticGate, rollback).
-  const triageFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmission');
-  const defaultFlag = loadFeatureFlagFromConfig(workspaceDir, 'painEvidenceAdmissionDefault');
-  const useGateB = triageFlag.enabled && defaultFlag.enabled;
+  // PRI-651-B1: Unconditional Gate B — TriggerController is the only
+  // admission authority. Gate A fallback (PRI-454 rollback) removed.
+  const rawObs = buildManualPainObservation({ sessionId });
+  const sourceKind = resolveSourceKind(rawObs); // → 'owner_reported'
+  const triage = evaluateEvidenceTriage(sourceKind, 100); // → 'admit'
+  const cooldownActive = isSharedCooldownActive(sourceKind, sessionId, 'manual_pain');
+  const triggerDecision = evaluateTriggerController({
+    triageResult: triage,
+    isOwnerManual: true,
+    isCooldownActive: cooldownActive,
+    isValid: true,
+    score: 100,
+    sessionId,
+  });
 
-  if (useGateB) {
-    // PRI-454: Gate B path — manual pain is owner-reported.
-    // isOwnerManual: true → evaluateTriggerController returns manual_owner_admitted
-    // (bypasses triage and cooldown per PRODUCT_IDENTITY: owner-governed).
-    const rawObs = buildManualPainObservation({ sessionId });
-    const sourceKind = resolveSourceKind(rawObs); // → 'owner_reported'
-    const triage = evaluateEvidenceTriage(sourceKind, 100); // → 'admit'
-    const cooldownActive = isSharedCooldownActive(sourceKind, sessionId, 'manual_pain');
-    const triggerDecision = evaluateTriggerController({
-      triageResult: triage,
+  // PEAT-B2: Record trigger decision
+  const painTriageFlag = loadPdConfigForPlugin(workspaceDir);
+  if (painTriageFlag.effective) {
+    SystemLogger.log(workspaceDir, 'TRIGGER_DECISION', JSON.stringify({
+      outcome: triggerDecision.outcome,
+      sourceKind: triggerDecision.sourceKind,
+      reason: triggerDecision.reason,
+      nextAction: triggerDecision.nextAction,
       isOwnerManual: true,
-      isCooldownActive: cooldownActive,
-      isValid: true,
-      score: 100,
       sessionId,
-    });
-
-    // PEAT-B2: Record trigger decision
-    const painTriageFlag = loadPdConfigForPlugin(workspaceDir);
-    if (painTriageFlag.effective) {
-      SystemLogger.log(workspaceDir, 'TRIGGER_DECISION', JSON.stringify({
-        outcome: triggerDecision.outcome,
-        sourceKind: triggerDecision.sourceKind,
-        reason: triggerDecision.reason,
-        nextAction: triggerDecision.nextAction,
-        isOwnerManual: true,
-        sessionId,
-        score: 100,
-      }));
-    }
-
-    if (triggerDecision.shouldCreateDiagnosticTask) {
-      markSharedEpisodeAsDiagnosed(sourceKind, sessionId, 'manual_pain');
-      emitPainDetectedEvent(wctx, {
-        ts: new Date().toISOString(),
-        type: 'pain_detected',
-        data: {
-          painId,
-          painType: 'user_frustration',
-          source: event.toolName,
-          reason: `User intervention: ${reason}`,
-          score: 100,
-          sessionId,
-          traceId,
-          agentId: ctx.agentId,
-        },
-      }, { recordObservability: false });
-    } else {
-      SystemLogger.log(workspaceDir, 'MANUAL_PAIN_SKIPPED', triggerDecision.reason);
-    }
-  } else {
-    // PRI-454: Gate A path (rollback when either flag is OFF)
-    const session = getSession(sessionId);
-    const gate = evaluatePainDiagnosticGate({
-      source: 'manual',
       score: 100,
-      currentGfi: session?.currentGfi ?? 0,
-      sessionId,
-    });
+    }));
+  }
 
-    if (!gate.shouldDiagnose) {
-      SystemLogger.log(workspaceDir, 'MANUAL_PAIN_SKIPPED', `Manual pain within cooldown: ${gate.detail}`);
-      let payload: string;
-      try {
-        payload = JSON.stringify({
-          reason: gate.reason,
-          detail: gate.detail,
-          source: 'manual',
-          sessionId,
-          gfi: 0,
-          score: 100,
-        });
-      } catch (e) {
-        SystemLogger.log(workspaceDir, 'PAYLOAD_SERIALIZE_FAILED', String(e));
-        payload = JSON.stringify({ reason: gate.reason, detail: '(log serialization failed)' });
-      }
-      SystemLogger.log(workspaceDir, 'PAIN_GATE_REJECTED', payload);
-
-      // PEAT-B2: Record trigger decision even when cooldown blocks manual pain
-      const painTriageFlag = loadPdConfigForPlugin(workspaceDir);
-      if (painTriageFlag.effective) {
-        SystemLogger.log(workspaceDir, 'TRIGGER_DECISION', JSON.stringify({
-          outcome: 'cooldown_skipped',
-          sourceKind: 'owner_reported',
-          reason: `Manual pain within cooldown: ${gate.detail}`,
-          nextAction: 'wait_for_cooldown_or_manual_retrigger',
-          isOwnerManual: true,
-          sessionId,
-          score: 100,
-        }));
-      }
-      return;
-    }
-
+  if (triggerDecision.shouldCreateDiagnosticTask) {
+    markSharedEpisodeAsDiagnosed(sourceKind, sessionId, 'manual_pain');
     emitPainDetectedEvent(wctx, {
       ts: new Date().toISOString(),
       type: 'pain_detected',
@@ -683,5 +613,7 @@ function handleManualPain(
         agentId: ctx.agentId,
       },
     }, { recordObservability: false });
+  } else {
+    SystemLogger.log(workspaceDir, 'MANUAL_PAIN_SKIPPED', triggerDecision.reason);
   }
 }
