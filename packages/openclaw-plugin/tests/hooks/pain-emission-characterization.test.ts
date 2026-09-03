@@ -174,8 +174,8 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/agentId:\s*ctx\.agentId/);
     });
 
-    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
-      expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    it('no longer uses evaluatePainDiagnosticGate (PRI-651-B1: Gate B only)', () => {
+      expect(source).not.toMatch(/evaluatePainDiagnosticGate/);
     });
 
     it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
@@ -186,12 +186,13 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/triageResult:\s*triage/);
     });
 
-    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
-      expect(source).toMatch(/painEvidenceAdmissionDefault/);
+    it('no longer loads painEvidenceAdmission flags (PRI-651-B1)', () => {
+      expect(source).not.toMatch(/painEvidenceAdmissionDefault/);
+      expect(source).not.toMatch(/loadFeatureFlagFromConfig/);
     });
 
-    it('gates emit on gate.shouldDiagnose being true', () => {
-      expect(source).toMatch(/if\s*\(gate\.shouldDiagnose\)/);
+    it('gates emit on triggerDecision.shouldCreateDiagnosticTask', () => {
+      expect(source).toMatch(/triggerDecision\.shouldCreateDiagnosticTask/);
     });
 
     it('calls emitPainDetectedEvent WITHOUT await (fire-and-forget)', () => {
@@ -200,9 +201,8 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).not.toMatch(/await\s+emitPainDetectedEvent/);
     });
 
-    it('uses PEAT-B1 evidence triage (feature-flagged)', () => {
+    it('uses PEAT-B1 evidence triage (unconditional since PRI-651-B1)', () => {
       expect(source).toMatch(/evaluateEvidenceTriage/);
-      expect(source).toMatch(/loadFeatureFlagFromConfig/);
     });
   });
 
@@ -255,8 +255,8 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(gateBlock).not.toMatch(/traceId/);
     });
 
-    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
-      expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    it('no longer uses evaluatePainDiagnosticGate (PRI-651-B1: Gate B only)', () => {
+      expect(source).not.toMatch(/evaluatePainDiagnosticGate/);
     });
 
     it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
@@ -267,17 +267,16 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/triageResult:\s*triage/);
     });
 
-    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
-      expect(source).toMatch(/painEvidenceAdmissionDefault/);
+    it('no longer reads painEvidenceAdmission flags (PRI-651-B1)', () => {
+      expect(source).not.toMatch(/painEvidenceAdmissionDefault/);
     });
 
-    it('gates emit on gate.shouldDiagnose being true', () => {
-      expect(source).toMatch(/if\s*\(gate\.shouldDiagnose\)/);
+    it('gates emit on triggerDecision.shouldCreateDiagnosticTask', () => {
+      expect(source).toMatch(/triggerDecision\.shouldCreateDiagnosticTask/);
     });
 
-    it('uses PEAT-B1 evidence triage (feature-flagged)', () => {
+    it('uses PEAT-B1 evidence triage (unconditional since PRI-651-B1)', () => {
       expect(source).toMatch(/evaluateEvidenceTriage/);
-      expect(source).toMatch(/loadFeatureFlagFromConfig/);
     });
 
     it('passes consecutiveErrors and isRisky to evaluateEvidenceTriage in Gate B path (PRI-454 P2-1)', () => {
@@ -329,8 +328,8 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/evidence:\s*buildTrajectoryEvidence\(wctx,\s*sessionId\)/);
     });
 
-    it('uses evaluatePainDiagnosticGate as gate (rollback path, PRI-454)', () => {
-      expect(source).toMatch(/evaluatePainDiagnosticGate/);
+    it('no longer uses evaluatePainDiagnosticGate (PRI-651-B1: Gate B only)', () => {
+      expect(source).not.toMatch(/evaluatePainDiagnosticGate/);
     });
 
     it('uses evaluateTriggerController as Gate B (PRI-454 dual-gate)', () => {
@@ -349,12 +348,14 @@ describe('PRI-433: PainAdmissionEmitter characterization (safety net)', () => {
       expect(source).toMatch(/buildManualPainObservation/);
     });
 
-    it('checks painEvidenceAdmissionDefault flag (PRI-454 kill switch)', () => {
-      expect(source).toMatch(/painEvidenceAdmissionDefault/);
+    it('no longer loads painEvidenceAdmission flags (PRI-651-B1)', () => {
+      expect(source).not.toMatch(/painEvidenceAdmissionDefault/);
+      expect(source).not.toMatch(/loadFeatureFlagFromConfig/);
     });
 
-    it('gates emit on gate.shouldDiagnose or triggerDecision.shouldCreateDiagnosticTask', () => {
-      expect(source).toMatch(/gate\.shouldDiagnose|triggerDecision\.shouldCreateDiagnosticTask/);
+    it('gates emit on triggerDecision.shouldCreateDiagnosticTask (no Gate A gate.shouldDiagnose)', () => {
+      expect(source).toMatch(/triggerDecision\.shouldCreateDiagnosticTask/);
+      expect(source).not.toMatch(/gate\.shouldDiagnose/);
     });
 
     it('calls emitPainDetectedEvent (not legacy APIs)', () => {

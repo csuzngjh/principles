@@ -210,7 +210,7 @@ describe('Gate Block Helper — PROFILE Resilience', () => {
 
 // ── PRI-454: Gate B rollback tests ───────────────────────────────────────────
 
-describe('PRI-454: Gate B rollback to Gate A', () => {
+describe('PRI-651-B1: Gate B is the only admission gate', () => {
   const sessionId = 's-rollback-test';
 
   beforeEach(() => {
