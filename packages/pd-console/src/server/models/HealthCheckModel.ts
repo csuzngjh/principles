@@ -5,6 +5,7 @@ import {
   PruningReadModel,
   RuntimeStateManager,
 } from '@principles/core/runtime-v2';
+import { readInstalledPdVersion } from '../utils/installed-layout.js';
 
 export interface HealthCheckResult {
   id: string;
@@ -86,15 +87,15 @@ export class HealthCheckModel {
   }
 
   /**
-   * P0-2: Read the PD (monorepo root) version from package.json.
+   * Read the installed PD plugin version — the same authority the update
+   * page shows as "当前版本" (utils/installed-layout.ts resolves the install
+   * layout; a fixed relative path cannot work because the dev tree and the
+   * installed legacy layout have different depths).
    * Returns 'unknown' on any resolution/parse failure (rc-9: no silent throw).
    */
   private static readPdVersion(): string {
     try {
-      // From src/server/models/ (or dist/server/models/), five levels up
-      // reaches the monorepo root package.json.
-      const pkg = moduleRequire('../../../../../package.json') as { version?: unknown };
-      return typeof pkg.version === 'string' ? pkg.version : 'unknown';
+      return readInstalledPdVersion() ?? 'unknown';
     } catch {
       return 'unknown';
     }

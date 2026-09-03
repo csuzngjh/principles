@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { OperatorHealthReadModel, PruningReadModel, RuntimeStateManager } from '@principles/core/runtime-v2';
@@ -68,6 +69,34 @@ describe('HealthCheckModel', () => {
       expect(health.platform?.nodeVersion).toBe(process.versions.node);
     } finally {
       model.dispose();
+    }
+  });
+
+  it('versions.pd reports the installed plugin version, not a dev-tree relative path (PRI-649)', async () => {
+    // Fixture install under a temp OPENCLAW_HOME: the health model must read
+    // the same plugin package.json the update page shows as "当前版本".
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-health-home-'));
+    const pluginDir = path.join(fakeHome, 'extensions', 'principles-disciple');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginDir, 'package.json'),
+      JSON.stringify({ name: 'principles-disciple', version: '9.8.7' }),
+    );
+
+    const savedHome = process.env.OPENCLAW_HOME;
+    process.env.OPENCLAW_HOME = fakeHome;
+    try {
+      const model = new HealthCheckModel(fakeHome);
+      try {
+        const health = await model.checkSystemHealth();
+        expect(health.versions?.pd).toBe('9.8.7');
+      } finally {
+        model.dispose();
+      }
+    } finally {
+      if (savedHome === undefined) delete process.env.OPENCLAW_HOME;
+      else process.env.OPENCLAW_HOME = savedHome;
+      fs.rmSync(fakeHome, { recursive: true, force: true });
     }
   });
 
