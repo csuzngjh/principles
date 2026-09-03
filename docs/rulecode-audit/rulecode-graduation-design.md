@@ -106,13 +106,31 @@
 
 ## 推荐方案
 
-**短期（P1 修复）**：**方案 1 + 方案 2 的子集**
+**短期（P1 修复）**：**方案 1 + 方案 2 的子集 + F-1 修正**
 1. 扩展 `TOOL_ALIAS` 表，添加 `execute_command`、`run_script`、`code_interpreter` 等缺失别名（修复本次 alias 表不完整问题）
 2. 在 `resolveCasePathParam` 中增加从 `command`、`script_path`、`interpreter` 等 execute 类参数中提取路径的 fallback
 3. 在 `canonicalizeToolKind` 为 `'execute'` 时使用最简单的模板（如命令注入 + 编码参数边界），不要求完整的 5 模板
+4. **（F-1 反馈错位修正）**修订指令（rollout_revisionPayload）携带结构化 gate-reachability 条件：死因是 `no_path_param` / `non_write_canonical_kind` / `no_llm_cases` 时，指令必须落到 Artificer 的对应契约字段（affectedTools / positive params 形状 / V2 声明），而非只落到原则语义文本
 
-**中期**：实现**方案 2 的完整 execute 模板**，覆盖行为规则所需的对抗场景
+**中期**：实现**方案 2 的完整 execute 模板**，覆盖行为规则所需的对抗场景；将 `v2_adversarial_cases_skipped` 的子原因（no_path_param / non_write_canonical_kind）接入 critical-events 持久化，消除观测缺口
 
 **长期**：评估**方案 4**——若行为规则增加到一个通道无法承载的复杂度，分离为独立通道
 
 **不推荐**方案 3（降低标准违反 PRI-634 的核心设计裁决）。
+
+---
+
+## 附：核查修订记录（2026-09-03 第二轮取证）
+
+初版审计后经 Owner 要求核查，以下结论被**修正**（证据：runs output_payload 直查、
+critical-events.jsonl、canonicalizeToolKind 运行时验证）：
+
+1. ~~"execute 类规则结构性不可达对抗重放"~~ → 精确化为"gate 对 execute 类的
+   可达性 100% 依赖 LLM 输出 V2 且自带用例；V1 输出（同等合法）时零兜底"。
+   cf9ceca8 run_1 重放实际执行（caseCount=7），gate 正确抓到 2 处真实规则漏拦。
+2. 新增 **F-1 反馈错位**发现：修订轮 scribe 改了原则文本但 Artificer 契约字段
+   逐字未动（-1 vs -2 直查证实），而 gate 死锁条件全部在契约字段上——修订指令
+   与死因之间缺少结构映射。
+3. 新增 **F-3**：evaluator attempt 上限混用三种失败性质（gate 判负 / schema
+   invalid / V1 死锁），gate 发现缺陷会消耗重试预算。
+4. 方案清单新增第 4 靶点（F-1 修正）与观测缺口修补项。
