@@ -162,6 +162,7 @@ function firstSentence(text: string): string {
 }
 
 /** 派生一个 stage 的摘要：目标键缺失即进 omittedFields（design §6.1）。 */
+// eslint-disable-next-line @typescript-eslint/max-params -- spike fixture DSL mirrors the design §6.1 derivation shape (kind, targetKeys, headlineSource, resolved); grouping into an options object would diverge from the 8 literal call sites below.
 function deriveSpikeSummary(
   runnerKind: SpikeStageKind,
   targetKeys: readonly string[],
@@ -214,7 +215,6 @@ function buildChainSummaries(chain: SpikeChain): Readonly<Record<SpikeStageKind,
   const recommendations = readArray(router, 'recommendations') ?? [];
   const firstRecommendationKind =
     recommendations.length > 0 ? readString(recommendations[0], 'kind') : null;
-  const goldenTraceCases = readArray(artificer, 'goldenTraceCases') ?? [];
   const evaluatorEvaluation = readRecord(evaluator, 'evaluation');
   const evaluatorConcerns = evaluatorEvaluation === null ? null : readArray(evaluatorEvaluation, 'concerns');
   const evaluatorCodeReview = readRecord(evaluator, 'codeReview');
@@ -342,8 +342,8 @@ const EVALUATOR_STAGE1_PATHS: readonly string[] = [
   'dreamer.summary.betterDecision',
   'dreamer.summary.rationale',
   'dreamer.summary.riskLevel',
-  'pain.summary.rootSymptom',
-  'pain.summary.category',
+  'diagnostician.summary.rootSymptom',
+  'diagnostician.summary.category',
 ];
 
 interface SummaryLevelContext {
@@ -366,8 +366,8 @@ function buildEvaluatorStage1Context(chain: SpikeChain): SummaryLevelContext {
     'dreamer.summary.betterDecision': summaries.dreamer.fields.betterDecision,
     'dreamer.summary.rationale': summaries.dreamer.fields.rationale,
     'dreamer.summary.riskLevel': summaries.dreamer.fields.riskLevel,
-    'pain.summary.rootSymptom': summaries.diag_rootcause.fields.rootSymptom,
-    'pain.summary.category': summaries.diag_rootcause.fields.category,
+    'diagnostician.summary.rootSymptom': summaries.diag_rootcause.fields.rootSymptom,
+    'diagnostician.summary.category': summaries.diag_rootcause.fields.category,
   };
 
   const fields: Record<string, string> = {};
@@ -1075,8 +1075,8 @@ function buildRouteBMessage(chain: SpikeChain, context: SummaryLevelContext): st
           riskLevel: context.fields['dreamer.summary.riskLevel'],
         },
         pain: {
-          rootSymptom: context.fields['pain.summary.rootSymptom'],
-          category: context.fields['pain.summary.category'],
+          rootSymptom: context.fields['diagnostician.summary.rootSymptom'],
+          category: context.fields['diagnostician.summary.category'],
         },
       },
       absentFields: context.absent,
@@ -1359,7 +1359,7 @@ describe('Phase 0 Spike 1.2 — 摘要级上下文的定位能力（阻塞门）
       for (const chain of SPIKE_CHAINS) {
         const context = buildEvaluatorStage1Context(chain);
         const call = await askAgent(`routeB-${chain.chainId}`, buildRouteBMessage(chain, context));
-        const rawText = call.rawText;
+        const { rawText } = call;
         const parsed: unknown = call.kind === 'reply'
           ? extractJsonObject(rawText) ?? repairMalformedJson(rawText)
           : null;
