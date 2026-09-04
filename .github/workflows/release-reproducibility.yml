@@ -44,21 +44,26 @@ jobs:
   quick-check:
     runs-on: ubuntu-24.04
     # The self-contained builder is the one release-lock materialization in
-    # this job. Keep enough headroom for a cold npm registry while avoiding a
-    # second, equivalent component-by-component npm ci before it.
-    timeout-minutes: 30
+    # this job. A 15-minute cap catches a return to duplicate dependency
+    # materialization while retaining headroom above the observed three-minute
+    # successful run.
+    timeout-minutes: 15
     env:
       SOURCE_DATE_EPOCH: '1700000000'
+      QUICK_CHECK_WARNING_SECONDS: '480'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
+      - name: Record quick-check start
+        shell: bash
+        run: echo "QUICK_CHECK_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           # Node 22 = the product's floor and every other CI job. Tier 1 ran
           # 26.x historically, which let release locks be regenerated with a
           # different npm major than the smoke jobs consume — a mismatch that
-          # only surfaces as npm ci sync errors on the node22 jobs.
+          # only surfaces as lock synchronization errors on the node22 jobs.
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
@@ -93,6 +98,15 @@ jobs:
         run: npm test --workspace=create-principles-disciple -- --run tests/release-asset-smoke.test.ts
         env:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication
+      - name: Report quick-check duration
+        if: always()
+        shell: bash
+        run: |
+          elapsed_seconds=$(( $(date +%s) - QUICK_CHECK_STARTED_AT ))
+          echo "Release reproducibility quick-check: ${elapsed_seconds}s" >> "$GITHUB_STEP_SUMMARY"
+          if (( elapsed_seconds > QUICK_CHECK_WARNING_SECONDS )); then
+            echo "::warning title=Release reproducibility quick-check is slow::Completed in ${elapsed_seconds}s; investigate before it reaches the 15-minute timeout."
+          fi
 
       # Upload the build identity + digest as a workflow artifact so the
       # full-matrix workflow can cross-check against it.

@@ -64,6 +64,24 @@ describe('native release target matrix', () => {
     }
   });
 
+  it('keeps the PR quick-check bounded and materializes each release lock once', () => {
+    const quickWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release-reproducibility.yml'), 'utf8');
+    const builderScript = fs.readFileSync(path.join(repoRoot, 'packages', 'create-principles-disciple', 'scripts', 'bundle-plugin.mjs'), 'utf8');
+
+    expect(quickWorkflow).toContain('timeout-minutes: 15');
+    expect(quickWorkflow).not.toContain('check:release-locks');
+    expect(quickWorkflow.match(/\bnpm ci\b/g)).toHaveLength(1);
+    expect(quickWorkflow.match(/build-self-contained-release\.mjs/g)).toHaveLength(1);
+    expect(quickWorkflow).toContain("QUICK_CHECK_WARNING_SECONDS: '480'");
+    expect(quickWorkflow).toContain('QUICK_CHECK_STARTED_AT');
+    expect(quickWorkflow).toContain('::warning title=Release reproducibility quick-check is slow');
+
+    for (const component of ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout']) {
+      const materialization = new RegExp(`installBundledRuntimeDependencies\\([^\\n]*'${component}'`, 'g');
+      expect(builderScript.match(materialization)).toHaveLength(1);
+    }
+  });
+
   it('publishes full-product serially in one job whose step order is the dependency order', () => {
     const publishWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'publish-npm.yml'), 'utf8');
     const actionYml = fs.readFileSync(path.join(repoRoot, '.github', 'actions', 'publish-npm-package', 'action.yml'), 'utf8');
