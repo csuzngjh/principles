@@ -72,6 +72,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-077 | API migration silently drops input parameters — characterization tests don't verify parameter parity | PRI-454 |
 | ERR-088 | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path | PRI-486 |
 | ERR-115 | Full-module vi.mock factories break on new public exports — transitive imports hit missing properties at module-evaluation time in unrelated CI tests | PRI-634-F PR #1495 R2 |
+| ERR-116 | Contract defined over an identity (owner/key/actor) validated only through the explicit-parameter path — the shipped DEFAULT path violates the mechanism's own renewal/idempotency contract | PRI-663 PR #1503 review R1 |
 | ERR-094 | Range-bounds assertion uses `\|\|` instead of `&&` — tautology that always passes for any value when `low <= high` | PR #1218 |
 | ERR-096 | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal | fix/installer-gateway-lock |
 | ERR-099 | Defensive ternary alternate for a contract-impossible empty state shipped uncovered — codecov/patch gate fails; prefer a branch-free join that degrades to the legacy format | PR #1341 |
@@ -664,8 +665,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 109 |
-| Last updated | 2026-09-03 |
+| Total lessons | 110 |
+| Last updated | 2026-09-04 |
 | Top category | Schema & Type |
 | Recurring errors | 58 |
 
@@ -1237,6 +1238,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
   - 2026-08-20 PRI-553: governance BDD treated non-empty body text as proof the SPA was ready. That signal was true before the initial `#/focus` redirect settled, so the delayed redirect could overwrite detail navigation; fixed by waiting for the canonical focus URL and then asserting the detail URL.
 
+  - 2026-09-04 PRI-665 misdiagnosis (diagnosis-side sibling of the non-unique-signal class): the 1.229.0 upgrade crash was attributed to a "host-runtime barrel missing 8 exports" based on three checks — rg symbol search, tarball regex, and an import-scanner using string `includes()`. All three are text-level symbol matching and share ONE blind spot: none can see `export *` re-export chains, so the published barrel (19 `export *` lines, all 8 symbols verified loadable via real Node import) was misdiagnosed as broken. The real cause: stale physical `@principles/*` dependency copies in the runtime `node_modules` shadowing the canonical packages (Node resolves the NEAREST node_modules first). Lesson: root-cause claims about module interfaces require a REAL Node import as evidence, must first establish which physical copy the runtime actually resolves, and must treat multiple checks sharing the same mechanism as ONE data point, not independent corroboration.
+
 ---
 
 **[ERR-089]** | Fix addresses primary failure path but leaves sibling failure branches with stale state, wrong command path, or CLI contract violation
@@ -1580,5 +1583,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: The CI failure itself + health.test.ts stub with explanatory comment.
 - **Related ERRs**: ERR-088 (test reality gap family), EP-09
 - **Source**: PRI-634-F PR #1495 CI (Test pd-cli failure, review P2)
+- **Date**: 2026-09-04
+- **Recurrence**: None (first recording)
+
+
+---
+
+**[ERR-116]** | A contract defined over an identity must be tested through its DEFAULT path, not only the explicit-parameter path
+
+- **What happened**: PRI-663 review round 1 (2026-09-04, PR #1503, CodeRabbit R1). The workspace lease CLI shipped a renewal contract ("same-owner acquire renews") whose default owner string embedded `process.pid`. Every CLI invocation is a new process, so a session following the shipped quick-start hint (`npm run dev:lease -- acquire`, no `--owner`) could never renew its own lease — the second acquire self-conflicted against the first. All shipped tests passed because they exercised renewal exclusively with explicit `--owner` values; the default path the docs told humans to run was never executed.
+- **Why it's wrong**: The default value of an identity-bearing parameter is itself part of the mechanism's contract surface. Validating a contract only through explicitly-provided identities proves nothing about the flow the documentation actually recommends; the default flow shipped silently broken.
+- **Generalized failure mode**: When a mechanism's contract (renew/idempotent-retry/resume) is defined over an identity (owner/key/actor/session), assistants must run at least one test through the DEFAULT identity path, otherwise the documented quick-start flow violates the mechanism's own contract while the suite stays green.
+- **Correct approach** (PR #1503 review round): kept the per-process default deliberately (the pid is the only portable signal distinguishing two concurrent agent sessions of the same OS user; silent mutual renewal is a worse failure than a loud self-conflict for a safety tool) and repaired the contract surface instead: quick-start hint and docs now pass a stable `--owner`, the conflict nextAction explains the per-process default, and a test pins the race semantics. When a default genuinely cannot satisfy the contract, change the flow so the contract is only documented over the identity users actually pass.
+- **How to prevent**: For every contract claim in a diff (renew/idempotent/resume), name the identity it is defined over and ask "what does the DEFAULT identity do here?" — then run that path once in a test. 30-second review probe: execute the README/hint command verbatim twice; the second run must hit the documented non-conflicting behavior.
+- **Regression guard**: `workspace-lease.test.ts` explicit-owner renewal test PLUS the concurrency race test (two real CLI processes, exactly one winner); AGENTS.md git-9 documents the default-owner semantics the tests and docs now agree on.
+- **Related ERRs**: ERR-083 family (default/constant changed but hardcoded consumers untested — mirror direction: default value breaks its own contract rather than others' tests), EP-09
+- **Source**: PRI-663 PR #1503 CodeRabbit review R1
 - **Date**: 2026-09-04
 - **Recurrence**: None (first recording)

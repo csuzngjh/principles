@@ -42,7 +42,7 @@
   "author": "csuzngjh",
   "license": "MIT",
   "dependencies": {
-    "@principles/install-layout": "0.1.0",
+    "@principles/install-layout": "^0.2.0",
     "@tufjs/models": "3.0.1",
     "@inquirer/prompts": "^8.5.2",
     "commander": "^14.0.3",
@@ -73,6 +73,6 @@
     "directory": "packages/create-principles-disciple"
   },
   "pd": {
-    "bundledPluginVersion": "1.222.4"
+    "bundledPluginVersion": "1.229.0"
   }
 }

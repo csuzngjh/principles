@@ -139,6 +139,9 @@ gha-creds-*.json
 .worktrees/
 .pd/
 
+# Workspace write lease (AGENTS.md §23A git-9) — dev-session state, human-deletable
+.workspace-lease.json
+
 # Symphony (external project copy)
 symphony/
 patches/

@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@principles/core": "^1.74.1",
-    "@principles/install-layout": "0.1.0",
+    "@principles/install-layout": "^0.2.0",
     "better-sqlite3": "^13.0.3",
     "js-yaml": "^5.2.0"
   },

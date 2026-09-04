@@ -22,7 +22,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@principles/core": "*",
     "@principles/host-runtime": "*",
-    "@principles/install-layout": "0.1.0",
+    "@principles/install-layout": "^0.2.0",
     "create-principles-disciple": "*",
     "principles-disciple": "*",
     "@radix-ui/react-alert-dialog": "^1.1.15",

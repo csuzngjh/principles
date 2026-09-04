@@ -16,6 +16,11 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { PruningReadModel, PainChainReadModel, auditCandidateLedgerConsistency } from '@principles/core/runtime-v2';
 import type { PainChainTrace } from '@principles/core/runtime-v2';
 import { getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
+import {
+  createEvaluatorRuntimeContext,
+  loadHostToolDeclarations,
+  resolveWorkspaceHostToolSemantics,
+} from '@principles/host-runtime';
 import { handleHealthCodex } from './health-codex.js';
 
 interface LastSuccessfulChain {
@@ -30,6 +35,54 @@ interface LastSuccessfulChain {
   checkedAt: string;
 }
 
+/**
+ * PRI-662: reliability readiness — the post-upgrade validation surface.
+ * Reads the SAME durable host declarations and uses the SAME resolver /
+ * evaluator runtime-context builder as the production activation and
+ * evaluator replay paths, so "replay: ready" here means exactly "the
+ * replay the gate will run is constructible" — no parallel truth.
+ */
+interface ReliabilityHealth {
+  registry: {
+    status: 'ok' | 'degraded';
+    hosts: string[];
+    declaredTools: number;
+  };
+  resolver: 'ready' | 'not_ready';
+  replay: 'ready' | 'not_ready';
+  reason?: string;
+  nextAction?: string;
+}
+
+function assessReliability(workspaceDir: string): ReliabilityHealth {
+  const loaded = loadHostToolDeclarations(workspaceDir);
+  const resolver = resolveWorkspaceHostToolSemantics(workspaceDir);
+  const replay = createEvaluatorRuntimeContext({ workspaceDir });
+
+  if (loaded.ok) {
+    return {
+      registry: {
+        status: 'ok',
+        hosts: loaded.declarations.map((d) => d.hostKind).sort(),
+        declaredTools: loaded.declarations.reduce((n, d) => n + d.mappings.length, 0),
+      },
+      resolver: resolver.ok ? 'ready' : 'not_ready',
+      replay: replay.ok ? 'ready' : 'not_ready',
+    };
+  }
+  // Fresh-install expected state until each host starts once — explicit, never
+  // a silent baseline fallback (ERR-114). Informational: the refusal authority
+  // lives in the activation/evaluator paths, so the health exit code is
+  // unchanged by this section.
+  return {
+    registry: { status: 'degraded', hosts: [], declaredTools: 0 },
+    resolver: 'not_ready',
+    replay: 'not_ready',
+    reason: loaded.reason,
+    nextAction: loaded.nextAction,
+  };
+}
+
 interface WorkspaceHealth {
   generatedAt: string;
   workspace: string;
@@ -39,6 +92,7 @@ interface WorkspaceHealth {
   candidates: { total: number; consumed: number; pending: number };
   tasks: { total: number; byStatus: Record<string, number> };
   candidateLedgerConsistency: { status: 'ok' | 'degraded'; missing: number };
+  reliability: ReliabilityHealth;
   lastSuccessfulChain?: LastSuccessfulChain;
 }
 
@@ -80,6 +134,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   const ledgerByStatus = healthSummary.byStatus;
 
   const { missingLedgerCount } = await auditCandidateLedgerConsistency(workspaceDir);
+  const reliability = assessReliability(workspaceDir);
 
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;
@@ -106,6 +161,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         status: missingLedgerCount === 0 ? 'ok' : 'degraded',
         missing: missingLedgerCount,
       },
+      reliability,
       lastSuccessfulChain,
     };
   }
@@ -134,6 +190,15 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     console.log(`tasks.byStatus: ${JSON.stringify(health.tasks.byStatus)}`);
     console.log(`candidateLedgerConsistency.status: ${health.candidateLedgerConsistency.status}`);
     console.log(`candidateLedgerConsistency.missing: ${health.candidateLedgerConsistency.missing}`);
+    console.log(`reliability.registry.status: ${health.reliability.registry.status}`);
+    console.log(`reliability.registry.hosts: ${health.reliability.registry.hosts.join('+') || '(none)'}`);
+    console.log(`reliability.registry.declaredTools: ${health.reliability.registry.declaredTools}`);
+    console.log(`reliability.resolver: ${health.reliability.resolver}`);
+    console.log(`reliability.replay: ${health.reliability.replay}`);
+    if (health.reliability.reason) {
+      console.log(`reliability.reason: ${health.reliability.reason}`);
+      console.log(`reliability.nextAction: ${health.reliability.nextAction}`);
+    }
     if (health.lastSuccessfulChain) {
       console.log('lastSuccessfulChain:');
       console.log(`  taskId:       ${health.lastSuccessfulChain.taskId}`);
