@@ -1,0 +1,17 @@
+{
+  "service": "orders-api",
+  "port": 8421,
+  "region": "cn-east-1",
+  "installDate": "2026-06-14T09:26:00Z",
+  "installToken": "tok-7a3e165f-c2ea-b230",
+  "deploymentId": "dep-673d1b6a",
+  "retentionDays": 90,
+  "metricsEndpoint": "https://metrics.internal/orders-api",
+  "serviceMeshId": "mesh-c77c0a",
+  "featureToggles": {
+    "canary": false,
+    "newPricing": true,
+    "verboseAudit": false
+  },
+  "maxBatch": 64
+}
