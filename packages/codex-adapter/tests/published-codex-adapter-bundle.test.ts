@@ -102,8 +102,8 @@ describe('published @principles/codex-adapter bundle safety', () => {
     runNpm(
       ['install', '--ignore-scripts', '--omit=optional', '--no-package-lock', '--', adapterTarball, hostRuntimeTarball, installLayoutTarball, coreTarball],
       // Registry-latency headroom (PRI-634-F CI): the 2026-09-04 slow window
-      // pushed this 4-tarball install past 180s.
-      { cwd: consumerDir, stdio: 'pipe', timeout: 420_000 },
+      // pushed this 4-tarball install past 420s as well.
+      { cwd: consumerDir, stdio: 'pipe', timeout: 900_000 },
     );
 
     // The packed tarball must ship the built hook entry and codec modules.
@@ -128,8 +128,8 @@ describe('published @principles/codex-adapter bundle safety', () => {
       { cwd: consumerDir, stdio: 'pipe', timeout: 30_000 },
     );
   // Hook budget = build + 4×npm pack + 4-tarball install, all serial and
-  // registry-bound; 3 minutes was exceeded in the 2026-09-04 slow window.
-  }, 600_000);
+  // registry-bound; raised twice after the 2026-09-04 slow window (10m14s).
+  }, 1_200_000);
 
   afterAll(() => {
     if (tempDir) {
