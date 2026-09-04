@@ -14,6 +14,10 @@
 //                      implement in task worktrees). Humans may override in
 //                      emergencies with PD_DEV_WORKTREE_ALLOW_PRIMARY=1 —
 //                      AI agents must NEVER set that variable.
+//   lease-invalid    — the workspace lease file exists but is malformed
+//   lease-branch-mismatch — an ACTIVE write lease names a different branch
+//                      than the one checked out (branch switched under a
+//                      live writer — the PRI-663 contamination signature)
 //
 // Usage:
 //   node scripts/dev/check-dev-worktree.mjs [--json]
@@ -22,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getGitContext } from './lib/git.mjs';
+import { evaluateLeaseForGuard } from './lib/workspace-lease.mjs';
 
 const PROTECTED_BRANCHES = new Set(['main', 'master']);
 
@@ -97,12 +102,26 @@ async function collectViolations() {
     });
   }
 
-  return { violations, ctx };
+  // Write-lease drift (AGENTS.md §23A git-9): the guard cannot see filesystem
+  // mutation, but it CAN see the branch a live lease was taken for no longer
+  // being checked out — the structural signature of a concurrent-session
+  // takeover. Expired leases never block (holder is gone by definition).
+  const leaseRoot = ctx.toplevel || ctx.cwd;
+  const lease = evaluateLeaseForGuard(leaseRoot, ctx.branch);
+  violations.push(...lease.violations);
+
+  return { violations, ctx, lease: lease.summary };
 }
 
-function reportHuman(violations, ctx) {
+function reportHuman(violations, ctx, lease) {
   if (violations.length === 0) {
-    console.log('[worktree-guard] ok: branch ' + ctx.branch + ' in task worktree ' + ctx.cwd);
+    let leaseNote = '';
+    if (lease && lease.state === 'active') {
+      leaseNote = ' (write lease: ' + lease.owner + ' until ' + lease.expiresAt + ')';
+    } else if (lease && lease.state === 'expired') {
+      leaseNote = ' (stale write lease ignored)';
+    }
+    console.log('[worktree-guard] ok: branch ' + ctx.branch + ' in task worktree ' + ctx.cwd + leaseNote);
     return;
   }
   console.error('[worktree-guard] FAIL — this checkout is not a safe write target:');
@@ -113,12 +132,13 @@ function reportHuman(violations, ctx) {
   process.exitCode = 1;
 }
 
-function reportJson(violations, ctx) {
+function reportJson(violations, ctx, lease) {
   const payload = {
     ok: violations.length === 0,
     worktree: ctx ? ctx.cwd : process.cwd(),
     branch: ctx ? ctx.branch : null,
     isPrimary: ctx ? ctx.isPrimary : null,
+    lease: lease ?? null,
     violations,
   };
   console.log(JSON.stringify(payload, null, 2));
@@ -127,9 +147,9 @@ function reportJson(violations, ctx) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  const { violations, ctx } = await collectViolations();
-  if (args.json) reportJson(violations, ctx);
-  else reportHuman(violations, ctx);
+  const { violations, ctx, lease } = await collectViolations();
+  if (args.json) reportJson(violations, ctx, lease);
+  else reportHuman(violations, ctx, lease);
 }
 
 const isMain = process.argv[1] && process.argv[1].endsWith('check-dev-worktree.mjs');

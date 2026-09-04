@@ -1,0 +1,7 @@
+{
+  "service": "orders-api",
+  "port": 8421,
+  "region": "cn-east-1",
+  "logLevel": "info",
+  "retries": 3
+}

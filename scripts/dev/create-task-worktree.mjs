@@ -160,6 +160,7 @@ async function main() {
     console.log('  base:     ' + summary.base + ' (' + args.base + ')');
     console.log('next steps:');
     console.log('  cd ' + summary.worktree);
+    console.log('  npm run dev:lease -- acquire --owner "<task> session"  # write lease BEFORE editing (git-9; stable --owner enables renewal)');
     console.log('  node scripts/setup-worktree.mjs   # PATH/private-docs/npm install/build bootstrap');
   }
 }
