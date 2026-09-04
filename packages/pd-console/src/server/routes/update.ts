@@ -919,7 +919,14 @@ function reconcileResolutionLink(
     // Roll this slot back before failing — the install stays untouched
     // (the PRI-561 fail-closed ordering contract).
     try { fs.unlinkSync(linkPath); } catch { /* nothing we created */ }
-    try { fs.renameSync(entry.quarantinePath, entry.slot); } catch { /* reported by outer rollback */ }
+    try {
+      fs.renameSync(entry.quarantinePath, entry.slot);
+    } catch {
+      // The in-slot rename failed (e.g. a transient lock). Hand the entry to
+      // the outer rollback so it retries the restore — restoreQuarantined
+      // tolerates a missing slot when unlinking before renaming back.
+      quarantined.push(entry);
+    }
     return error;
   }
   quarantined.push(entry);

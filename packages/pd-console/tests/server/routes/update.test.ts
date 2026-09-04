@@ -2764,4 +2764,91 @@ describe('Runtime resolution link reconciliation (PRI-665)', () => {
     }
   });
 
+
+  it('retries the quarantine restore through the outer rollback when the in-slot rename fails', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+          fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+          fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+            JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const STAGED_HOST_RUNTIME = 1;');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // Incident state: stale physical copy at the slot.
+    const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+    fs.mkdirSync(slot, { recursive: true });
+    fs.writeFileSync(path.join(slot, 'stale-marker'), 'stale');
+    fs.writeFileSync(path.join(pluginDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+    // The fs partial mock only wraps copyFileSync — renameSync/symlinkSync are
+    // real pass-throughs, so spy on them (the scenario never touches other
+    // rename/symlink call sites: the update aborts during reconciliation).
+    // rename sequence: #1 quarantineSlot (ok) — #2 in-slot rollback (mocked
+    // EPERM) — #3 outer restoreQuarantined retry (ok).
+    const { renameSync: realRename } = await vi.importActual<typeof import('fs')>('fs');
+    let renameCalls = 0;
+    // Make the link creation fail AFTER the quarantine succeeded so the
+    // in-slot rollback path is exercised.
+    const symlinkSpy = vi.spyOn(fs, 'symlinkSync').mockImplementation((() => {
+      throw Object.assign(new Error('EPERM: operation not permitted, symlink'), { code: 'EPERM' });
+    }) as unknown as typeof fs.symlinkSync);
+    const renameSpy = vi.spyOn(fs, 'renameSync').mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+      renameCalls += 1;
+      if (renameCalls === 2) {
+        throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
+      }
+      return realRename(from, to);
+    }) as unknown as typeof fs.renameSync);
+
+    try {
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('host_runtime_link_failed');
+
+      // The stale physical copy is RESTORED — the outer rollback retried the
+      // rename the in-slot rollback could not perform.
+      const slotLstat = fs.lstatSync(slot);
+      expect(slotLstat.isDirectory()).toBe(true);
+      expect(slotLstat.isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(slot, 'stale-marker'), 'utf-8')).toBe('stale');
+      // The quarantine was consumed — no leftovers.
+      expect(fs.readdirSync(path.dirname(slot)).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+      expect(renameCalls).toBe(3);
+    } finally {
+      symlinkSpy.mockRestore();
+      renameSpy.mockRestore();
+    }
+  });
 });
