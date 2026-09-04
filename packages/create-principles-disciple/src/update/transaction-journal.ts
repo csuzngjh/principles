@@ -35,6 +35,18 @@ export type TransactionState = typeof TRANSACTION_STATES[number];
 
 export type TransactionKind = 'update' | 'reinstall' | 'explicit_downgrade' | 'rollback' | 'legacy_migration' | 'recovery';
 
+/**
+ * Provenance of a transition's `releaseMetadataDigest` (PRI-664 review):
+ * - `manifest`          — sha256 of the self-contained asset manifest (whole-payload identity)
+ * - `package_manifest`  — sha256 of the bundled component package manifest
+ * - `fallback`          — synthetic digest (identity data unavailable); readable but NOT verifiable
+ */
+export const RELEASE_METADATA_DIGEST_SOURCES = ['manifest', 'package_manifest', 'fallback'] as const;
+
+export type ReleaseMetadataDigestSource = typeof RELEASE_METADATA_DIGEST_SOURCES[number];
+
+const RELEASE_METADATA_DIGEST_SOURCE_SET = new Set<string>(RELEASE_METADATA_DIGEST_SOURCES);
+
 export interface JournalTransition {
   readonly at: string;
   readonly from: TransactionState | null;
@@ -43,6 +55,8 @@ export interface JournalTransition {
   readonly releaseId: string;
   readonly productVersion: string;
   readonly releaseMetadataDigest: string;
+  /** Optional provenance marker; absent on journals written before PRI-664 review. */
+  readonly releaseMetadataDigestSource?: ReleaseMetadataDigestSource;
   readonly generation: number;
   readonly detail?: string;
 }
@@ -110,6 +124,13 @@ function parseTransition(line: string, lineNumber: number): JournalTransition {
   if (typeof parsed.releaseMetadataDigest !== 'string' || !/^[a-f0-9]{64}$/.test(parsed.releaseMetadataDigest)) {
     throw new TransactionJournalError('journal_field_invalid', `Journal line ${lineNumber}: releaseMetadataDigest must be 64-char hex.`);
   }
+  const digestSource = parsed.releaseMetadataDigestSource;
+  if (digestSource !== undefined && (typeof digestSource !== 'string' || !RELEASE_METADATA_DIGEST_SOURCE_SET.has(digestSource))) {
+    throw new TransactionJournalError(
+      'journal_field_invalid',
+      `Journal line ${lineNumber}: releaseMetadataDigestSource must be one of ${RELEASE_METADATA_DIGEST_SOURCES.join(' | ')}.`,
+    );
+  }
   return {
     at: parsed.at as string,
     from: fromValue as TransactionState | null,
@@ -118,6 +139,7 @@ function parseTransition(line: string, lineNumber: number): JournalTransition {
     releaseId: parsed.releaseId as string,
     productVersion: parsed.productVersion as string,
     releaseMetadataDigest: parsed.releaseMetadataDigest,
+    ...(digestSource !== undefined ? { releaseMetadataDigestSource: digestSource as ReleaseMetadataDigestSource } : {}),
     generation: parsed.generation as number,
     detail: typeof parsed.detail === 'string' ? parsed.detail : undefined,
   };
