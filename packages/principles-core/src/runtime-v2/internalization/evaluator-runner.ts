@@ -2286,6 +2286,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       gateDecision: gateResult.decision,
       caseCount: mergedTrace.cases.length,
       failedCaseCount: gateResult.sandboxResult.failedCases.length,
+      // PRI-634-F R2: structured layer attribution rides the telemetry event
+      // (review P2 — the repair/observability path must answer 哪一层负责).
+      ...(gateResult.failure ? { failureLayer: gateResult.failure.layer, reasonCode: gateResult.failure.reasonCode } : {}),
     });
 
     // (7) Populate adversarialResult from the gate result.
@@ -2297,6 +2300,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const adversarialResult: EvaluatorAdversarialResult = {
       passed: accepted,
       failedCases,
+      ...(gateResult.failure ? { failure: { layer: gateResult.failure.layer, reasonCode: gateResult.failure.reasonCode } } : {}),
     };
 
     return {

@@ -39,6 +39,12 @@ import {
 } from '../utils/installed-layout.js';
 import { ActivationCompatibilityReadModel } from '@principles/core/runtime-v2';
 import { collectFileDepLinkSpecs, type StagedComponent } from '../utils/update-links.js';
+import {
+  updateMutationController,
+  LEGACY_MUTATION_AUTHORITY,
+  type MutationContext,
+  type MutationKind,
+} from '../update/mutation-controller.js';
 
 /**
  * Legacy rule contract preflight (2026-08-19): refuse to swap the runtime
@@ -142,6 +148,40 @@ function logLegacyBackupMigration(source: string): void {
 // ---------------------------------------------------------------------------
 // Core update operations (inline to avoid cross-package import)
 // ---------------------------------------------------------------------------
+
+/**
+ * Read the identity of a staged release package.
+ *
+ * Returns undefined when the file is missing, malformed, or when the package
+ * does not self-identify as principles-disciple with a valid semver version
+ * (rc-1/rc-2: unknown JSON is validated through guards, never a type
+ * assertion).
+ *
+ * Refusing an identity-less staged package BEFORE any production copy turns
+ * silent runtime corruption into a loud, structured error (rc-9). Regression
+ * from 2026-09-03: a stub tarball carrying only a fake version with no
+ * package name was copied into the real ~/.pd/runtime, which made the update
+ * page report a false "already latest" and blocked every future update. A
+ * real principles-disciple / create-principles-disciple tarball always
+ * carries name + valid semver.
+ */
+function readStagedPackageIdentity(pkgPath: string): { name: string; version: string } | undefined {
+  try {
+    const raw = fs.readFileSync(pkgPath, 'utf-8');
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return undefined;
+    if (parsed.name !== 'principles-disciple') return undefined;
+    if (typeof parsed.version !== 'string' || semver.valid(parsed.version) === null) return undefined;
+    return { name: parsed.name, version: parsed.version };
+  } catch {
+    return undefined;
+  }
+}
+
+const STAGED_PACKAGE_REFUSAL_MESSAGE =
+  'Update source is not a valid principles-disciple release (package missing identity or valid version).';
+const STAGED_PACKAGE_REFUSAL_NEXT_ACTION =
+  'Try the update again later, or run the official installer (npx create-principles-disciple) to repair PD.';
 
 /**
  * Recursively copy a directory tree.
@@ -553,6 +593,29 @@ async function doApplyUpdate(
     execFileSync('tar', ['xzf', 'package.tgz', '--strip-components=1'], { cwd: tempDir, stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
+    // 3.5 Staged-package identity guard (2026-09-03 regression): refuse a
+    // tarball that does not name itself principles-disciple with a valid
+    // version BEFORE any production byte is copied — the incident stub
+    // carried no name. A real release always carries both.
+    if (readStagedPackageIdentity(path.join(tempDir, 'package.json')) === undefined) {
+      if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      if (backupPath && fs.existsSync(backupPath)) fs.rmSync(backupPath, { recursive: true, force: true });
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: toVersion ?? 'unknown',
+        success: false,
+        kind: 'refusal',
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      });
+      return {
+        success: false,
+        message: STAGED_PACKAGE_REFUSAL_MESSAGE,
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      };
+    }
+
     // 4. Compute diff and apply.
     // Fix 3: we ONLY apply modified + added files. We deliberately skip ALL
     // deletions — the tarball (principles-disciple) only contains dist/,
@@ -930,6 +993,30 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     // gateway is stopped or any production file is copied.
     const newPkgPath = path.join(tempDir, 'plugin', 'package.json');
     const stagedVersion = readCurrentVersion(path.join(tempDir, 'plugin'));
+
+    // Staged-package identity guard (2026-09-03 regression): the staged plugin
+    // must self-identify as principles-disciple with a valid version before
+    // the gateway is stopped or any production file is copied. The incident
+    // stub carried only a fake version with no package name.
+    if (readStagedPackageIdentity(path.join(tempDir, 'plugin', 'package.json')) === undefined) {
+      if (tempDir && fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: stagedVersion ?? 'unknown',
+        success: false,
+        kind: 'refusal',
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      });
+      return {
+        success: false,
+        message: STAGED_PACKAGE_REFUSAL_MESSAGE,
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+        requiresRestart: false,
+      };
+    }
+
     const progressed =
       fromVersion !== 'unknown' &&
       stagedVersion !== undefined &&
@@ -1170,16 +1257,23 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
 // Route handler
 // ---------------------------------------------------------------------------
 
-export async function handleUpdateRoute(
+/**
+ * PRI-659: the four mutation kinds below are the legacy console updater's
+ * implementations, registered into the MutationController (ADR-0023/0024
+ * migration boundary). handleUpdateRoute is now a thin dispatcher: it maps
+ * the URL subPath to a mutation kind and lets the controller resolve the
+ * authority. The implementation stays here verbatim (replace-then-delete —
+ * no third updater, no logic duplication); when ReleaseManager matures it
+ * registers under `release-manager` for the same kinds and this route layer
+ * needs no further change.
+ */
+function legacyCheckMutation(
   req: IncomingMessage,
   res: ServerResponse,
-  workspaceDir: string,
-  subPath: string,
+  ctx: MutationContext,
 ): Promise<void> {
-  const pluginDir = resolvePluginDir(workspaceDir);
-
-  // GET /check
-  if (subPath === '/check') {
+  return (async () => {
+    const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'GET') { sendMethodNotAllowed(res); return; }
     try {
       // ERR-002 / Runtime Contract Rule 9: 当无法确定当前版本时（如插件未安装），
@@ -1202,11 +1296,16 @@ export async function handleUpdateRoute(
     } catch (err) {
       sendError(res, 500, 'update_check_error', err instanceof Error ? err.message : 'Unknown error');
     }
-    return;
-  }
+  })();
+}
 
-  // POST /apply
-  if (subPath === '/apply') {
+function legacyApplyMutation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: MutationContext,
+): Promise<void> {
+  return (async () => {
+    const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     try {
       const rawBody = await readJsonBody(req);
@@ -1244,7 +1343,7 @@ export async function handleUpdateRoute(
       }
 
       // Path traversal validation
-      if (!validatePathInWorkspace(targetDir, workspaceDir)) {
+      if (!validatePathInWorkspace(targetDir, ctx.workspaceDir)) {
         sendBadRequest(res, 'targetDir must be within workspace or extensions directory');
         return;
       }
@@ -1253,17 +1352,22 @@ export async function handleUpdateRoute(
         targetDir,
         mergeStrategy,
         createBackup,
-      }, workspaceDir);
+      }, ctx.workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
       sendError(res, 500, 'update_apply_error', err instanceof Error ? err.message : 'Unknown error');
     }
-    return;
-  }
+  })();
+}
 
-  // POST /rollback
-  if (subPath === '/rollback') {
+function legacyRollbackMutation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: MutationContext,
+): Promise<void> {
+  return (async () => {
+    const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     try {
       const rawBody = await readJsonBody(req);
@@ -1284,35 +1388,66 @@ export async function handleUpdateRoute(
       }
 
       // Path traversal validation
-      if (!validatePathInWorkspace(targetDir, workspaceDir)) {
+      if (!validatePathInWorkspace(targetDir, ctx.workspaceDir)) {
         sendBadRequest(res, 'targetDir must be within workspace or extensions directory');
         return;
       }
-      if (!validatePathInWorkspace(backupDir, workspaceDir)) {
+      if (!validatePathInWorkspace(backupDir, ctx.workspaceDir)) {
         sendBadRequest(res, 'backupDir must be within the workspace, extensions directory, or PD backups directory');
         return;
       }
 
-      const result = await doRollbackUpdate({ targetDir, backupDir }, workspaceDir);
+      const result = await doRollbackUpdate({ targetDir, backupDir }, ctx.workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
       sendError(res, 500, 'update_rollback_error', err instanceof Error ? err.message : 'Unknown error');
     }
-    return;
-  }
+  })();
+}
 
-  // POST /apply-full — inline tarball download + file copy (no external installer)
-  if (subPath === '/apply-full') {
+function legacyApplyFullMutation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: MutationContext,
+): Promise<void> {
+  return (async () => {
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     try {
-      const result = await doInlineFullUpdate(workspaceDir);
+      const result = await doInlineFullUpdate(ctx.workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       sendError(res, 500, 'update_apply_full_error', err instanceof Error ? err.message : 'Unknown error');
     }
+  })();
+}
+
+// PRI-659: register the legacy authority (ADR-0024 D-1 fallback authority)
+// for every mutation kind. Registration is the ONLY coupling between this
+// implementation and the controller — no other module needs to know where
+// the legacy implementation lives.
+updateMutationController.register('check', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyCheckMutation });
+updateMutationController.register('apply', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyApplyMutation });
+updateMutationController.register('apply-full', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyApplyFullMutation });
+updateMutationController.register('rollback', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyRollbackMutation });
+
+const UPDATE_MUTATION_KINDS: ReadonlyMap<string, MutationKind> = new Map([
+  ['/check', 'check'],
+  ['/apply', 'apply'],
+  ['/apply-full', 'apply-full'],
+  ['/rollback', 'rollback'],
+]);
+
+export async function handleUpdateRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  workspaceDir: string,
+  subPath: string,
+): Promise<void> {
+  const kind = UPDATE_MUTATION_KINDS.get(subPath);
+  if (kind === undefined) {
+    sendNotFound(res, `Update route not found: ${subPath}`);
     return;
   }
-
-  sendNotFound(res, `Update route not found: ${subPath}`);
+  await updateMutationController.dispatch(req, res, { workspaceDir }, kind);
 }

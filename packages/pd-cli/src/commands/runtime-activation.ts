@@ -38,6 +38,7 @@ import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
 import { authorizeGovernanceAction, writeGovernanceAction } from 'principles-disciple/governance-audit';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
+import { resolveWorkspaceToolSemantics } from '../services/workspace-tool-semantics.js';
 
 /**
  * Type guard for parsed JSON objects (rc-2-no-as-bypass).
@@ -236,6 +237,29 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
+  // PRI-634-F R2 (review P1): code_tool_hook activation resolves the host
+  // tool registry from DURABLE workspace provenance (the declaration the
+  // host persisted). Refuse — never guess a host, never silently skip the
+  // reliability validation — when it is unavailable.
+  const toolSemanticsResolution = resolveWorkspaceToolSemantics(workspaceDir);
+  if (channel === 'code_tool_hook' && !toolSemanticsResolution.ok) {
+    const refused: ActivationDecision = {
+      decision: 'refused',
+      reason: toolSemanticsResolution.reason,
+      nextAction: toolSemanticsResolution.nextAction,
+      channel,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(refused, null, 2));
+    } else {
+      console.log(formatTextOutput(refused));
+      console.log('  nextAction: ' + toolSemanticsResolution.nextAction);
+    }
+    process.exitCode = 1;
+    return;
+  }
+  const workspaceToolSemantics = toolSemanticsResolution.ok ? toolSemanticsResolution.registry : undefined;
+
   try {
     await stateManager.initialize();
     const artifactRecord = await stateManager.piArtifactStore.getArtifactById(opts.artifactId);
@@ -296,8 +320,17 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
         writers: [
           new PromptWriter(),
           new RuleHostWriter({
-            gateDeps: createProductionGateDeps(),
+            // PRI-634-F R2: registry from durable host provenance (the host
+            // declaration persisted in the workspace) + the real workspace
+            // root — production-identical replay and tool-existence
+            // validation. No host is guessed (review P1).
+            gateDeps: createProductionGateDeps({
+              projectDir: workspaceDir,
+              ...(workspaceToolSemantics ? { toolSemantics: workspaceToolSemantics } : {}),
+            }),
             featureFlagProbe: (flagId) => featureFlags.flags[flagId]?.enabled === true,
+            projectDir: workspaceDir,
+            ...(workspaceToolSemantics ? { toolSemantics: workspaceToolSemantics } : {}),
           }),
           new DeferArchiveWriter(),
         ],
@@ -501,6 +534,11 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
   try {
     const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
     const flags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
+    // PRI-634-F R2: workspace-provenance registry — readiness evaluates with
+    // the same tool semantics as dispatch (readiness is a read-model probe,
+    // so unresolvable provenance degrades to legacy rather than refusing).
+    const readinessToolSemantics = resolveWorkspaceToolSemantics(workspaceDir);
+    const workspaceToolSemantics = readinessToolSemantics.ok ? readinessToolSemantics.registry : undefined;
     // ADR-0022 (PRI-578): single resolver — env > ~/.pd/owner.json > none
     const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
     const { ownerId, credentialId } = identity;
@@ -530,8 +568,15 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
         const manager = await getStateManager();
         const activationStore = new SqliteActivationStateStore(manager.connection);
         const writer = new RuleHostWriter({
-          gateDeps: createProductionGateDeps(),
+          // PRI-634-F R2: readiness replay uses workspace-provenance registry
+          // + real workspace root, matching the dispatch path exactly.
+          gateDeps: createProductionGateDeps({
+            projectDir: workspaceDir,
+            ...(workspaceToolSemantics ? { toolSemantics: workspaceToolSemantics } : {}),
+          }),
           featureFlagProbe: flagId => isFeatureEnabled(flags, flagId),
+          projectDir: workspaceDir,
+          ...(workspaceToolSemantics ? { toolSemantics: workspaceToolSemantics } : {}),
         });
         const reader = new PromotionReadinessReader({
           listCodeToolHookActivations: () => activationStore.listCodeToolHookActivations(false),
@@ -1230,6 +1275,32 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
     const approvalQueueStore = new SqliteApprovalQueueStore(sqliteConn);
     const queue = new ApprovalQueue(approvalQueueStore);
 
+    // PRI-634-F R2 (review P1): a code_tool_hook approval completing into an
+    // activation must resolve the host tool registry from workspace
+    // provenance — refuse BEFORE the approval write when unavailable, so no
+    // half-approved state is created and the operator gets a nextAction.
+    const pendingApproval = await queue.getById(opts.approvalId);
+    const approvalChannel = pendingApproval?.channel;
+    const approveToolSemantics = resolveWorkspaceToolSemantics(workspaceDir);
+    if (approvalChannel === 'code_tool_hook' && !approveToolSemantics.ok) {
+      const result: ApproveResult = {
+        ok: false,
+        approvalId: opts.approvalId,
+        reason: approveToolSemantics.reason,
+        nextAction: approveToolSemantics.nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`approvalId: ${result.approvalId}`);
+        console.log(`  reason:    ${result.reason}`);
+        console.log(`  nextAction: ${result.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+    const workspaceToolSemantics = approveToolSemantics.ok ? approveToolSemantics.registry : undefined;
+
     // Step 1: approve the pending approval record.
     let approvalResult: ApprovalDecisionResult;
     try {
@@ -1305,8 +1376,17 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         writers: [
           new PromptWriter(),
           new RuleHostWriter({
-            gateDeps: createProductionGateDeps(),
+            // PRI-634-F R2: registry from durable host provenance (the host
+            // declaration persisted in the workspace) + the real workspace
+            // root — production-identical replay and tool-existence
+            // validation. No host is guessed (review P1).
+            gateDeps: createProductionGateDeps({
+              projectDir: workspaceDir,
+              ...(workspaceToolSemantics ? { toolSemantics: workspaceToolSemantics } : {}),
+            }),
             featureFlagProbe: (flagId) => featureFlags.flags[flagId]?.enabled === true,
+            projectDir: workspaceDir,
+            ...(workspaceToolSemantics ? { toolSemantics: workspaceToolSemantics } : {}),
           }),
           new DeferArchiveWriter(),
         ],

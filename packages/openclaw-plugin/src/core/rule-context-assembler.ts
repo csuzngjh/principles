@@ -16,12 +16,12 @@
  */
 
 import {
-  canonicalizeToolKind,
   computeBehaviorFacts,
   extractFilePathFromParams,
   normalizePathPure,
   UNAVAILABLE_RULE_CONTEXT,
 } from '@principles/core/runtime-v2';
+import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
 import type {
   CanonicalKind,
   RuleContextV2,
@@ -114,7 +114,11 @@ export function assembleHistoryFromRows(
     }
 
     // ── build RuleToolCallRecord ──
-    const canonicalKind: CanonicalKind = canonicalizeToolKind(toolName);
+    // PRI-634-F: resolve through the OpenClaw registry (baseline + host
+    // layer) instead of baseline-only canonicalizeToolKind — production tools
+    // like 'shell'/'cmd'/'delete_file' previously degraded to 'other' here
+    // while the gate classified them as bash/write (vocabulary drift).
+    const canonicalKind: CanonicalKind = OPENCLAW_TOOL_SEMANTICS.resolve(toolName);
 
     // Extract normalized path using the same pure logic as buildRuleHostAction
     // (avoids production/replay drift, spec §4.4)

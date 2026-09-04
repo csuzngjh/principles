@@ -35,6 +35,7 @@ import {
   type SeedArtificerRepairParams,
   type RuntimeStateManager,
   type InternalizationOrchestrator,
+  type ToolSemanticRegistry,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
@@ -71,7 +72,7 @@ function makeFlagProbe(workspaceDir: string): (flagId: string) => boolean {
 export async function dispatchRolloutActivation(
   workspaceDir: string,
   input: RolloutAutoDispatchInput,
-  logger?: ConsumerGovernanceLogger,
+  options: { logger?: ConsumerGovernanceLogger; toolSemantics?: ToolSemanticRegistry } = {},
 ): Promise<RolloutAutoDispatchOutcome> {
   const connection = new SqliteConnection(workspaceDir);
   try {
@@ -105,7 +106,15 @@ export async function dispatchRolloutActivation(
       {
         writers: [
           new PromptWriter(),
-          new RuleHostWriter({ gateDeps: createProductionGateDeps(), featureFlagProbe: flagProbe }),
+          // PRI-634-F: toolSemantics (host-declared) + the workspace root flow
+          // into the activation writer — reliability validation + replay with
+          // production-identical path normalization.
+          new RuleHostWriter({
+            gateDeps: createProductionGateDeps(options.toolSemantics ? { toolSemantics: options.toolSemantics } : {}),
+            featureFlagProbe: flagProbe,
+            ...(options.toolSemantics ? { toolSemantics: options.toolSemantics } : {}),
+            projectDir: workspaceDir,
+          }),
           new DeferArchiveWriter(),
         ],
         approvalQueueStore,
@@ -123,7 +132,7 @@ export async function dispatchRolloutActivation(
     });
 
     const outcome = normalizeDecision(decision);
-    logger?.info?.(`[PD:Consumer] rollout dispatch: artifact=${input.artifactId} channel=${input.channel} → ${outcome.decision}${outcome.activationId ? ` (${outcome.activationId})` : ''}${outcome.reason ? ` reason=${outcome.reason}` : ''}`);
+    options.logger?.info?.(`[PD:Consumer] rollout dispatch: artifact=${input.artifactId} channel=${input.channel} → ${outcome.decision}${outcome.activationId ? ` (${outcome.activationId})` : ''}${outcome.reason ? ` reason=${outcome.reason}` : ''}`);
     return outcome;
   } finally {
     try { connection.close(); } catch { /* best-effort */ }
@@ -183,13 +192,13 @@ export function createEvaluatorRepairDeps(
 export function createRolloutGovernanceDeps(
   workspaceDir: string,
   orchestrator: InternalizationOrchestrator,
-  logger?: ConsumerGovernanceLogger,
+  options: { logger?: ConsumerGovernanceLogger; toolSemantics?: ToolSemanticRegistry } = {},
 ): {
   dispatchActivation: (input: RolloutAutoDispatchInput) => Promise<RolloutAutoDispatchOutcome>;
   reopenRevisionTarget: (input: RolloutRevisionRoutingInput) => Promise<{ ok: boolean; reason: string; reopenedTaskId?: string }>;
 } {
   return {
-    dispatchActivation: (input) => dispatchRolloutActivation(workspaceDir, input, logger),
+    dispatchActivation: (input) => dispatchRolloutActivation(workspaceDir, input, options),
     reopenRevisionTarget: async (input) => {
       const result = await orchestrator.reopenTaskForRevision(input.targetTaskId, {
         revisionFeedback: input.revisionFeedback,

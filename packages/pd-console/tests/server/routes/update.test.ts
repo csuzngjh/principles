@@ -83,6 +83,11 @@ function createMockResponse(): ServerResponse {
     statusCode: 200,
     _headers: {} as Record<string, string>,
     _body: '',
+    // PRI-659: the MutationController annotates responses via setHeader.
+    setHeader: vi.fn(function (this: ServerResponse, name: string, value: string) {
+      res._headers[name.toLowerCase()] = value;
+      return res;
+    }),
     writeHead: vi.fn(function (this: ServerResponse, statusCode: number, headers?: Record<string, string>) {
       res.statusCode = statusCode;
       if (headers) {
@@ -432,7 +437,7 @@ describe('handleUpdateRoute', () => {
           const dir = options?.cwd;
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -488,7 +493,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'openclaw.plugin.json'),
               JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/zh/skills'] }, null, 2));
           }
@@ -530,7 +535,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'openclaw.plugin.json'),
               JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/zh/skills'] }, null, 2));
           }
@@ -583,7 +588,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -626,7 +631,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -680,8 +685,8 @@ describe('handleUpdateRoute', () => {
       const backupDir = path.join(tmpDir, 'extensions', 'backup');
       fs.mkdirSync(targetDir, { recursive: true });
       fs.mkdirSync(backupDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
-      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
 
       const req = createMockRequest('POST', { targetDir, backupDir });
       const res = createMockResponse();
@@ -794,7 +799,7 @@ describe('handleUpdateRoute', () => {
       const targetDir = path.join(tmpDir, 'extensions', 'target-no-backup');
       const backupDir = path.join(tmpDir, 'extensions', 'nonexistent-backup');
       fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
       // Intentionally do NOT create backupDir
 
       const req = createMockRequest('POST', { targetDir, backupDir });
@@ -853,7 +858,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '3.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '3.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -948,7 +953,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -1092,14 +1097,14 @@ describe('handleUpdateRoute', () => {
       // Create a workspace file in target
       const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original content');
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
 
       vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'new content');
           }
         }
@@ -1138,14 +1143,14 @@ describe('handleUpdateRoute', () => {
 
       const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
 
       vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'overwritten');
           }
         }
@@ -1184,14 +1189,14 @@ describe('handleUpdateRoute', () => {
 
       const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
 
       vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'smart update');
           }
         }
@@ -1273,11 +1278,11 @@ describe('handleUpdateRoute', () => {
         }) as unknown as typeof fetch);
 
         vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
-          if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-            const dir = options?.cwd;
+          if (cmd === 'tar') {
+            const dir = tarExtractDir(cmd, args, options);
             if (dir) {
               fs.mkdirSync(dir, { recursive: true });
-              fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+              fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             }
           }
         }) as unknown as typeof execSyncMock);
@@ -1444,7 +1449,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -1496,7 +1501,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             // Tarball only has package.json — no console/, no core/, no node_modules/
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -1535,8 +1540,8 @@ describe('handleUpdateRoute', () => {
       fs.writeFileSync(path.join(targetDir, 'node_modules', 'better-sqlite3', 'index.js'), 'native');
 
       // Target has a newer package.json; backup has older
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
-      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
       // Backup does NOT have node_modules (excluded during backup)
 
       const req = createMockRequest('POST', { targetDir, backupDir });
@@ -1586,7 +1591,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -1735,7 +1740,7 @@ describe('handleUpdateRoute', () => {
         if (target === undefined) return;
         stagingDir = target;
         fs.mkdirSync(path.join(target, 'plugin'), { recursive: true });
-        fs.writeFileSync(path.join(target, 'plugin', 'package.json'), JSON.stringify({ version: '1.0.0' }));
+        fs.writeFileSync(path.join(target, 'plugin', 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
       }) as unknown as typeof execSyncMock);
 
       const req = createMockRequest('POST', {});
@@ -1775,7 +1780,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             fs.mkdirSync(path.join(dir, 'console', 'dist', 'web'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
@@ -1835,7 +1840,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             fs.mkdirSync(path.join(dir, 'console', 'dist', 'server'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
@@ -1911,7 +1916,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             // The STAGED console manifest declares a file: dep that the
             // pre-update install never had — the data-driven derivation must
@@ -2003,7 +2008,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
@@ -2059,7 +2064,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console');
@@ -2121,7 +2126,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
@@ -2170,7 +2175,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console');
@@ -2224,7 +2229,7 @@ describe('handleUpdateRoute', () => {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             // Deps CHANGED: better-sqlite3 ^14.0.0 (was ^13.0.3)
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^14.0.0', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^14.0.0', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
@@ -2270,7 +2275,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             // Shipped manifest is zh-default; bundle carries BOTH language template sets
             fs.writeFileSync(path.join(dir, 'plugin', 'openclaw.plugin.json'),
@@ -2391,5 +2396,106 @@ describe('handleUpdateRoute', () => {
       expect(body.data.requiresRestart).toBe(false);
       expect(fetchMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression guards: update source identity hardening + fixture isolation
+// (2026-09-03 incident — a test-fixture stub tarball leaked into the real
+// installed runtime; these tests fail loud if either the isolation pins or
+// the staged identity validation break again).
+// ---------------------------------------------------------------------------
+
+describe('Update source identity hardening and fixture isolation', () => {
+  it('fixture isolation sentinel: /check must read the FIXTURE install version (1.0.0), never a real machine install', async () => {
+    // /check resolves the installed plugin dir and reads its version. With the
+    // homedir/OPENCLAW_HOME pins working it must see the fixture's 1.0.0. If a
+    // future refactor drops the pins, it would read the REAL machine install
+    // instead — this test fails loudly BEFORE any write can escape the fixture.
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: '1.0.0' }),
+    } as Response);
+
+    const req = createMockRequest('GET');
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/check');
+
+    const body = parseResponseBody<{ data: { currentVersion: string } }>(res);
+    expect(body.data.currentVersion).toBe('1.0.0');
+  });
+
+  it('POST /apply refuses a staged package that does not name principles-disciple before any copy', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(dir, { recursive: true });
+          // Wrong package identity — the identity guard must refuse.
+          fs.writeFileSync(path.join(dir, 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'some-other-package' }));
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', { mergeStrategy: 'smart', createBackup: false });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+    const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+    expect(body.data).toMatchObject({ success: false, reason: 'staged_package_invalid' });
+    // Installed package untouched.
+    const installed = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf-8')) as { version: string };
+    expect(installed.version).toBe('1.0.0');
+  });
+
+  it('POST /apply-full refuses a staged plugin package without identity before any copy', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          // The exact incident stub shape: a fake version, NO package name.
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', {});
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+    const body = parseResponseBody<{ data: { success: boolean; reason?: string; requiresRestart: boolean } }>(res);
+    expect(body.data).toMatchObject({ success: false, reason: 'staged_package_invalid', requiresRestart: false });
+    // No production file was copied (the staged bundle never landed).
+    expect(fs.existsSync(path.join(pluginDir, 'dist', 'bundle.js'))).toBe(false);
   });
 });

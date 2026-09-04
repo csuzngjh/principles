@@ -15,6 +15,7 @@ import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
+import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
 import { getSession, trackReceiptAutoCorrect } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
@@ -50,9 +51,13 @@ export function handleBeforeToolCall(
   // (which uses WorkspaceContext.fromHookContext's normalized root). Mixing
   // the raw value here produced paths that disagreed with the normalized root
   // used downstream by the rule host / rule-context assembler.
+  // PRI-634-F: canonicalKind resolves from the OpenClaw registry (derived
+  // from constants/tools.ts) and drives hint derivation inside the builder —
+  // replay resolves the identical kind/hints through the same registry.
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
     isBashTool: isBash,
     isWriteTool,
+    canonicalKind: OPENCLAW_TOOL_SEMANTICS.resolve(event.toolName),
   });
   const relPath = action.normalizedPath;
   // buildRuleHostAction returns null when no path can be extracted (e.g. bash
@@ -554,6 +559,7 @@ export function handleSharedRuleHostResult(
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
     isBashTool: BASH_TOOLS_SET.has(event.toolName),
     isWriteTool: WRITE_TOOLS.has(event.toolName),
+    canonicalKind: OPENCLAW_TOOL_SEMANTICS.resolve(event.toolName),
   });
   const ruleId = typeof metadata?.['ruleId'] === 'string' ? metadata['ruleId'] : undefined;
   const principleId = typeof metadata?.['principleId'] === 'string' ? metadata['principleId'] : undefined;
