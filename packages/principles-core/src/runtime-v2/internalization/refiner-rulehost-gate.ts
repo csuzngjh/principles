@@ -1,5 +1,7 @@
 import type { GoldenTrace } from '../golden-trace.js';
 import type { RefinerSandboxResult, RefinerSandboxOptions, RefinerSandboxFailedCase } from './refiner-sandbox-wrapper.js';
+import type { ToolSemanticRegistry } from './tool-semantic-registry.js';
+import { classifyReplayFailure, type RuleReliabilityFailure } from './rule-reliability-validation.js';
 
 export type RefinerRuleHostGateDecision =
   | 'accepted_shadow'
@@ -14,6 +16,19 @@ export interface RefinerRuleHostGateInput {
   goldenTrace: GoldenTrace;
   requestedMode?: 'shadow' | 'live';
   softTimeoutMs?: number;
+  /**
+   * PRI-634-F Phase 2: registry the production gate resolves tool semantics
+   * with. Threaded into the sandbox so replay synthetic inputs derive
+   * canonicalKind + extraction hints identically to production. Absent →
+   * legacy replay inputs (parity disabled).
+   */
+  toolSemantics?: ToolSemanticRegistry;
+  /**
+   * PRI-634-F Phase 2: workspace root for replay path normalization — the
+   * same root the production gate normalizes against. Absent → legacy
+   * normalizedPath=null replay inputs.
+   */
+  projectDir?: string;
 }
 
 export interface RefinerRuleHostGateResult {
@@ -21,6 +36,12 @@ export interface RefinerRuleHostGateResult {
   applicationMode: 'shadow';
   sandboxResult: RefinerSandboxResult;
   reasons: string[];
+  /**
+   * PRI-634-F Phase 3: layered attribution for every rejected decision
+   * ({layer, reasonCode, evidence, nextAction} — SPEC §8/§10). Absent on
+   * accepted_shadow. Routing only — no repair.
+   */
+  failure?: RuleReliabilityFailure;
 }
 
 export interface RefinerRuleHostGateDeps {
@@ -102,47 +123,58 @@ export function evaluateRefinerRuleHostGate(
   }
 
   if (input.goldenTrace.cases.length === 0) {
+    const decision = 'rejected_no_cases' as const;
     return {
-      decision: 'rejected_no_cases',
+      decision,
       applicationMode: 'shadow',
       sandboxResult: EMPTY_SANDBOX_RESULT,
       reasons: ['goldenTrace.cases is empty — no test cases to validate against', ...reasons],
+      failure: classifyReplayFailure(decision, EMPTY_SANDBOX_RESULT),
     };
   }
 
-  const sandboxOpts: RefinerSandboxOptions | undefined =
-    input.softTimeoutMs !== undefined ? { softTimeoutMs: input.softTimeoutMs } : undefined;
+  const sandboxOpts: RefinerSandboxOptions | undefined = {
+    ...(input.softTimeoutMs !== undefined ? { softTimeoutMs: input.softTimeoutMs } : {}),
+    ...(input.toolSemantics !== undefined ? { toolSemantics: input.toolSemantics } : {}),
+    ...(input.projectDir !== undefined ? { projectDir: input.projectDir } : {}),
+  };
 
   const sandboxOutcome = invokeSandboxSafe(deps, { code: input.code, goldenTrace: input.goldenTrace, opts: sandboxOpts });
   if (sandboxOutcome.threw) {
+    const decision = 'rejected_runtime_error' as const;
     return {
-      decision: 'rejected_runtime_error',
+      decision,
       applicationMode: 'shadow',
       sandboxResult: sandboxOutcome.result,
       reasons: ['sandbox adapter failure: evaluateInSandbox threw', ...reasons],
+      failure: classifyReplayFailure(decision, sandboxOutcome.result),
     };
   }
   const sandboxResult = sandboxOutcome.result;
 
   if (sandboxResult.forbiddenPatternViolations.length > 0) {
+    const decision = 'rejected_forbidden_pattern' as const;
     return {
-      decision: 'rejected_forbidden_pattern',
+      decision,
       applicationMode: 'shadow',
       sandboxResult,
       reasons: [
         `forbidden patterns detected: ${sandboxResult.forbiddenPatternViolations.join(', ')}`,
         ...reasons,
       ],
+      failure: classifyReplayFailure(decision, sandboxResult),
     };
   }
 
   if (sandboxResult.failedCases.length === 0) {
     if (!sandboxResult.success) {
+      const decision = 'rejected_runtime_error' as const;
       return {
-        decision: 'rejected_runtime_error',
+        decision,
         applicationMode: 'shadow',
         sandboxResult,
         reasons: ['sandbox reported success=false with no failedCases or forbiddenPatternViolations — fail closed', ...reasons],
+        failure: classifyReplayFailure(decision, sandboxResult),
       };
     }
     return {
@@ -156,53 +188,61 @@ export function evaluateRefinerRuleHostGate(
   const errorTypes = new Set(sandboxResult.failedCases.map((c) => c.errorType));
 
   if (errorTypes.has('timeout')) {
+    const decision = 'rejected_timeout' as const;
     const timeoutCases = sandboxResult.failedCases.filter((c) => c.errorType === 'timeout');
     return {
-      decision: 'rejected_timeout',
+      decision,
       applicationMode: 'shadow',
       sandboxResult,
       reasons: [
         ...timeoutCases.map((c) => `case ${c.caseId}: timeout — ${c.message}`),
         ...reasons,
       ],
+      failure: classifyReplayFailure(decision, sandboxResult),
     };
   }
 
   const runtimeErrorTypes: ReadonlySet<string> = new Set(['runtime_error', 'syntax_error', 'unknown']);
   const hasRuntimeError = [...errorTypes].some((t) => runtimeErrorTypes.has(t));
   if (hasRuntimeError) {
+    const decision = 'rejected_runtime_error' as const;
     const runtimeCases = sandboxResult.failedCases.filter((c) => runtimeErrorTypes.has(c.errorType));
     return {
-      decision: 'rejected_runtime_error',
+      decision,
       applicationMode: 'shadow',
       sandboxResult,
       reasons: [
         ...runtimeCases.map((c) => `case ${c.caseId}: ${c.errorType} — ${c.message}`),
         ...reasons,
       ],
+      failure: classifyReplayFailure(decision, sandboxResult),
     };
   }
 
   if (errorTypes.has('validation_failed')) {
+    const decision = 'rejected_validation_failed' as const;
     const validationCases = sandboxResult.failedCases.filter((c) => c.errorType === 'validation_failed');
     return {
-      decision: 'rejected_validation_failed',
+      decision,
       applicationMode: 'shadow',
       sandboxResult,
       reasons: [
         ...validationCases.map((c) => `case ${c.caseId}: validation_failed — ${c.message}`),
         ...reasons,
       ],
+      failure: classifyReplayFailure(decision, sandboxResult),
     };
   }
 
+  const fallbackDecision = 'rejected_runtime_error' as const;
   return {
-    decision: 'rejected_runtime_error',
+    decision: fallbackDecision,
     applicationMode: 'shadow',
     sandboxResult,
     reasons: [
       ...sandboxResult.failedCases.map((c) => `case ${c.caseId}: ${c.errorType} — ${c.message}`),
       ...reasons,
     ],
+    failure: classifyReplayFailure(fallbackDecision, sandboxResult),
   };
 }

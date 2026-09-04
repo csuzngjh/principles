@@ -13,6 +13,7 @@
 import type { GoldenTraceCase, GoldenTraceDecision } from './golden-trace.js';
 import type { RuleHostDecision, RuleHostInput, RuleHostResult } from './internalization/rule-host-contracts.js';
 import type { RuleHostHelpers } from './internalization/rule-host-helpers.js';
+import type { ToolSemanticRegistry } from './internalization/tool-semantic-registry.js';
 import { createSyntheticRuleHostInput } from './golden-trace.js';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,13 @@ export interface ReplayValidatorConfig {
    * When not provided, `normalizedPath` falls back to `null` (legacy behavior).
    */
   projectDir?: string;
+  /**
+   * PRI-634-F Phase 2: the ToolSemanticRegistry used by the production gate.
+   * When provided, replay resolves `canonicalKind` from the same registry and
+   * derives identical bash/write extraction hints (replay/production input
+   * parity). Absent → legacy behavior (no canonicalKind, no derived hints).
+   */
+  toolSemantics?: ToolSemanticRegistry;
 }
 
 export const DEFAULT_REPLAY_VALIDATOR_CONFIG: ReplayValidatorConfig = {
@@ -204,12 +212,15 @@ function validateProposeCorrectionCase(
 function validateCase(
   evaluateFn: ReplayEvaluateFn,
   traceCase: GoldenTraceCase,
-  projectDir?: string,
+  options: { projectDir?: string; toolSemantics?: ToolSemanticRegistry } = {},
 ): ReplayValidatorCaseResult {
+  const { projectDir, toolSemantics } = options;
   const input = createSyntheticRuleHostInput(
     { toolName: traceCase.toolName, params: traceCase.params },
     traceCase.ruleContext !== undefined ? { context: traceCase.ruleContext } : {},
-    projectDir ? { projectDir } : {},
+    projectDir || toolSemantics
+      ? { ...(projectDir ? { projectDir } : {}), ...(toolSemantics ? { toolSemantics } : {}) }
+      : {},
   );
 
   const baseResult: ReplayValidatorCaseResult = {
@@ -290,7 +301,10 @@ export function replayGoldenTrace(
     };
   }
 
-  const perCaseResults = cases.map((traceCase) => validateCase(evaluateFn, traceCase, _config.projectDir));
+  const perCaseResults = cases.map((traceCase) => validateCase(evaluateFn, traceCase, {
+    ...(_config.projectDir !== undefined ? { projectDir: _config.projectDir } : {}),
+    ...(_config.toolSemantics !== undefined ? { toolSemantics: _config.toolSemantics } : {}),
+  }));
   const passedCases = perCaseResults.filter((r) => r.passed).length;
   const failedCases = perCaseResults.length - passedCases;
   const failureReasons = perCaseResults

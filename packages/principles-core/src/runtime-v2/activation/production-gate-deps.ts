@@ -29,6 +29,7 @@ import type {
   RefinerRuleHostGateDeps,
 } from '../internalization/refiner-rulehost-gate.js';
 import type { RefinerSandboxResult, RefinerSandboxOptions } from '../internalization/refiner-sandbox-wrapper.js';
+import type { ToolSemanticRegistry } from '../internalization/tool-semantic-registry.js';
 import { evaluateInRefinerSandbox } from '../internalization/refiner-sandbox-wrapper.js';
 import { checkForbiddenPatterns, checkReturnStatementsMissingFields, checkMatchedFalseDecisions } from '../internalization/rule-code-validator.js';
 import { validateRuleHostResult } from '../internalization/rule-host-validator.js';
@@ -122,6 +123,23 @@ function compileRuleCode(code: string, sourceLabel: string): ReplayEvaluateFn {
   };
 }
 
+export interface ProductionGateDepsOptions {
+  /**
+   * PRI-634-F Phase 2: the ToolSemanticRegistry the constructing host resolves
+   * tool semantics with (baseline-only when omitted). Threaded into sandbox
+   * replay so golden-trace synthetic inputs derive canonicalKind + extraction
+   * hints identically to the production gate — replay/production input parity.
+   */
+  toolSemantics?: ToolSemanticRegistry;
+  /**
+   * PRI-634-F Phase 2: workspace root the production gate normalizes paths
+   * against. Used as the replay normalization default so callers that don't
+   * thread a per-call projectDir still replay with production-identical
+   * normalizedPath values.
+   */
+  projectDir?: string;
+}
+
 /**
  * Create a production-grade RefinerRuleHostGateDeps that compiles rule code
  * using node:vm and evaluates it against golden traces.
@@ -130,7 +148,7 @@ function compileRuleCode(code: string, sourceLabel: string): ReplayEvaluateFn {
  * the demo-only createSandboxGateDeps() in pd-cli and makes the gateDeps
  * available to all packages that depend on @principles/core.
  */
-export function createProductionGateDeps(): RefinerRuleHostGateDeps {
+export function createProductionGateDeps(options: ProductionGateDepsOptions = {}): RefinerRuleHostGateDeps {
   return {
     evaluateInSandbox: (
       code: string,
@@ -211,6 +229,10 @@ export function createProductionGateDeps(): RefinerRuleHostGateDeps {
       return evaluateInRefinerSandbox(code, goldenTrace, {
         evaluateCode,
         ...opts,
+        // PRI-634-F: caller-supplied opts take precedence; the factory default
+        // fills the registry/root when the gate caller passed none (legacy callers).
+        toolSemantics: opts?.toolSemantics ?? options.toolSemantics,
+        projectDir: opts?.projectDir ?? options.projectDir,
       });
     },
   };

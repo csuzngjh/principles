@@ -46,6 +46,10 @@ async function checkCanActivate(
           reason: result.reason ?? 'can_activate_refused',
           riskLevel: result.riskLevel,
           channel: writer.channel,
+          // PRI-634-F R2: preserve the structured reliability failure so
+          // CLI/Console/operator surfaces see the layer without parsing the
+          // flattened reason string.
+          ...(result.failure ? { failure: result.failure } : {}),
         },
       };
     }

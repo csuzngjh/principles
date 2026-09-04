@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent } from 'fs';
+import { createHash, randomUUID } from 'node:crypto';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as http from 'http';
@@ -43,6 +44,7 @@ import {
   verifyReleaseAssetManifestAsync,
   verifyReleaseAssetTarget,
 } from './update/release-asset-manifest.js';
+import { appendJournalTransition, type ReleaseMetadataDigestSource, type TransactionState } from './update/transaction-journal.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -1877,6 +1879,20 @@ export interface InstallResult {
   consoleUrl?: string;
   /** ADR-0020 §2.3: Host-side install results (one per HostInstaller). */
   hostResults?: HostInstallResult[];
+  /** ADR-0024 D-2 (PRI-664): transaction journal record for this install.
+   * Undefined when the mutation never began (pre-mutation refusal/throw). */
+  journal?: InstallJournalRecord;
+}
+
+/** Observability record for one installer transaction (ADR-0024 D-2). */
+export interface InstallJournalRecord {
+  readonly transactionId: string;
+  /** Journal file: `~/.pd/transactions/<transactionId>.jsonl` (D-6, runtime scope). */
+  readonly journalPath: string;
+  /** True when a mid-flight journal append failed (Tier-2 degradation) and
+   * later transitions were skipped — the backup/restore safety net remained
+   * authoritative for this transaction. */
+  readonly degraded: boolean;
 }
 
 /**
@@ -1919,6 +1935,144 @@ export interface InstallRunMode {
   /** No interactive prompts. True under --yes / --non-interactive / --json. */
   nonInteractive?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0024 D-2 (PRI-664): transaction journal integration.
+//
+// The installer already owned digest verification, backup/rename-swap and
+// failure recovery; what it lacked was an auditable transaction lifecycle.
+// This glue reuses the EXISTING transaction journal (update/transaction-
+// journal.ts — one JSONL file per transaction under ~/.pd/transactions/,
+// journal-first append+fsync ordering). No new journal system, no history
+// duplication (D-7 convergence stays with the console-side task).
+//
+// Journal failure policy (documented in
+// docs/architecture/installer-journal-integration-analysis.md §3.2):
+// - Tier 1 — the FIRST ('planned') append fails before any mutation:
+//   the caller REFUSES to install (fail loud, zero side effects).
+// - Tier 2 — a later append fails mid-mutation: degrade (log + mark +
+//   skip further appends) and continue under the backup/restore safety
+//   net, which does not depend on the journal. Journal failure must not
+//   brick the installation.
+// ---------------------------------------------------------------------------
+
+interface InstallerJournal {
+  readonly transactionId: string;
+  readonly journalPath: string;
+  readonly releaseId: string;
+  readonly productVersion: string;
+  readonly releaseMetadataDigest: string;
+  /** PRI-664 review: provenance of releaseMetadataDigest ('manifest' | 'package_manifest' | 'fallback'). */
+  readonly releaseMetadataDigestSource: ReleaseMetadataDigestSource;
+  degraded: boolean;
+  /** Last successfully journaled state — the `from` for failure-path transitions. */
+  lastState: TransactionState | null;
+}
+
+function sha256File(filePath: string): string {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+/**
+ * Identity of the payload being installed. Prefers the self-contained asset
+ * manifest (covers the whole payload); falls back to the bundled pd-cli
+ * package manifest. Both are REAL digests — the journal never stores a
+ * placeholder where a verifiable value is available (same discipline as
+ * legacy-migration.ts). The last-resort fallback hashes the literal reason
+ * string only to satisfy the journal's 64-hex format requirement; it is not
+ * part of any release-metadata identity chain.
+ */
+function resolveInstallerPayloadIdentity(pluginDir: string): { productVersion: string; releaseMetadataDigest: string; releaseMetadataDigestSource: ReleaseMetadataDigestSource } {
+  let productVersion = 'unknown';
+  const pdCliPkgPath = path.join(pluginDir, 'pd-cli', 'package.json');
+  if (existsSync(pdCliPkgPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(pdCliPkgPath, 'utf8')) as { version?: unknown };
+      if (typeof parsed.version === 'string' && parsed.version.length > 0) productVersion = parsed.version;
+    } catch {
+      // Identity falls back to 'unknown'; journaling must not brick install.
+    }
+  }
+  const assetManifestPath = path.join(pluginDir, '_release', 'manifest.json');
+  let releaseMetadataDigest: string;
+  let releaseMetadataDigestSource: ReleaseMetadataDigestSource;
+  if (existsSync(assetManifestPath)) {
+    releaseMetadataDigest = sha256File(assetManifestPath);
+    releaseMetadataDigestSource = 'manifest';
+  } else if (existsSync(pdCliPkgPath)) {
+    releaseMetadataDigest = sha256File(pdCliPkgPath);
+    releaseMetadataDigestSource = 'package_manifest';
+  } else {
+    releaseMetadataDigest = createHash('sha256').update('installer-payload-missing-identity').digest('hex');
+    releaseMetadataDigestSource = 'fallback';
+  }
+  return { productVersion, releaseMetadataDigest, releaseMetadataDigestSource };
+}
+
+/** Opens one installer transaction: `~/.pd/transactions/<transactionId>.jsonl`. */
+export function beginInstallerJournal(pluginDir: string): InstallerJournal {
+  const { productVersion, releaseMetadataDigest, releaseMetadataDigestSource } = resolveInstallerPayloadIdentity(pluginDir);
+  const transactionId = `install-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const journalPath = path.join(getPdDir(), 'transactions', `${transactionId}.jsonl`);
+  const releaseId = `bundled-${productVersion}-${releaseMetadataDigest.slice(0, 12)}`;
+  return { transactionId, journalPath, releaseId, productVersion, releaseMetadataDigest, releaseMetadataDigestSource, degraded: false, lastState: null };
+}
+
+/**
+ * Append one transition durably (append + fsync) BEFORE the side effect it
+ * describes. Throws on failure — the caller decides Tier-1 (refuse before
+ * mutation) vs Tier-2 (degrade and continue).
+ */
+// eslint-disable-next-line @typescript-eslint/max-params -- (from, to, detail) mirrors the JournalTransition shape it appends
+export function journalInstallerTransition(
+  journal: InstallerJournal,
+  from: TransactionState | null,
+  to: TransactionState,
+  detail: string,
+): void {
+  appendJournalTransition(journal.journalPath, {
+    at: new Date().toISOString(),
+    from,
+    to,
+    transactionId: journal.transactionId,
+    releaseId: journal.releaseId,
+    productVersion: journal.productVersion,
+    releaseMetadataDigest: journal.releaseMetadataDigest,
+    releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
+    // The installer model has no active.json generation chain yet (it never
+    // writes active.json); generation continuity becomes ReleaseManager's
+    // responsibility when it takes over mutations (PRI-661).
+    generation: 1,
+    detail,
+  });
+  journal.lastState = to;
+}
+
+/** Tier-2 wrapper: on append failure, degrade (mark + warn) instead of throwing. */
+// eslint-disable-next-line @typescript-eslint/max-params -- (from, to, detail) mirrors the JournalTransition shape it appends
+export function journalInstallerTransitionDegrading(
+  journal: InstallerJournal,
+  from: TransactionState | null,
+  to: TransactionState,
+  detail: string,
+): void {
+  if (journal.degraded) return;
+  try {
+    journalInstallerTransition(journal, from, to, detail);
+  } catch (error) {
+    journal.degraded = true;
+    logger.error(
+      `Transaction journal append failed at '${to}' — continuing under the backup/restore safety net; `
+      + `this transaction is partially journaled (ADR-0024 D-2 Tier-2 degradation): `
+      + `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function installerJournalRecord(journal: InstallerJournal): InstallJournalRecord {
+  return { transactionId: journal.transactionId, journalPath: journal.journalPath, degraded: journal.degraded };
+}
+
 
 export async function install(options: InstallOptions, pluginDir: string, mode: InstallRunMode = {}): Promise<InstallResult> {
   // `quiet` (= jsonMode) suppresses human output / spinner. `nonInteractive`
@@ -1998,6 +2152,8 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   const spinner = quiet ? null : ora('Installing...').start();
   let backupDir: string | null = null;
   let runtimeBackupDir: string | null = null;
+  // ADR-0024 D-2: non-null once the transaction is planned (first mutation is imminent).
+  let journal: InstallerJournal | null = null;
   let installManifestHosts: ('codex' | 'openclaw')[];
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
@@ -2033,6 +2189,32 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Backing up existing install...');
+    // ADR-0024 D-2 (PRI-664): journal-first — record 'planned' BEFORE the
+    // first runtime mutation (the backup rename). Tier-1 policy: if the
+    // journal cannot be written at all, refuse before mutating (fail loud,
+    // zero side effects) rather than performing an unjournaled mutation
+    // (refusal over silent degradation, ADR-0024 §2.4 rule 4).
+    journal = beginInstallerJournal(pluginDir);
+    try {
+      journalInstallerTransition(journal, null, 'planned', `host=${options.host} mode=${options.mode}`);
+    } catch (journalError) {
+      if (spinner) spinner.fail('Install failed');
+      const journalDetail = journalError instanceof Error ? journalError.message : String(journalError);
+      logger.error(`Transaction journal unavailable — refusing to mutate the runtime unjournaled (ADR-0024 D-2): ${journalDetail}`);
+      return {
+        success: false,
+        workspaceDir: options.workspaceDir,
+        configYamlPath: getConfigYamlPath(options.workspaceDir),
+        templatesCount: 0,
+        components,
+        verification,
+        enabledChannels: options.channels,
+        nextAction: 'Resolve write access to ~/.pd/transactions (disk space / permissions), then re-run the installer. No changes were made.',
+        reason: `transaction_journal_unavailable: ${journalDetail}`,
+        error: `Could not write the transaction journal — refusing to mutate the runtime unjournaled (ADR-0024 D-2). No changes were made.`,
+        journal: { transactionId: journal.transactionId, journalPath: journal.journalPath, degraded: true },
+      };
+    }
     // Validate the existing host-ownership record before mutating runtime or
     // host config. A malformed manifest must not be discovered only after the
     // old installation has already been replaced (rc-3/rc-9).
@@ -2112,6 +2294,9 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled console dependencies...');
     await installConsoleDependencies();
     stepIndex++;
+    // ADR-0024 D-2: all runtime content is laid down — the new installation
+    // is staged (nothing has been discarded yet; backups still hold the old one).
+    journalInstallerTransitionDegrading(journal, journal.lastState, 'staged', 'runtime components installed');
 
     if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd-console...');
     const consoleVerify = await verifyConsole(options.workspaceDir);
@@ -2123,6 +2308,8 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       throw new Error(`Console verification failed: ${consoleVerify.reason ?? 'unknown'}. Installation rolled back — plugin and CLI are not activated.`);
     }
     stepIndex++;
+    // ADR-0024 D-2: the console probe passed — the staged installation is live.
+    journalInstallerTransitionDegrading(journal, journal.lastState, 'probed', `console verified at ${consoleVerify.url}`);
 
     if (spinner) updateProgress(spinner, stepIndex, 'Copying templates...');
     const templatesCount = await copyCoreTemplates({
@@ -2228,8 +2415,14 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       throw new Error(`Host installation failed: ${hostFailures.join(' | ')}`);
     }
     writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir));
+    // ADR-0024 D-2: host installers completed and the install manifest is
+    // written — the new installation is fully activated (backups not yet
+    // discarded, so a crash here still recovers via the backup).
+    journalInstallerTransitionDegrading(journal, journal.lastState, 'activated', 'host installers completed; install manifest written');
 
     cleanupBackup(backupDir, runtimeBackupDir);
+    // ADR-0024 D-2: backup cleanup is the commit point of the transaction.
+    journalInstallerTransitionDegrading(journal, journal.lastState, 'confirmed', 'backup cleaned up; install complete');
     if (spinner) {
       spinner.succeed('Install complete!');
     }
@@ -2280,15 +2473,35 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       nextAction: nextActions.join(' | '),
       consoleUrl: launchResult.consoleUrl,
       hostResults,
+      journal: installerJournalRecord(journal),
     };
   } catch (error) {
     if (spinner) spinner.fail('Install failed');
 
     killConsoleChild();
 
+    // ADR-0024 D-2: record the outcome (journal may be null when the throw
+    // happened before the transaction was planned — zero side effects then).
+    // `failed` and `rolled_back` are BOTH terminal states and one journal
+    // file must end at exactly one terminal state (the strict reader rejects
+    // any transition after a terminal one), so the outcome is either-or:
+    // - backup restored (a real rollback happened) → `rolled_back`
+    // - no backup existed (mutation never started) or restore failed → `failed`
+    const errorMsgRaw = error instanceof Error ? error.message : String(error);
     const restoreResult = restoreBackup(backupDir, runtimeBackupDir);
+    if (journal) {
+      const restoreFailed = Boolean(backupDir || runtimeBackupDir) && !restoreResult.restored;
+      const detail = restoreFailed
+        ? `${errorMsgRaw}; backup restore FAILED: ${restoreResult.error ?? 'unknown'}`
+        : errorMsgRaw;
+      if ((backupDir || runtimeBackupDir) && restoreResult.restored) {
+        journalInstallerTransitionDegrading(journal, journal.lastState, 'rolled_back', detail);
+      } else {
+        journalInstallerTransitionDegrading(journal, journal.lastState, 'failed', detail);
+      }
+    }
 
-    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorMsg = errorMsgRaw;
     // ERR-046 / rc-9: never claim a restore that didn't happen. When backupDir
     // is null, the backup step never completed (it threw — e.g. EPERM — or
     // there was no existing install), so the existing install was never moved
@@ -2341,6 +2554,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       component: error instanceof SelfContainedDependencyError ? error.component : undefined,
       dependency: error instanceof SelfContainedDependencyError ? error.dependency : undefined,
       error: `${errorMsg} — ${rollbackSuffix}`,
+      journal: journal ? installerJournalRecord(journal) : undefined,
     };
   } finally {
     // If we stopped the gateway at the pre-flight, restart it regardless of

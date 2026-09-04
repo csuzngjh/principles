@@ -1,4 +1,5 @@
 import type { InternalizationChannel, PIArtifactKind, PIArtifactValidationStatus } from '../internalization/peer-runner-contracts.js';
+import type { RuleReliabilityFailure } from '../internalization/rule-reliability-validation.js';
 
 export type { InternalizationChannel, PIArtifactKind, PIArtifactValidationStatus };
 
@@ -54,7 +55,7 @@ export type ActivationDecision =
   | { decision: 'activated'; activationId: string; action: string; targetRef: string }
   | { decision: 'already_activated'; activationId: string; action: string; targetRef: string }
   | { decision: 'queued_for_approval'; approvalId: string; queuedAt: string; channel: InternalizationChannel; riskLevel: ActivationRiskLevel }
-  | { decision: 'refused'; reason: string; nextAction?: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel; details?: { originalError: string; errorCategory: string } }
+  | { decision: 'refused'; reason: string; nextAction?: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel; details?: { originalError: string; errorCategory: string }; /** PRI-634-F R2: structured reliability failure (layer/reasonCode/evidence/nextAction) preserved from the writer's gate/reliability result. */ failure?: RuleReliabilityFailure }
   | { decision: 'invalid_artifact'; reason: string; nextAction?: string };
 
 export interface PIArtifactSnapshot {
@@ -113,6 +114,14 @@ export interface CanActivateResult {
   ok: boolean;
   reason?: string;
   riskLevel: ActivationRiskLevel;
+  /**
+   * PRI-634-F R2 (review P2): structured reliability failure
+   * ({layer, reasonCode, evidence, nextAction}) from the reliability
+   * validation or the replay gate — surfaced alongside the flattened reason
+   * so CLI/Console/operator surfaces can consume the layer without parsing
+   * strings.
+   */
+  failure?: RuleReliabilityFailure;
 }
 
 export interface ChannelWriter {

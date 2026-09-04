@@ -27,7 +27,16 @@ export { scanLegacyRuleContractDependencies, formatLegacyRuleContractRemediation
 
 // RuleHost input builder (PRI-439 Phase 3 — pure action snapshot)
 export type { ExtractFilePathOptions, BuildRuleHostActionOptions } from './rule-host-input-builder.js';
-export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction } from './rule-host-input-builder.js';
+export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction, deriveToolHintsFromCanonicalKind } from './rule-host-input-builder.js';
+
+// Tool semantic registry (PRI-634-F Phase 1 — raw tool name → canonical kind,
+// core baseline + host-declared layer; replay and production resolve identically)
+export type { ToolSemanticMappingV1, ToolSemanticRegistry, ToolSemanticMappingValidationResult } from './tool-semantic-registry.js';
+export { buildToolSemanticRegistry, validateToolSemanticMappings } from './tool-semantic-registry.js';
+
+// Rule reliability validation & failure attribution (PRI-634-F Phase 3)
+export type { FailureLayer, RuleReliabilityFailure, RuleReliabilityValidationInput, RuleReliabilityValidationResult } from './rule-reliability-validation.js';
+export { validateRuleReliability, classifyReplayFailure } from './rule-reliability-validation.js';
 
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization-route.js';

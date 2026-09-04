@@ -15,7 +15,7 @@ import {
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
-import { OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
+import { OPENCLAW_HOST_LIVENESS_CONTRACT, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -444,7 +444,21 @@ export class ActivationsConsoleModel {
       const decisions = await safetyStore.listDecisions(activationId);
       const telemetry = readRuleCodeTelemetry(this.workspaceDir, activationId, decisions);
       const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
-      const writer = new RuleHostWriter({ gateDeps: createProductionGateDeps(), featureFlagProbe: id => isFeatureEnabled(flags, id) });
+      // PRI-634-F R3 (SPEC P1-1): promotion readiness evaluates through the
+      // SAME workspace host-declaration resolver as CLI/Approvals — the bare
+      // baseline must never serve as an existence proof here. Unresolvable
+      // provenance degrades to the legacy readiness behavior (read-model
+      // probe, not a mutation), consistent with the CLI readiness writer.
+      const toolSemantics = resolveWorkspaceHostToolSemantics(this.workspaceDir);
+      const writer = new RuleHostWriter({
+        gateDeps: createProductionGateDeps({
+          projectDir: this.workspaceDir,
+          ...(toolSemantics.ok ? { toolSemantics: toolSemantics.registry } : {}),
+        }),
+        featureFlagProbe: id => isFeatureEnabled(flags, id),
+        projectDir: this.workspaceDir,
+        ...(toolSemantics.ok ? { toolSemantics: toolSemantics.registry } : {}),
+      });
       const reader = new PromotionReadinessReader({
         listCodeToolHookActivations: () => activationStore.listCodeToolHookActivations(true),
         getArtifactById: id => artifactStore.getArtifactById(id),

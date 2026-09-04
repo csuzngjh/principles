@@ -39,6 +39,7 @@ import {
   createProductionGateDeps,
   makeIdempotencyKey,
   createPITaskDiagnosticJson,
+  buildToolSemanticRegistry,
 } from '@principles/core/runtime-v2';
 import type { PIArtifactSnapshot, PIArtifactRecord } from '@principles/core/runtime-v2';
 import { runRuleHostPipeline, createSandboxGateDeps } from '../src/services/rulehost-pipeline-runner.js';
@@ -276,13 +277,35 @@ async function main(): Promise<void> {
     },
   };
 
+  // PRI-634-F R2: persist a dogfood tool declaration + registry so the
+  // activation path resolves host provenance exactly like a real workspace.
+  const dogfoodMappings = [
+      { rawToolName: 'write_file', canonicalKind: 'write' },
+      { rawToolName: 'edit_file', canonicalKind: 'write' },
+      { rawToolName: 'bash', canonicalKind: 'execute' },
+      { rawToolName: 'shell', canonicalKind: 'execute' },
+    ];
+  const dogfoodRegistry = buildToolSemanticRegistry(dogfoodMappings);
+  if (!dogfoodRegistry.ok) throw new Error(dogfoodRegistry.errors.join('; '));
+  saveHostToolDeclaration(tmpDir, {
+    version: 1,
+    hostKind: 'llm-dogfood',
+    mappings: dogfoodMappings,
+    declaredAt: new Date().toISOString(),
+  });
   const dispatcher = new ActivationDispatcher(
     artifactReadModel,
     stateStore,
     {
       writers: [
         new PromptWriter(),
-        new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+        // PRI-634-F: dogfood replay normalizes against the dogfood workspace
+        // root and validates tool existence against the declared registry.
+        new RuleHostWriter({
+          gateDeps: createProductionGateDeps({ projectDir: tmpDir, toolSemantics: dogfoodRegistry.registry }),
+          projectDir: tmpDir,
+          toolSemantics: dogfoodRegistry.registry,
+        }),
         new DeferArchiveWriter(),
       ],
       approvalQueueStore: approvalStore,

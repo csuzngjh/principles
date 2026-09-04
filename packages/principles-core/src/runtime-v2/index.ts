@@ -638,7 +638,27 @@ export { validateProposedParams, validateCorrectionProposal, isPathWithinWorkspa
 // openclaw-plugin assembler can normalise historical tool-call paths using the
 // same pure logic as buildRuleHostAction, avoiding production/replay drift.)
 export type { ExtractFilePathOptions, BuildRuleHostActionOptions } from './internalization/rule-host-input-builder.js';
-export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction } from './internalization/rule-host-input-builder.js';
+export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction, deriveToolHintsFromCanonicalKind } from './internalization/rule-host-input-builder.js';
+
+// Tool semantic registry (PRI-634-F Phase 1 — Tool Semantic Closure): core
+// baseline + host-declared layer; replay and production resolve raw tool
+// names to canonical kinds identically through ONE registry value.
+export type {
+  ToolSemanticMappingV1,
+  ToolSemanticRegistry,
+  ToolSemanticMappingValidationResult,
+} from './internalization/tool-semantic-registry.js';
+export { buildToolSemanticRegistry, validateToolSemanticMappings } from './internalization/tool-semantic-registry.js';
+
+// Rule reliability validation & failure attribution (PRI-634-F Phase 3):
+// deterministic tool-existence validation + failure layer classification.
+export type {
+  FailureLayer,
+  RuleReliabilityFailure,
+  RuleReliabilityValidationInput,
+  RuleReliabilityValidationResult,
+} from './internalization/rule-reliability-validation.js';
+export { validateRuleReliability, classifyReplayFailure } from './internalization/rule-reliability-validation.js';
 
 // RuleContext v2 — Phase 1 Core ABI (PRI-480): pure-logic types + canonicalize +
 // validators + behavior-facts computation + the frozen unavailable sentinel.
