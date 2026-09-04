@@ -55,3 +55,7 @@ dd164445650abd5813df01e94f41983090009e3b:packages/pd-cli/src/commands/runtime-ua
 e215b326c757308633e37d03b9b99de84488f9ef:promo-video/edge-tts-en.js:generic-api-key:39
 e215b326c757308633e37d03b9b99de84488f9ef:promo-video/edge-tts.js:generic-api-key:39
 f29a6264fb3b203138f44557882b38df41fb77b3:packages/openclaw-plugin/scripts/seed-nocturnal-scenarios.mjs:generic-api-key:108
+
+# PRI-653 closure-lab scenario E fixture: formula-seeded synthetic installToken (sha256 of a
+# fixed constant) — deliberately token-shaped for the irreversible-overwrite trap; not a secret.
+025ca976b7fc96adc1472075596a29ded5449059:scripts/dev/pipeline-closure-lab/scenarios/e-service-config/config.json:generic-api-key:6
