@@ -2,10 +2,9 @@ name: Release Reproducibility
 
 # Tiered verification (industry standard: fast on PR, full on merge):
 #
-# Tier 1 (this file, runs on PR): single-platform build + input-hash check.
-#   ~2-3 minutes.  If the content-addressed inputs (lockfile + source + tool
-#   chain + SOURCE_DATE_EPOCH) haven't changed since the last verified build,
-#   determinism is guaranteed by construction — no need to rebuild twice.
+# Tier 1 (this file, runs on PR): one real single-platform release build,
+# its input identity, and an install smoke. The build materializes each
+# component from its committed release lock exactly once.
 #
 # Tier 2 (release-reproducibility-full.yml, called by publish-npm.yml):
 #   15-target matrix with double-build byte comparison + install smoke.
@@ -44,11 +43,9 @@ permissions:
 jobs:
   quick-check:
     runs-on: ubuntu-24.04
-    # 15m was exceeded (cancelled at 15m17s) during the 2026-09-04
-    # slow-registry window: the job serially runs full build + component
-    # npm ci across the payload (900s cap each after the registry-latency
-    # fix) + the install smoke. Budget 30m so a slow registry degrades the
-    # job's speed, not its verdict.
+    # The self-contained builder is the one release-lock materialization in
+    # this job. Keep enough headroom for a cold npm registry while avoiding a
+    # second, equivalent component-by-component npm ci before it.
     timeout-minutes: 30
     env:
       SOURCE_DATE_EPOCH: '1700000000'
@@ -64,8 +61,8 @@ jobs:
           # only surfaces as npm ci sync errors on the node22 jobs.
           node-version: '22'
           cache: npm
-      - run: npm ci --ignore-scripts
-      - name: Build release producers and verify committed dependency locks
+      - run: npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
+      - name: Build release producers
         run: |
           npm run build
           # build:production's esbuild wipes dist/ (including the .d.ts files
@@ -76,7 +73,6 @@ jobs:
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
           npm run build --workspace=create-principles-disciple
-          npm run check:release-locks --workspace=create-principles-disciple
       - name: Compute the content-addressed build identity
         run: |
           node packages/create-principles-disciple/scripts/compute-build-identity.mjs \

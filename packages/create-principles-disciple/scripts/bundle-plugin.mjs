@@ -463,13 +463,13 @@ if (BUILD_SELF_CONTAINED_ASSET) {
     }
     copyFileSync(lockPath, join(directory, 'package-lock.json'));
     try {
-      await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
+      await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links', '--prefer-offline', '--no-audit', '--no-fund']);
     } catch (firstError) {
       // One transient retry: registry 5xx / socket drops are the dominant
       // real-world failure here. A genuinely broken lock still fails loud
       // after the retry.
       try {
-        await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
+        await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links', '--prefer-offline', '--no-audit', '--no-fund']);
       } catch {
         // rc-9: name the failing component — without this the piped stderr of a
         // mass component-materialization loop points at no directory at all.
@@ -509,6 +509,11 @@ if (BUILD_SELF_CONTAINED_ASSET) {
     await Promise.all([
       installBundledRuntimeDependencies(PD_CLI_DEST, 'pd-cli'),
       installBundledRuntimeDependencies(CONSOLE_DEST, 'console'),
+      // install-layout has no runtime dependencies, but npm ci still verifies
+      // that its committed release lock matches the bundled package. Keep all
+      // six release locks on the real PR build path without a second full
+      // component-materialization pass.
+      installBundledRuntimeDependencies(INSTALL_LAYOUT_DEST, 'install-layout'),
     ]);
   } finally {
     rmSync(join(PLUGIN_DEST, 'core'), { recursive: true, force: true });
