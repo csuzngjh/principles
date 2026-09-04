@@ -57,6 +57,26 @@ function tarExtractDir(
   const ci = args ? args.indexOf('-C') : -1;
   return ci >= 0 && args ? args[ci + 1] : undefined;
 }
+/**
+ * Create a REAL directory link (junction on win32, dir symlink elsewhere) —
+ * the exact artifact npm/installers create in dependency slots. Returns false
+ * when the environment denies link creation; callers skip the test (same
+ * pattern as the path-traversal symlink test).
+ */
+function makeDirLink(target: string, linkPath: string): boolean {
+  try {
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    if (process.platform === 'win32') {
+      fs.symlinkSync(target, linkPath, 'junction');
+    } else {
+      fs.symlinkSync(path.relative(path.dirname(linkPath), target), linkPath, 'dir');
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 
 function createMockRequest(method: string, body?: unknown): IncomingMessage {
   const bodyStr = body !== undefined ? JSON.stringify(body) : '';
@@ -83,6 +103,11 @@ function createMockResponse(): ServerResponse {
     statusCode: 200,
     _headers: {} as Record<string, string>,
     _body: '',
+    // PRI-659: the MutationController annotates responses via setHeader.
+    setHeader: vi.fn(function (this: ServerResponse, name: string, value: string) {
+      res._headers[name.toLowerCase()] = value;
+      return res;
+    }),
     writeHead: vi.fn(function (this: ServerResponse, statusCode: number, headers?: Record<string, string>) {
       res.statusCode = statusCode;
       if (headers) {
@@ -432,7 +457,7 @@ describe('handleUpdateRoute', () => {
           const dir = options?.cwd;
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -488,7 +513,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'openclaw.plugin.json'),
               JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/zh/skills'] }, null, 2));
           }
@@ -530,7 +555,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'openclaw.plugin.json'),
               JSON.stringify({ id: 'principles-disciple', skills: ['templates/langs/zh/skills'] }, null, 2));
           }
@@ -583,7 +608,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -626,7 +651,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -680,8 +705,8 @@ describe('handleUpdateRoute', () => {
       const backupDir = path.join(tmpDir, 'extensions', 'backup');
       fs.mkdirSync(targetDir, { recursive: true });
       fs.mkdirSync(backupDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
-      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
 
       const req = createMockRequest('POST', { targetDir, backupDir });
       const res = createMockResponse();
@@ -794,7 +819,7 @@ describe('handleUpdateRoute', () => {
       const targetDir = path.join(tmpDir, 'extensions', 'target-no-backup');
       const backupDir = path.join(tmpDir, 'extensions', 'nonexistent-backup');
       fs.mkdirSync(targetDir, { recursive: true });
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
       // Intentionally do NOT create backupDir
 
       const req = createMockRequest('POST', { targetDir, backupDir });
@@ -853,7 +878,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '3.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '3.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -948,7 +973,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -1092,14 +1117,14 @@ describe('handleUpdateRoute', () => {
       // Create a workspace file in target
       const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original content');
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
 
       vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'new content');
           }
         }
@@ -1138,14 +1163,14 @@ describe('handleUpdateRoute', () => {
 
       const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
 
       vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'overwritten');
           }
         }
@@ -1184,14 +1209,14 @@ describe('handleUpdateRoute', () => {
 
       const targetDir = pluginDir;
       fs.writeFileSync(path.join(targetDir, 'AGENTS.md'), 'original');
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
 
       vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
         if (cmd === 'tar') {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'smart update');
           }
         }
@@ -1273,11 +1298,11 @@ describe('handleUpdateRoute', () => {
         }) as unknown as typeof fetch);
 
         vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
-          if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
-            const dir = options?.cwd;
+          if (cmd === 'tar') {
+            const dir = tarExtractDir(cmd, args, options);
             if (dir) {
               fs.mkdirSync(dir, { recursive: true });
-              fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+              fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
             }
           }
         }) as unknown as typeof execSyncMock);
@@ -1444,7 +1469,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -1496,7 +1521,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
             // Tarball only has package.json — no console/, no core/, no node_modules/
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -1535,8 +1560,8 @@ describe('handleUpdateRoute', () => {
       fs.writeFileSync(path.join(targetDir, 'node_modules', 'better-sqlite3', 'index.js'), 'native');
 
       // Target has a newer package.json; backup has older
-      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
-      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+      fs.writeFileSync(path.join(backupDir, 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
       // Backup does NOT have node_modules (excluded during backup)
 
       const req = createMockRequest('POST', { targetDir, backupDir });
@@ -1586,7 +1611,7 @@ describe('handleUpdateRoute', () => {
           const dir = tarExtractDir(cmd, args, options);
           if (dir) {
             fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -1735,7 +1760,7 @@ describe('handleUpdateRoute', () => {
         if (target === undefined) return;
         stagingDir = target;
         fs.mkdirSync(path.join(target, 'plugin'), { recursive: true });
-        fs.writeFileSync(path.join(target, 'plugin', 'package.json'), JSON.stringify({ version: '1.0.0' }));
+        fs.writeFileSync(path.join(target, 'plugin', 'package.json'), JSON.stringify({ version: '1.0.0', name: 'principles-disciple' }));
       }) as unknown as typeof execSyncMock);
 
       const req = createMockRequest('POST', {});
@@ -1775,7 +1800,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             fs.mkdirSync(path.join(dir, 'console', 'dist', 'web'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
@@ -1835,7 +1860,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             fs.mkdirSync(path.join(dir, 'console', 'dist', 'server'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
@@ -1911,7 +1936,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             // The STAGED console manifest declares a file: dep that the
             // pre-update install never had — the data-driven derivation must
@@ -1983,7 +2008,7 @@ describe('handleUpdateRoute', () => {
       expect(probeError).toContain('@principles/host-runtime');
     });
 
-    it('does not overwrite an existing host-runtime resolution link (fresh-install no-op)', async () => {
+    it('keeps an existing correct host-runtime resolution link (fresh-install no-op)', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
@@ -2003,7 +2028,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
@@ -2019,10 +2044,15 @@ describe('handleUpdateRoute', () => {
         }
       }) as unknown as typeof execSyncMock);
 
-      // Fresh-install state: npm install already created the resolution link
-      // (real dir with a marker stands in for the npm-created link).
-      fs.mkdirSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime'), { recursive: true });
-      fs.writeFileSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime', 'marker'), 'npm-created');
+      // Fresh-install state: npm install already created a REAL link in this
+      // slot (junction on Windows, dir symlink elsewhere). A physical marker
+      // directory here previously stood in for the link and locked in the
+      // PRI-665 wrong behavior — the incident shape itself.
+      const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+      const hostRuntimeDir = path.join(pluginDir, 'host-runtime');
+      fs.mkdirSync(path.join(hostRuntimeDir, 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(hostRuntimeDir, 'dist', 'index.js'), 'old host-runtime');
+      if (!makeDirLink(hostRuntimeDir, slot)) return; // link creation denied — skip
       fs.writeFileSync(path.join(pluginDir, 'package.json'),
         JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
 
@@ -2033,10 +2063,14 @@ describe('handleUpdateRoute', () => {
 
       const body = parseResponseBody<{ data: { success: boolean } }>(res);
       expect(body.data.success).toBe(true);
-      // The existing link is untouched...
-      expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime', 'marker'))).toBe(true);
-      // ...but host-runtime content is still refreshed from the tarball
-      expect(fs.readFileSync(path.join(pluginDir, 'host-runtime', 'dist', 'index.js'), 'utf-8')).toBe('new host-runtime');
+      // The existing CORRECT link is kept — still a link, same target…
+      expect(fs.lstatSync(slot).isSymbolicLink()).toBe(true);
+      const resolvedLink = path.resolve(path.dirname(slot), fs.readlinkSync(slot));
+      expect(resolvedLink).toBe(hostRuntimeDir);
+      // …nothing needed quarantining…
+      expect(fs.readdirSync(path.dirname(slot)).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+      // …but host-runtime content is still refreshed from the tarball
+      expect(fs.readFileSync(path.join(hostRuntimeDir, 'dist', 'index.js'), 'utf-8')).toBe('new host-runtime');
     });
 
     it('aborts before swapping any package files when resolution links cannot be created (PRI-561 fail path)', async () => {
@@ -2059,7 +2093,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console');
@@ -2121,7 +2155,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
@@ -2170,7 +2204,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console');
@@ -2224,7 +2258,7 @@ describe('handleUpdateRoute', () => {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             // Deps CHANGED: better-sqlite3 ^14.0.0 (was ^13.0.3)
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^14.0.0', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^14.0.0', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new');
             fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new');
@@ -2270,7 +2304,7 @@ describe('handleUpdateRoute', () => {
           if (dir) {
             fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
-              JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
             fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
             // Shipped manifest is zh-default; bundle carries BOTH language template sets
             fs.writeFileSync(path.join(dir, 'plugin', 'openclaw.plugin.json'),
@@ -2391,5 +2425,430 @@ describe('handleUpdateRoute', () => {
       expect(body.data.requiresRestart).toBe(false);
       expect(fetchMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression guards: update source identity hardening + fixture isolation
+// (2026-09-03 incident — a test-fixture stub tarball leaked into the real
+// installed runtime; these tests fail loud if either the isolation pins or
+// the staged identity validation break again).
+// ---------------------------------------------------------------------------
+
+describe('Update source identity hardening and fixture isolation', () => {
+  it('fixture isolation sentinel: /check must read the FIXTURE install version (1.0.0), never a real machine install', async () => {
+    // /check resolves the installed plugin dir and reads its version. With the
+    // homedir/OPENCLAW_HOME pins working it must see the fixture's 1.0.0. If a
+    // future refactor drops the pins, it would read the REAL machine install
+    // instead — this test fails loudly BEFORE any write can escape the fixture.
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: '1.0.0' }),
+    } as Response);
+
+    const req = createMockRequest('GET');
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/check');
+
+    const body = parseResponseBody<{ data: { currentVersion: string } }>(res);
+    expect(body.data.currentVersion).toBe('1.0.0');
+  });
+
+  it('POST /apply refuses a staged package that does not name principles-disciple before any copy', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(dir, { recursive: true });
+          // Wrong package identity — the identity guard must refuse.
+          fs.writeFileSync(path.join(dir, 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'some-other-package' }));
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', { mergeStrategy: 'smart', createBackup: false });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+    const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+    expect(body.data).toMatchObject({ success: false, reason: 'staged_package_invalid' });
+    // Installed package untouched.
+    const installed = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf-8')) as { version: string };
+    expect(installed.version).toBe('1.0.0');
+  });
+
+  it('POST /apply-full refuses a staged plugin package without identity before any copy', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          // The exact incident stub shape: a fake version, NO package name.
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', {});
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+    const body = parseResponseBody<{ data: { success: boolean; reason?: string; requiresRestart: boolean } }>(res);
+    expect(body.data).toMatchObject({ success: false, reason: 'staged_package_invalid', requiresRestart: false });
+    // No production file was copied (the staged bundle never landed).
+    expect(fs.existsSync(path.join(pluginDir, 'dist', 'bundle.js'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Resolution-link reconciliation (PRI-665, 2026-09-03 incident)
+//
+// A Console full update on a machine whose runtime node_modules held STALE
+// PHYSICAL copies of internal @principles/* dependencies (inherited from a
+// legacy install) kept those copies in place: the updater's link logic
+// treated "slot exists" as "done", so the new dist resolved the old
+// components and crashed at startup. These tests pin the reconciliation
+// semantics: correct links are kept, stale physical copies and wrong-target
+// links are quarantined and replaced, and a later failure restores them.
+// ---------------------------------------------------------------------------
+
+describe('Runtime resolution link reconciliation (PRI-665)', () => {
+  it('replaces a stale physical dependency copy with a canonical link (2026-09-03 incident)', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+          fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+          fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+            JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+          // A valid module so a REAL ESM import can distinguish the staged
+          // host-runtime from the stale copy through the reconciled link.
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const STAGED_HOST_RUNTIME = 1;');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // Incident state: the console's node_modules slot holds a STALE PHYSICAL
+    // copy of host-runtime (exporting the OLD symbol set).
+    const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+    fs.mkdirSync(path.join(slot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(slot, 'dist', 'index.js'), 'export const STALE_HOST_RUNTIME = 1;');
+    fs.writeFileSync(path.join(pluginDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+    const req = createMockRequest('POST', {});
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+    const body = parseResponseBody<{ data: { success: boolean } }>(res);
+    expect(body.data.success).toBe(true);
+
+    // The slot must now be a LINK to the canonical host-runtime dir…
+    const slotLstat = fs.lstatSync(slot);
+    expect(slotLstat.isSymbolicLink(), 'the stale physical copy must be replaced by a link').toBe(true);
+    const resolvedLink = path.resolve(path.dirname(slot), fs.readlinkSync(slot));
+    expect(resolvedLink).toBe(path.join(pluginDir, 'host-runtime'));
+
+    // …and resolve the STAGED content through it.
+    expect(fs.readFileSync(path.join(slot, 'dist', 'index.js'), 'utf-8')).toBe('export const STAGED_HOST_RUNTIME = 1;');
+
+    // Success must clean the quarantine — no leftovers in the scope dir.
+    const scopeDir = path.dirname(slot);
+    expect(fs.readdirSync(scopeDir).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+
+    // End-to-end: a REAL Node ESM import from inside the deployed console
+    // dist must resolve the staged host-runtime through the link — the exact
+    // operation that crashed with the stale copy in place.
+    const { execFile } = await vi.importActual<typeof import('child_process')>('child_process');
+    const probePath = path.join(pluginDir, 'console', 'dist', '__probe_665__.mjs');
+    fs.writeFileSync(probePath, [
+      'const m = await import("@principles/host-runtime");',
+      'if (m.STAGED_HOST_RUNTIME !== 1) { console.error("stale copy resolved instead: " + JSON.stringify(Object.keys(m))); process.exit(3); }',
+    ].join('\n'));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        execFile(process.execPath, [probePath], { timeout: 15_000 }, (error) => (error ? reject(error) : resolve()));
+      });
+    } finally {
+      fs.rmSync(probePath, { force: true });
+    }
+  });
+
+  it('replaces a wrong-target link with the canonical link', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+          fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+          fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+            JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const STAGED_HOST_RUNTIME = 1;');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // The slot holds a link, but it points at a DECOY instead of the
+    // canonical host-runtime dir.
+    const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+    const decoyDir = path.join(pluginDir, 'decoy-host-runtime');
+    fs.mkdirSync(path.join(decoyDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(decoyDir, 'dist', 'index.js'), 'export const DECOY = 1;');
+    if (!makeDirLink(decoyDir, slot)) return; // link creation denied — skip
+    fs.writeFileSync(path.join(pluginDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+    const req = createMockRequest('POST', {});
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+    const body = parseResponseBody<{ data: { success: boolean } }>(res);
+    expect(body.data.success).toBe(true);
+    // The slot is repointed at the canonical host-runtime dir…
+    expect(fs.lstatSync(slot).isSymbolicLink()).toBe(true);
+    const resolvedLink = path.resolve(path.dirname(slot), fs.readlinkSync(slot));
+    expect(resolvedLink).toBe(path.join(pluginDir, 'host-runtime'));
+    // …resolves the staged content through it…
+    expect(fs.readFileSync(path.join(slot, 'dist', 'index.js'), 'utf-8')).toBe('export const STAGED_HOST_RUNTIME = 1;');
+    // …the decoy dir itself is untouched, and no quarantine leftovers remain.
+    expect(fs.readFileSync(path.join(decoyDir, 'dist', 'index.js'), 'utf-8')).toBe('export const DECOY = 1;');
+    expect(fs.readdirSync(path.dirname(slot)).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+  });
+
+  it('restores the quarantined copy when a later copy step fails (rollback)', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+          fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+          fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+            JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const STAGED_HOST_RUNTIME = 1;');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // Incident state: stale physical copy at the slot.
+    const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+    fs.mkdirSync(slot, { recursive: true });
+    fs.writeFileSync(path.join(slot, 'stale-marker'), 'stale');
+    fs.writeFileSync(path.join(pluginDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+    // Fail a copy step that runs AFTER link reconciliation: the plugin copy
+    // (its staged dist/bundle.js is copied after the links are reconciled).
+    const realFs = await vi.importActual<typeof import('fs')>('fs');
+    vi.mocked(fs.copyFileSync).mockImplementation(((src: fs.PathLike, dest: fs.PathLike) => {
+      if (String(dest).endsWith('bundle.js')) {
+        throw Object.assign(new Error("EPERM: operation not permitted, copyfile 'bundle.js'"), { code: 'EPERM' });
+      }
+      return realFs.copyFileSync(src, dest);
+    }) as unknown as typeof fs.copyFileSync);
+
+    try {
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('file_locked');
+
+      // The stale physical copy is RESTORED at the slot — no half-migrated
+      // state (the quarantined-away old resolution is back in place).
+      const slotLstat = fs.lstatSync(slot);
+      expect(slotLstat.isDirectory()).toBe(true);
+      expect(slotLstat.isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(slot, 'stale-marker'), 'utf-8')).toBe('stale');
+      // The rollback consumed the quarantine entry.
+      expect(fs.readdirSync(path.dirname(slot)).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+    } finally {
+      vi.mocked(fs.copyFileSync).mockImplementation(realFs.copyFileSync);
+    }
+  });
+
+
+  it('retries the quarantine restore through the outer rollback when the in-slot rename fails', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+          fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+          fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+            JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const STAGED_HOST_RUNTIME = 1;');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // Incident state: stale physical copy at the slot.
+    const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+    fs.mkdirSync(slot, { recursive: true });
+    fs.writeFileSync(path.join(slot, 'stale-marker'), 'stale');
+    fs.writeFileSync(path.join(pluginDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+    // The fs partial mock only wraps copyFileSync — renameSync/symlinkSync are
+    // real pass-throughs, so spy on them (the scenario never touches other
+    // rename/symlink call sites: the update aborts during reconciliation).
+    // rename sequence: #1 quarantineSlot (ok) — #2 in-slot rollback (mocked
+    // EPERM) — #3 outer restoreQuarantined retry (ok).
+    const { renameSync: realRename } = await vi.importActual<typeof import('fs')>('fs');
+    let renameCalls = 0;
+    // Make the link creation fail AFTER the quarantine succeeded so the
+    // in-slot rollback path is exercised.
+    const symlinkSpy = vi.spyOn(fs, 'symlinkSync').mockImplementation((() => {
+      throw Object.assign(new Error('EPERM: operation not permitted, symlink'), { code: 'EPERM' });
+    }) as unknown as typeof fs.symlinkSync);
+    const renameSpy = vi.spyOn(fs, 'renameSync').mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+      renameCalls += 1;
+      if (renameCalls === 2) {
+        throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
+      }
+      return realRename(from, to);
+    }) as unknown as typeof fs.renameSync);
+
+    try {
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('host_runtime_link_failed');
+
+      // The stale physical copy is RESTORED — the outer rollback retried the
+      // rename the in-slot rollback could not perform.
+      const slotLstat = fs.lstatSync(slot);
+      expect(slotLstat.isDirectory()).toBe(true);
+      expect(slotLstat.isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(slot, 'stale-marker'), 'utf-8')).toBe('stale');
+      // The quarantine was consumed — no leftovers.
+      expect(fs.readdirSync(path.dirname(slot)).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+      expect(renameCalls).toBe(3);
+    } finally {
+      symlinkSpy.mockRestore();
+      renameSpy.mockRestore();
+    }
   });
 });

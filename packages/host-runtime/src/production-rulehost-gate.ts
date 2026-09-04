@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   buildRuleHostAction,
+  buildToolSemanticRegistry,
+  deriveToolHintsFromCanonicalKind,
   estimateLineChanges,
   mergeDecisions,
   SqliteConnection,
@@ -13,6 +15,7 @@ import {
   type RuleHostInput,
   type RuleHostMeta,
   type RuleHostResult,
+  type ToolSemanticRegistry,
 } from '@principles/core/runtime-v2';
 import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
@@ -110,10 +113,27 @@ export interface ProductionRuleHostGateOptions {
   ruleContextProvider?: RuleContextProvider;
   ruleInputEnrichmentProvider?: RuleInputEnrichmentProvider;
   implementationRuntime?: RuleImplementationRuntime;
+  /**
+   * PRI-634-F: host-declared ToolSemanticRegistry. Extraction hints and
+   * action.canonicalKind derive from this registry (defaults to the
+   * core-baseline registry when the constructing host has not declared its
+   * tool semantics). Replaces the previous inline bash/write name sets,
+   * which silently disagreed with the OpenClaw host vocabulary
+   * (shell/cmd/insert/patch/delete_file/move_file were never hinted).
+   */
+  toolSemantics?: ToolSemanticRegistry;
 }
+
+const baselineToolSemanticsResult = buildToolSemanticRegistry();
+// Static baseline input — always builds; throwing here is a programming error.
+if (!baselineToolSemanticsResult.ok) {
+  throw new Error(`baseline tool semantic registry failed to build: ${baselineToolSemanticsResult.errors.join('; ')}`);
+}
+const BASELINE_TOOL_SEMANTICS: ToolSemanticRegistry = baselineToolSemanticsResult.registry;
 
 export function createProductionRuleHostGate(options: ProductionRuleHostGateOptions = {}) {
   const implementationRuntime = options.implementationRuntime ?? createNodeRuleImplementationRuntime();
+  const toolSemantics = options.toolSemantics ?? BASELINE_TOOL_SEMANTICS;
   return async (event: HostEvent): Promise<HostEventResult> => {
     const startedAt = Date.now();
     const warnings: string[] = [];
@@ -122,9 +142,9 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       return { decision: 'allow', source: event.source, warnings: [boundedWarning('tool_input_invalid', 'decode and validate toolName and params before dispatch')] };
     }
 
-    const isBash = new Set(['bash', 'exec', 'execute', 'run_shell_command']).has(input.toolName);
-    const isWrite = new Set(['write', 'write_file', 'edit', 'edit_file', 'replace', 'apply_patch']).has(input.toolName);
-    const action = buildRuleHostAction(input.toolName, input.params, event.context.workspaceDir, { isBashTool: isBash, isWriteTool: isWrite });
+    const canonicalKind = toolSemantics.resolve(input.toolName);
+    const { isBashTool: isBash, isWriteTool: isWrite } = deriveToolHintsFromCanonicalKind(canonicalKind);
+    const action = buildRuleHostAction(input.toolName, input.params, event.context.workspaceDir, { isBashTool: isBash, isWriteTool: isWrite, canonicalKind });
     if (action.normalizedPath === null) return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
 
     let context: RuleContextV2 | undefined;

@@ -55,6 +55,7 @@ import {
   type PDRuntimeAdapter,
   type RuntimeStateManager,
   type WakeOnceResult,
+  type ToolSemanticRegistry,
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from './pd-config.js';
@@ -88,6 +89,14 @@ export interface InternalizationConsumerCyclePorts {
    * catalog would be worse than none.
    */
   readonly hostToolCatalog?: ConsumerHostToolCatalog;
+  /**
+   * PRI-634-F: host-declared ToolSemanticRegistry (raw tool name → canonical
+   * kind). Threaded into the activation gate (RuleHostWriter) and its
+   * gateDeps so sandbox replay resolves tool semantics IDENTICALLY to the
+   * host's production gate (replay/production input parity). Optional:
+   * hosts that have not declared semantics keep core-baseline behavior.
+   */
+  readonly toolSemantics?: ToolSemanticRegistry;
   /** Log label used in human log prefixes ('AutoConsumer' | 'CodexWorker' | …). */
   readonly logLabel: string;
   readonly envGetter?: (name: string) => string | undefined;
@@ -226,7 +235,7 @@ export async function runInternalizationConsumerCycle(
   ports: InternalizationConsumerCyclePorts,
 ): Promise<InternalizationConsumerCycleOutcome> {
   const { logger, emitEvent, logLabel, owner } = ports;
-  const {hostToolCatalog} = ports;
+  const {hostToolCatalog, toolSemantics} = ports;
   const envGetter = ports.envGetter ?? ((name: string) => process.env[name]);
   let orchestrator: InternalizationOrchestrator | null = null;
   const flag = loadFeatureFlagFromConfig(workspaceDir, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, {
@@ -502,7 +511,13 @@ export async function runInternalizationConsumerCycle(
           },
           {
             ...runnerOptions,
-            gateDeps: createProductionGateDeps(),
+            // PRI-634-F: host registry + workspace root (when declared) make
+            // the evaluator's adversarial replay resolve tool semantics and
+            // normalizedPath identically to the host production gate.
+            gateDeps: createProductionGateDeps({
+              ...(toolSemantics ? { toolSemantics } : {}),
+              projectDir: workspaceDir,
+            }),
             ...(hostToolCatalog
               ? { hostToolCatalog: { readOnlyTools: [...hostToolCatalog.readOnlyTools], writeTools: [...hostToolCatalog.writeTools] } }
               : {}),
@@ -522,7 +537,7 @@ export async function runInternalizationConsumerCycle(
           {
             stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
             artifactStore: stateManager.piArtifactStore, validator: new DefaultRolloutReviewerValidator(),
-            ...createRolloutGovernanceDeps(workspaceDir, orchestrator, logger),
+            ...createRolloutGovernanceDeps(workspaceDir, orchestrator, { logger, ...(toolSemantics ? { toolSemantics } : {}) }),
           },
           runnerOptions,
         );

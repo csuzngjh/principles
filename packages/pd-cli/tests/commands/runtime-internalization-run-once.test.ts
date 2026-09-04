@@ -170,6 +170,21 @@ vi.mock('../../src/config-reader.js', () => ({
   readOutputLanguageFromWorkspace: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
+// PRI-661: run-once now builds the evaluator replay context through the ONE
+// host-runtime builder. Mock just that seam here — the unit tests below prove
+// dispatch wiring; the real resolver + declaration fixture path is proven by
+// runtime-internalization-run-once-evaluator-parity.test.ts.
+const { mockCreateEvaluatorRuntimeContext } = vi.hoisted(() => {
+  const mockCreateEvaluatorRuntimeContext = vi.fn().mockReturnValue({
+    ok: true,
+    gateDeps: { evaluateInSandbox: vi.fn() },
+  });
+  return { mockCreateEvaluatorRuntimeContext };
+});
+vi.mock('@principles/host-runtime', () => ({
+  createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
+}));
+
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
 
 const WS = '/fake/workspace';
@@ -1215,6 +1230,28 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.artifactId).toBe('pi-art-task-evaluator-001-run-evaluator-001');
     expect(output.resultRef).toBe('evaluator://run-evaluator-001');
     expect(output.runnerResult.status).toBe('succeeded');
+  });
+
+  it('--runner evaluator refuses BEFORE leasing when the runtime context is unresolvable (PRI-661)', async () => {
+    mockCreateEvaluatorRuntimeContext.mockReturnValueOnce({
+      ok: false,
+      reason: 'host_tool_declaration_missing',
+      nextAction: 'start a host (OpenClaw/Codex) once so it persists its tool declaration',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'evaluator', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    // cli-5: refusal must not lease/advance any task.
+    expect(mockWakeOnce).not.toHaveBeenCalled();
+    const EvaluatorRunnerMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.EvaluatorRunner),
+    );
+    expect(EvaluatorRunnerMock).not.toHaveBeenCalled();
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('refused');
+    expect(output.reason).toBe('host_tool_declaration_missing');
+    expect(output.nextAction).toContain('host');
   });
 
   it('auto-enqueue: --runner evaluator returns successor decision', async () => {

@@ -30,6 +30,36 @@ const stateDir = path.join(workspaceDir, '.pd');
 fs.mkdirSync(stateDir, { recursive: true });
 
 const stateConn = new SqliteConnection({ workspaceDir, readonly: false });
+
+// PRI-634-F R3: e2e workspaces must carry a persisted host declaration —
+// the activation paths (CLI and Console alike) refuse code_tool_hook
+// approvals when workspace host provenance is unresolvable. The seed acts
+// as the 'host' here, declaring the gate-reachable OpenClaw surface so
+// artifact-level contracts (e.g. PR #1079 goldenTrace schema validation)
+// are exercised instead of being masked by a provenance refusal.
+const hostSemanticsDir = path.join(workspaceDir, '.pd', 'host-tool-semantics');
+fs.mkdirSync(hostSemanticsDir, { recursive: true });
+fs.writeFileSync(
+  path.join(hostSemanticsDir, 'openclaw.json'),
+  JSON.stringify({
+    version: 1,
+    hostKind: 'openclaw',
+    mappings: [
+      { rawToolName: 'bash', canonicalKind: 'execute' },
+      { rawToolName: 'run_shell_command', canonicalKind: 'execute' },
+      { rawToolName: 'write', canonicalKind: 'write' },
+      { rawToolName: 'write_file', canonicalKind: 'write' },
+      { rawToolName: 'edit', canonicalKind: 'write' },
+      { rawToolName: 'edit_file', canonicalKind: 'write' },
+      // The promotion gate's neutral probe for owner_review_access dispatches
+      // a tool of the same name (OPENCLAW_HOST_LIVENESS_CONTRACT) — a rule in
+      // scope for it must pass the gate, so the seed host declares it.
+      { rawToolName: 'owner_review_access', canonicalKind: 'other' },
+    ],
+    declaredAt: new Date().toISOString(),
+  }),
+  'utf8',
+);
 const stateDb = stateConn.getDb();
 stateDb.pragma('foreign_keys = OFF');
 

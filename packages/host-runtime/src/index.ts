@@ -8,7 +8,7 @@ import { buildActivePrinciplePromptContext } from './active-principle-prompt.js'
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
 import { createProductionPainEvidenceHandler, type PainDatabaseFactory, type PainEnrichmentProvider } from './production-pain-evidence.js';
-import type { GovernanceHostKind } from '@principles/core/runtime-v2';
+import type { GovernanceHostKind, ToolSemanticRegistry } from '@principles/core/runtime-v2';
 
 export * from './active-principle-prompt.js';
 export * from './pd-config.js';
@@ -25,6 +25,12 @@ export * from './host-liveness-contract.js';
 // auto-consumer + Companion workspace worker call the same cycle).
 export * from './internalization-consumer-governance.js';
 export * from './internalization-consumer-cycle.js';
+// PRI-634-F R2: durable host-authored tool declaration — hosts persist, host-
+// neutral consumers (pd-cli/pd-console) resolve through the ONE resolver.
+export * from './host-tool-declaration.js';
+export * from './host-tool-semantic-resolver.js';
+// PRI-661: ONE evaluator replay-context builder for host-neutral CLI entries.
+export * from './evaluator-runtime-context.js';
 // PRI-634 A3: workspace-scoped critical telemetry — canonical implementation
 // moved from openclaw-plugin so both hosts share ONE semantics.
 export * from './workspace-telemetry-emitter.js';
@@ -198,12 +204,15 @@ export function createProductionHostRuntime(
     painDatabaseFactory?: PainDatabaseFactory;
     /** PRI-640: host attribution supplied by the constructing host adapter (OpenClaw / Codex). */
     hostKind?: GovernanceHostKind;
+    /** PRI-634-F: host-declared tool semantics supplied by the constructing host adapter. */
+    toolSemantics?: ToolSemanticRegistry;
   } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
     ...(options.ruleContextProvider ? { ruleContextProvider: options.ruleContextProvider } : {}),
     ...(options.ruleInputEnrichmentProvider ? { ruleInputEnrichmentProvider: options.ruleInputEnrichmentProvider } : {}),
     ...(options.ruleImplementationRuntime ? { implementationRuntime: options.ruleImplementationRuntime } : {}),
+    ...(options.toolSemantics ? { toolSemantics: options.toolSemantics } : {}),
   });
   return createHostRuntime({
     afterToolCall: options.afterToolCall ?? createProductionPainEvidenceHandler({

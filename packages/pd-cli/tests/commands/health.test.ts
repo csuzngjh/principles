@@ -31,6 +31,11 @@ const {
 });
 
 vi.mock('@principles/core/runtime-v2', () => ({
+  // PRI-634-F R2: full-module mocks must track new public exports — the
+  // activation graph imports buildToolSemanticRegistry transitively
+  // (workspace-tool-semantics), and vitest throws on the missing property
+  // access at import time even when never called.
+  buildToolSemanticRegistry: vi.fn().mockReturnValue({ ok: true, registry: {} }),
   PruningReadModel: vi.fn().mockImplementation(function () {
     return { getHealthSummary: mockPruningGetHealthSummary };
   }),
@@ -53,6 +58,28 @@ vi.mock('@principles/core/principle-tree-ledger', () => ({
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
+}));
+
+// PRI-662: the reliability section reads REAL declaration files through the
+// host-runtime seam — mock the three functions (this file mocks `fs`
+// wholesale, so the real loader cannot run here). Real-file coverage lives in
+// health-reliability.test.ts.
+const { mockLoadHostToolDeclarations, mockResolveWorkspaceHostToolSemantics, mockCreateEvaluatorRuntimeContext } = vi.hoisted(() => {
+  return {
+    mockLoadHostToolDeclarations: vi.fn().mockReturnValue({
+      ok: true,
+      declarations: [
+        { version: 1, hostKind: 'openclaw', mappings: [{}, {}, {}], declaredAt: '2026-09-04T00:00:00.000Z' },
+      ],
+    }),
+    mockResolveWorkspaceHostToolSemantics: vi.fn().mockReturnValue({ ok: true, registry: {}, hostKinds: ['openclaw'] }),
+    mockCreateEvaluatorRuntimeContext: vi.fn().mockReturnValue({ ok: true, gateDeps: {} }),
+  };
+});
+vi.mock('@principles/host-runtime', () => ({
+  loadHostToolDeclarations: mockLoadHostToolDeclarations,
+  resolveWorkspaceHostToolSemantics: mockResolveWorkspaceHostToolSemantics,
+  createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
 }));
 
 vi.mock('fs', () => ({
@@ -151,6 +178,51 @@ describe('handleHealth', () => {
       expect(allOutput).toContain('ledger.totalPrinciples: 5');
       expect(allOutput).toContain('candidateLedgerConsistency.status: ok');
       expect(allOutput).toContain('pdStateDb.exists: false');
+    });
+
+    it('reports the reliability readiness section (PRI-662) — declared workspace', async () => {
+      mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+      mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+
+      await handleHealth({ workspace: WS, json: true });
+
+      const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+      expect(jsonOutput.reliability).toEqual({
+        registry: { status: 'ok', hosts: ['openclaw'], declaredTools: 3 },
+        resolver: 'ready',
+        replay: 'ready',
+      });
+    });
+
+    it('reports reliability as explicitly degraded (host_tool_declaration_missing) without failing health', async () => {
+      mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+      mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+      mockLoadHostToolDeclarations.mockReturnValueOnce({
+        ok: false,
+        reason: 'host_tool_declaration_missing',
+        nextAction: 'start each workspace host once (OpenClaw plugin / Codex worker) so it persists its tool declaration',
+      });
+      mockResolveWorkspaceHostToolSemantics.mockReturnValueOnce({
+        ok: false,
+        reason: 'host_tool_declaration_missing',
+        nextAction: 'start each workspace host once (OpenClaw plugin / Codex worker) so it persists its tool declaration',
+      });
+      mockCreateEvaluatorRuntimeContext.mockReturnValueOnce({
+        ok: false,
+        reason: 'host_tool_declaration_missing',
+        nextAction: 'start each workspace host once (OpenClaw plugin / Codex worker) so it persists its tool declaration',
+      });
+
+      await handleHealth({ workspace: WS, json: false });
+
+      const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(allOutput).toContain('reliability.registry.status: degraded');
+      expect(allOutput).toContain('reliability.resolver: not_ready');
+      expect(allOutput).toContain('reliability.replay: not_ready');
+      expect(allOutput).toContain('reliability.reason: host_tool_declaration_missing');
+      // Fresh-install expected state: informational only, health exit code unchanged.
+      expect(process.exitCode).toBeUndefined();
+      expect(consoleWarnSpy).not.toHaveBeenCalledWith(expect.stringContaining('DEGRADED'));
     });
 
     it('reports zero candidate and task counts', async () => {

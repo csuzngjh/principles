@@ -53,6 +53,10 @@ function createMockResponse(): ServerResponse {
     headersSent: false,
     statusCode: 200,
     _body: '',
+    // PRI-659: the MutationController annotates responses via setHeader.
+    setHeader: vi.fn(function (this: ServerResponse, _name: string, _value: string) {
+      return res;
+    }),
     writeHead: vi.fn(function (this: ServerResponse, statusCode: number) {
       res.statusCode = statusCode;
       return this;
@@ -150,15 +154,15 @@ function mockSuccessfulApplyFetch(): void {
 /** execFileSync mock: tar "extracts" a package.json; every call is logged. */
 async function installExecMock(opts: { failTar?: boolean } = {}): Promise<void> {
   const { execFileSync: execSyncMock } = await import('child_process');
-  vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[]) => {
+  vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
     execLog.push({ cmd, args });
     if (cmd === 'tar') {
       if (opts.failTar) throw new Error('tar: simulated extraction failure');
       const ci = args ? args.indexOf('-C') : -1;
-      const dir = ci >= 0 ? args?.[ci + 1] : undefined;
+      const dir = options?.cwd ?? (ci >= 0 ? args?.[ci + 1] : undefined);
       if (dir) {
         fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+        fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
       }
     }
     return undefined;

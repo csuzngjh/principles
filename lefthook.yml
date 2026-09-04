@@ -29,4 +29,15 @@ pre-push:
     gitleaks:
       # `protect --staged` is deprecated in gitleaks v8.18+; `detect` scans
       # the full git history so outgoing commits are covered at pre-push.
-      run: gitleaks detect --source . --redact --verbose
+      #
+      # `--exclude=refs/stash` is required, not cosmetic: `detect` walks
+      # `git log --all`, which includes refs/stash. Any `git stash -u` that
+      # sweeps untracked runtime artifacts (e.g. .decision-card.json,
+      # .inbox-*.json) introduces local-only findings that abort every push
+      # in the repository, including branches unrelated to the stash. A
+      # stash is local scratch and is never pushed, so it is out of scope for
+      # an outgoing-commit scan.
+      #
+      # Note: keep the value free of spaces. Lefthook passes this string to
+      # the shell, and a quoted value does not survive every shell it uses.
+      run: gitleaks detect --source . --redact --verbose --log-opts=--exclude=refs/stash

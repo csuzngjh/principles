@@ -23,6 +23,8 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const CYCLE_SRC = fileURLToPath(new URL('../src/internalization-consumer-cycle.ts', import.meta.url));
+const RUN_ONCE_SRC = fileURLToPath(new URL('../../pd-cli/src/commands/runtime-internalization-run-once.ts', import.meta.url));
+const PIPELINE_RUNNER_SRC = fileURLToPath(new URL('../../pd-cli/src/services/rulehost-pipeline-runner.ts', import.meta.url));
 const OPENCLAW_SERVICE_SRC = fileURLToPath(new URL('../../openclaw-plugin/src/service/internalization-auto-consumer-service.ts', import.meta.url));
 const CODEX_WORKER_SRC = fileURLToPath(new URL('../../codex-adapter/src/worker/workspace-worker.ts', import.meta.url));
 
@@ -40,8 +42,12 @@ function evaluatorCase(): string {
 }
 
 describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction site)', () => {
-  it('Guard A: shared cycle evaluator case 注入 gateDeps: createProductionGateDeps()', () => {
-    expect(evaluatorCase()).toContain('gateDeps: createProductionGateDeps()');
+  it('Guard A: shared cycle evaluator case 注入 gateDeps: createProductionGateDeps(...)', () => {
+    // PRI-634-F: the call now carries replay-parity options (toolSemantics
+    // when the host declared them + the workspace root for path
+    // normalization). The guarded invariant is the WIRING itself — the
+    // canonical production gateDeps must be constructed at this site.
+    expect(evaluatorCase()).toContain('gateDeps: createProductionGateDeps(');
   });
 
   it('Guard B: gateDeps 位于 OPTIONS 参数（第二个构造参数）且在 ...runnerOptions 之后', () => {
@@ -53,7 +59,7 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction 
     const optsStart = slice.indexOf('...runnerOptions');
     expect(optsStart).toBeGreaterThan(-1);
     const afterOpts = slice.slice(optsStart);
-    expect(afterOpts).toContain('gateDeps: createProductionGateDeps()');
+    expect(afterOpts).toContain('gateDeps: createProductionGateDeps(');
   });
 
   it('Guard C: 第一个 Evaluator deps object 中不得出现 gateDeps', () => {
@@ -88,5 +94,37 @@ describe('PRI-634 A1 evaluator gateDeps wiring guard (shared cycle construction 
     const source = readSrc(CYCLE_SRC);
     expect(source).toContain('const evaluatorEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir,');
     expect(source).toContain("'WORKSPACE_TELEMETRY_PERSIST_FAILED'");
+  });
+});
+
+describe('PRI-661 pd-cli evaluator entries (host-neutral runtime context)', () => {
+  it('run-once evaluator resolves gateDeps via createEvaluatorRuntimeContext and places them in OPTIONS', () => {
+    const source = readSrc(RUN_ONCE_SRC);
+    // The ONE builder (durable provenance + workspace root), never a bare
+    // sandbox gate and never an inline assembly.
+    expect(source).toContain('createEvaluatorRuntimeContext({ workspaceDir })');
+    expect(source).not.toContain('createSandboxGateDeps');
+    // gateDeps travels in the runner OPTIONS, and the unresolvable context
+    // refuses BEFORE wakeOnce (no task lease on refusal).
+    expect(source).toContain('gateDeps: evaluatorGateDeps');
+    const refuseIdx = source.indexOf("decision: 'refused'");
+    expect(refuseIdx).toBeGreaterThan(-1);
+    expect(source.indexOf('createEvaluatorRuntimeContext({ workspaceDir })')).toBeLessThan(refuseIdx);
+  });
+
+  it('rulehost-pipeline evaluator replays through the production context, not the bare sandbox gate', () => {
+    const source = readSrc(PIPELINE_RUNNER_SRC);
+    expect(source).toContain("createEvaluatorRuntimeContext({ workspaceDir: opts.workspaceDir })");
+    expect(source).toContain('gateDeps: evaluatorContext.gateDeps');
+    // The evaluator construction must no longer use the sandbox-only gate...
+    const evalCtor = source.indexOf('const evaluatorRunner = new EvaluatorRunner(');
+    expect(evalCtor).toBeGreaterThan(-1);
+    const evalCtorEnd = source.indexOf(');', evalCtor);
+    const evalCtorSlice = source.slice(evalCtor, evalCtorEnd);
+    expect(evalCtorSlice).not.toContain('createSandboxGateDeps');
+    // ...while the ArtificerL2Adapter seam (out of PRI-661 scope) may keep it.
+    expect(source).toContain('export function createSandboxGateDeps');
+    // Unresolvable context fails the adversarial loop loud with a structured reason.
+    expect(source).toContain('evaluator_runtime_context_unresolvable');
   });
 });

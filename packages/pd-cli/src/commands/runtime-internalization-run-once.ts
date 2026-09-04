@@ -32,6 +32,8 @@ import {
 // path. EP-02: prior code passed only the 5 base deps, leaving the repair
 // loop as dead code at runtime.
 import { createEvaluatorRunnerDeps, contentHashFn } from '../services/rulehost-pipeline-runner.js';
+import { createEvaluatorRuntimeContext } from '@principles/host-runtime';
+import type { RefinerRuleHostGateDeps } from '@principles/core/runtime-v2';
 
 interface RunOnceOptions {
   workspace?: string;
@@ -450,6 +452,33 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     return;
   }
 
+  // PRI-661: the evaluator's deterministic adversarial replay needs the
+  // production gate context (workspace root + host tool registry from durable
+  // provenance) — the SAME context the consumer cycle replays with. Refuse
+  // BEFORE leasing any task (cli-5: no mutation on refusal) with the same
+  // structured semantics as runtime-activation's code_tool_hook refusal.
+  let evaluatorGateDeps: RefinerRuleHostGateDeps | undefined;
+  if (runnerKind === 'evaluator') {
+    const evaluatorContext = createEvaluatorRuntimeContext({ workspaceDir });
+    if (!evaluatorContext.ok) {
+      const refused = {
+        decision: 'refused',
+        reason: evaluatorContext.reason,
+        nextAction: evaluatorContext.nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(refused, null, 2));
+      } else {
+        console.log(`Run-once: refused`);
+        console.log(`  reason: ${refused.reason}`);
+        console.log(`  nextAction: ${refused.nextAction}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+    evaluatorGateDeps = evaluatorContext.gateDeps;
+  }
+
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
 
@@ -561,7 +590,19 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
             // `context_manifest_budget` were structurally unreadable on this
             // path — the two-stage evaluator could never be enabled from the
             // CLI. Mirrors line 525 (artificer) and rulehost runnerOptsFor.
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, effectiveConfig },
+            //
+            // PRI-661: gateDeps resolved ABOVE via the ONE
+            // createEvaluatorRuntimeContext builder (durable workspace
+            // provenance + workspace root) — replay/production parity with
+            // the consumer cycle. Options argument (2nd), never deps (1st).
+            {
+              owner: OWNER,
+              runtimeKind: runtimeAdapter.kind(),
+              pollIntervalMs: 100,
+              timeoutMs: effectiveTimeoutMs,
+              effectiveConfig,
+              gateDeps: evaluatorGateDeps,
+            },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'rollout_reviewer') {

@@ -39,6 +39,12 @@ import {
 } from '../utils/installed-layout.js';
 import { ActivationCompatibilityReadModel } from '@principles/core/runtime-v2';
 import { collectFileDepLinkSpecs, type StagedComponent } from '../utils/update-links.js';
+import {
+  updateMutationController,
+  LEGACY_MUTATION_AUTHORITY,
+  type MutationContext,
+  type MutationKind,
+} from '../update/mutation-controller.js';
 
 /**
  * Legacy rule contract preflight (2026-08-19): refuse to swap the runtime
@@ -142,6 +148,40 @@ function logLegacyBackupMigration(source: string): void {
 // ---------------------------------------------------------------------------
 // Core update operations (inline to avoid cross-package import)
 // ---------------------------------------------------------------------------
+
+/**
+ * Read the identity of a staged release package.
+ *
+ * Returns undefined when the file is missing, malformed, or when the package
+ * does not self-identify as principles-disciple with a valid semver version
+ * (rc-1/rc-2: unknown JSON is validated through guards, never a type
+ * assertion).
+ *
+ * Refusing an identity-less staged package BEFORE any production copy turns
+ * silent runtime corruption into a loud, structured error (rc-9). Regression
+ * from 2026-09-03: a stub tarball carrying only a fake version with no
+ * package name was copied into the real ~/.pd/runtime, which made the update
+ * page report a false "already latest" and blocked every future update. A
+ * real principles-disciple / create-principles-disciple tarball always
+ * carries name + valid semver.
+ */
+function readStagedPackageIdentity(pkgPath: string): { name: string; version: string } | undefined {
+  try {
+    const raw = fs.readFileSync(pkgPath, 'utf-8');
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return undefined;
+    if (parsed.name !== 'principles-disciple') return undefined;
+    if (typeof parsed.version !== 'string' || semver.valid(parsed.version) === null) return undefined;
+    return { name: parsed.name, version: parsed.version };
+  } catch {
+    return undefined;
+  }
+}
+
+const STAGED_PACKAGE_REFUSAL_MESSAGE =
+  'Update source is not a valid principles-disciple release (package missing identity or valid version).';
+const STAGED_PACKAGE_REFUSAL_NEXT_ACTION =
+  'Try the update again later, or run the official installer (npx create-principles-disciple) to repair PD.';
 
 /**
  * Recursively copy a directory tree.
@@ -553,6 +593,29 @@ async function doApplyUpdate(
     execFileSync('tar', ['xzf', 'package.tgz', '--strip-components=1'], { cwd: tempDir, stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
+    // 3.5 Staged-package identity guard (2026-09-03 regression): refuse a
+    // tarball that does not name itself principles-disciple with a valid
+    // version BEFORE any production byte is copied — the incident stub
+    // carried no name. A real release always carries both.
+    if (readStagedPackageIdentity(path.join(tempDir, 'package.json')) === undefined) {
+      if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      if (backupPath && fs.existsSync(backupPath)) fs.rmSync(backupPath, { recursive: true, force: true });
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: toVersion ?? 'unknown',
+        success: false,
+        kind: 'refusal',
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      });
+      return {
+        success: false,
+        message: STAGED_PACKAGE_REFUSAL_MESSAGE,
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      };
+    }
+
     // 4. Compute diff and apply.
     // Fix 3: we ONLY apply modified + added files. We deliberately skip ALL
     // deletions — the tarball (principles-disciple) only contains dist/,
@@ -721,8 +784,158 @@ function depsMeaningfullyChanged(
 }
 
 /**
- * Create the node_modules resolution links for the installed components, if
- * missing.
+ * A deployed dependency slot whose previous occupant was quarantined during
+ * resolution-link reconciliation (PRI-665). Kept so a failed update can
+ * restore the pre-update state, and a successful update can discard it.
+ */
+type QuarantinedSlot = {
+  /** The node_modules slot path (e.g. <console>/node_modules/@principles/host-runtime). */
+  slot: string;
+  /** Same-directory holding path the previous occupant was renamed to. */
+  quarantinePath: string;
+};
+
+/**
+ * Move the current occupant of a dependency slot aside (same-directory
+ * rename: same volume, atomic, reversible). The quarantine name starts with
+ * a dot and is not a valid package name, so npm module resolution ignores it.
+ */
+function quarantineSlot(slot: string): QuarantinedSlot | undefined {
+  try {
+    const quarantinePath = path.join(
+      path.dirname(slot),
+      `.${path.basename(slot)}.update-quarantine-${Date.now()}`,
+    );
+    fs.renameSync(slot, quarantinePath);
+    return { slot, quarantinePath };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Restore quarantined slots to their original locations (update failure
+ * path). The slot at that point holds the link reconciliation created —
+ * unlink removes the link itself, never its target. Best-effort, never
+ * throws; failures are logged (rc-9: observable degradation).
+ */
+function restoreQuarantined(quarantined: readonly QuarantinedSlot[]): void {
+  for (const entry of [...quarantined].reverse()) {
+    try {
+      try { fs.unlinkSync(entry.slot); } catch { /* slot may already be gone */ }
+      fs.renameSync(entry.quarantinePath, entry.slot);
+    } catch (error) {
+      console.error(`[pd-console:update] failed to restore quarantined dependency entry ${entry.slot}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+/**
+ * Discard quarantined slots (update success path). The quarantined entries
+ * are stale pre-update copies of internal @principles packages; the new
+ * canonical components are installed by the copy steps. Best-effort,
+ * failures are logged and non-fatal (rc-9).
+ */
+function cleanupQuarantined(quarantined: readonly QuarantinedSlot[]): void {
+  for (const entry of quarantined) {
+    try {
+      fs.rmSync(entry.quarantinePath, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[pd-console:update] failed to clean quarantined dependency entry ${entry.quarantinePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+/**
+ * True when the link at linkPath resolves to exactly `target` (string
+ * comparison — the target dir may legitimately not exist yet at
+ * reconciliation time). Windows paths compare case-insensitively.
+ */
+function linkPointsAt(linkPath: string, target: string): boolean {
+  const resolved = path.resolve(path.dirname(linkPath), fs.readlinkSync(linkPath));
+  const expected = path.resolve(target);
+  return process.platform === 'win32'
+    ? resolved.toLowerCase() === expected.toLowerCase()
+    : resolved === expected;
+}
+
+function createResolutionLink(linkPath: string, target: string): string | undefined {
+  try {
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    if (process.platform === 'win32') {
+      fs.symlinkSync(target, linkPath, 'junction');
+    } else {
+      fs.symlinkSync(path.relative(path.dirname(linkPath), target), linkPath, 'dir');
+    }
+    return undefined;
+  } catch (error) {
+    return `Failed to create runtime resolution link at ${linkPath}: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+/**
+ * Reconcile ONE deployed dependency slot against its canonical target
+ * (PRI-665, 2026-09-03 incident). The previous "existsSync → skip" logic
+ * silently kept stale PHYSICAL copies of internal @principles packages that
+ * legacy installs had left in these slots, so the updated dist resolved the
+ * old components and crashed at startup. Semantics:
+ *
+ *   - missing slot              → create the link (fresh installs);
+ *   - link pointing at target   → keep (npm- or installer-created);
+ *   - wrong-target link         → quarantine + replace;
+ *   - physical dir / plain file → quarantine + replace (the incident shape).
+ *
+ * Returns an error message on failure (the slot is rolled back first), or
+ * undefined; a successful quarantine is recorded in `quarantined` for the
+ * caller to restore on failure / discard on success.
+ */
+function reconcileResolutionLink(
+  linkPath: string,
+  target: string,
+  quarantined: QuarantinedSlot[],
+): string | undefined {
+  let stat: fs.Stats | undefined;
+  try {
+    stat = fs.lstatSync(linkPath);
+  } catch {
+    stat = undefined; // ENOENT — create below
+  }
+  if (stat === undefined) {
+    return createResolutionLink(linkPath, target);
+  }
+  if (stat.isSymbolicLink()) {
+    try {
+      if (linkPointsAt(linkPath, target)) return undefined; // correct link — keep
+    } catch {
+      // Unreadable link target — fall through to replace.
+    }
+  }
+  const entry = quarantineSlot(linkPath);
+  if (entry === undefined) {
+    return `Failed to quarantine the existing dependency entry at ${linkPath} (required to install the canonical resolution link). Resolve any file locks and retry the update.`;
+  }
+  const error = createResolutionLink(linkPath, target);
+  if (error) {
+    // Roll this slot back before failing — the install stays untouched
+    // (the PRI-561 fail-closed ordering contract).
+    try { fs.unlinkSync(linkPath); } catch { /* nothing we created */ }
+    try {
+      fs.renameSync(entry.quarantinePath, entry.slot);
+    } catch {
+      // The in-slot rename failed (e.g. a transient lock). Hand the entry to
+      // the outer rollback so it retries the restore — restoreQuarantined
+      // tolerates a missing slot when unlinking before renaming back.
+      quarantined.push(entry);
+    }
+    return error;
+  }
+  quarantined.push(entry);
+  return undefined;
+}
+
+/**
+ * Create or RECONCILE the node_modules resolution links for the installed
+ * components.
  *
  * Mirrors installer.ts syncPdCli: junction on Windows (no elevation needed),
  * relative symlink elsewhere. Fresh installs get these links via npm install
@@ -746,10 +959,16 @@ function depsMeaningfullyChanged(
  *      host-runtime/node_modules/@principles/install-layout missing and
  *      every pd-cli runtime command failing with ERR_MODULE_NOT_FOUND.
  *
- * Returns undefined on success, or an error message (rc-9: observable, never
- * silent — a missing link means the updated console cannot start).
+ * Returns { error } on failure with every quarantine rolled back (rc-9:
+ * observable, never silent — a missing or unreconciled link means the
+ * updated console cannot start), or { quarantined } listing the dependency
+ * entries replaced during reconciliation. The caller restores the
+ * quarantined entries if a LATER step fails, and discards them on success.
  */
-function ensureRuntimeResolutionLinks(layout: UpdateLayout, tempDir: string): string | undefined {
+function ensureRuntimeResolutionLinks(
+  layout: UpdateLayout,
+  tempDir: string,
+): { error?: string; quarantined: QuarantinedSlot[] } {
   const links = [
     { linkPath: path.join(layout.consoleDir, 'node_modules', '@principles', 'host-runtime'), target: layout.hostRuntimeDir },
     { linkPath: path.join(layout.pdCliDir, 'node_modules', '@principles', 'host-runtime'), target: layout.hostRuntimeDir },
@@ -788,42 +1007,35 @@ function ensureRuntimeResolutionLinks(layout: UpdateLayout, tempDir: string): st
     }
   };
   const fileDepSpecs = collectFileDepLinkSpecs(stagedComponents, readStagedDependencies);
-  const createResolutionLink = (linkPath: string, target: string): string | undefined => {
-    // Idempotent: never overwrite an existing link or directory (fresh
-    // installs have npm-created real dirs in these slots).
-    if (fs.existsSync(linkPath)) return undefined;
-    try {
-      fs.mkdirSync(path.dirname(linkPath), { recursive: true });
-      if (process.platform === 'win32') {
-        fs.symlinkSync(target, linkPath, 'junction');
-      } else {
-        fs.symlinkSync(path.relative(path.dirname(linkPath), target), linkPath, 'dir');
-      }
-      return undefined;
-    } catch (error) {
-      return `Failed to create runtime resolution link at ${linkPath}: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
-  };
+
+  const quarantined: QuarantinedSlot[] = [];
   // Pass 1 — explicit known-critical links, fail-closed BEFORE any byte is
-  // swapped (a link-creation failure aborts with the installed packages
-  // untouched: the PRI-561 ordering contract).
+  // swapped (a link-reconciliation failure aborts with the installed packages
+  // untouched: the PRI-561 ordering contract). Existing entries are
+  // RECONCILED, not skipped: a correct link is kept, but a stale physical
+  // copy or a wrong-target link is quarantined and replaced (PRI-665,
+  // 2026-09-03: legacy installs left physical @principles copies in these
+  // slots and updated dists crashed resolving them).
   for (const { linkPath, target } of links) {
     if (!fs.existsSync(target)) continue;
-    const error = createResolutionLink(linkPath, target);
-    if (error) return error;
+    const error = reconcileResolutionLink(linkPath, target, quarantined);
+    if (error) {
+      restoreQuarantined(quarantined);
+      return { error, quarantined: [] };
+    }
   }
   // Pass 2 — data-driven derived links. Their deployed target dir may be
   // created by the copy steps that follow (a brand-new component's dir does
   // not exist yet); each staged target's existence was already proven by the
   // extraction, and the copies below run unconditionally.
   for (const spec of fileDepSpecs) {
-    if (fs.existsSync(spec.linkPath)) continue;
-    const error = createResolutionLink(spec.linkPath, spec.target);
-    if (error) return error;
+    const error = reconcileResolutionLink(spec.linkPath, spec.target, quarantined);
+    if (error) {
+      restoreQuarantined(quarantined);
+      return { error, quarantined: [] };
+    }
   }
-  return undefined;
+  return { quarantined };
 }
 
 async function doInlineFullUpdate(workspaceDir: string): Promise<{
@@ -871,6 +1083,9 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
   // overwrites it (PR #1332 companion — see reapplySkillLanguage).
   const skillLanguage = detectInstalledSkillLanguage(extDir);
   let tempDir: string | undefined;
+  // Dependency entries quarantined during resolution-link reconciliation;
+  // restored on failure, discarded on success (PRI-665).
+  let reconciledQuarantine: readonly QuarantinedSlot[] = [];
 
   try {
     // 2. Fetch installer package info from npm
@@ -930,6 +1145,30 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     // gateway is stopped or any production file is copied.
     const newPkgPath = path.join(tempDir, 'plugin', 'package.json');
     const stagedVersion = readCurrentVersion(path.join(tempDir, 'plugin'));
+
+    // Staged-package identity guard (2026-09-03 regression): the staged plugin
+    // must self-identify as principles-disciple with a valid version before
+    // the gateway is stopped or any production file is copied. The incident
+    // stub carried only a fake version with no package name.
+    if (readStagedPackageIdentity(path.join(tempDir, 'plugin', 'package.json')) === undefined) {
+      if (tempDir && fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: stagedVersion ?? 'unknown',
+        success: false,
+        kind: 'refusal',
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      });
+      return {
+        success: false,
+        message: STAGED_PACKAGE_REFUSAL_MESSAGE,
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+        requiresRestart: false,
+      };
+    }
+
     const progressed =
       fromVersion !== 'unknown' &&
       stagedVersion !== undefined &&
@@ -1016,7 +1255,8 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       if (fs.existsSync(path.join(installLayoutSrc, 'package.json')) && fs.existsSync(path.join(installLayoutSrc, 'dist'))) {
         copyDirRecursive(installLayoutSrc, layout.installLayoutDir, SKIP_DIRS);
       }
-      const linkError = ensureRuntimeResolutionLinks(layout, tempDir);
+      const { error: linkError, quarantined } = ensureRuntimeResolutionLinks(layout, tempDir);
+      reconciledQuarantine = quarantined;
       if (linkError) {
         appendUpdateHistory(workspaceDir, {
           fromVersion,
@@ -1081,6 +1321,14 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
 
+    // 6.5 Discard the quarantined stale dependency copies — the canonical
+    // components are in place now (PRI-665). Both the success return and the
+    // version-drift failure return flow through here with files already
+    // swapped, so restoring the stale copies would re-break resolution.
+    if (reconciledQuarantine.length > 0) {
+      cleanupQuarantined(reconciledQuarantine);
+    }
+
     // 7. Version-advance check (drift guard). The full update installs the
     // plugin bundled inside the installer. If the installer is stale (its
     // bundled plugin is NOT newer than what is installed), the "update" is a
@@ -1128,6 +1376,13 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       requiresRestart: true,
     };
   } catch (error) {
+    // PRI-665: restore any dependency slots quarantined during link
+    // reconciliation FIRST — a failed update must not leave the install
+    // half-migrated (new dist with the old resolution quarantined away).
+    if (reconciledQuarantine.length > 0) {
+      restoreQuarantined(reconciledQuarantine);
+    }
+
     // Clean up temp dir on failure
     if (tempDir && fs.existsSync(tempDir)) {
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -1170,16 +1425,23 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
 // Route handler
 // ---------------------------------------------------------------------------
 
-export async function handleUpdateRoute(
+/**
+ * PRI-659: the four mutation kinds below are the legacy console updater's
+ * implementations, registered into the MutationController (ADR-0023/0024
+ * migration boundary). handleUpdateRoute is now a thin dispatcher: it maps
+ * the URL subPath to a mutation kind and lets the controller resolve the
+ * authority. The implementation stays here verbatim (replace-then-delete —
+ * no third updater, no logic duplication); when ReleaseManager matures it
+ * registers under `release-manager` for the same kinds and this route layer
+ * needs no further change.
+ */
+function legacyCheckMutation(
   req: IncomingMessage,
   res: ServerResponse,
-  workspaceDir: string,
-  subPath: string,
+  ctx: MutationContext,
 ): Promise<void> {
-  const pluginDir = resolvePluginDir(workspaceDir);
-
-  // GET /check
-  if (subPath === '/check') {
+  return (async () => {
+    const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'GET') { sendMethodNotAllowed(res); return; }
     try {
       // ERR-002 / Runtime Contract Rule 9: 当无法确定当前版本时（如插件未安装），
@@ -1202,11 +1464,16 @@ export async function handleUpdateRoute(
     } catch (err) {
       sendError(res, 500, 'update_check_error', err instanceof Error ? err.message : 'Unknown error');
     }
-    return;
-  }
+  })();
+}
 
-  // POST /apply
-  if (subPath === '/apply') {
+function legacyApplyMutation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: MutationContext,
+): Promise<void> {
+  return (async () => {
+    const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     try {
       const rawBody = await readJsonBody(req);
@@ -1244,7 +1511,7 @@ export async function handleUpdateRoute(
       }
 
       // Path traversal validation
-      if (!validatePathInWorkspace(targetDir, workspaceDir)) {
+      if (!validatePathInWorkspace(targetDir, ctx.workspaceDir)) {
         sendBadRequest(res, 'targetDir must be within workspace or extensions directory');
         return;
       }
@@ -1253,17 +1520,22 @@ export async function handleUpdateRoute(
         targetDir,
         mergeStrategy,
         createBackup,
-      }, workspaceDir);
+      }, ctx.workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
       sendError(res, 500, 'update_apply_error', err instanceof Error ? err.message : 'Unknown error');
     }
-    return;
-  }
+  })();
+}
 
-  // POST /rollback
-  if (subPath === '/rollback') {
+function legacyRollbackMutation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: MutationContext,
+): Promise<void> {
+  return (async () => {
+    const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     try {
       const rawBody = await readJsonBody(req);
@@ -1284,35 +1556,66 @@ export async function handleUpdateRoute(
       }
 
       // Path traversal validation
-      if (!validatePathInWorkspace(targetDir, workspaceDir)) {
+      if (!validatePathInWorkspace(targetDir, ctx.workspaceDir)) {
         sendBadRequest(res, 'targetDir must be within workspace or extensions directory');
         return;
       }
-      if (!validatePathInWorkspace(backupDir, workspaceDir)) {
+      if (!validatePathInWorkspace(backupDir, ctx.workspaceDir)) {
         sendBadRequest(res, 'backupDir must be within the workspace, extensions directory, or PD backups directory');
         return;
       }
 
-      const result = await doRollbackUpdate({ targetDir, backupDir }, workspaceDir);
+      const result = await doRollbackUpdate({ targetDir, backupDir }, ctx.workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
       sendError(res, 500, 'update_rollback_error', err instanceof Error ? err.message : 'Unknown error');
     }
-    return;
-  }
+  })();
+}
 
-  // POST /apply-full — inline tarball download + file copy (no external installer)
-  if (subPath === '/apply-full') {
+function legacyApplyFullMutation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: MutationContext,
+): Promise<void> {
+  return (async () => {
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     try {
-      const result = await doInlineFullUpdate(workspaceDir);
+      const result = await doInlineFullUpdate(ctx.workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       sendError(res, 500, 'update_apply_full_error', err instanceof Error ? err.message : 'Unknown error');
     }
+  })();
+}
+
+// PRI-659: register the legacy authority (ADR-0024 D-1 fallback authority)
+// for every mutation kind. Registration is the ONLY coupling between this
+// implementation and the controller — no other module needs to know where
+// the legacy implementation lives.
+updateMutationController.register('check', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyCheckMutation });
+updateMutationController.register('apply', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyApplyMutation });
+updateMutationController.register('apply-full', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyApplyFullMutation });
+updateMutationController.register('rollback', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyRollbackMutation });
+
+const UPDATE_MUTATION_KINDS: ReadonlyMap<string, MutationKind> = new Map([
+  ['/check', 'check'],
+  ['/apply', 'apply'],
+  ['/apply-full', 'apply-full'],
+  ['/rollback', 'rollback'],
+]);
+
+export async function handleUpdateRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  workspaceDir: string,
+  subPath: string,
+): Promise<void> {
+  const kind = UPDATE_MUTATION_KINDS.get(subPath);
+  if (kind === undefined) {
+    sendNotFound(res, `Update route not found: ${subPath}`);
     return;
   }
-
-  sendNotFound(res, `Update route not found: ${subPath}`);
+  await updateMutationController.dispatch(req, res, { workspaceDir }, kind);
 }

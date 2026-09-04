@@ -169,7 +169,11 @@ beforeAll(async () => {
   }
   // Prepend fakeBinDir to PATH so checkEnvironment finds the fake openclaw.
   process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH}`;
-}, 600_000);
+  // Budget = 2×npm pack + full self-contained build (staging + per-component
+  // npm ci at up to 900s each with one retry) + installer run. The 600s cap
+  // was exceeded ("Hook timed out in 600000ms") in the 2026-09-04 slow
+  // registry window; the builder alone can now legitimately need 15-25 min.
+}, 1_800_000);
 
 afterAll(() => {
   if (tarballPath) {
@@ -617,4 +621,101 @@ describe('Real packaged install smoke test', () => {
       expect(fs.existsSync(path.join(INSTALLER_DIR, pollution)), `source tree pollution: ${pollution}`).toBe(false);
     }
   }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Registry-resolved dependency install (npx parity) — PRI-669 gate.
+//
+// The tests above install the installer tarball TOGETHER with a locally
+// packed install-layout tarball, so npm satisfies the installer's
+// @principles/install-layout dependency from the LOCAL build. That hermetic
+// property masked the 2026-09-04 defect: the installer's top-level dep pinned
+// "@principles/install-layout": "0.1.0" (exact) while its dist statically
+// imported mergeInstallManifestWorkspaces — an interface the registry's
+// 0.1.0 never had — so every REAL `npx create-principles-disciple` fresh
+// install crashed at module load while the co-installed smoke stayed green.
+//
+// This variant installs ONLY the installer tarball in a clean directory, so
+// the dependency resolves against the real npm registry exactly as an npx
+// user's install does, then exercises the exact failure shape: loading
+// dist/index.js (whose top-level import chain reaches installer.js →
+// @principles/install-layout) must succeed.
+// ---------------------------------------------------------------------------
+describe('Registry-resolved dependency install (npx parity)', () => {
+  it('resolves @principles/install-layout from the registry and loads the installer entry', async () => {
+    const cleanDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-registry-install-'));
+    try {
+      // Install ONLY the installer tarball — dependencies come from the
+      // real registry (npx parity), not from the locally packed tarball.
+      await npmRun(['install', tarballPath], {
+        cwd: cleanDir,
+        timeout: 300_000,
+      });
+
+      // 1. The registry-resolved install-layout must satisfy the declared
+      //    range and carry the interface the installer dist imports.
+      const installLayoutEntry = path.join(
+        cleanDir,
+        'node_modules',
+        'create-principles-disciple',
+        'node_modules',
+        '@principles',
+        'install-layout',
+        'dist',
+        'index.js',
+      );
+      const installLayoutAnywhere = fs.existsSync(installLayoutEntry)
+        ? installLayoutEntry
+        : path.join(cleanDir, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js');
+      expect(
+        fs.existsSync(installLayoutAnywhere),
+        'expected the registry to provide @principles/install-layout for the installer',
+      ).toBe(true);
+
+      const resolvedLayoutManifestPath = installLayoutAnywhere.replace(
+        /dist[\\/]index\.js$/,
+        'package.json',
+      );
+      const resolvedLayoutManifest: unknown = JSON.parse(
+        fs.readFileSync(resolvedLayoutManifestPath, 'utf-8'),
+      );
+      const resolvedVersion =
+        typeof resolvedLayoutManifest === 'object' && resolvedLayoutManifest !== null && 'version' in resolvedLayoutManifest
+          ? String((resolvedLayoutManifest as Record<string, unknown>).version)
+          : 'unknown';
+      // The declared range is ^0.2.0; a registry-resolved 0.1.x (the
+      // pre-2026-09-04 defect) must fail this assertion loudly.
+      expect(resolvedVersion.startsWith('0.2.'), `registry resolved install-layout@${resolvedVersion}, expected >=0.2.0 <0.3.0`).toBe(true);
+
+      // 2. The interface check the whole gate exists for: the exact symbol
+      //    whose absence crashed real npx installs.
+      const probe = `
+        const m = await import(${JSON.stringify('file://' + installLayoutAnywhere.replaceAll('\\', '/'))});
+        if (typeof m.mergeInstallManifestWorkspaces !== 'function') {
+          console.error('mergeInstallManifestWorkspaces missing from resolved install-layout@' + ${JSON.stringify(resolvedVersion)});
+          process.exit(3);
+        }
+      `;
+      const probePath = path.join(cleanDir, '__probe_il__.mjs');
+      fs.writeFileSync(probePath, probe, 'utf-8');
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      try {
+        await execFileAsync(process.execPath, [probePath], { timeout: 30_000 });
+      } finally {
+        fs.rmSync(probePath, { force: true });
+      }
+
+      // 3. The npx failure shape itself: loading the installed entry
+      //    (top-level imports reach installer.js → @principles/install-layout)
+      //    must succeed and answer --version.
+      const entry = path.join(cleanDir, 'node_modules', 'create-principles-disciple', 'dist', 'index.js');
+      expect(fs.existsSync(entry), 'installed installer entry missing').toBe(true);
+      const { stdout } = await execFileAsync(process.execPath, [entry, '--version'], { timeout: 60_000 });
+      expect(stdout.trim().length, '--version produced no output').toBeGreaterThan(0);
+    } finally {
+      cleanupDir(cleanDir);
+    }
+  }, 420_000);
 });

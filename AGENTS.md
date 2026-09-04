@@ -42,6 +42,20 @@ For unsolicited adjacent opportunities:
 
 > record them as follow-up candidates; do not automatically implement them.
 
+## 1.1 Installed Runtime Boundary — Hard Rule
+
+The following directories are **owned by the installer** (`npx create-principles-disciple`) and the running system. They are NOT part of this repository, even though they contain files with identical names and layout (`dist/server.js`, `pd-cli/dist/index.js`, …):
+
+* `~/.pd/runtime/` — the installed canonical runtime (console, core, host-runtime, pd-cli, plugin);
+* `~/.openclaw/extensions/principles-disciple/` — the OpenClaw plugin shell (its `core` is a symlink into the canonical runtime);
+* `<workspace>/.pd/` — runtime state of a PD workspace (state.db, config, evidence).
+
+**Agents and developers MUST NOT create, modify, or delete files under these paths.** The only legitimate writer is the installer/updater.
+
+To change installed behavior: edit this repository, rebuild, and let the installer publish. To debug console/plugin behavior: run the dev server or CLI from this repository — never patch an installed file "just to try".
+
+Incident 2026-09-03: `~/.pd/runtime/console/dist/server.js` was overwritten with a 16-byte natural-language placeholder outside any install run. Every subsequent PD Companion launch failed with the misleading `console_exited_with_code_1` until the file was restored from the repository build. Root cause class: identical-path confusion on a combined dev+prod machine, enabled by an unprotected install directory.
+
 ---
 
 # 2. Engineering Constitution
@@ -1067,7 +1081,9 @@ The Owner performs final merge.
 PD runs multiple AI agents concurrently against one repository. These IDs are
 repository-stable rules for that mode. Tool-specific prompts MUST NOT override
 them. Tooling lives in `scripts/dev/` and is wired into `lefthook.yml`
-(`worktree-guard`, pre-commit and pre-push); the guard is judge-only.
+(`worktree-guard`, pre-commit and pre-push); the guard is judge-only. The
+write-intent complement is the workspace lease (`git-9-lease-before-write`),
+which covers the filesystem-mutation window the commit-time guard cannot see.
 
 ## `git-1-worktree-per-task`
 
@@ -1131,6 +1147,39 @@ recursive deletes — ERR-098) and must refuse dirty or unmerged state:
 ```bash
 npm run dev:worktree:cleanup -- ai/PRI-123-some-task --delete-branch
 ```
+
+## `git-9-lease-before-write`
+
+Before writing in a checkout, acquire the workspace write lease; release it
+when the task ends:
+
+```bash
+npm run dev:lease -- acquire --owner "<agent>/<task> session"
+npm run dev:lease -- status
+npm run dev:lease -- release
+```
+
+The lease is one gitignored JSON file (`.workspace-lease.json`) at the
+checkout root. It exists because the commit-time guard cannot see filesystem
+mutation — concurrent sessions have overwritten occupied checkouts (stash
+pops, branch switches, direct edits — PRI-663) without ever touching a commit
+boundary. Semantics:
+
+* acquire fails loudly while an ACTIVE lease is held by another owner;
+* same-owner acquire renews; leases expire after a TTL (default 4h) so a
+  crashed holder never locks a checkout forever;
+* the DEFAULT owner is per-process (includes the pid) — the only portable
+  signal that distinguishes two concurrent agent sessions of the same OS
+  user. Pass a stable `--owner` when the same session will re-acquire
+  (renew) across separate CLI invocations;
+* the worktree guard fails on `lease-invalid` (malformed file) and
+  `lease-branch-mismatch` (active lease + different branch checked out);
+* acquiring on the primary checkout is refused (same
+  `PD_DEV_WORKTREE_ALLOW_PRIMARY` emergency hatch as the guard).
+
+This is a cooperative signal between well-meaning sessions, NOT a permission
+system: a human may always delete the file. It does not run in CI, does not
+use file ACLs, and does not track file-level permissions.
 
 ---
 
