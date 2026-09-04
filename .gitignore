@@ -199,3 +199,16 @@ packages/pd-console/playwright/.cache/
 packages/website/.dev.vars
 packages/website/.wrangler-dev.log
 packages/website/.wrangler/
+
+# Runtime / agent scratch artifacts at the repository root.
+# Produced by local PD runs and browser-automation tooling; no production code
+# reads them. On 2026-09-04 a `git stash -u` swept these into refs/stash and
+# the pre-push gitleaks scan (which walks `git log --all`) failed on the
+# `reviewKey` values inside them, blocking every push in the repository.
+# Patterns are root-anchored so same-named files under subdirectories stay
+# tracked.
+/.decision-card.json
+/.inbox-*.json
+/.current-code-numbered.txt
+/.playwright-mcp/
+/--full-page
