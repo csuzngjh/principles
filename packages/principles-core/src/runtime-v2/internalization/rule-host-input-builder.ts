@@ -20,6 +20,7 @@
  */
 
 import type { RuleHostInput } from './rule-host-contracts.js';
+import type { CanonicalKind } from './rule-context-v2.js';
 
 // ── Path normalization (pure, no node:path) ─────────────────────────────────
 
@@ -158,6 +159,15 @@ export interface ExtractFilePathOptions {
   isBashTool?: boolean;
   /** The tool name (used for synthetic path generation). */
   toolName?: string;
+  /**
+   * PRI-634-F: canonical kind from the ToolSemanticRegistry. When provided,
+   * unspecified isBashTool/isWriteTool hints are DERIVED from it
+   * (execute→isBashTool, write→isWriteTool) so extraction behavior is a pure
+   * function of (toolName, params, projectDir, registry) — identical in
+   * replay and production. Explicit hints keep precedence for callers that
+   * classify with their own host dispatch surface.
+   */
+  canonicalKind?: CanonicalKind;
 }
 
 /**
@@ -209,11 +219,37 @@ export function extractFilePathFromParams(
 export type BuildRuleHostActionOptions = ExtractFilePathOptions;
 
 /**
+ * PRI-634-F Phase 2: derive extraction hints from a canonical kind.
+ * execute → bash-tool extraction; write → write-tool synthetic path; all
+ * other kinds → no tool-specific extraction. Pure, total.
+ */
+export function deriveToolHintsFromCanonicalKind(
+  canonicalKind: CanonicalKind,
+): { isBashTool: boolean; isWriteTool: boolean } {
+  return {
+    isBashTool: canonicalKind === 'execute',
+    isWriteTool: canonicalKind === 'write',
+  };
+}
+
+function withDerivedHints(options: ExtractFilePathOptions): ExtractFilePathOptions {
+  if (options.canonicalKind === undefined) return options;
+  const derived = deriveToolHintsFromCanonicalKind(options.canonicalKind);
+  return {
+    ...options,
+    isBashTool: options.isBashTool ?? derived.isBashTool,
+    isWriteTool: options.isWriteTool ?? derived.isWriteTool,
+  };
+}
+
+/**
  * Build the `action` field of RuleHostInput — the unified snapshot used by
  * both Golden Trace replay and the production OpenClaw Gate.
  *
  * This function combines file path extraction + path normalization into a
  * single pure call, ensuring both paths produce the same `normalizedPath`.
+ * When `options.canonicalKind` is provided it is echoed onto the action
+ * snapshot and drives hint derivation (see ExtractFilePathOptions).
  */
 // eslint-disable-next-line @typescript-eslint/max-params
 export function buildRuleHostAction(
@@ -222,11 +258,15 @@ export function buildRuleHostAction(
   projectDir: string,
   options: BuildRuleHostActionOptions = {},
 ): RuleHostInput['action'] {
-  const filePath = extractFilePathFromParams(params, { ...options, toolName });
+  const effectiveOptions = withDerivedHints(options);
+  const filePath = extractFilePathFromParams(params, { ...effectiveOptions, toolName });
   const normalizedPath = normalizePathPure(filePath, projectDir);
   return {
     toolName,
     normalizedPath,
     paramsSummary: { ...params },
+    ...(effectiveOptions.canonicalKind !== undefined
+      ? { canonicalKind: effectiveOptions.canonicalKind }
+      : {}),
   };
 }

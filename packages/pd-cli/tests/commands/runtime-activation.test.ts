@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { resolveWorkspaceToolSemantics } from '../../src/services/workspace-tool-semantics.js';
+import { vi as _vi } from 'vitest';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -24,6 +26,14 @@ const mockPromoteActivation = vi.fn().mockResolvedValue(true);
 const mockListCodeToolHookActivations = vi.fn().mockResolvedValue([
   { activationId: 'act-hook-1', artifactId: 'art-002', channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', targetRef: 'rule-001', activatedAt: '2026-06-18T00:00:00.000Z', promotedAt: null, deactivatedAt: null },
 ]);
+
+vi.mock('../../src/services/workspace-tool-semantics.js', () => ({
+  // Unit boundary: dispatch/approve tests exercise flag wiring and approval
+  // state transitions; host-provenance resolution has its own contract tests
+  // (workspace-tool-semantics.test.ts). Tests that need the refusal path
+  // override the return value via vi.mocked.
+  resolveWorkspaceToolSemantics: vi.fn().mockReturnValue({ ok: true, registry: { version: 1, hasHostLayer: true }, hostKind: 'test-host' }),
+}));
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
@@ -97,7 +107,9 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
       };
     }),
     ApprovalQueue: vi.fn().mockImplementation(function () {
-      return { approve: mockApprovalApprove, resetToPending: mockApprovalResetToPending };
+      // PRI-634-F R2: getById backs the pre-approve host-provenance check
+      // (null = no record; the approve path handles not-found itself).
+      return { approve: mockApprovalApprove, resetToPending: mockApprovalResetToPending, getById: async () => null };
     }),
     ApprovalCompletionService: vi.fn().mockImplementation(function () {
       return { completeApproval: mockCompletionComplete };
@@ -1964,5 +1976,75 @@ describe('PRI-499: cli-2-exit-stops — failure paths set exitCode and do not co
     // cli-2: mutex failure must set exitCode and NOT construct state manager.
     expect(process.exitCode).toBe(1);
     expect(RuntimeStateManager).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('handleRuntimeActivationDispatch — PRI-634-F R2 host provenance refusal', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRuleHostWriterConfigs.length = 0;
+    mockGetArtifactById.mockResolvedValue(makeArtifact());
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    process.exitCode = 0;
+  });
+
+  it('refuses code_tool_hook activation when host provenance is unresolvable — structured reason + nextAction, no writer constructed (review P1)', async () => {
+    vi.mocked(resolveWorkspaceToolSemantics).mockReturnValueOnce({
+      ok: false,
+      reason: 'host_tool_declaration_missing',
+      nextAction: 'start the workspace host once so it persists its tool declaration',
+    });
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'art-001',
+      channel: 'code_tool_hook',
+      json: true,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('refused');
+    expect(output.reason).toBe('host_tool_declaration_missing');
+    expect(output.nextAction).toContain('host');
+    // Fail-closed: the dispatcher (and its writers) must never run —
+    // cli-5-failure-no-mutation.
+    expect(mockRuleHostWriterConfigs).toHaveLength(0);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('non-code_tool_hook channels are unaffected by unresolvable provenance', async () => {
+    vi.mocked(resolveWorkspaceToolSemantics).mockReturnValueOnce({
+      ok: false,
+      reason: 'host_tool_declaration_missing',
+      nextAction: 'start the workspace host once',
+    });
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'art-001',
+      channel: 'prompt',
+      json: true,
+    });
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).not.toBe('refused');
+  });
+
+  it('code_tool_hook dispatch threads the resolved registry into RuleHostWriter and gateDeps', async () => {
+    const registry = { version: 1, hasHostLayer: true, resolve: () => 'write', lookup: () => null, hasHostTool: () => true };
+    vi.mocked(resolveWorkspaceToolSemantics).mockReturnValueOnce({ ok: true, registry, hostKind: 'openclaw' });
+    await handleRuntimeActivationDispatch({
+      workspace: WS,
+      artifactId: 'art-001',
+      channel: 'code_tool_hook',
+      json: true,
+    });
+    expect(mockRuleHostWriterConfigs).toHaveLength(1);
+    expect(mockRuleHostWriterConfigs[0]?.toolSemantics).toBe(registry);
+    expect(mockRuleHostWriterConfigs[0]?.gateDeps).toBeDefined();
   });
 });

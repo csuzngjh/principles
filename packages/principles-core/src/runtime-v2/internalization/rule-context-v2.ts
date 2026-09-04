@@ -18,6 +18,8 @@
  * Spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md §4.
  */
 
+import { baselineToolAlias as TOOL_ALIAS } from './tool-semantic-baseline.js';
+
 // ── public types ───────────────────────────────────────────────────────────
 
 export type CanonicalKind = 'read' | 'search' | 'write' | 'execute' | 'agent' | 'other';
@@ -107,34 +109,12 @@ function isNullOrNonNegativeFinite(value: unknown): boolean {
   return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
 }
 
-// ── canonicalizeToolKind (static alias table, spec §4.4) ────────────────────
+// ── canonicalizeToolKind (baseline alias table, spec §4.4) ──────────────────
 //
-// NOTE: the authoritative source for canonical kinds SHOULD be a host declaration
-// (spec §4.4 anti-drift note), so that `core` never owns a growing hardcoded
-// tool list. The first version uses a static alias table (ticket-bounded); a
-// later phase will let hosts declare `ruleCanonicalKind` overrides. core only
-// owns the CLOSED CanonicalKind enum + this pure lookup function.
-
-const TOOL_ALIAS: Readonly<Record<string, CanonicalKind>> = {
-  read: 'read',
-  read_file: 'read',
-  read_many_files: 'read',
-  grep: 'search',
-  grep_search: 'search',
-  search_file_content: 'search',
-  glob: 'search',
-  write: 'write',
-  write_file: 'write',
-  edit: 'write',
-  edit_file: 'write',
-  replace: 'write',
-  apply_patch: 'write',
-  bash: 'execute',
-  exec: 'execute',
-  execute: 'execute',
-  run_shell_command: 'execute',
-  sessions_spawn: 'agent',
-};
+// PRI-634-F: the table moved to tool-semantic-baseline.ts (host-neutral
+// generic vocabulary only) so canonicalizeToolKind and the host-layered
+// ToolSemanticRegistry read ONE table. canonicalizeToolKind itself stays
+// baseline-only — host-aware callers use buildToolSemanticRegistry().
 
 export function canonicalizeToolKind(toolName: unknown): CanonicalKind {
   if (typeof toolName !== 'string') return 'other';

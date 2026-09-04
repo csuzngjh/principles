@@ -31,6 +31,11 @@ const {
 });
 
 vi.mock('@principles/core/runtime-v2', () => ({
+  // PRI-634-F R2: full-module mocks must track new public exports — the
+  // activation graph imports buildToolSemanticRegistry transitively
+  // (workspace-tool-semantics), and vitest throws on the missing property
+  // access at import time even when never called.
+  buildToolSemanticRegistry: vi.fn().mockReturnValue({ ok: true, registry: {} }),
   PruningReadModel: vi.fn().mockImplementation(function () {
     return { getHealthSummary: mockPruningGetHealthSummary };
   }),

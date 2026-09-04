@@ -37,12 +37,14 @@ import {
   loadFeatureFlagFromConfig,
   reconcileGovernanceContinuation,
   runInternalizationConsumerCycle,
+  saveHostToolDeclaration,
   type InternalizationConsumerCycleOutcome,
   type ConsumerCycleLogger,
   type ReconcileGovernanceContinuationResult,
 } from '@principles/host-runtime';
 import { catchUpCodexIngestion, type CodexCatchUpResult } from '../ingestion/catch-up.js';
 import type { TranscriptPort } from '../ingestion/transcript-decoder.js';
+import { CODEX_TOOL_SEMANTIC_MAPPINGS, CODEX_TOOL_SEMANTICS } from '../tool-semantics.js';
 
 export type CodexWorkerMode = 'ready' | 'manual_action_required' | 'paused' | 'degraded';
 
@@ -253,11 +255,24 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
 
   // Step 7 — ONE bounded downstream consumer cycle via the shared executor
   // (same implementation the OpenClaw auto-consumer runs).
+  // PRI-634-F R2: persist the Codex tool declaration (workspace provenance
+  // for host-neutral consumers) and thread the registry into the cycle so
+  // activation-gate replay resolves Codex tool semantics (Bash, not bash).
+  const declared = saveHostToolDeclaration(workspaceDir, {
+    version: 1,
+    hostKind: 'codex',
+    mappings: CODEX_TOOL_SEMANTIC_MAPPINGS,
+    declaredAt: new Date().toISOString(),
+  });
+  if (!declared.ok) {
+    logger.warn?.(`[PD:CodexWorker] Failed to persist Codex tool declaration: ${declared.reason} — host-neutral consumers will not find it (rc-9)`);
+  }
   const downstream = await runInternalizationConsumerCycle(workspaceDir, {
     owner: WORKER_OWNER,
     logLabel: 'CodexWorker',
     logger,
     emitEvent,
+    toolSemantics: CODEX_TOOL_SEMANTICS,
     // No hostToolCatalog: PD has not declared a Codex tool catalog; a wrong
     // (OpenClaw) catalog would be worse than none (PRI-630 follow-up).
   });

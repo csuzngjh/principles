@@ -131,6 +131,26 @@ describe('assembleHistoryFromRows (PRI-482 Phase 3)', () => {
     expect(kinds).toEqual(['read', 'search', 'write', 'execute', 'agent', 'other']);
   });
 
+  it('PRI-634-F: OpenClaw host-layer tool names resolve through the registry (vocabulary drift regression)', () => {
+    // Baseline defect: shell/cmd are BASH_TOOL_NAMES the gate dispatches, but
+    // baseline-only canonicalizeToolKind mapped them to 'other' — a v2 rule
+    // matching canonicalKind==='execute' never fired for them in production
+    // facts. Same for delete_file/insert/patch on the write axis.
+    const rows: RuleHostContextRow[] = [
+      makeRow({ id: 1, toolName: 'shell', outcome: 'success', paramsJson: '{"command":"ls"}' }),
+      makeRow({ id: 2, toolName: 'cmd', outcome: 'success', paramsJson: '{"command":"dir"}' }),
+      makeRow({ id: 3, toolName: 'delete_file', outcome: 'success', paramsJson: '{"file_path":"src/a.ts"}' }),
+      makeRow({ id: 4, toolName: 'insert', outcome: 'success', paramsJson: '{"file_path":"src/b.ts"}' }),
+      makeRow({ id: 5, toolName: 'patch', outcome: 'success', paramsJson: '{"file_path":"src/c.ts"}' }),
+    ];
+
+    const history = assembleHistoryFromRows(rows, false, PROJECT_DIR);
+    expect(history.status).toBe('available');
+
+    const kinds = history.calls.map((c) => (c as RuleToolCallRecord).canonicalKind);
+    expect(kinds).toEqual(['execute', 'execute', 'write', 'write', 'write']);
+  });
+
   it('truncated flag propagated to history window', () => {
     const rows: RuleHostContextRow[] = [makeRow({ id: 1 })];
 

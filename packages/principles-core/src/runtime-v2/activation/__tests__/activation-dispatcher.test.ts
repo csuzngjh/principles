@@ -795,3 +795,45 @@ describe('activation type helpers', () => {
     expect(HIGH_RISK_CHANNEL_MAP.code_tool_hook).toBe('high');
   });
 });
+
+
+// ── PRI-634-F R2: structured failure passthrough (review P2) ────────────────
+
+describe('ActivationDispatcher — structured reliability failure passthrough', () => {
+  it('a refused canActivate with a structured failure surfaces it on the refused decision', async () => {
+    const artifactStore = new MemoryArtifactReadModel();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const failingWriter: ChannelWriter = {
+      channel: 'code_tool_hook',
+      canActivate: async () => ({
+        ok: false,
+        reason: 'rule_reliability_tool_not_host_dispatchable:adapter — execute_command…',
+        riskLevel: 'high' as const,
+        failure: {
+          layer: 'adapter',
+          reasonCode: 'tool_not_host_dispatchable',
+          evidence: 'affectedTools semantically classifiable but NOT dispatched by this host: execute_command',
+          nextAction: 'regenerate the rule against host-declared tool names',
+        },
+      }),
+      activate: async () => { throw new Error('must not be reached'); },
+    };
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      new MemoryActivationStateStore(),
+      {
+        writers: [failingWriter],
+        // code_tool_hook is high-risk: the approval store must exist so the
+        // flow reaches the writer's canActivate (the refusal under test)
+        // instead of the earlier requires_approval refusal.
+        approvalQueueStore: { enqueue: async () => ({ approvalId: 'apr-1', requestedAt: '2026-05-17T00:00:00.000Z' }) } as never,
+      },
+    );
+    const decision = await dispatcher.dispatch(makeDispatchInput({ channel: 'code_tool_hook', confirm: true }));
+    expect(decision.decision).toBe('refused');
+    if (decision.decision !== 'refused') return;
+    expect(decision.failure?.layer).toBe('adapter');
+    expect(decision.failure?.reasonCode).toBe('tool_not_host_dispatchable');
+    expect(decision.failure?.nextAction).toContain('host-declared');
+  });
+});

@@ -72,6 +72,13 @@ export interface EvaluatorCodeReview {
 export interface EvaluatorAdversarialResult {
   readonly passed: boolean;
   readonly failedCases: readonly AdversarialFailedCase[];
+  /**
+   * PRI-634-F R2 (review P2): layered failure attribution from the replay
+   * gate ({layer, reasonCode}) — preserved on the evaluator artifact so
+   * repair/telemetry consumers answer "哪一层负责" without re-parsing case
+   * text. Absent when the replay passed.
+   */
+  readonly failure?: { readonly layer: string; readonly reasonCode: string };
 }
 
 /**

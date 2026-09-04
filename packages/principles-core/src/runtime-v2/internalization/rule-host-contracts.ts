@@ -12,7 +12,7 @@
  */
 
 import type { CorrectionProposal } from './correction-proposal.js';
-import type { RuleContextV2 } from './rule-context-v2.js';
+import type { RuleContextV2, CanonicalKind } from './rule-context-v2.js';
 
 // ---------------------------------------------------------------------------
 // Input: Frozen snapshot provided to implementations
@@ -23,6 +23,15 @@ export interface RuleHostInput {
     toolName: string;
     normalizedPath: string | null;
     paramsSummary: Record<string, unknown>;
+    /**
+     * PRI-634-F Phase 2 (Replay/Production Input Parity): canonical tool kind
+     * resolved from the ToolSemanticRegistry (same registry instance for both
+     * replay and production). Optional on purpose — v1 rules that never read
+     * this field see `undefined` and behave exactly as before. Builders
+     * receiving a registry/kind populate it; unknown tools resolve to 'other',
+     * never throw.
+     */
+    canonicalKind?: CanonicalKind;
   };
   workspace: {
     isRiskPath: boolean;
