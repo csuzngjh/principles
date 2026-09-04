@@ -28,6 +28,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
+import { resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -383,6 +384,21 @@ export class ApprovalsConsoleModel {
       };
       const activationStateStore = new SqliteActivationStateStore(connection);
       const approvalQueueStore = new SqliteApprovalQueueStore(connection);
+      // PRI-634-F R3 (SPEC P1-1): the Console resolves tool semantics through
+      // the SAME workspace host-declaration resolver as the CLI — never guess
+      // a host, never validate against the bare baseline. A code_tool_hook
+      // approval whose provenance is unresolvable refuses BEFORE dispatch
+      // (fail loud, same reason string as the CLI); e2e seed environments
+      // must persist a host declaration like any real host would.
+      const toolSemantics = resolveWorkspaceHostToolSemantics(this.workspaceDir);
+      if (existing.channel === 'code_tool_hook' && !toolSemantics.ok) {
+        return {
+          decision: 'refused' as const,
+          reason: toolSemantics.reason,
+          nextAction: toolSemantics.nextAction,
+          channel: existing.channel,
+        };
+      }
       // Wire all three MVP-Core writers, including RuleHostWriter for code_tool_hook.
       // This fixes the P0 breakpoint where code_tool_hook approvals could not activate.
       const dispatcher = new ActivationDispatcher(
@@ -392,8 +408,16 @@ export class ApprovalsConsoleModel {
           writers: [
             new PromptWriter(),
             new RuleHostWriter({
-              gateDeps: createProductionGateDeps(),
+              gateDeps: createProductionGateDeps({
+                projectDir: this.workspaceDir,
+                ...(toolSemantics.ok ? { toolSemantics: toolSemantics.registry } : {}),
+              }),
               featureFlagProbe: (flagId) => pdFlags.flags[flagId]?.enabled === true,
+              projectDir: this.workspaceDir,
+              ...(toolSemantics.ok ? { toolSemantics: toolSemantics.registry } : {}),
+              // Provenance unresolvable → writer refuses at canActivate with
+              // the resolver reason (dispatcher maps it to a refused
+              // decision). Ordering note above: artifact-schema reasons win.
             }),
             new DeferArchiveWriter(),
           ],

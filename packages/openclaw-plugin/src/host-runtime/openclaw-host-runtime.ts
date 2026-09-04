@@ -1,5 +1,6 @@
 import { createProductionHostRuntime, type ActivePrinciplePromptResult, type HostRuntime, type ProductionRuleContextRequest, type ProductionPainEnrichment } from '@principles/host-runtime';
 import type { HostEvent, HostEventContext, HostEventResult } from '@principles/core/host';
+import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
 import type {
   PluginHookAgentContext,
   PluginHookAfterToolCallEvent,
@@ -72,6 +73,10 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
   }
 
   const runtime = createProductionHostRuntime({
+    // PRI-634-F R2: the shared production gate resolves tool semantics through
+    // the OpenClaw registry (not the core baseline) — production hints and
+    // action.canonicalKind then agree with the plugin hook path and replay.
+    toolSemantics: OPENCLAW_TOOL_SEMANTICS,
     ruleContextProvider(request) {
       if (typeof request.rawPayload !== 'object' || request.rawPayload === null) throw new Error('OpenClaw rule context request is missing its native payload');
       const token = Reflect.get(request.rawPayload, 'nativeToken');

@@ -68,6 +68,12 @@ export interface RulecodeReplayOutput {
   forbiddenPatternViolations: string[];
   reason?: string;
   nextAction?: string;
+  /**
+   * PRI-634-F R2 (review P2): structured failure attribution
+   * ({layer, reasonCode, evidence, nextAction}) — machine-readable on
+   * `--json`, printed on the text path. Absent when replay passed.
+   */
+  failure?: { layer: string; reasonCode: string; evidence: string; nextAction: string };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -369,11 +375,12 @@ export async function handleRulecodeReplay(opts: ReplayOptions): Promise<void> {
       message: c.message,
     })),
     forbiddenPatternViolations: gateResult.sandboxResult.forbiddenPatternViolations,
+    ...(gateResult.failure ? { failure: gateResult.failure } : {}),
   };
 
   if (output.status === 'failed') {
     output.reason = `sandbox replay rejected: ${gateResult.decision}`;
-    output.nextAction = 'fix the code or golden trace cases based on the failed cases above';
+    output.nextAction = gateResult.failure?.nextAction ?? 'fix the code or golden trace cases based on the failed cases above';
   }
 
   emitResult(output, {
@@ -381,6 +388,7 @@ export async function handleRulecodeReplay(opts: ReplayOptions): Promise<void> {
     formatText: (o) => {
       if (o.status === 'ok') return 'PASSED: all golden trace cases replayed successfully.';
       const lines = [`FAILED: ${o.decision}`];
+      if (o.failure) lines.push(`  - failureLayer: ${o.failure.layer} | reasonCode: ${o.failure.reasonCode}`);
       for (const r of o.reasons) lines.push(`  - ${r}`);
       for (const c of o.failedCases) lines.push(`  - caseId: ${c.caseId} | ${c.errorType}: ${c.message}`);
       for (const p of o.forbiddenPatternViolations) lines.push(`  - forbidden: ${p}`);
