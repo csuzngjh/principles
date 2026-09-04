@@ -447,7 +447,13 @@ if (BUILD_SELF_CONTAINED_ASSET) {
       [npmCliJs, ...args],
       {
         cwd: directory,
-        timeout: 300_000,
+        // Registry-latency headroom: a slow-registry window makes a single
+        // component `npm ci` legitimately exceed 5 minutes (PRI-634-F CI:
+        // the failing component migrated between runs with an EMPTY stderr —
+        // the signature of the process being killed by this timeout, not an
+        // npm error). 15 minutes keeps the gate honest without turning CI
+        // flakiness into a red run.
+        timeout: 900_000,
         windowsHide: true,
       },
     );
@@ -458,10 +464,17 @@ if (BUILD_SELF_CONTAINED_ASSET) {
     copyFileSync(lockPath, join(directory, 'package-lock.json'));
     try {
       await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
-    } catch (error) {
-      // rc-9: name the failing component — without this the piped stderr of a
-      // mass component-materialization loop points at no directory at all.
-      throw new Error(`[self-contained] npm ci failed for component "${label}" (cwd ${directory}): ${error.message}`, { cause: error });
+    } catch (firstError) {
+      // One transient retry: registry 5xx / socket drops are the dominant
+      // real-world failure here. A genuinely broken lock still fails loud
+      // after the retry.
+      try {
+        await runNpm(['ci', '--omit=dev', '--ignore-scripts', '--legacy-peer-deps', '--install-links']);
+      } catch {
+        // rc-9: name the failing component — without this the piped stderr of a
+        // mass component-materialization loop points at no directory at all.
+        throw new Error(`[self-contained] npm ci failed for component "${label}" (cwd ${directory}): ${firstError.message}`, { cause: firstError });
+      }
     }
     const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
     if (pkg.dependencies && Object.hasOwn(pkg.dependencies, 'better-sqlite3')) {

@@ -39,7 +39,7 @@ describe('published OpenClaw bundle host-runtime safety', () => {
     fs.mkdirSync(isolatedHome);
     fs.writeFileSync(path.join(consumerDir, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
     runNpm(['install', path.join(tempDir, filename), '--ignore-scripts', '--omit=optional', '--no-package-lock'], {
-      cwd: consumerDir, stdio: 'pipe', timeout: 120_000,
+      cwd: consumerDir, stdio: 'pipe', timeout: 300_000,
     });
     expect(fs.existsSync(path.join(consumerDir, 'node_modules', '@principles', 'host-runtime'))).toBe(false);
     execFileSync(process.execPath, ['--input-type=module', '--eval', `await import(${JSON.stringify(new URL(`file:///${path.join(consumerDir, 'node_modules', 'principles-disciple', 'dist', 'bundle.js').replace(/\\/g, '/')}`).href)})`], {
@@ -47,7 +47,7 @@ describe('published OpenClaw bundle host-runtime safety', () => {
       env: { ...process.env, HOME: isolatedHome, USERPROFILE: isolatedHome },
     });
     expect(fs.existsSync(path.join(isolatedHome, '.openclaw', 'openclaw.json'))).toBe(false);
-  }, 180_000);
+  }, 600_000);
 
   afterAll(() => {
     if (tempDir) {
