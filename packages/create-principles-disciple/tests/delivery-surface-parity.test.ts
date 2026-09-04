@@ -52,6 +52,10 @@ describe('delivery-surface parity for @principles/* runtime dependencies (PRI-56
     'pd-console',
     'principles-core',
     'host-runtime',
+    // PRI-672: the installer package's own dist ships as the release-manager
+    // payload component so the installed console can import the
+    // ReleaseManager authority module.
+    'create-principles-disciple',
   ] as const;
 
   // Deps deliberately OUTSIDE the three-surface contract. Every entry must
@@ -77,6 +81,7 @@ describe('delivery-surface parity for @principles/* runtime dependencies (PRI-56
     'pd-console': 'console',
     'principles-core': 'core',
     'host-runtime': 'host-runtime',
+    'create-principles-disciple': 'release-manager',
   };
 
   /**
@@ -116,7 +121,11 @@ describe('delivery-surface parity for @principles/* runtime dependencies (PRI-56
       const pkg = JSON.parse(read(pkgPath)) as { dependencies?: Record<string, string> };
       for (const name of Object.keys(pkg.dependencies ?? {})) {
         const relevant =
-          name.startsWith('@principles/') || name === 'principles-disciple';
+          name.startsWith('@principles/') ||
+          name === 'principles-disciple' ||
+          // PRI-672: the console's runtime dependency on the ReleaseManager
+          // authority module shipped inside the installer package.
+          name === 'create-principles-disciple';
         if (!relevant) continue;
         deps.push({
           consumerDir: dir,

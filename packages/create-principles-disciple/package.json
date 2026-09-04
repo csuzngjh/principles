@@ -14,6 +14,7 @@
     "core",
     "host-runtime",
     "install-layout",
+    "release-manager",
     "README.md",
     "LICENSE"
   ],

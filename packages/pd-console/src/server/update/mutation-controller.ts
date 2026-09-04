@@ -70,6 +70,13 @@ export interface MutationGovernanceInfo {
   readonly preferred: string;
   readonly fallback: boolean;
   readonly available: readonly string[];
+  /**
+   * PRI-672: why the fallback authority is serving (set by the wiring when the
+   * preferred authority is unregistered/unavailable). Omitted when the wiring
+   * has no reason to report — e.g. before any dispatch, or while the preferred
+   * authority serves.
+   */
+  readonly fallbackReason?: string;
 }
 
 export interface ResolvedAuthority {
@@ -79,6 +86,27 @@ export interface ResolvedAuthority {
 
 export class MutationController {
   private readonly authorities = new Map<MutationKind, Map<string, MutationAuthority>>();
+  /** PRI-672: per-kind reason the fallback is serving (machine-readable, rc-9). */
+  private readonly fallbackReasons = new Map<MutationKind, string>();
+
+  /**
+   * Record why the fallback authority is currently serving `kind` (e.g.
+   * `release_manager_shadow_disabled` or `release_manager_unavailable:…`).
+   * Emitted as the `X-PD-Mutation-Fallback-Reason` header whenever a dispatch
+   * actually resolves to the fallback, and surfaced by describeGovernance().
+   * Pass null to clear.
+   */
+  setFallbackReason(kind: MutationKind, reason: string | null): void {
+    if (reason === null) {
+      this.fallbackReasons.delete(kind);
+    } else {
+      this.fallbackReasons.set(kind, reason);
+    }
+  }
+
+  getFallbackReason(kind: MutationKind): string | undefined {
+    return this.fallbackReasons.get(kind);
+  }
 
   register(kind: MutationKind, authority: MutationAuthority): void {
     let table = this.authorities.get(kind);
@@ -139,6 +167,10 @@ export class MutationController {
       ? `${authority.name} (preferred: ${PREFERRED_MUTATION_AUTHORITY} not yet available)`
       : authority.name;
     res.setHeader('X-PD-Mutation-Authority', headerValue);
+    const fallbackReason = fallback ? this.fallbackReasons.get(kind) : undefined;
+    if (fallbackReason !== undefined) {
+      res.setHeader('X-PD-Mutation-Fallback-Reason', fallbackReason);
+    }
     await authority.handler(req, res, ctx);
   }
 
@@ -154,6 +186,10 @@ export class MutationController {
       } else {
         const { authority, fallback } = this.resolveAuthority(kind);
         info = { active: authority.name, preferred: PREFERRED_MUTATION_AUTHORITY, fallback, available };
+      }
+      if (info.fallback) {
+        const fallbackReason = this.fallbackReasons.get(kind);
+        if (fallbackReason !== undefined) info = { ...info, fallbackReason };
       }
       snapshot[kind] = info;
     }

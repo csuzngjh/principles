@@ -67,6 +67,8 @@ packages/openclaw-plugin/skills
 # create-principles-disciple: bundled plugin (build artifact)
 packages/create-principles-disciple/plugin/
 packages/create-principles-disciple/host-runtime/
+# PRI-672: release-manager payload component built by bundle-plugin.mjs
+packages/create-principles-disciple/release-manager/
 
 # Local environment and state
 # .claude/ is ignored except for skills (shared with team)
