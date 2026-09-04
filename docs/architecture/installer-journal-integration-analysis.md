@@ -82,7 +82,20 @@
 | **Tier 2**：`planned` 之后的追加失败 | **降级继续**：记 `logger.error`、标记 `degraded=true`、跳过后续追加；结果对象带 `journal.degraded=true` | mutation 已在进行中——中止并不能让状态更好（恢复手段是 backup/restore，它不依赖 journal）；带备份网继续 = 现有安全模型，journal 降级如实上报 |
 | pre-mutation refusal / pre-mutation throw（`checkBuiltPlugin`、rule preflight、gateway abort） | **不落 journal** | 零副作用；`refused` 态保留给"已 planned 后被拒"的未来场景（ReleaseManager 用） |
 
-### 3.3 不做的东西（对齐任务 Constraints）
+### 3.3 Recovery ownership（PRI-664 review 明确——不假装闭环）
+
+截至本 commit，**代码库中没有任何消费者对 `~/.pd/transactions/` 下的 installer journal 执行自动恢复**——journal 目前提供的是**可观测性（observability only）**。journal 的 schema 与恢复原语（`readTransactionJournalForRecovery` / `recoverUnfinishedTransaction`）已经就位，但把它们接入实际恢复流程属于 **PRI-661 ReleaseManager adoption** 的职责。
+
+已用测试钉住未来消费者必须继承的语义契约（`tests/installer-journal-sequence.test.ts` "unfinished transaction — recovery contract"）：
+
+| 中断点 | 恢复原语的结论（installer 模型，无 active.json） |
+| --- | --- |
+| 激活未发生（planned/staged 前后崩溃） | `old_confirmed`（swap lineage 未到 activation，旧安装方成立） |
+| 已 journal `activated` 但未 `confirmed` | `explicit_refusal`（`activation_interrupted_without_previous`——无 active record 可对账，规定动作是重跑官方安装器） |
+
+同时 schema 增加 `releaseMetadataDigestSource: 'manifest' | 'package_manifest' | 'fallback'`（可选字段，向后兼容旧 journal 行），让每个 digest 的可验证性有据可查——`fallback` 摘要可读但不可验证。
+
+### 3.4 不做的东西（对齐任务 Constraints）
 
 不重设计 installer、不改布局、不启用 ReleaseManager、不做 repair executor、不手改 runtime、不删重复副本、不动 console updater（PRI-659 已收敛其边界）。
 

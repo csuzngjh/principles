@@ -16,7 +16,11 @@ import {
   journalInstallerTransition,
   journalInstallerTransitionDegrading,
 } from '../src/installer.js';
-import { readTransactionJournal } from '../src/update/transaction-journal.js';
+import {
+  readTransactionJournal,
+  readTransactionJournalForRecovery,
+  recoverUnfinishedTransaction,
+} from '../src/update/transaction-journal.js';
 
 // Partial mock: real implementation by default, per-test failures injectable.
 vi.mock('../src/update/transaction-journal.js', async (importOriginal) => {
@@ -78,6 +82,8 @@ describe('installer journal sequence (real journal reader)', () => {
       expect(t.productVersion).toBe('9.9.9');
       expect(t.releaseMetadataDigest).toBe(journal.releaseMetadataDigest);
       expect(t.releaseMetadataDigest).toMatch(/^[a-f0-9]{64}$/);
+      // Fixture bundles pd-cli/package.json without an asset manifest.
+      expect(t.releaseMetadataDigestSource).toBe('package_manifest');
       expect(t.generation).toBe(1);
     }
     expect(journal.releaseId).toBe(`bundled-9.9.9-${journal.releaseMetadataDigest.slice(0, 12)}`);
@@ -117,5 +123,72 @@ describe('installer journal sequence (real journal reader)', () => {
     const pluginDir = makeFixtureBundle(tmpHome);
     const journal = beginInstallerJournal(pluginDir);
     expect(() => journalInstallerTransition(journal, null, 'planned', 'begin')).toThrow(/EACCES/);
+  });
+
+  // PRI-664 review — recovery behavior of an UNFINISHED installer transaction.
+  //
+  // HONEST SCOPE (do not pretend closure): as of this commit, NOTHING in the
+  // codebase reads installer journals for automatic recovery — the journal
+  // currently provides OBSERVABILITY ONLY. Recovery ownership (wiring
+  // readTransactionJournalForRecovery + recoverUnfinishedTransaction into an
+  // actual recovery flow for ~/.pd/transactions/) belongs to PRI-661
+  // ReleaseManager adoption. These tests pin the SEMANTIC contract a future
+  // consumer will inherit, so the migration cannot silently change it.
+  describe('unfinished transaction — recovery contract (not yet wired, PRI-661 owns wiring)', () => {
+    // Restore the REAL journal writer: an earlier test in this file replaces
+    // the shared mock's implementation with a throwing one (Tier-1 contract).
+    let actualAppend: typeof import('../src/update/transaction-journal.js')['appendJournalTransition'];
+    beforeEach(async () => {
+      const { appendJournalTransition } = await import('../src/update/transaction-journal.js');
+      const actualModule = await vi.importActual<typeof import('../src/update/transaction-journal.js')>('../src/update/transaction-journal.js');
+      actualAppend = actualModule.appendJournalTransition;
+      vi.mocked(appendJournalTransition).mockImplementation(actualAppend);
+    });
+
+    it('an interrupted install (activation never journaled) is recoverable as old-confirmed; journal stays parseable', () => {
+      const pluginDir = makeFixtureBundle(tmpHome);
+      const journal = beginInstallerJournal(pluginDir);
+      journalInstallerTransition(journal, null, 'planned', 'begin');
+      journalInstallerTransitionDegrading(journal, 'planned', 'staged', 'content laid down');
+      // Simulate crash: no activated/confirmed transition ever lands.
+
+      // The journal remains strictly parseable (no torn tail, chain intact).
+      const recovery = readTransactionJournalForRecovery(journal.journalPath);
+      expect(recovery.transitions.map((t) => t.to)).toEqual(['planned', 'staged']);
+      expect(recovery.tornTailDetected).toBe(false);
+
+      // What a future recovery consumer would conclude (and PRI-661 must
+      // preserve): the swap lineage never reached activation, and since the
+      // installer model has no active.json, the "old" side trivially stands.
+      const outcome = recoverUnfinishedTransaction({
+        transitions: recovery.transitions,
+        activeRecord: null,
+        previousRecord: null,
+        transactionId: journal.transactionId,
+      });
+      expect(outcome).toMatchObject({ kind: 'old_confirmed', releaseId: null, generation: null });
+    });
+
+    it('an interrupted install that already journaled activation is an explicit refusal under the installer model (no active record to reconcile)', () => {
+      const pluginDir = makeFixtureBundle(tmpHome);
+      const journal = beginInstallerJournal(pluginDir);
+      journalInstallerTransition(journal, null, 'planned', 'begin');
+      journalInstallerTransitionDegrading(journal, 'planned', 'staged', 'content laid down');
+      journalInstallerTransitionDegrading(journal, 'staged', 'probed', 'console verified');
+      journalInstallerTransitionDegrading(journal, 'probed', 'activated', 'host installers done');
+      // Crash before confirmed.
+
+      const recovery = readTransactionJournalForRecovery(journal.journalPath);
+      const outcome = recoverUnfinishedTransaction({
+        transitions: recovery.transitions,
+        activeRecord: null, // installer never writes active.json (ADR-0023 audit F3)
+        previousRecord: null,
+        transactionId: journal.transactionId,
+      });
+      // Activation lineage exists but there is no active record to reconcile:
+      // the recovery primitive refuses explicitly instead of guessing — the
+      // prescribed answer is "re-run the official installer".
+      expect(outcome).toMatchObject({ kind: 'explicit_refusal', reason: 'activation_interrupted_without_previous' });
+    });
   });
 });

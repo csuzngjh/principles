@@ -182,6 +182,9 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       expect(t.releaseId).toMatch(/^bundled-1\.74\.1-[0-9a-f]{12}$/);
       expect(t.productVersion).toBe('1.74.1');
       expect(t.releaseMetadataDigest).toMatch(/^[a-f0-9]{64}$/);
+      // PRI-664 review: provenance of the digest — this fixture DOES have an
+      // asset manifest (existsSync true), so the whole-payload identity is used.
+      expect(t.releaseMetadataDigestSource).toBe('manifest');
     }
     expect(result.journal).toMatchObject({ degraded: false });
   });

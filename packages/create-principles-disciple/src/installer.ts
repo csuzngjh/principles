@@ -44,7 +44,7 @@ import {
   verifyReleaseAssetManifestAsync,
   verifyReleaseAssetTarget,
 } from './update/release-asset-manifest.js';
-import { appendJournalTransition, type TransactionState } from './update/transaction-journal.js';
+import { appendJournalTransition, type ReleaseMetadataDigestSource, type TransactionState } from './update/transaction-journal.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -1962,6 +1962,8 @@ interface InstallerJournal {
   readonly releaseId: string;
   readonly productVersion: string;
   readonly releaseMetadataDigest: string;
+  /** PRI-664 review: provenance of releaseMetadataDigest ('manifest' | 'package_manifest' | 'fallback'). */
+  readonly releaseMetadataDigestSource: ReleaseMetadataDigestSource;
   degraded: boolean;
   /** Last successfully journaled state — the `from` for failure-path transitions. */
   lastState: TransactionState | null;
@@ -1980,7 +1982,7 @@ function sha256File(filePath: string): string {
  * string only to satisfy the journal's 64-hex format requirement; it is not
  * part of any release-metadata identity chain.
  */
-function resolveInstallerPayloadIdentity(pluginDir: string): { productVersion: string; releaseMetadataDigest: string } {
+function resolveInstallerPayloadIdentity(pluginDir: string): { productVersion: string; releaseMetadataDigest: string; releaseMetadataDigestSource: ReleaseMetadataDigestSource } {
   let productVersion = 'unknown';
   const pdCliPkgPath = path.join(pluginDir, 'pd-cli', 'package.json');
   if (existsSync(pdCliPkgPath)) {
@@ -1993,23 +1995,27 @@ function resolveInstallerPayloadIdentity(pluginDir: string): { productVersion: s
   }
   const assetManifestPath = path.join(pluginDir, '_release', 'manifest.json');
   let releaseMetadataDigest: string;
+  let releaseMetadataDigestSource: ReleaseMetadataDigestSource;
   if (existsSync(assetManifestPath)) {
     releaseMetadataDigest = sha256File(assetManifestPath);
+    releaseMetadataDigestSource = 'manifest';
   } else if (existsSync(pdCliPkgPath)) {
     releaseMetadataDigest = sha256File(pdCliPkgPath);
+    releaseMetadataDigestSource = 'package_manifest';
   } else {
     releaseMetadataDigest = createHash('sha256').update('installer-payload-missing-identity').digest('hex');
+    releaseMetadataDigestSource = 'fallback';
   }
-  return { productVersion, releaseMetadataDigest };
+  return { productVersion, releaseMetadataDigest, releaseMetadataDigestSource };
 }
 
 /** Opens one installer transaction: `~/.pd/transactions/<transactionId>.jsonl`. */
 export function beginInstallerJournal(pluginDir: string): InstallerJournal {
-  const { productVersion, releaseMetadataDigest } = resolveInstallerPayloadIdentity(pluginDir);
+  const { productVersion, releaseMetadataDigest, releaseMetadataDigestSource } = resolveInstallerPayloadIdentity(pluginDir);
   const transactionId = `install-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const journalPath = path.join(getPdDir(), 'transactions', `${transactionId}.jsonl`);
   const releaseId = `bundled-${productVersion}-${releaseMetadataDigest.slice(0, 12)}`;
-  return { transactionId, journalPath, releaseId, productVersion, releaseMetadataDigest, degraded: false, lastState: null };
+  return { transactionId, journalPath, releaseId, productVersion, releaseMetadataDigest, releaseMetadataDigestSource, degraded: false, lastState: null };
 }
 
 /**
@@ -2032,6 +2038,7 @@ export function journalInstallerTransition(
     releaseId: journal.releaseId,
     productVersion: journal.productVersion,
     releaseMetadataDigest: journal.releaseMetadataDigest,
+    releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
     // The installer model has no active.json generation chain yet (it never
     // writes active.json); generation continuity becomes ReleaseManager's
     // responsibility when it takes over mutations (PRI-661).
