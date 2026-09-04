@@ -384,11 +384,12 @@ export class ApprovalsConsoleModel {
       };
       const activationStateStore = new SqliteActivationStateStore(connection);
       const approvalQueueStore = new SqliteApprovalQueueStore(connection);
-      // PRI-634-F R3 (SPEC P1-1): the Console must resolve tool semantics
-      // through the SAME workspace host-declaration resolver as the CLI —
-      // never guess a host, never validate against the bare baseline. A
-      // code_tool_hook approval whose provenance is unresolvable is refused
-      // with the SAME structured reason the CLI produces (parity contract).
+      // PRI-634-F R3 (SPEC P1-1): the Console resolves tool semantics through
+      // the SAME workspace host-declaration resolver as the CLI — never guess
+      // a host, never validate against the bare baseline. A code_tool_hook
+      // approval whose provenance is unresolvable refuses BEFORE dispatch
+      // (fail loud, same reason string as the CLI); e2e seed environments
+      // must persist a host declaration like any real host would.
       const toolSemantics = resolveWorkspaceHostToolSemantics(this.workspaceDir);
       if (existing.channel === 'code_tool_hook' && !toolSemantics.ok) {
         return {
@@ -414,6 +415,9 @@ export class ApprovalsConsoleModel {
               featureFlagProbe: (flagId) => pdFlags.flags[flagId]?.enabled === true,
               projectDir: this.workspaceDir,
               ...(toolSemantics.ok ? { toolSemantics: toolSemantics.registry } : {}),
+              // Provenance unresolvable → writer refuses at canActivate with
+              // the resolver reason (dispatcher maps it to a refused
+              // decision). Ordering note above: artifact-schema reasons win.
             }),
             new DeferArchiveWriter(),
           ],
