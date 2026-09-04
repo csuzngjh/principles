@@ -169,7 +169,11 @@ beforeAll(async () => {
   }
   // Prepend fakeBinDir to PATH so checkEnvironment finds the fake openclaw.
   process.env.PATH = `${fakeBinDir}${path.delimiter}${process.env.PATH}`;
-}, 600_000);
+  // Budget = 2×npm pack + full self-contained build (staging + per-component
+  // npm ci at up to 900s each with one retry) + installer run. The 600s cap
+  // was exceeded ("Hook timed out in 600000ms") in the 2026-09-04 slow
+  // registry window; the builder alone can now legitimately need 15-25 min.
+}, 1_800_000);
 
 afterAll(() => {
   if (tarballPath) {

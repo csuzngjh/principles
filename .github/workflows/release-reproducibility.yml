@@ -44,7 +44,12 @@ permissions:
 jobs:
   quick-check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # 15m was exceeded (cancelled at 15m17s) during the 2026-09-04
+    # slow-registry window: the job serially runs full build + component
+    # npm ci across the payload (900s cap each after the registry-latency
+    # fix) + the install smoke. Budget 30m so a slow registry degrades the
+    # job's speed, not its verdict.
+    timeout-minutes: 30
     env:
       SOURCE_DATE_EPOCH: '1700000000'
     steps:
