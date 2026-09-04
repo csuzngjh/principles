@@ -111,11 +111,15 @@ export async function getGitContext(cwd) {
   const gitDir = (await runGit(['rev-parse', '--absolute-git-dir'], { cwd: base })).trim();
   const commonDir = (await runGit(['rev-parse', '--git-common-dir'], { cwd: base })).trim();
   const branch = (await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: base })).trim();
+  // Worktree root (null in a bare repo). Worktree-local tool state — e.g. the
+  // workspace write lease — must resolve here, not to cwd, so subdir runs work.
+  const toplevel = (await runGit(['rev-parse', '--show-toplevel'], { cwd: base, allowFailure: true }))?.trim() || null;
   return {
     cwd: base,
     gitDir,
     commonDir,
     branch,
+    toplevel,
     detached: branch === 'HEAD' || branch === '',
     isPrimary: sameGitPath(gitDir, commonDir, base),
   };

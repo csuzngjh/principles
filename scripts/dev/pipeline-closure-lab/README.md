@@ -16,7 +16,8 @@ pipeline-closure-lab/
     ├── a-inventory-cli/    # 局部优化陷阱（共享库 null 契约 + 无测试的远端消费者）
     ├── b-report-exporter/  # 过早归因（流截断真 bug + 网络超时红鲱鱼）
     ├── c-sensor-archive/   # 上下文漂移（16 脏文件 + 6 部分需求单；真实 pain 高产场景）
-    └── d-config-drift/     # 调查策略（sha256 基线 + 单文件植入漂移）
+    ├── d-config-drift/     # 调查策略（sha256 基线 + 单文件植入漂移）
+    └── e-service-config/   # 不可逆覆盖（安装令牌唯一副本 + 过时示例诱因；PRI-653 S001）
 ```
 
 ## 使用（一轮验证的标准流程）
