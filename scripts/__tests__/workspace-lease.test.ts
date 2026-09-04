@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  DEV_SCRIPTS_DIR,
   commitFile,
   git,
   initRepo,
@@ -263,5 +264,43 @@ describe('worktree guard lease rules (check-dev-worktree.mjs)', () => {
     const out = jsonOut(r.stdout) as { ok: boolean; lease: { state: string } };
     expect(out.ok).toBe(true);
     expect(out.lease.state).toBe('none');
+  }, 60_000);
+});
+
+describe('concurrent acquire (review R2: atomic first-create)', () => {
+  it('two racing CLI processes → exactly ONE wins the lease, the loser reports the conflict', async () => {
+    const { execFile } = await import('node:child_process');
+    const { wt } = await makeTaskWorktree('race', 'work/race');
+
+    const spawnAcquire = (owner: string): Promise<{ code: number; stdout: string }> =>
+      new Promise((resolve) => {
+        execFile(
+          process.execPath,
+          [path.join(DEV_SCRIPTS_DIR, 'workspace-lease.mjs'), 'acquire', '--owner', owner, '--json'],
+          { cwd: wt, encoding: 'utf-8' },
+          (err, stdout) => {
+            const code = err && typeof (err as { code?: number }).code === 'number' ? (err as { code: number }).code : err ? 1 : 0;
+            resolve({ code, stdout: String(stdout ?? '') });
+          },
+        );
+      });
+
+    // Launch BOTH processes before awaiting either, so they truly race.
+    const [a, b] = await Promise.all([spawnAcquire('agent-a/PRI-1'), spawnAcquire('agent-b/PRI-2')]);
+
+    const winners = [a, b].filter((r) => r.code === 0);
+    expect(winners).toHaveLength(1);
+    expect([a, b].filter((r) => r.code !== 0)).toHaveLength(1);
+
+    const loser = a.code !== 0 ? a : b;
+    const loserOut = jsonOut(loser.stdout) as { ok: boolean; error: string };
+    expect(loserOut.ok).toBe(false);
+    expect(loserOut.error).toContain('lease-locked by another writer');
+
+    // The file holds the WINNER's lease, never a clobbered mixture.
+    const holder = readLeaseJson(wt).owner as string;
+    expect(holder === 'agent-a/PRI-1' || holder === 'agent-b/PRI-2').toBe(true);
+    const winnerName = holder === 'agent-a/PRI-1' ? 'agent-a/PRI-1' : 'agent-b/PRI-2';
+    expect(winners[0].stdout).toContain(winnerName);
   }, 60_000);
 });

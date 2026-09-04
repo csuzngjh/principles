@@ -99,46 +99,84 @@ function writeLease(root, lease) {
 }
 
 /**
+ * Create the FIRST lease atomically: flag 'wx' (O_EXCL) makes the create
+ * exclusive across processes, so of two racing acquires exactly one wins and
+ * the loser re-reads the winner's ACTIVE lease and reports the conflict
+ * instead of silently overwriting it. Renewal of an EXISTING lease keeps the
+ * plain write (the holder already passed the same-owner check; a full
+ * compare-and-swap protocol would exceed this tool's cooperative scope).
+ */
+function createLeaseAtomically(root, lease) {
+  try {
+    fs.writeFileSync(leaseFilePath(root), JSON.stringify(lease, null, 2) + '\n', { flag: 'wx' });
+    return null;
+  } catch (err) {
+    if (err && err.code === 'EEXIST') return 'EEXIST';
+    throw err;
+  }
+}
+
+/**
  * Acquire (or renew) the write lease for `root`.
  * Succeeds when: no lease exists, the existing lease is expired, or the
  * existing ACTIVE lease has the same owner (renewal by the holding session).
  * Fails loudly when an ACTIVE lease is held by a different owner.
  */
 export function acquireLease(root, { owner, branch, ttlMs = DEFAULT_TTL_MS, now = Date.now() }) {
-  const current = readLease(root);
-  if (current.exists && !current.valid) {
-    return {
-      ok: false,
-      error: 'existing lease file is invalid: ' + current.error,
-      nextAction: 'Delete ' + leaseFilePath(root) + ' (or fix it) and retry.',
+  // Racing first-acquires are serialized by the exclusive create below: the
+  // loser of the create re-reads and re-evaluates against the winner's lease.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = readLease(root);
+    if (current.exists && !current.valid) {
+      return {
+        ok: false,
+        error: 'existing lease file is invalid: ' + current.error,
+        nextAction: 'Delete ' + leaseFilePath(root) + ' (or fix it) and retry.',
+      };
+    }
+    if (current.exists && leasePhase(current.lease, now) === 'active' && current.lease.owner !== owner) {
+      return {
+        ok: false,
+        error:
+          'workspace is lease-locked by another writer:\n' +
+          '    owner:     ' + current.lease.owner + '\n' +
+          '    branch:    ' + current.lease.branch + '\n' +
+          '    expiresAt: ' + current.lease.expiresAt,
+        nextAction:
+          'Do NOT write into this checkout (AGENTS.md §23A git-2). Coordinate with the holder, ' +
+          'wait for expiry, or — if you are human and have confirmed the holder is gone — delete ' +
+          leaseFilePath(root) + '. ' +
+          'Note: the DEFAULT owner is per-process (includes the pid) — pass the same --owner you ' +
+          'acquired with, or delete the lease file, when re-acquiring your own earlier session.',
+        conflict: current.lease,
+      };
+    }
+    const renewed = current.exists === true;
+    const lease = {
+      schema: LEASE_SCHEMA,
+      workspace: root,
+      owner,
+      branch,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + ttlMs).toISOString(),
     };
+    if (!renewed) {
+      const lostCreate = createLeaseAtomically(root, lease);
+      if (lostCreate !== null) {
+        continue; // A racing process created the lease first — re-read and re-evaluate.
+      }
+      return { ok: true, action: 'acquired', lease };
+    }
+    writeLease(root, lease);
+    return { ok: true, action: 'renewed', lease };
   }
-  if (current.exists && leasePhase(current.lease, now) === 'active' && current.lease.owner !== owner) {
-    return {
-      ok: false,
-      error:
-        'workspace is lease-locked by another writer:\n' +
-        '    owner:     ' + current.lease.owner + '\n' +
-        '    branch:    ' + current.lease.branch + '\n' +
-        '    expiresAt: ' + current.lease.expiresAt,
-      nextAction:
-        'Do NOT write into this checkout (AGENTS.md §23A git-2). Coordinate with the holder, ' +
-        'wait for expiry, or — if you are human and have confirmed the holder is gone — delete ' +
-        leaseFilePath(root) + '.',
-      conflict: current.lease,
-    };
-  }
-  const renewed = current.exists === true;
-  const lease = {
-    schema: LEASE_SCHEMA,
-    workspace: root,
-    owner,
-    branch,
-    createdAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + ttlMs).toISOString(),
+  // Unreachable in practice: three consecutive lost exclusive-creates mean
+  // three processes raced within microseconds. Fail loud rather than loop.
+  return {
+    ok: false,
+    error: 'could not acquire the lease: another process kept winning the exclusive create',
+    nextAction: 'Re-run acquire — the winner is now the active holder you will conflict with loudly.',
   };
-  writeLease(root, lease);
-  return { ok: true, action: renewed ? 'renewed' : 'acquired', lease };
 }
 
 /** Release the lease (idempotent — releasing an unleased workspace is ok). */

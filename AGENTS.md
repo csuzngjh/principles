@@ -1168,6 +1168,10 @@ boundary. Semantics:
 * acquire fails loudly while an ACTIVE lease is held by another owner;
 * same-owner acquire renews; leases expire after a TTL (default 4h) so a
   crashed holder never locks a checkout forever;
+* the DEFAULT owner is per-process (includes the pid) — the only portable
+  signal that distinguishes two concurrent agent sessions of the same OS
+  user. Pass a stable `--owner` when the same session will re-acquire
+  (renew) across separate CLI invocations;
 * the worktree guard fails on `lease-invalid` (malformed file) and
   `lease-branch-mismatch` (active lease + different branch checked out);
 * acquiring on the primary checkout is refused (same
