@@ -57,6 +57,26 @@ function tarExtractDir(
   const ci = args ? args.indexOf('-C') : -1;
   return ci >= 0 && args ? args[ci + 1] : undefined;
 }
+/**
+ * Create a REAL directory link (junction on win32, dir symlink elsewhere) —
+ * the exact artifact npm/installers create in dependency slots. Returns false
+ * when the environment denies link creation; callers skip the test (same
+ * pattern as the path-traversal symlink test).
+ */
+function makeDirLink(target: string, linkPath: string): boolean {
+  try {
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    if (process.platform === 'win32') {
+      fs.symlinkSync(target, linkPath, 'junction');
+    } else {
+      fs.symlinkSync(path.relative(path.dirname(linkPath), target), linkPath, 'dir');
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 
 function createMockRequest(method: string, body?: unknown): IncomingMessage {
   const bodyStr = body !== undefined ? JSON.stringify(body) : '';
@@ -1988,7 +2008,7 @@ describe('handleUpdateRoute', () => {
       expect(probeError).toContain('@principles/host-runtime');
     });
 
-    it('does not overwrite an existing host-runtime resolution link (fresh-install no-op)', async () => {
+    it('keeps an existing correct host-runtime resolution link (fresh-install no-op)', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
@@ -2024,10 +2044,15 @@ describe('handleUpdateRoute', () => {
         }
       }) as unknown as typeof execSyncMock);
 
-      // Fresh-install state: npm install already created the resolution link
-      // (real dir with a marker stands in for the npm-created link).
-      fs.mkdirSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime'), { recursive: true });
-      fs.writeFileSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime', 'marker'), 'npm-created');
+      // Fresh-install state: npm install already created a REAL link in this
+      // slot (junction on Windows, dir symlink elsewhere). A physical marker
+      // directory here previously stood in for the link and locked in the
+      // PRI-665 wrong behavior — the incident shape itself.
+      const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+      const hostRuntimeDir = path.join(pluginDir, 'host-runtime');
+      fs.mkdirSync(path.join(hostRuntimeDir, 'dist'), { recursive: true });
+      fs.writeFileSync(path.join(hostRuntimeDir, 'dist', 'index.js'), 'old host-runtime');
+      if (!makeDirLink(hostRuntimeDir, slot)) return; // link creation denied — skip
       fs.writeFileSync(path.join(pluginDir, 'package.json'),
         JSON.stringify({ version: '1.0.0', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
 
@@ -2038,10 +2063,14 @@ describe('handleUpdateRoute', () => {
 
       const body = parseResponseBody<{ data: { success: boolean } }>(res);
       expect(body.data.success).toBe(true);
-      // The existing link is untouched...
-      expect(fs.existsSync(path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime', 'marker'))).toBe(true);
-      // ...but host-runtime content is still refreshed from the tarball
-      expect(fs.readFileSync(path.join(pluginDir, 'host-runtime', 'dist', 'index.js'), 'utf-8')).toBe('new host-runtime');
+      // The existing CORRECT link is kept — still a link, same target…
+      expect(fs.lstatSync(slot).isSymbolicLink()).toBe(true);
+      const resolvedLink = path.resolve(path.dirname(slot), fs.readlinkSync(slot));
+      expect(resolvedLink).toBe(hostRuntimeDir);
+      // …nothing needed quarantining…
+      expect(fs.readdirSync(path.dirname(slot)).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+      // …but host-runtime content is still refreshed from the tarball
+      expect(fs.readFileSync(path.join(hostRuntimeDir, 'dist', 'index.js'), 'utf-8')).toBe('new host-runtime');
     });
 
     it('aborts before swapping any package files when resolution links cannot be created (PRI-561 fail path)', async () => {
@@ -2498,4 +2527,241 @@ describe('Update source identity hardening and fixture isolation', () => {
     // No production file was copied (the staged bundle never landed).
     expect(fs.existsSync(path.join(pluginDir, 'dist', 'bundle.js'))).toBe(false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Resolution-link reconciliation (PRI-665, 2026-09-03 incident)
+//
+// A Console full update on a machine whose runtime node_modules held STALE
+// PHYSICAL copies of internal @principles/* dependencies (inherited from a
+// legacy install) kept those copies in place: the updater's link logic
+// treated "slot exists" as "done", so the new dist resolved the old
+// components and crashed at startup. These tests pin the reconciliation
+// semantics: correct links are kept, stale physical copies and wrong-target
+// links are quarantined and replaced, and a later failure restores them.
+// ---------------------------------------------------------------------------
+
+describe('Runtime resolution link reconciliation (PRI-665)', () => {
+  it('replaces a stale physical dependency copy with a canonical link (2026-09-03 incident)', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+          fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+          fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+            JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+          // A valid module so a REAL ESM import can distinguish the staged
+          // host-runtime from the stale copy through the reconciled link.
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const STAGED_HOST_RUNTIME = 1;');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // Incident state: the console's node_modules slot holds a STALE PHYSICAL
+    // copy of host-runtime (exporting the OLD symbol set).
+    const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+    fs.mkdirSync(path.join(slot, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(slot, 'dist', 'index.js'), 'export const STALE_HOST_RUNTIME = 1;');
+    fs.writeFileSync(path.join(pluginDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+    const req = createMockRequest('POST', {});
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+    const body = parseResponseBody<{ data: { success: boolean } }>(res);
+    expect(body.data.success).toBe(true);
+
+    // The slot must now be a LINK to the canonical host-runtime dir…
+    const slotLstat = fs.lstatSync(slot);
+    expect(slotLstat.isSymbolicLink(), 'the stale physical copy must be replaced by a link').toBe(true);
+    const resolvedLink = path.resolve(path.dirname(slot), fs.readlinkSync(slot));
+    expect(resolvedLink).toBe(path.join(pluginDir, 'host-runtime'));
+
+    // …and resolve the STAGED content through it.
+    expect(fs.readFileSync(path.join(slot, 'dist', 'index.js'), 'utf-8')).toBe('export const STAGED_HOST_RUNTIME = 1;');
+
+    // Success must clean the quarantine — no leftovers in the scope dir.
+    const scopeDir = path.dirname(slot);
+    expect(fs.readdirSync(scopeDir).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+
+    // End-to-end: a REAL Node ESM import from inside the deployed console
+    // dist must resolve the staged host-runtime through the link — the exact
+    // operation that crashed with the stale copy in place.
+    const { execFile } = await vi.importActual<typeof import('child_process')>('child_process');
+    const probePath = path.join(pluginDir, 'console', 'dist', '__probe_665__.mjs');
+    fs.writeFileSync(probePath, [
+      'const m = await import("@principles/host-runtime");',
+      'if (m.STAGED_HOST_RUNTIME !== 1) { console.error("stale copy resolved instead: " + JSON.stringify(Object.keys(m))); process.exit(3); }',
+    ].join('\n'));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        execFile(process.execPath, [probePath], { timeout: 15_000 }, (error) => (error ? reject(error) : resolve()));
+      });
+    } finally {
+      fs.rmSync(probePath, { force: true });
+    }
+  });
+
+  it('replaces a wrong-target link with the canonical link', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+          fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+          fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+            JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const STAGED_HOST_RUNTIME = 1;');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // The slot holds a link, but it points at a DECOY instead of the
+    // canonical host-runtime dir.
+    const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+    const decoyDir = path.join(pluginDir, 'decoy-host-runtime');
+    fs.mkdirSync(path.join(decoyDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(decoyDir, 'dist', 'index.js'), 'export const DECOY = 1;');
+    if (!makeDirLink(decoyDir, slot)) return; // link creation denied — skip
+    fs.writeFileSync(path.join(pluginDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+    const req = createMockRequest('POST', {});
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+    const body = parseResponseBody<{ data: { success: boolean } }>(res);
+    expect(body.data.success).toBe(true);
+    // The slot is repointed at the canonical host-runtime dir…
+    expect(fs.lstatSync(slot).isSymbolicLink()).toBe(true);
+    const resolvedLink = path.resolve(path.dirname(slot), fs.readlinkSync(slot));
+    expect(resolvedLink).toBe(path.join(pluginDir, 'host-runtime'));
+    // …resolves the staged content through it…
+    expect(fs.readFileSync(path.join(slot, 'dist', 'index.js'), 'utf-8')).toBe('export const STAGED_HOST_RUNTIME = 1;');
+    // …the decoy dir itself is untouched, and no quarantine leftovers remain.
+    expect(fs.readFileSync(path.join(decoyDir, 'dist', 'index.js'), 'utf-8')).toBe('export const DECOY = 1;');
+    expect(fs.readdirSync(path.dirname(slot)).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+  });
+
+  it('restores the quarantined copy when a later copy step fails (rollback)', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.120.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) {
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+            JSON.stringify({ version: '2.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+          fs.mkdirSync(path.join(dir, 'console', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'console', 'dist', 'server.js'), 'new console code');
+          fs.mkdirSync(path.join(dir, 'core', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'core', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+            JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+          fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const STAGED_HOST_RUNTIME = 1;');
+        }
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // Incident state: stale physical copy at the slot.
+    const slot = path.join(pluginDir, 'console', 'node_modules', '@principles', 'host-runtime');
+    fs.mkdirSync(slot, { recursive: true });
+    fs.writeFileSync(path.join(slot, 'stale-marker'), 'stale');
+    fs.writeFileSync(path.join(pluginDir, 'package.json'),
+      JSON.stringify({ version: '1.0.0', name: 'principles-disciple', dependencies: { 'better-sqlite3': '^13.0.3', '@principles/core': 'file:./core' } }));
+
+    // Fail a copy step that runs AFTER link reconciliation: the plugin copy
+    // (its staged dist/bundle.js is copied after the links are reconciled).
+    const realFs = await vi.importActual<typeof import('fs')>('fs');
+    vi.mocked(fs.copyFileSync).mockImplementation(((src: fs.PathLike, dest: fs.PathLike) => {
+      if (String(dest).endsWith('bundle.js')) {
+        throw Object.assign(new Error("EPERM: operation not permitted, copyfile 'bundle.js'"), { code: 'EPERM' });
+      }
+      return realFs.copyFileSync(src, dest);
+    }) as unknown as typeof fs.copyFileSync);
+
+    try {
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('file_locked');
+
+      // The stale physical copy is RESTORED at the slot — no half-migrated
+      // state (the quarantined-away old resolution is back in place).
+      const slotLstat = fs.lstatSync(slot);
+      expect(slotLstat.isDirectory()).toBe(true);
+      expect(slotLstat.isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(slot, 'stale-marker'), 'utf-8')).toBe('stale');
+      // The rollback consumed the quarantine entry.
+      expect(fs.readdirSync(path.dirname(slot)).some((entry) => entry.includes('update-quarantine'))).toBe(false);
+    } finally {
+      vi.mocked(fs.copyFileSync).mockImplementation(realFs.copyFileSync);
+    }
+  });
+
 });

@@ -1237,6 +1237,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
   - 2026-08-20 PRI-553: governance BDD treated non-empty body text as proof the SPA was ready. That signal was true before the initial `#/focus` redirect settled, so the delayed redirect could overwrite detail navigation; fixed by waiting for the canonical focus URL and then asserting the detail URL.
 
+  - 2026-09-04 PRI-665 misdiagnosis (diagnosis-side sibling of the non-unique-signal class): the 1.229.0 upgrade crash was attributed to a "host-runtime barrel missing 8 exports" based on three checks — rg symbol search, tarball regex, and an import-scanner using string `includes()`. All three are text-level symbol matching and share ONE blind spot: none can see `export *` re-export chains, so the published barrel (19 `export *` lines, all 8 symbols verified loadable via real Node import) was misdiagnosed as broken. The real cause: stale physical `@principles/*` dependency copies in the runtime `node_modules` shadowing the canonical packages (Node resolves the NEAREST node_modules first). Lesson: root-cause claims about module interfaces require a REAL Node import as evidence, must first establish which physical copy the runtime actually resolves, and must treat multiple checks sharing the same mechanism as ONE data point, not independent corroboration.
+
 ---
 
 **[ERR-089]** | Fix addresses primary failure path but leaves sibling failure branches with stale state, wrong command path, or CLI contract violation
