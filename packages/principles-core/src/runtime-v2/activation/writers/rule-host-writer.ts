@@ -289,6 +289,7 @@ export class RuleHostWriter implements ChannelWriter {
           ok: false,
           reason: `rule_reliability_${failure.reasonCode}:${failure.layer} — ${failure.evidence} (nextAction=${failure.nextAction})`,
           riskLevel: 'high',
+          failure,
         };
       }
     }
@@ -319,6 +320,7 @@ export class RuleHostWriter implements ChannelWriter {
         ok: false,
         reason: reasonParts.join(' — '),
         riskLevel: 'high',
+        ...(gateResult.failure ? { failure: gateResult.failure } : {}),
       };
     }
 

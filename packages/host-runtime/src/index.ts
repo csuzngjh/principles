@@ -25,6 +25,9 @@ export * from './host-liveness-contract.js';
 // auto-consumer + Companion workspace worker call the same cycle).
 export * from './internalization-consumer-governance.js';
 export * from './internalization-consumer-cycle.js';
+// PRI-634-F R2: durable host-authored tool declaration — hosts persist, host-
+// neutral consumers (pd-cli) load to build the same registry as production.
+export * from './host-tool-declaration.js';
 // PRI-634 A3: workspace-scoped critical telemetry — canonical implementation
 // moved from openclaw-plugin so both hosts share ONE semantics.
 export * from './workspace-telemetry-emitter.js';

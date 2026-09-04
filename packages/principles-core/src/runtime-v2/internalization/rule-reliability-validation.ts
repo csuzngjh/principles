@@ -61,38 +61,83 @@ export interface RuleReliabilityValidationResult {
 }
 
 /**
- * V1 validation (SPEC §9): every tool name the rule declares or tests against
- * must resolve in the registry. Unknown names are an adapter-layer defect —
- * the rule would reference a tool the host can never dispatch, so replay
- * passing would be meaningless (SPEC SC1).
+ * V1 validation (SPEC §9, revised in R2 per review): every tool name the rule
+ * declares or tests against must be HOST-DISPATCHABLE — resolvable is not
+ * enough. Three verdicts:
+ *
+ *   tool_alias_unknown          — resolves nowhere (not even baseline);
+ *   tool_not_host_dispatchable  — semantically classifiable (baseline generic
+ *                                 vocabulary like `execute_command`, or a
+ *                                 read/search family the host gate never
+ *                                 routes) but NOT declared by the host layer.
+ *                                 A rule matching this name passes replay
+ *                                 against fictional inputs and never fires
+ *                                 in production — reject (SC1).
+ *   tool_registry_host_layer_missing — the registry carries no host
+ *                                 declaration at all; existence cannot be
+ *                                 verified. Configuration defect, fail loud
+ *                                 rather than silently skipping the check.
  */
 export function validateRuleReliability(
   input: RuleReliabilityValidationInput,
 ): RuleReliabilityValidationResult {
-  const unknownAffected = input.affectedTools.filter((tool) => input.toolSemantics.lookup(tool) === null);
+  if (!input.toolSemantics.hasHostLayer) {
+    return {
+      valid: false,
+      failure: {
+        layer: 'adapter',
+        reasonCode: 'tool_registry_host_layer_missing',
+        evidence: 'ToolSemanticRegistry has no host-declared layer — tool existence cannot be verified against the production host',
+        nextAction: 'supply a host-declared registry (host mappings), or run the host once so its declaration is persisted for the workspace',
+      },
+    };
+  }
+
+  const classify = (tool: string): 'ok' | 'unknown' | 'not_dispatchable' => {
+    if (input.toolSemantics.hasHostTool(tool)) return 'ok';
+    return input.toolSemantics.lookup(tool) === null ? 'unknown' : 'not_dispatchable';
+  };
+
+  const unknownAffected = input.affectedTools.filter((tool) => classify(tool) === 'unknown');
+  const notDispatchableAffected = input.affectedTools.filter((tool) => classify(tool) === 'not_dispatchable');
   if (unknownAffected.length > 0) {
     return {
       valid: false,
       failure: {
         layer: 'adapter',
         reasonCode: 'tool_alias_unknown',
-        evidence: boundEvidence(`affectedTools not in tool semantic registry: ${unknownAffected.join(', ')}`),
-        nextAction: 'update the host tool semantic mapping, or regenerate the rule against known tools',
+        evidence: boundEvidence(`affectedTools unknown to any tool vocabulary: ${unknownAffected.join(', ')}`),
+        nextAction: 'regenerate the rule using real host tool names (see the host tool semantic declaration)',
       },
     };
   }
-
-  const unknownCaseTools = input.goldenTraceCaseToolNames.filter(
-    (tool) => input.toolSemantics.lookup(tool) === null,
-  );
-  if (unknownCaseTools.length > 0) {
+  if (notDispatchableAffected.length > 0) {
     return {
       valid: false,
       failure: {
         layer: 'adapter',
-        reasonCode: 'tool_alias_unknown',
-        evidence: boundEvidence(`goldenTraceCases toolName not in tool semantic registry: ${unknownCaseTools.join(', ')}`),
-        nextAction: 'update the host tool semantic mapping, or regenerate golden trace cases against known tools',
+        reasonCode: 'tool_not_host_dispatchable',
+        evidence: boundEvidence(
+          `affectedTools semantically classifiable but NOT dispatched by this host (never reach the RuleHost gate): ${notDispatchableAffected.join(', ')}`,
+        ),
+        nextAction: 'regenerate the rule against host-declared tool names — generic LLM vocabulary and read/search-family names cannot trigger rules in production',
+      },
+    };
+  }
+
+  const unknownCaseTools = input.goldenTraceCaseToolNames.filter((tool) => classify(tool) === 'unknown');
+  const notDispatchableCaseTools = input.goldenTraceCaseToolNames.filter((tool) => classify(tool) === 'not_dispatchable');
+  if (unknownCaseTools.length > 0 || notDispatchableCaseTools.length > 0) {
+    const parts: string[] = [];
+    if (unknownCaseTools.length > 0) parts.push(`unknown: ${unknownCaseTools.join(', ')}`);
+    if (notDispatchableCaseTools.length > 0) parts.push(`not host-dispatchable: ${notDispatchableCaseTools.join(', ')}`);
+    return {
+      valid: false,
+      failure: {
+        layer: 'adapter',
+        reasonCode: unknownCaseTools.length > 0 ? 'tool_alias_unknown' : 'tool_not_host_dispatchable',
+        evidence: boundEvidence(`goldenTraceCases toolName ${parts.join('; ')}`),
+        nextAction: 'regenerate golden trace cases against host-declared tool names so replay exercises inputs production can actually produce',
       },
     };
   }

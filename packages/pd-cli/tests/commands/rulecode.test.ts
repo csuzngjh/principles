@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import os from 'os';
 import { loadGoldenTraceCases } from '../../src/commands/rulecode.js';
+import { vi } from 'vitest';
 
 const VALID_CASES = JSON.stringify([
   {
@@ -131,5 +132,45 @@ describe('loadGoldenTraceCases containment', () => {
     const result = loadGoldenTraceCases(p, wsDir);
     expect(result.error).toBeDefined();
     expect(result.error?.reason).toContain('not valid JSON');
+  });
+});
+
+
+// ── PRI-634-F R2 (review P2): replay --json carries structured failure ──────
+
+describe('handleRulecodeReplay — structured failure attribution on --json', () => {
+  it('a failing replay surfaces {layer, reasonCode, evidence, nextAction} in the JSON output', async () => {
+    const { handleRulecodeReplay } = await import('../../src/commands/rulecode.js');
+    const code = [
+      'const evaluate = (input) => {',
+      '  return { decision: "allow", matched: false, reason: "never blocks" };',
+      '};',
+    ].join(String.fromCharCode(10));
+    // The --golden-trace CLI input is a JSON ARRAY of cases (not the
+    // persisted GoldenTrace envelope) — see loadGoldenTraceCases.
+    const cases = [
+      { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { file_path: '/prod.env' }, expectedDecision: 'block' },
+      { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { file_path: '/repo/a.ts' }, expectedDecision: 'allow' },
+    ];
+    const traceFile = path.join(os.tmpdir(), 'pd-replay-failure-trace.json');
+    fs.writeFileSync(traceFile, JSON.stringify(cases), 'utf8');
+
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { logs.push(String(args[0])); });
+    try {
+      await handleRulecodeReplay({ code, goldenTrace: traceFile, json: true });
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(traceFile, { force: true });
+    }
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+    const output = JSON.parse(logs[0]);
+    expect(output.status).toBe('failed');
+    expect(output.decision).toBe('rejected_validation_failed');
+    expect(output.failure).toBeDefined();
+    expect(output.failure.layer).toBe('rule');
+    expect(output.failure.reasonCode).toBe('replay_decision_mismatch');
+    expect(typeof output.failure.nextAction).toBe('string');
   });
 });

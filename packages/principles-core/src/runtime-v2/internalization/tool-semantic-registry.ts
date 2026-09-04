@@ -32,8 +32,8 @@ export interface ToolSemanticRegistry {
   readonly version: 1;
   /**
    * Explicit lookup. Returns `null` when the raw name has no mapping in
-   * baseline + host layers — validation contexts use this to fail explicitly
-   * (SPEC §9 Tool存在性) instead of silently treating unknown as 'other'.
+   * baseline + host layers — classification contexts use this to distinguish
+   * "known kind" from "unknown".
    */
   lookup(rawToolName: string): CanonicalKind | null;
   /**
@@ -42,6 +42,19 @@ export interface ToolSemanticRegistry {
    * never throw on an unmapped tool name).
    */
   resolve(rawToolName: string): CanonicalKind;
+  /**
+   * PRI-634-F R2 (review P1): SEMANTIC RESOLVABILITY IS NOT HOST EXISTENCE.
+   * True iff the raw name is declared by the HOST layer — i.e. the host
+   * actually dispatches this tool name AND routes it to the RuleHost gate.
+   * Core-baseline membership (generic LLM vocabulary like `execute_command`,
+   * or read/search names the OpenClaw hook never routes) never counts as
+   * existence evidence: a rule matching such a name passes replay against
+   * fictional inputs while never firing in production — exactly the failure
+   * class PRI-634-F exists to eliminate.
+   */
+  hasHostTool(rawToolName: string): boolean;
+  /** True iff this registry carries a host-declared layer at all. */
+  readonly hasHostLayer: boolean;
 }
 
 export interface ToolSemanticMappingValidationResult {
@@ -109,6 +122,7 @@ export function buildToolSemanticRegistry(
   hostMappings?: readonly ToolSemanticMappingV1[],
 ): { ok: true; registry: ToolSemanticRegistry } | { ok: false; errors: readonly string[] } {
   let merged: Readonly<Record<string, CanonicalKind>>;
+  const hostNames = new Set<string>();
   if (hostMappings === undefined) {
     merged = baselineToolAlias;
   } else {
@@ -120,6 +134,7 @@ export function buildToolSemanticRegistry(
     for (const mapping of hostMappings) {
       // validateToolSemanticMappings guarantees own-property safety
       record[mapping.rawToolName] = mapping.canonicalKind;
+      hostNames.add(mapping.rawToolName);
     }
     merged = Object.freeze(record);
   }
@@ -128,6 +143,11 @@ export function buildToolSemanticRegistry(
     ok: true,
     registry: {
       version: 1,
+      hasHostLayer: hostNames.size > 0,
+      hasHostTool(rawToolName: string): boolean {
+        if (typeof rawToolName !== 'string') return false;
+        return hostNames.has(rawToolName);
+      },
       lookup(rawToolName: string): CanonicalKind | null {
         if (typeof rawToolName !== 'string') return null;
         // ERR-076: Object.hasOwn guards inherited Object.prototype keys

@@ -4,6 +4,7 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import type { HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
+import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
@@ -118,7 +119,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     const ingestionDiagnostics = ingestionEnabled
       ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
       : [];
-    const result = await createProductionHostRuntime({ hostKind: 'codex' }).dispatch(event);
+    const result = await createProductionHostRuntime({ hostKind: 'codex', toolSemantics: CODEX_TOOL_SEMANTICS }).dispatch(event);
     const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {

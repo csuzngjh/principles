@@ -34,16 +34,32 @@ describe('OPENCLAW_TOOL_SEMANTICS — host declaration', () => {
     }
   });
 
-  it('keeps core-baseline generic names resolvable (execute_command → execute)', () => {
-    // SPEC Phase 1 acceptance #1: the same execute_command resolves to execute
-    // on both the baseline (replay without host layer) and the host registry.
+  it('R2: semantic classification still resolves generic/read names via the baseline, but hasHostTool denies them', () => {
+    // Semantic resolvability (classification) and host dispatchability
+    // (existence) are SEPARATE axes (review P1): execute_command/read_file
+    // classify fine — and rules declared against them must still be REJECTED
+    // because OpenClaw never dispatches/routes them to the gate.
     expect(OPENCLAW_TOOL_SEMANTICS.resolve('execute_command')).toBe('execute');
+    expect(OPENCLAW_TOOL_SEMANTICS.resolve('read_file')).toBe('read');
     expect(OPENCLAW_TOOL_SEMANTICS.resolve('exec')).toBe('execute');
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('execute_command')).toBe(false);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('read_file')).toBe(false);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('grep')).toBe(false);
+  });
+
+  it('R2: every gate-routed tool family is host-declared (a rule on them can really fire)', () => {
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('shell')).toBe(true);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('cmd')).toBe(true);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('write_file')).toBe(true);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('delete_file')).toBe(true);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('sessions_spawn')).toBe(true);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostLayer).toBe(true);
   });
 
   it('unknown tools stay unknown for validation (lookup null) and other at runtime', () => {
     expect(OPENCLAW_TOOL_SEMANTICS.lookup('pd-status')).toBeNull();
     expect(OPENCLAW_TOOL_SEMANTICS.resolve('pd-status')).toBe('other');
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('pd-status')).toBe(false);
   });
 
   it('the declaration is derived from constants/tools.ts (one name list, two axes)', () => {

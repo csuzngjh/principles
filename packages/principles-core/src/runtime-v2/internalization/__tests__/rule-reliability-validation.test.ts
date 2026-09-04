@@ -36,48 +36,113 @@ const TRACE: GoldenTrace = {
   ],
 };
 
-describe('validateRuleReliability — SPEC §9 Tool存在性', () => {
-  it('adapter layer: unknown affectedTools fail with tool_alias_unknown', () => {
-    const result = validateRuleReliability({
-      affectedTools: ['write_file', 'execute_command'],
-      goldenTraceCaseToolNames: ['write_file'],
-      toolSemantics: registry(),
-    });
-    // execute_command is in the core baseline since PRI-634-F — use a name
-    // that is genuinely unknown to prove the failure path.
-    expect(result.valid).toBe(true);
+describe('validateRuleReliability — SPEC §9 Tool存在性 (R2: host-dispatchability)', () => {
+  // Registry mimicking the OpenClaw host layer: gate-reachable families only.
+  function openclawLikeRegistry() {
+    const built = buildToolSemanticRegistry([
+      { rawToolName: 'shell', canonicalKind: 'execute' },
+      { rawToolName: 'cmd', canonicalKind: 'execute' },
+      { rawToolName: 'bash', canonicalKind: 'execute' },
+      { rawToolName: 'write_file', canonicalKind: 'write' },
+      { rawToolName: 'edit_file', canonicalKind: 'write' },
+      { rawToolName: 'delete_file', canonicalKind: 'write' },
+      { rawToolName: 'sessions_spawn', canonicalKind: 'agent' },
+    ]);
+    if (!built.ok) throw new Error(built.errors.join('; '));
+    return built.registry;
+  }
 
-    const failing = validateRuleReliability({
-      affectedTools: ['write_file', 'totally_unknown_tool'],
-      goldenTraceCaseToolNames: ['write_file'],
-      toolSemantics: registry(),
-    });
-    expect(failing.valid).toBe(false);
-    expect(failing.failure?.layer).toBe('adapter');
-    expect(failing.failure?.reasonCode).toBe('tool_alias_unknown');
-    expect(failing.failure?.evidence).toContain('totally_unknown_tool');
-    expect(failing.failure?.nextAction).toContain('tool semantic mapping');
-  });
-
-  it('adapter layer: unknown goldenTraceCase toolNames fail too', () => {
+  it('R2 review regression: generic LLM alias execute_command is REJECTED (semantically classifiable ≠ host-dispatchable)', () => {
+    // Dogfood evidence: Artificer emitted execute_command in affectedTools;
+    // it resolves via the core baseline ('execute') but OpenClaw dispatches
+    // exec/shell/cmd — a rule matching it would pass replay and never fire.
     const result = validateRuleReliability({
-      affectedTools: ['write_file'],
-      goldenTraceCaseToolNames: ['write_file', 'fictional_tool'],
-      toolSemantics: registry(),
+      affectedTools: ['execute_command'],
+      goldenTraceCaseToolNames: ['bash'],
+      toolSemantics: openclawLikeRegistry(),
     });
     expect(result.valid).toBe(false);
     expect(result.failure?.layer).toBe('adapter');
-    expect(result.failure?.evidence).toContain('fictional_tool');
+    expect(result.failure?.reasonCode).toBe('tool_not_host_dispatchable');
+    expect(result.failure?.evidence).toContain('execute_command');
+    expect(result.failure?.nextAction).toContain('host-declared');
   });
 
-  it('valid declarations pass with host-layer names included', () => {
+  it('R2 review regression: real host tool shell is ACCEPTED', () => {
     const result = validateRuleReliability({
-      affectedTools: ['shell', 'write_file'],
+      affectedTools: ['shell'],
       goldenTraceCaseToolNames: ['shell', 'write_file'],
-      toolSemantics: registry(),
+      toolSemantics: openclawLikeRegistry(),
     });
     expect(result.valid).toBe(true);
     expect(result.failure).toBeUndefined();
+  });
+
+  it('R2 review regression: read_file is REJECTED with an explicit policy (real tool, but never routed to the RuleHost gate)', () => {
+    const result = validateRuleReliability({
+      affectedTools: ['read_file'],
+      goldenTraceCaseToolNames: ['read_file'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failure?.reasonCode).toBe('tool_not_host_dispatchable');
+    expect(result.failure?.evidence).toContain('read_file');
+  });
+
+  it('names unknown to ANY vocabulary fail with tool_alias_unknown', () => {
+    const result = validateRuleReliability({
+      affectedTools: ['totally_unknown_tool'],
+      goldenTraceCaseToolNames: ['bash'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failure?.reasonCode).toBe('tool_alias_unknown');
+  });
+
+  it('goldenTraceCases toolNames are held to the same host-dispatchability standard', () => {
+    const result = validateRuleReliability({
+      affectedTools: ['bash'],
+      goldenTraceCaseToolNames: ['bash', 'fictional_tool'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failure?.reasonCode).toBe('tool_alias_unknown');
+    expect(result.failure?.evidence).toContain('fictional_tool');
+
+    const generic = validateRuleReliability({
+      affectedTools: ['bash'],
+      goldenTraceCaseToolNames: ['bash', 'run_script'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(generic.valid).toBe(false);
+    expect(generic.failure?.reasonCode).toBe('tool_not_host_dispatchable');
+  });
+
+  it('dogfood-shaped mixed declaration (real + fictional + generic) is rejected with the most actionable reason', () => {
+    // Directly from the dogfood artifact: affectedTools mixed bash/shell/
+    // write_file (real) with remove_file/drop_table (fictional) and
+    // execute_command (generic alias).
+    const result = validateRuleReliability({
+      affectedTools: ['delete_file', 'bash', 'shell', 'execute_command', 'remove_file', 'drop_table', 'write_file'],
+      goldenTraceCaseToolNames: ['delete_file', 'bash'],
+      toolSemantics: openclawLikeRegistry(),
+    });
+    expect(result.valid).toBe(false);
+    // Unknown-everywhere names win the reasonCode (most actionable first).
+    expect(result.failure?.reasonCode).toBe('tool_alias_unknown');
+    expect(result.failure?.evidence).toContain('remove_file');
+  });
+
+  it('a registry without a host layer fails loud (configuration defect, no silent skip)', () => {
+    const baselineOnly = buildToolSemanticRegistry();
+    if (!baselineOnly.ok) throw new Error('baseline build failed');
+    const result = validateRuleReliability({
+      affectedTools: ['bash'],
+      goldenTraceCaseToolNames: ['bash'],
+      toolSemantics: baselineOnly.registry,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failure?.reasonCode).toBe('tool_registry_host_layer_missing');
   });
 });
 
