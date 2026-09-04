@@ -46,8 +46,6 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
 | ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358 |
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
-| ERR-041 | Install success reported when delivered components are incomplete | PRI-247 |
-| ERR-042 | Output reports requested config instead of actual disk state | PRI-247 |
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 | ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
@@ -694,30 +692,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-07-01 PR #1146 (compressed; full text → ERROR_ARCHIVE.md): bare npm `pd` shim fails under Windows `shell:false`; resolve the sibling `dist/index.js` and spawn via `process.execPath`.
   - 2026-06-03 PRI-299 (compressed; full text → ERROR_ARCHIVE.md): pd-cli imported better-sqlite3 without declaring it.
   - 2026-06-02 PRI-250 (compressed; full text → ERROR_ARCHIVE.md): `js-yaml`/`semver` in devDependencies (stripped by publish); undeclared better-sqlite3 for console bundle; `installBundledCore` never ran npm install.
-
----
-
-**[ERR-041]** | Install success reported when delivered components are incomplete
-
-- **What happened**: `install()` returned `success: true` and printed "Ready." when `components.console` was `not_deliverable`. The interactive output said the installation was complete, but a core product surface (owner review console) was missing. This created a contradiction: the installer claimed success while explicitly noting a release-blocking gap.
-- **Why it's wrong**: `success: true` means the full product contract is met. If any required component is not deliverable, the install is not successful. Reporting success with an undeliverable component misleads both users and automation. This is the same class as ERR-002 (catch-and-degrade swallows failure) and ERR-009 (silently skip invalid instead of failing loud) — the system claims everything is fine when it's not.
-- **Correct approach**: `success` must require ALL required components to be verified/delivered. If any component is `not_deliverable` or `failed`, `success` must be `false`. Interactive output must clearly distinguish full success ("Ready.") from partial success ("Runtime + CLI verified, but console is not yet deliverable"). The README must explicitly state what the installer delivers and what is a known gap.
-- **How to prevent**: When defining a component delivery contract, `success` must be a conjunction of ALL required component statuses. If any component is not verified, success is false. Add tests that verify: (1) each component failure makes success=false, (2) all components verified makes success=true, (3) interactive output matches the actual success state.
-- **Source**: PRI-247 / PR #721
-- **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-002, ERR-009. Recurred 2026-05-26 PRI-247 (PR #721): `bundle-plugin.mjs` silently skipped missing artifacts without exit(1). If `templates/` or `openclaw.plugin.json` was absent, the bundle would produce an incomplete tarball that passes CI but fails at runtime. Fixed by adding PLUGIN_REQUIRED/PD_CLI_REQUIRED arrays with process.exit(1) on missing items, and PLUGIN_OPTIONAL for items that skip with warning.
-
----
-
-**[ERR-042]** | Output reports requested config instead of actual disk state
-
-- **What happened**: The installer returned `enabledChannels: options.channels` in its result, but the actual feature-flags.yaml on disk might have different channels enabled (e.g., from a previous install). When rerunning with `--channels prompt`, the output said `enabledChannels: ['prompt']` but the disk still had all three MVP channels enabled because `generateFeatureFlagsConfig()` skipped writing when the file already existed.
-- **Why it's wrong**: The output is a contract with the caller. If it says `enabledChannels: ['prompt']` but the disk has `['prompt', 'code_tool_hook', 'defer_archive']`, the caller cannot trust the output. This is the same class as ERR-034 (canonical config not consumed by caller) — the output should reflect the source of truth (disk), not the input parameters.
-- **Correct approach**: (1) When `--channels` is specified, always rewrite `feature-flags.yaml` to match (no early return on existing file). (2) After writing, read the actual enabled channels from disk and return those in the output. (3) If preserving existing config, explicitly report `configuration_preserved` and read from disk.
-- **How to prevent**: When a function returns state that should reflect disk, always read from disk after writing — never return the input parameters as if they were the result. Add tests that: (1) write config, (2) modify config, (3) verify output matches disk, not input.
-- **Source**: PRI-247 / PR #721
-- **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-034
 
 ---
 
