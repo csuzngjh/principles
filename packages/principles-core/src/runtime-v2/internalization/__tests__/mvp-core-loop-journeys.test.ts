@@ -188,6 +188,64 @@ describe('Journey 5 — Evaluator needs_revision 无旁路 + repair reopen', () 
     tasks = await countTasks();
     expect([...tasks.keys()]).toContain('rollout_reviewer-j5-prompt');
   });
+
+  it('PRI-668: rollout needs_revision 重开父 artificer 后,级联 reopen 必须刷新 evaluator 的 artificer 依赖', async () => {
+    const evalId = 'evaluator-j5b-prompt';
+    const parentArtificerId = 'artificer-j5b-prompt';
+    const repairId = 'artificer-repair-evaluator-j5b-prompt-r1';
+    await createTask('scribe-j5b-prompt', 'scribe', meta({ correlationId: 'j5b' }));
+    await succeedWithDecision('scribe-j5b-prompt');
+    await createTask(parentArtificerId, 'artificer', meta({
+      dependencyTaskIds: ['scribe-j5b-prompt'], correlationId: 'j5b',
+    }));
+    await succeedWithDecision(parentArtificerId);
+    await createTask(evalId, 'evaluator', meta({
+      dependencyTaskIds: [parentArtificerId], correlationId: 'j5b',
+    }));
+    await succeedWithDecision(evalId, 'approved');
+    const seeded = await orchestrator.commitNextTaskProposal(evalId); // seeds rollout_reviewer
+    expect(seeded.decision).toBe('successor_created');
+    const rolloutId = 'rollout_reviewer-j5b-prompt';
+    await succeedWithDecision(rolloutId, 'needs_revision');
+
+    // repair 循环把 evaluator 依赖换到 repair 任务 (P0-D 既有行为)
+    await createTask(repairId, 'artificer', meta({
+      repairPayload: {
+        requiredChanges: ['fix guard clause'],
+        concerns: [],
+        previousScore: 0.4,
+        repairIteration: 1,
+        sourceArtificerArtifactId: 'pi-art-afix-j5b',
+        sourceEvaluatorTaskId: evalId,
+      },
+      dependencyTaskIds: ['scribe-j5b-prompt'],
+    }));
+    await succeedWithDecision(repairId);
+    await orchestrator.commitNextTaskProposal(repairId); // REOPEN_SOURCE_EVALUATOR: dep → repair
+    let evalTask = await stateManager.getTask(evalId);
+    let evalPi = hydratePITaskRecord(evalTask as TaskRecord);
+    expect(evalPi?.dependencyTaskIds).toContain(repairId); // P0-D 换依赖已生效
+    // 修复轮后的 evaluator 修订轮完成 (仍 needs_revision → repair 预算耗尽形态)
+    await succeedWithDecision(evalId, 'needs_revision');
+    // rollout 复核仍 needs_revision → governance reopen 父 artificer
+    // (模拟 createRolloutGovernanceDeps.reopenRevisionTarget 对 code_tool_hook 通道)
+    const reopened = await orchestrator.reopenTaskForRevision(parentArtificerId, {
+      reason: 'rollout_revision_iteration_1',
+      revisionCauseId: 'rollout-rollout_reviewer-j5b-prompt-r1',
+    });
+    expect(reopened.ok).toBe(true);
+    // 父 artificer 修订后重新完成 → commit 触发对 evaluator 的级联 reopen
+    await succeedWithDecision(parentArtificerId);
+    const cascade = await orchestrator.commitNextTaskProposal(parentArtificerId);
+    expect(['successor_reopened', 'revision_reopen_noop']).toContain(cascade.decision);
+
+    // PRI-668 断言: evaluator 的 artificer 依赖必须已刷新为刚完成的父 artificer,
+    // 不得仍钉在陈旧的 repair 任务上 (陈旧依赖 = 修订永不收敛根因)
+    evalTask = await stateManager.getTask(evalId);
+    evalPi = hydratePITaskRecord(evalTask as TaskRecord);
+    expect(evalPi?.dependencyTaskIds).toContain(parentArtificerId);
+    expect(evalPi?.dependencyTaskIds).not.toContain(repairId);
+  });
 });
 
 describe('Journey 6 — Repair 耗尽 → needs_human_review,零副作用', () => {
