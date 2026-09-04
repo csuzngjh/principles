@@ -152,7 +152,8 @@ describe('handleRulecodeReplay — structured failure attribution on --json', ()
       { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { file_path: '/prod.env' }, expectedDecision: 'block' },
       { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { file_path: '/repo/a.ts' }, expectedDecision: 'allow' },
     ];
-    const traceFile = path.join(os.tmpdir(), 'pd-replay-failure-trace.json');
+    const traceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-replay-'));
+    const traceFile = path.join(traceDir, 'golden-trace-cases.json');
     fs.writeFileSync(traceFile, JSON.stringify(cases), 'utf8');
 
     const logs: string[] = [];
@@ -161,7 +162,7 @@ describe('handleRulecodeReplay — structured failure attribution on --json', ()
       await handleRulecodeReplay({ code, goldenTrace: traceFile, json: true });
     } finally {
       spy.mockRestore();
-      fs.rmSync(traceFile, { force: true });
+      fs.rmSync(traceDir, { recursive: true, force: true });
     }
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;

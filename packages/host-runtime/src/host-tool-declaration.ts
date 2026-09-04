@@ -17,7 +17,7 @@
  * never degrades to baseline silently (rc-3/rc-9).
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import {
   validateToolSemanticMappings,
@@ -54,8 +54,7 @@ export function saveHostToolDeclaration(
   declaration: HostToolDeclaration,
 ): { ok: boolean; reason?: string } {
   try {
-    const dir = path.join(workspaceDir, '.pd');
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
     const payload = JSON.stringify({
       version: declaration.version,
       hostKind: declaration.hostKind,
@@ -65,7 +64,21 @@ export function saveHostToolDeclaration(
     if (Buffer.byteLength(payload, 'utf8') > MAX_DECLARATION_BYTES) {
       return { ok: false, reason: `host tool declaration exceeds ${MAX_DECLARATION_BYTES} bytes` };
     }
-    writeFileSync(declarationPath(workspaceDir), payload, 'utf8');
+    // Atomic replace via a mkdtemp-unique staging directory (exclusive,
+    // unpredictable creation — the sanctioned pattern for writing into a
+    // possibly-shared workspace location): hosts re-declare on every startup
+    // while host-neutral consumers may read concurrently — a torn or
+    // half-written declaration must never be observable.
+    const dir = path.join(workspaceDir, '.pd');
+    const finalPath = declarationPath(workspaceDir);
+    const stagingDir = mkdtempSync(path.join(dir, 'declaration-'));
+    try {
+      const tmpPath = path.join(stagingDir, HOST_TOOL_DECLARATION_FILENAME);
+      writeFileSync(tmpPath, payload, 'utf8');
+      renameSync(tmpPath, finalPath);
+    } finally {
+      rmSync(stagingDir, { recursive: true, force: true });
+    }
     return { ok: true };
   } catch (error: unknown) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
