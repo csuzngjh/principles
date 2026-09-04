@@ -428,7 +428,18 @@ export async function runInternalizationConsumerCycle(
     // Issue 2: forward effectiveConfig so runners can resolve feature flags
     // (e.g. `artificer_output_retry`) — mirrors the diagnostician wiring
     // (ADR-0019). Flag-off / absent = legacy behavior.
-    const runnerOptions = { owner, runtimeKind, effectiveConfig: configResult.effective };
+    // PRI-670: also forward the profile-resolved timeout as the runner
+    // deadline — before, runtimeProfile.timeoutMs only reached the adapter as
+    // a per-request timeout and the runner deadline stayed hardcoded at 300s,
+    // so slow/local models could never finish dreamer/evaluator stages.
+    // runtimeConfigResult.timeoutMs is profile-first with a 300s default —
+    // behavior only changes for workspaces that declare a larger timeoutMs.
+    const runnerOptions = {
+      owner,
+      runtimeKind,
+      effectiveConfig: configResult.effective,
+      timeoutMs: runtimeConfigResult.timeoutMs,
+    };
 
     // PRI-634 A3: workspace-scoped telemetry sink for the evaluator runner.
     // Constructed here (per-wake, workspaceDir in scope) so events from THIS

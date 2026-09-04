@@ -573,11 +573,30 @@ export class InternalizationOrchestrator {
           reason: 'revision_cause_already_materialized',
         };
       }
+      // PRI-668: 修订波级联必须刷新 successor 的 artificer 依赖。
+      // repair 完成路径 (:477) 把 evaluator 的依赖换成 artificer-repair 任务;
+      // 其后 rollout needs_revision reopen 父 artificer 重跑出**新**产物,但若
+      // 级联 reopen 不换依赖,evaluator buildContext 永远读陈旧 repair 任务的
+      // artifact,修订预算被旧输入烧光 (修订永不收敛根因)。判定: successor 是
+      // evaluator 且其依赖中的 artificer 不是刚完成的 taskId 时,镜像
+      // REOPEN_SOURCE_EVALUATOR 的 replaceArtificerDependencyWith 语义。
+      let cascadeReplaceArtificerDependencyWith: string | undefined;
+      if (succPi && proposal.taskKind === 'evaluator') {
+        const staleArtificerDep = succPi.dependencyTaskIds.some(
+          (depId) => depId !== taskId && depId.startsWith('artificer'),
+        );
+        if (staleArtificerDep) {
+          cascadeReplaceArtificerDependencyWith = taskId;
+        }
+      }
       const reopened = await this.reopenTaskForRevision(successorTaskId, {
         reason: 'upstream_revision_cascade',
         // B (外部复核): causal idempotency — 同一 upstream revision wave 的
         // reconciliation/commit 重放不得再次 reopen 或递增 revisionCount。
         revisionCauseId: cascadeCauseId,
+        ...(cascadeReplaceArtificerDependencyWith !== undefined
+          ? { replaceArtificerDependencyWith: cascadeReplaceArtificerDependencyWith }
+          : {}),
       });
       if (reopened.ok) {
         if (reopened.reason === 'idempotent_replay_same_revision') {

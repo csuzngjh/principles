@@ -18,6 +18,7 @@ import {
   TestDoubleRuntimeAdapter,
 } from '@principles/core/runtime-v2';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
+import { resolveRuntimeConfigFromPdConfig, isRuntimeConfigError } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
@@ -422,15 +423,18 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   const runtimeKind = opts.runtime ?? 'config';
   const runnerKind = opts.runner ?? 'dreamer';
 
-  // Resolve effective timeout: CLI flag > runner default (300_000)
+  // Resolve effective timeout (PRI-670): CLI flag > runtimeProfile.timeoutMs
+  // (via the shared resolver, same value the auto-consumer now forwards) >
+  // 300s default. Before, the profile timeout only reached the adapter and
+  // the runner deadline was hardcoded 300s — slow/local models could never
+  // finish dreamer/evaluator stages.
   const cliTimeoutMs = opts.timeoutMs;
   if (cliTimeoutMs !== undefined && (!Number.isFinite(cliTimeoutMs) || cliTimeoutMs <= 0)) {
     console.error(`Error: --timeout-ms must be a positive integer, got: ${opts.timeoutMs}`);
     process.exitCode = 1;
     return;
   }
-  const defaultRunnerTimeoutMs = 300_000;
-  const effectiveTimeoutMs = cliTimeoutMs ?? defaultRunnerTimeoutMs;
+  const FALLBACK_RUNNER_TIMEOUT_MS = 300_000;
 
   if (runtimeKind === 'test-double' && !opts.allowTestDouble) {
     console.error('Error: test-double runtime mutates real queue state (leases tasks, marks them succeeded with empty output).');
@@ -453,6 +457,19 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   // (e.g. `artificer_output_retry`). Mirrors rulehost-pipeline-runner.
   const configLoad = loadPdConfig(workspaceDir);
   const effectiveConfig: EffectivePdConfig | undefined = configLoad.ok ? configLoad.effective : configLoad.defaults;
+
+  // PRI-670: profile timeout fallback for the runner deadline. The shared
+  // resolver reads the diagnostician binding (the binding ALL peer stages
+  // share today) — on any resolution error, fall back to the 300s default
+  // rather than refusing the run: the flag-off/legacy behavior was 300s.
+  let profileTimeoutMs: number | undefined;
+  if (effectiveConfig) {
+    const resolved = resolveRuntimeConfigFromPdConfig(effectiveConfig, (name) => process.env[name]);
+    if (!isRuntimeConfigError(resolved)) {
+      profileTimeoutMs = resolved.timeoutMs;
+    }
+  }
+  const effectiveTimeoutMs = cliTimeoutMs ?? profileTimeoutMs ?? FALLBACK_RUNNER_TIMEOUT_MS;
 
   try {
     const orchestrator = new InternalizationOrchestrator(

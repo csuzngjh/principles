@@ -786,6 +786,87 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.effectiveTimeoutMs).toBe(300_000);
   });
 
+  it('PRI-670: profile timeoutMs is the runner deadline when --timeout-ms not provided', async () => {
+    // The shared resolver returns the diagnostician binding's runtimeProfile
+    // timeout (mocked here to 600_000 — the local-llamacpp lab shape). Without
+    // the PRI-670 fix the runner deadline stayed hardcoded at 300s and the
+    // profile value only reached the adapter as a per-request timeout.
+    const coreModule = await import('@principles/core/runtime-v2');
+    vi.mocked(coreModule.resolveRuntimeConfigFromPdConfig).mockReturnValue({
+      runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY', timeoutMs: 600_000, agentId: 'main',
+    } as never);
+
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-pt',
+      taskKind: 'dreamer',
+    });
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-pt',
+      runId: 'run-pt',
+      artifactId: 'pi-art-pt',
+      resultRef: 'dreamer://run-pt',
+      contextHash: 'ctx-pt',
+      output: { valid: true, taskId: 'task-dreamer-pt', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    try {
+      await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+      const DreamerRunnerMock = vi.mocked(coreModule.DreamerRunner);
+      const lastCall = DreamerRunnerMock.mock.calls[DreamerRunnerMock.mock.calls.length - 1];
+      if (lastCall) {
+        const opts = lastCall[1] as { timeoutMs?: number };
+        expect(opts.timeoutMs).toBe(600_000);
+      }
+      const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+      expect(output.effectiveTimeoutMs).toBe(600_000);
+    } finally {
+      vi.mocked(coreModule.resolveRuntimeConfigFromPdConfig).mockReturnValue({
+        runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
+        apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main',
+      } as never);
+    }
+  });
+
+  it('PRI-670: --timeout-ms still wins over the profile timeoutMs', async () => {
+    const coreModule = await import('@principles/core/runtime-v2');
+    vi.mocked(coreModule.resolveRuntimeConfigFromPdConfig).mockReturnValue({
+      runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
+      apiKeyEnv: 'TEST_API_KEY', timeoutMs: 600_000, agentId: 'main',
+    } as never);
+
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-pt2',
+      taskKind: 'dreamer',
+    });
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-pt2',
+      runId: 'run-pt2',
+      artifactId: 'pi-art-pt2',
+      resultRef: 'dreamer://run-pt2',
+      contextHash: 'ctx-pt2',
+      output: { valid: true, taskId: 'task-dreamer-pt2', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    try {
+      await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, timeoutMs: 120_000, json: true });
+      const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+      expect(output.effectiveTimeoutMs).toBe(120_000);
+    } finally {
+      vi.mocked(coreModule.resolveRuntimeConfigFromPdConfig).mockReturnValue({
+        runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
+        apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main',
+      } as never);
+    }
+  });
+
   it('timeout source extracted from failureReason on timeout', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
