@@ -83,6 +83,11 @@ function createMockResponse(): ServerResponse {
     statusCode: 200,
     _headers: {} as Record<string, string>,
     _body: '',
+    // PRI-659: the MutationController annotates responses via setHeader.
+    setHeader: vi.fn(function (this: ServerResponse, name: string, value: string) {
+      res._headers[name.toLowerCase()] = value;
+      return res;
+    }),
     writeHead: vi.fn(function (this: ServerResponse, statusCode: number, headers?: Record<string, string>) {
       res.statusCode = statusCode;
       if (headers) {
