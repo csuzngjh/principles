@@ -29,6 +29,8 @@ export * from './internalization-consumer-cycle.js';
 // neutral consumers (pd-cli/pd-console) resolve through the ONE resolver.
 export * from './host-tool-declaration.js';
 export * from './host-tool-semantic-resolver.js';
+// PRI-661: ONE evaluator replay-context builder for host-neutral CLI entries.
+export * from './evaluator-runtime-context.js';
 // PRI-634 A3: workspace-scoped critical telemetry — canonical implementation
 // moved from openclaw-plugin so both hosts share ONE semantics.
 export * from './workspace-telemetry-emitter.js';
