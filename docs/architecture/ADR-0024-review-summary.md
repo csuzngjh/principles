@@ -1,6 +1,6 @@
 # ADR-0024 Review Summary — PD Runtime Mutation Governance
 
-> **Subject**: [ADR-0024: PD Runtime Mutation Governance](../adr/0024-pd-runtime-mutation-governance.md)（Status: **Proposed**，待 Owner 裁决）
+> **Subject**: [ADR-0024: PD Runtime Mutation Governance](../adr/0024-pd-runtime-mutation-governance.md)（Status: **Accepted**，Owner 2026-09-04 裁决 D-1–D-7，决议记录见 ADR §5）
 > **Date**: 2026-09-04 · **Mode**: 只读调查 + 架构决策文档，零生产代码修改
 > **Input**: ADR-0023（Accepted，PR #1496 已合并）+ 全仓写入入口扫描
 

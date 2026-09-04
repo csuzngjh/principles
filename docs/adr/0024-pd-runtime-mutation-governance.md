@@ -2,12 +2,12 @@
 
 | Field | Value |
 | --- | --- |
-| Status | **Proposed**（待 Owner 裁决） |
+| Status | **Accepted** |
 | Date | 2026-09-04 |
 | Supersedes | 无 |
 | Superseded by | 无 |
 | Related | ADR-0020（宿主适配器与多平台抽象）、ADR-0023（PD Installation Architecture Decisions，Accepted）、`packages/create-principles-disciple/src/update/*`（transactional update 子系统）、`packages/pd-cli/src/commands/runtime-artifact-repair.ts`（PRI-555 phase 1） |
-| Decision evidence | 尚无 —— 本 ADR 为 Proposed，等待 Owner 对 §2.1–2.5 逐项裁决 |
+| Decision evidence | Owner 于 2026-09-04 在 ADR-0024 审查后逐项裁决 D-1 至 D-7（见 §5 决议记录） |
 
 ---
 
@@ -38,22 +38,22 @@ ADR-0023（Accepted）Decision 1 规定 `~/.pd/runtime` 是 canonical runtime，
 
 ---
 
-## 2. Decision（Proposed —— 以下各项为分析后的建议，待 Owner 裁决）
+## 2. Decision（Accepted —— 以下各项已经 Owner 裁决，决议记录见 §5）
 
 ### 2.1 Mutation Authority（谁可以修改 runtime）
 
-**建议规则：**
+**规则（D-1 已裁决）：**
 
-1. **Installer**（`create-principles-disciple`）：唯一拥有**整体安装/重装**权限的写入者。必须：写入前完成 digest 校验（现状已满足，F1）、写入 journal（现状缺失，见 2.2）、保留可回滚备份。
-2. **Updater**：**不允许多于一个实现**。现状存在两套（installer 内的更新路径与 console Web updater，F1/F2），这是 ADR-0023 未预见的第三写入者。建议：console Web updater 收敛为 ReleaseManager 的**触发器与进度呈现层**，不得自行执行文件变更；在 ReleaseManager 退出 shadow mode 之前，console updater 属于**存量债务**而非合法长期形态（其零 digest 校验是不可接受项）。
+1. **Installer**（`create-principles-disciple`）：唯一的 **direct artifact deployment authority**（直接产物部署权威）——唯一拥有整体安装/重装写权限的组件。必须：写入前完成 digest 校验（现状已满足，F1）、写入 journal（现状缺失，见 2.2）、保留可回滚备份。采用 "direct artifact deployment authority" 而非 "only writer" 的措辞，是为 ReleaseManager 采纳（ADR-0023 P4 dual-slot）预留正确的概念位置：ReleaseManager 将来调度部署时通过 installer/journal 纪律落盘，而不与本条冲突。
+2. **Updater**：**不允许多于一个实现**。现状存在两套（installer 内的更新路径与 console Web updater，F1/F2），这是 ADR-0023 未预见的第三写入者。**已裁决（D-1）：console Web updater 收敛为 ReleaseManager 的触发器与进度呈现层，不得自行执行任何 runtime 文件变更**；在 ReleaseManager 退出 shadow mode 之前，console updater 属于**存量债务**而非合法长期形态（其零 digest 校验是不可接受项）。
 3. **Repair tool**：见 2.3。
 4. 其余一切组件（Agent、Adapter、Console 其余部分、Companion、用户脚本）：**零写入**，与 ADR-0023 Decision 1 一致。Companion 已证实只写自身状态文件（F12，见审查报告）。
 
-**裁决点**：是否接受"console updater 必须收敛为触发器"作为约束性规则（影响 Web UI 更新功能的实现路线）。
+**决议记录**：D-1 = 接受"console updater 必须收敛为触发器"作为约束性规则（Owner 2026-09-04 裁决）。
 
 ### 2.2 Mutation Transaction Model（事务纪律）
 
-**建议规则：任何对 `~/.pd/runtime` 的写入，必须是一次可审计的事务，至少记录：**
+**规则（D-2、D-6 已裁决）：任何对 `~/.pd/runtime` 的写入，必须是一次可审计的事务（D-2：journal 为所有 mutation 的强制契约，含 installer），至少记录：**
 
 - `actor`（写入者身份：installer / updater / repair-executor）
 - `reason`（触发原因：install / update / reinstall / rollback / repair / recovery）
@@ -62,9 +62,11 @@ ADR-0023（Accepted）Decision 1 规定 `~/.pd/runtime` 是 canonical runtime，
 - `after digest`（写入后内容的 digest）
 - `rollback point`（备份路径或 dual-slot 槽位标识）
 
-**实现基线已存在**：`transaction-journal.ts` 的 11 态状态机 + `JournalTransition` + 恢复感知读取完全覆盖上述字段语义，`TransactionKind` 枚举（update / reinstall / explicit_downgrade / rollback / legacy_migration / recovery）只需**追加 `repair`**。建议不新建第二套机制（AGENTS.md P4：One Source of Truth），而是把 journal 的消费范围从"仅 legacy-migration"扩大为"所有 mutation 强制"。
+**实现基线已存在**：`transaction-journal.ts` 的 11 态状态机 + `JournalTransition` + 恢复感知读取完全覆盖上述字段语义，`TransactionKind` 枚举（update / reinstall / explicit_downgrade / rollback / legacy_migration / recovery）只需**追加 `repair`**。不新建第二套机制（AGENTS.md P4：One Source of Truth），而是把 journal 的消费范围从"仅 legacy-migration"扩大为"所有 mutation 强制"。
 
-**裁决点**：journal 的存放位置与读取权限（建议：`~/.pd/` 下、随 runtime 备份一起轮换、对 Owner 只读可见）。
+**决议记录**：
+- **D-2** = journal 是所有 runtime mutation 的强制契约（含 installer；installer 补 journal 写入为后续实施任务）。
+- **D-6** = journal 存放于 **`~/.pd/`**（runtime 作用域），随 runtime 备份一起轮换，对 Owner 只读可见。
 
 ### 2.3 Repair Tool Boundary（修复工具边界）
 
@@ -76,16 +78,19 @@ ADR-0023（Accepted）Decision 1 规定 `~/.pd/runtime` 是 canonical runtime，
 | **B. 生成 plan 后执行**（plan 与 execute 分离） | 计划阶段可审计、可 diff、可拒绝；PRI-555 phase 1 已实现 plan 侧且质量良好（歧义标 `needs_human_review`、只读连接、不猜） | 仍需定义执行器的授权与纪律 | 中 |
 | **C. 需要 Owner approval** | 人是最便宜的最终裁决者；治理系统"Owner-governed"的产品定位要求关键变更可归因于 Owner | Owner 不在场时无法自愈 | 低，但牺牲自动化 |
 
-**建议：B + C 组合，分两级。**
+**决定：B + C 组合，分两级（D-3 / D-4 / D-5 已裁决）。**
 
-- **默认路径（plan → approval → execute）**：`runtime-artifact-repair` 继续只产出 plan（现状不变）；新增的执行器**必须**满足：只消费 plan 文件（不自行检测）、逐条与 journal 记录对应、写入用 installer 同款 backup-swap 与 digest 校验、执行前要求 Owner 显式批准（CLI 交互确认或批准文件）。
-- **受限自动路径（远期，默认关闭）**：仅当修复动作满足"可证明幂等 + 单文件 + digest 精确匹配已知好值"时才允许自动执行，且仍写 journal。该开关的引入本身需要一份后续决策。
+- **默认路径（plan → Owner approval → execute）**：`runtime-artifact-repair` 继续只产出 plan（现状不变）；新增的执行器**必须**满足：只消费 plan 文件（不自行检测）、逐条与 journal 记录对应、写入用 installer 同款 backup-swap 与 digest 校验、执行前要求 Owner 显式批准（CLI 交互确认或批准文件）。
+- **受限自动路径**：**D-5 = 自动修复禁用**。仅当修复动作满足"可证明幂等 + 单文件 + digest 精确匹配已知好值（exact digest recovery）"时，未来方可考虑启用自动执行，且仍写 journal。该开关的引入本身需要一份后续单独决策。
 
-**裁决点**：执行器放在哪个包（建议 `create-principles-disciple`，与 installer 共享 swap/journal 基建，避免第三处实现）；`repair` 是否需要与 `update` 同级的兼容性 preflight（console updater 已有 legacy rule contract preflight 可参考，F 值见审查报告）。
+**决议记录**：
+- **D-3** = repair 工作流固定为 plan → Owner approval → execute。
+- **D-4** = repair executor 落点包为 `create-principles-disciple`，与 installer 共享 swap/journal 基建，避免第三处实现。
+- **D-5** = 自动修复默认关闭；未来仅在"可证明幂等的精确 digest 恢复"场景下另行决策引入。
 
 ### 2.4 Failure Model（失败语义）
 
-**建议规则：**
+**规则（随本 ADR 整体 Accepted）：**
 
 1. **任何 mutation 失败时，runtime 必须保持在上一个已验证状态**——要么事务尚未开始（最常见），要么备份恢复完成（`installer.ts:587-590` 的恢复路径即此模式的雏形）。禁止"失败后留下部分写入"作为终态。
 2. **部分状态只允许存在于 journal 可见的窗口内**：`transaction-journal.ts` 的 staged / probed / activated 中间态 + `readTransactionJournalForRecovery()` 的恢复感知读取，就是为"进程死于事务中途"设计的。任何新写入者接入 journal 即自动获得该语义。
@@ -94,18 +99,18 @@ ADR-0023（Accepted）Decision 1 规定 `~/.pd/runtime` 是 canonical runtime，
 
 ### 2.5 Audit Model（审计义务）
 
-**建议规则：**
+**规则（D-7 已裁决）：**
 
 1. 每次事务的**终态迁移**（confirmed / rolled_back / refused / failed）必须追加到人类可读的 history 流。基线已存在：`update-history.ts` 的 `appendHistoryEvent`，且 workspace `.pd/update-history.json` 已在实际运行中产生（见审查报告 F13）。
 2. **journal 与 history 职责分离**：journal 面向机器恢复（状态机、可重放），history 面向 Owner 审阅（何时、谁、为什么、结果）。不合并为一份（P4 允许派生读模型，但二者语义不同，非重复）。
-3. **console updater 的私有 history（`routes/update-history.ts`）必须收敛到同一实现**，消除双份审计源。
+3. **console updater 的私有 history（`routes/update-history.ts`）必须收敛到同一实现（D-7）**，消除双份审计源（console 改造为后续任务）。
 4. 审计记录为 append-only；清理策略（保留多少天/多少条）不属于本 ADR。
 
 ---
 
 ## 3. Non-Goals
 
-本 ADR **不执行、不授权**以下事项（均属后续 implementation tasks，须在本 ADR 转 Accepted 后另行立项）：
+本 ADR **不执行、不授权**以下事项（均属后续 implementation tasks，在本 ADR 已 Accepted 的前提下另行立项）：
 
 - 修复 2026-09-03 污染的 runtime 文件（`core/dist/index.js`、`plugin/dist/bundle.js` 两处占位哑弹仍未恢复）；
 - 修改 repair tool 代码（包括为 `runtime-artifact-repair` 增加 confirm 执行路径）；
@@ -126,14 +131,18 @@ ADR-0023（Accepted）Decision 1 规定 `~/.pd/runtime` 是 canonical runtime，
 
 ---
 
-## 5. Owner 裁决清单
+## 5. Owner 决议记录
 
-| # | 问题 | 建议方向 | 影响 |
+> **Decision evidence**：Owner 于 2026-09-04 在审阅 ADR-0024（Proposed，commit `e1526d45`）及其审查报告后，逐项裁决 D-1 至 D-7 如下。全部建议方向均被接受，其中 D-5 收紧为"自动修复禁用，未来仅限可证明幂等的精确 digest 恢复"。
+
+| # | 问题 | **决议** | 影响 |
 | --- | --- | --- | --- |
-| D-1 | console Web updater 是否收敛为 ReleaseManager 触发器（禁止自行写文件） | 是 | Web UI 更新功能实现路线 |
-| D-2 | journal 是否成为所有 mutation 的强制契约（含 installer） | 是 | installer 需补 journal 写入（后续任务） |
-| D-3 | repair executor 的批准模式 | plan → Owner approval → execute | PRI-555 phase 2 设计前提 |
-| D-4 | repair executor 落点包 | create-principles-disciple | 与 installer 共享基建 |
-| D-5 | 受限自动修复是否引入 | 远期、默认关闭 | 后续单独决策 |
-| D-6 | journal 存放位置与轮换策略 | `~/.pd/` 下，随备份轮换 | 实施细节 |
-| D-7 | history 收敛为单一实现 | 是 | console 需改造（后续任务） |
+| D-1 | console Web updater 是否收敛为 ReleaseManager 触发器（禁止自行写文件） | **接受**：console updater 收敛为 ReleaseManager 的触发器/呈现层，不得直接修改 runtime | Web UI 更新功能实现路线；console 改造为后续任务 |
+| D-2 | journal 是否成为所有 mutation 的强制契约（含 installer） | **接受**：所有 runtime mutation 必须走 transaction journal | installer 需补 journal 写入（后续任务） |
+| D-3 | repair executor 的批准模式 | **接受**：plan → Owner approval → execute | PRI-555 phase 2 设计前提 |
+| D-4 | repair executor 落点包 | **接受**：create-principles-disciple | 与 installer 共享基建 |
+| D-5 | 受限自动修复是否引入 | **接受并收紧**：自动修复禁用；未来仅限可证明幂等的精确 digest 恢复（exact digest recovery），且需后续单独决策 | 后续单独决策 |
+| D-6 | journal 存放位置与轮换策略 | **接受**：`~/.pd/` 下，runtime 作用域，随备份轮换 | 实施细节 |
+| D-7 | history 收敛为单一实现 | **接受**：单一 history 实现 | console 需改造（后续任务） |
+
+**措辞澄清（Owner 指示）**：ADR-0023 Decision 1 语境下的"installer 是唯一写入者"在本 ADR 中统一表述为 **"installer is the only direct artifact deployment authority"（installer 是唯一直接产物部署权威）**，为 ReleaseManager adoption 预留概念空间，避免未来冲突（见 §2.1 第 1 条）。
