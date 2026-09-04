@@ -42,6 +42,20 @@ For unsolicited adjacent opportunities:
 
 > record them as follow-up candidates; do not automatically implement them.
 
+## 1.1 Installed Runtime Boundary — Hard Rule
+
+The following directories are **owned by the installer** (`npx create-principles-disciple`) and the running system. They are NOT part of this repository, even though they contain files with identical names and layout (`dist/server.js`, `pd-cli/dist/index.js`, …):
+
+* `~/.pd/runtime/` — the installed canonical runtime (console, core, host-runtime, pd-cli, plugin);
+* `~/.openclaw/extensions/principles-disciple/` — the OpenClaw plugin shell (its `core` is a symlink into the canonical runtime);
+* `<workspace>/.pd/` — runtime state of a PD workspace (state.db, config, evidence).
+
+**Agents and developers MUST NOT create, modify, or delete files under these paths.** The only legitimate writer is the installer/updater.
+
+To change installed behavior: edit this repository, rebuild, and let the installer publish. To debug console/plugin behavior: run the dev server or CLI from this repository — never patch an installed file "just to try".
+
+Incident 2026-09-03: `~/.pd/runtime/console/dist/server.js` was overwritten with a 16-byte natural-language placeholder outside any install run. Every subsequent PD Companion launch failed with the misleading `console_exited_with_code_1` until the file was restored from the repository build. Root cause class: identical-path confusion on a combined dev+prod machine, enabled by an unprotected install directory.
+
 ---
 
 # 2. Engineering Constitution
