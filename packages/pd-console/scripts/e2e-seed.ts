@@ -51,6 +51,10 @@ fs.writeFileSync(
       { rawToolName: 'write_file', canonicalKind: 'write' },
       { rawToolName: 'edit', canonicalKind: 'write' },
       { rawToolName: 'edit_file', canonicalKind: 'write' },
+      // The promotion gate's neutral probe for owner_review_access dispatches
+      // a tool of the same name (OPENCLAW_HOST_LIVENESS_CONTRACT) — a rule in
+      // scope for it must pass the gate, so the seed host declares it.
+      { rawToolName: 'owner_review_access', canonicalKind: 'other' },
     ],
     declaredAt: new Date().toISOString(),
   }),
