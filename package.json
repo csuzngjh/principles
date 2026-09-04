@@ -26,6 +26,7 @@
     "dev:worktree:check": "node scripts/dev/check-dev-worktree.mjs",
     "dev:worktree:cleanup": "node scripts/dev/cleanup-task-worktree.mjs",
     "dev:closure-lab": "node scripts/dev/pipeline-closure-lab/generate.mjs",
+    "dev:evolution-evidence": "node scripts/dev/pipeline-evolution/collect-evidence.mjs",
     "test:scripts": "cd scripts && vitest run",
     "ci:impact": "node scripts/ci/impact.mjs",
     "test:website": "npm test --workspace=@principles/website",
