@@ -68,6 +68,7 @@ import type {
 } from '@principles/core/runtime-v2';
 import { createHash } from 'node:crypto';
 import { loadPdConfig } from './pd-config-loader.js';
+import { createEvaluatorRuntimeContext } from '@principles/host-runtime';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
 import { compileDemoRule } from './demo-rule-compiler.js';
 
@@ -385,6 +386,21 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       return rejectedResult(opts.painId, stages, 'code_rule_capability enabled but artificerAdapter not provided');
     }
     onProgress('adversarial_loop', 'start');
+    // PRI-661: the loop's evaluator replay must use the SAME production gate
+    // context as the consumer cycle and the activation gate (workspace root +
+    // durable host tool registry). The previous sandbox-only gateDeps could
+    // pass generation-time replay and fail the production activation gate on
+    // the same workspace — the drift class PRI-634-F closed elsewhere.
+    // Unresolvable provenance fails the loop LOUD (never a silent baseline
+    // fallback — ERR-114), mirroring the artificerAdapter-not-provided failure
+    // precedent below.
+    const evaluatorContext = createEvaluatorRuntimeContext({ workspaceDir: opts.workspaceDir });
+    if (!evaluatorContext.ok) {
+      const refusalReason = `${evaluatorContext.reason} — ${evaluatorContext.nextAction}`;
+      stages.push({ name: 'adversarial_loop', status: 'failed', reason: refusalReason });
+      onProgress('adversarial_loop', 'failed', refusalReason);
+      return rejectedResult(opts.painId, stages, `evaluator_runtime_context_unresolvable: ${evaluatorContext.reason} (nextAction: ${evaluatorContext.nextAction})`);
+    }
     const artificerRunner = new ArtificerRunner(
       {
         stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore,
@@ -405,7 +421,11 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
         artifactStore,
         workspaceDir: opts.workspaceDir,
       }),
-      { ...runnerOptsFor(agentAdapters.evaluator), gateDeps: createSandboxGateDeps() },
+      // PRI-661: production gate context (workspace root + host tool registry
+      // from durable provenance) — replaces the previous sandbox-only gate
+      // deps so generation-time replay verdicts match the activation gate on
+      // the same workspace. Options argument (2nd), never deps (1st).
+      { ...runnerOptsFor(agentAdapters.evaluator), gateDeps: evaluatorContext.gateDeps },
     );
 
     const loopResult = await runAdversarialLoop({
