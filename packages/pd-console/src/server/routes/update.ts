@@ -144,6 +144,40 @@ function logLegacyBackupMigration(source: string): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Read the identity of a staged release package.
+ *
+ * Returns undefined when the file is missing, malformed, or when the package
+ * does not self-identify as principles-disciple with a valid semver version
+ * (rc-1/rc-2: unknown JSON is validated through guards, never a type
+ * assertion).
+ *
+ * Refusing an identity-less staged package BEFORE any production copy turns
+ * silent runtime corruption into a loud, structured error (rc-9). Regression
+ * from 2026-09-03: a stub tarball carrying only a fake version with no
+ * package name was copied into the real ~/.pd/runtime, which made the update
+ * page report a false "already latest" and blocked every future update. A
+ * real principles-disciple / create-principles-disciple tarball always
+ * carries name + valid semver.
+ */
+function readStagedPackageIdentity(pkgPath: string): { name: string; version: string } | undefined {
+  try {
+    const raw = fs.readFileSync(pkgPath, 'utf-8');
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return undefined;
+    if (parsed.name !== 'principles-disciple') return undefined;
+    if (typeof parsed.version !== 'string' || semver.valid(parsed.version) === null) return undefined;
+    return { name: parsed.name, version: parsed.version };
+  } catch {
+    return undefined;
+  }
+}
+
+const STAGED_PACKAGE_REFUSAL_MESSAGE =
+  'Update source is not a valid principles-disciple release (package missing identity or valid version).';
+const STAGED_PACKAGE_REFUSAL_NEXT_ACTION =
+  'Try the update again later, or run the official installer (npx create-principles-disciple) to repair PD.';
+
+/**
  * Recursively copy a directory tree.
  *
  * skipDirs: directory names to skip at every recursion level (e.g. node_modules).
@@ -553,6 +587,29 @@ async function doApplyUpdate(
     execFileSync('tar', ['xzf', 'package.tgz', '--strip-components=1'], { cwd: tempDir, stdio: 'pipe' });
     fs.unlinkSync(tarballPath);
 
+    // 3.5 Staged-package identity guard (2026-09-03 regression): refuse a
+    // tarball that does not name itself principles-disciple with a valid
+    // version BEFORE any production byte is copied — the incident stub
+    // carried no name. A real release always carries both.
+    if (readStagedPackageIdentity(path.join(tempDir, 'package.json')) === undefined) {
+      if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      if (backupPath && fs.existsSync(backupPath)) fs.rmSync(backupPath, { recursive: true, force: true });
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: toVersion ?? 'unknown',
+        success: false,
+        kind: 'refusal',
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      });
+      return {
+        success: false,
+        message: STAGED_PACKAGE_REFUSAL_MESSAGE,
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      };
+    }
+
     // 4. Compute diff and apply.
     // Fix 3: we ONLY apply modified + added files. We deliberately skip ALL
     // deletions — the tarball (principles-disciple) only contains dist/,
@@ -930,6 +987,30 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     // gateway is stopped or any production file is copied.
     const newPkgPath = path.join(tempDir, 'plugin', 'package.json');
     const stagedVersion = readCurrentVersion(path.join(tempDir, 'plugin'));
+
+    // Staged-package identity guard (2026-09-03 regression): the staged plugin
+    // must self-identify as principles-disciple with a valid version before
+    // the gateway is stopped or any production file is copied. The incident
+    // stub carried only a fake version with no package name.
+    if (readStagedPackageIdentity(path.join(tempDir, 'plugin', 'package.json')) === undefined) {
+      if (tempDir && fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: stagedVersion ?? 'unknown',
+        success: false,
+        kind: 'refusal',
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+      });
+      return {
+        success: false,
+        message: STAGED_PACKAGE_REFUSAL_MESSAGE,
+        reason: 'staged_package_invalid',
+        nextAction: STAGED_PACKAGE_REFUSAL_NEXT_ACTION,
+        requiresRestart: false,
+      };
+    }
+
     const progressed =
       fromVersion !== 'unknown' &&
       stagedVersion !== undefined &&
