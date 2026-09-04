@@ -76,6 +76,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-096 | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal | fix/installer-gateway-lock |
 | ERR-099 | Defensive ternary alternate for a contract-impossible empty state shipped uncovered — codecov/patch gate fails; prefer a branch-free join that degrades to the legacy format | PR #1341 |
 | ERR-112 | Sentinel value satisfies a downstream structural check while the operator success criterion measures generation, not admission — Owner input silently lost and reported as success | PRI-642 |
+| ERR-113 | Generator reset/write/deploy loops leak stale state when cleanup base, write base, and residue-enumeration base are three different directories | PRI-634-F |
 
 ---
 
@@ -748,8 +749,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 108 |
-| Last updated | 2026-08-28 |
+| Total lessons | 109 |
+| Last updated | 2026-09-03 |
 | Top category | Schema & Type |
 | Recurring errors | 58 |
 
@@ -1620,3 +1621,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-642 (production-escaped; live-DB contrast experiment 2026-09-01, remediation branch 2026-09-02)
 - **Date**: 2026-09-02
 - **Recurrence**: None (first root-cause recording of the sentinel+wrong-dimension-success compound)
+---
+
+**[ERR-113]** | Generator reset/write/deploy loops leak stale state when the cleanup base, write base, and residue-enumeration base are three different directories
+
+- **What happened**: PRI-634-F review round (2026-09-03). The lab generator's canonical mode gained "reset scenario dirs before writing" (stale files break fixed file-count ground truth), but the `writeScenarioFiles()` call kept the OLD parent root — generated files landed in the scenarios/ root while the reset had emptied the real dirs. Separately, deploy mode enumerated the SOURCE directory to decide which TARGET subtrees to reset — scenario B's `data/`/`out/` artifacts exist only in the target after a prior round, so the second deployment leaked them into a "fresh" copy. Two residue channels, one root cause: cleanup base, write base, and residue-enumeration base were never asserted to be the same directory.
+- **Why it's wrong**: Reset-then-write loops share one directory base across ALL operations; any asymmetry re-creates the stale-state problem the reset was added to solve. The leak is invisible to per-file assertions (every WRITTEN file is byte-correct — only the FILE SET is wrong), and manifests pinning per-file hashes but not the file-set count cannot catch it.
+- **Generalized failure mode**: Whenever code both deletes and rewrites files under a tree — fixture generators, installers, cache rebuilders, backup rotators — enumerate residue from the SAME base the writer used, and assert the post-run file SET against a manifest.
+- **Correct approach**: One `base` threaded through `reset(base)` → `write(base, files)` → `verify(listFiles(base) == manifest)`; for copy-to-target flows enumerate the TARGET (artifacts exist only where runs happened, never in pristine sources) and filter by relative path with BOTH separator spellings on Windows.
+- **How to prevent**: In review of any `rmSync` + `write*` pair, name the variable holding each operation's base — three different values is a bug. Under 30 seconds: after a generator rebuild, `git status` must show ONLY expected paths; untracked strays at a parent level are leaked writes.
+- **Regression guard**: PRI-634-F lab `generate.mjs` — rebuild with a planted rogue file (must vanish); redeploy a target containing scenario B `data/out` (must not survive); post-rebuild `git status --short` on the lab tree must be empty.
+- **Related ERRs**: ERR-098 (same base-confusion family, destructive direction), ERR-101 (stale-state reuse in test harnesses), ERR-040 (generated-copy staleness)
+- **Source**: PRI-634-F (fix commit b26d4dad; both leaks self-caught during fix verification, none escaped to main)
+- **Date**: 2026-09-03
+- **Recurrence**: None (first recording)

@@ -85,7 +85,10 @@ beforeAll(async () => {
     await timePhaseAsync('internal-build', () => execFileAsync(process.execPath, [builderEntry, '--output', internalPublicationDir], {
       cwd: INSTALLER_DIR,
       env: { ...process.env, SOURCE_DATE_EPOCH: '1700000000' },
-      timeout: 600_000,
+      // Registry-latency headroom (PRI-634-F CI): the builder serially runs
+      // per-component npm ci (900s cap each); 600s for the WHOLE build was
+      // exceeded in the 2026-09-04 slow-registry window. 30 min = hook budget.
+      timeout: 1_800_000,
     }));
     expect(COMPONENT_NAMES.filter(name => fs.existsSync(path.join(INSTALLER_DIR, name, 'node_modules')))).toEqual(before);
   }
