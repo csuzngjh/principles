@@ -37,6 +37,8 @@ import {
   createSandboxGateDeps,
 } from '../../src/services/rulehost-pipeline-runner.js';
 import { RuleHost } from '../../../openclaw-plugin/src/core/rule-host.js';
+import { OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../../../openclaw-plugin/src/constants/tool-semantics.js';
+import { saveHostToolDeclaration } from '@principles/host-runtime';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
 import {
@@ -204,6 +206,16 @@ let tmpDir = '';
 function makeTmpDir(): string {
   const dir = path.join(os.tmpdir(), `pd-xpkg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   fs.mkdirSync(dir, { recursive: true });
+  // PRI-661: the pipeline's evaluator replay resolves the production gate
+  // context from durable workspace provenance. Seed the declaration the real
+  // OpenClaw host would persist on startup (same mapping constants), so the
+  // generation-time replay and the activation gate see the same registry.
+  saveHostToolDeclaration(dir, {
+    version: 1,
+    hostKind: 'openclaw',
+    mappings: OPENCLAW_TOOL_SEMANTIC_MAPPINGS,
+    declaredAt: new Date().toISOString(),
+  });
   return dir;
 }
 
