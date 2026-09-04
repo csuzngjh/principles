@@ -101,7 +101,9 @@ describe('published @principles/codex-adapter bundle safety', () => {
 
     runNpm(
       ['install', '--ignore-scripts', '--omit=optional', '--no-package-lock', '--', adapterTarball, hostRuntimeTarball, installLayoutTarball, coreTarball],
-      { cwd: consumerDir, stdio: 'pipe', timeout: 180_000 },
+      // Registry-latency headroom (PRI-634-F CI): the 2026-09-04 slow window
+      // pushed this 4-tarball install past 180s.
+      { cwd: consumerDir, stdio: 'pipe', timeout: 420_000 },
     );
 
     // The packed tarball must ship the built hook entry and codec modules.
@@ -125,7 +127,9 @@ describe('published @principles/codex-adapter bundle safety', () => {
       ['--input-type=module', '--eval', `await import(${JSON.stringify(pathToFileURL(path.join(consumerDir, 'node_modules', '@principles', 'codex-adapter', 'dist', 'index.js')).href)})`],
       { cwd: consumerDir, stdio: 'pipe', timeout: 30_000 },
     );
-  }, 180_000);
+  // Hook budget = build + 4×npm pack + 4-tarball install, all serial and
+  // registry-bound; 3 minutes was exceeded in the 2026-09-04 slow window.
+  }, 600_000);
 
   afterAll(() => {
     if (tempDir) {
