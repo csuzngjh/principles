@@ -20,6 +20,7 @@ import { runRuleHostPipeline } from '../../src/services/rulehost-pipeline-runner
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
 import { RuntimeStateManager, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import { saveHostToolDeclaration } from '@principles/host-runtime';
 
 type StageFactory = (taskId: string, priorArtifactId?: string) => unknown;
 type EvaluatorFactory = (taskId: string, artificerArtifactId: string) => unknown;
@@ -192,6 +193,19 @@ let tmpDir = '';
 function makeTmpDir(): string {
   const dir = path.join(os.tmpdir(), `pd-pipe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   fs.mkdirSync(dir, { recursive: true });
+  // PRI-661: the pipeline's evaluator replay resolves the production gate
+  // context from durable workspace provenance — seed a declaration like every
+  // real host does on startup.
+  saveHostToolDeclaration(dir, {
+    version: 1,
+    hostKind: 'testhost',
+    mappings: [
+      { rawToolName: 'Write', canonicalKind: 'write' },
+      { rawToolName: 'Edit', canonicalKind: 'write' },
+      { rawToolName: 'Bash', canonicalKind: 'execute' },
+    ],
+    declaredAt: new Date().toISOString(),
+  });
   return dir;
 }
 
