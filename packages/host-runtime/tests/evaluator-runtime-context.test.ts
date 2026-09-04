@@ -80,7 +80,14 @@ const FAILING_TRACE = [
 ] as const;
 
 function replay(gateDeps: { evaluateInSandbox: (code: string, trace: unknown, opts?: unknown) => { success: boolean; failedCases: unknown[]; executionTimeMs?: number } }, code: string, cases: readonly unknown[]): unknown {
-  const result = gateDeps.evaluateInSandbox(code, { version: 1, cases: [...cases], createdAt: '2026-09-04T00:00:00.000Z' } as never, {
+  // RUNTIME_CONTRACT: the gate validates the trace structurally at runtime
+  // (validateGoldenTrace); the fabricated minimal object intentionally omits
+  // provenance fields the full GoldenTrace type carries, so the literal
+  // cannot satisfy the parameter type directly — same documented pattern as
+  // the `as unknown as PDRuntimeAdapter` fixtures in
+  // evaluator-gate-authority.test.ts.
+  const trace = { version: 1, cases: [...cases], createdAt: '2026-09-04T00:00:00.000Z' } as never;
+  const result = gateDeps.evaluateInSandbox(code, trace, {
     projectDir: undefined,
   });
   // executionTimeMs is wall-clock noise — strip it so parity assertions

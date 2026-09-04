@@ -164,6 +164,10 @@ function consumerCycleFormulaReplay(implementationCode: string): { passed: boole
   const liveRegistry = buildToolSemanticRegistry(HOST_MAPPINGS);
   if (!liveRegistry.ok) throw new Error(liveRegistry.errors.join('; '));
   const gateDeps = createProductionGateDeps({ toolSemantics: liveRegistry.registry });
+  // RUNTIME_CONTRACT: the gate structurally validates the trace at runtime;
+  // the fabricated minimal object intentionally omits the full GoldenTrace
+  // provenance fields, so the literal cannot satisfy the parameter type
+  // directly (same documented pattern as evaluator-gate-authority fixtures).
   const result = gateDeps.evaluateInSandbox(implementationCode, {
     version: 1,
     cases: GOLDEN_CASES.map((c) => ({ ...c })),
