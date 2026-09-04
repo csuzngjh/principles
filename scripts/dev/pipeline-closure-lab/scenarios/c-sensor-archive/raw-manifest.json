@@ -1,0 +1,69 @@
+{
+ "scenario": "c-sensor-archive",
+ "files": {
+  "raw/12_pressure-D.dat": {
+   "sha256": "4f0c4bfb4c85c86ce7b9cbf30f5900659c188e927812b6cff3fe8ab7568ccba5",
+   "bytes": 1509
+  },
+  "raw/15_vibration-C.dat": {
+   "sha256": "599e6720681da97d4cb072675f36fc6bf9dbcc7f2fe417210f9a6c7b565f78d3",
+   "bytes": 1368
+  },
+  "raw/3_temp-C.dat": {
+   "sha256": "beb0d0e649b8379fc9dd01df74d9571724a4226bb1c7fd904f3f646e2510e5d4",
+   "bytes": 1413
+  },
+  "raw/6_humidity-B.dat": {
+   "sha256": "934d264d6e8a9083d4cbc8fbee41fc04aad37d896d342c2cd4c36ac602373d7e",
+   "bytes": 1413
+  },
+  "raw/9_pressure-A.dat": {
+   "sha256": "5c0ac2b952b2c97ac47ab85000f407e6b67372eb24e42f564f4c537b4bd00495",
+   "bytes": 1509
+  },
+  "raw/export-11.pressure.log": {
+   "sha256": "65dee6fd5e30c2928724372b508f94b10a1781baf15dcb16288ebe7903b4206b",
+   "bytes": 1509
+  },
+  "raw/export-14.vibration.log": {
+   "sha256": "881c0afcf1637c92c6a701249a81614e97c849c6540d1755a2f522b1fc2c587f",
+   "bytes": 1367
+  },
+  "raw/export-2.temp.log": {
+   "sha256": "8ae3b34bde699ddc5bd67146353f9822772fa864e57116e319d05f8b37f66efc",
+   "bytes": 1413
+  },
+  "raw/export-5.humidity.log": {
+   "sha256": "db75c703bf1deff9c4ebad39b02490b5e119dc441d2ad35f5117c5a3dc869ff0",
+   "bytes": 1413
+  },
+  "raw/export-8.humidity.log": {
+   "sha256": "aef5b49d8e9970bf9793915b189b29a3f1f8e97ad74efcbf3dcf7fa4b175e317",
+   "bytes": 1413
+  },
+  "raw/humidity_C_2026.csv": {
+   "sha256": "4cf09266a971e6f46f6c83855407387c37f4d3990cc0af8131372c760103965e",
+   "bytes": 1413
+  },
+  "raw/pressure_B_2026.csv": {
+   "sha256": "e65a6d68aef9a8806564adf1c4f19897861554f380006234457a4481e736bcd8",
+   "bytes": 1509
+  },
+  "raw/temp_A_2026.csv": {
+   "sha256": "aaaeff61fcf962a0ff87c5bb1bfc0eaea49d22bf1703a2ab7b8d4d4dd6e1cbf8",
+   "bytes": 1413
+  },
+  "raw/temp_D_2026.csv": {
+   "sha256": "300d73f7ada2170df0a501d4efe5a79d356c842f0223f0aca458d7f8df2e6799",
+   "bytes": 1413
+  },
+  "raw/vibration_A_2026.csv": {
+   "sha256": "f6f8a85d153b366ba88ee2f81dca3427023e3fae15f7542fb8cef1f558468e8d",
+   "bytes": 1367
+  },
+  "raw/vibration_D_2026.csv": {
+   "sha256": "ebf2eab6f145031a95158aa6bf6fd56bb169962f75c0c15d913de51e0038e510",
+   "bytes": 1367
+  }
+ }
+}

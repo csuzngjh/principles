@@ -1,0 +1,4 @@
+# Pipeline Closure Lab fixtures carry byte-exact ground truth (raw-manifest.json
+# sha256, audit totals derived from exact bytes). Disable ANY line-ending
+# conversion so checked-out bytes always match generator output.
+* -text

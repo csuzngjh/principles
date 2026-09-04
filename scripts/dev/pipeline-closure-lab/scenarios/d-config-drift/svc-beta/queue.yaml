@@ -1,0 +1,5 @@
+routes:
+  - path: /health
+    target: localhost:7070
+  - path: /api
+    target: localhost:7071

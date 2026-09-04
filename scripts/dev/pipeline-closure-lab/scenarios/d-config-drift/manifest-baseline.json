@@ -1,0 +1,37 @@
+{
+ "generatedAt": "2026-09-02T22:00:00Z",
+ "files": {
+  "svc-alpha/config.json": {
+   "sha256": "ba2e676694f8b5568e462de82785c672268a695a59515cd43093f76329b938aa",
+   "bytes": 72
+  },
+  "svc-alpha/routes.yaml": {
+   "sha256": "98538dafe76721e11956158c126c36a3857c5a488110ecc919f0f21e29ae8769",
+   "bytes": 95
+  },
+  "svc-alpha/logger.ini": {
+   "sha256": "b9993c50f7e9c10f8a56ecd6659b76390f0e73a5393e6598f9622687654d74cf",
+   "bytes": 40
+  },
+  "svc-beta/config.json": {
+   "sha256": "8ee693b35a3a5b8a959e5c8fedaeb34b74e188f8ad3005dc0f06d9744c21d5e9",
+   "bytes": 71
+  },
+  "svc-beta/queue.yaml": {
+   "sha256": "98538dafe76721e11956158c126c36a3857c5a488110ecc919f0f21e29ae8769",
+   "bytes": 95
+  },
+  "svc-gamma/config.json": {
+   "sha256": "b5636d544517d48dcda605d19b8ea8d47124ce9f9180aaef27f1783987894eeb",
+   "bytes": 72
+  },
+  "svc-gamma/cache.ini": {
+   "sha256": "05234b7c5016566d470106f7f89fe6bbcd644f8de18125718d72d749b6424d38",
+   "bytes": 40
+  },
+  "svc-gamma/worker.yaml": {
+   "sha256": "98538dafe76721e11956158c126c36a3857c5a488110ecc919f0f21e29ae8769",
+   "bytes": 95
+  }
+ }
+}

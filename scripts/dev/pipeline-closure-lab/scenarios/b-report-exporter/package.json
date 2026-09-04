@@ -1,0 +1,13 @@
+{
+  "name": "report-exporter",
+  "version": "1.4.2",
+  "private": true,
+  "description": "Daily report export pipeline: pull orders from upstream, aggregate, export CSV report.",
+  "scripts": {
+    "upstream": "node upstream.js",
+    "pull": "node fetch-orders.js",
+    "export": "node export-report.js",
+    "verify": "node verify.js",
+    "test": "node verify.js"
+  }
+}
