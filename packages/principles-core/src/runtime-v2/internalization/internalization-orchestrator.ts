@@ -578,15 +578,18 @@ export class InternalizationOrchestrator {
       // 其后 rollout needs_revision reopen 父 artificer 重跑出**新**产物,但若
       // 级联 reopen 不换依赖,evaluator buildContext 永远读陈旧 repair 任务的
       // artifact,修订预算被旧输入烧光 (修订永不收敛根因)。判定: successor 是
-      // evaluator 且其依赖中的 artificer 不是刚完成的 taskId 时,镜像
-      // REOPEN_SOURCE_EVALUATOR 的 replaceArtificerDependencyWith 语义。
+      // evaluator 且其 artificer 依赖 (按 taskKind 两跳判定,与 revision-reopen
+      // 的 replaceArtificerDependencyWith 过滤同源——不用 id 前缀约定) 不是
+      // 刚完成的 taskId 时,镜像 REOPEN_SOURCE_EVALUATOR 的换依赖语义。
       let cascadeReplaceArtificerDependencyWith: string | undefined;
       if (succPi && proposal.taskKind === 'evaluator') {
-        const staleArtificerDep = succPi.dependencyTaskIds.some(
-          (depId) => depId !== taskId && depId.startsWith('artificer'),
-        );
-        if (staleArtificerDep) {
-          cascadeReplaceArtificerDependencyWith = taskId;
+        for (const depId of succPi.dependencyTaskIds) {
+          if (depId === taskId) continue;
+          const dep = await this.stateManager.getTask(depId);
+          if (dep?.taskKind === 'artificer') {
+            cascadeReplaceArtificerDependencyWith = taskId;
+            break;
+          }
         }
       }
       const reopened = await this.reopenTaskForRevision(successorTaskId, {

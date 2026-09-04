@@ -248,6 +248,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**:
   - Yes - same class as ERR-003, ERR-013.
   - 2026-07-03 / PRI-442 / PR #1164: `handleFrictionTrackingForFailure` used `workspaceDir.includes('e2e-workspace')` to decide whether to admit shell-tool failures as pain signals. A production workspace whose absolute path happens to contain the substring `e2e-workspace` (e.g. `D:\ci\e2e-workspace-prod\owner-1`) would silently get E2E behavior in production. Fixed by replacing the substring test with an explicit env-var signal (`process.env.PD_E2E_MODE === '1'`) set only by the E2E harness. The generalization: when gating behavior by environment/context, use explicit signals (env vars / config flags), never path-substring matching — path substrings cannot distinguish a sibling directory from a true descendant.
+  - 2026-09-05 / PRI-668 / PR #1512: the orchestrator's new cascade branch identified evaluator artificer deps via `depId.startsWith('artificer')` — task-id string shape — while the mechanism it mirrors (`revision-reopen.ts` `replaceArtificerDependencyWith`) identifies them by the two-hop `task.taskKind === 'artificer'` check. Correct only while the id convention holds; breaks silently if ids ever change shape or a non-artificer task gets an `artificer*` id. Caught in PR self-review before merge; fixed to query `taskKind` per dep. Generalization: when classifying entities, never infer kind from id/name string shape if an authoritative structural field exists — especially when mirroring an existing mechanism, reuse ITS classification primitive instead of re-inventing a string heuristic.
 
 ---
 
@@ -666,9 +667,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 110 |
-| Last updated | 2026-09-04 |
+| Last updated | 2026-09-05 |
 | Top category | Schema & Type |
-| Recurring errors | 58 |
+| Recurring errors | 59 |
 
 ---
 
