@@ -36,7 +36,11 @@ vi.mock('os', async (importOriginal) => {
 const authorityMock = vi.hoisted(() => ({
   readiness: { ready: false, reasons: ['metadata_source_unconfigured'] as string[] },
   checkRejection: null as (Error & { reason?: string; nextAction?: string }) | null,
+  createThrows: false,
   createCalls: 0,
+  /** Readiness reported at DISPATCH time (inside the governed check handler). */
+  dispatchReadiness: null as null | { ready: boolean; reasons: string[] },
+  dispatchInstallStatus: 'dual-slot' as string | null,
 }));
 
 vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', () => {
@@ -46,6 +50,14 @@ vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', (
     createReleaseManagerAuthority: (options: unknown) => {
       authorityMock.createCalls += 1;
       void options;
+      if (authorityMock.createThrows) throw new Error('authority construction failed');
+      const kinds = () => ({
+        check: { ready: authorityMock.readiness.ready, reasons: authorityMock.readiness.reasons },
+        apply: { ready: false, reasons: ['rollback_not_available'] },
+        'apply-full': { ready: false, reasons: ['rollback_not_available'] },
+        rollback: { ready: false, reasons: ['rollback_not_available'] },
+      });
+      const initialKinds = kinds();
       return {
         manager: {
           check: async () => {
@@ -59,20 +71,19 @@ vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', (
             };
           },
         },
-        installStatus: {
-          layout: 'dual-slot',
-          productVersion: '1.222.0',
-          releaseId: 'r'.repeat(64),
-          generation: 2,
-          bootstrapVersion: '1.0.0',
-          channel: 'stable',
-        },
-        kinds: {
-          check: { ready: authorityMock.readiness.ready, reasons: authorityMock.readiness.reasons },
-          apply: { ready: false, reasons: ['rollback_not_available'] },
-          'apply-full': { ready: false, reasons: ['rollback_not_available'] },
-          rollback: { ready: false, reasons: ['rollback_not_available'] },
-        } satisfies Record<AuthorityKind, { ready: boolean; reasons: string[] }>,
+        // Registration-time snapshot; a null dispatchInstallStatus simulates
+        // the install state corrupting between sync and the next dispatch.
+        installStatus: authorityMock.dispatchInstallStatus === null
+          ? null
+          : {
+              layout: 'dual-slot',
+              productVersion: '1.222.0',
+              releaseId: 'r'.repeat(64),
+              generation: 2,
+              bootstrapVersion: '1.0.0',
+              channel: 'stable',
+            },
+        kinds: authorityMock.dispatchReadiness === null ? initialKinds : kinds(),
       };
     },
     mapReleaseManagerErrorToFallback: (error: unknown) => {
@@ -156,6 +167,9 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     vi.mocked(os.homedir).mockImplementation(() => tmpDir);
     authorityMock.readiness = { ready: false, reasons: ['metadata_source_unconfigured'] };
     authorityMock.checkRejection = null;
+    authorityMock.createThrows = false;
+    authorityMock.dispatchReadiness = null;
+    authorityMock.dispatchInstallStatus = 'dual-slot';
   });
 
   afterEach(() => {
@@ -275,5 +289,58 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
       expect(snapshot[kind].available).toEqual([LEGACY_MUTATION_AUTHORITY]);
       expect(snapshot[kind].fallbackReason).toBe('release_manager_shadow_disabled');
     }
+  });
+
+  it('authority module import failure falls back explicitly with installer_missing (delivery-surface gap)', async () => {
+    enableFlag();
+    // The wiring's dynamic import runs once per process; make THAT import fail
+    // by re-importing the route module under a throwing factory for the
+    // authority spec (the production catch records { state: 'missing' }).
+    vi.resetModules();
+    vi.doMock('create-principles-disciple/dist/update/release-manager-authority.js', () => {
+      throw new Error('Cannot find module');
+    });
+    const freshRoutes = await import('../../../src/server/routes/update.js');
+    const req = createMockRequest('GET');
+    const res = createMockResponse();
+    await freshRoutes.handleUpdateRoute(req, res, tmpDir, '/check');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
+    expect(res._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);
+    expect(res._headers['x-pd-mutation-fallback-reason']).toBe('installer_missing');
+    // Restore the normal module registry for subsequent tests.
+    vi.resetModules();
+    vi.doUnmock('create-principles-disciple/dist/update/release-manager-authority.js');
+  });
+
+  it('createReleaseManagerAuthority throwing falls back explicitly with authority_module_unavailable', async () => {
+    enableFlag();
+    authorityMock.createThrows = true;
+    const req = createMockRequest('GET');
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(req, res, tmpDir, '/check');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
+    for (const kind of MUTATION_KINDS) {
+      expect(updateMutationController.describeGovernance()[kind].fallbackReason).toBe('authority_module_unavailable');
+    }
+  });
+
+  it('readiness flipping between registration and dispatch re-falls-back explicitly inside the governed check', async () => {
+    enableFlag();
+    // Registration sync sees a READY check (authority registered); the next
+    // dispatch constructs a fresh authority whose install state now fails.
+    authorityMock.readiness = { ready: true, reasons: [] };
+    await routes.handleUpdateRoute(createMockRequest('GET'), createMockResponse(), tmpDir, '/check');
+    expect(updateMutationController.describeGovernance().check.active).toBe('release-manager');
+
+    authorityMock.dispatchInstallStatus = null; // install state corrupt at dispatch time
+    const req = createMockRequest('GET');
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(req, res, tmpDir, '/check');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
+    expect(res._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);
+    expect(res._headers['x-pd-mutation-fallback-reason']).toBe('release_manager_unavailable:install_state_corrupt');
   });
 });
