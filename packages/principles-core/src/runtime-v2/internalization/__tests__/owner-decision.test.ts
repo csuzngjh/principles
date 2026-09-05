@@ -167,6 +167,48 @@ function makeFactStore(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore): O
   };
 }
 
+// ── N-3 fixtures: candidate-unresolved rollout 任务（跨 describe 共享）──
+
+const ROLLOUT_ID = 'rollout-reviewer-001';
+
+function rolloutCandidateUnresolvedTask(overrides: { meta?: Partial<PITaskMetadata> } = {}): TaskRecord {
+  return {
+    taskId: ROLLOUT_ID,
+    taskKind: 'rollout_reviewer',
+    status: 'needs_human_review',
+    attemptCount: 1,
+    maxAttempts: 3,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    diagnosticJson: createPITaskDiagnosticJson(baseMeta({
+      channel: 'code_tool_hook',
+      dependencyTaskIds: [EVAL_ID],
+      runnerDecision: 'approve_rollout',
+      completionIntent: { decision: 'approve_rollout', sourceRunId: RUN_ID, revisionEpoch: 0, status: 'pending' },
+      humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.rolloutActivationCandidateUnresolved),
+      ...overrides.meta,
+    })),
+  };
+}
+
+function makeRolloutArtifactStore(): MemoryPIArtifactStore {
+  const store = new MemoryPIArtifactStore();
+  void store.upsertArtifact({
+    artifactId: ARTIFACT_ID,
+    artifactKind: 'principle',
+    sourceTaskId: ROLLOUT_ID,
+    lineageArtifactIds: [],
+    validationStatus: 'pending',
+    contentJson: JSON.stringify({
+      review: { decision: 'approve_rollout', summary: 's', confidence: 0.9, requiredChanges: [], rolloutRisks: [] },
+      risks: [], generatedAt: 't', sourceEvaluatorArtifactId: 'pi-art-eval-1',
+    }),
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+  });
+  return store;
+}
+
 /** in-memory stateManager 满足 owner-resolution-service / owner-retry 需要的面 */
 function makeInMemoryStateManager(tasks: TaskRecord[], artifacts: MemoryPIArtifactStore) {
   const store = new MemoryTaskStore();
@@ -397,44 +439,8 @@ describe('PRI-629 classification + capability (INV-01/INV-02/§22)', () => {
   // 生产者 (rollout-reviewer-runner) 语义: 机器 approve_rollout 但激活候选缺失,
   // rejectionDetail 透传给 Owner 判断。修复前该原因不在 decision-capable 集合 →
   // 收件箱静默丢弃 (live 2 条挂 5 天不可见)。
-
-  function rolloutCandidateUnresolvedTask(overrides: { meta?: Partial<PITaskMetadata> } = {}): TaskRecord {
-    return {
-      taskId: 'rollout-reviewer-001',
-      taskKind: 'rollout_reviewer',
-      status: 'needs_human_review',
-      attemptCount: 1,
-      maxAttempts: 3,
-      createdAt: '2026-09-01T00:00:00.000Z',
-      updatedAt: '2026-09-01T00:00:00.000Z',
-      diagnosticJson: createPITaskDiagnosticJson(baseMeta({
-        channel: 'code_tool_hook',
-        dependencyTaskIds: [EVAL_ID],
-        runnerDecision: 'approve_rollout',
-        completionIntent: { decision: 'approve_rollout', sourceRunId: RUN_ID, revisionEpoch: 0, status: 'pending' },
-        humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.rolloutActivationCandidateUnresolved),
-        ...overrides.meta,
-      })),
-    };
-  }
-
-  function makeRolloutArtifactStore(): MemoryPIArtifactStore {
-    const store = new MemoryPIArtifactStore();
-    void store.upsertArtifact({
-      artifactId: ARTIFACT_ID,
-      artifactKind: 'principle',
-      sourceTaskId: 'rollout-reviewer-001',
-      lineageArtifactIds: [],
-      validationStatus: 'pending',
-      contentJson: JSON.stringify({
-        review: { decision: 'approve_rollout', summary: 's', confidence: 0.9, requiredChanges: [], rolloutRisks: [] },
-        risks: [], generatedAt: 't', sourceEvaluatorArtifactId: 'pi-art-eval-1',
-      }),
-      createdAt: '2026-09-01T00:00:00.000Z',
-      updatedAt: '2026-09-01T00:00:00.000Z',
-    });
-    return store;
-  }
+  // fixtures (rolloutCandidateUnresolvedTask / makeRolloutArtifactStore / ROLLOUT_ID)
+  // 定义在模块顶层,与 resolution describe 共享。
 
   it('N-3: rollout_activation_candidate_unresolved is decision-capable with revise/reject (no accept — no candidate to approve)', async () => {
     const task = rolloutCandidateUnresolvedTask();
@@ -654,6 +660,66 @@ describe('PRI-629 applyOwnerResolution (SPEC §7/§10/§11)', () => {
     expect(second.status).toBe('resolved');
     const pi = hydratePITaskRecord((await sm.getTask(EVAL_ID))!);
     expect(pi?.ownerResolutions?.length).toBe(1); // 无第二条记录
+  });
+
+  // ── N-3 端到端: candidate-unresolved rollout 任务的新裁决路径 ──
+  // Phase 3 自查补充: 既有 resolution 测试只覆盖 budget-exhausted 场景;
+  // 新 eligible 场景 (approve_rollout + candidate-unresolved) 的
+  // applyOwnerResolution 全链行为必须同样被锁定。
+
+  async function setupRolloutCandidateUnresolved() {
+    const artifacts = makeRolloutArtifactStore();
+    const task = rolloutCandidateUnresolvedTask();
+    const evaluator = evaluatorNhrTask({ status: 'succeeded', meta: baseMeta({
+      channel: 'code_tool_hook',
+      runnerDecision: 'approved',
+      humanReviewContext: undefined,
+      dependencyTaskIds: [ARTIFER_ID],
+    }) });
+    const sm = makeInMemoryStateManager([task, evaluator, artificerTaskWithPayload(0)], artifacts);
+    const factStore: OwnerDecisionFactStore = {
+      getTask: (id) => sm.getTask(id),
+      listArtifactsBySourceTask: async (id) => (await artifacts.listBySourceTaskId(id)).map((a) => ({
+        artifactId: a.artifactId, artifactKind: a.artifactKind, validationStatus: a.validationStatus, contentJson: a.contentJson,
+      })),
+    };
+    const facts = await collectOwnerDecisionFacts(factStore, ROLLOUT_ID);
+    const cap = deriveOwnerDecisionCapability(facts!);
+    expect(cap.eligible).toBe(true); // 前置: 新场景确实 eligible
+    const hash = facts!.decisionArtifact!.contentHash;
+    const req = (action: 'accept_current' | 'revise_once' | 'reject_current') => ({
+      action,
+      reviewKey: cap.reviewKey!,
+      expectedRevisionEpoch: 0,
+      expectedSourceRunId: RUN_ID,
+      expectedSourceArtifactId: ARTIFACT_ID,
+      expectedSourceArtifactHash: hash,
+    });
+    return { sm, req, deps: { stateManager: sm as never, now: () => '2026-09-05T10:00:00.000Z' } };
+  }
+
+  it('N-3 e2e: reject_current on candidate-unresolved rollout → resolved with effectiveDecision=reject, task requeued', async () => {
+    const { sm, deps, req } = await setupRolloutCandidateUnresolved();
+    const outcome = await applyOwnerResolution(deps, { taskId: ROLLOUT_ID, request: req('reject_current'), identity });
+    expect(outcome.status).toBe('resolved');
+    if (outcome.status === 'resolved') {
+      expect(outcome.effectiveDecision).toBe('reject'); // rollout 映射 (INV-08)
+      expect(outcome.runnerWillApply).toBe(true);
+    }
+    const updated = await sm.getTask(ROLLOUT_ID);
+    expect(updated?.status).toBe('pending'); // 翻回 pending 等 runner resume 门应用
+    const pi = hydratePITaskRecord(updated!);
+    expect(pi?.runnerDecision).toBe('approve_rollout'); // INV-03: 机器 verdict 不改写
+    expect(pi?.ownerResolutions?.[0]?.status).toBe('pending');
+  });
+
+  it('N-3 e2e: accept_current on candidate-unresolved rollout is refused by the server (action_not_permitted)', async () => {
+    const { deps, req } = await setupRolloutCandidateUnresolved();
+    const outcome = await applyOwnerResolution(deps, { taskId: ROLLOUT_ID, request: req('accept_current'), identity });
+    expect(outcome.status).toBe('not_decision_capable');
+    if (outcome.status === 'not_decision_capable') {
+      expect(outcome.blockers).toContain('action_not_permitted:accept_current');
+    }
   });
 
   it('same reviewKey/action with changed lineage evidence digest is not an idempotent replay', async () => {
