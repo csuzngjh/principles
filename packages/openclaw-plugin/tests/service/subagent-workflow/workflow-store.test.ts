@@ -55,7 +55,7 @@ describe('WorkflowStore', () => {
       const now = Date.now();
       store.createWorkflow({
         workflow_id: 'wf-null-run',
-        workflow_type: 'deep-reflect',
+        workflow_type: 'test-workflow',
         transport: 'runtime_direct',
         parent_session_id: 'parent-sess-2',
         child_session_key: 'child-key-2',
@@ -114,7 +114,7 @@ describe('WorkflowStore', () => {
       const now = Date.now();
       store.createWorkflow({
         workflow_id: 'wf-no-reason',
-        workflow_type: 'deep-reflect',
+        workflow_type: 'test-workflow',
         transport: 'runtime_direct',
         parent_session_id: 'parent-sess-4',
         child_session_key: 'child-key-4',
@@ -164,7 +164,7 @@ describe('WorkflowStore', () => {
       const now = Date.now();
       store.createWorkflow({
         workflow_id: 'wf-cleanup',
-        workflow_type: 'deep-reflect',
+        workflow_type: 'test-workflow',
         transport: 'runtime_direct',
         parent_session_id: 'parent-sess-6',
         child_session_key: 'child-key-6',
@@ -240,7 +240,7 @@ describe('WorkflowStore', () => {
       const now = Date.now();
       store.createWorkflow({
         workflow_id: 'wf-child-lookup',
-        workflow_type: 'deep-reflect',
+        workflow_type: 'test-workflow',
         transport: 'runtime_direct',
         parent_session_id: 'parent-sess-9',
         child_session_key: 'unique-child-key',
@@ -278,7 +278,7 @@ describe('WorkflowStore', () => {
       });
       store.createWorkflow({
         workflow_id: 'wf-parent-new',
-        workflow_type: 'deep-reflect',
+        workflow_type: 'test-workflow',
         transport: 'runtime_direct',
         parent_session_id: 'parent-sess-shared',
         child_session_key: 'child-key-new',
@@ -309,7 +309,7 @@ describe('WorkflowStore', () => {
       });
       store.createWorkflow({
         workflow_id: 'wf-type-deep',
-        workflow_type: 'deep-reflect',
+        workflow_type: 'test-workflow',
         transport: 'runtime_direct',
         parent_session_id: 'parent-sess-filter',
         child_session_key: 'child-key-deep',
@@ -334,9 +334,9 @@ describe('WorkflowStore', () => {
     it('returns only non-terminal workflows', () => {
       const now = Date.now();
       store.createWorkflow({ workflow_id: 'wf-active-1', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p1', child_session_key: 'c1', run_id: 'r1', state: 'active', created_at: now, updated_at: now, metadata_json: '{}' });
-      store.createWorkflow({ workflow_id: 'wf-active-2', workflow_type: 'deep-reflect', transport: 'runtime_direct', parent_session_id: 'p2', child_session_key: 'c2', run_id: 'r2', state: 'pending', created_at: now, updated_at: now, metadata_json: '{}' });
+      store.createWorkflow({ workflow_id: 'wf-active-2', workflow_type: 'test-workflow', transport: 'runtime_direct', parent_session_id: 'p2', child_session_key: 'c2', run_id: 'r2', state: 'pending', created_at: now, updated_at: now, metadata_json: '{}' });
       store.createWorkflow({ workflow_id: 'wf-completed', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p3', child_session_key: 'c3', run_id: 'r3', state: 'completed', created_at: now, updated_at: now, metadata_json: '{}' });
-      store.createWorkflow({ workflow_id: 'wf-terminal-error', workflow_type: 'deep-reflect', transport: 'runtime_direct', parent_session_id: 'p4', child_session_key: 'c4', run_id: 'r4', state: 'terminal_error', created_at: now, updated_at: now, metadata_json: '{}' });
+      store.createWorkflow({ workflow_id: 'wf-terminal-error', workflow_type: 'test-workflow', transport: 'runtime_direct', parent_session_id: 'p4', child_session_key: 'c4', run_id: 'r4', state: 'terminal_error', created_at: now, updated_at: now, metadata_json: '{}' });
       store.createWorkflow({ workflow_id: 'wf-expired', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p5', child_session_key: 'c5', run_id: 'r5', state: 'expired', created_at: now, updated_at: now, metadata_json: '{}' });
 
       const result = store.getActiveWorkflows();
@@ -347,7 +347,7 @@ describe('WorkflowStore', () => {
     it('filters by workflow_type when provided', () => {
       const now = Date.now();
       store.createWorkflow({ workflow_id: 'wf-filter-empathy', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p6', child_session_key: 'c6', run_id: 'r6', state: 'active', created_at: now, updated_at: now, metadata_json: '{}' });
-      store.createWorkflow({ workflow_id: 'wf-filter-deep', workflow_type: 'deep-reflect', transport: 'runtime_direct', parent_session_id: 'p7', child_session_key: 'c7', run_id: 'r7', state: 'active', created_at: now, updated_at: now, metadata_json: '{}' });
+      store.createWorkflow({ workflow_id: 'wf-filter-deep', workflow_type: 'test-workflow', transport: 'runtime_direct', parent_session_id: 'p7', child_session_key: 'c7', run_id: 'r7', state: 'active', created_at: now, updated_at: now, metadata_json: '{}' });
 
       const result = store.getActiveWorkflows('empathy-observer');
       expect(result).toHaveLength(1);
@@ -360,7 +360,7 @@ describe('WorkflowStore', () => {
       const now = Date.now();
       store.createWorkflow({ workflow_id: 'wf-expired-candidate', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p8', child_session_key: 'c8', run_id: 'r8', state: 'active', created_at: now - 10000, updated_at: now - 10000, last_observed_at: now - 6000, metadata_json: '{}' });
 
-      store.createWorkflow({ workflow_id: 'wf-recent', workflow_type: 'deep-reflect', transport: 'runtime_direct', parent_session_id: 'p9', child_session_key: 'c9', run_id: 'r9', state: 'active', created_at: now, updated_at: now, last_observed_at: now, metadata_json: '{}' });
+      store.createWorkflow({ workflow_id: 'wf-recent', workflow_type: 'test-workflow', transport: 'runtime_direct', parent_session_id: 'p9', child_session_key: 'c9', run_id: 'r9', state: 'active', created_at: now, updated_at: now, last_observed_at: now, metadata_json: '{}' });
 
       store.createWorkflow({ workflow_id: 'wf-no-touch', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p10', child_session_key: 'c10', run_id: 'r10', state: 'active', created_at: now - 10000, updated_at: now - 10000, metadata_json: '{}' });
 
@@ -374,7 +374,7 @@ describe('WorkflowStore', () => {
     it('returns all workflows ordered by created_at desc', () => {
       const now = Date.now();
       store.createWorkflow({ workflow_id: 'wf-list-1', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p11', child_session_key: 'c11', run_id: 'r11', state: 'active', created_at: now - 2000, updated_at: now - 2000, metadata_json: '{}' });
-      store.createWorkflow({ workflow_id: 'wf-list-2', workflow_type: 'deep-reflect', transport: 'runtime_direct', parent_session_id: 'p12', child_session_key: 'c12', run_id: 'r12', state: 'completed', created_at: now - 1000, updated_at: now - 1000, metadata_json: '{}' });
+      store.createWorkflow({ workflow_id: 'wf-list-2', workflow_type: 'test-workflow', transport: 'runtime_direct', parent_session_id: 'p12', child_session_key: 'c12', run_id: 'r12', state: 'completed', created_at: now - 1000, updated_at: now - 1000, metadata_json: '{}' });
       store.createWorkflow({ workflow_id: 'wf-list-3', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p13', child_session_key: 'c13', run_id: 'r13', state: 'pending', created_at: now, updated_at: now, metadata_json: '{}' });
 
       const result = store.listWorkflows();
@@ -387,7 +387,7 @@ describe('WorkflowStore', () => {
     it('filters by state when provided', () => {
       const now = Date.now();
       store.createWorkflow({ workflow_id: 'wf-state-active', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p14', child_session_key: 'c14', run_id: 'r14', state: 'active', created_at: now, updated_at: now, metadata_json: '{}' });
-      store.createWorkflow({ workflow_id: 'wf-state-completed', workflow_type: 'deep-reflect', transport: 'runtime_direct', parent_session_id: 'p15', child_session_key: 'c15', run_id: 'r15', state: 'completed', created_at: now, updated_at: now, metadata_json: '{}' });
+      store.createWorkflow({ workflow_id: 'wf-state-completed', workflow_type: 'test-workflow', transport: 'runtime_direct', parent_session_id: 'p15', child_session_key: 'c15', run_id: 'r15', state: 'completed', created_at: now, updated_at: now, metadata_json: '{}' });
 
       const result = store.listWorkflows('completed');
       expect(result).toHaveLength(1);
@@ -426,7 +426,7 @@ describe('WorkflowStore', () => {
       const now = Date.now();
       store.createWorkflow({
         workflow_id: 'wf-event-null-from',
-        workflow_type: 'deep-reflect',
+        workflow_type: 'test-workflow',
         transport: 'runtime_direct',
         parent_session_id: 'p17',
         child_session_key: 'c17',
@@ -473,7 +473,7 @@ describe('WorkflowStore', () => {
       const now = Date.now();
       store.createWorkflow({
         workflow_id: 'wf-duration',
-        workflow_type: 'deep-reflect',
+        workflow_type: 'test-workflow',
         transport: 'runtime_direct',
         parent_session_id: 'p19',
         child_session_key: 'c19',
@@ -497,7 +497,7 @@ describe('WorkflowStore', () => {
       const now = Date.now();
       store.createWorkflow({ workflow_id: 'wf-dur-1', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p20', child_session_key: 'c20', run_id: 'r20', state: 'completed', duration_ms: 10000, created_at: now, updated_at: now, metadata_json: '{}' });
       store.createWorkflow({ workflow_id: 'wf-dur-2', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p21', child_session_key: 'c21', run_id: 'r21', state: 'completed', duration_ms: 20000, created_at: now + 100, updated_at: now + 100, metadata_json: '{}' });
-      store.createWorkflow({ workflow_id: 'wf-dur-3', workflow_type: 'deep-reflect', transport: 'runtime_direct', parent_session_id: 'p22', child_session_key: 'c22', run_id: 'r22', state: 'completed', duration_ms: 30000, created_at: now, updated_at: now, metadata_json: '{}' });
+      store.createWorkflow({ workflow_id: 'wf-dur-3', workflow_type: 'test-workflow', transport: 'runtime_direct', parent_session_id: 'p22', child_session_key: 'c22', run_id: 'r22', state: 'completed', duration_ms: 30000, created_at: now, updated_at: now, metadata_json: '{}' });
       store.createWorkflow({ workflow_id: 'wf-dur-4', workflow_type: 'empathy-observer', transport: 'runtime_direct', parent_session_id: 'p23', child_session_key: 'c23', run_id: 'r23', state: 'active', duration_ms: 5000, created_at: now, updated_at: now, metadata_json: '{}' });
 
       const result = store.getCompletionDurations('empathy-observer');
