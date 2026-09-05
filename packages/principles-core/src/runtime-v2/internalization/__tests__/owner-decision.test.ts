@@ -393,6 +393,110 @@ describe('PRI-629 classification + capability (INV-01/INV-02/§22)', () => {
     expect(detectHardGateFailureFromArtifact('{"adversarialResult":{"passed":true}}')).toBe(false);
   });
 
+  // ── N-3 (pipeline-verification 2026-09-05): rollout_activation_candidate_unresolved ──
+  // 生产者 (rollout-reviewer-runner) 语义: 机器 approve_rollout 但激活候选缺失,
+  // rejectionDetail 透传给 Owner 判断。修复前该原因不在 decision-capable 集合 →
+  // 收件箱静默丢弃 (live 2 条挂 5 天不可见)。
+
+  function rolloutCandidateUnresolvedTask(overrides: { meta?: Partial<PITaskMetadata> } = {}): TaskRecord {
+    return {
+      taskId: 'rollout-reviewer-001',
+      taskKind: 'rollout_reviewer',
+      status: 'needs_human_review',
+      attemptCount: 1,
+      maxAttempts: 3,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+      diagnosticJson: createPITaskDiagnosticJson(baseMeta({
+        channel: 'code_tool_hook',
+        dependencyTaskIds: [EVAL_ID],
+        runnerDecision: 'approve_rollout',
+        completionIntent: { decision: 'approve_rollout', sourceRunId: RUN_ID, revisionEpoch: 0, status: 'pending' },
+        humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.rolloutActivationCandidateUnresolved),
+        ...overrides.meta,
+      })),
+    };
+  }
+
+  function makeRolloutArtifactStore(): MemoryPIArtifactStore {
+    const store = new MemoryPIArtifactStore();
+    void store.upsertArtifact({
+      artifactId: ARTIFACT_ID,
+      artifactKind: 'principle',
+      sourceTaskId: 'rollout-reviewer-001',
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        review: { decision: 'approve_rollout', summary: 's', confidence: 0.9, requiredChanges: [], rolloutRisks: [] },
+        risks: [], generatedAt: 't', sourceEvaluatorArtifactId: 'pi-art-eval-1',
+      }),
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    });
+    return store;
+  }
+
+  it('N-3: rollout_activation_candidate_unresolved is decision-capable with revise/reject (no accept — no candidate to approve)', async () => {
+    const task = rolloutCandidateUnresolvedTask();
+    const evaluator = evaluatorNhrTask({ status: 'succeeded', meta: baseMeta({
+      channel: 'code_tool_hook',
+      runnerDecision: 'approved',
+      humanReviewContext: undefined,
+      dependencyTaskIds: [ARTIFER_ID],
+    }) });
+    const facts = await collectOwnerDecisionFacts(
+      makeFactStore([task, evaluator], makeRolloutArtifactStore()), 'rollout-reviewer-001');
+    expect(facts).not.toBeNull();
+    const cap = deriveOwnerDecisionCapability(facts!);
+    expect(cap.eligible).toBe(true);
+    expect(cap.attention).toBe('owner_decision');
+    expect(cap.reasonCode).toBe('rollout_activation_candidate_unresolved');
+    // 机器决策 approve_rollout 不再触发 runner_decision_not_needs_revision 阻断
+    expect(cap.blockers).not.toContain('runner_decision_not_needs_revision:approve_rollout');
+    // 无可批准候选 → accept_current 不可用;revise_once (重开生成链) / reject_current (归档) 可用
+    expect(cap.allowedActions).toEqual(['revise_once', 'reject_current']);
+    expect(cap.reviewKey).toMatch(/^odk_[0-9a-f]{64}$/);
+  });
+
+  it('N-3: revise_once target resolves through evaluator dep chain (reopen artificer on code_tool_hook)', async () => {
+    // live 同构链: rollout → evaluator → artificer。revise_once 的目标解析必须
+    // 在 candidate-unresolved 任务上成功,否则裁决权形同虚设。
+    const task = rolloutCandidateUnresolvedTask();
+    const evaluator = evaluatorNhrTask({ status: 'succeeded', meta: baseMeta({
+      channel: 'code_tool_hook',
+      runnerDecision: 'approved',
+      humanReviewContext: undefined,
+      dependencyTaskIds: [ARTIFER_ID],
+    }) });
+    const artificer = artificerTaskWithPayload(0);
+    const byId = new Map<string, TaskRecord>([
+      [task.taskId, task],
+      [evaluator.taskId, evaluator],
+      [artificer.taskId, artificer],
+    ]);
+    const target = await resolveRolloutRevisionTarget(
+      async (id) => byId.get(id) ?? null,
+      task.taskId,
+      'code_tool_hook',
+    );
+    expect(target).not.toBeNull();
+    expect(target?.taskId).toBe(ARTIFER_ID);
+  });
+
+  it('N-3: legacy budget-exhausted semantics unchanged (needs_revision still required outside no-accept reasons)', async () => {
+    // 守卫: 门放宽只作用于 NO_ACCEPT 集合内的原因,其余 decision-capable 原因
+    // 仍要求 runnerDecision=needs_revision。
+    const task = evaluatorNhrTask({ meta: baseMeta({
+      runnerDecision: 'approved',
+      humanReviewContext: nhrContext(HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted),
+    }) });
+    const facts = await collectOwnerDecisionFacts(
+      makeFactStore([task, artificerTaskWithPayload(2)], makeArtifactStoreWithDecisionArtifact()), EVAL_ID);
+    const cap = deriveOwnerDecisionCapability(facts!);
+    expect(cap.eligible).toBe(false);
+    expect(cap.blockers).toContain('runner_decision_not_needs_revision:approved');
+  });
+
   it('not_run + code-bearing artificer → accept_current forbidden (deterministic gate never ran, PRI-634 R4 P1)', async () => {
     // Evaluator artifact 不包含 adversarialResult → deterministicStatus = not_run。
     // code-bearing 时 accept_current 被移除（owner-decision-review.ts:348-350）。
