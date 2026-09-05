@@ -1630,8 +1630,11 @@ describe('handleUpdateRoute', () => {
       expect(body.data.success).toBe(false);
       expect(body.data.reason).toBe('file_locked');
       expect(body.data.nextAction).toBeDefined();
-      expect(body.data.nextAction).toBeDefined();
-      expect(body.data.nextAction).toContain('重启');
+      // CP-10: the attribution names the real lock-source candidates (gateway,
+      // the console process itself, indexers) and tries gateway-stop before
+      // prescribing a reboot.
+      expect(body.data.nextAction).toContain('OpenClaw gateway');
+      expect(body.data.nextAction).toContain('retry');
     });
   });
 
@@ -2849,6 +2852,187 @@ describe('Runtime resolution link reconciliation (PRI-665)', () => {
     } finally {
       symlinkSpy.mockRestore();
       renameSpy.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Install/upgrade reliability fixes (2026-09-05 investigation, CP-3/4/5/8):
+// canonical-layout guard acceptance, full-update backup + rollback, and
+// OpenClaw extension-copy refresh.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixture path helper following the documented safe pattern: resolve the
+ * fragment under an explicit root and refuse anything that escapes it.
+ * `under(root, 'a/b')` for tmpDir fixtures; an absolute `inner` is also
+ * accepted after the same boundary check (for paths discovered at runtime,
+ * e.g. a timestamped backup dir returned by the code under test).
+ */
+function under(root: string, inner: string): string {
+  const resolved = path.resolve(root, inner);
+  if (!resolved.startsWith(path.resolve(root) + path.sep)) {
+    throw new Error(`fixture path escaped root "${root}": ${inner}`);
+  }
+  return resolved;
+}
+
+function writeFixture(inner: string, data: string): void {
+  const filePath = under(tmpDir, inner);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, data);
+}
+
+describe('handleUpdateRoute — install/upgrade reliability (CP-3/4/5/8)', () => {
+  it('accepts a rollback targetDir under the canonical runtime root (CP-3)', async () => {
+    writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '2.0.0' }));
+    const runtimePluginDir = under(tmpDir, '.pd/runtime/plugin');
+    writeFixture('pd-backups/plugin-backup/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+    const backupDir = under(tmpDir, 'pd-backups/plugin-backup');
+
+    const req = createMockRequest('POST', { targetDir: runtimePluginDir, backupDir });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/rollback');
+
+    expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+    const body = parseResponseBody<{ success: boolean; data: { success: boolean; message?: string; reason?: string } }>(res);
+    expect(body.success).toBe(true);
+    expect(body.data.success).toBe(true);
+    expect(fs.readFileSync(under(tmpDir, '.pd/runtime/plugin/package.json'), 'utf-8')).toContain('1.0.0');
+  });
+
+  it('still rejects a targetDir that is inside ~/.pd but outside the runtime root (CP-3 negative)', async () => {
+    const pdOther = under(tmpDir, '.pd/not-runtime/plugin');
+    const backupDir = under(tmpDir, 'pd-backups/plugin-backup');
+    fs.mkdirSync(backupDir, { recursive: true });
+
+    const req = createMockRequest('POST', { targetDir: pdOther, backupDir });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/rollback');
+
+    const body = parseResponseBody<{ success: boolean }>(res);
+    expect(body.success).toBe(false);
+  });
+
+  it('full update in canonical mode backs up the plugin, refreshes the OpenClaw extension copy, and records backupPath (CP-4/CP-5)', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    // Canonical layout: runtime dir + manifest.
+    writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+    writeFixture('.pd/install.json', JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: ['openclaw'],
+      workspaces: [workspaceDir],
+    }));
+
+    // The extension copy OpenClaw actually loads — exists pre-update (the
+    // installer registered it), so the refresh must fire.
+    writeFixture('extensions/principles-disciple/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+
+    // Pre-built staging fixture: the fake "extracted installer tarball".
+    writeFixture('staging-fixture/plugin/package.json', JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+    writeFixture('staging-fixture/plugin/dist/bundle.js', 'new plugin code');
+    writeFixture('staging-fixture/console/package.json', '{}');
+    writeFixture('staging-fixture/console/dist/server.js', 'new console code');
+    writeFixture('staging-fixture/core/package.json', '{}');
+    writeFixture('staging-fixture/core/dist/index.js', 'new core');
+    writeFixture('staging-fixture/pd-cli/package.json', '{}');
+    writeFixture('staging-fixture/pd-cli/dist/index.js', 'new cli');
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) fs.cpSync(under(tmpDir, 'staging-fixture'), dir, { recursive: true });
+      }
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', {});
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+    const body = parseResponseBody<{ data: { success: boolean; newVersion?: string; reason?: string } }>(res);
+    expect(body.data.success).toBe(true);
+    expect(body.data.newVersion).toBe('2.0.0');
+
+    // CP-5: canonical plugin updated…
+    expect(fs.readFileSync(under(tmpDir, '.pd/runtime/plugin/package.json'), 'utf-8')).toContain('2.0.0');
+    // …and the extension copy OpenClaw loads was refreshed too.
+    expect(fs.readFileSync(under(tmpDir, 'extensions/principles-disciple/package.json'), 'utf-8')).toContain('2.0.0');
+    expect(fs.readFileSync(under(tmpDir, 'extensions/principles-disciple/dist/bundle.js'), 'utf-8')).toBe('new plugin code');
+
+    // CP-4: the pre-swap backup exists under the backups root and the history
+    // entry records it.
+    const backupsRoot = under(tmpDir, 'pd-backups');
+    const backupName = fs.readdirSync(backupsRoot).find((name) => name.startsWith('plugin'));
+    expect(backupName).toBeDefined();
+    const backupPath = under(backupsRoot, backupName as string);
+    expect(fs.readFileSync(under(backupPath, 'package.json'), 'utf-8')).toContain('1.0.0');
+
+    const history = JSON.parse(fs.readFileSync(under(workspaceDir, '.pd/update-history.json'), 'utf-8')) as { success: boolean; kind: string; backupPath?: string }[];
+    const successEntry = history.filter((e) => e.success && e.kind === 'update').at(-1);
+    expect(successEntry?.backupPath).toBe(backupPath);
+  });
+
+  it('rollback of a canonical plugin syncs the OpenClaw extension copy (CP-5 invariant)', async () => {
+    writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '2.0.0' }));
+    writeFixture('.pd/runtime/plugin/dist-marker', 'new');
+    writeFixture('extensions/principles-disciple/package.json', JSON.stringify({ name: 'principles-disciple', version: '2.0.0' }));
+    writeFixture('extensions/principles-disciple/dist-marker', 'new');
+    writeFixture('pd-backups/plugin-backup/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+    writeFixture('pd-backups/plugin-backup/dist-marker', 'old');
+
+    const req = createMockRequest('POST', {
+      targetDir: under(tmpDir, '.pd/runtime/plugin'),
+      backupDir: under(tmpDir, 'pd-backups/plugin-backup'),
+    });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/rollback');
+
+    const body = parseResponseBody<{ data: { success: boolean; message?: string } }>(res);
+    expect(body.data.success).toBe(true);
+    expect(fs.readFileSync(under(tmpDir, '.pd/runtime/plugin/dist-marker'), 'utf-8')).toBe('old');
+    // The copy the gateway loads was rolled back too — no half-rollback.
+    expect(fs.readFileSync(under(tmpDir, 'extensions/principles-disciple/dist-marker'), 'utf-8')).toBe('old');
+    expect(body.data.message).toContain('extension copy');
+  });
+
+  it('sweeps only stale pd-update staging dirs (CP-8)', async () => {
+    const { sweepStaleUpdateTempDirs } = await import('../../../src/server/routes/update.js');
+    const realOs = await vi.importActual<typeof import('os')>('os');
+    const tmpRoot = realOs.tmpdir();
+    const oldDir = under(tmpRoot, 'pd-update-sweeptest-old');
+    const newDir = under(tmpRoot, 'pd-full-update-sweeptest-new');
+    const unrelated = under(tmpRoot, 'pd-unrelated-sweeptest-old');
+    for (const dir of [oldDir, newDir, unrelated]) fs.mkdirSync(dir, { recursive: true });
+    const stale = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(oldDir, stale, stale);
+    fs.utimesSync(unrelated, stale, stale);
+
+    try {
+      const { swept } = sweepStaleUpdateTempDirs();
+      expect(swept).toContain(oldDir);
+      expect(swept).not.toContain(newDir);
+      expect(swept).not.toContain(unrelated);
+      expect(fs.existsSync(oldDir)).toBe(false);
+      expect(fs.existsSync(newDir)).toBe(true);
+      expect(fs.existsSync(unrelated)).toBe(true);
+    } finally {
+      for (const dir of [oldDir, newDir, unrelated]) fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });
