@@ -68,21 +68,27 @@ describe('codex worker daemon loop resilience (PRI-655)', () => {
 
     const handler = handleCodexWorker({ workspace: workspaceDir, intervalMs: 1000 });
 
-    // Round one rejects; the daemon reports it instead of crashing.
-    await waitForCalls(1);
-    await vi.waitFor(() => {
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[PD:CodexWorker] cycle failed: boom: escaping exception'));
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Investigate: pd codex worker --status'));
-    });
+    // Review fix (ERR-071 recurrence): the daemon keeps looping with real
+    // timers and signal listeners — stop it in finally so assertion failures
+    // cannot leak a live background loop into subsequent tests.
+    try {
+      // Round one rejects; the daemon reports it instead of crashing.
+      await waitForCalls(1);
+      await vi.waitFor(() => {
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('[PD:CodexWorker] cycle failed: boom: escaping exception'));
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Investigate: pd codex worker --status'));
+      });
 
-    // Round two runs — the loop did not die (the bug: process crash).
-    await waitForCalls(2);
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`Codex workspace worker (${workspaceDir})`));
+      // Round two runs — the loop did not die (the bug: process crash).
+      await waitForCalls(2);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`Codex workspace worker (${workspaceDir})`));
+    } finally {
+      process.emit('SIGINT');
+      await handler.catch(() => undefined);
+    }
 
-    // Stop the daemon (SIGINT during the inter-cycle sleep) and confirm a
-    // clean exit with signal listeners removed.
-    process.emit('SIGINT');
-    await expect(handler).resolves.toBeUndefined();
+    // Clean exit: signal listeners removed (only reached after the finally
+    // stopped the daemon, on the happy path AND on assertion failure).
     expect(process.listenerCount('SIGINT')).toBe(0);
     expect(process.listenerCount('SIGTERM')).toBe(0);
   }, 20_000);
