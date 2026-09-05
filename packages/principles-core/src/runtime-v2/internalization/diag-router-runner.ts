@@ -330,6 +330,41 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       throw commitErr;
     }
 
+    // 2b. Dual-write the DiagnosticianOutputV1 into pi_artifacts (PRI-667).
+    // The committer's legacy `artifacts` row is the candidate-intake source,
+    // but the internalization tier2 lineage (CandidateLineage) reads ONLY
+    // pi_artifacts — without this row, evaluator stage2's required path
+    // `diagnostician.raw.evidence` can never resolve (permanent input_invalid,
+    // observed live 2026-09-03 ×5 chains and in the PRI-653 lab ×2). Same
+    // persistence shape as the diag_rootcause/diag_distiller writers; the
+    // Layer-0 envelope keeps the top-level `evidence` field readable by
+    // readRawField. Idempotent via the (source_task_id, artifact_kind) upsert.
+    try {
+      const lineageResult = await this.resolveLineageArtifactIds(taskId);
+      const now = new Date().toISOString();
+      await this.artifactStore.upsertArtifact({
+        artifactId: `pi-art-${taskId}-${runId}`,
+        artifactKind: 'principle',
+        sourceTaskId: taskId,
+        lineageArtifactIds: lineageResult.ids,
+        validationStatus: 'pending',
+        contentJson: routerContentJson,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (piWriteErr) {
+      this.emitEvent('artifact_write_failed', taskId, {
+        runId,
+        errorMessage: piWriteErr instanceof Error ? piWriteErr.message : String(piWriteErr),
+      });
+      return this.retryOrFail({
+        taskId,
+        task,
+        errorCategory: 'artifact_commit_failed',
+        failureReason: `PIArtifact dual-write failed: ${piWriteErr instanceof Error ? piWriteErr.message : String(piWriteErr)}`,
+      });
+    }
+
     // Emit: principle_candidate_registered per recommendation
     for (let i = 0; i < output.recommendations.length; i++) {
       const rec = output.recommendations[i];
