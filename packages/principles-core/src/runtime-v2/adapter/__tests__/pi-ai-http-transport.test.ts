@@ -21,7 +21,11 @@
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import * as http from 'node:http';
-import { createBoundPiAiFetch, getPiAiFetch } from '../pi-ai-http-transport.js';
+import {
+  createBoundPiAiFetch,
+  getPiAiFetch,
+  resetPiAiFetchForTest,
+} from '../pi-ai-http-transport.js';
 
 /** Local slow server: delays response headers by `headerDelayMs`. */
 function startSlowHeaderServer(headerDelayMs: number): Promise<{
@@ -111,5 +115,23 @@ describe('PRI-683: pi-ai HTTP transport inner timeout cap', () => {
 
   it('singleton: getPiAiFetch returns the same function across calls', () => {
     expect(getPiAiFetch()).toBe(getPiAiFetch());
+  });
+
+  it('createBoundPiAiFetch default args build an undici-capped Agent (factory covers zero-cap path)', async () => {
+    // Default args (production config: caps disabled) — exercise the factory's
+    // default-value branch, not just the explicit-options path used by the
+    // fingerprint/fix tests above.
+    const fetch = createBoundPiAiFetch();
+    const server = await startSlowHeaderServer(50);
+    servers.push(server.close);
+    const res = await fetch(server.url);
+    expect(res.status).toBe(200);
+  }, 10_000);
+
+  it('resetPiAiFetchForTest clears the singleton (subsequent call returns a fresh fetch)', () => {
+    const first = getPiAiFetch();
+    resetPiAiFetchForTest();
+    const second = getPiAiFetch();
+    expect(second).not.toBe(first);
   });
 });
