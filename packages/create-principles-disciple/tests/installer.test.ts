@@ -402,3 +402,99 @@ describe('install() gateway lock pre-flight', () => {
     expect(result.error).not.toMatch(/has been restored/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CP-6 / CP-9 (install-upgrade investigation 2026-09-05): honest failure
+// semantics for a fresh install that dies mid-deployment, and early workspace
+// creation.
+// ---------------------------------------------------------------------------
+
+describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', () => {
+  let savedLegacyNpmInstall: string | undefined;
+  let savedHome: string | undefined;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    savedLegacyNpmInstall = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    process.env.PD_ALLOW_LEGACY_NPM_INSTALL = '1';
+    setLanguage('en');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+    vi.mocked(fs.readdirSync).mockReset();
+    if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+  });
+
+  it('cleans up deployed runtime dirs and reports truth when a FRESH install fails mid-deployment (CP-6)', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
+    // Fresh install: no pre-existing ext copy / runtime root, so
+    // backupExistingInstall returns no_existing (no backup safety net).
+    // The package source core/ exists (deployed), host-runtime/ does not —
+    // so the failure fires AFTER the first component deployment. The mock
+    // is phase-based: the first core-source probe flips the fixture into
+    // "deployed" phase so the catch-block cleanup sees the targets on disk.
+    let deployed = false;
+    vi.mocked(fs.existsSync).mockImplementation((value) => {
+      const s = String(value);
+      if (s.endsWith('install.json') || s.endsWith(path.join('.pd', 'state.db'))) return false;
+      if (s.includes(path.join('/asset', 'host-runtime'))) return false;
+      if (s.includes(path.join('/asset', 'core'))) deployed = true;
+      if (deployed) return true;
+      if (s.endsWith(path.join('extensions', 'principles-disciple'))) return false;
+      if (s.endsWith(path.join('.pd', 'runtime'))) return false;
+      return s.includes(path.join('/asset', 'core')) || s.includes(path.join('/asset', 'plugin'));
+    });
+    vi.mocked(fs.readFileSync).mockImplementation((value) => {
+      const filePath = String(value);
+      if (filePath.endsWith('openclaw.plugin.json')) {
+        return JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } });
+      }
+      if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
+      return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
+    });
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const result = await install({ ...baseInstallOptions }, '/asset', { quiet: true });
+
+    expect(result.success).toBe(false);
+    // Truthful reason: mutation happened, fresh install, residue cleaned.
+    expect(result.reason).toMatch(/^install_failed_unactivated_cleaned:/);
+    expect(result.error).toMatch(/removed/);
+    expect(result.error).not.toMatch(/not modified/);
+    // The deployment roots this run created were removed (rc-9 observable).
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.pd[/\\]runtime$/),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringMatching(/extensions[/\\]principles-disciple$/),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+  });
+
+  it('creates the workspace directory before the gateway pre-flight (CP-9)', async () => {
+    // Gateway running + no --stop-gateway → clean abort BEFORE any step ran
+    // in the old flow, so the workspace dir would not exist. The fix creates
+    // it up front — assert against the REAL filesystem (fs-extra is not
+    // mocked; the workspace path is a throwaway temp dir).
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789 });
+    const realFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const realPath = await vi.importActual<typeof import('node:path')>('node:path');
+    const realOs = await vi.importActual<typeof import('node:os')>('node:os');
+    const wsRoot = realFs.mkdtempSync(realPath.join(realFs.realpathSync.native(realOs.tmpdir()), 'pd-cp9-'));
+    const workspaceDir = realPath.join(wsRoot, 'ws', 'nested');
+    try {
+      const result = await install({ ...baseInstallOptions, workspaceDir }, '/asset', { quiet: true });
+      expect(result.success).toBe(false);
+      expect(realFs.existsSync(workspaceDir)).toBe(true);
+    } finally {
+      realFs.rmSync(wsRoot, { recursive: true, force: true });
+    }
+  });
+});
