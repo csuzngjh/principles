@@ -20,7 +20,7 @@
 // (sessionIds accumulate via --session during the run or afterwards).
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { newManifestTemplate } from './lib/experiment-manifest.mjs';
@@ -114,8 +114,7 @@ function pkgVersion(pkgPath) {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const outFile = resolve(opts.out); // one canonical path — checks and writes must agree (CodeQL race note)
-  if (existsSync(outFile)) fail(`${outFile} already exists — edit it instead of re-initializing`);
+  const outFile = resolve(opts.out); // one canonical path for all uses
 
   let manifest;
   try {
