@@ -30,7 +30,9 @@ import * as os from 'node:os';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import { EvaluatorRunner, type SeedArtificerRepairParams } from '../evaluator-runner.js';
 import { ArtificerRunner } from '../artificer-runner.js';
+import { DiagRouterRunner } from '../diag-router-runner.js';
 import { DefaultEvaluatorValidator } from '../evaluator-output.js';
+import { SqliteDiagnosticianCommitter } from '../../store/commit/diagnostician-committer.js';
 import { DefaultArtificerValidator } from '../artificer-output.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
@@ -517,6 +519,142 @@ describe('PR B T-B: Evaluator Stage2 resolves required tier2 raw evidence (flags
     const ruleArtifact = evalArtifacts.find((a) => a.artifactKind === 'rule');
     expect(ruleArtifact).toBeDefined();
     if (ruleArtifact) expect(ruleArtifact.artifactId).toContain('pi-rule-');
+  });
+
+  it('PRI-667: the REAL DiagRouterRunner dual-write is what makes the diag_router tier2 node exist', async () => {
+    // Production-shape regression: run the real DiagRouterRunner (Stage C) with
+    // a real committer and test-double adapter, then verify (a) the
+    // pi_artifacts row exists for the diag_router task, and (b) that row is
+    // exactly what the seeded evaluator stage2 lineage consumes. Before
+    // PRI-667 the committer wrote ONLY the legacy `artifacts` table and this
+    // row never existed — every stage2 run died on required-unavailable.
+    const diagRouterTaskId = `diag_router-${DIAG_ID}`;
+    const diagRootTaskId = `diag_rootcause-${DIAG_ID}`;
+    const diagDistTaskId = `diag_distiller-${DIAG_ID}`;
+    // Router context requires BOTH split predecessors (rootcause + distiller),
+    // each passing its own TypeBox schema.
+    await stateManager.createTask({
+      taskId: diagRootTaskId, taskKind: 'diag_rootcause', status: 'succeeded',
+      attemptCount: 1, maxAttempts: 3, diagnosticJson: meta({}),
+    });
+    const rootCauseArtId = `pi-art-${diagRootTaskId}`;
+    await upsertArtifact(rootCauseArtId, diagRootTaskId, [], {
+      valid: true, diagnosisId: DIAG_ID, taskId: diagRootTaskId,
+      summary: 'Agent wrote a controlled file without reading it first.',
+      causalChain: [{ why: 1, statement: 'write tool invoked without prior read', evidenceRefs: ['pain-1'] }],
+      rootCause: 'Tooling: write path skipped the read-before-write check.',
+      rootCauseCategory: 'Tooling',
+      evidence: [{ sourceRef: 'pain-1', note: PAIN_EVIDENCE_MARKER }],
+      confidence: 0.9,
+    });
+    await stateManager.createTask({
+      taskId: diagDistTaskId, taskKind: 'diag_distiller', status: 'succeeded',
+      attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: meta({ dependencyTaskIds: [diagRootTaskId] }),
+    });
+    await upsertArtifact(`pi-art-${diagDistTaskId}`, diagDistTaskId, [rootCauseArtId], {
+      valid: true, taskId: diagDistTaskId,
+      sourceRootCauseArtifactId: rootCauseArtId,
+      abstractedPrinciple: 'Read a file before writing it.',
+      rationale: 'reading first keeps edits consistent with on-disk state',
+      groundedOnCorePrincipleIds: ['T-01'],
+      scope: 'scenario',
+      confidence: 0.8,
+    });
+    await stateManager.createTask({
+      taskId: DIAG_ID, taskKind: 'diagnostician', status: 'succeeded',
+      attemptCount: 1, maxAttempts: 3, diagnosticJson: meta({}),
+    });
+    await stateManager.createTask({
+      taskId: diagRouterTaskId, taskKind: 'diag_router', status: 'pending',
+      attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: meta({ dependencyTaskIds: [diagRootTaskId, diagDistTaskId] }),
+    });
+
+    const routerOutput = {
+      valid: true,
+      diagnosisId: DIAG_ID,
+      summary: 'Agent wrote a controlled file without reading it first.',
+      rootCause: 'Tooling: write path skipped the read-before-write check.',
+      violatedPrinciples: [],
+      evidence: [{ sourceRef: 'pain-1', note: PAIN_EVIDENCE_MARKER }],
+      recommendations: [{ kind: 'principle', description: 'read before write', abstractedPrinciple: 'Read before write' }],
+      confidence: 0.9,
+    };
+    const committer = new SqliteDiagnosticianCommitter(new SqliteConnection(workspaceDir));
+    const routerPrompts: string[] = [];
+    const routerRunner = new DiagRouterRunner(
+      {
+        stateManager,
+        runtimeAdapter: scriptedAdapter([routerOutput], routerPrompts, `run-${diagRouterTaskId}`),
+        eventEmitter: emitter,
+        artifactStore: store,
+        committer,
+      },
+      { owner: 'sip-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 },
+    );
+    const routerResult = await routerRunner.run(diagRouterTaskId);
+    expect(routerResult.status).toBe('succeeded');
+
+    // (a) the dual-written pi_artifacts row exists with the evidence field
+    const diagRows = await store.listBySourceTaskId(diagRouterTaskId);
+    expect(diagRows.length).toBe(1);
+    const [diagRow] = diagRows;
+    if (diagRow === undefined) throw new Error('dual-written pi_artifacts row missing');
+    const parsed = JSON.parse(diagRow.contentJson) as Record<string, unknown>;
+    expect(Object.hasOwn(parsed, 'evidence')).toBe(true);
+
+    // (b) downstream: seed the chain off this REAL row (instead of the manual
+    // fixture) and assert stage2 still resolves — the wiring end-to-end.
+    // Re-point the dreamer's lineage at the real diag artifact:
+    await stateManager.createTask({
+      taskId: DREAM_ID, taskKind: 'dreamer', status: 'succeeded',
+      attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: meta({ dependencyTaskIds: [diagRouterTaskId] }),
+    });
+    await upsertArtifact(DREAM_ART, DREAM_ID, [diagRow.artifactId], {
+      valid: true, taskId: DREAM_ID, contextRefs: [], generatedAt: new Date().toISOString(),
+      candidates: [{
+        candidateIndex: 0,
+        badDecision: 'wrote the file without reading it',
+        betterDecision: BETTER_DECISION_MARKER,
+        rationale: 'reading first keeps edits consistent with on-disk state',
+        confidence: 0.85, riskLevel: 'low', strategicPerspective: 'safety',
+      }],
+    });
+    await stateManager.createTask({
+      taskId: PHIL_ID, taskKind: 'philosopher', status: 'succeeded',
+      attemptCount: 1, maxAttempts: 3, diagnosticJson: meta({ dependencyTaskIds: [DREAM_ID] }),
+    });
+    await upsertArtifact(PHIL_ART, PHIL_ID, [DREAM_ART], {
+      thesis: 'read before write', principleCandidate: { title: 'Read before write', scope: 'file tools', confidence: 0.8 },
+    });
+    await stateManager.createTask({
+      taskId: SCRIBE_ID, taskKind: 'scribe', status: 'succeeded',
+      attemptCount: 1, maxAttempts: 3, diagnosticJson: meta({ dependencyTaskIds: [PHIL_ID] }),
+    });
+    await upsertArtifact(SCRIBE_ART, SCRIBE_ID, [PHIL_ART], {
+      principleId: 'pri-sip-read-before-write',
+      principleDraft: { statement: 'Read a file before writing it.', applicability: ['file tools'], antiPatterns: ['blind overwrite'] },
+      sourceTrace: {},
+    });
+    await seedEvaluatorChain();
+
+    const stage1Output = evaluatorOutput(EVAL1_ID, ART1_ART, 'approved', {
+      painCoverage: { fullyCovered: false },
+      compressionFidelity: { missingDimensions: [] },
+    });
+    const stage2Output = evaluatorOutput(EVAL1_ID, ART1_ART, 'approved');
+    const prompts: string[] = [];
+    const evaluator = makeEvaluatorRunner([stage1Output, stage2Output], prompts, 'run-sip-eval-667', FLAGS_ON);
+    const result = await evaluator.run(EVAL1_ID);
+    expect(result.status).toBe('succeeded');
+    expect(prompts.length).toBe(2);
+    // Stage 2 resolved tier2 through the REAL dual-written diag_router node.
+    expect(prompts[1]).toContain('diagnostician.raw.evidence');
+    expect(prompts[1]).toContain(PAIN_EVIDENCE_MARKER);
+    expect(emitted.some((e) => e.eventType === 'evaluator_required_context_evidence_unresolved'
+      && (e.payload as { manifestId?: string }).manifestId === 'evaluator.stage2.v1')).toBe(false);
   });
 });
 

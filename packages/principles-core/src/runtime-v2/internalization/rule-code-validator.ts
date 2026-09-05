@@ -7,7 +7,16 @@
  *
  * PRI-44: Pure validation logic, zero infrastructure dependency.
  * VM-dependent checks remain in the plugin layer.
+ *
+ * PRI-668: pattern matching examines EXECUTABLE source only — comments and
+ * string-literal contents are masked first (maskNonExecutableText). A string
+ * literal is DATA; it can only become code through the dynamic-evaluation
+ * and bracket-access primitives, each of which is its own forbidden pattern,
+ * so the masking creates no escape. Template `${...}` interpolation stays
+ * un-masked (executable).
  */
+
+import { maskNonExecutableText } from './legacy-rule-contract-scanner.js';
 
 export interface ValidationResult {
   valid: boolean;
@@ -28,7 +37,9 @@ const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bFunction\s*\(/, label: 'Function' },
   { pattern: /\bprocess\b(?![\w])/, label: 'process' },
   { pattern: /\bglobalThis\b/, label: 'globalThis' },
-  // Only match bare "global" as identifier/global, not in comments like "// global rule" or "the global scope"
+  // Bare "global" as identifier/global. PRI-668: literal/comment occurrences
+  // no longer match — the source is masked before scanning (see header), so
+  // `paramsSummary.scope === 'global'` and `// global rule` are DATA, not access.
   { pattern: /\bglobal\b(?![A-Za-z])/, label: 'global' },
   { pattern: /\bReflect\b/, label: 'Reflect' },
   { pattern: /\bProxy\b/, label: 'Proxy' },
@@ -56,11 +67,25 @@ const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
 /**
  * Pure forbidden-pattern check — returns labels of all forbidden patterns found.
  * No VM, no filesystem, no side effects.
+ *
+ * PRI-668: identifier-shaped patterns scan the MASKED source (comments +
+ * string-literal contents blanked) so a literal like 'global_apply' or a
+ * comment mentioning "global" is not flagged as an access. Template `${}`
+ * interpolation survives masking and stays subject to every pattern.
+ *
+ * EXCEPTION — the bracket-access pattern scans the RAW source: it exists
+ * precisely to catch forbidden-global names reached THROUGH a string literal
+ * (`globalThis['WeakRef']`), so masking would defeat it. The literal is the
+ * attack surface there, not incidental data.
  */
+const BRACKET_ACCESS_LABEL = 'bracket access to forbidden global';
+
 export function checkForbiddenPatterns(code: string): string[] {
+  const executableSource = maskNonExecutableText(code);
   const labels: string[] = [];
   for (const { pattern, label } of FORBIDDEN_PATTERNS) {
-    if (pattern.test(code)) {
+    const haystack = label === BRACKET_ACCESS_LABEL ? code : executableSource;
+    if (pattern.test(haystack)) {
       labels.push(label);
     }
   }
