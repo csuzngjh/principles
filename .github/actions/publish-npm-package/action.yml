@@ -134,11 +134,18 @@ runs:
           # esbuild first (cleans dist, produces bundle.js), then tsc --emitDeclarationOnly
           # (adds .d.ts without overwriting esbuild's .js output). Both needed: pd-cli
           # imports types from principles-disciple, bundle-plugin.mjs needs bundle.js.
+          # codex-adapter must be built before the installer: bundle-plugin.mjs
+          # bundles it (pd-cli's runtime dep) and pd-cli's tsc needs its dist.
+          # The installer MUST be built before pd-console: since PRI-672 the
+          # console typechecks against create-principles-disciple's dist types
+          # (release-manager-authority), which do not exist after a clean
+          # `npm ci` — console-first ordering fails tsc with TS2307.
           npm run build:production --workspace=principles-disciple
           npm run build:types --workspace=principles-disciple
+          npm run build --workspace=@principles/codex-adapter
           npm run build --workspace=@principles/pd-cli
-          npm run build --workspace=@principles/pd-console
           cd packages/create-principles-disciple && npm run build
+          npm run build --workspace=@principles/pd-console
         elif [ "$PKG_DIR" = "host-runtime" ]; then
           npm run build --workspace=@principles/host-runtime
         elif [ "$PKG_DIR" = "install-layout" ]; then
