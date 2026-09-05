@@ -2,7 +2,7 @@
  * Subagent Workflow Helper - Type Definitions
  *
  * This file defines the TypeScript interfaces for the workflow helper system
- * that manages subagent lifecycle (empathy observer, deep-reflect, etc.).
+ * that manages subagent lifecycle (empathy observer, etc.).
  *
  * Design reference: docs/design/2026-03-31-subagent-workflow-helper-design.md
  *
@@ -112,7 +112,7 @@ export interface WorkflowHandle {
 
 /**
  * Specification for a subagent workflow.
- * Each workflow type (empathy observer, deep-reflect) implements this spec.
+ * Each workflow type (empathy observer) implements this spec.
  * 
  * @example
  * ```ts

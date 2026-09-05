@@ -475,7 +475,7 @@ tail -50 "$SESSION" | jq 'select(.message.details.error != null)'
 
 - [ ] **Subagent Spawning**: 测试子agent创建和继承
 - [ ] **Event Logging**: 测试事件记录完整性
-- [ ] **Tool System**: 测试自定义工具（deep-reflect等）
+- [ ] **Tool System**: 测试自定义工具注册
 
 ### 低优先级
 
