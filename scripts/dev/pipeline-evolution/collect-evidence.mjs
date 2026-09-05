@@ -8,11 +8,22 @@
 //   <ws>/.state/trajectory.db    (sessions / tool_calls / pain_events)
 //   <ws>/.pd/telemetry/critical-events.jsonl   (adversarial gate events)
 // — all SQLite opened READ-ONLY (better-sqlite3 readonly + fileMustExist).
-// No new store is created; nothing is written except the optional --out file.
+// No new store is created; nothing is written except --out/--package output.
+//
+// PRI-685 Evidence Foundation additions:
+//   --experiment <manifest.json>  bind collection to one experiment
+//                                  (session → pain → candidate → correlation;
+//                                  NO "recent 10" fallback in this mode)
+//   --package <dir>                write a full evidence package
+//                                  (manifest/index/trace/metrics/report +
+//                                   artifact & telemetry export copies)
+//   truncation marks               every bounded collection reports
+//                                  { returned, total, truncated } (SPEC §12.3)
 //
 // Usage:
 //   node scripts/dev/pipeline-evolution/collect-evidence.mjs --workspace <dir> \
-//          [--chain <correlationId>] [--session <sid>] [--task <taskId>] [--json] [--out <file>]
+//          [--chain <correlationId>] [--session <sid>] [--task <taskId>] [--json] [--out <file>] \
+//          [--experiment <manifest.json> [--package <dir>]]
 //
 // --task: per-attempt run timeline for one task (duration / runtime / death
 //   reason per attempt) — retry-budget & timeout-cap forensics (PRI-683 pattern:
@@ -22,9 +33,16 @@
 // data, not a tool error); 1 = usage/environment error.
 
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { loadManifest } from './lib/experiment-manifest.mjs';
+import {
+  buildEvidenceIndex,
+  buildMetrics,
+  buildPipelineTrace,
+  renderOwnerReview,
+} from './lib/evidence-package.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -56,6 +74,16 @@ const STAGE_ORDER = [
 ];
 
 const BOUND = 200; // bounded preview length for any free-text field (rc-8)
+// Collection caps. Experiment scope is naturally small, but bounds stay —
+// truncation must be marked, never silent (SPEC §12.3).
+const CAP = {
+  chains: 50,
+  pains: 100,
+  sessions: 100,
+  candidates: 100,
+  toolCalls: 200,
+  adversarialEvents: 20,
+};
 
 function clip(value, bound = BOUND) {
   if (value === null || value === undefined) return null;
@@ -65,11 +93,21 @@ function clip(value, bound = BOUND) {
 }
 
 function parseArgs(argv) {
-  const opts = { workspace: null, chain: null, session: null, task: null, json: false, out: null };
+  const opts = {
+    workspace: null,
+    chain: null,
+    session: null,
+    task: null,
+    json: false,
+    out: null,
+    experiment: null,
+    package: null,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const value = argv[i + 1];
-    const takesValue = a === '--workspace' || a === '--chain' || a === '--session' || a === '--task' || a === '--out';
+    const takesValue =
+      a === '--workspace' || a === '--chain' || a === '--session' || a === '--task' || a === '--out' || a === '--experiment' || a === '--package';
     if (takesValue) {
       if (!value) {
         console.error(`missing value for ${a}`);
@@ -79,19 +117,35 @@ function parseArgs(argv) {
       else if (a === '--chain') opts.chain = value;
       else if (a === '--session') opts.session = value;
       else if (a === '--task') opts.task = value;
-      else opts.out = value;
+      else if (a === '--out') opts.out = value;
+      else if (a === '--experiment') opts.experiment = value;
+      else opts.package = value;
       i += 1;
     } else if (a === '--json') {
       opts.json = true;
     } else {
       console.error(`unknown argument: ${a}`);
-      console.error('usage: collect-evidence.mjs --workspace <abs-dir> [--chain <id>] [--session <sid>] [--task <taskId>] [--json] [--out <file>]');
+      console.error(
+        'usage: collect-evidence.mjs --workspace <abs-dir> [--chain <id>] [--session <sid>] [--task <taskId>] [--json] [--out <file>] [--experiment <manifest.json> [--package <dir>]]',
+      );
       process.exit(1);
     }
   }
   if (!opts.workspace || !isAbsolute(resolve(opts.workspace))) {
-    console.error('usage: collect-evidence.mjs --workspace <abs-dir> [--chain <id>] [--session <sid>] [--task <taskId>] [--json] [--out <file>]');
+    console.error(
+      'usage: collect-evidence.mjs --workspace <abs-dir> [--chain <id>] [--session <sid>] [--task <taskId>] [--json] [--out <file>] [--experiment <manifest.json> [--package <dir>]]',
+    );
     process.exit(1);
+  }
+  if (opts.package && !opts.experiment) {
+    console.error('--package requires --experiment: a package must name its experiment (SPEC §7 manifest.json)');
+    process.exit(1);
+  }
+  if (opts.task && opts.experiment) {
+    // Not a hard error — --task answers a different question (one task's run
+    // timeline) and is already fully scoped — but say it, so a combined
+    // invocation never looks like it produced experiment evidence.
+    console.error('note: --task mode ignores --experiment (the task id is already fully scoped)');
   }
   return opts;
 }
@@ -238,16 +292,28 @@ function failureLayer(matrix) {
   return 'unknown';
 }
 
-function readAdversarialEvents(root) {
+function readAdversarialEvents(root, window) {
   const file = join(root, '.pd', 'telemetry', 'critical-events.jsonl');
-  if (!existsSync(file)) return [];
+  if (!existsSync(file)) return { events: [], total: 0 };
   const lines = readFileSync(file, 'utf8').split('\n').filter((l) => l.trim() !== '');
   const events = [];
+  let total = 0;
   for (const line of lines) {
     try {
       const j = JSON.parse(line);
       const t = String(j.eventType ?? '');
-      if (t.startsWith('evaluator_adversarial')) {
+      if (!t.startsWith('evaluator_adversarial')) continue;
+      // Experiment mode scopes telemetry by the manifest window — without a
+      // window check, another experiment's replay events would leak into this
+      // package (isolation is a tested contract, PRI-685 test #1).
+      if (window) {
+        const ts = typeof j.timestamp === 'string' ? j.timestamp : null;
+        if (ts === null) continue; // unattributable event cannot enter a windowed package
+        if (window.start && ts < window.start) continue;
+        if (window.end && ts > window.end) continue;
+      }
+      total += 1;
+      if (events.length < CAP.adversarialEvents) {
         events.push({
           timestamp: j.timestamp ?? null,
           eventType: t,
@@ -258,7 +324,163 @@ function readAdversarialEvents(root) {
       // malformed line in an append-only log — skip, not our data to fix
     }
   }
-  return events.slice(-20);
+  return { events, total };
+}
+
+// ---------------------------------------------------------------------------
+// PRI-685 experiment binding: manifest → (pains, correlations, sessions).
+// The manifest is the experiment's metadata authority (scope + attribution);
+// runtime facts stay owned by state.db/trajectory.db/telemetry — discovery
+// goes session → pain_events → candidates → correlations, and explicit
+// manifest entries (painIds / correlations) are trusted as operator truth.
+// ---------------------------------------------------------------------------
+
+function inClause(values) {
+  return values.map(() => '?').join(',');
+}
+
+function resolveExperimentScope(state, traj, manifest) {
+  const bindingNotes = [];
+
+  // 1. pains: explicit painIds win; else discover via sessionIds (+window).
+  let pains = [];
+  if (manifest.painIds.length > 0) {
+    pains = traj
+      .prepare(
+        `SELECT id, session_id, source, score, reason, canonical_pain_id, created_at FROM pain_events WHERE canonical_pain_id IN (${inClause(manifest.painIds)})`,
+      )
+      .all(...manifest.painIds);
+    const found = new Set(pains.map((p) => p.canonical_pain_id));
+    for (const id of manifest.painIds) if (!found.has(id)) bindingNotes.push(`manifest painId ${id} not found in pain_events`);
+  } else if (manifest.sessionIds.length > 0) {
+    let sql = `SELECT id, session_id, source, score, reason, canonical_pain_id, created_at FROM pain_events WHERE session_id IN (${inClause(manifest.sessionIds)})`;
+    const args = [...manifest.sessionIds];
+    if (manifest.startedAt) {
+      sql += ' AND created_at >= ?';
+      args.push(manifest.startedAt);
+    }
+    if (manifest.finishedAt) {
+      sql += ' AND created_at <= ?';
+      args.push(manifest.finishedAt);
+    }
+    sql += ' ORDER BY id';
+    pains = traj.prepare(sql).all(...args);
+  }
+  const painIds = pains.map((p) => p.canonical_pain_id);
+
+  // Correlation discovery runs over declared ∪ discovered pain ids: a
+  // manifest painId is operator truth even when its trajectory row is absent
+  // (real case: pri653-e1's first pain lost its pain_events row while its
+  // full chain lives on in state.db — dropping it would silently amputate
+  // the experiment).
+  const discoveryPainIds = [...new Set([...manifest.painIds, ...painIds])];
+
+  // 2. correlations: candidates admitted for those pains + explicit entries.
+  const correlations = new Set(manifest.correlations);
+  for (const painId of discoveryPainIds) {
+    const rows = state
+      .prepare('SELECT candidate_id FROM principle_candidates WHERE task_id = ? ORDER BY rowid')
+      .all(`diag_router-diagnosis_${painId}`);
+    for (const r of rows) correlations.add(r.candidate_id);
+  }
+  // A pain that never reached candidate admission can still have its
+  // diagnosis-half chain collected via the diagnosis task id.
+  for (const painId of discoveryPainIds) {
+    const diagTask = state.prepare('SELECT task_id FROM tasks WHERE task_id = ?').get(`diagnosis_${painId}`);
+    if (diagTask && correlations.size < CAP.chains) correlations.add(`diagnosis_${painId}`);
+  }
+  if (correlations.size > CAP.chains) bindingNotes.push(`correlation set capped at ${CAP.chains} (manifest scope larger)`);
+
+  const sessionIds = manifest.sessionIds.length > 0 ? manifest.sessionIds : [...new Set(pains.map((p) => p.session_id).filter(Boolean))];
+  return { pains, painIds, discoveryPainIds, correlations: [...correlations].slice(0, CAP.chains), sessionIds, bindingNotes };
+}
+
+// ---------------------------------------------------------------------------
+// Evidence package writer (SPEC §7/§13): derived files + bounded export
+// copies. Copies carry sourceId/hash/schemaVersion/createdAt; the stores stay
+// the only truth — a package is a derived, disposable projection.
+// ---------------------------------------------------------------------------
+
+function sha256(text) {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+// Export capacity guard: a package is a derived copy, not an archive — bound
+// both the number of exported artifacts and the total bytes so a lab package
+// stays small even when the store has grown for years. Skipped (not silently
+// dropped) artifacts are counted in the truncation mark (SPEC §12.3 shape).
+const EXPORT_CAP = { artifacts: 50, maxTotalBytes: 10 * 1024 * 1024 };
+
+function exportArtifacts(state, chains, outDir) {
+  const taskIds = new Set(chains.flatMap((c) => c.stages.map((s) => s.taskId)));
+  const dir = join(outDir, 'artifacts');
+  // A package is a disposable projection — clear stale exports so a rebuilt
+  // package never carries artifacts that no longer belong to the experiment.
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const exported = [];
+  let totalInScope = 0;
+  let totalBytes = 0;
+  for (const chain of chains) {
+    for (const a of chain.artifacts) {
+      if (!a.sourceTaskId || !taskIds.has(a.sourceTaskId)) continue;
+      const row = state
+        .prepare(
+          'SELECT artifact_id, artifact_kind, source_task_id, content_json, validation_status, created_at, updated_at FROM pi_artifacts WHERE artifact_id = ?',
+        )
+        .get(a.id);
+      if (!row) continue;
+      totalInScope += 1;
+      const contentJson = String(row.content_json ?? '');
+      if (exported.length >= EXPORT_CAP.artifacts || totalBytes + contentJson.length > EXPORT_CAP.maxTotalBytes) {
+        continue; // count as skipped — the mark below reports it, never silently dropped
+      }
+      let content = null;
+      let schemaVersion = null;
+      try {
+        content = JSON.parse(row.content_json);
+        schemaVersion = typeof content?.version === 'string' ? content.version : null;
+      } catch {
+        content = row.content_json; // keep raw — unparsable content is data, not an error to hide
+      }
+      const record = {
+        artifactId: row.artifact_id,
+        sourceId: row.source_task_id,
+        artifactKind: row.artifact_kind,
+        validationStatus: row.validation_status ?? null,
+        hash: sha256(contentJson),
+        schemaVersion, // null = artifact carries no version field — honest UNKNOWN (rc-9)
+        createdAt: row.created_at ?? null,
+        updatedAt: row.updated_at ?? null,
+        contentJson: content,
+      };
+      const text = JSON.stringify(record, null, 2) + '\n';
+      writeFileSync(join(dir, `${row.artifact_id}.json`), text, 'utf8');
+      totalBytes += contentJson.length;
+      exported.push(row.artifact_id);
+    }
+  }
+  return {
+    exported,
+    truncation: { returned: exported.length, total: totalInScope, truncated: exported.length < totalInScope },
+  };
+}
+
+function writePackage(pkgDir, pkgData) {
+  mkdirSync(pkgDir, { recursive: true });
+  writeFileSync(join(pkgDir, 'manifest.json'), JSON.stringify(pkgData.manifest, null, 2) + '\n', 'utf8');
+  writeFileSync(join(pkgDir, 'collected.json'), JSON.stringify(pkgData.collected, null, 2) + '\n', 'utf8');
+  writeFileSync(join(pkgDir, 'evidence-index.json'), JSON.stringify(pkgData.evidenceIndex, null, 2) + '\n', 'utf8');
+  writeFileSync(join(pkgDir, 'pipeline-trace.json'), JSON.stringify(pkgData.pipelineTrace, null, 2) + '\n', 'utf8');
+  writeFileSync(join(pkgDir, 'metrics.json'), JSON.stringify(pkgData.metrics, null, 2) + '\n', 'utf8');
+  writeFileSync(join(pkgDir, 'report.md'), renderOwnerReview(pkgData) + '\n', 'utf8');
+  const telDir = join(pkgDir, 'telemetry');
+  mkdirSync(telDir, { recursive: true });
+  writeFileSync(
+    join(telDir, 'adversarial-events.json'),
+    JSON.stringify(pkgData.telemetryExport, null, 2) + '\n',
+    'utf8',
+  );
 }
 
 // Per-attempt run timeline for one task (PRI-653 round-2 lesson: timeout-cap /
@@ -365,10 +587,51 @@ function main() {
     return;
   }
 
+  let manifest = null;
+  let scope = null;
+  if (opts.experiment) {
+    try {
+      manifest = loadManifest(opts.experiment);
+    } catch (err) {
+      console.error(`[collect-evidence] ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  // trajectory.db is needed for experiment binding even before chain collection.
+  const trajPath = join(root, '.state', 'trajectory.db');
+  const trajAvailable = existsSync(trajPath);
+
   // Correlations to report: explicit --chain, else every correlation seen in
   // tasks (bounded to the 10 most recently updated).
   let correlations;
-  if (opts.chain) {
+  let candidateFilter = null; // Set of candidate_ids
+  let sessionFilter = null; // explicit session list
+  let bindingNotes = [];
+  if (manifest) {
+    if (!trajAvailable) {
+      console.error(`[collect-evidence] experiment mode requires trajectory.db (not found at ${trajPath}) — pain binding impossible`);
+      process.exit(1);
+    }
+    const traj = openReadOnly(trajPath);
+    try {
+      scope = resolveExperimentScope(state, traj, manifest);
+    } finally {
+      traj.close();
+    }
+    correlations = scope.correlations;
+    bindingNotes = scope.bindingNotes;
+    if (scope.painIds.length > 0 || manifest.painIds.length > 0) {
+      const candidateIds = new Set();
+      for (const painId of scope.discoveryPainIds) {
+        for (const r of state.prepare('SELECT candidate_id FROM principle_candidates WHERE task_id = ?').all(`diag_router-diagnosis_${painId}`)) {
+          candidateIds.add(r.candidate_id);
+        }
+      }
+      candidateFilter = candidateIds;
+    }
+    sessionFilter = scope.sessionIds;
+  } else if (opts.chain) {
     correlations = [opts.chain];
   } else {
     const recent = state
@@ -392,7 +655,7 @@ function main() {
     if (artifactIds.length > 0) {
       approvalRows = state
         .prepare(
-          'SELECT approval_id, artifact_id, channel, status, requested_at FROM approvals WHERE artifact_id IN (SELECT artifact_id FROM pi_artifacts WHERE source_task_id LIKE ?) LIMIT 20',
+          'SELECT approval_id, artifact_id, channel, status, requested_at, decided_at FROM approvals WHERE artifact_id IN (SELECT artifact_id FROM pi_artifacts WHERE source_task_id LIKE ?) LIMIT 20',
         )
         .all(`%${correlation}%`);
       const placeholders = artifactIds.map(() => '?').join(',');
@@ -414,7 +677,12 @@ function main() {
         attempts: t.attempt_count ?? null,
         updatedAt: t.updated_at ?? null,
       })),
-      artifacts: base.artifacts.map((a) => ({ id: a.artifact_id, kind: a.artifact_kind })),
+      artifacts: base.artifacts.map((a) => ({
+        id: a.artifact_id,
+        kind: a.artifact_kind,
+        sourceTaskId: a.source_task_id,
+        createdAt: a.created_at ?? null,
+      })),
       failures: base.runs
         .filter((r) => r.execution_status !== 'succeeded')
         .map((r) => ({ taskId: r.task_id, reason: clip(r.reason) })),
@@ -425,47 +693,136 @@ function main() {
     });
   }
 
-  // trajectory.db: sessions + pains (by --session or recent)
-  const trajPath = join(root, '.state', 'trajectory.db');
-  let trajectory = { path: trajPath, available: existsSync(trajPath), sessions: [], pains: [], toolCalls: [] };
-  if (trajectory.available) {
+  // trajectory.db: sessions + pains (experiment-scoped or recent)
+  let trajectory = { path: trajPath, available: trajAvailable, sessions: [], pains: [], toolCalls: [] };
+  const truncation = {};
+  if (trajAvailable) {
     const traj = openReadOnly(trajPath);
-    const sessFilter = opts.session ? 'WHERE session_id = ?' : '';
-    const sessArgs = opts.session ? [opts.session] : [];
-    trajectory.sessions = traj
-      .prepare(`SELECT session_id, updated_at FROM sessions ${sessFilter} ORDER BY updated_at DESC LIMIT 10`)
-      .all(...sessArgs);
-    trajectory.pains = traj
-      .prepare(`SELECT session_id, source, score, reason FROM pain_events ORDER BY id DESC LIMIT 10`)
-      .all()
-      .map((p) => ({ ...p, reason: clip(p.reason) }));
-    if (opts.session) {
-      trajectory.toolCalls = traj
-        .prepare('SELECT tool_name, outcome, created_at FROM tool_calls WHERE session_id = ? ORDER BY created_at LIMIT 200')
-        .all(opts.session)
+
+    // sessions
+    let sessions = [];
+    if (sessionFilter && sessionFilter.length > 0) {
+      sessions = traj
+        .prepare(`SELECT session_id, updated_at FROM sessions WHERE session_id IN (${inClause(sessionFilter)}) ORDER BY updated_at DESC`)
+        .all(...sessionFilter);
+    } else if (opts.session) {
+      sessions = traj.prepare('SELECT session_id, updated_at FROM sessions WHERE session_id = ?').all(opts.session);
+    } else {
+      sessions = traj.prepare('SELECT session_id, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 10').all();
+    }
+    trajectory.sessions = sessions;
+    truncation.sessions = { returned: sessions.length, total: sessions.length, truncated: false };
+
+    // pains
+    let pains;
+    let painsTotal;
+    if (manifest) {
+      // Experiment scope was fully resolved during binding — reuse it so the
+      // package and the binding see the same pain set.
+      const inScope = scope.pains;
+      painsTotal = inScope.length;
+      pains = inScope.slice(0, CAP.pains).map((p) => ({ ...p, reason: clip(p.reason) }));
+      truncation.pains = { returned: pains.length, total: painsTotal, truncated: painsTotal > pains.length };
+    } else {
+      const recent = traj.prepare('SELECT id, session_id, source, score, reason FROM pain_events ORDER BY id DESC LIMIT 10').all();
+      const total = traj.prepare('SELECT COUNT(*) AS n FROM pain_events').get().n;
+      pains = recent.map((p) => ({ ...p, reason: clip(p.reason) }));
+      truncation.pains = { returned: pains.length, total, truncated: total > pains.length };
+    }
+    trajectory.pains = pains;
+
+    // tool calls (session-scoped)
+    const tcSessions = sessionFilter && sessionFilter.length > 0 ? sessionFilter : opts.session ? [opts.session] : [];
+    if (tcSessions.length > 0) {
+      const total = traj.prepare(`SELECT COUNT(*) AS n FROM tool_calls WHERE session_id IN (${inClause(tcSessions)})`).get(...tcSessions).n;
+      const rows = traj
+        .prepare(`SELECT tool_name, outcome, created_at FROM tool_calls WHERE session_id IN (${inClause(tcSessions)}) ORDER BY created_at LIMIT ${CAP.toolCalls}`)
+        .all(...tcSessions)
         .map((c) => ({ ...c, tool_name: clip(c.tool_name), outcome: clip(c.outcome) }));
+      trajectory.toolCalls = rows;
+      truncation.toolCalls = { returned: rows.length, total, truncated: total > rows.length };
+    } else {
+      truncation.toolCalls = { returned: 0, total: 0, truncated: false };
     }
     traj.close();
   }
 
-  const candidates = state
-    .prepare('SELECT candidate_id, status, confidence, created_at FROM principle_candidates ORDER BY rowid DESC LIMIT 10')
-    .all();
+  // candidates
+  let candidates;
+  if (candidateFilter) {
+    const rows = state
+      .prepare('SELECT candidate_id, task_id, status, confidence, created_at FROM principle_candidates ORDER BY rowid DESC')
+      .all();
+    const inScope = rows.filter((c) => candidateFilter.has(c.candidate_id));
+    candidates = inScope.slice(0, CAP.candidates);
+    truncation.candidates = { returned: candidates.length, total: inScope.length, truncated: inScope.length > candidates.length };
+  } else {
+    const rows = state.prepare('SELECT candidate_id, status, confidence, created_at FROM principle_candidates ORDER BY rowid DESC LIMIT 10').all();
+    const total = state.prepare('SELECT COUNT(*) AS n FROM principle_candidates').get().n;
+    candidates = rows;
+    truncation.candidates = { returned: rows.length, total, truncated: total > rows.length };
+  }
+
+  const adversarialWindow = manifest
+    ? { start: manifest.startedAt ?? null, end: manifest.finishedAt ?? null }
+    : null;
+  const adversarial = readAdversarialEvents(root, adversarialWindow);
+  truncation.adversarialEvents = {
+    returned: adversarial.events.length,
+    total: adversarial.total,
+    truncated: adversarial.total > adversarial.events.length,
+  };
 
   const report = {
     collectedAt: new Date().toISOString(),
     workspaceRoot: root,
+    experiment: manifest
+      ? {
+          experimentId: manifest.experimentId,
+          scenarioId: manifest.scenarioId,
+          manifestPath: resolve(opts.experiment),
+          bindingNotes,
+        }
+      : null,
+    truncation,
     candidates,
     chains,
     trajectory,
-    adversarialEvents: readAdversarialEvents(root),
+    adversarialEvents: adversarial.events,
   };
+
+  if (opts.package) {
+    const artExport = exportArtifacts(state, chains, opts.package);
+    // Export capacity follows the same marked-truncation contract as every
+    // other bounded collection (SPEC §12.3) — a package that skipped artifacts
+    // says so in collected.json, never silently drops them.
+    truncation.artifacts = artExport.truncation;
+    const evidenceIndex = buildEvidenceIndex(report, manifest);
+    const metrics = buildMetrics(report, evidenceIndex);
+    const pipelineTrace = buildPipelineTrace(report);
+    const pkgData = {
+      manifest,
+      collected: report,
+      evidenceIndex,
+      pipelineTrace,
+      metrics,
+      telemetryExport: { events: adversarial.events, total: adversarial.total, truncated: truncation.adversarialEvents.truncated },
+      artifactsExport: artExport.truncation,
+    };
+    writePackage(opts.package, pkgData);
+    // --out and stdout still describe WHERE the package went; keep stdout
+    // clean of the full JSON in package mode (report.md is the human surface).
+    console.log(
+      `[ok] evidence package written to ${resolve(opts.package)} (${artExport.exported.length}/${artExport.truncation.total} artifacts exported${artExport.truncation.truncated ? ', TRUNCATED' : ''}, ${chains.length} chains)`,
+    );
+    state.close();
+    return;
+  }
 
   state.close();
 
   const text = opts.json ? JSON.stringify(report, null, 2) : renderMarkdown(report);
   if (opts.out) {
-    const { writeFileSync, mkdirSync } = require('node:fs');
     mkdirSync(dirname(resolve(opts.out)), { recursive: true });
     writeFileSync(opts.out, text, 'utf8');
     console.log(`[ok] evidence written to ${opts.out}`);
@@ -478,8 +835,20 @@ function renderMarkdown(r) {
   const lines = [];
   lines.push(`# Pipeline Evidence — ${r.workspaceRoot}`);
   lines.push('');
+  if (r.experiment) {
+    lines.push(`experiment: **${r.experiment.experimentId}** (scenario ${r.experiment.scenarioId}, manifest ${r.experiment.manifestPath})`);
+    if (r.experiment.bindingNotes.length) {
+      for (const n of r.experiment.bindingNotes) lines.push(`- binding note: ${n}`);
+    }
+    lines.push('');
+  }
   lines.push(`collected: ${r.collectedAt} · source: read-only state.db + trajectory.db + telemetry`);
   lines.push('');
+  const trunc = Object.entries(r.truncation ?? {}).filter(([, v]) => v.truncated);
+  if (trunc.length) {
+    lines.push(`> truncated collections: ${trunc.map(([k, v]) => `${k} ${v.returned}/${v.total}`).join(', ')}`);
+    lines.push('');
+  }
   lines.push('## Capability matrix (per chain)');
   lines.push('');
   lines.push('| chain | pain | diagnosis | principle | rule | validation | activation | behavior | failureLayer |');

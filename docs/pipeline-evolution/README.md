@@ -18,12 +18,56 @@ scripts/dev/pipeline-closure-lab/           ← 夹具层（PRI-634-F，唯一�
 ├── GROUND_TRUTH.md                         #   机械断言 + 行为参考基线（两层分离）
 └── FORENSICS.md                            #   只读取证查询 runbook（state.db/trajectory.db/telemetry）
 
-scripts/dev/pipeline-evolution/collect-evidence.mjs  ← 取证自动化（FORENSICS §1–3 的脚本化）
+scripts/dev/pipeline-evolution/             ← 取证自动化 + 实验证据基础设施（PRI-685）
+├── collect-evidence.mjs                    #   FORENSICS §1–3 的脚本化 + 实验绑定取证
+│                                              (--experiment <manifest> --package <dir>)
+├── init-experiment.mjs                     #   experiment-manifest.json 生成（自动抓 PD sha/版本）
+└── lib/                                    #   evidence-package.mjs（纯函数：claim 索引/指标
+                                              矩阵/trace/Owner Review——同 JSON 同报告）
 ```
 
 分工边界：**夹具的机械事实**只记在 closure-lab `GROUND_TRUTH.md`；**场景的演化契约**
 （期望 pain、期望原则、行为改变判定）只记在本目录 `scenarios/`；**取证查询**的人读版在
 `FORENSICS.md`、机器版在 `collect-evidence.mjs`。同一事实不写两处。
+
+## 1A. 实验证据包（PRI-685 Evidence Foundation）
+
+每轮实验的**实验定义与归属权威记录**是 **experiment-manifest.json**（PD commit/版本、
+host、模型、flags、session/pain 绑定、时间窗）——它是 *experiment metadata authority*，
+**不是运行事实来源**：发生了什么仍由 state.db / trajectory.db / telemetry 拥有，manifest
+只界定“这次实验是什么”。manifest 与存储冲突时，以存储为准。取证不再是"最近 10 条"，
+而是按 manifest 绑定：
+
+```bash
+# Phase 0 环境准备时生成（自动抓 git sha / 包版本；host/model 人工补）
+npm run dev:evolution-init -- --out <lab>/experiment-manifest.json \
+  --experiment PRI653-R3-S001 --scenario S001 --session <sid>
+
+# Phase 3 每阶段取证 → 一个可复算的证据包
+node scripts/dev/pipeline-evolution/collect-evidence.mjs \
+  --workspace <ws> --experiment <lab>/experiment-manifest.json \
+  --package <lab>/evidence-package
+```
+
+证据包结构（全部从只读存储派生，可由 collected.json 重新计算）：
+
+```
+evidence-package/
+├── manifest.json          # 实验权威（manifest 副本）
+├── collected.json         # 原始取证快照（含 truncation 截断标记）
+├── evidence-index.json    # claim → evidence（CONFIRMED/NOT_CONFIRMED/UNKNOWN/BLOCKED/INVALID）
+├── pipeline-trace.json    # 每链阶段 trace（stage → task/artifact 锚点）
+├── metrics.json           # 指标矩阵：pipeline / governance / behavior 三层
+├── report.md              # Owner Review（从 JSON 确定性生成，禁止人工重抄）
+├── artifacts/             # pi_artifacts 导出副本（sourceId/hash/createdAt；
+│                          #   有界导出：≤50 个 / ≤10MB 总量，超额计 truncated）
+└── telemetry/adversarial-events.json
+```
+
+语义纪律（SPEC Evidence Foundation §Problem 2）：**事实（task 级 bucket）与结论（claim
+级 status）分层**；阶段未到达 = UNKNOWN，绝不判 FAIL；无 activation 绝不声称行为改善
+（behavior 恒 NOT_REACHED/INCONCLUSIVE）；governance 计数（正确拒绝/审批等待/修复触发）
+描述治理面被行使，**不是缺陷计数**。
 
 ## 2. 场景模型（ExperienceScenario）
 
@@ -56,16 +100,21 @@ host: openclaw                  # 真实宿主（Phase 1 只支持 OpenClaw）
 ```
 Phase 0  环境准备     最新 main 构建 → 隔离 lab workspace → 插件部署 →
                      .pd/feature-flags.yaml 打开验证 flag → 快照（PD sha/插件版本/
-                     OpenClaw 版本/模型）→ 记入报告头部
+                     OpenClaw 版本/模型）→ npm run dev:evolution-init 生成
+                     experiment-manifest.json（机器可读快照，替代手抄报告头部）
 Phase 1  场景执行     npm run dev:closure-lab -- <lab>/scenario-<x> 部署一次性副本；
                      openclaw agent 真实会话执行任务模板（禁止内部 API 直调）
 Phase 2  Pain 捕获    真实失误发生后：pd pain record --session <sid> --score N -r "<纠正>"
-                     （必须 --session 绑定，否则 admission 依法拒绝）
+                     （必须 --session 绑定，否则 admission 依法拒绝）；session id 记入
+                     manifest.sessionIds
 Phase 3  管道推进     auto-consumer（生产路径）自行推进；需要立即观察时用
                      pd runtime internalization run-once。每阶段取证：
-                     node scripts/dev/pipeline-evolution/collect-evidence.mjs --workspace <ws>
+                     collect-evidence.mjs --workspace <ws> \
+                       --experiment <lab>/experiment-manifest.json --package <lab>/evidence-package
+                     （按实验绑定过滤，无"最近10条"fallback；截断有标记）
 Phase 4  行为验证     重新部署副本 → 同一任务模板再来一次真实会话 →
-                     机械断言（verify.js）+ 注入证据（pd principles stats）
+                     机械断言（verify.js）+ 注入证据（pd principles stats）；
+                     结果回填 manifest.behaviorObservation 后重新出包
 ```
 
 Owner 决策点（needs_human_review / approval 队列）是管道**设计终点**，不是卡死；
