@@ -372,7 +372,6 @@ One-line summaries remain in the handbook; the verbatim texts live here.
 ## Archived 2026-09-04 (PRI-672 review — handbook over 300KB cap; both entries last recurrences 2026-05-26, >90 days)
 
 **[ERR-041]** | Install success reported when delivered components are incomplete
-
 - **What happened**: `install()` returned `success: true` and printed "Ready." when `components.console` was `not_deliverable`. The interactive output said the installation was complete, but a core product surface (owner review console) was missing. This created a contradiction: the installer claimed success while explicitly noting a release-blocking gap.
 - **Why it's wrong**: `success: true` means the full product contract is met. If any required component is not deliverable, the install is not successful. Reporting success with an undeliverable component misleads both users and automation. This is the same class as ERR-002 (catch-and-degrade swallows failure) and ERR-009 (silently skip invalid instead of failing loud) — the system claims everything is fine when it's not.
 - **Correct approach**: `success` must require ALL required components to be verified/delivered. If any component is `not_deliverable` or `failed`, `success` must be `false`. Interactive output must clearly distinguish full success ("Ready.") from partial success ("Runtime + CLI verified, but console is not yet deliverable"). The README must explicitly state what the installer delivers and what is a known gap.
@@ -391,6 +390,9 @@ One-line summaries remain in the handbook; the verbatim texts live here.
 - **Date**: 2026-05-26
 - **Recurrence**: Same class as ERR-034
 
+---
+
+## Archived 2026-09-05 (PRI-686 review — handbook 305KB over 300KB cap; 11 entries with no recurrence > 90 days, identified by check:error-handbook --audit)
 
 **[ERR-056]** | Redaction pipeline truncates string values without running path/token/env redactors — secrets slip through
 

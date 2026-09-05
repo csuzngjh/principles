@@ -299,7 +299,10 @@ function handleEmpathySubcommand(
 }
 
 export async function handlePainReportCommand(ctx: PluginCommandContext): Promise<PluginCommandResult> {
-  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pain-report');
+  // PRI-686: wire the divergence warning into the real command chain — the
+  // ctx may carry a logger per the SDK convention (hook adapter supplies it);
+  // without it a PD-explicit vs OpenClaw-context split would be silent (rc-9).
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pain-report', ctx.logger);
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';

@@ -24,6 +24,9 @@ import { afterEach, beforeEach, vi } from 'vitest';
  */
 
 let isolatedHome: string | undefined;
+let originalPdWorkspaceDir: string | undefined;
+let originalOpenClawWorkspace: string | undefined;
+let envTouched = false;
 
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof os>('os');
@@ -36,11 +39,23 @@ vi.mock('os', async () => {
 export function isolatePdCanonicalConfig(): void {
   beforeEach(() => {
     isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-isolated-home-'));
+    // Save then delete — restored in afterEach so other tests in the same
+    // process never observe a mutated env (test-order independence).
+    originalPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
+    originalOpenClawWorkspace = process.env.OPENCLAW_WORKSPACE;
+    envTouched = true;
     delete process.env.PD_WORKSPACE_DIR;
     delete process.env.OPENCLAW_WORKSPACE;
   });
 
   afterEach(() => {
+    if (envTouched) {
+      if (originalPdWorkspaceDir === undefined) delete process.env.PD_WORKSPACE_DIR;
+      else process.env.PD_WORKSPACE_DIR = originalPdWorkspaceDir;
+      if (originalOpenClawWorkspace === undefined) delete process.env.OPENCLAW_WORKSPACE;
+      else process.env.OPENCLAW_WORKSPACE = originalOpenClawWorkspace;
+      envTouched = false;
+    }
     if (isolatedHome) {
       fs.rmSync(isolatedHome, { recursive: true, force: true });
       isolatedHome = undefined;

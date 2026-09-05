@@ -109,7 +109,12 @@ export function resolvePluginCommandWorkspaceDir(
   // 1. PD explicit sources (owner-declared) take priority over session context
   const explicit = (options?.explicitPdResolver ?? resolveExplicitPdSources)();
   if (explicit) {
-    const ctxWs = ctx.workspaceDir ?? (ctx.config?.workspaceDir as string | undefined);
+    // rc-2: config.workspaceDir is untrusted dispatcher data — only a real
+    // string participates in the divergence comparison; other types are
+    // treated as absent (they would previously crash path.resolve).
+    const configWorkspaceDir =
+      typeof ctx.config?.workspaceDir === 'string' ? ctx.config.workspaceDir : undefined;
+    const ctxWs = ctx.workspaceDir ?? configWorkspaceDir;
     if (ctxWs && path.resolve(ctxWs) !== path.resolve(explicit.workspaceDir)) {
       logger?.warn?.(
         `[PD:Command:${source}] PD explicit workspace (${explicit.source}: ${explicit.workspaceDir}) ` +

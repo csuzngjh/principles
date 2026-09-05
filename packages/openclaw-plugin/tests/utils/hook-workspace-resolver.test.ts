@@ -507,6 +507,23 @@ describe('resolvePluginCommandWorkspaceDir — Plugin Command Resolution', () =>
     expect(warnLogger.warn).toHaveBeenCalledWith(expect.stringContaining('differs from OpenClaw context'));
     delete process.env.PD_WORKSPACE_DIR;
   });
+
+  // ── PRI-686 review R1: non-string config.workspaceDir must not crash the
+  // divergence comparison (rc-2 — untrusted dispatcher data treated as unknown)
+
+  it('ignores non-string config.workspaceDir during divergence comparison instead of throwing', () => {
+    process.env.PD_WORKSPACE_DIR = validWorkspace;
+    const agentSub = path.join(os.tmpdir(), 'pd-test-workspace-agent-sub-3');
+    ensureDir(agentSub);
+    // config.workspaceDir is truthy but not a string (e.g. dispatcher bug)
+    const ctx = { workspaceDir: agentSub, config: { workspaceDir: { nested: 'object' } } };
+    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'pain', warnLogger)).not.toThrow();
+    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'pain', warnLogger);
+    expect(result).toBe(path.resolve(validWorkspace));
+    // Divergence still detected via ctx.workspaceDir and warned
+    expect(warnLogger.warn).toHaveBeenCalledWith(expect.stringContaining('differs from OpenClaw context'));
+    delete process.env.PD_WORKSPACE_DIR;
+  });
 });
 
 describe('resolveWorkspaceDirForRuntimeV2 — Runtime V2 Resolution', () => {

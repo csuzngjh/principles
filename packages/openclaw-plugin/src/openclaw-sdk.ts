@@ -56,6 +56,9 @@ export interface PluginCommandContext {
   workspaceDir?: string;
   config?: Record<string, unknown>;
   args?: string | string[];
+  /** Optional logger — the local hook adapter supplies it; PRI-686 command
+   *  resolvers use it for workspace divergence warnings. */
+  logger?: Partial<PluginLogger>;
   [key: string]: unknown;
 }
 
