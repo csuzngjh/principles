@@ -270,15 +270,39 @@ describe('install() gateway lock pre-flight', () => {
   let savedLang: 'zh' | 'en';
   let savedLegacyNpmInstall: string | undefined;
 
-  beforeEach(() => {
+  // Real on-disk fixture shaped like the npm-distributed package (no
+  // _release/, all component directories present with package.json + dist),
+  // so the form-gate passes and the install flow reaches the step under
+  // test. Replaces the old '/nonexistent/plugin' fixture, which the
+  // npm_bundle_incomplete form-gate now (correctly) refuses before the
+  // gateway step. 'fs' is auto-mocked at module scope, so the fixture
+  // resolves the REAL fs via importActual inside beforeEach.
+  let npmBundleFixtureDir: string;
+  const completeNpmBundlePluginDir = () => npmBundleFixtureDir;
+
+  beforeEach(async () => {
     vi.clearAllMocks();
     savedLang = 'zh';
     savedLegacyNpmInstall = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     process.env.PD_ALLOW_LEGACY_NPM_INSTALL = '1';
     setLanguage('en');
+    const actualFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
+    const realPath = await vi.importActual<typeof import('node:path')>('node:path');
+    npmBundleFixtureDir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-npm-bundle-'));
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout']) {
+      actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, component, 'dist'), { recursive: true });
+      actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
+    }
+    // The fixture is REAL on disk, but 'fs' is auto-mocked (every function
+    // returns undefined), so delegate the existsSync the form-gate consults
+    // to the real fs. Later steps (checkBuiltPlugin) still see the mocked
+    // fs and fail on the missing plugin manifest — which is what the
+    // failure-path tests below assert against.
+    vi.mocked(fs.existsSync).mockImplementation((value) => actualFs.existsSync(String(value)));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
     vi.mocked(fs.existsSync).mockReset();
     vi.mocked(fs.readFileSync).mockReset();
@@ -287,6 +311,10 @@ describe('install() gateway lock pre-flight', () => {
     if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
     setLanguage(savedLang);
+    if (npmBundleFixtureDir) {
+      const actualFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+      actualFs.rmSync(npmBundleFixtureDir, { recursive: true, force: true });
+    }
   });
 
   it('refuses a wrong-ABI release before gateway control or filesystem mutation', async () => {
@@ -350,7 +378,7 @@ describe('install() gateway lock pre-flight', () => {
     vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789, pid: 33584 });
     vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
 
-    const result = await install({ ...baseInstallOptions, stopGateway: false }, '/nonexistent/plugin', { quiet: true });
+    const result = await install({ ...baseInstallOptions, stopGateway: false }, completeNpmBundlePluginDir(), { quiet: true });
 
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/^gateway_running_aborted:/);
@@ -367,7 +395,7 @@ describe('install() gateway lock pre-flight', () => {
     vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
 
     // quiet=false (not --json), nonInteractive=true (--yes): must NOT prompt.
-    const result = await install({ ...baseInstallOptions, stopGateway: false }, '/nonexistent/plugin', { quiet: false, nonInteractive: true });
+    const result = await install({ ...baseInstallOptions, stopGateway: false }, completeNpmBundlePluginDir(), { quiet: false, nonInteractive: true });
 
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/^gateway_running_aborted:/);
@@ -379,9 +407,10 @@ describe('install() gateway lock pre-flight', () => {
     vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
     vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });
 
-    // fs is auto-mocked -> checkBuiltPlugin throws ("Built plugin files missing")
+    // completeNpmBundlePluginDir passes the form-gate; checkBuiltPlugin then
+    // throws on the mocked plugin manifest ("Built plugin files missing")
     // -> catch -> finally(restart). Verifies restart runs on failure too.
-    const result = await install({ ...baseInstallOptions, stopGateway: true }, '/nonexistent/plugin', { quiet: true });
+    const result = await install({ ...baseInstallOptions, stopGateway: true }, completeNpmBundlePluginDir(), { quiet: true });
 
     expect(stopOpenClawGateway).toHaveBeenCalledTimes(1);
     expect(restartOpenClawGateway).toHaveBeenCalledTimes(1);
@@ -394,7 +423,7 @@ describe('install() gateway lock pre-flight', () => {
   it('reports "not modified" (never "restored") when install fails before a backup is created', async () => {
     vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
 
-    const result = await install({ ...baseInstallOptions }, '/nonexistent/plugin', { quiet: true });
+    const result = await install(baseInstallOptions, completeNpmBundlePluginDir(), { quiet: true });
 
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/^install_failed_before_mutation:/);

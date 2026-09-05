@@ -316,6 +316,87 @@ function legacyNpmInstallEnabled(): boolean {
 }
 
 /**
+ * Installer payload shape, decided once per install run (see
+ * `decideInstallPayloadMode` below):
+ * - `self-contained` — the package ships the immutable release asset
+ *   (`_release/asset.json` + per-component node_modules); the default
+ *   for the release-asset publication channel.
+ * - `npm-distributed` — the npm registry package ships the bundled
+ *   component trees WITHOUT node_modules/_release (the registry package
+ *   is ~8MB vs ~792MB for the self-contained payload); dependencies
+ *   resolve from the npm registry at install time (the
+ *   PD_ALLOW_LEGACY_NPM_INSTALL recovery path).
+ */
+type InstallerPayloadMode = 'self-contained' | 'npm-distributed';
+
+const NPM_DISTRIBUTED_COMPONENTS = [
+  ['Core', 'core'],
+  ['Host runtime', 'host-runtime'],
+  ['Codex adapter', 'codex-adapter'],
+  ['Plugin', 'plugin'],
+  ['PD CLI', 'pd-cli'],
+  ['Console', 'console'],
+  ['Install layout', 'install-layout'],
+] as const;
+
+function releaseAssetPresent(pluginDir: string): boolean {
+  return existsSync(path.join(pluginDir, '_release', 'asset.json'));
+}
+
+/**
+ * Form-gate for the npm-distributed package shape: every bundled
+ * component directory must at least carry package.json + dist. Returns
+ * the missing items (empty = complete) so the refusal can name them
+ * (rc-3: fail loud with specifics, not a generic "invalid asset").
+ */
+function missingNpmDistributedComponents(pluginDir: string): string[] {
+  const missing: string[] = [];
+  for (const [, componentDirectory] of NPM_DISTRIBUTED_COMPONENTS) {
+    const componentDir = path.join(pluginDir, componentDirectory);
+    if (!existsSync(path.join(componentDir, 'package.json'))) {
+      missing.push(`${componentDirectory}/package.json`);
+      continue;
+    }
+    if (componentDirectory !== 'plugin' && !existsSync(path.join(componentDir, 'dist'))) {
+      missing.push(`${componentDirectory}/dist`);
+    }
+  }
+  return missing;
+}
+
+/**
+ * Decide which payload shape this package instance carries and whether
+ * registry dependency resolution (npm install) is required. Env override
+ * first (explicit operator intent), then the physical shape: a present
+ * `_release/asset.json` always takes the self-contained path (a present
+ * but CORRUPT asset still fails hard inside the preflight — never
+ * silently falling back to registry resolution); a package without the
+ * release asset but with complete component trees is the npm-distributed
+ * shape and resolves dependencies from the registry.
+ */
+export function decideInstallPayloadMode(pluginDir: string): InstallerPayloadMode {
+  if (legacyNpmInstallEnabled()) return 'npm-distributed';
+  if (releaseAssetPresent(pluginDir)) return 'self-contained';
+  return 'npm-distributed';
+}
+
+// Per-run payload mode, set by install() alongside activeHostTarget (same
+// module-level idiom) — prepareComponentDependencies' call sites are the
+// per-component wrappers, which have no natural parameter path from install().
+let activePayloadMode: InstallerPayloadMode = 'self-contained';
+
+/**
+ * Whether registry dependency resolution (npm install / global root
+ * discovery) may run: true for the npm-distributed payload shape and the
+ * PD_ALLOW_LEGACY_NPM_INSTALL recovery path. Host installers consume this
+ * gate instead of re-reading the env (their concern is payload shape, not
+ * the specific env var).
+ */
+export function isNpmDependencyResolutionEnabled(): boolean {
+  return activePayloadMode === 'npm-distributed';
+}
+
+/**
  * Supported release assets are self-contained: installation validates the
  * copied component and never resolves dependencies or runs lifecycle scripts.
  * The old npm path remains opt-in for development/legacy recovery only.
@@ -431,7 +512,7 @@ export async function preflightSelfContainedReleaseAsset(assetDir: string): Prom
 }
 
 async function prepareComponentDependencies(cwd: string, componentName: string): Promise<void> {
-  if (!legacyNpmInstallEnabled()) {
+  if (activePayloadMode === 'self-contained') {
     await prepareBundledComponentDependencies(cwd, componentName);
     return;
   }
@@ -2116,7 +2197,12 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   const quiet = mode.quiet === true;
   const nonInteractive = mode.nonInteractive ?? quiet;
   activeHostTarget = options.host;
-  if (!legacyNpmInstallEnabled()) {
+  // Decide the payload shape once: self-contained (release asset) or
+  // npm-distributed (registry-resolved dependencies). A present `_release`
+  // asset keeps the hard preflight; the npm-distributed shape must pass
+  // the component form-gate or fail loud naming what is missing.
+  activePayloadMode = decideInstallPayloadMode(pluginDir);
+  if (activePayloadMode === 'self-contained') {
     try {
       await preflightSelfContainedReleaseAsset(pluginDir);
     } catch (error) {
@@ -2142,6 +2228,24 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
         component: preflightError.component,
         dependency: preflightError.dependency,
         error: `${preflightError.message} — ${t('rollback_no_changes')}`,
+      };
+    }
+  } else {
+    if (!quiet) logger.warn('npm-distributed package detected — resolving component dependencies from the npm registry.');
+    const missing = missingNpmDistributedComponents(pluginDir);
+    if (missing.length > 0) {
+      return {
+        success: false,
+        workspaceDir: options.workspaceDir,
+        configYamlPath: getConfigYamlPath(options.workspaceDir),
+        templatesCount: 0,
+        components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+        verification: { features: 'skipped', storyA: 'skipped' },
+        enabledChannels: options.channels,
+        nextAction: 'The package is incomplete — reinstall it: npm cache clear --force && npx create-principles-disciple@latest. No changes were made.',
+        reason: `npm_bundle_incomplete: missing ${missing.join(', ')}`,
+        component: 'Release asset',
+        error: `Bundled components incomplete (missing ${missing.join(', ')}) — the npm package is corrupted or truncated. No changes were made.`,
       };
     }
   }
