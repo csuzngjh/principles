@@ -157,8 +157,15 @@ function logLegacyBackupMigration(source: string): void {
 // dir in os.tmpdir() (a crash between mkdtemp and the success/cleanup rmSync
 // has no sweeper). ~140 orphaned pd-update-* dirs were observed on one
 // machine over a week. Best-effort sweep of week-old staging dirs at the
-// start of each full update — a LIVE update's temp dir is minutes old and is
-// never touched.
+// start of each full update. Concurrency window (review finding): a LIVE
+// update's staging dir is at most minutes old — its top-level mtime updates
+// when tar extraction creates direct child dirs (verified: creating a
+// subdir bumps the parent mtime; grandchild file writes do not) — so a
+// >7-day-old top-level mtime means no direct child was ever created, i.e.
+// the update died before extraction started. Two concurrent console
+// processes both running full updates >7 days apart would be needed to
+// sweep a live dir; that residual risk is accepted (a process lock would be
+// the follow-up).
 const STALE_UPDATE_TEMP_DIR_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const UPDATE_TEMP_DIR_PREFIXES = ['pd-update-', 'pd-full-update-'];
 
@@ -801,7 +808,12 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
       backupPath: backupDir,
     });
 
-    return { success: true, message: extCopySynced ? 'Rollback completed successfully (OpenClaw extension copy restored too)' : 'Rollback completed successfully' };
+    return {
+      success: true,
+      message: extCopySynced
+        ? 'Rollback completed successfully (OpenClaw extension copy restored too). Note: only the plugin was rolled back; console/core/host-runtime/pd-cli keep the upgraded version. For a full step-back, re-run the official installer pinned to the older release.'
+        : 'Rollback completed successfully. Note: only the plugin was rolled back; console/core/host-runtime/pd-cli keep the upgraded version. For a full step-back, re-run the official installer pinned to the older release.',
+    };
   } catch (error) {
     return {
       success: false,
@@ -1326,10 +1338,22 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     // handler can find it. Console self-update owns the console dir backup;
     // core/host-runtime/pd-cli are plain dist overlays re-fetched on any
     // next update, so only the version authority (plugin) is backed up.
+    // R5 (review): reservePdBackupDestination creates the directory BEFORE
+    // the copy — a mid-copy failure must not leave backupPath pointing at a
+    // partial backup (a later /rollback would happily restore the fragment).
+    // Copy into the reserved dir inside its own try: on failure remove the
+    // fragment and let the thrown error flow into the outer catch with
+    // pluginBackupDir still undefined (no backupPath recorded).
     if (fs.existsSync(extDir)) {
-      pluginBackupDir = reservePdBackupDestination(path.basename(extDir));
-      copyDirRecursive(extDir, pluginBackupDir, SKIP_DIRS);
-      console.log(`[pd-update-full] Backed up ${extDir} → ${pluginBackupDir}`);
+      const backupDest = reservePdBackupDestination(path.basename(extDir));
+      try {
+        copyDirRecursive(extDir, backupDest, SKIP_DIRS);
+      } catch (backupError) {
+        try { fs.rmSync(backupDest, { recursive: true, force: true }); } catch { /* best effort */ }
+        throw backupError;
+      }
+      pluginBackupDir = backupDest;
+      console.log(`[pd-update-full] Backed up ${extDir} → ${backupDest}`);
     }
     if (
       fs.existsSync(hostRuntimeSrc) &&

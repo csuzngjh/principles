@@ -2140,13 +2140,6 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   const quiet = mode.quiet === true;
   const nonInteractive = mode.nonInteractive ?? quiet;
   activeHostTarget = options.host;
-  // CP-9 (2026-09-05 investigation): the workspace must exist before any step
-  // touches it — console verification spawns the server with --workspace and
-  // `pd-cli runtime init` writes under it, while workspace creation used to
-  // happen only as a side effect of the LATE template copy step. An explicit
-  // --workspace pointing at a new directory therefore failed the install
-  // halfway through (leaving the CP-6 residue). Create it up front.
-  await fse.ensureDir(path.resolve(options.workspaceDir));
   if (!legacyNpmInstallEnabled()) {
     try {
       await preflightSelfContainedReleaseAsset(pluginDir);
@@ -2238,6 +2231,17 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   };
 
   try {
+    // CP-9 (2026-09-05 investigation): the workspace must exist before any
+    // step touches it — console verification spawns the server with
+    // --workspace and `pd-cli runtime init` writes under it, while workspace
+    // creation used to happen only as a side effect of the LATE template
+    // copy step. An explicit --workspace pointing at a new directory
+    // therefore failed the install halfway through (leaving the CP-6
+    // residue). First statement INSIDE the try: an ensureDir failure
+    // (permissions / invalid path) flows into the unified failure result
+    // below instead of rejecting the install() promise (P1 review finding).
+    await fse.ensureDir(path.resolve(options.workspaceDir));
+
     if (spinner) updateProgress(spinner, stepIndex, 'Checking built plugin...');
     await checkBuiltPlugin(pluginDir);
     verification.manifestActivation = 'verified';
@@ -2617,6 +2621,12 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     const freshCleanup = !hasBackup && mutationStarted && !isLockError
       ? cleanUnactivatedFreshInstall()
       : undefined;
+    // R2 (review): after template/config steps have run (console verified →
+    // templates copied → config generated), the WORKSPACE also holds this
+    // run's files — but the workspace is the operator's own directory and may
+    // pre-date this run, so it is NOT wholesale-removed. Report its retention
+    // honestly instead of claiming "nothing else was modified".
+    const workspaceTouched = !hasBackup && mutationStarted && journal?.lastState !== 'planned';
     const rollbackSuffix = !hasBackup
       ? freshCleanup
         ? freshCleanup.failed.length === 0
@@ -2629,6 +2639,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '');
+    const rollbackSuffixFinal = rollbackSuffix + (workspaceTouched && freshCleanup && freshCleanup.failed.length === 0 ? ` ${t('rollback_fresh_workspace_kept')}` : '');
     const rollbackNextAction = !hasBackup
       ? freshCleanup
         ? (freshCleanup.failed.length === 0 ? t('next_fresh_cleaned') : t('next_fresh_clean_failed'))
@@ -2669,7 +2680,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       reason,
       component: error instanceof SelfContainedDependencyError ? error.component : undefined,
       dependency: error instanceof SelfContainedDependencyError ? error.dependency : undefined,
-      error: `${errorMsg} — ${rollbackSuffix}`,
+      error: `${errorMsg} — ${rollbackSuffixFinal}`,
       journal: journal ? installerJournalRecord(journal) : undefined,
     };
   } finally {

@@ -111,6 +111,7 @@ const translations: Record<Language, Record<string, string>> = {
     next_restore_failed: 'Installation and rollback both failed. Check {extDir} and {backupDir} manually. Error: {errorMsg}',
     // CP-6: fresh-install failure mid-deployment (no pre-existing install → no backup).
     rollback_fresh_cleaned: 'The install failed before activation — the partially deployed runtime files were removed. Nothing else was modified.',
+    rollback_fresh_workspace_kept: 'Files already written into the workspace (templates/config) were kept — the workspace is not managed by the installer; remove them manually if unwanted.',
     rollback_fresh_clean_failed: 'The install failed before activation, and some partially deployed files could NOT be removed: {dirs}. They are not activated (no install manifest), but should be removed manually.',
     next_fresh_cleaned: 'Fix the error above and re-run the installer.',
     next_fresh_clean_failed: 'Remove the listed directories manually (they are not activated), then re-run the installer.',
@@ -225,6 +226,7 @@ const translations: Record<Language, Record<string, string>> = {
     next_restore_failed: '安装与回滚均失败。请手动检查 {extDir} 和 {backupDir}。错误：{errorMsg}',
     // CP-6：全新安装部署中途失败（无既有安装 → 无备份）。
     rollback_fresh_cleaned: '安装未激活即失败 —— 已移除本次部署的部分运行时文件。其余内容未被修改。',
+    rollback_fresh_workspace_kept: '已写入工作区的文件（模板/配置）被保留 —— 工作区不由安装器管理；如不需要请手动移除。',
     rollback_fresh_clean_failed: '安装未激活即失败，且部分已部署文件无法移除：{dirs}。它们未被激活（无安装清单），但应手动移除。',
     next_fresh_cleaned: '请修复上方错误后重新运行安装器。',
     next_fresh_clean_failed: '请手动移除上述目录（它们未被激活），然后重新运行安装器。',
