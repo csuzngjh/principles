@@ -141,6 +141,12 @@ function parseArgs(argv) {
     console.error('--package requires --experiment: a package must name its experiment (SPEC §7 manifest.json)');
     process.exit(1);
   }
+  if (opts.task && opts.experiment) {
+    // Not a hard error — --task answers a different question (one task's run
+    // timeline) and is already fully scoped — but say it, so a combined
+    // invocation never looks like it produced experiment evidence.
+    console.error('note: --task mode ignores --experiment (the task id is already fully scoped)');
+  }
   return opts;
 }
 

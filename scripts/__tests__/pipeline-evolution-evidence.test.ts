@@ -12,6 +12,12 @@ import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
 
+// Every test in this file spawns the real collector CLI (node process spawn
+// ≈2s each on Windows); the vitest default 5s is too tight under parallel
+// suite load, which caused intermittent false timeouts.
+const SPAWN_TEST_TIMEOUT = 60_000;
+const itSpawn = (name: string, fn: () => Promise<void>) => it(name, fn, SPAWN_TEST_TIMEOUT);
+
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3'); // resolved from the repo root, same as the collector
 
@@ -283,7 +289,7 @@ describe('experiment isolation (两个实验数据不能串线)', () => {
 }, 60_000);
 
 describe('missing evidence stays non-PASS (缺失 evidence 时不能 PASS)', () => {
-  it('a session with no pain yields NOT_CONFIRMED capture and UNKNOWN metrics', async () => {
+  itSpawn('a session with no pain yields NOT_CONFIRMED capture and UNKNOWN metrics', async () => {
     const ws = seedWorkspace();
     const mC = path.join(root, 'manifest-C.json');
     writeJson(mC, manifest({ experimentId: 'EXP-C', sessionIds: [SID_C] }));
@@ -300,7 +306,7 @@ describe('missing evidence stays non-PASS (缺失 evidence 时不能 PASS)', () 
     expect(painRow.status).toBe('UNKNOWN');
   });
 
-  it('rejects an invalid manifest loudly (rc-3)', async () => {
+  itSpawn('rejects an invalid manifest loudly (rc-3)', async () => {
     const ws = seedWorkspace();
     const bad = path.join(root, 'manifest-bad.json');
     writeJson(bad, { experimentId: 'EXP-X' }); // missing scenarioId/host/startedAt/pdCommit
@@ -310,7 +316,7 @@ describe('missing evidence stays non-PASS (缺失 evidence 时不能 PASS)', () 
     expect(r.stderr).toMatch(/missing required field: scenarioId/);
   });
 
-  it('declares a missing painId as a binding note instead of guessing', async () => {
+  itSpawn('declares a missing painId as a binding note instead of guessing', async () => {
     const ws = seedWorkspace();
     const m = path.join(root, 'manifest-ghost.json');
     writeJson(m, manifest({ experimentId: 'EXP-G', sessionIds: [SID_A], painIds: ['painGhost'] }));
@@ -321,7 +327,7 @@ describe('missing evidence stays non-PASS (缺失 evidence 时不能 PASS)', () 
 });
 
 describe('truncation marks (截断数据必须标记)', () => {
-  it('marks truncated tool calls and adversarial events with returned/total', async () => {
+  itSpawn('marks truncated tool calls and adversarial events with returned/total', async () => {
     const ws = seedWorkspace();
     const m = path.join(root, 'manifest-A2.json');
     writeJson(m, manifest({ experimentId: 'EXP-A', sessionIds: [SID_A] }));
@@ -335,7 +341,7 @@ describe('truncation marks (截断数据必须标记)', () => {
 });
 
 describe('deterministic reports (同一 JSON 生成相同报告)', () => {
-  it('two package builds produce byte-identical derived files', async () => {
+  itSpawn('two package builds produce byte-identical derived files', async () => {
     const ws = seedWorkspace();
     const m = path.join(root, 'manifest-D.json');
     writeJson(m, manifest({ experimentId: 'EXP-A', sessionIds: [SID_A], finishedAt: '2026-09-01T12:00:00.000Z' }));
@@ -348,7 +354,7 @@ describe('deterministic reports (同一 JSON 生成相同报告)', () => {
     }
   });
 
-  it('renderOwnerReview is a pure function of the package data', async () => {
+  itSpawn('renderOwnerReview is a pure function of the package data', async () => {
     const libPath = path.join(REPO_ROOT, 'scripts', 'dev', 'pipeline-evolution', 'lib', 'evidence-package.mjs');
     const { renderOwnerReview } = (await import(`file://${libPath.replace(/\\/g, '/')}`)) as {
       renderOwnerReview: (pkg: unknown) => string;
@@ -369,7 +375,7 @@ describe('deterministic reports (同一 JSON 生成相同报告)', () => {
 });
 
 describe('manifest initializer', () => {
-  it('creates a valid manifest with the repo commit and refuses overwrite', async () => {
+  itSpawn('creates a valid manifest with the repo commit and refuses overwrite', async () => {
     const out = path.join(root, 'init', 'experiment-manifest.json');
     const args = ['--out', out, '--experiment', 'PRI653-R3-S001', '--scenario', 'S001', '--session', 'sid-1'];
     const r1 = await runScript('pipeline-evolution/init-experiment.mjs', args);
