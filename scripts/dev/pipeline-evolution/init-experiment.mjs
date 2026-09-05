@@ -114,7 +114,8 @@ function pkgVersion(pkgPath) {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
-  if (existsSync(opts.out)) fail(`${opts.out} already exists — edit it instead of re-initializing`);
+  const outFile = resolve(opts.out); // one canonical path — checks and writes must agree (CodeQL race note)
+  if (existsSync(outFile)) fail(`${outFile} already exists — edit it instead of re-initializing`);
 
   let manifest;
   try {
@@ -137,12 +138,18 @@ function main() {
     fail(err.message);
   }
 
-  mkdirSync(dirname(resolve(opts.out)), { recursive: true });
-  writeFileSync(opts.out, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
-  console.log(`[ok] manifest written to ${resolve(opts.out)}`);
+  mkdirSync(dirname(outFile), { recursive: true });
+  // 'wx' = create-or-fail atomically — closes the check-then-write window.
+  try {
+    writeFileSync(outFile, JSON.stringify(manifest, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
+  } catch (err) {
+    if (err.code === 'EEXIST') fail(`${outFile} already exists — edit it instead of re-initializing`);
+    throw err;
+  }
+  console.log(`[ok] manifest written to ${outFile}`);
   console.log('     next: fill hostVersion / model / featureFlags by hand, add --session ids during the run,');
   console.log('           set finishedAt + painIds afterwards, then collect with:');
-  console.log(`           node scripts/dev/pipeline-evolution/collect-evidence.mjs --workspace <ws> --experiment ${resolve(opts.out)} --package <evidence-package-dir>`);
+  console.log(`           node scripts/dev/pipeline-evolution/collect-evidence.mjs --workspace <ws> --experiment ${outFile} --package <evidence-package-dir>`);
 }
 
 main();

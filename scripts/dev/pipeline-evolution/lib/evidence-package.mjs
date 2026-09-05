@@ -50,7 +50,6 @@ function principleArtifactsOf(report) {
 export function buildEvidenceIndex(report, manifest) {
   const claims = [];
   const pains = report.trajectory?.pains ?? [];
-  const candidates = report.candidates ?? [];
   const chains = report.chains ?? [];
   const sessionIds = Array.isArray(manifest?.sessionIds) ? manifest.sessionIds : [];
 
