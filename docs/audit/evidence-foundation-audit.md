@@ -51,7 +51,8 @@ approvals/activations 计数、trajectory sessions/pains/toolCalls、对抗门�
 1. **`--experiment <裸ID>` 不可实现**（SPEC §12.1 示例）。仓库没有实验注册表
    （Evolution Case Registry 是 SPEC 自身的 Phase 2 非目标），裸 experimentId 无法定位
    任何数据。修正为 `--experiment <experiment-manifest.json 路径>`——manifest 即实验
-   的单一权威（P4）。
+   的定义与归属权威（P4；metadata authority，非运行事实权威——运行事实仍归
+   state.db/trajectory.db/telemetry 所有，冲突时以存储为准）。
 2. **状态词表分层**。SPEC §8 词表（CONFIRMED/NOT_CONFIRMED/…）与 collector 既有
    bucket（PASS/FAIL/UNKNOWN/PENDING/BLOCKED_OWNER）是**两层不是一层**：bucket 是
    task 事实层（绑定 `tasks.status` 语义，保留不动），claim status 是结论层（evidence

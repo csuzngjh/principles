@@ -329,7 +329,8 @@ function readAdversarialEvents(root, window) {
 
 // ---------------------------------------------------------------------------
 // PRI-685 experiment binding: manifest → (pains, correlations, sessions).
-// The manifest is the experiment's single authority (audit §3.1) — discovery
+// The manifest is the experiment's metadata authority (scope + attribution);
+// runtime facts stay owned by state.db/trajectory.db/telemetry — discovery
 // goes session → pain_events → candidates → correlations, and explicit
 // manifest entries (painIds / correlations) are trusted as operator truth.
 // ---------------------------------------------------------------------------
@@ -404,6 +405,12 @@ function sha256(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
+// Export capacity guard: a package is a derived copy, not an archive — bound
+// both the number of exported artifacts and the total bytes so a lab package
+// stays small even when the store has grown for years. Skipped (not silently
+// dropped) artifacts are counted in the truncation mark (SPEC §12.3 shape).
+const EXPORT_CAP = { artifacts: 50, maxTotalBytes: 10 * 1024 * 1024 };
+
 function exportArtifacts(state, chains, outDir) {
   const taskIds = new Set(chains.flatMap((c) => c.stages.map((s) => s.taskId)));
   const dir = join(outDir, 'artifacts');
@@ -412,6 +419,8 @@ function exportArtifacts(state, chains, outDir) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const exported = [];
+  let totalInScope = 0;
+  let totalBytes = 0;
   for (const chain of chains) {
     for (const a of chain.artifacts) {
       if (!a.sourceTaskId || !taskIds.has(a.sourceTaskId)) continue;
@@ -421,6 +430,11 @@ function exportArtifacts(state, chains, outDir) {
         )
         .get(a.id);
       if (!row) continue;
+      totalInScope += 1;
+      const contentJson = String(row.content_json ?? '');
+      if (exported.length >= EXPORT_CAP.artifacts || totalBytes + contentJson.length > EXPORT_CAP.maxTotalBytes) {
+        continue; // count as skipped — the mark below reports it, never silently dropped
+      }
       let content = null;
       let schemaVersion = null;
       try {
@@ -434,17 +448,22 @@ function exportArtifacts(state, chains, outDir) {
         sourceId: row.source_task_id,
         artifactKind: row.artifact_kind,
         validationStatus: row.validation_status ?? null,
-        hash: sha256(String(row.content_json ?? '')),
+        hash: sha256(contentJson),
         schemaVersion, // null = artifact carries no version field — honest UNKNOWN (rc-9)
         createdAt: row.created_at ?? null,
         updatedAt: row.updated_at ?? null,
         contentJson: content,
       };
-      writeFileSync(join(dir, `${row.artifact_id}.json`), JSON.stringify(record, null, 2) + '\n', 'utf8');
+      const text = JSON.stringify(record, null, 2) + '\n';
+      writeFileSync(join(dir, `${row.artifact_id}.json`), text, 'utf8');
+      totalBytes += contentJson.length;
       exported.push(row.artifact_id);
     }
   }
-  return exported;
+  return {
+    exported,
+    truncation: { returned: exported.length, total: totalInScope, truncated: exported.length < totalInScope },
+  };
 }
 
 function writePackage(pkgDir, pkgData) {
@@ -773,6 +792,11 @@ function main() {
   };
 
   if (opts.package) {
+    const artExport = exportArtifacts(state, chains, opts.package);
+    // Export capacity follows the same marked-truncation contract as every
+    // other bounded collection (SPEC §12.3) — a package that skipped artifacts
+    // says so in collected.json, never silently drops them.
+    truncation.artifacts = artExport.truncation;
     const evidenceIndex = buildEvidenceIndex(report, manifest);
     const metrics = buildMetrics(report, evidenceIndex);
     const pipelineTrace = buildPipelineTrace(report);
@@ -783,13 +807,13 @@ function main() {
       pipelineTrace,
       metrics,
       telemetryExport: { events: adversarial.events, total: adversarial.total, truncated: truncation.adversarialEvents.truncated },
+      artifactsExport: artExport.truncation,
     };
-    const exported = exportArtifacts(state, chains, opts.package);
     writePackage(opts.package, pkgData);
     // --out and stdout still describe WHERE the package went; keep stdout
     // clean of the full JSON in package mode (report.md is the human surface).
     console.log(
-      `[ok] evidence package written to ${resolve(opts.package)} (${exported.length} artifacts exported, ${chains.length} chains)`,
+      `[ok] evidence package written to ${resolve(opts.package)} (${artExport.exported.length}/${artExport.truncation.total} artifacts exported${artExport.truncation.truncated ? ', TRUNCATED' : ''}, ${chains.length} chains)`,
     );
     state.close();
     return;

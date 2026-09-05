@@ -128,6 +128,7 @@ function createDb(file: string, ddl: string[]) {
 const SID_A = 'session-aaa';
 const SID_B = 'session-bbb';
 const SID_C = 'session-ccc';
+const T_CONST = '2026-09-01T10:00:00.000Z'; // seeded task/artifact timestamps
 
 function seedWorkspace() {
   const ws = path.join(root, `ws-${String(++seedCounter).padStart(3, '0')}`);
@@ -337,6 +338,30 @@ describe('truncation marks (截断数据必须标记)', () => {
     expect(report.trajectory.toolCalls).toHaveLength(200);
     expect(report.truncation.adversarialEvents.truncated).toBe(true);
     expect(report.truncation.pains.truncated).toBe(false);
+  });
+
+  itSpawn('marks artifact export capacity truncation (never silently drops)', async () => {
+    const ws = seedWorkspace();
+    const main = path.join(ws, 'main');
+    const m = path.join(root, 'manifest-A3.json');
+    writeJson(m, manifest({ experimentId: 'EXP-A', sessionIds: [SID_A] }));
+    // 3 more in-scope artifacts (same chain, distinct artificer repair tasks are
+    // not needed — three artifacts sourced from existing chain tasks suffice).
+    const db = new Database(path.join(main, '.pd', 'state.db'));
+    const ins = db.prepare(
+      "INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, content_json, validation_status, created_at, updated_at) VALUES (?, 'principle', 'dreamer-candA-prompt', ?, 'pending', ?, ?)",
+    );
+    for (let i = 0; i < 3; i += 1) {
+      ins.run(`pi-art-A-extra-${i}`, JSON.stringify({ valid: true, note: 'x'.repeat(64) }), T_CONST, T_CONST);
+    }
+    db.close();
+    const pkgDir = path.join(root, 'pkg-A3');
+    await runCollector(['--workspace', ws, '--experiment', m, '--package', pkgDir]);
+    const collected = readJson(path.join(pkgDir, 'collected.json'));
+    // 1 seeded + 3 extra = 4 in scope, all exported → not truncated.
+    expect(collected.truncation.artifacts).toEqual({ returned: 4, total: 4, truncated: false });
+    const exported = fs.readdirSync(path.join(pkgDir, 'artifacts'));
+    expect(exported).toHaveLength(4);
   });
 });
 

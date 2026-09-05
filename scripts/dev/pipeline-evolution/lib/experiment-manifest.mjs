@@ -1,10 +1,16 @@
 // PRI-685 Evidence Foundation — experiment manifest contract.
 //
-// The manifest IS the experiment's single authority (audit §3.1): a bare
-// experiment id cannot locate any data (no registry until SPEC Phase 2), so
-// `--experiment <path-to-manifest.json>` is the only supported shape.
+// The manifest is the experiment METADATA authority (what this experiment IS:
+// id, scenario, code version, environment, scope bindings) — it is NOT a
+// runtime evidence authority. What HAPPENED remains owned by the stores:
+// state.db / trajectory.db / telemetry. The collector derives claims from
+// those stores; the manifest only scopes the derivation. If a manifest and a
+// store ever disagree, the store wins (the manifest is operator input).
+//
 // Fields follow SPEC §6; extras (painIds/correlations/behaviorObservation)
-// are the binding surface the collector needs.
+// are the binding surface the collector needs. A bare experiment id cannot
+// locate any data (no registry until SPEC Phase 2), so
+// `--experiment <path-to-manifest.json>` is the only supported shape.
 
 import { readFileSync } from 'node:fs';
 

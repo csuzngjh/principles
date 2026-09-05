@@ -32,8 +32,11 @@ scripts/dev/pipeline-evolution/             ← 取证自动化 + 实验证据�
 
 ## 1A. 实验证据包（PRI-685 Evidence Foundation）
 
-每轮实验的权威记录是 **experiment-manifest.json**（单一真相源：PD commit/版本、host、
-模型、flags、session/pain 绑定、时间窗）。取证不再是"最近 10 条"，而是按 manifest 绑定：
+每轮实验的**实验定义与归属权威记录**是 **experiment-manifest.json**（PD commit/版本、
+host、模型、flags、session/pain 绑定、时间窗）——它是 *experiment metadata authority*，
+**不是运行事实来源**：发生了什么仍由 state.db / trajectory.db / telemetry 拥有，manifest
+只界定“这次实验是什么”。manifest 与存储冲突时，以存储为准。取证不再是"最近 10 条"，
+而是按 manifest 绑定：
 
 ```bash
 # Phase 0 环境准备时生成（自动抓 git sha / 包版本；host/model 人工补）
@@ -56,7 +59,8 @@ evidence-package/
 ├── pipeline-trace.json    # 每链阶段 trace（stage → task/artifact 锚点）
 ├── metrics.json           # 指标矩阵：pipeline / governance / behavior 三层
 ├── report.md              # Owner Review（从 JSON 确定性生成，禁止人工重抄）
-├── artifacts/             # pi_artifacts 导出副本（sourceId/hash/createdAt）
+├── artifacts/             # pi_artifacts 导出副本（sourceId/hash/createdAt；
+│                          #   有界导出：≤50 个 / ≤10MB 总量，超额计 truncated）
 └── telemetry/adversarial-events.json
 ```
 
