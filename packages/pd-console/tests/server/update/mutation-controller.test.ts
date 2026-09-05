@@ -166,6 +166,52 @@ describe('MutationController (migration semantics)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// PRI-672 — explicit fallback reasons (rc-9: degradation must be observable)
+// ---------------------------------------------------------------------------
+
+describe('MutationController fallback reasons (PRI-672)', () => {
+  it('emits X-PD-Mutation-Fallback-Reason only when the fallback serves and a reason is known', async () => {
+    const controller = new MutationController();
+    controller.register('check', { name: LEGACY_MUTATION_AUTHORITY, handler: okHandler('legacy') });
+    controller.setFallbackReason('check', 'release_manager_shadow_disabled');
+
+    const resFallback = createMockResponse();
+    await controller.dispatch(createMockRequest('GET'), resFallback, ctx, 'check');
+    expect(resFallback._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);
+    expect(resFallback._headers['x-pd-mutation-fallback-reason']).toBe('release_manager_shadow_disabled');
+
+    // Direct preferred dispatch: no fallback, no reason header.
+    controller.register('check', { name: RELEASE_MANAGER_AUTHORITY, handler: okHandler('rm') });
+    const resDirect = createMockResponse();
+    await controller.dispatch(createMockRequest('GET'), resDirect, ctx, 'check');
+    expect(resDirect._headers['x-pd-mutation-authority']).toBe(RELEASE_MANAGER_AUTHORITY);
+    expect(resDirect._headers['x-pd-mutation-fallback-reason']).toBeUndefined();
+
+    // Clearing the reason removes the header.
+    controller.setFallbackReason('check', null);
+    const resCleared = createMockResponse();
+    controller.register('check', { name: LEGACY_MUTATION_AUTHORITY, handler: okHandler('legacy') });
+    controller.unregister('check', RELEASE_MANAGER_AUTHORITY);
+    await controller.dispatch(createMockRequest('GET'), resCleared, ctx, 'check');
+    expect(resCleared._headers['x-pd-mutation-fallback-reason']).toBeUndefined();
+  });
+
+  it('describeGovernance carries the fallbackReason only while a fallback with a reason serves', () => {
+    const controller = new MutationController();
+    controller.register('apply', { name: LEGACY_MUTATION_AUTHORITY, handler: okHandler('legacy') });
+    controller.setFallbackReason('apply', 'release_manager_unavailable:rollback_not_available');
+    expect(controller.describeGovernance().apply).toMatchObject({
+      active: LEGACY_MUTATION_AUTHORITY,
+      fallback: true,
+      fallbackReason: 'release_manager_unavailable:rollback_not_available',
+    });
+
+    controller.setFallbackReason('apply', null);
+    expect(controller.describeGovernance().apply.fallbackReason).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Production wiring tests — the real singleton after routes/update.js loads
 // ---------------------------------------------------------------------------
 
