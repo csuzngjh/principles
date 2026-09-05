@@ -444,11 +444,13 @@ describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', 
       const s = String(value);
       if (s.endsWith('install.json') || s.endsWith(path.join('.pd', 'state.db'))) return false;
       if (s.includes(path.join('/asset', 'host-runtime'))) return false;
-      if (s.includes(path.join('/asset', 'core'))) deployed = true;
-      if (deployed) return true;
-      if (s.endsWith(path.join('extensions', 'principles-disciple'))) return false;
-      if (s.endsWith(path.join('.pd', 'runtime'))) return false;
-      return s.includes(path.join('/asset', 'core')) || s.includes(path.join('/asset', 'plugin'));
+      // Pre-deployment phase: only the package sources (plugin + core staging
+      // probes) exist; deployment flips every probe to true from then on.
+      if (!deployed) {
+        if (s.includes(path.join('/asset', 'core'))) deployed = true;
+        else return s.includes(path.join('/asset', 'plugin'));
+      }
+      return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
       const filePath = String(value);
@@ -478,18 +480,21 @@ describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', 
     );
   });
 
-  it('creates the workspace directory before the gateway pre-flight (CP-9)', async () => {
-    // Gateway running + no --stop-gateway → clean abort BEFORE any step ran
-    // in the old flow, so the workspace dir would not exist. The fix creates
-    // it up front — assert against the REAL filesystem (fs-extra is not
-    // mocked; the workspace path is a throwaway temp dir).
-    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: true, port: 18789 });
+  it('creates the workspace directory early, inside the unified failure boundary (CP-9 + review R1)', async () => {
+    // The workspace must exist before console verification / pd runtime init
+    // consume it, and its creation failure must surface as a structured
+    // InstallResult instead of a bare rejection. Verified against the REAL
+    // filesystem (fs-extra is not mocked; throwaway temp dirs).
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
     const realFs = await vi.importActual<typeof import('node:fs')>('node:fs');
     const realPath = await vi.importActual<typeof import('node:path')>('node:path');
     const realOs = await vi.importActual<typeof import('node:os')>('node:os');
     const wsRoot = realFs.mkdtempSync(realPath.join(realFs.realpathSync.native(realOs.tmpdir()), 'pd-cp9-'));
     const workspaceDir = realPath.join(wsRoot, 'ws', 'nested');
     try {
+      // fs is auto-mocked: package/asset probes fail loudly (form-gate or
+      // built-plugin check), so the run ends in the catch WITHOUT reaching
+      // the deploy steps — but only AFTER ensureDir ran inside the try.
       const result = await install({ ...baseInstallOptions, workspaceDir }, '/asset', { quiet: true });
       expect(result.success).toBe(false);
       expect(realFs.existsSync(workspaceDir)).toBe(true);

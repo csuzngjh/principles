@@ -3011,6 +3011,77 @@ describe('handleUpdateRoute — install/upgrade reliability (CP-3/4/5/8)', () =>
     expect(body.data.message).toContain('extension copy');
   });
 
+  it('drops the partial backup and omits backupPath when the backup copy fails mid-way (review R5)', async () => {
+    const { execFileSync: execSyncMock } = await import('child_process');
+
+    // Canonical layout with an existing plugin (so the backup path fires).
+    writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+    fs.mkdirSync(under(tmpDir, '.pd'), { recursive: true });
+    writeFixture('.pd/install.json', JSON.stringify({
+      layoutVersion: 1,
+      mode: 'canonical',
+      hosts: ['openclaw'],
+      workspaces: [workspaceDir],
+    }));
+    writeFixture('staging-fixture/plugin/package.json', JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+
+    vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      } as Response);
+    }) as unknown as typeof fetch);
+
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      if (cmd === 'tar') {
+        const dir = tarExtractDir(cmd, args, options);
+        if (dir) fs.cpSync(under(tmpDir, 'staging-fixture'), dir, { recursive: true });
+      }
+    }) as unknown as typeof execSyncMock);
+
+    // Copy fails with a lock error during the backup copy (a class of failure
+    // the full-update catch maps to file_locked). The reserved backup dir must
+    // be removed and NO backupPath recorded.
+    const realFs = await vi.importActual<typeof import('fs')>('fs');
+    const copySpy = vi.spyOn(fs, 'copyFileSync').mockImplementation(((src: fs.PathLike, dest: fs.PathLike) => {
+      if (String(dest).includes('pd-backups')) {
+        throw Object.assign(new Error("EPERM: operation not permitted, copyfile 'backup'"), { code: 'EPERM' });
+      }
+      return realFs.copyFileSync(src as fs.PathLike, dest as fs.PathLike);
+    }) as typeof fs.copyFileSync);
+
+    try {
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('file_locked');
+
+      // No partial backup dir survives under the backups root.
+      const backupsRoot = under(tmpDir, 'pd-backups');
+      if (fs.existsSync(backupsRoot)) {
+        const leftovers = fs.readdirSync(backupsRoot).filter((name) => name.startsWith('plugin'));
+        expect(leftovers).toEqual([]);
+      }
+      // The failure history entry carries NO backupPath (a fragment must not
+      // be presented as a rollback target).
+      const history = JSON.parse(fs.readFileSync(under(workspaceDir, '.pd/update-history.json'), 'utf-8')) as { success: boolean; kind: string; backupPath?: string }[];
+      const failureEntry = history.filter((e) => !e.success).at(-1);
+      expect(failureEntry?.backupPath).toBeUndefined();
+    } finally {
+      copySpy.mockRestore();
+    }
+  });
+
   it('sweeps only stale pd-update staging dirs (CP-8)', async () => {
     const { sweepStaleUpdateTempDirs } = await import('../../../src/server/routes/update.js');
     const realOs = await vi.importActual<typeof import('os')>('os');
