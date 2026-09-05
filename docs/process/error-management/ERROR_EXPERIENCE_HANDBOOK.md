@@ -22,8 +22,7 @@ The reviewer (human) only needs to point out the error. The AI assistant invokes
 
 ## Entry Format
 
-```
-**[ERR-XXX]** | <one-line summary>
+```**[ERR-XXX]** | <one-line summary>
 
 - **What happened**: <what the AI assistant did wrong>
 - **Why it's wrong**: <violated constraint, unread doc, or root cause>
@@ -71,6 +70,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-088 | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path | PRI-486 |
 | ERR-115 | Full-module vi.mock factories break on new public exports — transitive imports hit missing properties at module-evaluation time in unrelated CI tests | PRI-634-F PR #1495 R2 |
 | ERR-116 | Contract defined over an identity (owner/key/actor) validated only through the explicit-parameter path — the shipped DEFAULT path violates the mechanism's own renewal/idempotency contract | PRI-663 PR #1503 review R1 |
+| ERR-117 | One concept resolved through two entry-point chains (hook vs command) with different priority orders — silent split-brain state trees, masked on dev machines by the host's real config; hermetic tests must redirect the config-lookup root | PRI-686 live incident + PR #1518 |
 | ERR-094 | Range-bounds assertion uses `\|\|` instead of `&&` — tautology that always passes for any value when `low <= high` | PR #1218 |
 | ERR-096 | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal | fix/installer-gateway-lock |
 | ERR-099 | Defensive ternary alternate for a contract-impossible empty state shipped uncovered — codecov/patch gate fails; prefer a branch-free join that degrades to the legacy format | PR #1341 |
@@ -95,12 +95,8 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-014 | `formatValidationErrorEntry` string values not truncated — evidence pack unbounded | PRI-200 |
 | ERR-017 | JSON.stringify on unknown values can throw (BigInt, circular) — preview paths crash | PRI-200 |
 | ERR-018 | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors | PRI-200 |
-| ERR-057 | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through to String(err) | PRI-285 |
 | ERR-072 | React component duplicates hook state as local state — desync causes silent feature failure | PR-971 |
-| ERR-054 | `as TOutput` cast on untrusted LLM/runtime payload before validation — typed hooks receive unverified data | PRI-302 |
 | ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded | PR #808/#809/#810 |
-| ERR-061 | Runtime shape check validates wrong field name — guessed structure instead of verifying against actual type | PR #823 |
-| ERR-062 | Collapsed details section renders empty-state copy instead of actual data when data exists | PRI-319 / PR #825 |
 | ERR-063 | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored | PR #844 |
 | ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit | PRI-337 / PR #852 |
 | ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
@@ -140,10 +136,6 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 |----|---------|--------|
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 | ERR-055 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
-| ERR-056 | Redaction pipeline truncates string values without running path/token/env redactors — secrets in values like buildId or cwd slip through | PRI-285 |
-| ERR-049 | Unconditional taskId reinjection bypasses validator mismatch check — malicious LLM lineage fields pass validation | PRI-294 |
-| ERR-058 | Inconsistent forbidden-key lists across validation paths — gateway_token passes pi-ai profile validation | PRI-304 |
-| ERR-059 | Nullish coalescing dead code — always-defined default shadows user override in effective config merge | PRI-304 |
 | ERR-079 | Concurrency-primitive hardening gaps (age-based lock eviction, busy-spin retry) silently re-open the data-loss class the primitive was added to prevent | PRI-459 / PR #1045 |
 | ERR-080 | Control (size bound / path check) applied to the RAW input form instead of the CANONICAL/transformed form — bound is bypassable (escaped output exceeds budget; path traversal evades a /prefix match) | PRI-467 / PR #1059, PR #1302 |
 | ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
@@ -160,10 +152,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
-| ERR-050 | Modified bundled/generated copy instead of source of truth | PRI-250 |
-| ERR-051 | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path | PRI-297 |
 | ERR-052 | Cherry-pick from stacked feature branch cross-contaminates unrelated PR | PRI-299 |
-| ERR-053 | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail | PRI-299 |
 | ERR-068 | Used `pnpm install` in an `npm ci` repo — package-lock.json not synced, all CI jobs fail | PRI-419 / PR #953 |
 | ERR-074 | Inner try/catch creates exit tunnel — early returns bypass outer catch cleanup, leaking resources | PR #977 |
 | ERR-075 | Hardcoded aria-label bypasses i18n — screen readers read in wrong language for non-English UI | PR #979 |
@@ -183,7 +172,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 ---
 
 ## Detailed Entries
-
 **[ERR-001]** | `as string | undefined` type cast on untrusted JSON bypasses runtime validation
 
 - **What happened**: In `SqliteSourceTraceLocator.locate()`, the code used `(dj.sourcePainId ?? dj.painId) as string | undefined` to extract the pain ID from a parsed JSON object (`Record<string, unknown>`). The `as` cast silently passes non-string values (e.g., `sourcePainId: 42`), causing `taskPainId === query.sourcePainId` to always fail for non-string types because strict equality between a number and a string is always `false`.
@@ -201,7 +189,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Earlier 2026-06 recurrences (PR #1098–#1146, compressed): same `as`-bypass across JSON parsing, SQLite rows, DOM events, LLM adapter output, test fixtures — fixed with `isRecord()` guards, `typeof` checks, `Object.hasOwn()`, or removing the cast. See git history for PR#688–#1072 and PR#1098–#1146.
 
 ---
-
 **[ERR-002]** | Catch-and-degrade pattern silently swallows failure reasons
 
 - 2026-08-25 update Phase 2a self-review (no Linear issue): blank `stderr` won over the real CLI probe timeout message. Fixed with `unknown`/own-field validation, blank rejection, bounded message fallback, and a 30s cold-asset probe. Prevention: normalize diagnostic candidates before fallback and test packaged cold starts.
@@ -221,7 +208,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-28 PR #1435 (CodeRabbit, fixed same PR): the new worktree-integrity guard `checkWorktreeIntegrity()` routed `git ls-files -d` through `gitLines()`, whose catch block converts every query failure (not a repo, unreadable index, maxBuffer) into `[]` — the safety gate would report "Passed" exactly when it could not run (fails open, rc-9). Its test also used a conditional assertion (`if (missingFiles.length > 0)`) that passed on an always-empty result. Fixed by calling `execFileSync` directly and throwing on failure (callers report reason + nextAction, exit nonzero) plus temp-repo tests that create a real missing tracked file and assert the throw on a non-repo cwd.
 
 ---
-
 **[ERR-029]** | CLI unknown input silently dropped instead of failing loud
 
 - **What happened**: `parseChannels()` in the CLI handler silently dropped unrecognized channel names from `--channels` input. When all tokens were invalid, it returned `undefined`, causing the runner to fall back to all MVP channels. A typo like `--channels code-hook` would yield a successful full-baseline run instead of an input error.
@@ -234,7 +220,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-06-19 PRI-408 (PR #972): `--include-deactivated` not threaded to store query; invalid `--channel` degraded to all-channels instead of failing loud
 
 ---
-
 **[ERR-030]** | Path prefix `startsWith` matches sibling directories as production workspace
 
 - **What happened**: `isProductionWorkspace()` used `normalized.startsWith(prefix.toLowerCase())` to check if a workspace directory is a production path. This matched sibling directories like `~/.openclaw/workspace-backup` or `D:\.openclaw\workspace-extra`, incorrectly blocking safe non-production directories.
@@ -249,7 +234,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-09-05 / PRI-668 / PR #1512: the orchestrator's new cascade branch identified evaluator artificer deps via `depId.startsWith('artificer')` — task-id string shape — while the mechanism it mirrors (`revision-reopen.ts` `replaceArtificerDependencyWith`) identifies them by the two-hop `task.taskKind === 'artificer'` check. Correct only while the id convention holds; breaks silently if ids ever change shape or a non-artificer task gets an `artificer*` id. Caught in PR self-review before merge; fixed to query `taskKind` per dep. Generalization: when classifying entities, never infer kind from id/name string shape if an authoritative structural field exists — especially when mirroring an existing mechanism, reuse ITS classification primitive instead of re-inventing a string heuristic.
 
 ---
-
 **[ERR-100]** | Browser UI runtime-imports a Node-oriented package barrel, pulling filesystem/database modules into the client bundle
 
 - **What happened**: PRI-552 initially reused `OwnerGovernanceViewSchema` in the browser validator by runtime-importing `@principles/core/runtime-v2`. That barrel also exports Node-only Runtime modules, so esbuild attempted to resolve `fs`, `path`, `crypto`, `better-sqlite3`, and other server dependencies and the Console UI build failed.
@@ -264,7 +248,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-101]** | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree
 
 - **What happened**: PRI-553's browser BDD reused an already-running installed PD Console on port 3100 because `reuseExistingServer` was enabled outside CI. The API route mock responded, but the loaded JavaScript bundle came from the installed extension rather than the current worktree, so the new governance card was absent and the test reported a misleading product failure.
@@ -279,7 +262,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-102]** | Optional governance gate conflates disabled/unavailable/loading states and fails open to the legacy path
 
 - **What happened**: The Principle Detail page disabled legacy approval actions only when a validated governance view explicitly said no Owner action was required. If the enabled projection endpoint failed validation or storage access, the page showed an unavailable card but left legacy approval/edit/reject controls authorized from the separate approval-group response.
@@ -294,7 +276,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-08-21 RuleCode Owner Live Decision formal SPEC review (no Linear issue): the initial feature-flag design said flag-off restored the existing Console presentation but did not state that every promotion entry point, especially CLI, must refuse promotion. That left room for the stricter Owner decision authority to disappear while the legacy unchecked mutation remained available. The same review also found that local no-auth Console had been allowed to write `reject-after-shadow`, incorrectly granting governance authority to a break-glass operator. Fixed before implementation by making feature-off refuse promotion across Console and CLI, requiring both paths to use one application service, and restricting unauthenticated authority to inspect/deactivate/global-pause only. Regression requirement: disabled, unavailable, validated-deny, and authenticated-allow must be exercised at every promotion entry point; no-auth tests must prove governance writes are refused. 2026-08-25 PR #1409 (PRI-586): READ-side sibling — `featureFlags?.enabled === true` gating made the still-loading state indistinguishable from flag-off, so FocusPage fired the legacy `/governance/queue` request before flipping to experience mode (wasted call + legacy-panel flash). Fixed by gating the data load on flags-resolved; loading ≠ disabled extends the same three-state rule to read paths.
 
 ---
-
 **[ERR-103]** | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior
 
 - **What happened**: `RuleHostWriter.canActivate()` validated executable code and GoldenTrace but accepted `affectedTools: []` and arrays containing no valid tool names. Downstream interpretation could therefore treat the missing effective scope as broadly applicable.
@@ -309,7 +290,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-104]** | Auth bootstrap redirects overwrite authenticated deep links because splash/onboarding state is not scoped to entry routes
 
 - **What happened**: The authenticated RuleCode Owner browser E2E opened `#/activation`, signed in, and then could not find the Owner review card. `AuthRoutes` initialized `showSplash=true` even when the splash route was not mounted, and its onboarding effect later navigated every authenticated route to `/focus` or `/welcome`. A valid deep link to the emergency and Owner decision surface was therefore either left behind the login route or overwritten after authentication.
@@ -323,7 +303,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 
 **[ERR-004]** | `sourceTaskId` set to diagnostician task ID instead of located source task ID
 
@@ -342,7 +321,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Pattern: lineage from unverified task or non-atomic read-then-write. Fix: verify task kind; atomic writes; mismatch regression tests.
 
 ---
-
 **[ERR-005]** | Invalid salvaged arrays bypass type contract in validate failure path
 
 - **What happened**: In `refineFullTrace()` validation failure path, `sourceRunIds`, `ambiguityNotes`, `sanitizationNotes` only checked `Array.isArray()` then used `as string[]` cast without validating element types. For invalid FullTrace JSON like `sourceRunIds: [42]`, this returned a `RefinedTracePayload` whose arrays violated the `string[]` contract, reintroducing the same untrusted-JSON problem the FullTrace contract was meant to avoid.
@@ -357,7 +335,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Earlier recurrences (PR#689-#1027): same `as`-on-untrusted-value pattern across recommendation_kind, language, SQLite rows, YAML, depIds. See git history.
 
 ---
-
 
 
 **[ERR-008]** | Missing lineage field validation allows agent to return trace with wrong attribution
@@ -376,7 +353,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Pattern: lineage fields must be verified against source, not trusted from agent output. Fix: strip lineage from LLM schema; verify per-dependency; emit malformed separately.
 
 ---
-
 **[ERR-009]** | Validator silently skips missing/malformed required array fields instead of failing loud
 
 - **What happened**: In `validateTraceRefinerAgentOutput()`, the `refinedTrace` shape validation used `if (Array.isArray(rt.sourceRunIds)) { ... }` pattern — when the field was missing, `undefined`, or non-array, the validator silently skipped it instead of reporting an error. Same for `evidenceRefs` and `keyEvents`. Additionally, `keyEvent` objects that were non-objects were skipped with `continue`, and `keyEvent.evidenceRefs` non-arrays were silently skipped.
@@ -391,7 +367,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-06-25 PRI-459 (PR#1045): `createRule`/`createImplementation` silently overwrote existing id (orphaning parent link)
   - 2026-06-23 PR#1026: 4 review `as`-bypass violations (`(err as Error)`, `this.token as string`, etc.)
   - Earlier recurrences (PR#680-#966): same silent-skip pattern across `parseInt` w/o NaN check, `?.trim()||undefined`, `?? 'fallback'` defaulting, `if(output){assert}`. See git history.
-
 **[ERR-011]** | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades
 
 - **What happened**: `runtime-canary.ts`, `runtime-diagnostics-export.ts`, and `runtime-recovery.ts` directly imported and instantiated `RuntimeStateManager` from the Store layer, bypassing the Read Model / Service facade boundary established by ADR-0001. Additionally, `createInternalizationQueueReadModel` did not support a `readonly` option, forcing read-only CLI commands (canary, diagnostics-export) to open writable database connections.
@@ -403,7 +378,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — same boundary violation pattern as PRI-129 (trace.ts) and PRI-131 Tier 1 (health.ts, runtime-pruning.ts, runtime-internalization-queue.ts). 2026-08-13 PRI-523 C1.1 review: the shared prompt reader opened the Runtime V2 database through the normal bootstrapping connection path, so a logically read-only prompt build could create/migrate the database and checkpoint WAL state. Fixed by using the existing validated store APIs over a file-must-exist read-only connection with bootstrap and close-time checkpoint disabled; a production test proves a missing database yields a structured warning without changing the workspace filesystem.
 
 ---
-
 **[ERR-012]** | PR branch based on stale main reverts already-merged telemetry fields
 
 - **What happened**: PR #659 was created from a branch that did not include the latest `origin/main` after PRI-174 merged. The PR was mostly documentation/tests, but its diff would have removed `rulehostAutoCorrectApplied` from daily stats types, initialization, update logic, and tests.
@@ -419,7 +393,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Earlier recurrence (PRI-444 PR#1027): `subagent.ts` deleted but stale route in `hooks/AGENTS.md`. See git history.
 
 ---
-
 **[ERR-013]** | `in` operator OR direct indexing on a plain object leaks inherited Object.prototype members (`__proto__`, `constructor`, `toString`)
 
 - **What happened**: Two variants of the same prototype-chain leakage. **Variant A (`in` operator, PRI-201):** in `validateCorrectionProposal()`, the cross-check for `correctedFields[].field` against `proposedParams` used `cf.field in proposal.proposedParams`. The `in` operator traverses the prototype chain, so inherited properties like `toString`, `constructor`, `valueOf` would match even though they are not actual keys in `proposedParams`. A `correctedFields` entry with `field: 'toString'` would incorrectly pass validation. **Variant B (lookup-table value read, PRI-480 PR #1089):** `canonicalizeToolKind()` indexed a hardcoded `TOOL_ALIAS` plain-object table via `TOOL_ALIAS[toolName]` and checked `hit !== undefined`. For inherited keys (`__proto__`, `constructor`, `toString`, `hasOwnProperty`, `valueOf`), the lookup returns the corresponding `Object.prototype` member (the prototype object itself, the Object constructor function, the `toString` method, etc.) — none of which are `=== undefined`, so the function returned a non-`CanonicalKind` value (`Object.prototype` for `__proto__`, the Object constructor for `constructor`) and violated its closed-enum return contract. `Record<string, T>` typing does NOT model the prototype chain, so `noUncheckedIndexedAccess` does not catch this.
@@ -436,7 +409,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Earlier recurrences (PR#702-#810): variant A — `computeEffectiveFlags()` lacked dangerous-key rejection; Scribe/Evaluator/Artificer validators used direct property access. See git history.
 
 ---
-
 **[ERR-014]** | `formatValidationErrorEntry` string values not truncated — evidence pack unbounded
 
 - **What happened**: In `formatValidationErrorEntry()`, the `actualPreview` field returned raw string values without truncation: `typeof value === 'string' ? value : ...`. Only non-string values went through `truncatePreview()`. This violated the "bounded preview" design goal of the evidence pack — a very long string value (e.g., a 10KB error message) would bloat the evidence pack and could leak sensitive content.
@@ -451,7 +423,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-
 **[ERR-017]** | JSON.stringify on unknown values can throw (BigInt, circular) — preview paths crash
 
 - **What happened**: Multiple preview paths used `JSON.stringify()` directly on unknown values: `formatRepairPrompt()` used `JSON.stringify(invalidJson, null, 2)`, `attemptStructuredOutputRepair()` used `JSON.stringify(invalidOutput)` for `rawOutputPreview`, and `formatValidationErrorEntry()` used `JSON.stringify(value)`. All of these throw on BigInt values, circular references, or other unstringifiable objects.
@@ -463,7 +434,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — 2026-06-23 PR #1020 (PRI-443): `validatePainSignal()` used `JSON.stringify(hydrated.context).length` without try-catch — throws on circular/BigInt, crashing validator. Fixed with try-catch returning structured error + 2 regression tests.
 
 ---
-
 **[ERR-018]** | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors
 
 - **What happened**: In `attemptStructuredOutputRepair()`, the repair loop computed `initialValidationErrors = buildValidationErrorEntries(schemaErrors)` once before the loop, then used it for ALL repair attempt records across all iterations. When `maxRepairAttempts > 1`, attempt 2+ would record the initial schema errors (e.g., `/confidence`) instead of the current errors from the latest failed candidate (e.g., `/summary`). This made the evidence pack misleading — it showed errors that no longer existed while hiding the actual errors that caused the repair to fail.
@@ -475,7 +445,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes - same class as ERR-015 where loop state was not refreshed per iteration. 2026-08-29 PRI-621: the repair prompt itself starved the loop of state — it carried only a top-level schema summary (deriveSchemaSummary), leaving nested enums/minItems invisible, so the repair LLM guessed (`kind:"tool_call"`, `expectedDecision:"approve"`, 1 case instead of minItems 2) and failed all attempts on live artificer chains. Fixed: formatRepairPrompt carries the complete serialized schema (`schemaJson`, REPAIR_PROMPT_VERSION v2).
 
 ---
-
 **[ERR-021]** | Handler-only tests miss Commander flag→opts mapping bugs
 
 - **What happened**: Added `--no-intake` CLI flag to `pd diagnose run`. All tests called `handleDiagnoseRun()` directly with manually constructed `opts` objects, bypassing Commander entirely. This hid two bugs: (1) Commander negated booleans strip the `no-` prefix, so `opts.noIntake` was always `undefined`; (2) `.option('--intake', ...)` does not auto-create `--no-intake`, so `pd diagnose run --no-intake` threw "unknown option".
@@ -490,7 +459,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-13 PR #1309 (self-review): new `maxTokens` pi-ai config was wired through `RuntimeConfig`/adapter but had NO Commander `--maxTokens` flag and NO flag-wiring test — asymmetric with `maxRetries`/`timeoutMs` which have both. Handler tests for the retry path existed but none exercised `parseAsync` with the new flag. Fix: added `.option('--maxTokens <n>', ...)` to `registerPainRetryCommand`, threaded `opts.maxTokens ?? policyConfig?.maxTokens`, added `pain-retry-maxTokens-flag.test.ts` (3 parser tests: numeric parse, parseInt path, omitted→undefined). Also caught the numeric-validation error message omitting `maxTokens` (message now lists all three numeric options).
 
 ---
-
 **[ERR-022]** | process.exit(1) without return allows fallthrough to intake on failed diagnosis
 
 - **What happened**: In `handleDiagnoseRun()`, the `result.status !== 'succeeded'` branch called `process.exit(1)` without a subsequent `return`. When `process.exit` is stubbed in tests (or when the handler is called from embedded contexts), execution continues past the exit call into the candidate intake code, potentially writing ledger entries for a failed diagnosis.
@@ -505,7 +473,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - See git history for full incident detail.
 
 ---
-
 **[ERR-023]** | CLI dry-run command opens writable database connection instead of readonly
 
 - **What happened**: `pd runtime internalization enqueue-successors` defaulted to dry-run mode but constructed `RuntimeStateManager` without `readonly: true`. This meant the dry-run path opened a writable SQLite connection, potentially mutating the database (schema migration, WAL files) even though the command was only supposed to report what it would do.
@@ -518,7 +485,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-21 RuleCode Owner promotion self-review (no Linear issue): the shared decision service initially had no explicit dry-run result, and the first real readiness wiring opened `RuntimeStateManager` in writable mode even though no promotion commit was intended. Future completion of all readiness checks could therefore have made `--dry-run` ambiguous, while initialization itself could migrate schema or create WAL state. Fixed by adding a first-class `would_promote` service result that never calls the atomic commit port and by constructing the manager with `readonly: true` for dry-run; production CLI tests assert the real constructor option and zero legacy mutation. Lesson: dry-run safety must cover both business mutation and connection/bootstrap side effects.
 
 ---
-
 **[ERR-024]** | Security validator exists but is not wired into enforcement path — defense is illusory
 
 - **What happened**: `isPathWithinWorkspace()` and `validateProposedPathBounds()` were added to core as path boundary validation functions, but they were only called by tests and barrel exports. The real live auto-correct apply path in `gate.ts` still used `validateCorrectionProposal()` alone and directly applied `proposal.proposedParams` without checking path boundaries. An out-of-bounds path correction would be applied despite the validator existing.
@@ -540,7 +506,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Fix: when adding optional deps/fields/handlers to a constructor/service interface, grep ALL construction sites and update each one; add a test exercising the production construction path (not just the helper in isolation).
 
 ---
-
 **[ERR-025]** | Test coverage proves isolated helper behavior, not real production defense
 
 - **What happened**: `broken-artifact-simulation.ts` was added with `decideDownstreamGate()` and 54 tests, but no production code called it. The real `InternalizationChainIntegrityReadModel` and `InternalizationIntegrityRemediation` were completely untested. Tests proved the helper's logic, but the production system had no defense against the scenarios the helper covered.
@@ -559,7 +524,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Earlier recurrences (PR#689-#1004): same vacuous-pass pattern across MVP smoke, repair loop, package tests, nav tests, RuleHost fixtures. See git history.
 
 ---
-
 **[ERR-032]** | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014
 
 - **What happened**: `LEGACY_ENTRYPOINT_CENSUS.md` and test comments described evolution-worker heartbeat, sleep-cycle orchestrator, and queue-io sleep_reflection enqueue as `mvp_core_dependency` / "ADR-0014 core". But ADR-0014 defines MVP-Core as only three activation paths: `prompt`, `code_tool_hook / RuleHost`, `defer_archive`. The idle/night/sleep-reflection/nocturnal dispatch paths are retirement targets, not core.
@@ -574,7 +538,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-20 PRI-551/PRI-553: final acceptance/review found exact-contract drifts: a synonymous lease reason code, wrong flag-off API code, regex-only impossible timestamps, an ignored `verdict_missing` relation, and a second/replacement timeline that could hide durable history. Fixed with exact schema/API/derivation assertions and by embedding governance events into the existing trajectory.
 
 ---
-
 **[ERR-034]** | Canonical runtime config not consumed by caller or cache key
 
 - **What happened**: Two related issues: (1) `diagnose.ts` forced a pre-check requiring `--openclaw-local` or `--openclaw-gateway` CLI flags before calling `resolveRuntimeConfig()`, preventing file-config-only paths from working. After `resolveRuntimeConfig()` succeeded, the code still used `configResult.openclawMode ?? (opts.openclawLocal ? 'local' : 'gateway')` — guessing the mode instead of consuming the canonical validated result. (2) `pain-signal-runtime-factory.ts` bridge cache key was `${workspaceDir}:${runtimeKind}` without `openclawMode`, causing the same workspace switching from local to gateway to reuse the wrong bridge/adapter.
@@ -592,7 +555,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 ---
 
 > PRI-523 C2 recurrence for ERR-034 (2026-08-13): The Codex hook initially preferred inherited `PD_WORKSPACE_DIR` over codex-cli 0.147.0's validated `cwd`, so stale process-global compatibility state could route one Workspace's hook into another Workspace's business state. The fix treats hook `cwd` as authoritative and resolves its nearest ancestor `.pd/config.yaml`; executable regressions cover nested-cwd selection and flag-off/no-mutation behavior.
-
 **[ERR-035]** | Static guard only covers frozen-basename dynamic imports, misses other legacy paths
 
 - **What happened**: `nocturnal-entrypoint-guard.test.ts` `findImportLines()` only checked dynamic imports against `FROZEN_NOCTURNAL_MODULES` basenames. A dynamic import like `import('../service/sleep-cycle.js')` or `import('../service/idle-detector.js')` would not be detected because `sleep-cycle` and `idle-detector` are not in the frozen set. PRI-227's goal is to prevent new legacy nocturnal callers, not just frozen module callers.
@@ -607,7 +569,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Fix: update enforcement check when adding guarded items; match at segment boundaries, never substrings.
 
 ---
-
 **[ERR-045]** | Shell interpolation of user-provided paths enables command injection
 
 - **What happened**: Story A verification used `execSync(\`"${pdCmd}" demo story-a --json --workspace "${options.workspaceDir}"\`, { shell: 'cmd' })`. The `workspaceDir` is user-provided and enters a shell string via template literal interpolation. A workspace path containing shell metacharacters (e.g., `&`, `|`, `$(...)`) would be interpreted by cmd.exe, enabling command injection.
@@ -620,7 +581,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-21 RuleCode Owner Live Decision self-review: `SqliteActivationSafetyStore.deactivateWithDecision` interpolated an internally selected `actionClause` into SELECT and UPDATE DML. The values were fixed constants, but this still bypassed the repository's no-dynamic-DML guard and left an injection-shaped maintenance seam. Replaced it with two fully static prepared statements for reject-after-shadow versus emergency deactivation. Prevention: SQL structure is code, not a parameter; choose between complete static statements and bind only values.
 
 ---
-
 **[ERR-048]** | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected
 
 - **What happened**: Runtime V2 `ActivationDispatcher` writes activation records to the `activations` SQLite table (`channel='prompt', action='prompt_activate'`), but the live OpenClaw prompt hook (`handleBeforePromptBuild`) only reads from the legacy `evolutionReducer.getActivePrinciples()`. The activation write path and the prompt read path are completely separate systems — activation dispatch never calls `evolutionReducer.promote()`, so activated principles never appear in agent prompts and never change agent behavior.
@@ -639,7 +599,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-
 **[ERR-065]** | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013)
 
 - **What happened**: In the malformed consumed candidate row test for `mainline-snapshot-assembler`, raw SQL INSERT into `principle_candidates` was written with guessed column names: `INSERT INTO principle_candidates (candidate_id, task_id, status, created_at) VALUES ('', ?, 'consumed', ?)`. This hit `SqliteError` three times: first `no column named updated_at`, then `NOT NULL constraint failed: artifact_id`, then `NOT NULL constraint failed: title`.
@@ -651,7 +610,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-14
 
 ---
-
 **[ERR-072]** | React component duplicates hook state as local state — desync causes silent feature failure
 
 - **What happened**: `NotificationProvider` maintained its own `audioUnlocked` state in `useState` while also consuming `audioUnlocked` from `useNotificationSound()` hook. The Provider's `handleInteraction` callback called `unlockAudio()` (which sets the hook's internal state) AND `setState({ audioUnlocked: true })` (setting the Provider's local copy). Since `unlockAudio()` is async (calls `ctx.resume()`), the Provider could mark audio as unlocked before the hook's internal state updated, causing `playSound()` to still return early due to its own `audioUnlocked` being `false`.
@@ -671,7 +629,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Recurring errors | 59 |
 
 ---
-
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist
 
 - **What happened**: The installer's `syncPdCli()` function expected `pd-cli/dist/index.js` to exist in the package root, but `bundle-plugin.mjs` only copied the OpenClaw plugin — not pd-cli. The `package.json files` array didn't include `pd-cli`. Source-tree tests passed because pd-cli existed in the monorepo, but the published npm tarball would be missing it entirely.
@@ -695,7 +652,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-06-02 PRI-250 (compressed; full text → ERROR_ARCHIVE.md): `js-yaml`/`semver` in devDependencies (stripped by publish); undeclared better-sqlite3 for console bundle; `installBundledCore` never ran npm install.
 
 ---
-
 **[ERR-055]** | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys pass through unredacted
 
 - **2026-08-13 PRI-523 C1.3 recurrence**: the shared sanitizer documented ANY-segment key redaction but only applied value-shaped token regexes, allowing `token` and nested `authorization` values through. Fixed in the canonical core sanitizer with nested sensitive-key regressions and verified through persisted host-runtime evidence.
@@ -709,69 +665,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Same class as ERR-024 (security check exists but is not wired into enforcement path)
 
 ---
-
-**[ERR-056]** | Redaction pipeline truncates string values without running path/token/env redactors — secrets slip through
-
-- **What happened**: In `redactSensitiveFields()`, the `t === 'string'` branch only truncated strings to `REDACT_MAX_STRING` without running them through `redactAbsolutePaths()`, `redactTokenLikeValues()`, and `redactEnvLikeValues()`. Similarly, `render-github-url.ts` used `shortSummary` with only truncation but no redaction before putting it into the URL body.
-- **Why it's wrong**: The redaction pipeline has two layers: (1) key-based redaction (redact entire values for sensitive keys), and (2) value-based redaction (redact secrets embedded in any string value regardless of key name). Layer 2 was not applied to the string branch. This means secrets embedded in non-sensitive-key values (e.g., `buildId` containing a token, `cwd` containing an absolute path) slip through. Same class as ERR-014/ERR-016/ERR-017 (previews and serialization not bounded/safe).
-- **Correct approach**: Every string value that passes through the redaction pipeline must be run through the full set of string redactors (path, token, env) BEFORE truncation. Truncation should be the last step. The same applies to any renderer that embeds user-provided text into output (markdown, email, GitHub URL body).
-- **How to prevent**: When adding a new branch to a redaction pipeline, check that ALL existing string redactors are applied before any truncation. Add tests that verify secrets in values (not just in keys) are redacted.
-- **Source**: PRI-285 / PR #767
-- **Date**: 2026-06-01
-- **Recurrence**: Same class as ERR-014, ERR-016, ERR-017 (previews/serialization not bounded/safe).
-  - 2026-06-06 PEAT-A (PR #836): `sanitizeString()` only ran `convergePath()` on full string — embedded paths (`"cd D:\\Code\\principles && git status"`) passed through. Fixed with `ABSOLUTE_PATH_IN_STRING_RE` (Windows/POSIX/UNC) + `replacePathsInString()`
-  - 2026-06-06 PEAT-A CI breakage: `nodePath.basename()` on Linux doesn't split on `\` — `D:\Code\principles` preserved verbatim. Fixed with `platformAgnosticBasename()` (splits on both `\` and `/`)
-  - Cross-platform portability variant: path op works on Windows dev machine but silently fails on Linux CI.
-
----
-
-**[ERR-057]** | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through
-
-- **What happened**: `errMsg(e: { code?: string } | undefined, err: unknown)` was designed to extract a readable message from caught errors. The first parameter `e` is a typed narrower (`err as { code?: string }`) used for `code === 'ENOENT'` checks. The second parameter `err` is the raw `unknown` caught value. But the function body checked `e` for a `.message` property — which `e` (typed as `{ code?: string }`) never has. This meant the function always fell through to `String(err)`, producing less useful error messages like `[object Object]`.
-- **Why it's wrong**: The parameter naming was confusing and led to checking the wrong variable. The typed narrower is for `code` checks (done by the caller before calling errMsg), not for message extraction. Message extraction should operate on the raw `unknown` value.
-- **Correct approach**: Check the `unknown` parameter (second argument) for `.message` property, not the typed narrower. Or better: restructure to a single-parameter function that takes `unknown` and extracts the message, since the typed narrower is only needed by the caller for `code` checks.
-- **How to prevent**: When a helper function takes two parameters with confusingly similar names (`e` and `err`), add a comment explaining what each is for. Use descriptive names like `typedNarrower` and `rawError` instead of single-letter names. Add unit tests that verify the function correctly extracts messages from Error objects, string errors, and non-Error objects.
-- **Source**: PRI-285 / PR #767
-- **Date**: 2026-06-01
-- **Recurrence**: Same class as ERR-001, ERR-005 (runtime type check operates on wrong value)
-
----
-
-**[ERR-049]** | Unconditional taskId reinjection bypasses validator mismatch check — malicious LLM lineage fields pass validation
-
-- **What happened**: When fixing `stripLineageFields` removing `taskId` from LLM output (PRI-272), I used unconditional assignment `(output as unknown as Record<string, unknown>).taskId = taskId` in all 7 peer runners (Dreamer, Philosopher, Scribe, Artificer, Evaluator, RolloutReviewer, Trainer). This overwrote any LLM-supplied `taskId` — including wrong or malicious values — before `DefaultDreamerValidator.validate()` could check for mismatches. The `output.taskId !== taskId` check became dead code.
-- **Why it's wrong**: The validator's taskId mismatch check is a security boundary (ERR-008 lineage protection). It prevents LLM-supplied lineage fields from poisoning downstream artifacts. Unconditional reinjection bypasses this check entirely — a malicious or buggy LLM that returns `taskId: "injected-id"` would have it silently overwritten with the correct value, and the artifact would be written as if the LLM output was trustworthy.
-- **Correct approach**: Only inject runner-owned lineage when the property is **absent** via `Object.hasOwn(output, 'taskId')`. Present but invalid/falsy values (`''`, `0`, `false`, `null`, wrong string) must NOT be overwritten — they must reach the validator and fail loud (Runtime Contract Rule 3). Use the `injectRunnerLineageIfAbsent(output, 'taskId', taskId)` helper from `peer-runner-contracts.ts` to centralize this logic across all 7 runners. The helper performs a runtime type guard (`output !== null && typeof output === 'object'`) before calling `Object.hasOwn`.
-- **How to prevent**: When re-injecting fields stripped by a security mechanism, always use `Object.hasOwn` — never truthiness checks (`!value`). Truthiness treats `''`, `0`, `false`, `null` as "missing" and silently overwrites them, hiding validation failures. Required regression tests per runner: missing taskId → injected; `taskId: ''` → not overwritten, validation fails; `taskId: 0` → not overwritten, validation fails; `taskId: false` → not overwritten, validation fails; `taskId: 'wrong-id'` → not overwritten, validation fails. Static regression test: verify no runner contains the old `!(output as unknown as Record<string, unknown>).taskId` pattern.
-- **Source**: PRI-294 / PR #790
-- **Date**: 2026-06-02
-- **Recurrence**: Same class as ERR-008 (lineage fields must not be trusted from LLM output)
-
----
-
-**[ERR-050]** | Modified bundled/generated copy instead of source of truth — fix overwritten on next build
-
-- **What happened**: During PR #794, `better-sqlite3` was added to `packages/create-principles-disciple/console/package.json` (a bundled copy generated by `bundle-plugin.mjs`) instead of the source `packages/pd-console/package.json`. The next `prepack`/`prepublishOnly` would run `bundle-plugin.mjs` and overwrite the fix, silently losing the dependency.
-- **Why it's wrong**: `packages/create-principles-disciple/console/` is a generated artifact — `bundle-plugin.mjs` copies from `packages/pd-console/` and rewrites `@principles/core` to `file:../core`. Editing the generated copy is the same class as editing `dist/` output: it works until the next build. This is a process error: the agent did not trace the file's provenance before editing.
-- **Correct approach**: Always trace a file's provenance before editing. If the file is generated (by a bundle script, build step, or codegen), edit the SOURCE and re-run the generator. For this case: add `better-sqlite3` to `packages/pd-console/package.json`, then run `node scripts/bundle-plugin.mjs` to sync.
-- **How to prevent**: Before editing any `package.json` (or any file), check if it's listed in a bundle/build script's copy/rewrite step. If the file has a source of truth, edit the source and re-run the generator. Add a comment in generated files: `// GENERATED — edit packages/pd-console/ and re-run bundle-plugin.mjs`.
-- **Source**: PRI-250 / PR #794
-- **Date**: 2026-06-02
-- **Recurrence**: Same class as ERR-040 (published artifact missing components) — editing a generated artifact instead of its source.
-
-
----
-**[ERR-051]** | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path
-
-- **What happened**: PRI-297 added security redaction to _extractParamsSummary() in gate.ts, which is called before RuleHost.evaluate() receives the params. This meant raw exec commands containing Authorization: Bearer or LINEAR_API_KEY= were redacted before RuleHost implementations could match against input.action.paramsSummary.command. A live rule intended to block a command by URL/argument after an auth header would fail to match. The EventLog.record() chokepoint correctly redacted before persistence, but the gate.ts source-level redaction was premature.
-- **Why it's wrong**: Security redaction must happen at the persistence boundary (before event log write), not at the enforcement boundary (before RuleHost evaluation). Redacting before RuleHost evaluation silently degrades rule matching accuracy — rules that match on command strings stop working for commands containing secrets. This is the same class as ERR-002 (silent degradation) — the mechanism exists, but it's applied at the wrong layer, creating a hidden behavior change.
-- **Correct approach**: Apply redaction only in EventLog.record() as a chokepoint before JSON persistence. Leave _extractParamsSummary() raw — it feeds into RuleHost evaluation for command-matching rules. If a future requirement needs redacted versions in both places, two separate calls are needed: one for RuleHost input (preserving structure), one for EventLog (redacting).
-- **How to prevent**: When adding security/privacy transformations, identify the data flow boundaries first: (1) enforcement boundary (where conditions are matched), (2) persistence boundary (where data is written). Always apply transformations at the persistence boundary. If enforcement needs sanitized data, create a separate cleaned copy — never mutate the enforcement input. Add a test that proves the enforcement path receives raw data.
-- **Source**: PRI-297 / PR #797
-- **Date**: 2026-06-03
-- **Recurrence**: Same class as ERR-002 (silent degradation at wrong layer)
----
-
 **[ERR-052]** | Cherry-pick from stacked feature branch cross-contaminates unrelated PR
 
 - **What happened**: When creating PR #800 (PRI-300 console-launcher) from the `feat/pri-300-console-launcher` branch, a cherry-pick from `feat/pri-299-config-doctor` was used to bring in the ERR-050 handbook entry. This cherry-pick also brought in the `pd config doctor` CLI source files from PRI-299, which were completely unrelated to the console launcher PR. PR #800's diff included config-doctor code that belonged in PR #801 (PRI-299).
@@ -783,35 +676,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-06-18 PR #971 — the notification-sound branch was based on a stacked history and its PR diff included already-merged RuleHost work plus unrelated website assets. Fixed by rebuilding the branch from current `main` and replaying only the seven notification commits. The review guard was strengthened in practice by comparing both `git log origin/main..source-branch` and `gh pr diff --name-only` before resolving conflicts.
 
 ---
-
-**[ERR-053]** | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail
-
-- **What happened**: `pd config doctor` subcommand was implemented in `config-doctor.ts` with full handler logic, but the subcommand was never registered in `packages/pd-cli/src/index.ts`. The Commander program had no `.command('config')` or `.command('doctor')` registration, so `pd config doctor` would fail with "unknown command". Meanwhile, 4 of 22 CLI wiring tests in `cli-wiring-registration.test.ts` were silently failing because they tested registration existence without asserting the command actually runs.
-- **Why it's wrong**: A CLI subcommand that is not registered is completely unreachable to users. The implementation exists but the wiring is missing - same class as ERR-024 (security validator not wired into enforcement path) and ERR-048 (activation write path disconnected from read path). The silently failing tests are the same class as ERR-025 (tests prove isolated behavior, not production defense).
-- **Correct approach**: When adding a new CLI subcommand, the implementation checklist must include: (1) handler file, (2) Commander registration in `index.ts`, (3) wiring test that calls `program.parseAsync(['node', 'pd', 'config', 'doctor', ...])` and asserts it reaches the handler, (4) no test should silently pass when the command is unregistered.
-- **How to prevent**: Add a mandatory "Commander registration" checklist item for every new CLI subcommand. The wiring test must call `program.parseAsync()` with the full command path, not just test handler existence. Add a global test that enumerates all registered commands and verifies each has a corresponding handler file.
-- **Source**: PRI-299 / PR #801
-- **Date**: 2026-06-03
-- **Recurrence**: Same class as ERR-024, ERR-048 (code exists but is not wired into production path)
-
----
-
-**[ERR-054]** | `as TOutput` cast on untrusted LLM/runtime payload before validation — typed hooks receive unverified data
-
-- **What happened**: `BasePeerRunner.fetchAndParseOutput()` cast `result.payload` as `TOutput` (generic type parameter) without runtime validation. The `run()` template method then called `postFetchTransform()` and `checkLineageIntegrity()` with this unverified typed data BEFORE calling `validateOutput()`. This meant untrusted LLM/runtime output entered typed runner hooks as if it were validated.
-- **Why it's wrong**: Violates Runtime Contract Rule 1 (ERR-001: treat parsed JSON/LLM output as `unknown`) and Rule 2 (ERR-005: do not use `as` to bypass runtime validation). The `as TOutput` cast is a type-system lie — the payload has not been validated at that point. Typed hooks receiving unverified data could access properties that don't exist, leading to silent undefined behavior or crashes.
-- **Correct approach**: `fetchAndParseOutput()` must return `unknown`. Pre-validation hooks (`postFetchTransform`) must accept `unknown`. Only after `validateOutput()` confirms the payload shape should data be cast to `TOutput`. Post-validation hooks (`checkLineageIntegrity`, `emitSuccessTelemetry`, `succeedTask`) receive the validated typed data.
-- **How to prevent**: Any function that returns data from an external source (LLM, runtime adapter, network) must return `unknown`. The trust boundary is the validation step — no data should be typed before crossing it. Review checklist: (1) Does this function return data from an untrusted source? (2) If yes, does it return `unknown`? (3) Is the `as` cast AFTER a validation step?
-- **Source**: PRI-302 / PR #806
-- **Date**: 2026-06-03
-- **Recurrence**: Yes — `as TOutput` cast on untrusted LLM/runtime payload before validation.
-  - 2026-06-03 PR #809: EvaluatorValidator.validate() accepted `EvaluatorOutputV1` instead of `unknown`; evaluator-runner.ts used `output as EvaluatorOutputV1` — fixed by accepting `unknown`
-  - 2026-06-03 PR #810: ArtificerRunner.validateOutput used `result.errorCategory as PDErrorCategory | undefined` instead of `isPDErrorCategory()` runtime check
-  - Earlier: PR #806 (first occurrence in BasePeerRunner.fetchAndParseOutput). See git history.
-
-
----
-
 **[ERR-060]** | Emitted telemetry event not registered in schema — event silently dropped or degraded
 
 - **What happened**: After migrating Scribe/Evaluator/Artificer runners to BasePeerRunner, the runners emit events like `artificer_implementation_plan_generated`, `scribe_principle_draft_generated`, etc. via `this.emitEvent()`. BasePeerRunner prefixes these with the runner name (e.g., `artificer_implementation_plan_generated`). But `telemetry-event.ts` TelemetryEventType union did not include any `artificer_*`, `evaluator_*`, or `scribe_*` event literals. Events not in the schema are silently dropped or degraded by the telemetry pipeline.
@@ -823,7 +687,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes - 2026-06-11 PR #902 (PRI-371): `diagnostician_core_grounding_result` telemetry event emitted by DiagnosticianRunner.succeedTask() but not registered in TelemetryEventType union in telemetry-event.ts. Event would be silently dropped and replaced with `degradation_triggered` fallback by StoreEventEmitter. Same class as original: new event literal added to runner but telemetry schema not updated.
 
 ---
-
 **[ERR-063]** | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored
 
 - **What happened**: When changing `--enqueue-next` to `--no-enqueue-next` (inverting the default), the CLI registration used `.option('--no-enqueue-next', ...)` but the `.action()` handler accessed `opts.noEnqueueNext`. Commander's `--no-` prefix convention stores the option as the *positive* form: `--no-enqueue-next` → `opts.enqueueNext`. Since `opts.noEnqueueNext` is always `undefined`, `!opts.noEnqueueNext` is always `true`, meaning the `--no-enqueue-next` flag was silently ignored and enqueue always happened regardless of the flag.
@@ -836,55 +699,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-25 Phase 0 update safeguards self-review: the unstamped legacy-installer path staged and inspected a tarball, then returned `installer_bundle_stale` before production mutation. Because that return was inside the outer `try`, it bypassed the `catch` cleanup and left the temporary staging directory behind. Fixed by removing the staging directory before the refusal return and adding a real route test that records the tar extraction directory, asserts the stale result, and proves the directory no longer exists. Lesson: every early refusal after temporary-resource creation must either clean that resource locally or use a `finally`; test the refusal path with an observable resource-lifecycle assertion.
 
 ---
-
-**[ERR-062]** | Collapsed details section renders empty-state copy instead of actual data when data exists
-
-- **What happened**: In the FocusPage `<details>` collapsed section (Layer 3: full trajectory), the content inside the `<details>` element always rendered `{t("pages.focus.emptyDeviation")}` regardless of whether data was available. When `deviationCount > 0`, the user would expand the details section expecting to see deviation evidence, but instead saw the empty-state message "No behavior deviations captured yet."
-- **Why it's wrong**: The `<details>` section was implemented as a copy of the empty-state branch without updating the content to render actual data. The conditional branch `deviationCount > 0` correctly showed the count and disclaimer, but the nested `<details>` inside it always showed the empty-state i18n key. This violates EP-03: degraded content shown when actual data is available is a form of misleading degradation.
-- **Correct approach**: The `<details>` section content must be conditionally rendered: show actual data (e.g., pending group titles and record counts) when data is available, and show the empty-state message only as a fallback. Each conditional branch in a component must be reviewed for content correctness, not just structural correctness.
-- **How to prevent**: When implementing nested conditional rendering (e.g., a `<details>` inside a conditional branch), verify that each branch renders content appropriate to its condition. Add a visual or test check that the expanded details section shows actual data when data exists. Review trigger: any PR that adds a `<details>` or collapsed section must include a test or manual check that the expanded content matches the data condition.
-- **Source**: PRI-319 / PR #825
-- **Date**: 2026-06-05
-- **Recurrence**: None
-
----
-
-**[ERR-061]** | Runtime shape check validates wrong field name — guessed structure instead of verifying against actual type
-
-- **What happened**: When fixing a P0 review finding (ERR-001 recurrence: `as` cast bypassing validation in `ConsoleLifecycleDatasource.loadLedger()`), the AI replaced the `as LedgerTreeStore` cast with a runtime shape check. However, the shape check validated `nodes` (an array field) instead of `principles` (a record field). The actual `LedgerTreeStore` interface is `{ principles: Record<string, LedgerPrinciple>, rules: Record<string, LedgerRule>, implementations: Record<string, Implementation>, metrics: Record<string, PrincipleValueMetrics>, lastUpdated: string }` — it has no `nodes` field at all. The check `!Array.isArray(tree.nodes)` always evaluated to `true`, causing `loadLedger()` to throw "ledger tree is malformed" for every valid ledger, which made all lifecycle route tests return 500 instead of 200/404.
-- **Why it's wrong**: The AI guessed the structure instead of reading the actual `LedgerTreeStore` interface definition. The fix replaced one form of invalid validation (`as` cast) with another form of invalid validation (checking the wrong field). Both bypass the purpose of runtime validation: ensuring the data matches the expected shape. A shape check that validates a non-existent field is equivalent to no shape check at all — it rejects valid data and provides a false sense of security.
-- **Correct approach**: When writing a runtime shape check, read the actual type/interface definition first. The check should validate the most discriminating required field(s) of the actual type. For `LedgerTreeStore`, the correct check is `isRecord(tree.principles)` (the `principles` field is the primary discriminator — a valid ledger must have a `principles` record). Always verify the shape check matches the actual type definition, not an assumed one.
-- **How to prevent**: Before writing a runtime shape check, read the target type's interface definition. The shape check must validate at least one required field that exists in the actual type. Add a test that proves the shape check passes for valid data and fails for malformed data. Review trigger: any PR that adds or modifies a runtime shape check must include a test proving the check works against the actual type structure.
-- **Source**: PR #823
-- **Date**: 2026-06-05
-- **Recurrence**: None
-
----
-
-**[ERR-058]** | Inconsistent forbidden-key lists across validation paths — gateway_token passes pi-ai profile validation
-
-- **What happened**: `validateOpenClawProfile` and `validatePdLocalProfile` each defined their own local `forbiddenKeys` arrays for rejecting secret-bearing fields. The openclaw list included `gatewayToken` and `gateway_token`, but the pd-local list only had `apiKey`, `api_key`, `token`, `secret`, `password`, `auth`. This inconsistency meant `gateway_token` and `gatewayToken` would pass validation in pi-ai profiles, potentially allowing secret values through.
-- **Why it's wrong**: When security deny-lists are defined in multiple places, any inconsistency creates a bypass path. The openclaw validator would correctly reject `gateway_token`, but the pi-ai validator would accept it. A user or LLM could place secrets in a pi-ai profile under `gateway_token` and they would pass validation.
-- **Correct approach**: Define forbidden-key lists as a single shared constant (e.g., `FORBIDDEN_SECRET_KEYS`) and reference it from all validation paths. When adding a key to one list, it must appear in all lists that serve the same security purpose.
-- **How to prevent**: When implementing security validation that rejects dangerous fields by name, (1) define the list as a shared constant, (2) reference it from all validation paths, (3) add a test that each forbidden key is rejected in every validation path that uses the list. Review checklist: (1) Are there multiple lists serving the same security purpose? (2) Are they identical? (3) Is there a test for each list × forbidden key combination?
-- **Source**: PRI-304 / PR #811
-- **Date**: 2026-06-03
-- **Recurrence**: First occurrence
-
----
-
-**[ERR-059]** | Nullish coalescing dead code — always-defined default shadows user override in effective config merge
-
-- **What happened**: In `computeEffectivePdConfig()`, the else branch for agents without user override used `defaultBinding.runtimeProfile ?? userConfig.internalAgents.defaultRuntime`. Since `getDefaultInternalAgents()` always sets `runtimeProfile` to `'openclaw.default'` for every agent, the `??` operator never reached the right-hand side. This meant agents without explicit override always got the hard-coded `'openclaw.default'` instead of the user's configured `defaultRuntime`.
-- **Why it's wrong**: When a function always returns a defined value for a field, using `??` with a fallback for that field is dead code. The intent was "use the user's defaultRuntime as fallback", but the always-defined `defaultBinding.runtimeProfile` prevented the fallback from ever being reached. This is a logic error that silently breaks the user's expectation.
-- **Correct approach**: When merging user config with defaults, distinguish between (1) user-provided values, (2) hard-coded defaults, and (3) user-configured defaults. For agents without explicit override, the correct behavior is to use the user's `defaultRuntime`, not the hard-coded default's `runtimeProfile`.
-- **How to prevent**: When writing `a ?? b`, verify that `a` can actually be null/undefined. If `a` is always defined (e.g., from a function that always returns a value), the `?? b` is dead code. Test the fallback path explicitly: set the user's default to a non-default value and verify agents without override use it.
-- **Source**: PRI-304 / PR #811
-- **Date**: 2026-06-03
-- **Recurrence**: First occurrence
-
----
-
 **[ERR-064]** | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during edit
 
 - **What happened**: During PRI-337 implementation, the pd pain retry command lost its --baseUrl, --maxRetries, --timeoutMs, and --force options. These options ended up on a bogus top-level pd canary command that incorrectly called handlePainRetry instead of handleRuntimeCanary. Separately, pd pain evidence was hardcoded to read .state/logs/SYSTEM_*.log instead of the actual SystemLogger path <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
@@ -897,7 +711,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 [ERR-064]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-064
 
 ---
-
 **[ERR-066]** | CLI --json failure path not structured; raw stack trace dumped to stderr on assembler throw
 
 - **What happened**: PRI-397's `pd mvp smoke --json` and `pd task list --json` handlers did not wrap their work in try/catch. On any assembler/state-manager throw (e.g., fresh post-PRI-398 workspace, missing `.pd/state.db`, corrupt config), the throw bubbled to the top of the async function, the test runner saw a raw stack trace on stderr, and the exit code was non-zero with no JSON output on stdout. This violated EP-04 Rules 1 (single parseable JSON object on stdout) and 6 (failure paths must carry reason + nextAction). The handler was shipped untested for the failure path. I marked my self-review Phase 6.5 as "no real issues" without running the failure path through a test or even a manual `pd mvp smoke --workspace <nonexistent>` against the production binary.
@@ -910,7 +723,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 [ERR-066]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-066
 
 ---
-
 **[ERR-067]** | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI
 
 - **What happened**: When a sub-runner (e.g., DiagRootCauseRunner) returns `status: "retried"` from `retryOrFail()`, the SplitDiagnosticianRunner treats it as failure (since `resultA.status !== "succeeded"`) and immediately marks the parent task as failed. The retry mechanism in BasePeerRunner works correctly (marks task as `retry_wait`, increments attemptCount), but the orchestrator doesn't wait for or trigger the retry. Similarly, `diagnose run` CLI command checks `result.status !== "succeeded"` and exits with code 1, never giving the retry a chance. This means `output_invalid` errors from LLM schema non-compliance (e.g., qwen3.6-27b-mtp missing `rootCauseCategory`) are never retried, even though `output_invalid` is not in `permanentErrorCategories` and `shouldRetry()` returns true.
@@ -925,7 +737,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-16
 - **Recurrence**: First occurrence (EP-05 Loop State Freshness + EP-02 Production Path Wiring). 2026-08-29 PRI-621, retry-asymmetry form: `artificer_output_retry` flag-off put `output_invalid` in ArtificerRunner.permanentErrorCategories, making artificer the only peer runner whose output_invalid never retried — 5/6 live internalization chains dead-ended while dreamer self-healed the SAME error category via the base retry policy. Graduated the flag to default-on (quiet rollback retained).
 [ERR-067]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-067
-
 **[ERR-068]** | Used the wrong package manager (pnpm) in a repo whose CI runs `npm ci`, leaving `package-lock.json` out of sync
 
 - **What happened**: Adding the `@earendil-works/pi-agent-core` / `@earendil-works/pi-ai` dependencies via `pnpm install` updated `pnpm-lock.yaml` only. The repo's CI workflows all run `npm ci` (which reads `package-lock.json`). Because `package-lock.json` was not updated, every CI job failed with `Missing: @earendil-works/pi-agent-core@0.79.4 from lock file` and `Invalid: lock file's typebox@1.1.34 does not satisfy typebox@1.1.38`. Local pre-push `verify:merge` passed because it does not re-resolve the lockfile.
@@ -933,7 +744,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Fix**: `git checkout pnpm-lock.yaml` (revert the wrong lockfile), then `npm install --ignore-scripts` to regenerate `package-lock.json` with the new deps. Commit 3a7780e.
 - **Prevention**: Before adding/removing dependencies, check CI workflows (`grep -r "npm ci\|pnpm install" .github/workflows/`) to identify the canonical lockfile. Run the install command matching CI's package manager, then commit the lockfile CI reads. EP-06 "package runtime dependencies are declared in the package that imports them" extends to: the lockfile CI consumes must be the one updated.
 - **Recurrence**: 2026-06-16, PRI-419 / PR #953.
-
 **[ERR-069]** | Adapter `runHandle` hardcodes `status:'succeeded'` absent from `RunHandleSchema` (masked by `as RunHandle`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in `ArtificerL2Adapter`
 
 - **What happened**: Two defects found in a single self-review of `ArtificerL2Adapter` (PRI-424 Phase 4), both in the same file:
@@ -949,7 +759,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Treat every output-emitting path (happy, degraded, fallback, retry-exhausted) as a trust boundary: each must emit only objects that passed validation. Degradation is a *content* transformation (strip code fields), not a *trust* escape hatch.
   - Prefer `throw PDRuntimeError` over returning a contradictory state object on total failure — it surfaces in `handlePostLeaseError` with a structured reason, rather than relying on the caller to cross-check handle vs pollRun.
 - **Recurrence**: 2026-06-21 PR #993 — Artificer prompt requested retired `implementationPlan` while validator required `implementationSummary` (coding against remembered contract). Fixed by aligning prompt+schema on V2 + negative assertions for retired V1 field. Original found in self-review (commit c396ed92).
-
 **[ERR-070]** | New public types/classes not exported from barrel `index.ts` — module consumers cannot import the new API surface
 
 - **What happened**: In PR #963 (PRI-424 RuleHost MVP Activation), multiple new V2 types (`ArtificerOutputV2`, `EvaluatorOutputV2`, `AdversarialCase`, `AdversarialFailedCase`, `EvaluatorCodeReview`, `EvaluatorAdversarialResult`, `GoldenTraceCaseInput`) and the `ArtificerL2Adapter` class were added to internal module files (`artificer-output.ts`, `evaluator-output.ts`, `artificer-l2-adapter.ts`, `golden-trace.ts`) but were not re-exported from the barrel `index.ts` files (`runtime-v2/internalization/index.ts` and `runtime-v2/index.ts`). Downstream consumers importing from the package's public API would get "module has no exported member" errors.
@@ -964,7 +773,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: First occurrence.
 
 ---
-
 **[ERR-071]** | Async cleanup not `await`ed in finally; test resources not wrapped in try-finally; `process.env` not restored — resource leaks and test pollution
 
 - **What happened**: Three cleanup-hygiene defects found in PR #966 review (PRI-428), all in the `pd-cli` package:
@@ -987,7 +795,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-13 PRI-523 C1.3 self-review (corrected classification, consolidated): the OpenClaw host-owned diagnosis continuation must remain best-effort so the PostToolUse hook returns after durable shared SQLite persistence, but the first implementation used bare `void emitPainDetectedEvent(...)` with no lifecycle-owned rejection handling or test drain. The first corrective scheduler still allowed a never-settling continuation to keep the pending set and lifecycle drain open forever. Fixed with an explicit scheduler that attaches immediate resolution/rejection handlers, enforces a finite 30-second timeout, emits bounded reason/nextAction, clears its timer on every terminal path, removes settled or timed-out promises, and exposes a test-only drain. Rejected and never-settling continuation regressions prove observability and bounded cleanup without extending hook latency; the original promise remains rejection-observed even if it settles after the timeout.
 
 ---
-
 **[ERR-073]** | Refactoring characterization tests cover shared logic happy path, not call-site-specific behavior equivalence
 
 - **What happened**: When extracting the shared `resolveRuntimeAdapterFromConfig` resolver from `diagnose.ts` and `run-once.ts` (PRI-431), the characterization tests verified the shared resolver's behavior in isolation but did not verify behavior equivalence with the original call-site code for the `configOptional: true` option. The original `diagnose.ts` never called `validateRuntimeConfig` — it only did a manual missing-field check on merged values (provider, model, apiKeyEnv). The shared resolver called `validateRuntimeConfig(configResult)` on the raw config BEFORE merging CLI overrides, which rejected configs missing `baseUrl` for non-built-in providers even when the user passed `--baseUrl` on the CLI. This was a behavior regression: a user with `provider: openrouter` in config but no `baseUrl` in config (passing `--baseUrl` on CLI) would get an error from the resolver that they didn't get before.
@@ -999,7 +806,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-074]** | Inner try/catch creates exit tunnel — early returns bypass outer catch cleanup, leaking resources
 
 - 2026-08-25 update Phase 2a quality review (no Linear issue): target/ABI/dependency checks ran after gateway, backup, and copies. Fixed by preflighting identity, manifest digests, dependencies, and native loads before every side effect; tests assert no gateway/rm/cp/rename. Prevention: place refusal guards above the first production mutation.
@@ -1016,7 +822,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 
 ---
-
 **[ERR-075]** | Hardcoded aria-label bypasses i18n — screen readers read in wrong language for non-English UI
 
 - **What happened**: In `app-sidebar.tsx` (PR #979), the assistant added `aria-label={`${pendingCount} pending approvals`}` and `aria-label={`${degradedCount} degraded signals`}` as hardcoded English strings. The file already imported `useTranslation` and used `t()` for visible text (e.g., `t(item.labelKey)`), but the assistant failed to apply the same i18n convention to the new accessibility attributes.
@@ -1036,7 +841,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-22 PRI-558 / PR #1377: six newly added zh-CN timeline strings used bare `Owner`/`Agent` (one value was entirely English: `Owner Approved`), failing the CR10 locale governance gate and redding `Test pd-console` on CI. Fixed with 拥有者/智能体 in aa6a881b. Same prevention rule, new flavor: keys WERE added to both locales (parity held) but the zh values violated the locale term policy — run `cr10-i18n-governance.test.ts` before pushing any i18n change.
 
 ---
-
 **[ERR-076]** | Host-realm type narrowing (`isPlainObject`, `as never`) rejects or bypasses cross-realm VM objects — auto_correct silently broken
 
 - **What happened**: In `correction-proposal.ts` (PRI-437), `isPlainObject()` used `Object.getPrototypeOf(value) === Object.prototype` to validate correction proposals from VM-executed RuleCode. Objects created inside `vm.createContext(Object.create(null))` have prototypes from the VM realm, not the host realm, so `isPlainObject` returned `false` and `validateCorrectionProposal` rejected all valid `auto_correct` proposals with "proposal must be a plain object". This made the entire `auto_correct` decision path silently non-functional in production. Additionally, `_recordUnhealthy()` in `rule-host.ts` used `this.logger as never` to bypass a type mismatch between `RuleHostLogger` (only `warn`) and `PluginLogger` (has `error`, `info`, `warn`), which would cause a `TypeError` if `EventLog` called `this.logger.error()`.
@@ -1051,7 +855,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-077]** | API migration silently drops input parameters — characterization tests don't verify parameter parity
 
 - **What happened**: When migrating `gate-block-helper.ts` from Gate A (`evaluatePainDiagnosticGate`) to Gate B (`evaluateEvidenceTriage` + `evaluateTriggerController`) in PRI-454 Step 4a, the assistant passed only `isUnsafeHighConfidence` to `evaluateEvidenceTriage` but omitted `consecutiveErrors` and `isRisky`. Gate A's input included `consecutiveErrors: session?.consecutiveErrors ?? 0`, which drove Rule 3 (consecutiveErrors >= 4 → admit). Gate B's triage call silently dropped this parameter, so non-risky repeated gate blocks (4+ consecutive errors) never triggered diagnosis — Gate B was less sensitive than Gate A.
@@ -1066,7 +869,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-078]** | PR body self-report labels CI failure "pre-existing on main" without verifying against main — reviewer inherits false regression classification
 
 - **What happened**: During PRI-454 (PR #1043), the assistant's PR body claimed the failing `gate-no-path-write-tool.test.ts` test was "pre-existing on main, unrelated to PRI-454". In reality the failure was introduced by the PR itself: the PR flipped `painEvidenceAdmission`'s default from `enabled:false` to `enabled:true`, which activated the Gate B path in `gate-block-helper.ts`. That path calls `wctx.resolve('PROFILE')`, but the pre-existing test's mock `WorkspaceContext` fixture did not implement `resolve()`, so the block-handling code threw `TypeError: wctx.resolve is not a function`. `gate.ts`'s catch block then degraded to "allow conservatively", silently downgrading the expected block to allow and failing the assertion. On `main`, the flag was OFF so the Gate B branch never ran and the test passed.
@@ -1081,7 +883,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-079]** | Concurrency-primitive hardening gaps (age-based lock eviction, busy-spin retry) silently re-open the data-loss class the primitive was added to prevent
 
 - **What happened**: PRI-459 hoisted a cross-process file lock into core to eliminate dual-writer lost updates on `principle_training_state.json`. The initial implementation had two hardening gaps that defeated the lock's own purpose:
@@ -1101,7 +902,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-26 PR #1419 review round 4 (lock-coverage flavor): per-workspace export locks correctly serialized same-workspace exports, but the control state was one SHARED file written WHOLE from a pre-flight read — two different workspaces completing concurrently overwrote each other's entries (lost update), and a concurrent reset could be overwritten by the stale write. The primitive guarded the wrong critical section: only the ms-scale read→merge→write needed a machine-scope state-update lock (fresh read + identity guard inside); the network flight stays concurrent. Tests: overlapping two-workspace flights asserting BOTH entries survive + no identity resurrection; overlap asserted, not assumed.
 
 ---
-
 **[ERR-080]** | Control applied to the RAW input form instead of the CANONICAL/transformed form — size bound applied pre-escape (escaped output exceeds budget), or path-prefix check applied to the raw param path instead of normalizedPath (traversal bypasses the match)
 
 - **What happened**: In `buildIntentFrictionBlock()` (`packages/principles-core/src/runtime-v2/intent/intent-friction-block.ts`), the `INTENT_INJECT_MAX_CHARS` bound (4000 chars) was applied to the RAW intent content via `slice()`, and then `escapeXml()` was called on the already-bounded slice. Because XML entity expansion is length-increasing (`&` → `&amp;` = 5x, `<` → `&lt;` = 4x), the escaped output could exceed the budget. A 4000-char raw string of `&` would be bounded to 4000 chars, then escaped to ~20000 chars of `&amp;` — 5x over the budget. The prompt hook's 9000-char `truncateInjectionToBudget` size guard provided a hard upper bound, but the `INTENT_INJECT_MAX_CHARS` contract was silently violated.
@@ -1116,7 +916,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-08-13 PRI-523 C1.2 quality review: RuleCode evaluation ran in a bounded child, but compilation still executed untrusted top-level source in the parent; the timeout applied per rule, so N active rules created an N×timeout gate; active rows/source/output/warnings were uncapped. The control protected one evaluation phase, not the canonical full untrusted workload. Fixed by moving compilation+evaluation into one 32 MiB child batch with one total deadline, bounded SQL/source/output/warnings, and parent-only validation of bounded child JSON. Narrow re-review found the same root cause at the storage/lifecycle boundary: the first SQL query still materialized full artifact JSON before checking its envelope size, and provider deadline timers survived early settlement. Fixed with a metadata-only SQLite byte-length preflight, a bounded second fetch with defensive actual-byte verification, and timer cleanup in `finally`. Regression covers top-level loops, syntax errors, memory/output/source exhaustion, active-rule overflow, multi-rule elapsed time, a small RuleCode inside oversized irrelevant JSON, and early provider resolve/reject timer cleanup. 2026-08-13 PRI-523 C1.1 review: the shared active-principle kernel budgeted compact pre-render lines, then XML-escaped and wrapped them as directives; expandable content could therefore make the final emitted block exceed the 2,000-character contract. Fixed by selecting only whole directives whose fully rendered escaped block fits, with regression coverage for 10 expandable principles, complete tags, truncation metadata, and exact fit. 2026-08-12 PR #1302 (CodeRabbit review, semantic-canonicalization flavor): the demo RuleCode exemplar in `story-a-demo.ts` / `proven-channel-baseline.ts` used `String(input.action.paramsSummary.path ?? input.action.normalizedPath ?? "")` — raw path first, so `/project/../../etc/passwd` bypassed the `/etc` block (demo activations run in the production RuleHost shadow, so this was a real, if low-impact, correctness gap). Fixed by swapping to `normalizedPath ?? paramsSummary.path`; regression test in `story-a-demo.test.ts` ("blocks via normalizedPath even when paramsSummary.path is a traversal").
 
 ---
-
 **[ERR-081]** | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check
 
 - **What happened**: `safeReadIntentDoc()` in `packages/openclaw-plugin/src/core/intent-doc-reader.ts` enforced the `INTENT_MAX_BYTES` (32KB) size cap by checking `fs.statSync(filePath).size` FIRST, then calling `fs.readFileSync(filePath, 'utf8')`. If the INTENT.md file was concurrently rewritten with larger content between the `statSync()` and `readFileSync()` calls, the oversized content would bypass the stat-based check and enter the parse/hash/cache path as `ok: true`, violating the 32KB size cap contract (SPEC §12).
@@ -1132,7 +931,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-31 PRI-631 / PR #1462: Owner resolution checked a digest before a task-only CAS, allowing evidence rows to change in the final gap. Fixed with one SQLite mutation conditioned on each reviewed artifact's id, source, lineage and content; barrier regression proves no write.
 
 ---
-
 **[ERR-082]** | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped
 
 - **What happened**: In `DiagRouterRunner.postFetchTransform()` (Stage C of the split Diagnostician), the code branched on `Object.hasOwn(context.rootCauseOutput, 'intentTension')` to decide whether to passthrough Stage A's intentTension or strip an LLM-hallucinated one. `Object.hasOwn` returns `true` even when the value is `undefined`. So when Stage A's output had the property present but `undefined`, the passthrough branch was entered, the inner `if (value !== undefined)` was false, and execution fell through WITHOUT entering the strip branch — leaving the LLM-hallucinated intentTension on the output unstripped. SPEC §18.2 requires Stage C to be additive-only and never generate intentTension when Stage A didn't produce one.
@@ -1147,7 +945,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-083]** | Changing a shared contract (store guard, type union, service method, default config value, package identity) without auditing all same-package AND cross-package consumers (callers, validators, tests, mocks, CI workflows) — downstream packages break
 
 - 2026-08-25 update Phase 2a quality review (no Linear issue): self-contained builds rewrote source versions from live npm and accepted labels unlike the native build host. Fixed by preserving source identity, rejecting target mismatches, and consuming in-asset identity. Prevention: immutable identity comes from pinned metadata; native outputs use the executed toolchain target.
@@ -1179,7 +976,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-09-03 / adhoc-20260904-runtime-update-guards (dev-machine test isolation leak -> real runtime corruption): after a canonical reinstall created ~/.pd/runtime on the dev machine, the pd-console update route tests' legacy fixtures resolved the REAL canonical install (os.homedir() was not yet pinned; OPENCLAW_HOME injection alone cannot override canonical resolution), so a mocked /apply-full "tarball" stub (fake version 2.0.0, no package name) was copied into the real runtime, corrupting console/dist/server.js, plugin/package.json (false "already latest", blocked future updates), core/plugin entry files, and core/pd-cli package identity. Fixes: (1) pin os.homedir() to the fixture in all update-route suites (931739a1); (2) production now refuses staged packages that do not self-identify as principles-disciple with valid semver BEFORE any copy (staged_package_invalid, /apply + /apply-full); (3) fixture-isolation sentinel test (resolved currentVersion must equal the fixture's, never a real machine install) plus identity-refusal negative tests. Prevention: any test suite that can mutate installed trees must fail loud when its environment-isolation pins stop working; update routes must validate the staged package identity before the first production write.
 
 ---
-
 **[ERR-084]** | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA
 
 - **What happened**: In `packages/pd-console/scripts/e2e-start.mjs` (PR #1068), `spawn('npx', [...], { shell: true })` launched a tsx server. Signal handlers called `child.kill()` then `process.exit(0)`. On CI, `shell: true` wraps in `/bin/sh`, so `child.kill()` only kills the shell — tsx is orphaned with port 3100 bound. `process.exit(0)` prevents `child.on('exit')` cleanup. Also, `.github/workflows/pd-console-e2e.yml` used `@v4` tags instead of commit SHAs, violating zizmor policy.
@@ -1195,7 +991,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-14 PRI-524 (PR #1316 review): the plugin hook wrapper's fail-open path called process.exit(0) immediately after process.stdout.write('{}') — stdout on a pipe is asynchronous, so the exit can drop the very object the fail-open contract promises. Fixed with fs.writeSync(1/2). Rule of thumb: before any process.exit, stdout/stderr writes must be fs.writeSync or the code must return and let the loop drain (process.exitCode assignment).
 
 ---
-
 **[ERR-088]** | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path
 
 - **What happened**: In PRI-486 Phase 7 E2E tests (PR #1109), two test cases used non-unique assertion signals:
@@ -1218,7 +1013,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-09-04 PRI-665 misdiagnosis (diagnosis-side sibling of the non-unique-signal class): the 1.229.0 upgrade crash was attributed to a "host-runtime barrel missing 8 exports" based on three checks — rg symbol search, tarball regex, and an import-scanner using string `includes()`. All three are text-level symbol matching and share ONE blind spot: none can see `export *` re-export chains, so the published barrel (19 `export *` lines, all 8 symbols verified loadable via real Node import) was misdiagnosed as broken. The real cause: stale physical `@principles/*` dependency copies in the runtime `node_modules` shadowing the canonical packages (Node resolves the NEAREST node_modules first). Lesson: root-cause claims about module interfaces require a REAL Node import as evidence, must first establish which physical copy the runtime actually resolves, and must treat multiple checks sharing the same mechanism as ONE data point, not independent corroboration.
 
 ---
-
 **[ERR-089]** | Fix addresses primary failure path but leaves sibling failure branches with stale state, wrong command path, or CLI contract violation
 
 - **What happened**: In PR #1124 (Bug-O/Q/M/P cascade fix), the assistant fixed 4 bugs across `runtime-activation.ts`, `pain-record.ts`, `ApprovalsConsoleModel.ts`, and `diagnose.ts`. CodeRabbit review found 10 inline issues (4 P1 + 4 P2 + 2 P3) where the fixes introduced new defects:
@@ -1244,7 +1038,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-21 PR #1371 review (parallel-implementation flavor): the default-OFF era suppressed the "core flag explicitly disabled" warning for `rulecode_owner_live_decision` in ALL THREE loader paths (`feature-flag-contract.ts`, `pd-config-effective.ts`, `pd-config-feature-flags.ts`). The rollout flip to default ON removed the suppression from two of them and added a pd-config test asserting the disable is observable — but missed the sibling `computeEffectiveFlags` path in `feature-flag-contract.ts:307`, leaving that loader's emergency-disable unobservable with no covering test. Caught by external review; fixed by removing the leftover special case + adding a mirror regression test in feature-flag-contract.test.ts. Lesson: when one behavior is implemented in N parallel loader/validation paths, enumerate all N sites in the fix commit message itself (or via a shared helper) — "grep the pattern" must cover the exact same expression in every file, not just the files the failing test points at.
 
 ---
-
 **[ERR-090]** | Package.json entry point (main/exports) changed without verifying the referenced file exists in ALL build paths (tsc vs esbuild) — CI fails on paths that don't generate the new entry
 
 - **What happened**: In PR #1162 (PRI-501), to fix an esbuild packaging issue, `packages/openclaw-plugin/package.json` `main` and `exports["."].default` were changed from `./dist/index.js` to `./dist/bundle.js`. esbuild.config.js generates `dist/bundle.js`, but the CI test step uses `tsc` build (which generates `dist/index.js` from `src/index.ts`), NOT esbuild. After `tsc` build, `dist/bundle.js` did not exist, so pd-cli CI failed when importing the plugin entry point. The fix: revert `main`/`exports` back to `./dist/index.js`, and add a re-export shim in `esbuild.config.js` (`writeFileSync('dist/index.js', "export * from './bundle.js';\n")`) so the entry point resolves correctly under both build paths.
@@ -1261,7 +1054,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-28 release-pipeline recovery (codex/release-pipeline-recovery): the release-asset-smoke containment guard compared a `path.resolve()`-normalized read path against an UN-normalized allowed root taken verbatim from `PD_RELEASE_SMOKE_PUBLICATION`. On Windows the workflow env value arrives with MIXED separators (`${{ runner.temp }}` expands to `D:\a\_temp`, the workflow appends `/pd-publication-two`), so the resolved read path (`D:\a\_temp\pd-publication-two\asset.tar`) never lexically starts with the raw root form (`D:\a\_temp/pd-publication-two`) — the guard rejected its own legitimate inputs and publish-npm failed on all three Windows Node versions for days while Linux/macOS stayed green. Fixed by canonicalizing BOTH sides (`path.resolve`) before the prefix comparison (tests/release-containment.ts), with Windows mixed-separator regression tests including the legacy raw-comparison negative control (tests/release-containment.test.ts). Prevention: lexical path-containment guards must normalize every input (path.resolve canonical form) before comparing — never mix a resolved path with a raw env/workflow-provided path; and the same guard family needs a Windows mixed-separator test case, because POSIX-only local runs never produce the failing form.
 
 ---
-
 **[ERR-091]** | CI checkout lacks `lfs: true` when tests read LFS-tracked binary assets — assertion fails on 132-byte pointer files
 
 - **What happened**: PR #1159 added homepage-demo-{zh,en}.mp4 and homepage-demo-poster-{zh,en}.webp as Git LFS-tracked binary assets under `packages/website/public/`. The `verify-merge` CI job's `actions/checkout` step used the default `lfs: false`, so the LFS-tracked assets were checked out as 132-byte pointer files instead of real binary content. The `homepage-contract.test.mjs` test asserts `asset.size > 100_000` (`must contain a rendered video`); with 132-byte pointers, the assertion failed: `homepage-demo-zh.mp4 must contain a rendered video`. The "Verify Merge Gate" CI check failed, blocking merge.
@@ -1276,7 +1068,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-092]** | Module-level cache leaks across workspace instances when not keyed by workspaceDir
 
 - **What happened**: `SystemLogger` in `packages/openclaw-plugin/src/core/system-logger.ts` used three module-level `let` variables (`cachedLogFile`, `cachedLogDate`, `lastCleanupDate`) to cache the current log file path. These variables were NOT keyed by `workspaceDir` — they were single-valued. When multiple workspaces were used in the same Node.js process (e.g., PRI-442 E2E isolation tests), the first workspace to call `log()` set `cachedLogFile` to its own log path. All subsequent calls from other workspaces used the same cached path, writing their logs to the FIRST workspace's log file. The cache only invalidated on date change (midnight), not on workspace change.
@@ -1292,7 +1083,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-16 PRI-532 (PR #1330 self-review): `isSelfReportEnabled` in `principle-application-ledger.ts` used a single-valued `let selfReportFlagCache` with a `workspaceDir === cached.workspaceDir` last-seen check — the exact anti-pattern this entry documents (written the same day the entry was re-read; pattern knowledge alone does not prevent the mistake). No correctness leak here (the key check prevented cross-workspace use) but multi-workspace processes would thrash to a disk read every turn. Fixed with `Map<string, T>` keyed by `path.resolve(workspaceDir)` per this entry's guidance; review also caught that the first fix forgot the path normalization step.
 
 ---
-
 **[ERR-093]** | New log sink emits full external identifier despite an established minimization convention
 
 - **What happened**: PRI-516 added duplicate-run and missing-runId logs that interpolated the complete OpenClaw `sessionId`, while the same prompt hook already truncated session identifiers to 20 characters before logging.
@@ -1307,7 +1097,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-094]** | Range-bounds assertion uses `||` instead of `&&` — tautology that always passes for any value when `low <= high`
 
 - **What happened**: In PR #1218, `packages/principles-core/src/quality-scorecard/__tests__/quality-scorecard.test.ts` line 797 verified that `row.created_at` falls inside the `[before, after]` timestamp window captured around the call. The assertion was written as `expect(row.created_at >= before || row.created_at <= after).toBe(true)`. Because `before` is captured before `after`, `before <= after` always holds. For any value `A`, either `A >= before` OR `A < before` — and when `A < before <= after`, the second clause `A <= after` is true. So `(A >= before) || (A <= after)` is a tautology true for every string `A`, including epoch zero, far-future dates, empty strings, or unrelated values. The test could never fail, even if `validatePrincipleEventRow` set `created_at` to a constant or garbage.
@@ -1322,7 +1111,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-095]** | Additive envelope/`contentJson` merge uses a key that collides with an existing output-schema field — silently overwrites the legitimate field
 
 - **What happened**: In PR #1273 (Layer 0 internalization summary envelope), `BasePeerRunner.buildArtifactContentJson` merged the `ArtifactSummary` envelope into a runner's output via `{ ...output, summary: envelope.summary }`. But two of the 8 `SummaryRunnerKind` outputs already declare a top-level `summary` string field in their output schema: `DiagRootCauseOutputV1.summary` (the root-cause symptom statement) and `DiagnosticianOutputV1.summary` (the router's route summary). The spread-then-assign pattern unconditionally wrote the envelope object under the `summary` key, silently **overwriting** the legitimate output field with the `ArtifactSummary` envelope object. Any downstream reader expecting the string `summary` would receive an object instead. design §7 explicitly promises "不删不改任何既有字段" (never delete or modify any existing field) — this violated it. The flag defaults off, so no production data was corrupted before discovery, but enabling it would have silently broken diag_rootcause and diag_router artifacts.
@@ -1337,7 +1125,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-08-27 / PR #1421 (PRI-606, self-review during implementation): `validatePdConfig` reconstructed the validated `PdConfig` field-by-field and never extracted the `principles` section — `principles.outputLanguage` (canonical language SSOT since PRI-336) was silently dropped between raw YAML and `effective.config` for every `loadPdConfigForPlugin` consumer. The SSOT only *appeared* to work because pd-cli (`config-reader.ts`) and pd-console (`pd-config-store.ts`) re-read the raw YAML in parallel shadow paths. Fixed by extracting/validating `principles` (strict `outputLanguage` via `isValidOutputLanguage`) into the returned config; regression guard `pd-config-principles.test.ts`; prompt.ts now reads the language through this canonical path.
 
 ---
-
 **[ERR-096]** | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal
 
 - **What happened**: In the `create-principles-disciple` installer gateway pre-flight, `install()` showed a 3-way interactive `@inquirer/prompts` `select` (stop / proceed / abort) when the OpenClaw gateway was running. Prompting was gated on `!quiet`, where `quiet` is `install()`'s mode parameter set to `jsonMode` (true only under `--json`). The CLI also exposes `--yes` / `--non-interactive`, which are non-interactive but NOT `--json`. So a `--yes` run with the gateway up had `quiet=false` → `interactive=true` → `install()` invoked `select` and **hung waiting for stdin**, breaking the `--yes` non-interactive contract and any CI/script relying on `--yes`. Caught in adversarial self-review before PR handoff; no `--yes` user was affected.
@@ -1352,7 +1139,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-097]** | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins
 
 - **What happened**: Three shipped behaviors violated OpenClaw host contracts because each was designed from PD's side only, treating the host environment as passive storage. (1) The pd-console updater and the installer stored update backups INSIDE `~/.openclaw/extensions/` (`.pd-backup-<ts>` and `<extDir>.backup.<ms>` siblings of the live plugin). OpenClaw plugin discovery scans every extensions/ child directory (its ignore list matches `.bak` / `.backup-` / `.disabled`, NOT `.pd-backup-`), so every backup was re-discovered as a second `principles-disciple` plugin — "duplicate plugin id detected" config warning on EVERY gateway start; 21 stale backup dirs had accumulated on the owner machine. (2) `openclaw.plugin.json` declared BOTH `templates/langs/en/skills` and `templates/langs/zh/skills`. OpenClaw publishes plugin skills by NAME (first declared root wins, no i18n mechanism), so all 23 same-named zh skills were silently dropped with 23 "plugin skill name collision" warnings per startup, and every published skill was English although PD's default language is zh. (3) `OpenClawHostInstaller.install()` created `plugins.allow: ["principles-disciple"]` when the key was absent. Once non-empty, OpenClaw's allowlist gate silently DISABLES every discovered non-bundled plugin not on it (entries.enabled=true does NOT bypass), so installing PD on a machine that auto-loads feishu/tavily would silently disable those plugins.
@@ -1367,7 +1153,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-098]** | Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing directories, and must not silence errors on critical cleanup steps
 
 - **What happened**: During PR review verification (PRs #1332-1335, 2026-08-16), the assistant created temporary git worktrees and junctioned their node_modules into the SHARED main repo (`D:\Code\principles`) to reuse dependencies. During cleanup, junction removal used `-ErrorAction SilentlyContinue` (removal failed silently due to file locks from still-running vitest/node processes), then `Remove-Item -Recurse -Force` was run on the worktree directories. PowerShell 7's Remove-Item FOLLOWS junction/reparse points during recursive deletion, so the shared repo's working tree (1,865 tracked files across packages/*/src) and all node_modules were deleted.
@@ -1383,7 +1168,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-19 PR #1358 session (near-miss, no damage): the `principles-mvp-core-loop` worktree's `node_modules` was itself a JUNCTION into the main repo's shared `D:\Code\principles\node_modules` (leftover of the same junction-reuse pattern). Symptom: workspace package resolution silently hit the MAIN checkout's packages (different branch → `mergePITaskMetadata` "not a function" in spawned pd-cli while vitest imports passed). Nearly ran `npm ci` in the worktree — npm's rimraf of existing node_modules FOLLOWS the junction and would have deleted the main repo's entire node_modules. Safe recovery: `cmd /c rmdir node_modules` (removes the link only, verified main intact), then a fresh `npm ci` INSIDE the worktree so it owns a real node_modules with junctions to its own packages. Extra hazard observed: MSYS `ln -sfn` on Windows silently falls back to DEEP-COPYING the target (2000+ partial `Cu*` temp dirs when it hit the huge `packages/website`) — use PowerShell `New-Item -ItemType Junction` instead. Reinforces rule (5) of Correct approach: never junction a worktree's node_modules into a shared repo; install inside the worktree.
 
 ---
-
 **[ERR-099]** | Defensive ternary alternate for a contract-impossible empty state shipped uncovered — codecov/patch gate fails; prefer a branch-free join that degrades to the legacy format
 
 - **What happened**: In PR #1341 (issue #1337), the fix surfaced `gateResult.reasons` in the `RuleHostWriter.canActivate` refusal via a ternary with an empty-reasons alternate (`gateReasonDetail.length > 0 ? enriched : bare`). Every `evaluateRefinerRuleHostGate` rejection path initializes `reasons` with at least one string, so the bare alternate was unreachable through any production seam (the writer only injects `gateDeps`, not the gate result itself). The two new regression tests covered only the enriched branch, so codecov/patch reported 66.66% of diff hit (target 79.52%) and the check failed.
@@ -1399,7 +1183,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-28 PRI-615 / PR #1432 (self-review round 1): a new fail-loud guard branch (`max_attempts` validation in `sqlite-task-store.rowToFailedTaskSummary`) shipped with only the happy path covered — the throw block's 2 lines were flagged by the codecov patch comment (the gate itself passed at 91.67%, but the uncovered-branch pattern recurred). Unlike the original incident the branch is NOT contract-impossible (a corrupted DB column reaches it), so the fix was the "add a test per branch" arm of the rule: a corrupt-row regression that writes `max_attempts = 0` below the `TaskRecordSchema` bound via a bound `UPDATE` and asserts `listFailedTasks` throws. Lesson flavor: fail-loud validation guards are legitimate branches, but each one must ship with a corrupt-input regression in the same PR — "the sibling guard was also uncovered" is the file's existing convention, not a license.
 
 ---
-
 **[ERR-105]** | Hardcoded light-mode hex colors bypass theme tokens on a dual-theme UI — timeline dots near-invisible in dark mode
 
 - **What happened**: In PR #1377 (PRI-558), the assistant added timeline status dots to `PrinciplesPage.tsx` as raw hex literals (`STATUS_DOT = { pending: "#1e3a5f", approved: "#4d6b52", rejected: "#8b3a3a", parked: "#6b7280" }`) applied via inline `style={{ backgroundColor }}`. These values are exactly pd-console's LIGHT-theme token values (`--color-gov/green/danger` in `globals.css`). pd-console ships a dark theme (`[data-theme="dark"]`) where those variables flip to light tints (`#9db9d8`, `#90b892`, `#d28b8b`), so in dark mode the dots render dark-navy-on-dark and are nearly invisible. The same PR body claimed "reuses existing design tokens only".
@@ -1414,7 +1197,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-106]** | Binary ternary collapsed a 4-state review status into approved/pending — rejected/parked principles displayed as "awaiting Owner review"
 
 - **What happened**: In PR #1377 (PRI-558), the governance decision badge on `PrinciplesPage.tsx` was rendered as `isApproved ? govApproved : govPending`. `ReviewStatus` has four members (pending/approved/rejected/parked), so rejected and parked principles showed "⏳ 等待拥有者审查" directly beneath a status badge reading 已拒绝 — contradictory, false information on a governance page whose entire purpose is showing the Owner true decision state.
@@ -1429,7 +1211,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-107]** | Exception registry used to legitimize new I/O inside a pure core package
 
 - **What happened**: PR #1392 added a filesystem-backed governance audit writer under `principles-core/src`, then registered the file in `io-seam-registry.json` so the architecture tests accepted it.
@@ -1444,7 +1225,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-108]** | Governance derivation implemented from the implementer's audit-delta narrative instead of clause-by-clause against the normative spec
 
 - **What happened**: The experience-snapshot derivation (PR #1409, PRI-584) was written to match the implementer's own Phase-0 delta notes rather than re-checking SPEC §7–§9 clauses. Review found four conformance bugs: per-principle classification applied decision-first although §7.3 defines recovery > decision precedence (the UI-priority clause is presentation-only); `queued` counted as processing despite §8.4 requiring active execution evidence; `blocked` emitted a bare count with no evidence refs; and RuleCode/frontier evidence counted raw rows without the §9 linkage requirement.
@@ -1459,7 +1239,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-109]** | Tri-state fact (boolean | null) collapsed during a merge — one source's definite `false` resolved another source's unknown into an observed-false
 
 - **What happened**: PR #1419 round 3 made telemetry milestones tri-state (`true` = evidence observed, `false` = evaluable-and-empty, `null` = source not evaluable) to honor "Unknown ≠ false". But the `principleObserved` merge over its two evidence populations (pipeline candidates ∪ tree principles) used an "authority-first" variant: `if (a===false || b===false) return false`. A readable-but-empty `principle_candidates` table (`false`) combined with a malformed ledger (`null`) — and the mirror case — collapsed to a definite `false`, silently manufacturing "no principles exist" from one population's emptiness plus another's unreadability.
@@ -1474,7 +1253,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-110]** | Published security disclosure contradicts shipped code — a network-capable subsystem landed without updating the README that explicitly denied it
 
 - **What happened**: PR #1419 shipped the consent-gated anonymous product telemetry exporter (HTTPS POST to `principles-website.pages.dev`) inlined into the openclaw-plugin `dist/bundle.js`, but did not update `packages/openclaw-plugin/README.md` — npm-auto-included in every tarball and the surface ClawHub's audit reads — which still stated "The core plugin does not send product telemetry" and "The core plugin performs no network I/O except through Owner-configured provider SDKs". The root READMEs likewise carried "State is stored locally." / "Is it safe? Yes." with zero telemetry mention. ClawHub's audit of the published plugin surfaced the capability (static `suspicious.env_credential_access`, Critical); the telemetry code itself was verified sound (default-off flag, consent-before-network, strict 8-field schema), but the shipped README's absolute denial turned a benign-capability finding into a user-facing trust contradiction.
@@ -1489,7 +1267,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-08-28 PR #1430 self-review — the first root README remediation described telemetry as the only outbound path and still omitted Owner-configured LLM provider calls. Fixed the English and Chinese disclosures and strengthened the disclosure contract test to require the provider-network path explicitly.
 
 ---
-
 **[ERR-111]** | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them
 
 - **What happened**: `packages/pd-cli/tests/commands/console-open.test.ts` case `[::1] is accepted and normalized to ::1` hard-fails after an 8s timeout on machines where IPv6 loopback is blocked (PRI-581). Diagnosis on the affected Windows machine (2026-08-28): the IPv6 stack itself was healthy — `::1` address present (DAD Preferred), `::1/128` route present, Node `listen('::1')` succeeded — but `connect('::1')` failed with `EACCES` and `ping ::1` returned "General failure". `EACCES` (WSAEACCES 10013) on a loopback connect is WFP (Windows Filtering Platform) interception, caused by a global TUN VPN's filter driver (a `tun0` interface with the lowest interface metric was present), NOT by missing IPv6 config. The product code was correct: `console-launcher.ts` normalizes `[::1]`→`::1` and the server binds it fine; only the test's environment assumption was wrong.
@@ -1504,7 +1281,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None
 
 ---
-
 **[ERR-112]** | Sentinel values silently substitute for missing evidence while the success criterion measures the wrong dimension — three individually-correct layers compound into losing the Owner's report
 
 - **What happened**: PRI-642 (2026-09-01). The published `pd-pain-signal` skill taught `pd pain record` without `--session`; the CLI substituted the sentinel session `'cli'` and the evidence builder returned a NON-EMPTY placeholder array (`owner_reported:cli / "No session context available"`); the diagnostician honestly scored the evidence-less report at confidence 0.45; the admission gate (threshold 0.5) gated every candidate `needs_evidence`. Every layer behaved "correctly" in isolation, but the composition silently discarded the Owner's correction: the pain persisted, diagnosis "completed", nothing internalized — and the skill's own success check (non-empty `candidateIds`) reported SUCCESS because it measured GENERATION, not ADMISSION. A control experiment (same reason + `--session <real>`) admitted 4/4 candidates at 0.62 and drove the full chain.
@@ -1518,7 +1294,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-09-02
 - **Recurrence**: None (first root-cause recording of the sentinel+wrong-dimension-success compound)
 ---
-
 **[ERR-113]** | Generator reset/write/deploy loops leak stale state when the cleanup base, write base, and residue-enumeration base are three different directories
 
 - **What happened**: PRI-634-F review round (2026-09-03). The lab generator's canonical mode gained "reset scenario dirs before writing" (stale files break fixed file-count ground truth), but the `writeScenarioFiles()` call kept the OLD parent root — generated files landed in the scenarios/ root while the reset had emptied the real dirs. Separately, deploy mode enumerated the SOURCE directory to decide which TARGET subtrees to reset — scenario B's `data/`/`out/` artifacts exist only in the target after a prior round, so the second deployment leaked them into a "fresh" copy. Two residue channels, one root cause: cleanup base, write base, and residue-enumeration base were never asserted to be the same directory.
@@ -1534,7 +1309,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 
 ---
-
 **[ERR-114]** | Semantic resolvability is not host dispatchability — a lookup table cannot serve as an existence proof
 
 - **What happened**: PRI-634-F review round 2 (2026-09-04, PR #1495). The tool reliability validator checked names against a registry whose core baseline included generic LLM vocabulary (`execute_command`, `run_script`) and read/search names. Dogfood artifacts showed Artificer emitting mixed `affectedTools` (real `bash`/`shell` + fictional `remove_file` + generic `execute_command`); `execute_command` PASSED validation (baseline resolves it) while OpenClaw actually dispatches `exec`/`shell`/`cmd` and the gate never routes read tools — the exact "validated but never fires" failure class the validator was built to eliminate survived the validator.
@@ -1549,7 +1323,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: None (first recording)
 
 ---
-
 **[ERR-115]** | Full-module test mocks break on new public exports — the mock factory must track the public surface or bypass it
 
 - **What happened**: PRI-634-F review round 2 (2026-09-04, PR #1495). Adding `buildToolSemanticRegistry` to the `@principles/core/runtime-v2` barrel broke `Test pd-cli` in CI: `health.test.ts`'s `vi.mock` factory replaces the whole module, and a transitive import (`workspace-tool-semantics` → barrel) accessed the missing property at module-evaluation time — before any test ran.
@@ -1565,7 +1338,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 
 ---
-
 **[ERR-116]** | A contract defined over an identity must be tested through its DEFAULT path, not only the explicit-parameter path
 
 - **What happened**: PRI-663 review round 1 (2026-09-04, PR #1503, CodeRabbit R1). The workspace lease CLI shipped a renewal contract ("same-owner acquire renews") whose default owner string embedded `process.pid`. Every CLI invocation is a new process, so a session following the shipped quick-start hint (`npm run dev:lease -- acquire`, no `--owner`) could never renew its own lease — the second acquire self-conflicted against the first. All shipped tests passed because they exercised renewal exclusively with explicit `--owner` values; the default path the docs told humans to run was never executed.
@@ -1577,4 +1349,20 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-083 family (default/constant changed but hardcoded consumers untested — mirror direction: default value breaks its own contract rather than others' tests), EP-09
 - **Source**: PRI-663 PR #1503 CodeRabbit review R1
 - **Date**: 2026-09-04
+- **Recurrence**: None (first recording)
+
+
+
+---
+**[ERR-117]** | A trust boundary with two resolution chains (hook vs command) for the same concept diverges silently — and the divergence is masked on dev machines by the host machine's real config
+
+- **What happened**: PRI-686 (2026-09-05, live incident + PR #1518). The OpenClaw plugin resolved the workspace through two asymmetric chains: hooks used PD explicit sources first (PRI-259), commands trusted only `ctx.workspaceDir`. On OpenClaw 2026.8/9 multi-agent layouts with a custom workspace root, an unpinned `agents.entries.main` resolves ctx to `<root>/main`, so hooks wrote the root state tree while `/pd-*` commands read a parallel empty one — every pain candidate gated `needs_evidence`/`empty_trajectory` for days with no error pointing at the cause. Compounding it: 12 existing command tests passed on clean CI but failed on the dev machine because the real `~/.openclaw/principles-disciple.json` (absent in CI, present on the dev box) made the new priority branch resolve the REAL canonical instead of each test's mock workspace — the exact inverse of the usual "passes locally, fails in CI" masking.
+- **Why it's wrong**: One concept (the workspace) with two priority orders is a latent split-brain; whichever side is "wrong" fails silently because each side is locally coherent. Environment-dependent resolution chains also make tests non-hermetic: a host artifact decides which branch runs.
+- **Generalized failure mode**: Any resolver/dispatcher pair where two entry points to the same resource use different priority orders (explicit config vs ambient context); any test that exercises such a chain while the host machine's real config files are reachable through the production lookup path.
+- **Correct approach**: Align both entry points on one documented priority order (explicit owner-declared sources first), emit a consistency warning on divergence (never silent, rc-9), and make tests hermetic by redirecting the config-lookup root (os.homedir via `vi.mock('os', importActual)` — note: module namespaces are non-configurable so `vi.spyOn(os, 'homedir')` throws in ESM) with the helper imported BEFORE the module under test (vitest module-registry order matters for statically-imported graphs).
+- **How to prevent**: When adding a second resolution/dispatch chain for an existing concept, diff its priority order against the first and justify any asymmetry in code comments; add a convergence test asserting both chains return the same value under divergent inputs.
+- **Regression guard**: `hook-workspace-resolver.test.ts` "hooks and commands converge on the same PD canonical workspace (split regression)" plus the divergence-warning assertions; `isolatePdCanonicalConfig` helper applied to command test files.
+- **Related ERRs**: ERR-083 family (environment/fixture leakage across consumers — mirror direction: dev machine artifact leaks INTO tests), ERR-071 (observability of failure paths — the degraded branch swallowed the evidence reason), EP-02, EP-03
+- **Source**: PRI-686 live incident (2026-09-05) + PR #1518
+- **Date**: 2026-09-05
 - **Recurrence**: None (first recording)
