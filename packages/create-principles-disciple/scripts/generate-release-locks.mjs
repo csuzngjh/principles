@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const installerRoot = fileURLToPath(new URL('../', import.meta.url));
 const lockRoot = join(installerRoot, 'release-locks');
 const bundleScript = join(installerRoot, 'scripts', 'bundle-plugin.mjs');
-const components = ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout'];
+const components = ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager'];
 const stagingRoot = mkdtempSync(join(tmpdir(), 'pd-generate-release-locks-'));
 
 // Run npm through the running Node binary's own toolchain (same resolution as

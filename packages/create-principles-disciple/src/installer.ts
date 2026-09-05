@@ -1308,6 +1308,26 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   return { localOk, globalOk, localPath: localShim, localError };
 }
 
+/**
+ * PRI-672: the ReleaseManager authority module ships as the release-manager/
+ * payload component (package name create-principles-disciple). Installed to
+ * ~/.pd/runtime so the console's rewritten `create-principles-disciple`
+ * dependency resolves; installConsole creates the resolution link.
+ */
+function getInstalledReleaseManagerDir(): string {
+  return path.join(getPdRuntimeDir(), 'release-manager');
+}
+
+function installBundledReleaseManagerPackage(pluginDir: string): void {
+  const source = path.join(pluginDir, 'release-manager');
+  const destination = getInstalledReleaseManagerDir();
+  if (!existsSync(path.join(source, 'package.json')) || !existsSync(path.join(source, 'dist', 'update', 'release-manager-authority.js'))) {
+    throw new Error('Bundled release-manager component is incomplete (missing package.json or dist/update/release-manager-authority.js). Re-run the installer with a current package.');
+  }
+  rmSync(destination, { recursive: true, force: true });
+  cpSync(source, destination, { recursive: true });
+}
+
 function installConsole(consoleDir: string): void {
   const consoleSrc = path.join(consoleDir, 'console');
   const consoleDest = getInstalledConsoleDir();
@@ -1335,6 +1355,19 @@ function installConsole(consoleDir: string): void {
       symlinkSync(installedPluginDir(), pluginLinkPath, 'junction');
     } else {
       symlinkSync(path.relative(path.dirname(pluginLinkPath), installedPluginDir()), pluginLinkPath, 'dir');
+    }
+  }
+
+  // PRI-672: console resolves its create-principles-disciple dependency (the
+  // ReleaseManager authority module, rewritten to file:../release-manager by
+  // bundle-plugin.mjs) through this link into ~/.pd/runtime.
+  const releaseManagerLinkPath = path.join(consoleDest, 'node_modules', 'create-principles-disciple');
+  if (!existsSync(releaseManagerLinkPath)) {
+    mkdirSync(path.dirname(releaseManagerLinkPath), { recursive: true });
+    if (isWindows()) {
+      symlinkSync(getInstalledReleaseManagerDir(), releaseManagerLinkPath, 'junction');
+    } else {
+      symlinkSync(path.relative(path.dirname(releaseManagerLinkPath), getInstalledReleaseManagerDir()), releaseManagerLinkPath, 'dir');
     }
   }
 }
@@ -2246,6 +2279,10 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     stepIndex++;
 
     installBundledLayoutPackage(pluginDir);
+
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
+    installBundledReleaseManagerPackage(pluginDir);
+    stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
     await installPluginToStaging(pluginDir, options.language);

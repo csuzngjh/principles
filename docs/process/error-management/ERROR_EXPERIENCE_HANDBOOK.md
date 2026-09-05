@@ -46,8 +46,6 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
 | ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358 |
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
-| ERR-041 | Install success reported when delivered components are incomplete | PRI-247 |
-| ERR-042 | Output reports requested config instead of actual disk state | PRI-247 |
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 | ERR-097 | PD writes into host-managed paths/config without checking the host's discovery/trust semantics — backups re-discovered as duplicate plugins, dual-language skill roots silently collapsed, created plugins.allow silently disables other plugins | startup-warning audit 2026-08-16 |
@@ -248,6 +246,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**:
   - Yes - same class as ERR-003, ERR-013.
   - 2026-07-03 / PRI-442 / PR #1164: `handleFrictionTrackingForFailure` used `workspaceDir.includes('e2e-workspace')` to decide whether to admit shell-tool failures as pain signals. A production workspace whose absolute path happens to contain the substring `e2e-workspace` (e.g. `D:\ci\e2e-workspace-prod\owner-1`) would silently get E2E behavior in production. Fixed by replacing the substring test with an explicit env-var signal (`process.env.PD_E2E_MODE === '1'`) set only by the E2E harness. The generalization: when gating behavior by environment/context, use explicit signals (env vars / config flags), never path-substring matching — path substrings cannot distinguish a sibling directory from a true descendant.
+  - 2026-09-05 / PRI-668 / PR #1512: the orchestrator's new cascade branch identified evaluator artificer deps via `depId.startsWith('artificer')` — task-id string shape — while the mechanism it mirrors (`revision-reopen.ts` `replaceArtificerDependencyWith`) identifies them by the two-hop `task.taskKind === 'artificer'` check. Correct only while the id convention holds; breaks silently if ids ever change shape or a non-artificer task gets an `artificer*` id. Caught in PR self-review before merge; fixed to query `taskKind` per dep. Generalization: when classifying entities, never infer kind from id/name string shape if an authoritative structural field exists — especially when mirroring an existing mechanism, reuse ITS classification primitive instead of re-inventing a string heuristic.
 
 ---
 
@@ -416,6 +415,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes — feature branch base drifts from `origin/main` so PR diff surfaces unrelated/deleted files.
   - 2026-06-23 PRI-451 (PR#1033): graphify+lefthook auto-committed prior session's WIP (153 files) into new branch — caught via `git diff origin/main..HEAD`
   - 2026-06-23 PRI-446 (PR#1028): branch based on local main drifted ahead by one stray commit — fixed with `git rebase --onto`
+  - 2026-09-04 PRI-672 (PR#1511): PR created the same day three related PRs (#1503/#1504/#1510) merged to main, without re-fetching `origin/main` between the last branch cut and PR creation — GitHub reported `mergeable: CONFLICTING`. Caught in the post-creation self-review pass, fixed by merging `origin/main` into the branch (two conflicts: a dep line in `pd-console/package.json`, and an `ensureRuntimeResolutionLinks` quarantine-signature change colliding with an added copy block), regenerating the component release lock pinned to the bumped `@principles/install-layout`, and re-running targeted tests + `verify:merge` before push. Lesson refined: **PR creation is a merge-candidate event — immediately after `gh pr create`, re-read `mergeable` from the API and treat `CONFLICTING` as a blocker to fix in the same session, not a reviewer's problem.**
   - Earlier recurrence (PRI-444 PR#1027): `subagent.ts` deleted but stale route in `hooks/AGENTS.md`. See git history.
 
 ---
@@ -666,9 +666,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 110 |
-| Last updated | 2026-09-04 |
+| Last updated | 2026-09-05 |
 | Top category | Schema & Type |
-| Recurring errors | 58 |
+| Recurring errors | 59 |
 
 ---
 
@@ -693,30 +693,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-07-01 PR #1146 (compressed; full text → ERROR_ARCHIVE.md): bare npm `pd` shim fails under Windows `shell:false`; resolve the sibling `dist/index.js` and spawn via `process.execPath`.
   - 2026-06-03 PRI-299 (compressed; full text → ERROR_ARCHIVE.md): pd-cli imported better-sqlite3 without declaring it.
   - 2026-06-02 PRI-250 (compressed; full text → ERROR_ARCHIVE.md): `js-yaml`/`semver` in devDependencies (stripped by publish); undeclared better-sqlite3 for console bundle; `installBundledCore` never ran npm install.
-
----
-
-**[ERR-041]** | Install success reported when delivered components are incomplete
-
-- **What happened**: `install()` returned `success: true` and printed "Ready." when `components.console` was `not_deliverable`. The interactive output said the installation was complete, but a core product surface (owner review console) was missing. This created a contradiction: the installer claimed success while explicitly noting a release-blocking gap.
-- **Why it's wrong**: `success: true` means the full product contract is met. If any required component is not deliverable, the install is not successful. Reporting success with an undeliverable component misleads both users and automation. This is the same class as ERR-002 (catch-and-degrade swallows failure) and ERR-009 (silently skip invalid instead of failing loud) — the system claims everything is fine when it's not.
-- **Correct approach**: `success` must require ALL required components to be verified/delivered. If any component is `not_deliverable` or `failed`, `success` must be `false`. Interactive output must clearly distinguish full success ("Ready.") from partial success ("Runtime + CLI verified, but console is not yet deliverable"). The README must explicitly state what the installer delivers and what is a known gap.
-- **How to prevent**: When defining a component delivery contract, `success` must be a conjunction of ALL required component statuses. If any component is not verified, success is false. Add tests that verify: (1) each component failure makes success=false, (2) all components verified makes success=true, (3) interactive output matches the actual success state.
-- **Source**: PRI-247 / PR #721
-- **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-002, ERR-009. Recurred 2026-05-26 PRI-247 (PR #721): `bundle-plugin.mjs` silently skipped missing artifacts without exit(1). If `templates/` or `openclaw.plugin.json` was absent, the bundle would produce an incomplete tarball that passes CI but fails at runtime. Fixed by adding PLUGIN_REQUIRED/PD_CLI_REQUIRED arrays with process.exit(1) on missing items, and PLUGIN_OPTIONAL for items that skip with warning.
-
----
-
-**[ERR-042]** | Output reports requested config instead of actual disk state
-
-- **What happened**: The installer returned `enabledChannels: options.channels` in its result, but the actual feature-flags.yaml on disk might have different channels enabled (e.g., from a previous install). When rerunning with `--channels prompt`, the output said `enabledChannels: ['prompt']` but the disk still had all three MVP channels enabled because `generateFeatureFlagsConfig()` skipped writing when the file already existed.
-- **Why it's wrong**: The output is a contract with the caller. If it says `enabledChannels: ['prompt']` but the disk has `['prompt', 'code_tool_hook', 'defer_archive']`, the caller cannot trust the output. This is the same class as ERR-034 (canonical config not consumed by caller) — the output should reflect the source of truth (disk), not the input parameters.
-- **Correct approach**: (1) When `--channels` is specified, always rewrite `feature-flags.yaml` to match (no early return on existing file). (2) After writing, read the actual enabled channels from disk and return those in the output. (3) If preserving existing config, explicitly report `configuration_preserved` and read from disk.
-- **How to prevent**: When a function returns state that should reflect disk, always read from disk after writing — never return the input parameters as if they were the result. Add tests that: (1) write config, (2) modify config, (3) verify output matches disk, not input.
-- **Source**: PRI-247 / PR #721
-- **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-034
 
 ---
 
@@ -1003,7 +979,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-002 (silent cleanup failure — PRI-240 recurrence), ERR-015/ERR-018/ERR-019 (stale state from incomplete cleanup)
 - **Source**: PRI-428 / PR #966 (CodeRabbit review)
 - **Date**: 2026-06-18
-- **Recurrence**: 2026-06-21 PR #994 — timeout cleanup killed only the direct CLI process on Unix, allowing descendant processes and inherited handles to survive. Fixed by launching a detached process group and terminating the whole group on timeout. Also 2026-06-21 PR #989 — short-lived SQLite queues returned without their owning connection; 2026-06-18 PRI-429 / PR #966 — cleanup failures were discarded; 2026-06-18 PR #971 — `AudioContext` instances leaked on unmount.
+- **Recurrence**: 2026-06-21 PR #994 — timeout cleanup killed only the direct CLI process on Unix, allowing descendant processes and inherited handles to survive. Fixed by launching a detached process group and terminating the whole group on timeout. Also 2026-06-21 PR #989 — short-lived SQLite queues returned without their owning connection; 2026-06-18 PRI-429 / PR #966 — cleanup failures were discarded; 2026-06-18 PR #971 — `AudioContext` instances leaked on unmount. 2026-09-04 PRI-655 / PR #1514 review — a daemon-loop test sent its stop signal only on the happy path, so assertion failures leaked a live background loop, timers and signal listeners into subsequent tests; fixed by moving SIGINT + handler await into try/finally.
 
   - 2026-07-17 PRI-518 self-review: a new cross-SQLite E2E test called `RuntimeStateManager.close()` in `afterEach` without `await`. Fixed before handoff by making the hook async and awaiting close before removing the temporary workspace.
   - 2026-08-13 PRI-523: a registration-test timer could mutate real home config. Mocked the writer, authorized the fake config, cleaned timers, and isolated packed-bundle HOME.
@@ -1186,6 +1162,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
+  - 2026-09-04 PRI-672 / PR #1511 (build-scope recurrence): pd-console gained a deep import of `create-principles-disciple/dist/update/release-manager-authority.js`, but the root `build` script never built the installer package — clean CI failed with TS2307 in the pd-console build, quick-check release producers, and the component smoke tests, while local runs were masked by the prebuilt dist (same class as the 2026-08-26 PRI-595~603 build-order recurrence; the variant here is build SCOPE — the package was absent from the shared chain entirely, not ordered late). Fixed by adding `create-principles-disciple` to the root build script and verifying with a clean-CI simulation: remove the dist, run the root build, typecheck pd-console green. Prevention rule: a new cross-package import of another package's `dist` (runtime or type-level) must add that package to the root build chain (or the consuming job's build steps) in the SAME PR.
   - 2026-08-26 PRI-595~603 / PR #1419 (build-order + test-env recurrence): host-runtime gained a new runtime dep on `@principles/install-layout` but the root build chain and several CI jobs still built host-runtime before install-layout — clean CI checkouts failed with TS2307 while local runs were masked by leftover `dist` (same class as the 2026-08-24 PRI-583 recurrence). Separately, the new pd-cli telemetry test isolated the machine-scope consent store with `USERPROFILE` only, a no-op on Linux CI (`os.homedir()` reads `HOME`) — passed on Windows, failed on Linux (same class as the 2026-08-15 PRI-526 recurrence). Fixed by dependency-first build ordering in every CI chain and setting both `HOME` and `USERPROFILE` in the test.
   - 2026-08-24 PRI-583 / PR #1406 (install-layout/delivery flavor): a new shared `@principles/install-layout` contract was wired into selected source consumers but not the clean-CI build order, npm publication workflow, Console updater, host-set manifest merge, or host-scoped uninstall lifecycle. Local residual `dist` files masked missing dependency builds. Fixed by auditing every producer/consumer/delivery/cleanup path, adding dependency-first CI/publish wiring, and exercising clean packaged installation plus host-union/uninstall regressions. Related published-artifact aspect: ERR-040.
   - 2026-08-27 PRI-612 / PR #1426 (vi.mock factory variant): a new barrel export (`PD_TASK_STATUSES` on `@principles/core/runtime-v2`) was consumed by an existing pd-cli command whose test file replaces the WHOLE barrel with a bare `vi.mock` factory — the factory lacked the new export, vitest's strict mock threw "No export is defined on the mock", and 19 tests failed on CI. The local pre-push run missed it because a neighboring (wrong) test directory was executed instead of the exact mocking test path. Fixed by spreading `importOriginal` in the factory (pure constants stay authentic, only stateful classes mocked). Prevention trigger (g): when adding ANY new export to a barrel that production importers consume, grep `vi.mock('<barrel>'` across all packages and either add the export to each factory or convert the factory to `importOriginal` spread — and run the mocking tests by their exact path, not a directory neighbor.

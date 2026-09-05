@@ -327,6 +327,7 @@ jobs:
           npm run build --workspace=@principles/codex-adapter
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
+          npm run build --workspace=create-principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
 
@@ -364,6 +365,7 @@ jobs:
           npm run build --workspace=@principles/codex-adapter
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
+          npm run build --workspace=create-principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
 
@@ -401,6 +403,7 @@ jobs:
           npm run build --workspace=@principles/codex-adapter
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
+          npm run build --workspace=create-principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
 
@@ -596,8 +599,13 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        working-directory: packages/openclaw-plugin
-        run: npm ci
+        # Root-level install (same as build-openclaw-plugin): the "Build
+        # dependencies" step runs the root build script, whose package set is
+        # a superset of the plugin's dependency closure (PRI-672 added
+        # create-principles-disciple). A plugin-directory npm ci installs only
+        # the plugin closure and the root build then fails on missing
+        # devDependencies outside it.
+        run: npm ci --ignore-scripts
 
       - name: Build dependencies
         run: npm run build
@@ -623,8 +631,8 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        working-directory: packages/openclaw-plugin
-        run: npm ci
+        # Root-level install — see the note in test-openclaw-plugin-unit.
+        run: npm ci --ignore-scripts
 
       - name: Build dependencies
         run: npm run build

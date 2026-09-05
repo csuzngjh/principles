@@ -37,14 +37,17 @@ import {
   readCurrentVersion,
   type UpdateLayout,
 } from '../utils/installed-layout.js';
-import { ActivationCompatibilityReadModel } from '@principles/core/runtime-v2';
+import { ActivationCompatibilityReadModel, isFeatureEnabled } from '@principles/core/runtime-v2';
 import { collectFileDepLinkSpecs, type StagedComponent } from '../utils/update-links.js';
 import {
   updateMutationController,
   LEGACY_MUTATION_AUTHORITY,
+  RELEASE_MANAGER_AUTHORITY,
+  MUTATION_KINDS,
   type MutationContext,
   type MutationKind,
 } from '../update/mutation-controller.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 
 /**
  * Legacy rule contract preflight (2026-08-19): refuse to swap the runtime
@@ -988,6 +991,11 @@ function ensureRuntimeResolutionLinks(
     { manifestDir: path.join(tempDir, 'install-layout'), deployedDir: layout.installLayoutDir },
     { manifestDir: path.join(tempDir, 'core'), deployedDir: layout.coreDir },
     { manifestDir: path.join(tempDir, 'plugin'), deployedDir: layout.pluginDir },
+    // PRI-672: staged release-manager component (npm name
+    // create-principles-disciple). Its staged manifest carries the
+    // file:../install-layout ref, and the staged console's manifest carries
+    // file:../release-manager — both derive their resolution links here.
+    { manifestDir: path.join(tempDir, 'release-manager'), deployedDir: layout.releaseManagerDir },
   ];
   const readStagedDependencies = (manifestDir: string): Record<string, string> => {
     try {
@@ -1255,6 +1263,20 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       if (fs.existsSync(path.join(installLayoutSrc, 'package.json')) && fs.existsSync(path.join(installLayoutSrc, 'dist'))) {
         copyDirRecursive(installLayoutSrc, layout.installLayoutDir, SKIP_DIRS);
       }
+      // PRI-672: the release-manager component (npm name
+      // create-principles-disciple — the ReleaseManager authority module the
+      // updated console imports) must land BEFORE the swap and its resolution
+      // link, same PRI-561 ordering as host-runtime/install-layout. Conditioned
+      // on the staged component so updates from tarballs published before this
+      // component existed simply skip it (their console does not import it).
+      const releaseManagerSrc = path.join(tempDir, 'release-manager');
+      if (
+        fs.existsSync(releaseManagerSrc) &&
+        fs.existsSync(path.join(releaseManagerSrc, 'package.json')) &&
+        fs.existsSync(path.join(releaseManagerSrc, 'dist'))
+      ) {
+        copyDirRecursive(releaseManagerSrc, layout.releaseManagerDir, SKIP_DIRS);
+      }
       const { error: linkError, quarantined } = ensureRuntimeResolutionLinks(layout, tempDir);
       reconciledQuarantine = quarantined;
       if (linkError) {
@@ -1435,6 +1457,37 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
  * registers under `release-manager` for the same kinds and this route layer
  * needs no further change.
  */
+/**
+ * Compute the legacy update-check response body (PRI-659 handler body, split
+ * out in PRI-672 so the ReleaseManager-governed check can serve the exact
+ * same wire contract). Behavior is unchanged: degraded ERR-002 shape when the
+ * current version cannot be determined, network checks otherwise.
+ */
+async function computeLegacyUpdateCheck(pluginDir: string): Promise<{
+  currentVersion: string | undefined;
+  body: Record<string, unknown>;
+}> {
+  // ERR-002 / Runtime Contract Rule 9: 当无法确定当前版本时（如插件未安装），
+  // 返回 degraded 状态 + reason，而非 500。前端 validateUpdateStatus 要求
+  // currentVersion/latestVersion 为 string，hasUpdate 为 boolean。
+  const currentVersion = readCurrentVersion(pluginDir);
+  const codexInstalled = detectCodexInstall();
+  if (!currentVersion) {
+    return {
+      currentVersion: undefined,
+      body: {
+        hasUpdate: false,
+        currentVersion: 'unknown',
+        latestVersion: '',
+        codexInstalled,
+        error: 'Could not determine current version (plugin not installed)',
+      },
+    };
+  }
+  const result = await doCheckForUpdates(currentVersion);
+  return { currentVersion, body: { ...result, codexInstalled } };
+}
+
 function legacyCheckMutation(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1444,23 +1497,8 @@ function legacyCheckMutation(
     const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'GET') { sendMethodNotAllowed(res); return; }
     try {
-      // ERR-002 / Runtime Contract Rule 9: 当无法确定当前版本时（如插件未安装），
-      // 返回 degraded 状态 + reason，而非 500。前端 validateUpdateStatus 要求
-      // currentVersion/latestVersion 为 string，hasUpdate 为 boolean。
-      const currentVersion = readCurrentVersion(pluginDir);
-      const codexInstalled = detectCodexInstall();
-      if (!currentVersion) {
-        sendSuccess(res, {
-          hasUpdate: false,
-          currentVersion: 'unknown',
-          latestVersion: '',
-          codexInstalled,
-          error: 'Could not determine current version (plugin not installed)',
-        });
-        return;
-      }
-      const result = await doCheckForUpdates(currentVersion);
-      sendSuccess(res, { ...result, codexInstalled });
+      const { body } = await computeLegacyUpdateCheck(pluginDir);
+      sendSuccess(res, body);
     } catch (err) {
       sendError(res, 500, 'update_check_error', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -1599,6 +1637,168 @@ updateMutationController.register('apply', { name: LEGACY_MUTATION_AUTHORITY, ha
 updateMutationController.register('apply-full', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyApplyFullMutation });
 updateMutationController.register('rollback', { name: LEGACY_MUTATION_AUTHORITY, handler: legacyRollbackMutation });
 
+// ---------------------------------------------------------------------------
+// PRI-672: ReleaseManager as the PREFERRED mutation authority (ADR-0024 D-1).
+//
+// The legacy registrations above stay verbatim (replace-then-delete). This
+// layer decides per dispatch whether the preferred authority may serve:
+//   - `release_manager_shadow` flag off (default) → legacy serves, with the
+//     machine-readable fallback reason `release_manager_shadow_disabled`;
+//   - flag on → the ReleaseManager authority module is loaded and asked for
+//     per-kind readiness. A ready `check` is served under ReleaseManager
+//     governance with the response body still computed by the legacy path
+//     (wire contract unchanged, shadow comparison logged); every not-ready
+//     kind falls back explicitly with `release_manager_unavailable:<reasons>`.
+//
+// This layer routes and annotates only — it is not a third updater and never
+// performs a runtime mutation itself. If the authority module is absent from
+// the installation (delivery-surface gap), the failure is explicit
+// (`installer_missing`), never silent.
+// ---------------------------------------------------------------------------
+
+import type * as releaseManagerAuthorityModule from 'create-principles-disciple/dist/update/release-manager-authority.js';
+type ReleaseManagerAuthorityModule = typeof releaseManagerAuthorityModule;
+type ReleaseManagerAuthorityHandle = ReturnType<ReleaseManagerAuthorityModule['createReleaseManagerAuthority']>;
+/** Structural mirror of the ReleaseManager LegacyUpdaterDecision (shadow comparison input). */
+type LegacyUpdaterDecision = { source: 'legacy-updater'; latestVersion: string | null; updateAvailable: boolean | null };
+
+let releaseManagerModuleState:
+  | { state: 'unattempted' }
+  | { state: 'loaded'; module: ReleaseManagerAuthorityModule }
+  | { state: 'missing'; detail: string } = { state: 'unattempted' };
+
+function releaseManagerFlagEnabled(workspaceDir: string): boolean {
+  const flags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
+  return isFeatureEnabled(flags, 'release_manager_shadow');
+}
+
+function fallbackToLegacyForAllKinds(reason: string): void {
+  for (const kind of MUTATION_KINDS) {
+    updateMutationController.unregister(kind, RELEASE_MANAGER_AUTHORITY);
+    updateMutationController.setFallbackReason(kind, reason);
+  }
+}
+
+/**
+ * Governed check dispatch (kind `check` only, flag on, readiness ready at
+ * registration time). Runs the ReleaseManager shadow check for governance and
+ * parity evidence, then serves the legacy-computed response body — byte-for-
+ * byte the legacy contract. On a ReleaseManager refusal the response headers
+ * are re-annotated to the explicit fallback and the legacy body is served
+ * anyway: check is read-only, so the fallback cannot leave partial state.
+ */
+async function runReleaseManagerCheckDispatch(
+  mod: ReleaseManagerAuthorityModule,
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: MutationContext,
+): Promise<void> {
+  if (req.method !== 'GET') { sendMethodNotAllowed(res); return; }
+  const pluginDir = resolvePluginDir(ctx.workspaceDir);
+  // One legacy computation feeds BOTH the shadow comparison (via legacyCheck)
+  // and the response body — a governed check never doubles network cost.
+  let legacyOnce: (() => Promise<Awaited<ReturnType<typeof computeLegacyUpdateCheck>>>) | null = null;
+  const legacyComputed = (): Promise<Awaited<ReturnType<typeof computeLegacyUpdateCheck>>> => {
+    legacyOnce ??= () => computeLegacyUpdateCheck(pluginDir);
+    return legacyOnce();
+  };
+  let decisionSource: ((currentVersion: string) => Promise<LegacyUpdaterDecision | null>) | null = null;
+  const authority: ReleaseManagerAuthorityHandle = mod.createReleaseManagerAuthority({
+    pdHome: path.join(os.homedir(), '.pd'),
+    metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
+    legacyCheck: async (currentVersion) => {
+      if (decisionSource === null) return null;
+      return decisionSource(currentVersion);
+    },
+  });
+  decisionSource = async () => {
+    const computed = await legacyComputed();
+    if (computed.currentVersion === undefined) return null;
+    const raw = computed.body as { hasUpdate?: unknown; latestVersion?: unknown };
+    return {
+      source: 'legacy-updater',
+      latestVersion: typeof raw.latestVersion === 'string' && raw.latestVersion.length > 0 ? raw.latestVersion : null,
+      updateAvailable: raw.hasUpdate === true,
+    };
+  };
+  if (authority.installStatus === null || !authority.kinds.check.ready) {
+    // Readiness flipped between registration sync and dispatch — explicit
+    // fallback, never a half-governed check.
+    const reasons = authority.installStatus === null
+      ? 'install_state_corrupt'
+      : authority.kinds.check.reasons.join(',');
+    res.setHeader('X-PD-Mutation-Authority', `${LEGACY_MUTATION_AUTHORITY} (preferred: ${RELEASE_MANAGER_AUTHORITY} unavailable)`);
+    res.setHeader('X-PD-Mutation-Fallback-Reason', `release_manager_unavailable:${reasons}`);
+    await legacyCheckMutation(req, res, ctx);
+    return;
+  }
+  try {
+    const check = await authority.manager.check(authority.installStatus.channel);
+    const comparison = check.shadowComparison;
+    const agrees = comparison.agrees === null ? 'unknown' : String(comparison.agrees);
+    console.log(`[release-manager] governed update check served (channel=${check.channel}, agrees=${agrees}${comparison.note ? `, note: ${comparison.note}` : ''})`);
+  } catch (error) {
+    const mapped = mod.mapReleaseManagerErrorToFallback(error);
+    console.log(`[release-manager] governed update check refused (${mapped.reason}) — explicit fallback to ${LEGACY_MUTATION_AUTHORITY}`);
+    res.setHeader('X-PD-Mutation-Authority', `${LEGACY_MUTATION_AUTHORITY} (preferred: ${RELEASE_MANAGER_AUTHORITY} unavailable: ${mapped.reason})`);
+    res.setHeader('X-PD-Mutation-Fallback-Reason', `release_manager_unavailable:${mapped.reason}`);
+  }
+  try {
+    const { body } = await legacyComputed();
+    sendSuccess(res, body);
+  } catch (err) {
+    sendError(res, 500, 'update_check_error', err instanceof Error ? err.message : 'Unknown error');
+  }
+}
+
+/**
+ * Bring the authority registration in line with current flag + readiness
+ * state, then dispatch happens through the controller as usual. Idempotent;
+ * the dynamic import is attempted once per server run.
+ */
+async function syncReleaseManagerAuthority(workspaceDir: string): Promise<void> {
+  if (!releaseManagerFlagEnabled(workspaceDir)) {
+    fallbackToLegacyForAllKinds('release_manager_shadow_disabled');
+    return;
+  }
+  if (releaseManagerModuleState.state === 'unattempted') {
+    try {
+      const module = await import('create-principles-disciple/dist/update/release-manager-authority.js');
+      releaseManagerModuleState = { state: 'loaded', module };
+    } catch (error) {
+      releaseManagerModuleState = { state: 'missing', detail: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  if (releaseManagerModuleState.state === 'missing') {
+    fallbackToLegacyForAllKinds('installer_missing');
+    return;
+  }
+  const mod = releaseManagerModuleState.module;
+  let authority: ReleaseManagerAuthorityHandle;
+  try {
+    authority = mod.createReleaseManagerAuthority({
+      pdHome: path.join(os.homedir(), '.pd'),
+      metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
+    });
+  } catch {
+    fallbackToLegacyForAllKinds('authority_module_unavailable');
+    return;
+  }
+  for (const rmKind of mod.RELEASE_MANAGER_AUTHORITY_KINDS) {
+    const readiness = authority.kinds[rmKind];
+    if (readiness.ready && rmKind === 'check') {
+      updateMutationController.register('check', {
+        name: RELEASE_MANAGER_AUTHORITY,
+        handler: (req, res, ctx) => runReleaseManagerCheckDispatch(mod, req, res, ctx),
+      });
+      updateMutationController.setFallbackReason('check', null);
+    } else {
+      updateMutationController.unregister(rmKind, RELEASE_MANAGER_AUTHORITY);
+      updateMutationController.setFallbackReason(rmKind, `release_manager_unavailable:${readiness.reasons.join(',')}`);
+    }
+  }
+}
+
 const UPDATE_MUTATION_KINDS: ReadonlyMap<string, MutationKind> = new Map([
   ['/check', 'check'],
   ['/apply', 'apply'],
@@ -1617,5 +1817,9 @@ export async function handleUpdateRoute(
     sendNotFound(res, `Update route not found: ${subPath}`);
     return;
   }
+  // PRI-672: align the authority registration with the current flag +
+  // readiness state before the controller resolves the authority. Pure
+  // routing/decision work — no runtime mutation happens here.
+  await syncReleaseManagerAuthority(workspaceDir);
   await updateMutationController.dispatch(req, res, { workspaceDir }, kind);
 }

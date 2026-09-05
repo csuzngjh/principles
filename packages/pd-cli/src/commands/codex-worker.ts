@@ -160,8 +160,19 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
   process.on('SIGTERM', onSignal);
   try {
     while (!stopped) {
-      const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME } });
-      printCycleReport(result, false);
+      // PRI-655: one escaping cycle exception must not kill the daemon —
+      // runCodexWorkspaceWorkerCycle reports component failures as degraded
+      // results, but anything it still throws would propagate out of this
+      // handler (commander's sync parse does not catch action rejections) and
+      // crash the process. Log with a next action and keep the loop alive.
+      try {
+        const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME } });
+        printCycleReport(result, false);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[PD:CodexWorker] cycle failed: ${message}`);
+        console.error(`  continuing in ${interval}ms. Investigate: pd codex worker --status --workspace "${workspace}"`);
+      }
       if (stopped) break;
       await new Promise((resolve) => setTimeout(resolve, interval));
     }

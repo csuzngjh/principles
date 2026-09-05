@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=principles-disciple",
+    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=principles-disciple && npm run build --workspace=create-principles-disciple",
     "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts",
     "lint:fix": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts --fix",
     "typecheck:openclaw-plugin": "cd packages/openclaw-plugin && npx tsc --noEmit",

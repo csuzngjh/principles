@@ -35,6 +35,11 @@ export interface InstallLayoutPaths {
   codexDir: string;
   openClawDir: string;
   openClawExtensionDir: string;
+  /**
+   * PRI-672: the ReleaseManager authority component (payload dir
+   * release-manager/, npm name create-principles-disciple).
+   */
+  releaseManagerDir: string;
 }
 
 export interface LayoutResolution {
@@ -124,6 +129,7 @@ export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {
     codexDir: path.join(pdDir, 'codex'),
     openClawDir,
     openClawExtensionDir: path.join(openClawDir, 'extensions', 'principles-disciple'),
+    releaseManagerDir: path.join(runtimeDir, 'release-manager'),
   };
 }
 

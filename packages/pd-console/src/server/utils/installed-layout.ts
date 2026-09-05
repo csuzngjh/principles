@@ -27,6 +27,7 @@ export interface UpdateLayout {
   hostRuntimeDir: string;
   pdCliDir: string;
   installLayoutDir: string;
+  releaseManagerDir: string;
   hosts: InstallHost[];
 }
 
@@ -55,6 +56,7 @@ export function resolveUpdateLayout(): UpdateLayout | undefined {
       hostRuntimeDir: paths.hostRuntimeDir,
       pdCliDir: paths.pdCliDir,
       installLayoutDir: paths.installLayoutDir,
+      releaseManagerDir: paths.releaseManagerDir,
       hosts: resolution.manifest?.hosts ?? [],
     };
   }
@@ -65,6 +67,7 @@ export function resolveUpdateLayout(): UpdateLayout | undefined {
     hostRuntimeDir: path.join(legacyPluginDir, 'host-runtime'),
     pdCliDir: path.join(legacyPluginDir, 'pd-cli'),
     installLayoutDir: path.join(legacyPluginDir, 'install-layout'),
+    releaseManagerDir: path.join(legacyPluginDir, 'release-manager'),
     hosts: ['openclaw'],
   };
 }
