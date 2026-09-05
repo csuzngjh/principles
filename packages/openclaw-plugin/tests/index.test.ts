@@ -1,4 +1,11 @@
 import { describe, it, expect } from 'vitest';
+// PRI-686: the os mock must be registered before src/index is imported, so
+// this import + call sit above it. Command resolvers now prioritize PD
+// explicit sources; hiding the host machine's real
+// ~/.openclaw/principles-disciple.json keeps registered handlers on this
+// suite's mock ctx.workspaceDir.
+import { isolatePdCanonicalConfig } from './utils/isolate-pd-canonical.js';
+isolatePdCanonicalConfig();
 import plugin from '../src/index';
 import { checkConversationAccessConfig } from '../src/index';
 import type { PluginCommandDefinition, OpenClawPluginApi, PluginCommandContext } from '../src/openclaw-sdk.js';

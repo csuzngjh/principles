@@ -2,6 +2,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
+// PRI-686: os mock must register before any src import so command resolvers
+// (which now prioritize PD explicit sources) stay on the ctx-provided temp
+// workspace instead of the host machine's real PD canonical config.
+import { isolatePdCanonicalConfig } from '../utils/isolate-pd-canonical.js';
+isolatePdCanonicalConfig();
 import { handleEvolutionStatusCommand } from '../../src/commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from '../../src/commands/principle-rollback.js';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';

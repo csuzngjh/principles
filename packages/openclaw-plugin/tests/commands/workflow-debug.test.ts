@@ -7,7 +7,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// PRI-686: os mock must register before any src import so command resolvers
+// (which now prioritize PD explicit sources) stay on this suite's
+// ctx-provided mock workspace instead of the host's real PD canonical config.
+import { isolatePdCanonicalConfig } from '../utils/isolate-pd-canonical.js';
+isolatePdCanonicalConfig();
 import type { WorkflowRow, WorkflowEventRow } from '../../src/service/subagent-workflow/types.js';
+import { handleWorkflowDebugCommand } from '../../src/commands/workflow-debug.js';
 
 const mockGetWorkflow = vi.fn<(id: string) => WorkflowRow | null>();
 const mockGetEvents = vi.fn<(id: string) => WorkflowEventRow[]>();
@@ -20,8 +26,6 @@ vi.mock('../../src/service/subagent-workflow/workflow-store.js', () => ({
         dispose = mockDispose;
     },
 }));
-
-import { handleWorkflowDebugCommand } from '../../src/commands/workflow-debug';
 
 function createRow(overrides: Partial<WorkflowRow> = {}): WorkflowRow {
     return {

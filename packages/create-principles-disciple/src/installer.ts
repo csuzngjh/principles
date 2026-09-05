@@ -36,6 +36,7 @@ import {
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
+import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
   parseReleaseAssetIdentity,
@@ -2371,6 +2372,22 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     if (spinner) updateProgress(spinner, stepIndex, 'Creating config...');
     await createConfigFile(options.workspaceDir, options.channels);
     stepIndex++;
+
+    // PRI-686 Fix C: after pinning PD canonical, check OpenClaw's resolved
+    // main-agent workspace against it. Read-only; a divergence means PD
+    // commands and hooks would write to two different state trees.
+    try {
+      const divergence = detectOpenClawMainWorkspaceDivergence(options.workspaceDir);
+      if (divergence.divergent) {
+        logger.warn(
+          `Workspace divergence detected: ${divergence.detail}. ` +
+          `${divergence.nextAction} ` +
+          `Until fixed, OpenClaw sessions in "${divergence.openclawMainWorkspace}" may be unable to record pain signals (needs_evidence).`,
+        );
+      }
+    } catch (e) {
+      logger.warn(`OpenClaw workspace divergence check failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
+    }
 
     if (spinner) updateProgress(spinner, stepIndex, 'Initializing PD databases...');
     try {

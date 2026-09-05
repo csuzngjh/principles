@@ -440,4 +440,66 @@ describe('Pain Report Command (/pd-pain)', () => {
         expect(input.evidence).toEqual([]);
         expect(result.text).toMatch(/trajectory_unavailable|evidence/i);
     });
+
+    // ── PRI-686 Fix A: the degraded (gated) branch must surface WHY evidence
+    // was unavailable — the live 2026-09-05 incident showed Owners seeing
+    // only "all_candidates_gated:...=needs_evidence" with no way to
+    // self-diagnose the evidence gap (rc-9 silent degradation). ─────────────
+
+    it('surfaces the evidence unavailability reason when candidates are gated (degraded)', async () => {
+        // Trajectory present but empty for this session → ingress degrades
+        // with reasonCode empty_trajectory; recordPain then gates all
+        // candidates (status degraded).
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+            ...mockWctx,
+            trajectory: {
+                listUserTurnsForSession: vi.fn().mockReturnValue([]),
+                listAssistantTurns: vi.fn().mockReturnValue([]),
+                listToolCallsForSession: vi.fn().mockReturnValue([]),
+            },
+        } as any);
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'degraded',
+            painId: 'manual_deg_ev',
+            taskId: 'diagnosis_manual_deg_ev',
+            message: 'all_candidates_gated:abc=needs_evidence',
+            candidateIds: ['abc'],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 40,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke');
+        expect(result.text).toContain('not accepted');
+        expect(result.text).toContain('Evidence unavailable');
+        expect(result.text).toContain('empty_trajectory');
+    });
+
+    it('surfaces the evidence unavailability reason in Chinese when language is zh', async () => {
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+            ...mockWctx,
+            trajectory: {
+                listUserTurnsForSession: vi.fn().mockReturnValue([]),
+                listAssistantTurns: vi.fn().mockReturnValue([]),
+                listToolCallsForSession: vi.fn().mockReturnValue([]),
+            },
+        } as any);
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'degraded',
+            painId: 'manual_deg_zh',
+            taskId: 'diagnosis_manual_deg_zh',
+            message: 'all_candidates_gated:abc=needs_evidence',
+            candidateIds: ['abc'],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 40,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke', 'zh');
+        expect(result.text).toContain('未成功');
+        expect(result.text).toContain('证据不可用');
+        expect(result.text).toContain('empty_trajectory');
+    });
 });
