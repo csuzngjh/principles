@@ -70,16 +70,51 @@ describe('PRI-439 Phase 2: new forbidden patterns', () => {
     const labels = checkForbiddenPatterns(
       `function evaluate(input, helpers) {\n  return { decision: 'allow', matched: false, reason: 'synchronous not async' };\n}`,
     );
-    // The word-boundary regex \basync\b WILL match "async" inside the string.
-    // This is a known limitation of regex-based static analysis. We document
-    // it here: the check is conservative (false positives on string literals
-    // are acceptable; false negatives are not).
-    // If this becomes a problem in practice, migrate to an AST-based check.
-    if (labels.includes('async')) {
-      // Conservative match inside string — acceptable for now.
-      return;
-    }
+    // PRI-668: string-literal contents are masked before scanning, so a
+    // mention inside a literal is never a pattern hit — the former "known
+    // limitation" branch (labels.includes('async') → return) is now dead.
     expect(labels).not.toContain('async');
+  });
+
+  // ── PRI-668: string literals / comments are DATA, never an access ───────
+
+  it('PRI-668: does not flag "global" compared as string data (scope === \'global\')', async () => {
+    const { checkForbiddenPatterns } = await getModule();
+    // Exact production shape from lab chain 38a29eb5 repair round: the rule
+    // compares a config value against the literal 'global' — data, not access.
+    const labels = checkForbiddenPatterns(
+      `function evaluate(input, helpers) {\n  var p = input.action.paramsSummary || {};\n  if (p.scope === 'global') { return { decision: 'block', matched: true, reason: 'system scope' }; }\n  return { decision: 'allow', matched: false, reason: 'x' };\n}`,
+    );
+    expect(labels).not.toContain('global');
+    expect(labels).not.toContain('process');
+  });
+
+  it('PRI-668: does not flag "global_apply" denylist literal or comments mentioning global', async () => {
+    const { checkForbiddenPatterns } = await getModule();
+    const labels = checkForbiddenPatterns(
+      `// global rule — this comment mentions global and process\n` +
+      `function evaluate(input, helpers) {\n  var blanketKeys = ['all', 'recursive_all', 'bulk_apply', 'global_apply', 'wipe'];\n  return { decision: 'allow', matched: false, reason: 'checked ' + blanketKeys.length };\n}`,
+    );
+    expect(labels).not.toContain('global');
+    expect(labels).not.toContain('process');
+  });
+
+  it('PRI-668: still flags bare `global` as identifier and template interpolation', async () => {
+    const { checkForbiddenPatterns } = await getModule();
+    const bare = checkForbiddenPatterns(
+      `function evaluate(input, helpers) {\n  var x = global.foo;\n  return { decision: 'allow', matched: false, reason: 'x' };\n}`,
+    );
+    expect(bare).toContain('global');
+    // Template interpolation is executable code — masking must NOT protect it.
+    const interp = checkForbiddenPatterns(
+      'function evaluate(input, helpers) {\n  var r = `${global}`;\n  return { decision: \'allow\', matched: false, reason: r };\n}',
+    );
+    expect(interp).toContain('global');
+    // The escape hatches stay forbidden even when reached via a string-typed value.
+    const viaEval = checkForbiddenPatterns(
+      `function evaluate(input, helpers) {\n  var s = 'ev' + 'il';\n  return { decision: 'allow', matched: false, reason: 'x' };\n}`,
+    );
+    expect(viaEval).toEqual([]);
   });
 
   // ── Math.random (non-deterministic randomness) ──────────────────────────

@@ -67,7 +67,17 @@ const SYMBOL_PATTERNS: readonly SymbolPattern[] = [
   { symbol: 'hasPlanFile', pattern: /\bhasPlanFile\b(?!\s*\()/ },
 ];
 
-function maskNonExecutableText(source: string): string {
+/**
+ * Mask comments and string-literal CONTENTS (preserving newlines; template
+ * `${...}` interpolation stays executable) so downstream static symbol scans
+ * only see executable source.
+ *
+ * Shared by the retired-contract scanner here and by `checkForbiddenPatterns`
+ * (rule-code-validator, PRI-668): a string literal can only become
+ * executable via eval/Function/bracket access — each of which carries its own
+ * forbidden pattern — so masking literals creates no sandbox escape.
+ */
+export function maskNonExecutableText(source: string): string {
   type State = 'code' | 'line_comment' | 'block_comment' | 'single_quote' | 'double_quote' | 'template';
   let state: State = 'code';
   let templateExpressionDepth = 0;
