@@ -7,6 +7,13 @@
  * PD canonical sources: PD_WORKSPACE_DIR env → OPENCLAW_WORKSPACE env →
  * principles-disciple.json → ~/.openclaw/workspace default.
  * OpenClaw fallback: ctx.workspaceDir → api.runtime.agent.resolveAgentWorkspaceDir().
+ *
+ * WHY PD canonical wins over host runtime workspace (ADR-0023 §2.6.1, PRI-686):
+ * the PD workspace is the single boundary of governance state (.pd/.state/
+ * .principles/memory/) — splitting it across two directories splits governance
+ * itself. The host's workspace semantics (e.g. OpenClaw 2026.8/9 resolving an
+ * unpinned main agent to <defaults.workspace>/main) describe where a session
+ * RUNS, not which state tree owns governance.
  */
 
 import type { OpenClawPluginApi, PluginCommandContext } from '../openclaw-sdk.js';
