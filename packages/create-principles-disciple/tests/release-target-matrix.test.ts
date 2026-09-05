@@ -76,7 +76,7 @@ describe('native release target matrix', () => {
     expect(quickWorkflow).toContain('QUICK_CHECK_STARTED_AT');
     expect(quickWorkflow).toContain('::warning title=Release reproducibility quick-check is slow');
 
-    for (const component of ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout']) {
+    for (const component of ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
       const materialization = new RegExp(`installBundledRuntimeDependencies\\([^\\n]*'${component}'`, 'g');
       expect(builderScript.match(materialization)).toHaveLength(1);
     }

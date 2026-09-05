@@ -12,7 +12,9 @@ function createFixture(): { inputDir: string; outputDir: string } {
   temporaryDirectories.push(root);
   const inputDir = path.join(root, 'input');
   const outputDir = path.join(root, 'output');
-  for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout']) {
+  // PRI-672: release-manager joined the shipped component set — the fixture
+  // mirrors REQUIRED_COMPONENTS in build-release-asset.mjs.
+  for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager']) {
     fs.mkdirSync(path.join(inputDir, component, 'node_modules', 'runtime-dependency'), { recursive: true });
     fs.writeFileSync(path.join(inputDir, component, 'package.json'), JSON.stringify({
       name: component,

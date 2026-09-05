@@ -7,7 +7,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath } from 'node:url';
 import { createDeterministicReleaseArchive, parseSourceDateEpoch } from './deterministic-release-archive.mjs';
 
-const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'];
+// PRI-672: release-manager joins the six shipped components (mirror of the
+// bundle-plugin.mjs payload / parity-gate component set).
+const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager'];
 
 function isPathWithin(directory, candidate) {
   const candidateRelativePath = relative(directory, candidate);
@@ -104,7 +106,7 @@ async function listPayloadFiles(assetDirectory) {
       if (entryRelativePath === '_release') continue;
       // Depth-0 node_modules is the PACKAGE'S OWN toolchain install (dev deps
       // of create-principles-disciple itself), not release payload — the
-      // shipped components are the six REQUIRED_COMPONENTS trees.
+      // shipped components are the REQUIRED_COMPONENTS trees.
       if (entryRelativePath === 'node_modules') continue;
       if (entry.isSymbolicLink()) throw new Error(`Release asset contains a symlink: ${entryRelativePath}`);
       if (entry.isDirectory()) {

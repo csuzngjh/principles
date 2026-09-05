@@ -61,6 +61,14 @@ const CODEX_ADAPTER_SRC = join(ROOT_DIR, 'packages', 'codex-adapter');
 const CODEX_ADAPTER_DEST = join(OUTPUT_ROOT, 'codex-adapter');
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
 const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
+// PRI-672: the ReleaseManager authority module ships as its own payload
+// component so the installed console can resolve it at runtime
+// (create-principles-disciple/dist/update/release-manager-authority.js).
+// The directory is named `release-manager` (its runtime ROLE); the package.json
+// inside keeps the npm name `create-principles-disciple`, which is what the
+// console's rewritten dependency + resolution link target.
+const RELEASE_MANAGER_SRC = join(ROOT_DIR, 'packages', 'create-principles-disciple');
+const RELEASE_MANAGER_DEST = join(OUTPUT_ROOT, 'release-manager');
 const RELEASE_LOCKS_ROOT = join(ROOT_DIR, 'packages', 'create-principles-disciple', 'release-locks');
 const execFileAsync = promisify(execFile);
 
@@ -118,6 +126,15 @@ const CODEX_ADAPTER_REQUIRED = [
 const INSTALL_LAYOUT_REQUIRED = [
   'dist',
   'dist/index.js',
+  'package.json',
+];
+
+// Named after the providing package dir (parity-gate convention:
+// providerSlug.toUpperCase().replace(/-/g,'_') + '_REQUIRED'), even though the
+// payload directory is the shorter `release-manager`.
+const CREATE_PRINCIPLES_DISCIPLE_REQUIRED = [
+  'dist',
+  'dist/update/release-manager-authority.js',
   'package.json',
 ];
 
@@ -331,6 +348,28 @@ for (const item of INSTALL_LAYOUT_REQUIRED) {
 }
 console.log(`   Install Layout: ${INSTALL_LAYOUT_DEST}`);
 
+for (const item of CREATE_PRINCIPLES_DISCIPLE_REQUIRED) {
+  const src = join(RELEASE_MANAGER_SRC, item);
+  if (!existsSync(src)) {
+    console.error(`❌ Required release-manager item not found: ${src}`);
+    console.error(`   Run: npm run build --workspace=create-principles-disciple`);
+    process.exit(1);
+  }
+}
+
+if (existsSync(RELEASE_MANAGER_DEST)) {
+  console.log('  Removing old release-manager/ directory...');
+  rmSync(RELEASE_MANAGER_DEST, { recursive: true, force: true });
+}
+mkdirSync(RELEASE_MANAGER_DEST, { recursive: true });
+for (const item of CREATE_PRINCIPLES_DISCIPLE_REQUIRED) {
+  const src = join(RELEASE_MANAGER_SRC, item);
+  const dest = join(RELEASE_MANAGER_DEST, item);
+  console.log(`  Copying release-manager/${item}...`);
+  cpSync(src, dest, { recursive: true });
+}
+console.log(`   Release Manager: ${RELEASE_MANAGER_DEST}`);
+
 console.log('\n🔧 Rewriting bundled dependencies (@principles/core, @principles/host-runtime, @principles/install-layout, principles-disciple)...');
 
 function rewriteBundledDependency(pkgPath, label, depName, replacement) {
@@ -423,6 +462,16 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'princip
 // Without this rewrite + symlink, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
 // because pd-cli statically imports initTrajectorySchema/initWorkflowSchema from it.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principles-disciple', 'file:../plugin');
+// PRI-672: console gains a runtime dependency on the ReleaseManager authority
+// module. Ship it as the release-manager/ payload component and rewrite the
+// dep to a local file reference; the installer and /apply-full create the
+// resolving node_modules/create-principles-disciple link.
+rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'create-principles-disciple', 'file:../release-manager');
+// The shipped release-manager component itself declares @principles/install-layout
+// (its installer entry points use it). Rewrite to the sibling component; npm
+// resolution for the authority module graph never leaves dist/update/*, but the
+// rewrite keeps the shipped manifest self-contained and the parity gate honest.
+rewriteBundledDependency(join(RELEASE_MANAGER_DEST, 'package.json'), 'release-manager', '@principles/install-layout', 'file:../install-layout');
 
 if (BUILD_SELF_CONTAINED_ASSET) {
   console.log('\n📦 Installing build-time runtime dependencies for the self-contained release asset...');
@@ -514,6 +563,10 @@ if (BUILD_SELF_CONTAINED_ASSET) {
       // six release locks on the real PR build path without a second full
       // component-materialization pass.
       installBundledRuntimeDependencies(INSTALL_LAYOUT_DEST, 'install-layout'),
+      // PRI-672: ships tuf-js / @tufjs/models for the ReleaseManager authority
+      // module graph; its file:../install-layout dep materializes from the
+      // sibling component via --install-links.
+      installBundledRuntimeDependencies(RELEASE_MANAGER_DEST, 'release-manager'),
     ]);
   } finally {
     rmSync(join(PLUGIN_DEST, 'core'), { recursive: true, force: true });

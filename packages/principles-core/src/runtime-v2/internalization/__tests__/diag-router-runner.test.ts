@@ -251,6 +251,54 @@ describe('DiagRouterRunner V-slice', () => {
     );
   });
 
+  it('PRI-667: succeed → dual-writes the DiagnosticianOutputV1 into pi_artifacts (tier2 lineage source)', async () => {
+    const deps = createMockDeps();
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROUTER_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // The pi_artifacts row the tier2 lineage (CandidateLineage) resolves
+    // `diagnostician.raw.evidence` from — previously missing entirely
+    // (committer writes only the legacy `artifacts` table).
+    const artifacts = await deps.artifactStore.listBySourceTaskId(ROUTER_TASK_ID);
+    expect(artifacts.length).toBe(1);
+    const piArtifact = artifacts[0] as unknown as { artifactKind: string; contentJson: string };
+    expect(piArtifact.artifactKind).toBe('principle');
+    const parsed = JSON.parse(piArtifact.contentJson) as Record<string, unknown>;
+    // Layer-0 envelope: top-level evidence survives for readRawField(['evidence'])
+    expect(Object.hasOwn(parsed, 'evidence')).toBe(true);
+    // recommendation payload survives for candidate-intake parity with the legacy row
+    expect(Object.hasOwn(parsed, 'recommendations')).toBe(true);
+  });
+
+  it('PRI-667: pi_artifacts dual-write failure → task fails (no silent split-brain between the two stores)', async () => {
+    const deps = createMockDeps();
+    // Poison the pi store after predecessors are populated
+    const failingStore = deps.artifactStore as unknown as MemoryPIArtifactStore;
+    failingStore.upsertArtifact = async () => {
+      throw new Error('pi store exploded');
+    };
+    const runner = new DiagRouterRunner(deps, {
+      owner: OWNER,
+      runtimeKind: RUNTIME_KIND,
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ROUTER_TASK_ID);
+    expect(result.status).toBe('failed');
+    // legacy commit DID happen but the task must NOT read as succeeded while
+    // the lineage-visible copy is missing — the evaluator would then hang on
+    // evidence that will never exist.
+    expect(deps._stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
   it('dependency not succeeded → blocked', async () => {
     // Empty artifact store — no distiller artifact
     const emptyStore = new MemoryPIArtifactStore();
