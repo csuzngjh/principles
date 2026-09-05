@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { handlePainCommand, handlePainReportCommand } from '../../src/commands/pain.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
@@ -164,6 +167,9 @@ describe('Pain Command', () => {
 describe('Pain Report Command (/pd-pain)', () => {
     const workspaceDir = '/mock/workspace';
     const sessionId = 's1';
+    // Real directory for the PD-explicit divergence test (env source beats
+    // the host's principles-disciple.json, so no host isolation needed).
+    const validWorkspaceForDivergence = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-div-'));
 
     const mockEvolutionReducer = { emitSync: vi.fn() };
     const mockWctx = {
@@ -184,6 +190,37 @@ describe('Pain Report Command (/pd-pain)', () => {
             sessionId,
         } as any);
     }
+
+    // ── PRI-686 review R1 (CodeRabbit): the divergence warning must fire on
+    // the REAL /pd-pain command chain — resolver unit tests alone don't prove
+    // the logger is wired through handlePainReportCommand. ──────────────────
+
+    it('logs the workspace divergence warning on the real command path when ctx carries a logger', async () => {
+        process.env.PD_WORKSPACE_DIR = validWorkspaceForDivergence;
+        const warn = vi.fn();
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'skipped',
+            painId: 'manual_div_1',
+            taskId: 'diagnosis_manual_div_1',
+            candidateIds: [],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 10,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        await handlePainReportCommand({
+            args: 'something broke',
+            // ctx.workspaceDir diverges from the PD explicit workspace
+            workspaceDir: '/mock/openclaw/main-sub',
+            config: { language: 'en' },
+            sessionId,
+            logger: { warn },
+        } as any);
+
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('differs from OpenClaw context'));
+        delete process.env.PD_WORKSPACE_DIR;
+    });
 
     it('rejects empty args', async () => {
         const result = await runPainReport('');
@@ -439,5 +476,67 @@ describe('Pain Report Command (/pd-pain)', () => {
         const input = mockRecordPain.mock.calls[0][0];
         expect(input.evidence).toEqual([]);
         expect(result.text).toMatch(/trajectory_unavailable|evidence/i);
+    });
+
+    // ── PRI-686 Fix A: the degraded (gated) branch must surface WHY evidence
+    // was unavailable — the live 2026-09-05 incident showed Owners seeing
+    // only "all_candidates_gated:...=needs_evidence" with no way to
+    // self-diagnose the evidence gap (rc-9 silent degradation). ─────────────
+
+    it('surfaces the evidence unavailability reason when candidates are gated (degraded)', async () => {
+        // Trajectory present but empty for this session → ingress degrades
+        // with reasonCode empty_trajectory; recordPain then gates all
+        // candidates (status degraded).
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+            ...mockWctx,
+            trajectory: {
+                listUserTurnsForSession: vi.fn().mockReturnValue([]),
+                listAssistantTurns: vi.fn().mockReturnValue([]),
+                listToolCallsForSession: vi.fn().mockReturnValue([]),
+            },
+        } as any);
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'degraded',
+            painId: 'manual_deg_ev',
+            taskId: 'diagnosis_manual_deg_ev',
+            message: 'all_candidates_gated:abc=needs_evidence',
+            candidateIds: ['abc'],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 40,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke');
+        expect(result.text).toContain('not accepted');
+        expect(result.text).toContain('Evidence unavailable');
+        expect(result.text).toContain('empty_trajectory');
+    });
+
+    it('surfaces the evidence unavailability reason in Chinese when language is zh', async () => {
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+            ...mockWctx,
+            trajectory: {
+                listUserTurnsForSession: vi.fn().mockReturnValue([]),
+                listAssistantTurns: vi.fn().mockReturnValue([]),
+                listToolCallsForSession: vi.fn().mockReturnValue([]),
+            },
+        } as any);
+        const mockRecordPain = vi.fn().mockResolvedValue({
+            status: 'degraded',
+            painId: 'manual_deg_zh',
+            taskId: 'diagnosis_manual_deg_zh',
+            message: 'all_candidates_gated:abc=needs_evidence',
+            candidateIds: ['abc'],
+            ledgerEntryIds: [],
+            observabilityWarnings: [],
+            latencyMs: 40,
+        });
+        vi.mocked(PainToPrincipleService).mockImplementation(function(this: any) { this.recordPain = mockRecordPain; } as any);
+
+        const result = await runPainReport('something broke', 'zh');
+        expect(result.text).toContain('未成功');
+        expect(result.text).toContain('证据不可用');
+        expect(result.text).toContain('empty_trajectory');
     });
 });

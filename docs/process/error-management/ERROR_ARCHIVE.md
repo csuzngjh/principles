@@ -372,7 +372,6 @@ One-line summaries remain in the handbook; the verbatim texts live here.
 ## Archived 2026-09-04 (PRI-672 review — handbook over 300KB cap; both entries last recurrences 2026-05-26, >90 days)
 
 **[ERR-041]** | Install success reported when delivered components are incomplete
-
 - **What happened**: `install()` returned `success: true` and printed "Ready." when `components.console` was `not_deliverable`. The interactive output said the installation was complete, but a core product surface (owner review console) was missing. This created a contradiction: the installer claimed success while explicitly noting a release-blocking gap.
 - **Why it's wrong**: `success: true` means the full product contract is met. If any required component is not deliverable, the install is not successful. Reporting success with an undeliverable component misleads both users and automation. This is the same class as ERR-002 (catch-and-degrade swallows failure) and ERR-009 (silently skip invalid instead of failing loud) — the system claims everything is fine when it's not.
 - **Correct approach**: `success` must require ALL required components to be verified/delivered. If any component is `not_deliverable` or `failed`, `success` must be `false`. Interactive output must clearly distinguish full success ("Ready.") from partial success ("Runtime + CLI verified, but console is not yet deliverable"). The README must explicitly state what the installer delivers and what is a known gap.
@@ -390,3 +389,156 @@ One-line summaries remain in the handbook; the verbatim texts live here.
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
 - **Recurrence**: Same class as ERR-034
+
+---
+
+## Archived 2026-09-05 (PRI-686 review — handbook 305KB over 300KB cap; 11 entries with no recurrence > 90 days, identified by check:error-handbook --audit)
+
+**[ERR-056]** | Redaction pipeline truncates string values without running path/token/env redactors — secrets slip through
+
+- **What happened**: In `redactSensitiveFields()`, the `t === 'string'` branch only truncated strings to `REDACT_MAX_STRING` without running them through `redactAbsolutePaths()`, `redactTokenLikeValues()`, and `redactEnvLikeValues()`. Similarly, `render-github-url.ts` used `shortSummary` with only truncation but no redaction before putting it into the URL body.
+- **Why it's wrong**: The redaction pipeline has two layers: (1) key-based redaction (redact entire values for sensitive keys), and (2) value-based redaction (redact secrets embedded in any string value regardless of key name). Layer 2 was not applied to the string branch. This means secrets embedded in non-sensitive-key values (e.g., `buildId` containing a token, `cwd` containing an absolute path) slip through. Same class as ERR-014/ERR-016/ERR-017 (previews and serialization not bounded/safe).
+- **Correct approach**: Every string value that passes through the redaction pipeline must be run through the full set of string redactors (path, token, env) BEFORE truncation. Truncation should be the last step. The same applies to any renderer that embeds user-provided text into output (markdown, email, GitHub URL body).
+- **How to prevent**: When adding a new branch to a redaction pipeline, check that ALL existing string redactors are applied before any truncation. Add tests that verify secrets in values (not just in keys) are redacted.
+- **Source**: PRI-285 / PR #767
+- **Date**: 2026-06-01
+- **Recurrence**: Same class as ERR-014, ERR-016, ERR-017 (previews/serialization not bounded/safe).
+  - 2026-06-06 PEAT-A (PR #836): `sanitizeString()` only ran `convergePath()` on full string — embedded paths (`"cd D:\\Code\\principles && git status"`) passed through. Fixed with `ABSOLUTE_PATH_IN_STRING_RE` (Windows/POSIX/UNC) + `replacePathsInString()`
+  - 2026-06-06 PEAT-A CI breakage: `nodePath.basename()` on Linux doesn't split on `\` — `D:\Code\principles` preserved verbatim. Fixed with `platformAgnosticBasename()` (splits on both `\` and `/`)
+  - Cross-platform portability variant: path op works on Windows dev machine but silently fails on Linux CI.
+
+---
+
+---
+**[ERR-057]** | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through
+
+- **What happened**: `errMsg(e: { code?: string } | undefined, err: unknown)` was designed to extract a readable message from caught errors. The first parameter `e` is a typed narrower (`err as { code?: string }`) used for `code === 'ENOENT'` checks. The second parameter `err` is the raw `unknown` caught value. But the function body checked `e` for a `.message` property — which `e` (typed as `{ code?: string }`) never has. This meant the function always fell through to `String(err)`, producing less useful error messages like `[object Object]`.
+- **Why it's wrong**: The parameter naming was confusing and led to checking the wrong variable. The typed narrower is for `code` checks (done by the caller before calling errMsg), not for message extraction. Message extraction should operate on the raw `unknown` value.
+- **Correct approach**: Check the `unknown` parameter (second argument) for `.message` property, not the typed narrower. Or better: restructure to a single-parameter function that takes `unknown` and extracts the message, since the typed narrower is only needed by the caller for `code` checks.
+- **How to prevent**: When a helper function takes two parameters with confusingly similar names (`e` and `err`), add a comment explaining what each is for. Use descriptive names like `typedNarrower` and `rawError` instead of single-letter names. Add unit tests that verify the function correctly extracts messages from Error objects, string errors, and non-Error objects.
+- **Source**: PRI-285 / PR #767
+- **Date**: 2026-06-01
+- **Recurrence**: Same class as ERR-001, ERR-005 (runtime type check operates on wrong value)
+
+---
+
+---
+**[ERR-049]** | Unconditional taskId reinjection bypasses validator mismatch check — malicious LLM lineage fields pass validation
+
+- **What happened**: When fixing `stripLineageFields` removing `taskId` from LLM output (PRI-272), I used unconditional assignment `(output as unknown as Record<string, unknown>).taskId = taskId` in all 7 peer runners (Dreamer, Philosopher, Scribe, Artificer, Evaluator, RolloutReviewer, Trainer). This overwrote any LLM-supplied `taskId` — including wrong or malicious values — before `DefaultDreamerValidator.validate()` could check for mismatches. The `output.taskId !== taskId` check became dead code.
+- **Why it's wrong**: The validator's taskId mismatch check is a security boundary (ERR-008 lineage protection). It prevents LLM-supplied lineage fields from poisoning downstream artifacts. Unconditional reinjection bypasses this check entirely — a malicious or buggy LLM that returns `taskId: "injected-id"` would have it silently overwritten with the correct value, and the artifact would be written as if the LLM output was trustworthy.
+- **Correct approach**: Only inject runner-owned lineage when the property is **absent** via `Object.hasOwn(output, 'taskId')`. Present but invalid/falsy values (`''`, `0`, `false`, `null`, wrong string) must NOT be overwritten — they must reach the validator and fail loud (Runtime Contract Rule 3). Use the `injectRunnerLineageIfAbsent(output, 'taskId', taskId)` helper from `peer-runner-contracts.ts` to centralize this logic across all 7 runners. The helper performs a runtime type guard (`output !== null && typeof output === 'object'`) before calling `Object.hasOwn`.
+- **How to prevent**: When re-injecting fields stripped by a security mechanism, always use `Object.hasOwn` — never truthiness checks (`!value`). Truthiness treats `''`, `0`, `false`, `null` as "missing" and silently overwrites them, hiding validation failures. Required regression tests per runner: missing taskId → injected; `taskId: ''` → not overwritten, validation fails; `taskId: 0` → not overwritten, validation fails; `taskId: false` → not overwritten, validation fails; `taskId: 'wrong-id'` → not overwritten, validation fails. Static regression test: verify no runner contains the old `!(output as unknown as Record<string, unknown>).taskId` pattern.
+- **Source**: PRI-294 / PR #790
+- **Date**: 2026-06-02
+- **Recurrence**: Same class as ERR-008 (lineage fields must not be trusted from LLM output)
+
+---
+
+---
+**[ERR-050]** | Modified bundled/generated copy instead of source of truth — fix overwritten on next build
+
+- **What happened**: During PR #794, `better-sqlite3` was added to `packages/create-principles-disciple/console/package.json` (a bundled copy generated by `bundle-plugin.mjs`) instead of the source `packages/pd-console/package.json`. The next `prepack`/`prepublishOnly` would run `bundle-plugin.mjs` and overwrite the fix, silently losing the dependency.
+- **Why it's wrong**: `packages/create-principles-disciple/console/` is a generated artifact — `bundle-plugin.mjs` copies from `packages/pd-console/` and rewrites `@principles/core` to `file:../core`. Editing the generated copy is the same class as editing `dist/` output: it works until the next build. This is a process error: the agent did not trace the file's provenance before editing.
+- **Correct approach**: Always trace a file's provenance before editing. If the file is generated (by a bundle script, build step, or codegen), edit the SOURCE and re-run the generator. For this case: add `better-sqlite3` to `packages/pd-console/package.json`, then run `node scripts/bundle-plugin.mjs` to sync.
+- **How to prevent**: Before editing any `package.json` (or any file), check if it's listed in a bundle/build script's copy/rewrite step. If the file has a source of truth, edit the source and re-run the generator. Add a comment in generated files: `// GENERATED — edit packages/pd-console/ and re-run bundle-plugin.mjs`.
+- **Source**: PRI-250 / PR #794
+- **Date**: 2026-06-02
+- **Recurrence**: Same class as ERR-040 (published artifact missing components) — editing a generated artifact instead of its source.
+
+
+---
+---
+**[ERR-051]** | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path
+
+- **What happened**: PRI-297 added security redaction to _extractParamsSummary() in gate.ts, which is called before RuleHost.evaluate() receives the params. This meant raw exec commands containing Authorization: Bearer or LINEAR_API_KEY= were redacted before RuleHost implementations could match against input.action.paramsSummary.command. A live rule intended to block a command by URL/argument after an auth header would fail to match. The EventLog.record() chokepoint correctly redacted before persistence, but the gate.ts source-level redaction was premature.
+- **Why it's wrong**: Security redaction must happen at the persistence boundary (before event log write), not at the enforcement boundary (before RuleHost evaluation). Redacting before RuleHost evaluation silently degrades rule matching accuracy — rules that match on command strings stop working for commands containing secrets. This is the same class as ERR-002 (silent degradation) — the mechanism exists, but it's applied at the wrong layer, creating a hidden behavior change.
+- **Correct approach**: Apply redaction only in EventLog.record() as a chokepoint before JSON persistence. Leave _extractParamsSummary() raw — it feeds into RuleHost evaluation for command-matching rules. If a future requirement needs redacted versions in both places, two separate calls are needed: one for RuleHost input (preserving structure), one for EventLog (redacting).
+- **How to prevent**: When adding security/privacy transformations, identify the data flow boundaries first: (1) enforcement boundary (where conditions are matched), (2) persistence boundary (where data is written). Always apply transformations at the persistence boundary. If enforcement needs sanitized data, create a separate cleaned copy — never mutate the enforcement input. Add a test that proves the enforcement path receives raw data.
+- **Source**: PRI-297 / PR #797
+- **Date**: 2026-06-03
+- **Recurrence**: Same class as ERR-002 (silent degradation at wrong layer)
+---
+
+---
+**[ERR-053]** | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail
+
+- **What happened**: `pd config doctor` subcommand was implemented in `config-doctor.ts` with full handler logic, but the subcommand was never registered in `packages/pd-cli/src/index.ts`. The Commander program had no `.command('config')` or `.command('doctor')` registration, so `pd config doctor` would fail with "unknown command". Meanwhile, 4 of 22 CLI wiring tests in `cli-wiring-registration.test.ts` were silently failing because they tested registration existence without asserting the command actually runs.
+- **Why it's wrong**: A CLI subcommand that is not registered is completely unreachable to users. The implementation exists but the wiring is missing - same class as ERR-024 (security validator not wired into enforcement path) and ERR-048 (activation write path disconnected from read path). The silently failing tests are the same class as ERR-025 (tests prove isolated behavior, not production defense).
+- **Correct approach**: When adding a new CLI subcommand, the implementation checklist must include: (1) handler file, (2) Commander registration in `index.ts`, (3) wiring test that calls `program.parseAsync(['node', 'pd', 'config', 'doctor', ...])` and asserts it reaches the handler, (4) no test should silently pass when the command is unregistered.
+- **How to prevent**: Add a mandatory "Commander registration" checklist item for every new CLI subcommand. The wiring test must call `program.parseAsync()` with the full command path, not just test handler existence. Add a global test that enumerates all registered commands and verifies each has a corresponding handler file.
+- **Source**: PRI-299 / PR #801
+- **Date**: 2026-06-03
+- **Recurrence**: Same class as ERR-024, ERR-048 (code exists but is not wired into production path)
+
+---
+
+---
+**[ERR-054]** | `as TOutput` cast on untrusted LLM/runtime payload before validation — typed hooks receive unverified data
+
+- **What happened**: `BasePeerRunner.fetchAndParseOutput()` cast `result.payload` as `TOutput` (generic type parameter) without runtime validation. The `run()` template method then called `postFetchTransform()` and `checkLineageIntegrity()` with this unverified typed data BEFORE calling `validateOutput()`. This meant untrusted LLM/runtime output entered typed runner hooks as if it were validated.
+- **Why it's wrong**: Violates Runtime Contract Rule 1 (ERR-001: treat parsed JSON/LLM output as `unknown`) and Rule 2 (ERR-005: do not use `as` to bypass runtime validation). The `as TOutput` cast is a type-system lie — the payload has not been validated at that point. Typed hooks receiving unverified data could access properties that don't exist, leading to silent undefined behavior or crashes.
+- **Correct approach**: `fetchAndParseOutput()` must return `unknown`. Pre-validation hooks (`postFetchTransform`) must accept `unknown`. Only after `validateOutput()` confirms the payload shape should data be cast to `TOutput`. Post-validation hooks (`checkLineageIntegrity`, `emitSuccessTelemetry`, `succeedTask`) receive the validated typed data.
+- **How to prevent**: Any function that returns data from an external source (LLM, runtime adapter, network) must return `unknown`. The trust boundary is the validation step — no data should be typed before crossing it. Review checklist: (1) Does this function return data from an untrusted source? (2) If yes, does it return `unknown`? (3) Is the `as` cast AFTER a validation step?
+- **Source**: PRI-302 / PR #806
+- **Date**: 2026-06-03
+- **Recurrence**: Yes — `as TOutput` cast on untrusted LLM/runtime payload before validation.
+  - 2026-06-03 PR #809: EvaluatorValidator.validate() accepted `EvaluatorOutputV1` instead of `unknown`; evaluator-runner.ts used `output as EvaluatorOutputV1` — fixed by accepting `unknown`
+  - 2026-06-03 PR #810: ArtificerRunner.validateOutput used `result.errorCategory as PDErrorCategory | undefined` instead of `isPDErrorCategory()` runtime check
+  - Earlier: PR #806 (first occurrence in BasePeerRunner.fetchAndParseOutput). See git history.
+
+
+---
+
+---
+**[ERR-062]** | Collapsed details section renders empty-state copy instead of actual data when data exists
+
+- **What happened**: In the FocusPage `<details>` collapsed section (Layer 3: full trajectory), the content inside the `<details>` element always rendered `{t("pages.focus.emptyDeviation")}` regardless of whether data was available. When `deviationCount > 0`, the user would expand the details section expecting to see deviation evidence, but instead saw the empty-state message "No behavior deviations captured yet."
+- **Why it's wrong**: The `<details>` section was implemented as a copy of the empty-state branch without updating the content to render actual data. The conditional branch `deviationCount > 0` correctly showed the count and disclaimer, but the nested `<details>` inside it always showed the empty-state i18n key. This violates EP-03: degraded content shown when actual data is available is a form of misleading degradation.
+- **Correct approach**: The `<details>` section content must be conditionally rendered: show actual data (e.g., pending group titles and record counts) when data is available, and show the empty-state message only as a fallback. Each conditional branch in a component must be reviewed for content correctness, not just structural correctness.
+- **How to prevent**: When implementing nested conditional rendering (e.g., a `<details>` inside a conditional branch), verify that each branch renders content appropriate to its condition. Add a visual or test check that the expanded details section shows actual data when data exists. Review trigger: any PR that adds a `<details>` or collapsed section must include a test or manual check that the expanded content matches the data condition.
+- **Source**: PRI-319 / PR #825
+- **Date**: 2026-06-05
+- **Recurrence**: None
+
+---
+
+---
+**[ERR-061]** | Runtime shape check validates wrong field name — guessed structure instead of verifying against actual type
+
+- **What happened**: When fixing a P0 review finding (ERR-001 recurrence: `as` cast bypassing validation in `ConsoleLifecycleDatasource.loadLedger()`), the AI replaced the `as LedgerTreeStore` cast with a runtime shape check. However, the shape check validated `nodes` (an array field) instead of `principles` (a record field). The actual `LedgerTreeStore` interface is `{ principles: Record<string, LedgerPrinciple>, rules: Record<string, LedgerRule>, implementations: Record<string, Implementation>, metrics: Record<string, PrincipleValueMetrics>, lastUpdated: string }` — it has no `nodes` field at all. The check `!Array.isArray(tree.nodes)` always evaluated to `true`, causing `loadLedger()` to throw "ledger tree is malformed" for every valid ledger, which made all lifecycle route tests return 500 instead of 200/404.
+- **Why it's wrong**: The AI guessed the structure instead of reading the actual `LedgerTreeStore` interface definition. The fix replaced one form of invalid validation (`as` cast) with another form of invalid validation (checking the wrong field). Both bypass the purpose of runtime validation: ensuring the data matches the expected shape. A shape check that validates a non-existent field is equivalent to no shape check at all — it rejects valid data and provides a false sense of security.
+- **Correct approach**: When writing a runtime shape check, read the actual type/interface definition first. The check should validate the most discriminating required field(s) of the actual type. For `LedgerTreeStore`, the correct check is `isRecord(tree.principles)` (the `principles` field is the primary discriminator — a valid ledger must have a `principles` record). Always verify the shape check matches the actual type definition, not an assumed one.
+- **How to prevent**: Before writing a runtime shape check, read the target type's interface definition. The shape check must validate at least one required field that exists in the actual type. Add a test that proves the shape check passes for valid data and fails for malformed data. Review trigger: any PR that adds or modifies a runtime shape check must include a test proving the check works against the actual type structure.
+- **Source**: PR #823
+- **Date**: 2026-06-05
+- **Recurrence**: None
+
+---
+
+---
+**[ERR-058]** | Inconsistent forbidden-key lists across validation paths — gateway_token passes pi-ai profile validation
+
+- **What happened**: `validateOpenClawProfile` and `validatePdLocalProfile` each defined their own local `forbiddenKeys` arrays for rejecting secret-bearing fields. The openclaw list included `gatewayToken` and `gateway_token`, but the pd-local list only had `apiKey`, `api_key`, `token`, `secret`, `password`, `auth`. This inconsistency meant `gateway_token` and `gatewayToken` would pass validation in pi-ai profiles, potentially allowing secret values through.
+- **Why it's wrong**: When security deny-lists are defined in multiple places, any inconsistency creates a bypass path. The openclaw validator would correctly reject `gateway_token`, but the pi-ai validator would accept it. A user or LLM could place secrets in a pi-ai profile under `gateway_token` and they would pass validation.
+- **Correct approach**: Define forbidden-key lists as a single shared constant (e.g., `FORBIDDEN_SECRET_KEYS`) and reference it from all validation paths. When adding a key to one list, it must appear in all lists that serve the same security purpose.
+- **How to prevent**: When implementing security validation that rejects dangerous fields by name, (1) define the list as a shared constant, (2) reference it from all validation paths, (3) add a test that each forbidden key is rejected in every validation path that uses the list. Review checklist: (1) Are there multiple lists serving the same security purpose? (2) Are they identical? (3) Is there a test for each list × forbidden key combination?
+- **Source**: PRI-304 / PR #811
+- **Date**: 2026-06-03
+- **Recurrence**: First occurrence
+
+---
+
+---
+**[ERR-059]** | Nullish coalescing dead code — always-defined default shadows user override in effective config merge
+
+- **What happened**: In `computeEffectivePdConfig()`, the else branch for agents without user override used `defaultBinding.runtimeProfile ?? userConfig.internalAgents.defaultRuntime`. Since `getDefaultInternalAgents()` always sets `runtimeProfile` to `'openclaw.default'` for every agent, the `??` operator never reached the right-hand side. This meant agents without explicit override always got the hard-coded `'openclaw.default'` instead of the user's configured `defaultRuntime`.
+- **Why it's wrong**: When a function always returns a defined value for a field, using `??` with a fallback for that field is dead code. The intent was "use the user's defaultRuntime as fallback", but the always-defined `defaultBinding.runtimeProfile` prevented the fallback from ever being reached. This is a logic error that silently breaks the user's expectation.
+- **Correct approach**: When merging user config with defaults, distinguish between (1) user-provided values, (2) hard-coded defaults, and (3) user-configured defaults. For agents without explicit override, the correct behavior is to use the user's `defaultRuntime`, not the hard-coded default's `runtimeProfile`.
+- **How to prevent**: When writing `a ?? b`, verify that `a` can actually be null/undefined. If `a` is always defined (e.g., from a function that always returns a value), the `?? b` is dead code. Test the fallback path explicitly: set the user's default to a non-default value and verify agents without override use it.
+- **Source**: PRI-304 / PR #811
+- **Date**: 2026-06-03
+- **Recurrence**: First occurrence
+
+---
+

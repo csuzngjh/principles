@@ -149,6 +149,12 @@ ADR-0020 已 Accepted，确立了"宿主包是薄协议适配器、业务编排�
 
 **"逻辑统一"的含义**：建立单一路径权威（把散落的路径常量收敛为唯一解析入口，当前 `PD_DIRS` 位于 `openclaw-plugin/src/core/paths.ts` 且未被 host-runtime / pd-cli 普遍消费），要求所有读写路径经其解析，并阻止未登记的状态目录继续滋生。**物理目录结构维持不变。**
 
+#### 2.6.1 Workspace 解析优先级 — PD canonical 优先于 host runtime workspace（修正案 2026-09-05，PRI-686）
+
+**决策**：当 PD canonical workspace 与 host runtime 的工作区解析结果不一致时，**PD canonical 优先**——hook 与命令两条解析链（`resolveHookWorkspaceDir` / `resolveCommandWorkspaceDir` / `resolvePluginCommandWorkspaceDir`）统一采用：PD 显式来源（`PD_WORKSPACE_DIR` → `OPENCLAW_WORKSPACE` → `~/.openclaw/principles-disciple.json`）优先，host 会话上下文（`ctx.workspaceDir`）作为回退；分歧必须打告警，不得静默（rc-9）。
+
+**理由**：PD workspace 是治理状态的唯一边界——`.pd`/`.state`/`.principles`/`memory/` 四个状态根共同构成治理事实的完整性单位，跨两个 workspace 分裂即分裂为两套治理状态。host runtime 的 workspace 语义（如 OpenClaw 2026.8/9 多 agent 布局将未钉定的 `main` agent 解析到 `<defaults.workspace>/main` 子目录）描述的是**会话运行位置**，不是治理状态归属；让它覆盖 PD canonical 会让 hook 写入与命令读取落到两棵状态树（2026-09-05 live incident：所有 pain 候选被 `needs_evidence/empty_trajectory` 门控，且无错误指向真因）。回归防线：`tests/integration/workspace-hook-command-convergence.test.ts`（hook 写 + 命令读同一真实 trajectory DB 的往返断言）。
+
 ---
 
 ### 2.7 Desktop Companion Boundary — 独立 release 生命周期

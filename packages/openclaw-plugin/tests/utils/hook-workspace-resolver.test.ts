@@ -369,6 +369,11 @@ describe('resolveCommandWorkspaceDir — Command Resolution', () => {
     logger,
   };
 
+  // PRI-686: isolate from the host machine's real ~/.openclaw/principles-disciple.json
+  // (present on dev machines with a live PD install) so "no explicit sources"
+  // scenarios actually exercise the ctx/fallback chain.
+  const noExplicit = () => ({ explicitPdResolver: () => null });
+
   beforeEach(() => {
     process.env = { ...originalEnv };
     delete process.env.PD_WORKSPACE_DIR;
@@ -381,26 +386,26 @@ describe('resolveCommandWorkspaceDir — Command Resolution', () => {
     process.env = { ...originalEnv };
   });
 
-  it('returns ctx.workspaceDir when valid', () => {
-    const result = resolveCommandWorkspaceDir(api as any, { workspaceDir: validWorkspace });
+  it('returns ctx.workspaceDir when valid and no PD explicit source', () => {
+    const result = resolveCommandWorkspaceDir(api as any, { workspaceDir: validWorkspace }, noExplicit());
     expect(result).toBe(validWorkspace);
   });
 
   it('throws when ctx.workspaceDir is home directory', () => {
-    expect(() => resolveCommandWorkspaceDir(api as any, { workspaceDir: homeDir }))
+    expect(() => resolveCommandWorkspaceDir(api as any, { workspaceDir: homeDir }, noExplicit()))
       .toThrow(/is invalid/);
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('is invalid'));
   });
 
   it('throws when ctx.workspaceDir is empty string', () => {
-    expect(() => resolveCommandWorkspaceDir(api as any, { workspaceDir: '' }))
+    expect(() => resolveCommandWorkspaceDir(api as any, { workspaceDir: '' }, noExplicit()))
       .toThrow(/Cannot resolve workspace directory/);
   });
 
   it('falls back to API resolution when ctx.workspaceDir is undefined', () => {
     api.runtime.agent.resolveAgentWorkspaceDir.mockReturnValue(validWorkspace);
     process.env.OPENCLAW_WORKSPACE = validWorkspace;
-    const result = resolveCommandWorkspaceDir(api as any, {});
+    const result = resolveCommandWorkspaceDir(api as any, {}, noExplicit());
     expect(result).toBe(path.resolve(validWorkspace));
   });
 
@@ -409,46 +414,115 @@ describe('resolveCommandWorkspaceDir — Command Resolution', () => {
       throw new Error('API unavailable');
     });
     // PathResolver provides default ~/.openclaw/workspace fallback
-    const result = resolveCommandWorkspaceDir(api as any, {});
+    const result = resolveCommandWorkspaceDir(api as any, {}, noExplicit());
     expect(result).toBeDefined();
     expect(result).toContain('.openclaw');
+  });
+
+  // ── PRI-686: PD explicit sources take priority over session context ──
+
+  it('returns PD explicit workspace over diverging ctx.workspaceDir and warns (env source)', () => {
+    process.env.PD_WORKSPACE_DIR = validWorkspace;
+    const agentSub = path.join(os.tmpdir(), 'pd-test-workspace-agent-sub');
+    ensureDir(agentSub);
+    const result = resolveCommandWorkspaceDir(api as any, { workspaceDir: agentSub });
+    expect(result).toBe(path.resolve(validWorkspace));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('differs from OpenClaw context'));
+  });
+
+  it('does not warn when PD explicit workspace matches ctx.workspaceDir', () => {
+    process.env.PD_WORKSPACE_DIR = validWorkspace;
+    const result = resolveCommandWorkspaceDir(api as any, { workspaceDir: validWorkspace });
+    expect(result).toBe(path.resolve(validWorkspace));
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('hooks and commands converge on the same PD canonical workspace (split regression)', () => {
+    // The live 2026-09-05 incident: hook side wrote root (PD canonical from
+    // principles-disciple.json), command side read <root>/main (ctx.workspaceDir).
+    // After PRI-686 both must resolve identically.
+    process.env.PD_WORKSPACE_DIR = validWorkspace;
+    const agentSub = path.join(validWorkspace, 'main');
+    ensureDir(agentSub);
+
+    const hookResult = resolveHookWorkspaceDir({ workspaceDir: agentSub }, api as any, 'test');
+    const cmdResult = resolveCommandWorkspaceDir(api as any, { workspaceDir: agentSub });
+
+    expect(hookResult.ok).toBe(true);
+    if (hookResult.ok) {
+      expect(path.resolve(hookResult.workspaceDir)).toBe(path.resolve(cmdResult));
+    }
   });
 });
 
 describe('resolvePluginCommandWorkspaceDir — Plugin Command Resolution', () => {
+  // PRI-686: isolate from host machine's real PD canonical config (see above).
+  const noExplicit = () => ({ explicitPdResolver: () => null });
+  const warnLogger = { warn: vi.fn() };
+
   beforeEach(() => {
     vi.clearAllMocks();
     ensureDir(validWorkspace);
   });
 
-  it('returns ctx.workspaceDir when valid', () => {
+  it('returns ctx.workspaceDir when valid and no PD explicit source', () => {
     const ctx = { workspaceDir: validWorkspace, config: {} };
-    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'test-source');
+    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'test-source', undefined, noExplicit());
     expect(result).toBe(validWorkspace);
   });
 
   it('throws when ctx.workspaceDir is home directory', () => {
     const ctx = { workspaceDir: homeDir, config: {} };
-    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source'))
+    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source', undefined, noExplicit()))
       .toThrow(/is invalid/);
   });
 
   it('falls back to ctx.config.workspaceDir when ctx.workspaceDir is undefined', () => {
     const ctx = { workspaceDir: undefined, config: { workspaceDir: validWorkspace } };
-    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'test-source');
+    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'test-source', undefined, noExplicit());
     expect(result).toBe(validWorkspace);
   });
 
   it('throws when both ctx.workspaceDir and ctx.config.workspaceDir are invalid', () => {
     const ctx = { workspaceDir: homeDir, config: { workspaceDir: homeDir } };
-    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source'))
+    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source', undefined, noExplicit()))
       .toThrow(/is invalid/);
   });
 
   it('throws critical error when no workspaceDir available', () => {
     const ctx = { workspaceDir: undefined, config: {} };
-    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source'))
+    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source', undefined, noExplicit()))
       .toThrow(/CRITICAL: workspaceDir is not set/);
+  });
+
+  // ── PRI-686: PD explicit sources take priority over session context ──
+
+  it('returns PD explicit workspace over diverging ctx.workspaceDir and warns via logger', () => {
+    process.env.PD_WORKSPACE_DIR = validWorkspace;
+    const agentSub = path.join(os.tmpdir(), 'pd-test-workspace-agent-sub-2');
+    ensureDir(agentSub);
+    const ctx = { workspaceDir: agentSub, config: {} };
+    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'pain', warnLogger);
+    expect(result).toBe(path.resolve(validWorkspace));
+    expect(warnLogger.warn).toHaveBeenCalledWith(expect.stringContaining('differs from OpenClaw context'));
+    delete process.env.PD_WORKSPACE_DIR;
+  });
+
+  // ── PRI-686 review R1: non-string config.workspaceDir must not crash the
+  // divergence comparison (rc-2 — untrusted dispatcher data treated as unknown)
+
+  it('ignores non-string config.workspaceDir during divergence comparison instead of throwing', () => {
+    process.env.PD_WORKSPACE_DIR = validWorkspace;
+    const agentSub = path.join(os.tmpdir(), 'pd-test-workspace-agent-sub-3');
+    ensureDir(agentSub);
+    // config.workspaceDir is truthy but not a string (e.g. dispatcher bug)
+    const ctx = { workspaceDir: agentSub, config: { workspaceDir: { nested: 'object' } } };
+    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'pain', warnLogger)).not.toThrow();
+    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'pain', warnLogger);
+    expect(result).toBe(path.resolve(validWorkspace));
+    // Divergence still detected via ctx.workspaceDir and warned
+    expect(warnLogger.warn).toHaveBeenCalledWith(expect.stringContaining('differs from OpenClaw context'));
+    delete process.env.PD_WORKSPACE_DIR;
   });
 });
 

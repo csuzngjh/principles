@@ -7,6 +7,13 @@
  * PD canonical sources: PD_WORKSPACE_DIR env → OPENCLAW_WORKSPACE env →
  * principles-disciple.json → ~/.openclaw/workspace default.
  * OpenClaw fallback: ctx.workspaceDir → api.runtime.agent.resolveAgentWorkspaceDir().
+ *
+ * WHY PD canonical wins over host runtime workspace (ADR-0023 §2.6.1, PRI-686):
+ * the PD workspace is the single boundary of governance state (.pd/.state/
+ * .principles/memory/) — splitting it across two directories splits governance
+ * itself. The host's workspace semantics (e.g. OpenClaw 2026.8/9 resolving an
+ * unpinned main agent to <defaults.workspace>/main) describe where a session
+ * RUNS, not which state tree owns governance.
  */
 
 import type { OpenClawPluginApi, PluginCommandContext } from '../openclaw-sdk.js';
@@ -19,16 +26,47 @@ import * as fs from 'fs';
 /**
  * Resolve workspace directory for command execution.
  *
- * Chain: ctx.workspaceDir → resolveWorkspaceDirFromApi (official OpenClaw API + env vars)
+ * Chain (PRI-686, aligned with hook side PRI-259): PD explicit sources
+ * (PD_WORKSPACE_DIR → OPENCLAW_WORKSPACE → principles-disciple.json) →
+ * ctx.workspaceDir → resolveWorkspaceDirFromApi (official OpenClaw API).
+ *
+ * PD explicit sources are owner-declared and intentionally override the live
+ * session context: on OpenClaw 2026.8/9 multi-agent layouts an unpinned agent
+ * entry resolves ctx.workspaceDir to `<defaults.workspace>/<agentId>`, which
+ * split hook writes (PD canonical) from command reads (agent sub-workspace)
+ * and silently gated every pain candidate with needs_evidence.
+ *
+ * Divergence between PD explicit and ctx.workspaceDir is logged as a warning
+ * — never silent (rc-9).
  *
  * CRITICAL: Throws if workspaceDir cannot be resolved. Silent failures are dangerous
  * because commands might operate on the wrong directory.
  */
+/** Options shared by command-side resolvers (mirrors HookWorkspaceResolutionOptions). */
+export interface CommandWorkspaceResolutionOptions {
+  /** Override PD explicit-source resolution — for tests isolating from host config. */
+  explicitPdResolver?: () => CanonicalWorkspaceResult | null;
+}
+
 export function resolveCommandWorkspaceDir(
   api: OpenClawPluginApi,
   ctx: { workspaceDir?: string },
+  options?: CommandWorkspaceResolutionOptions,
 ): string {
-  // 1. Direct from command context (most reliable — set by OpenClaw for current session)
+  // 1. PD explicit sources (owner-declared) take priority over session context
+  const explicit = (options?.explicitPdResolver ?? resolveExplicitPdSources)();
+  if (explicit) {
+    if (ctx.workspaceDir && path.resolve(ctx.workspaceDir) !== path.resolve(explicit.workspaceDir)) {
+      api.logger.warn(
+        `[PD:Command] PD explicit workspace (${explicit.source}: ${explicit.workspaceDir}) ` +
+        `differs from OpenClaw context (${ctx.workspaceDir}). Using PD explicit. ` +
+        `If this is wrong, update ~/.openclaw/principles-disciple.json or unset PD_WORKSPACE_DIR/OPENCLAW_WORKSPACE.`,
+      );
+    }
+    return explicit.workspaceDir;
+  }
+
+  // 2. Direct from command context (set by OpenClaw for current session)
   if (ctx.workspaceDir) {
     const issue = validateWorkspaceDir(ctx.workspaceDir);
     if (!issue) return ctx.workspaceDir;
@@ -38,7 +76,7 @@ export function resolveCommandWorkspaceDir(
     throw new Error(errorMsg);
   }
 
-  // 2. Official OpenClaw API → env vars → config file
+  // 3. Official OpenClaw API → env vars → config file
   const resolved = resolveWorkspaceDirFromApi(api);
   if (resolved) return resolved;
 
@@ -54,7 +92,12 @@ export function resolveCommandWorkspaceDir(
 /**
  * Resolve workspace directory for plugin command execution.
  *
- * Chain: ctx.workspaceDir (canonical) → ctx.config.workspaceDir (dispatcher fallback)
+ * Chain (PRI-686, aligned with hook side PRI-259): PD explicit sources
+ * (PD_WORKSPACE_DIR → OPENCLAW_WORKSPACE → principles-disciple.json) →
+ * ctx.workspaceDir (canonical) → ctx.config.workspaceDir (dispatcher fallback)
+ *
+ * Same priority as resolveCommandWorkspaceDir — see its doc comment for the
+ * workspace-split rationale. Divergence is logged, never silent (rc-9).
  *
  * CRITICAL: Throws if workspaceDir cannot be resolved. Commands must NEVER silently
  * fall back to process.cwd() as this masks configuration errors and can corrupt
@@ -62,12 +105,34 @@ export function resolveCommandWorkspaceDir(
  *
  * @param ctx - Plugin command context (has workspaceDir + config properties)
  * @param source - Source label for error messages (e.g. 'evolution-status', 'pain')
+ * @param logger - Optional logger for divergence warnings (the plugin API logger)
  */
 export function resolvePluginCommandWorkspaceDir(
   ctx: PluginCommandContext,
   source: string,
+  logger?: { warn?: (msg: string) => void },
+  options?: CommandWorkspaceResolutionOptions,
 ): string {
-  // 1. Canonical workspaceDir field (set by OpenClaw command dispatcher)
+  // 1. PD explicit sources (owner-declared) take priority over session context
+  const explicit = (options?.explicitPdResolver ?? resolveExplicitPdSources)();
+  if (explicit) {
+    // rc-2: config.workspaceDir is untrusted dispatcher data — only a real
+    // string participates in the divergence comparison; other types are
+    // treated as absent (they would previously crash path.resolve).
+    const configWorkspaceDir =
+      typeof ctx.config?.workspaceDir === 'string' ? ctx.config.workspaceDir : undefined;
+    const ctxWs = ctx.workspaceDir ?? configWorkspaceDir;
+    if (ctxWs && path.resolve(ctxWs) !== path.resolve(explicit.workspaceDir)) {
+      logger?.warn?.(
+        `[PD:Command:${source}] PD explicit workspace (${explicit.source}: ${explicit.workspaceDir}) ` +
+        `differs from OpenClaw context (${ctxWs}). Using PD explicit. ` +
+        `If this is wrong, update ~/.openclaw/principles-disciple.json or unset PD_WORKSPACE_DIR/OPENCLAW_WORKSPACE.`,
+      );
+    }
+    return explicit.workspaceDir;
+  }
+
+  // 2. Canonical workspaceDir field (set by OpenClaw command dispatcher)
   if (ctx.workspaceDir) {
     const issue = validateWorkspaceDir(ctx.workspaceDir);
     if (!issue) return ctx.workspaceDir;

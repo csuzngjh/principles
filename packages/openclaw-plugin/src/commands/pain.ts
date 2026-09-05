@@ -299,7 +299,10 @@ function handleEmpathySubcommand(
 }
 
 export async function handlePainReportCommand(ctx: PluginCommandContext): Promise<PluginCommandResult> {
-  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pain-report');
+  // PRI-686: wire the divergence warning into the real command chain — the
+  // ctx may carry a logger per the SDK convention (hook adapter supplies it);
+  // without it a PD-explicit vs OpenClaw-context split would be silent (rc-9).
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pain-report', ctx.logger);
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
@@ -439,10 +442,19 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
     const messageInfo = result.message
       ? (isZh ? `\n📝 **详情**: ${result.message}` : `\n📝 **Detail**: ${result.message}`)
       : '';
+    // PRI-686 Fix A: when trajectory evidence was unavailable at ingress
+    // (e.g. empty_trajectory), surface WHY here — otherwise the Owner sees
+    // only "all_candidates_gated:...=needs_evidence" with no way to
+    // self-diagnose the evidence gap (rc-9: silent degradation).
+    const evidenceCauseInfo = evidenceDegradation
+      ? (isZh
+        ? `\n🔍 **证据不可用**: ${evidenceDegradation.reasonCode}${evidenceDegradation.detail ? ` — ${evidenceDegradation.detail}` : ''}`
+        : `\n🔍 **Evidence unavailable**: ${evidenceDegradation.reasonCode}${evidenceDegradation.detail ? ` — ${evidenceDegradation.detail}` : ''}`)
+      : '';
     return {
       text: isZh
-        ? `❌ Pain 记录未成功 (status: ${result.status})${reasonInfo}${messageInfo}\n\n请检查系统日志或使用 \`/pd-status\` 查看状态。`
-        : `❌ Pain recording not accepted (status: ${result.status})${reasonInfo}${messageInfo}\n\nCheck system logs or use \`/pd-status\` for status.`,
+        ? `❌ Pain 记录未成功 (status: ${result.status})${reasonInfo}${messageInfo}${evidenceCauseInfo}\n\n请检查系统日志或使用 \`/pd-status\` 查看状态。`
+        : `❌ Pain recording not accepted (status: ${result.status})${reasonInfo}${messageInfo}${evidenceCauseInfo}\n\nCheck system logs or use \`/pd-status\` for status.`,
     };
   } catch (err) {
     return {
