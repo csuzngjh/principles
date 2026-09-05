@@ -18,9 +18,19 @@
  * only ReleaseManager-owned verified-metadata caches under `~/.pd/trust` and
  * `~/.pd/channels` — never `~/.pd/runtime`, never the extension directory.
  *
+ * Journal readiness semantics: `journal_not_supported` gates MUTATION kinds as
+ * a hard precondition (ADR-0024 D-2 — an unjournaled runtime mutation must be
+ * refused, never degraded to). It is reported for `check` only as a
+ * conservative coupling — on a dual-slot install, a corrupt active.json is
+ * recovered FROM the journal, so a check that cannot trust journal-recoverable
+ * state must not claim readiness. Relaxing it for `check` alone is a Phase 4
+ * decision that must stay explicit (see the analysis doc §4.3); it can never
+ * be relaxed for apply/apply-full/rollback.
+ *
  * apply/apply-full/rollback stay structurally not-ready until the Phase 4
  * activation rollout opens the `shadow_mode_read_only` gate (its own go/no-go);
- * until then these kinds explicitly fall back to the legacy console updater.
+ * until then these kinds explicitly fall back to the legacy console updater —
+ * TEMPORARY migration debt per ADR-0024 D-1, not a supported long-term state.
  */
 
 import * as fs from 'node:fs';

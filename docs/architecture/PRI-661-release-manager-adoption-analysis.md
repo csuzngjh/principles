@@ -78,12 +78,37 @@ This task moves only `check` governance; the prepare→confirm chain converges w
 - `describeGovernance()` gains an optional `fallbackReason` field (additive; existing fields unchanged).
 - Mid-dispatch degradation (ReleaseManager `check()` throws) re-annotates the authority header to the legacy authority and sets the fallback reason before responding — the response body stays the legacy contract. No silent fallback anywhere (rc-9).
 
+### 4.1 The legacy fallback is temporary migration debt, not a supported state
+
+ADR-0024 D-1 already rules the console Web updater a **transitional form**: its zero-digest-check mutation path is "存量债务而非合法长期形态" (existing debt, not a legitimate long-term shape). This adoption task wires the routing and makes every fallback leg **explicit and machine-readable** precisely so the debt stays visible until it is paid:
+
+- `release_manager_unavailable:rollback_not_available` on every apply/apply-full/rollback dispatch is a standing reminder that mutation kinds have NOT been taken over — it must not be read as "fallback is fine forever".
+- No work in this PR may be justified by "the legacy updater remains available" — bug fixes in the legacy implementation stay minimal and get removed with it (Gate C).
+- The fallback ends when Phase 4 (apply orchestration through installer + journal) opens the `shadow_mode_read_only` gate; Gate C deletes the legacy updater after parity evidence. Until then the fallback reasons above are the observability contract that tracks the debt.
+
+### 4.2 Gate B ≠ mutation takeover
+
+The `release_manager_shadow` lifecycle metadata names "PRI-614 Gate B wires a live update surface through ReleaseManager" as the graduation criterion. **This task satisfies Gate B's letter — a live surface (`/api/update/check`) is routed through ReleaseManager with parity evidence — and nothing more.** Explicitly:
+
+- What this task takes over: the **check** kind only — a read-only governance surface. apply / apply-full / rollback still execute through the legacy updater.
+- What it does NOT take over: runtime mutation of any kind. `apply()`/`rollback()` remain structurally `shadow_mode_read_only`; the installer remains the only direct artifact deployment authority; the transaction journal remains the single source of truth for runtime mutations.
+- Graduating the flag from STAGED therefore must NOT be interpreted as "ReleaseManager owns mutations now". Mutation takeover is the Phase 4 plan's own go/no-go gate (SPEC 2026-08-25 §15), and the flag's lifecycle wording is about wiring a surface, not about ownership of `~/.pd/runtime` writes.
+
+### 4.3 Journal readiness gates MUTATION kinds, not the read-only check
+
+`journal_not_supported` (missing/unwritable `~/.pd/transactions/`) currently gates the readiness of every kind including `check`. Two clarifications so this does not mislead the Phase 4 evolution:
+
+- Why `check` still carries it today: on a dual-slot installation, a corrupted `active.json` is recovered FROM the journal, so a check that cannot trust journal-recoverable state must not claim readiness. This is a conservative coupling, not a claim that checks mutate.
+- Semantics for Phase 4: once mutation kinds are actually taken over, journal support becomes a HARD precondition for `apply`/`apply-full`/`rollback` (ADR-0024 D-2: every runtime mutation must be a journaled transaction — an unjournaled mutation is refused, not degraded to). For the read-only `check`, journal state only informs which recovery story the response can promise; a future decision may legitimately relax `journal_not_supported` for `check` alone without touching mutation-kind readiness. Any such relaxation must be explicit and documented — never a silent weakening of the reason vocabulary above.
+
 ## 5. Explicit exclusions (deviation from PRI-664's broader PRI-661 assignment, per Owner task constraints)
 
 - Exiting shadow mode / `apply()` orchestration through the installer (SPEC 2026-08-25 §15 Phase 4 has its own go/no-go gate).
 - Journal recovery wiring (`readTransactionJournalForRecovery` / `recoverUnfinishedTransaction` stay consumer-less; no repair executor in this task). The pinned semantic contract (crash-before-activation ⇒ `old_confirmed`; journaled-activated-without-active-record ⇒ `explicit_refusal`, re-run official installer) is inherited unchanged.
 - `active.json` generation continuity; `releaseId` identity-chain convergence; D-7 update-history unification (console `appendUpdateHistory` stays the Owner-facing history until ReleaseManager owns mutations).
 - Legacy updater deletion (Gate C; replace-then-delete ordering).
+
+These exclusions are the boundary between this task and the Phase 4 takeover: graduating `release_manager_shadow` (Gate B, satisfied here for the check surface) changes the flag's lifecycle metadata, not mutation ownership — see §4.2.
 
 ## 6. Verification plan
 
