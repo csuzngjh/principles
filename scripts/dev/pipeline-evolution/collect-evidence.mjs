@@ -12,7 +12,11 @@
 //
 // Usage:
 //   node scripts/dev/pipeline-evolution/collect-evidence.mjs --workspace <dir> \
-//          [--chain <correlationId>] [--session <sid>] [--json] [--out <file>]
+//          [--chain <correlationId>] [--session <sid>] [--task <taskId>] [--json] [--out <file>]
+//
+// --task: per-attempt run timeline for one task (duration / runtime / death
+//   reason per attempt) — retry-budget & timeout-cap forensics (PRI-683 pattern:
+//   failures clustered at one exact duration = hard cap; spread = latency).
 //
 // Exit codes: 0 = collected (report may still contain FAIL stages — that is
 // data, not a tool error); 1 = usage/environment error.
@@ -61,11 +65,11 @@ function clip(value, bound = BOUND) {
 }
 
 function parseArgs(argv) {
-  const opts = { workspace: null, chain: null, session: null, json: false, out: null };
+  const opts = { workspace: null, chain: null, session: null, task: null, json: false, out: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const value = argv[i + 1];
-    const takesValue = a === '--workspace' || a === '--chain' || a === '--session' || a === '--out';
+    const takesValue = a === '--workspace' || a === '--chain' || a === '--session' || a === '--task' || a === '--out';
     if (takesValue) {
       if (!value) {
         console.error(`missing value for ${a}`);
@@ -74,17 +78,19 @@ function parseArgs(argv) {
       if (a === '--workspace') opts.workspace = value;
       else if (a === '--chain') opts.chain = value;
       else if (a === '--session') opts.session = value;
+      else if (a === '--task') opts.task = value;
       else opts.out = value;
       i += 1;
     } else if (a === '--json') {
       opts.json = true;
     } else {
       console.error(`unknown argument: ${a}`);
+      console.error('usage: collect-evidence.mjs --workspace <abs-dir> [--chain <id>] [--session <sid>] [--task <taskId>] [--json] [--out <file>]');
       process.exit(1);
     }
   }
   if (!opts.workspace || !isAbsolute(resolve(opts.workspace))) {
-    console.error('usage: collect-evidence.mjs --workspace <abs-dir> [--chain <id>] [--session <sid>] [--json] [--out <file>]');
+    console.error('usage: collect-evidence.mjs --workspace <abs-dir> [--chain <id>] [--session <sid>] [--task <taskId>] [--json] [--out <file>]');
     process.exit(1);
   }
   return opts;
@@ -255,10 +261,109 @@ function readAdversarialEvents(root) {
   return events.slice(-20);
 }
 
+// Per-attempt run timeline for one task (PRI-653 round-2 lesson: timeout-cap /
+// retry-budget forensics took ~40min of hand-written SQL; this mode reproduces
+// it in one command). Read-only; shows what each attempt actually ran on,
+// how long it took, and why it died — the data needed to distinguish
+// "config timeout not consumed" from "a second inner cap".
+function collectTaskTimeline(state, taskId) {
+  const task = state
+    .prepare('SELECT task_id, task_kind, status, attempt_count, max_attempts, created_at, updated_at FROM tasks WHERE task_id = ?')
+    .get(taskId);
+  if (!task) return { task: null };
+  const runs = state
+    .prepare(
+      'SELECT run_id, attempt_number, runtime_kind, execution_status, started_at, ended_at, reason, error_category FROM runs WHERE task_id = ? ORDER BY started_at',
+    )
+    .all(taskId);
+  const attempts = runs.map((r) => {
+    const startedMs = r.started_at ? Date.parse(r.started_at) : null;
+    const endedMs = r.ended_at ? Date.parse(r.ended_at) : null;
+    const durationMs =
+      startedMs !== null && !Number.isNaN(startedMs) && endedMs !== null && !Number.isNaN(endedMs)
+        ? endedMs - startedMs
+        : null;
+    return {
+      attempt: r.attempt_number ?? null,
+      runtime: r.runtime_kind ?? null,
+      status: r.execution_status,
+      startedAt: r.started_at ?? null,
+      durationMs,
+      errorCategory: r.error_category ?? null,
+      reason: r.reason ? clip(r.reason, 120) : null,
+    };
+  });
+  // Retry/timeout forensics summary: how attempts distributed across durations.
+  const failed = attempts.filter((a) => a.status === 'failed');
+  const failedWithDuration = failed.filter((a) => a.durationMs !== null);
+  const timeoutDeaths = failedWithDuration.filter((a) => /timeout/i.test(String(a.reason ?? '')));
+  return {
+    task: {
+      taskId: task.task_id,
+      kind: task.task_kind,
+      status: task.status,
+      attempts: task.attempt_count ?? null,
+      maxAttempts: task.max_attempts ?? null,
+      createdAt: task.created_at ?? null,
+      updatedAt: task.updated_at ?? null,
+    },
+    attempts,
+    summary: {
+      totalRuns: attempts.length,
+      succeeded: attempts.filter((a) => a.status === 'succeeded').length,
+      failed: failed.length,
+      running: attempts.filter((a) => a.status === 'running').length,
+      timeoutDeaths: timeoutDeaths.length,
+      // A cluster of failures all pinned at one duration (stddev ≈ 0) is the
+      // signature of a hard cap (PRI-683 pattern); spread-out durations point
+      // at genuine provider latency instead.
+      failedDurationMs: failedWithDuration.map((a) => a.durationMs),
+      distinctRuntimes: [...new Set(attempts.map((a) => a.runtime).filter(Boolean))],
+    },
+  };
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const { root, stateDb } = resolvePdRoot(opts.workspace);
   const state = openReadOnly(stateDb);
+
+  // --task mode: per-attempt run timeline for one task, then exit.
+  // (Everything below is the chain-matrix path.)
+  if (opts.task) {
+    const timeline = collectTaskTimeline(state, opts.task);
+    if (!timeline.task) {
+      console.error(`no task '${opts.task}' in ${stateDb}`);
+      process.exit(1);
+    }
+    const output = {
+      collected: new Date().toISOString(),
+      source: `read-only ${stateDb}`,
+      taskId: opts.task,
+      ...timeline,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(output, null, 2));
+    } else {
+      console.log(`# Run Timeline — ${opts.task}`);
+      console.log(`task: ${timeline.task.kind} ${timeline.task.status} (${timeline.task.attempts}/${timeline.task.maxAttempts} attempts)`);
+      console.log('summary:', JSON.stringify(timeline.summary));
+      console.log('');
+      console.log('attempt | runtime | status    | duration | reason');
+      for (const a of timeline.attempts) {
+        const dur = a.durationMs === null ? '(running)' : `${(a.durationMs / 1000).toFixed(0)}s`;
+        console.log(
+          String(a.attempt ?? '?').padEnd(7),
+          String(a.runtime ?? '?').padEnd(7),
+          String(a.status).padEnd(10),
+          dur.padEnd(9),
+          a.reason ?? '',
+        );
+      }
+    }
+    state.close();
+    return;
+  }
 
   // Correlations to report: explicit --chain, else every correlation seen in
   // tasks (bounded to the 10 most recently updated).

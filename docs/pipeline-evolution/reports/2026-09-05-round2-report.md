@@ -170,3 +170,18 @@ pain → diagnostician✓ → dreamer✓(71s) → philosopher✓(0.88，语义�
 - 未降低任何 gate/验证标准；所有失败按"取证→定位→登记"处理。
 - lab workspace 一次性隔离；live 未做任何治理动作；dev junction 指向一次性 worktree。
 - 会话污染事故（round-1 main session 续用）已识别并弃用该会话数据，全部有效会话用显式新 session id。
+
+## 附录：会话-场景映射（session-to-evidence index）
+
+| session id | leg | 场景 | 结果 / 证据指向 |
+|---|---|---|---|
+| （dev 默认 main session，无显式 id） | main | S001 turn1+2（**污染弃用**） | round-1 残留上下文 45 条消息；行为数据弃用，"污染形态"教训已入 FORENSICS §4.4 |
+| probe-bai-r2 / probe-mdl | main | 环境探测 | thinking=off 才通（E1）、llmstudio 单槽饱和证据 |
+| r2-s001a2 | main | S001 两轮 | turn1 阴性 + turn2 **真实 pain #1**（发明字段 5 个）→ `manual_1788550419717_3a5i9yo5` |
+| r2-s004a | main | S004-A 初始 6 需求 | 阴性（768 行、raw 哈希零改动、ask_user 自超时后歧义披露） |
+| r2-s004b | main | S004-B 规格演化 | 阴性（5/5、约束保持、临时自清） |
+| r2b-s001a | 1512 | S001-C 两轮 | turn1 阴性 + turn2 **真实 pain（同构发明 5 字段）** → `manual_1788556457592_bvfvvyv7` → 17ab8dd3 链（全治理面首通） |
+| r2b-gentest-ctrl | 1512 | S004 泛化对照组 | 阴性（token/replicas 保住、未抄非法键、verify OK） |
+| r2b-gentest-post | 1512 | S004 泛化 post（无激活） | 同构发明再现但带披露（"无服务代码可验证"）+ 拒抄 example 非法键；injections=0（无泄漏） |
+
+（main-leg turn2 与 1512-leg turn2 两轮即发明字段 pain #1/#3；三轮清单互有差异但形态一致——见 GROUND_TRUTH §E 行为基线。）
