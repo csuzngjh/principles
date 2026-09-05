@@ -201,4 +201,55 @@ describe('runInternalizationConsumerCycle — PRI-634 A3 workspace telemetry (sh
     expect(persistFailures[0]?.payload).toContain('evaluator_rule_assembly_failed');
     expect(persistFailures[0]?.payload).toContain('critical-events.jsonl');
   });
+
+  it('PRI-670: runnerOptions carries the profile-resolved timeout as the runner deadline', async () => {
+    // Workspace shape from the PRI-653 lab: a pi-ai runtimeProfile with
+    // timeoutMs 600_000 as the default runtime. Before PRI-670 the value
+    // only reached the PiAi adapter as a per-request timeout — the runner
+    // deadline stayed hardcoded 300s and slow/local models could never
+    // finish a stage.
+    const workspace = makeWorkspace();
+    const config = getDefaultPdConfig();
+    config.features.internalization_auto_consumer.enabled = true;
+    config.features.internalization_full_chain.enabled = true;
+    (config.internalAgents.agents as Record<string, { enabled: boolean }>).evaluator.enabled = true;
+    (config.internalAgents.agents as Record<string, { enabled: boolean }>).diagnostician.enabled = true;
+    (config.runtimeProfiles as Record<string, unknown>)['pi-ai.llamacpp'] = {
+      type: 'pi-ai',
+      provider: 'llamacpp',
+      model: 'qwen3.8-27b-llamacpp',
+      apiKeyEnv: 'LLAMACPP_API_KEY',
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      timeoutMs: 600_000,
+    };
+    (config.internalAgents as { defaultRuntime: string }).defaultRuntime = 'pi-ai.llamacpp';
+    // The shared runtime resolver reads the DIAGNOSTICIAN binding (the binding
+    // all peer stages share) — per-agent profile overrides win over
+    // defaultRuntime, so point it at the slow-profile explicitly.
+    (config.internalAgents.agents as Record<string, { runtimeProfile: string }>).diagnostician.runtimeProfile = 'pi-ai.llamacpp';
+    fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify(config));
+    process.env.LLAMACPP_API_KEY = 'test-key';
+
+    await seedEvaluatorTask(workspace);
+    let capturedRunnerTimeout: number | undefined;
+    vi.spyOn(EvaluatorRunner.prototype, 'run').mockImplementation(async function (this: EvaluatorRunner, taskId: string) {
+      const self = this as unknown as { resolvedOptions: { timeoutMs?: number }; stateManager: RuntimeStateManager };
+      capturedRunnerTimeout = self.resolvedOptions.timeoutMs;
+      await self.stateManager.markTaskSucceeded(taskId, 'evaluator://test-run');
+      return { status: 'succeeded', taskId, attemptCount: 1 };
+    });
+
+    try {
+      const outcome = await runInternalizationConsumerCycle(workspace, {
+        owner: 'test', logLabel: 'Test', logger, emitEvent: () => undefined,
+      });
+      expect(outcome.ran).toBe(true);
+      expect(outcome.taskKind).toBe('evaluator');
+      // The cycle-constructed runner resolved the PROFILE timeout as its
+      // deadline (was: hardcoded 300_000 before PRI-670).
+      expect(capturedRunnerTimeout).toBe(600_000);
+    } finally {
+      delete process.env.LLAMACPP_API_KEY;
+    }
+  });
 });

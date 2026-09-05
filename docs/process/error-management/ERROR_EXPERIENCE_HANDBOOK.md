@@ -246,6 +246,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**:
   - Yes - same class as ERR-003, ERR-013.
   - 2026-07-03 / PRI-442 / PR #1164: `handleFrictionTrackingForFailure` used `workspaceDir.includes('e2e-workspace')` to decide whether to admit shell-tool failures as pain signals. A production workspace whose absolute path happens to contain the substring `e2e-workspace` (e.g. `D:\ci\e2e-workspace-prod\owner-1`) would silently get E2E behavior in production. Fixed by replacing the substring test with an explicit env-var signal (`process.env.PD_E2E_MODE === '1'`) set only by the E2E harness. The generalization: when gating behavior by environment/context, use explicit signals (env vars / config flags), never path-substring matching — path substrings cannot distinguish a sibling directory from a true descendant.
+  - 2026-09-05 / PRI-668 / PR #1512: the orchestrator's new cascade branch identified evaluator artificer deps via `depId.startsWith('artificer')` — task-id string shape — while the mechanism it mirrors (`revision-reopen.ts` `replaceArtificerDependencyWith`) identifies them by the two-hop `task.taskKind === 'artificer'` check. Correct only while the id convention holds; breaks silently if ids ever change shape or a non-artificer task gets an `artificer*` id. Caught in PR self-review before merge; fixed to query `taskKind` per dep. Generalization: when classifying entities, never infer kind from id/name string shape if an authoritative structural field exists — especially when mirroring an existing mechanism, reuse ITS classification primitive instead of re-inventing a string heuristic.
 
 ---
 
@@ -665,9 +666,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 110 |
-| Last updated | 2026-09-04 |
+| Last updated | 2026-09-05 |
 | Top category | Schema & Type |
-| Recurring errors | 58 |
+| Recurring errors | 59 |
 
 ---
 
@@ -978,7 +979,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-002 (silent cleanup failure — PRI-240 recurrence), ERR-015/ERR-018/ERR-019 (stale state from incomplete cleanup)
 - **Source**: PRI-428 / PR #966 (CodeRabbit review)
 - **Date**: 2026-06-18
-- **Recurrence**: 2026-06-21 PR #994 — timeout cleanup killed only the direct CLI process on Unix, allowing descendant processes and inherited handles to survive. Fixed by launching a detached process group and terminating the whole group on timeout. Also 2026-06-21 PR #989 — short-lived SQLite queues returned without their owning connection; 2026-06-18 PRI-429 / PR #966 — cleanup failures were discarded; 2026-06-18 PR #971 — `AudioContext` instances leaked on unmount.
+- **Recurrence**: 2026-06-21 PR #994 — timeout cleanup killed only the direct CLI process on Unix, allowing descendant processes and inherited handles to survive. Fixed by launching a detached process group and terminating the whole group on timeout. Also 2026-06-21 PR #989 — short-lived SQLite queues returned without their owning connection; 2026-06-18 PRI-429 / PR #966 — cleanup failures were discarded; 2026-06-18 PR #971 — `AudioContext` instances leaked on unmount. 2026-09-04 PRI-655 / PR #1514 review — a daemon-loop test sent its stop signal only on the happy path, so assertion failures leaked a live background loop, timers and signal listeners into subsequent tests; fixed by moving SIGINT + handler await into try/finally.
 
   - 2026-07-17 PRI-518 self-review: a new cross-SQLite E2E test called `RuntimeStateManager.close()` in `afterEach` without `await`. Fixed before handoff by making the hook async and awaiting close before removing the temporary workspace.
   - 2026-08-13 PRI-523: a registration-test timer could mutate real home config. Mocked the writer, authorized the fake config, cleaned timers, and isolated packed-bundle HOME.
