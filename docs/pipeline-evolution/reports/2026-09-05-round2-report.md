@@ -3,7 +3,9 @@
 > **PRI-653 Round 2 回归实验**。目标：验证最新 main 的 PD 是否仍能完成
 > 真实失败 → Pain → Diagnosis → Principle → Rule → Replay/Evaluation → Activation → 行为改善，
 > 并主动寻找断点、数据丢失、语义漂移与治理缺陷。
-> 双腿设计：**main leg**（origin/main `9f195342d`）+ **main+#1512 leg**（`5c983db7b` = main + PRI-667/668/670 修复，PR #1512 开放未合并）。
+> 双腿设计：**main leg**（origin/main 快照 `9f195342d`，修复前——实验启动时抓取；
+> 该快照当日 23:56 被 #1512 合并超越，当前 main `03e186db9` 已含三修复）
+> + **main+#1512 leg**（`5c983db7b` = 9f195342d + PRI-667/668/670 修复，PR #1512 已于实验进行中合并）。
 > 所有证据来自隔离 lab workspace（`D:\pd-labs\pri653-r2\*` / `D:\pd-labs\pri653-r2b\*`）的只读取证与真实 OpenClaw agent 会话；
 > **live 环境（~/.openclaw、18789 gateway）全程未触碰**。
 
@@ -37,7 +39,7 @@
 
 > **最新 main 的 PD 是否仍能让 Agent 从失败经验中学习？**
 
-**机制核心未退化，但 main 无法走完全链——且三个卡点全部是 round-1 已定位、修复躺在未合并的 #1512 里；此外新发现两个 main 上的真缺陷（恢复面缺口 PRI-674、prompt 通道 dreamer 校验稳定失败 PRI-675）。**
+**机制核心未退化。实验基线快照（修复前 main）无法走完全链——三个卡点全部是 round-1 已定位、#1512 已修（实验进行中合并，当前 main 已含）；此外新发现三个真缺陷：恢复面缺口 PRI-674、prompt 通道 dreamer 校验稳定失败 PRI-675、pi-ai 300s 内层帽 PRI-683（最后一公里堵点）。**
 
 - **main leg**：真实 pain 捕获 ✓ →（人工借 core 服务恢复后）诊断 ✓ → dreamer/philosopher/scribe ✓ →
   **artificer 3×300s LLM timeout 死**（PRI-670：profile `timeoutMs` 未接通）。链止于规则生成，未达验证/激活。
@@ -66,7 +68,7 @@
 
 | # | 断点 | 层 | 证据 | 处置 |
 |---|---|---|---|---|
-| ① | 诊断在 lmstudio 27B 上 3×~330s timeout 耗尽；profile `timeoutMs: 600000` 未被消费（300s 硬顶）——**PRI-670 在诊断阶段的再现**（round-1 只观察到 evaluator/dreamer） | diagnosis（runtime） | `pain record` latency 988924ms；runs.reason ×3 `[timeout] LLM request timed out: Request aborted`；task list：diag_rootcause failed 3/3 | PRI-670（#1512 修复，未合并）。改用 Bai 后诊断通过 |
+| ① | 诊断在 lmstudio 27B 上 3×~330s timeout 耗尽；profile `timeoutMs: 600000` 未被消费（300s 硬顶）——**PRI-670 在诊断阶段的再现**（round-1 只观察到 evaluator/dreamer） | diagnosis（runtime） | `pain record` latency 988924ms；runs.reason ×3 `[timeout] LLM request timed out: Request aborted`；task list：diag_rootcause failed 3/3 | PRI-670（#1512 已修复并合并）。改用 Bai 后诊断通过 |
 | ② | **诊断家族 failed 任务无任何操作者重入口**（新缺陷）：pain retry/diagnose run 只收 pending/retry_wait；hidden `runtime recovery failed-tasks` 按 `isPeerRunnerKind` 过滤看不见 diagnostician/diag_*；internalization retry 只收 needs_human_review；dead_letter 空。且恢复顺序错（先父后子）会把父任务再标 failed 并烧一次 attempt | diagnosis（治理/恢复面） | 本轮复现全序列；最终直接调 core `recoverFailedTask(taskId, force)`（Console Recover 背后的同一生产代码）才解开 | **PRI-674 已建**（P1） |
 | ③ | artificer（rule 通道）在 Bai glm-5.3-flash 上 3×300s timeout——**PRI-670 在 artificer 的再现**（同 ① 根因：大 prompt/长生成 > 300s 硬顶；前置阶段 52-101s 均正常通过） | rule（runtime） | task artificer-cbcbb377 3/3 failed；runs.reason ×3 timeout；dreamer 71s / philosopher 52s / scribe 80s 对照 | PRI-670（#1512 修复：双装配点接通 profile timeout） |
 | ④ | prompt 通道 dreamer 输出校验稳定失败 3×`Validation failed: output.valid must be true`（非超时；同 workspace 同模型的 rule 通道全过） | principle（输出契约/模型兼容） | runs ×3；task dreamer-d15ef9dc | **PRI-675 已建**（P2） |
@@ -80,7 +82,7 @@ pain manual_1788550419717_3a5i9yo5 (session r2-s001a2, score 70, 真实纠正)
 ```
 
 **Main leg 结论**：pain→diagnosis→principle(部分) 真实、可取证；rule 生成被 PRI-670 拦截；
-validation/activation/behavior 未达。**归因全部落在已知未合并修复（#1512）或新登记 issue（PRI-674/675），
+validation/activation/behavior 未达。**归因全部落在已合并修复（#1512，基线快照不含）或新登记 issue（PRI-674/675/683），
 无"静默失败"或数据丢失**——失败语义（failureCategory/reason/nextAction）全程可观测，这与 PRI-634-C 以来的
 fail-loud 纪律一致。
 
@@ -142,11 +144,16 @@ pain → diagnostician✓ → dreamer✓(71s) → philosopher✓(0.88，语义�
 | Behavior improvement | N/A（未达激活） | N/A（未达激活——断点⑤堵路） |
 | Governance | 85（失败可观测/决策面未达但拒绝路径正确） | 90（对抗门真实执行两轮、needs_revision 指令精确、无低质产物放行） |
 
-**综合：main ≈ 66/100（修复在 #1512 未合并）；main+#1512 ≈ 86/100（最后一公里卡在 PRI-683）**
+**综合：修复前基线 ≈ 66/100；main+#1512（=当前 main）≈ 86/100（最后一公里卡在 PRI-683）**
 
 ## Final Recommendation
 
-1. **合并 PR #1512**（实证依据见修复验证表；review 评论已附完整证据）。
+> **状态更新（2026-09-05 报告提交时）**：实验开始时抓取的 origin/main 快照为 `9f195342d`（修复前）；
+> 当日 23:56 **PR #1512 已合并**（merge commit `53dae06c`，含于当前 origin/main `03e186db9`）。
+> 因此"main leg 不含修复"描述的是**实验基线快照**；**当前 main 已含三修复**，1512-leg 的验证结论
+> 直接适用于当前 main。本报告的双腿对照数据不变，仅"建议合并 #1512"已被 Owner 完成。
+
+1. ~~合并 PR #1512~~ **✅ 已合并（2026-09-04 23:56）**——三修复实证有效（修复验证表）。
 2. **修复 PRI-683**（pi-ai 300s 内层帽）——当前 activation 通路唯一堵点；修复后用同一场景重跑
    断点⑤之后的链（修复轮→复评→rollout→Owner 决策→activation→S004 泛化），
    预计一次重跑即可回答"PD 学到的是原则还是错误模板"这一 SPEC 核心问题。
