@@ -411,7 +411,6 @@ describe('install() gateway lock pre-flight', () => {
 
 describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', () => {
   let savedLegacyNpmInstall: string | undefined;
-  let savedHome: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -427,8 +426,6 @@ describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', 
     vi.mocked(fs.readdirSync).mockReset();
     if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
-    if (savedHome === undefined) delete process.env.HOME;
-    else process.env.HOME = savedHome;
   });
 
   it('cleans up deployed runtime dirs and reports truth when a FRESH install fails mid-deployment (CP-6)', async () => {

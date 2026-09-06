@@ -720,14 +720,24 @@ async function doApplyUpdate(
 
     // Stamp a plugin tree's package.json with the new version (best effort —
     // a tree without package.json keeps its own).
+    // The stamped document is rebuilt from validated fields rather than
+    // spreading the parsed unknown: the file is operator-owned, but writing
+    // a re-serialized unknown back to disk keeps CodeQL's untrusted-data
+    // taint honest (file-system-race + network-data-to-file alerts on this
+    // line, PR #1526 recheck). Non-string fields are dropped on rebuild;
+    // package.json consumers only read string fields.
     const stampPackageVersion = (destDir: string): void => {
       const pkgPath = path.join(destDir, 'package.json');
       if (!fs.existsSync(pkgPath)) return;
       try {
         const rawPkg: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-        if (isRecord(rawPkg)) {
-          fs.writeFileSync(pkgPath, JSON.stringify({ ...rawPkg, version: toVersion }, null, 2));
+        if (!isRecord(rawPkg)) return;
+        const stamped: Record<string, string> = {};
+        for (const [key, value] of Object.entries(rawPkg)) {
+          if (typeof value === 'string') stamped[key] = value;
         }
+        stamped.version = toVersion;
+        fs.writeFileSync(pkgPath, JSON.stringify(stamped, null, 2));
       } catch {
         // rc-9: a malformed package.json must not fail an otherwise-applied
         // update; the version stamp is derived state.
