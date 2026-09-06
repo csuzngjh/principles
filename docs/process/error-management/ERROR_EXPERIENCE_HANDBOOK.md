@@ -167,6 +167,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-101 | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree | PRI-553 |
 | ERR-102 | Optional governance gate conflates disabled/unavailable/loading states and fails open to the legacy path | PRI-553 |
 | ERR-104 | Auth bootstrap redirects overwrite authenticated deep links because splash/onboarding state is not scoped to entry routes | RuleCode Owner Live Decision E2E |
+| ERR-118 | Route/identity matcher extracted from legacy prefix code keeps the prefix form — adjacent-but-different routes inherit the exemption | PRI-643 / PR #1530 review |
 | ERR-111 | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them | PRI-581 |
 
 ---
@@ -623,8 +624,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 110 |
-| Last updated | 2026-09-05 |
+| Total lessons | 111 |
+| Last updated | 2026-09-06 |
 | Top category | Schema & Type |
 | Recurring errors | 59 |
 
@@ -1366,3 +1367,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-686 live incident (2026-09-05) + PR #1518
 - **Date**: 2026-09-05
 - **Recurrence**: 2026-09-05 PR #1518 review R1 (CodeRabbit) — the divergence warning shipped as an OPTIONAL logger parameter with zero real-chain callers: /pd-pain invoked the resolver without a logger, so the PR's own rc-9 guarantee held only in unit tests. An observability contract must be exercised through the production command path, not just the resolver's parameter list. Same round caught the `ctx.config.workspaceDir` `as string` cast (rc-2 flavor). Fixed in af2ab7a5a with a real-path regression test.
+
+---
+**[ERR-118]** | Route/identity equality extracted from existing prefix code keeps the prefix form — adjacent-but-different routes inherit the exemption
+
+- **What happened**: PRI-643 / PR #1530 (2026-09-06, CodeRabbit P1). When removing the `hadToken` gate from the 401 handler in the Console's `api.ts`, the existing inline guard `!window.location.hash.startsWith("#/login")` was extracted verbatim into a named predicate `shouldRedirectToLoginOnUnauthorized` with zero changes to the matching semantics. But `/login` is the only registered login route (App.tsx `<Route path="/login">`), so hashes like `#/login-help` are NOT the login route — they fall through to the wildcard route. On those hashes a 401 cleared the token yet skipped the redirect to the login form, stranding the user on an unmatched route — the exact stranded-page state the PR existed to fix.
+- **Why it's wrong**: A `startsWith` check encodes "same prefix", which is only equal to "same route" when the route system has no other route sharing that prefix. Extracting legacy matching logic into a named, tested predicate is precisely the moment to audit what the check semantically claims — carrying the form over untested cements the latent bug behind a clean function name.
+- **Generalized failure mode**: When moving an existing conditional check into an extracted, named function (predicate/resolver/guard), assistants must re-derive the check's semantics from the authoritative registry (routes, IDs, enum members) and add boundary tests for near-miss values (one-character extensions, adjacent names, query forms), otherwise adjacent-but-different identities silently inherit exemptions or denials intended only for the exact identity.
+- **Correct approach**: Match the exact identity plus its parameterized forms: `currentHash === "#/login" || currentHash.startsWith("#/login?")` — equality for the bare form, prefix only for the `?` query boundary, because query strings are the only legal suffix of a hash route. List which suffixes are legal before writing the match.
+- **How to prevent**: During PR review of any extracted matcher: (1) find the authoritative set of registered identities (e.g. grep `<Route path=`), (2) for each near-miss identity sharing the prefix, ask whether it deserves the same treatment, (3) require at least one negative test asserting a prefix-sharing but non-identical value does NOT match.
+- **Regression guard**: `packages/pd-console/tests/ui/auth-session-401.test.ts` "redirects from hashes that merely share the login prefix" asserts `#/login-help`, `#/loginpage`, `#/login/x` all redirect while `#/login` and `#/login?…` stay exempt.
+- **Related ERRs**: ERR-080 (raw-form vs canonical-form check — different root: normalization; this entry: identity equality), ERR-104 (auth redirect scope — different root: state authority over routes; this entry: matcher semantics), ERR-073 (extraction equivalence — different root: call-site behavior options; this entry: legacy matcher form carried into a NEW contract)
+- **Source**: PRI-643 / PR #1530 CodeRabbit review
+- **Date**: 2026-09-06
+- **Recurrence**: None (first recording)
