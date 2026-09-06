@@ -50,7 +50,8 @@ describe('getGlobalShimPaths scan set (PRI-696)', () => {
       expect(paths).toContain(path.join(homeBin, 'pd.cmd'));
       expect(paths).toContain(path.join(homeBin, 'pd.ps1'));
     } else {
-      expect(paths).toContain(path.join(MOCK_NPM_PREFIX, 'pd'));
+      // mvp-config appends /bin under the npm prefix on Unix.
+      expect(paths).toContain(path.join(MOCK_NPM_PREFIX, 'bin', 'pd'));
       expect(paths).toContain(path.join(homeBin, 'pd'));
     }
   });
@@ -64,7 +65,7 @@ describe('getGlobalShimPaths scan set (PRI-696)', () => {
       expect(paths).toContain(path.join(MOCK_NPM_PREFIX, 'pd.ps1'));
     } else {
       expect(paths).toContain(path.join(homeBin, 'pd'));
-      expect(paths).toContain(path.join(MOCK_NPM_PREFIX, 'pd'));
+      expect(paths).toContain(path.join(MOCK_NPM_PREFIX, 'bin', 'pd'));
       expect(paths.some((p) => p.endsWith('.cmd') || p.endsWith('.ps1'))).toBe(false);
     }
   });
