@@ -502,7 +502,9 @@ describe('ReDoS timing regressions', () => {
 
   it('sanitizeString handles repeated empathy-tag openings in bounded time', () => {
     // CodeQL example shape: many `<empathy` restart positions, each forcing a
-    // full `[^>]*` unwind before the mandatory `>` fails.
+    // full `[^>]*` unwind before the mandatory `>` fails. The V8 regex form
+    // measured super-linear (~29ms at 1000 restarts, growing with restart
+    // count); the linear scanner is ~0.1ms there.
     const adversarial = '<empathy'.repeat(2_500);
     let result = '';
     const elapsed = expectBounded(() => {
@@ -512,6 +514,20 @@ describe('ReDoS timing regressions', () => {
     // No `>` anywhere → empathy tag pattern matches nothing; no token/path
     // pattern fires either, so the value just hits the length bound.
     expect(result).toBe('<empathy'.repeat(25) + '___TRUNCATED___');
+  });
+
+  it('sanitizeString handles restart-heavy empathy prefixes with long non-close runs in bounded time', () => {
+    // Worst-case CodeQL shape: many restart positions, each with a long run
+    // that never reaches `>`, so every restart unwinds the full run. '!' keeps
+    // every alnum run below the token-redaction threshold so the assertion can
+    // pin the untouched-truncation output exactly.
+    const adversarial = ('<empathy' + '!'.repeat(118)).repeat(5000);
+    let result = '';
+    const elapsed = expectBounded(() => {
+      result = sanitizeString(adversarial);
+    });
+    expect(elapsed).toBeLessThan(TIMING_BUDGET_MS);
+    expect(result).toBe(adversarial.slice(0, MAX_EVIDENCE_VALUE_CHARS) + '___TRUNCATED___');
   });
 
   it('sanitizeString strips empathy tags identically, including self-closing form', () => {

@@ -42,13 +42,56 @@ const TOKEN_LIKE_PATTERNS: RegExp[] = [
 
 // ── PD tag patterns ──
 
+// NOTE: the empathy-tag pattern is NOT listed here. Its `<empathy[^>]*>…`
+// shape is js/polynomial-redos flagged even without the ambiguous `\/?` —
+// CodeQL models worst-case `[^>]*` unwind per restart position, which regex
+// engines cannot bound without possessive quantifiers (unsupported in JS).
+// stripEmpathyTags() below replaces it with a linear scan producing
+// identical output.
 const PD_TAG_PATTERNS: RegExp[] = [
   /\[EMOTIONAL_DAMAGE_DETECTED(?::(?:mild|moderate|severe))?\]/gi,
   /\[EMPATHY_ROLLBACK_REQUEST\]/gi,
-  // No `\/?` before `>`: `/` is already in `[^>]`, so the optional branch only
-  // adds backtracking paths (CodeQL js/polynomial-redos) without changing what matches.
-  /<empathy[^>]*>(?:<\/empathy>)?/gi,
 ];
+
+/**
+ * Linear, regex-free replacement for the empathy-tag pattern
+ * `/<empathy[^>]*>(?:<\/empathy>)?/gi` (behavior-identical, ReDoS-free):
+ *
+ * - Case-insensitive `<empathy` prefix, optional whitespace-and-tag-remainder
+ *   up to the first `>` (the old greedy `[^>]*` also stopped at the first
+ *   `>`), optional immediately-following `</empathy>` close tag.
+ * - The optional close-tag group only fired when `</empathy>` directly
+ *   followed the open tag's `>`; absent that, the close tag (if any) stayed
+ *   in the output — preserved verbatim.
+ */
+function stripEmpathyTags(value: string): string {
+  const lower = value.toLowerCase();
+  let out = '';
+  let i = 0;
+  while (i < value.length) {
+    const open = lower.indexOf('<empathy', i);
+    if (open < 0) {
+      out += value.slice(i);
+      return out;
+    }
+    out += value.slice(i, open);
+    i = open + 8; // past '<empathy'
+    // Optional self-closing/attribute run up to the first '>'.
+    const close = lower.indexOf('>', i);
+    if (close < 0) {
+      // No '>' anywhere after the prefix — the regex never matched either.
+      out += value.slice(open);
+      return out;
+    }
+    i = close + 1;
+    // Regex-level greediness nuance: when '<' immediately follows '>', the
+    // old pattern's `(?:<\/empathy>)?` consumed a directly adjacent close tag.
+    if (lower.startsWith('</empathy>', i)) {
+      i += 10;
+    }
+  }
+  return out;
+}
 
 // ── Path detection ──
 
@@ -164,10 +207,11 @@ function replacePathsInString(value: string, workspaceDir?: string): string {
 export function sanitizeString(value: string, workspaceDir?: string): string {
   let result = value;
 
-  // 1. Strip PD tags
+  // 1. Strip PD tags (empathy tags via the linear scanner — see NOTE above)
   for (const p of PD_TAG_PATTERNS) {
     result = result.replace(p, '');
   }
+  result = stripEmpathyTags(result);
 
   // 2. Redact tokens
   for (const pattern of TOKEN_LIKE_PATTERNS) {
