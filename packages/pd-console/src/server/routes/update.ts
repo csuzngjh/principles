@@ -718,31 +718,14 @@ async function doApplyUpdate(
       return files;
     };
 
-    // Stamp a plugin tree's package.json with the new version (best effort —
-    // a tree without package.json keeps its own).
-    // The stamped document is rebuilt from validated fields rather than
-    // spreading the parsed unknown: the file is operator-owned, but writing
-    // a re-serialized unknown back to disk keeps CodeQL's untrusted-data
-    // taint honest (file-system-race + network-data-to-file alerts on this
-    // line, PR #1526 recheck). Non-string fields are dropped on rebuild;
-    // package.json consumers only read string fields.
-    const stampPackageVersion = (destDir: string): void => {
-      const pkgPath = path.join(destDir, 'package.json');
-      if (!fs.existsSync(pkgPath)) return;
-      try {
-        const rawPkg: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-        if (!isRecord(rawPkg)) return;
-        const stamped: Record<string, string> = {};
-        for (const [key, value] of Object.entries(rawPkg)) {
-          if (typeof value === 'string') stamped[key] = value;
-        }
-        stamped.version = toVersion;
-        fs.writeFileSync(pkgPath, JSON.stringify(stamped, null, 2));
-      } catch {
-        // rc-9: a malformed package.json must not fail an otherwise-applied
-        // update; the version stamp is derived state.
-      }
-    };
+    // Note: there is NO separate package.json version-stamp step. The staged
+    // tarball carries its own package.json (identity-verified by the
+    // staged-package guard above), and each tree's per-target diff copies it
+    // whenever it differs from the tree's current one — so after
+    // applyFileDiff both trees carry the release's package.json verbatim.
+    // The historic re-parse-and-restamp step was removed in the PR #1526
+    // recheck: it duplicated that copy and its parse→re-serialize→write chain
+    // was flagged by CodeQL as untrusted-data-to-file.
 
     const updatedFiles = applyFileDiff(targetDir);
 
@@ -751,9 +734,6 @@ async function doApplyUpdate(
     reapplySkillLanguage(targetDir, skillLanguage);
 
     // Fix 3: deletions intentionally skipped — see comment above.
-
-    // 5. Update package.json version
-    stampPackageVersion(targetDir);
 
     // 5b. CP-5 invariant: OpenClaw loads ~/.openclaw/extensions/principles-disciple,
     // not this tree. When both physical plugin trees exist (canonical runtime +
@@ -765,7 +745,6 @@ async function doApplyUpdate(
     if (path.resolve(openClawPluginCopy) !== path.resolve(targetDir) && fs.existsSync(openClawPluginCopy)) {
       applyFileDiff(openClawPluginCopy);
       reapplySkillLanguage(openClawPluginCopy, skillLanguage);
-      stampPackageVersion(openClawPluginCopy);
       extCopySynced = true;
     }
 
