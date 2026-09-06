@@ -40,9 +40,10 @@ export const HUMAN_REVIEW_REASON = {
   evaluatorRepairBudgetExhausted: 'evaluator_repair_budget_exhausted',
   /** Rollout 修订预算耗尽 — Owner 可裁决 */
   rolloutRevisionBudgetExhausted: 'rollout_revision_budget_exhausted',
+  /** Rollout 语义批准但激活候选缺失 — Owner 可裁决（无 accept：候选不存在，无可批准物） */
+  rolloutActivationCandidateUnresolved: 'rollout_activation_candidate_unresolved',
   // ── recovery-only ──
   evaluatorRepairSeedFailed: 'evaluator_repair_seed_failed',
-  rolloutActivationCandidateUnresolved: 'rollout_activation_candidate_unresolved',
   rolloutDispatchNotWired: 'rollout_dispatch_not_wired',
   rolloutDispatchRefused: 'rollout_dispatch_refused',
   rolloutRevisionTargetUnresolved: 'rollout_revision_target_unresolved',
@@ -58,6 +59,15 @@ export type HumanReviewReasonCode = typeof HUMAN_REVIEW_REASON[keyof typeof HUMA
 export const DECISION_CAPABLE_HUMAN_REVIEW_REASONS: ReadonlySet<string> = new Set([
   HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted,
   HUMAN_REVIEW_REASON.rolloutRevisionBudgetExhausted,
+  HUMAN_REVIEW_REASON.rolloutActivationCandidateUnresolved,
+]);
+
+/**
+ * candidate-unresolved 类原因：机器已 approve 但激活候选缺失，accept_current 无
+ * 可批准对象 — 这类原因的任务不允许 accept，只允许 revise_once / reject_current。
+ */
+export const NO_ACCEPT_HUMAN_REVIEW_REASONS: ReadonlySet<string> = new Set([
+  HUMAN_REVIEW_REASON.rolloutActivationCandidateUnresolved,
 ]);
 
 /** legacy（无 humanReviewContext）判定后使用的原因码，携带 _legacy 后缀以示证据来源。 */
@@ -495,8 +505,15 @@ export function deriveOwnerDecisionCapability(facts: OwnerDecisionFacts): OwnerD
     };
   }
 
-  if (task.runnerDecision !== 'needs_revision') {
+  // candidate-unresolved 场景机器决策是 approve_rollout（语义批准、激活候选缺
+  // 失），needs_revision 门不适用——只要求 runnerDecision 存在且是合法 rollout
+  // 决策。reasonCode 未带 NO_ACCEPT 标记时保持原 needs_revision 语义。
+  const noAcceptReason = NO_ACCEPT_HUMAN_REVIEW_REASONS.has(classification.reasonCode);
+  if (!noAcceptReason && task.runnerDecision !== 'needs_revision') {
     blockers.push(`runner_decision_not_needs_revision:${task.runnerDecision ?? 'missing'}`);
+  }
+  if (noAcceptReason && !task.runnerDecision) {
+    blockers.push('runner_decision_missing');
   }
   if (!facts.decisionArtifact) {
     blockers.push('decision_artifact_missing');
@@ -537,7 +554,9 @@ export function deriveOwnerDecisionCapability(facts: OwnerDecisionFacts): OwnerD
   });
 
   const allowedActions: OwnerResolutionAction[] = ['revise_once', 'reject_current'];
-  if (!facts.hardGateFailed) {
+  if (noAcceptReason) {
+    // candidate-unresolved: accept_current 无可批准对象 — 不提供。
+  } else if (!facts.hardGateFailed) {
     allowedActions.unshift('accept_current');
   } else {
     blockers.push('deterministic_hard_gate_failed');
