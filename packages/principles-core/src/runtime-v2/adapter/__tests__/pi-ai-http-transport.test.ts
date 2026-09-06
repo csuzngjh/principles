@@ -38,14 +38,53 @@ function startSlowHeaderServer(headerDelayMs: number): Promise<{
       res.end(JSON.stringify({ ok: true }));
     }, headerDelayMs);
   });
-  const port = 12700 + Math.floor(Math.random() * 200);
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
+    // Port 0 = OS-assigned ephemeral port: fixed-range picks can collide
+    // across the four tests in this file and fail with EADDRINUSE.
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('server did not bind to an ephemeral port'));
+        return;
+      }
       resolve({
-        url: `http://127.0.0.1:${port}`,
+        url: `http://127.0.0.1:${address.port}`,
         close: () =>
           new Promise<void>((res2, rej2) => {
+            server.close((err?: Error | null) => (err ? rej2(err) : res2()));
+          }),
+      });
+    });
+  });
+}
+
+/** Local stalled-body server: sends headers immediately, then never sends a body byte. */
+function startStalledBodyServer(): Promise<{
+  url: string;
+  close: () => Promise<void>;
+}> {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    // Intentionally never res.end() — simulates an LLM stream that opened
+    // successfully then stalls mid-generation (the bodyTimeout half of the
+    // PRI-683 cap pair).
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('server did not bind to an ephemeral port'));
+        return;
+      }
+      resolve({
+        url: `http://127.0.0.1:${address.port}`,
+        close: () =>
+          new Promise<void>((res2, rej2) => {
+            // destroy() instead of close(): the hung response keeps the
+            // socket open, so a graceful close would never finish.
+            server.closeAllConnections?.();
             server.close((err?: Error | null) => (err ? rej2(err) : res2()));
           }),
       });
@@ -127,6 +166,34 @@ describe('PRI-683: pi-ai HTTP transport inner timeout cap', () => {
     const res = await fetch(server.url);
     expect(res.status).toBe(200);
   }, 10_000);
+
+  it('fix: a stalled body (headers arrived, body never continues) is stoppable by the outer AbortSignal', async () => {
+    // The bodyTimeout half of the PRI-683 cap pair, pinned in the OTHER
+    // direction: with the transport caps disabled, a stalled body is NOT
+    // silently cut by a transport timer — the caller's own AbortSignal (the
+    // same signal pi-ai forwards from completeOptions.signal) is what ends
+    // the hang, bounded and observable. When the signal fires mid-stream,
+    // undici rejects the fetch promise itself (the SSE stream never yields
+    // a completed response) — exactly the shape the adapter classifies as
+    // `[timeout]` from the caller's signal, never as a transport abort.
+    const server = await startStalledBodyServer();
+    servers.push(server.close);
+
+    const fetch = getPiAiFetch();
+    // Same shape as production: AbortSignal.timeout(effectiveTimeoutMs)
+    // passed via completeOptions and forwarded to the fetch init.
+    const signal = AbortSignal.timeout(300);
+
+    const startedAt = Date.now();
+    await expect(fetch(server.url, { signal })).rejects.toThrow();
+    const elapsed = Date.now() - startedAt;
+
+    // Ended at the outer authority's 300ms — not left hanging (caps
+    // disabled means nothing else was ever going to stop it) and not cut
+    // early by a transport-layer timer.
+    expect(elapsed).toBeGreaterThanOrEqual(250);
+    expect(elapsed).toBeLessThan(5_000);
+  }, 15_000);
 
   it('resetPiAiFetchForTest clears the singleton (subsequent call returns a fresh fetch)', () => {
     const first = getPiAiFetch();
