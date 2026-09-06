@@ -1014,15 +1014,68 @@ export async function runLegacyRuleContractPreflight(
         'Re-download/rebuild the installer before upgrading. The current installation has not been replaced.',
     };
   }
+  // PRI-693: the bundled pd-cli dist statically imports @principles/core,
+  // @principles/host-runtime and principles-disciple, but the npm package
+  // ships those as SIBLING directories (core/, host-runtime/, plugin/) — not
+  // as node_modules entries — and the scan runs BEFORE deployment, so the
+  // runtime symlinks created by syncPdCli do not exist yet. Node resolves
+  // ESM imports only through node_modules, hence ERR_MODULE_NOT_FOUND for
+  // every workspace with persisted state (fresh workspaces skip the scan).
+  // Materialize the same links syncPdCli creates at deploy time.
+  ensureBundledPdCliResolution(pdCliRoot);
   try {
     return await runScan(pdCliEntry, resolvedWorkspace);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('ERR_MODULE_NOT_FOUND')) {
+      // PRI-693: distinguish the packaging defect from a workspace problem —
+      // telling the user to "repair the workspace database" sent them on a
+      // hopeless path (the database is fine; the bundled dependency graph is
+      // what cannot resolve).
+      return {
+        ok: false,
+        status: 'scan_failed',
+        reason: `compatibility_scan_dependency_missing: ${message}`,
+        remediation:
+          'The bundled pd-cli could not resolve its own dependencies (packaging defect). ' +
+          'Do NOT modify the workspace database. Re-download/rebuild the installer, or report this version.',
+      };
+    }
     return {
       ok: false,
       status: 'scan_failed',
-      reason: `compatibility_scan_failed: ${err instanceof Error ? err.message : String(err)}`,
+      reason: `compatibility_scan_failed: ${message}`,
       remediation: 'Repair the workspace database or its permissions, then retry the upgrade. The current installation has not been replaced.',
     };
+  }
+}
+
+/**
+ * PRI-693: materialize node_modules links for the BUNDLED (not yet deployed)
+ * pd-cli so its static @principles/* / principles-disciple imports resolve
+ * during the pre-deployment compatibility scan. Mirrors the links syncPdCli
+ * creates for the deployed copy — targets are the sibling component
+ * directories of the npm package (files whitelist: core/, host-runtime/,
+ * codex-adapter/, install-layout/, plugin/). Idempotent.
+ */
+export function ensureBundledPdCliResolution(pdCliRoot: string): void {
+  const packageRoot = path.resolve(pdCliRoot, '..');
+  const linkSpecs: { linkPath: string; windowsTarget: string; unixTarget: string }[] = [
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'core'), windowsTarget: path.join(packageRoot, 'core'), unixTarget: '../../core' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'host-runtime'), windowsTarget: path.join(packageRoot, 'host-runtime'), unixTarget: '../../host-runtime' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'), windowsTarget: path.join(packageRoot, 'codex-adapter'), unixTarget: '../../codex-adapter' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'install-layout'), windowsTarget: path.join(packageRoot, 'install-layout'), unixTarget: '../../install-layout' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', 'principles-disciple'), windowsTarget: path.join(packageRoot, 'plugin'), unixTarget: '../../plugin' },
+  ];
+  for (const spec of linkSpecs) {
+    if (existsSync(spec.linkPath)) continue;
+    if (!existsSync(spec.windowsTarget)) continue; // component absent from this package layout — skip
+    mkdirSync(path.dirname(spec.linkPath), { recursive: true });
+    if (isWindows()) {
+      symlinkSync(spec.windowsTarget, spec.linkPath, 'junction');
+    } else {
+      symlinkSync(spec.unixTarget, spec.linkPath, 'dir');
+    }
   }
 }
 
