@@ -13,6 +13,7 @@
     "console",
     "core",
     "host-runtime",
+    "codex-adapter",
     "install-layout",
     "release-manager",
     "README.md",
