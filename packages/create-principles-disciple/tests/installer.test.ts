@@ -438,3 +438,188 @@ describe('install() gateway lock pre-flight', () => {
     expect(result.error).not.toMatch(/has been restored/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CP-6 / CP-9 (install-upgrade investigation 2026-09-05): honest failure
+// semantics for a fresh install that dies mid-deployment, and early workspace
+// creation.
+// ---------------------------------------------------------------------------
+
+describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', () => {
+  let savedLegacyNpmInstall: string | undefined;
+  let realExistsSync: (path: string) => boolean;
+  // Real on-disk npm-bundle fixture (same shape the form-gate demands), so
+  // the merged npm-distributed shape gate passes and the flow reaches the
+  // deployment steps under test. Same pattern as the gateway pre-flight
+  // suite's npmBundleFixtureDir.
+  let fixtureDir: string;
+  let deployedPhase = false;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    savedLegacyNpmInstall = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    process.env.PD_ALLOW_LEGACY_NPM_INSTALL = '1';
+    setLanguage('en');
+    deployedPhase = false;
+    const actualFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    realExistsSync = (p: string) => actualFs.existsSync(p);
+    const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
+    const realPath = await vi.importActual<typeof import('node:path')>('node:path');
+    fixtureDir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-cp6-npm-bundle-'));
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+      actualFs.mkdirSync(realPath.join(fixtureDir, component, 'dist'), { recursive: true });
+      actualFs.writeFileSync(realPath.join(fixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
+    }
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
+    actualFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    actualFs.mkdirSync(realPath.join(fixtureDir, 'console', 'dist', 'web'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'server.js'), 'export {};');
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
+    // Form gate + deployment source probes resolve against the REAL fixture.
+    vi.mocked(fs.existsSync).mockImplementation((value) => actualFs.existsSync(String(value)));
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+    vi.mocked(fs.readdirSync).mockReset();
+    if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
+    if (fixtureDir) {
+      const actualFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+      actualFs.rmSync(fixtureDir, { recursive: true, force: true });
+      fixtureDir = '';
+    }
+  });
+
+  /**
+   * Fresh-install destination gating on top of the real-fs delegation: the
+   * runtime tree and the OpenClaw extension copy read as ABSENT until the
+   * first deployment mutation flips the phase — so backupExistingInstall
+   * sees a fresh machine while the catch-block cleanup sees the residue.
+   * Deeper runtime probes (native-module verification) only happen after a
+   * component landed, so they see the deployed phase too.
+   */
+  function mockFreshInstallDestinations(realExistsSync: (path: string) => boolean): void {
+    deployedPhase = false;
+    vi.mocked(fs.existsSync).mockImplementation((value) => {
+      const s = String(value);
+      // Fresh install: no install manifest on this machine.
+      if (s.endsWith('install.json')) return false;
+      if (/\.pd[/\\]runtime$/.test(s) || /extensions[/\\]principles-disciple$/.test(s)) return deployedPhase;
+      if (/\.pd[/\\]runtime/.test(s)) return deployedPhase && realExistsSync(s);
+      return realExistsSync(s);
+    });
+  }
+
+  function mockPluginManifestReads(): void {
+    vi.mocked(fs.readFileSync).mockImplementation((value) => {
+      const filePath = String(value);
+      if (filePath.endsWith('openclaw.plugin.json')) {
+        return JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } });
+      }
+      if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
+      return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
+    });
+  }
+
+  function expectFreshCleanupRemovedRoots(): void {
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.pd[/\\]runtime$/),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringMatching(/extensions[/\\]principles-disciple$/),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+  }
+
+  it('cleans up deployed runtime dirs and reports truth when a FRESH install fails mid-deployment (CP-6)', async () => {
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
+    // Fresh install: runtime + extension destinations absent (no backup
+    // safety net). The form gate passes against the real fixture; the first
+    // component copy dies mid-deployment with a non-lock error.
+    mockFreshInstallDestinations(realExistsSync);
+    mockPluginManifestReads();
+    vi.mocked(fs.cpSync).mockImplementation(() => {
+      deployedPhase = true; // the copy is the mutation — targets now "on disk"
+      throw new Error('EPIPE: broken pipe during copy');
+    });
+
+    const result = await install({ ...baseInstallOptions }, fixtureDir, { quiet: true });
+
+    expect(result.success).toBe(false);
+    // Truthful reason: mutation happened, fresh install, residue cleaned.
+    expect(result.reason).toMatch(/^install_failed_unactivated_cleaned:/);
+    expect(result.error).toMatch(/removed/);
+    expect(result.error).not.toMatch(/not modified/);
+    // The deployment roots this run created were removed (rc-9 observable).
+    expectFreshCleanupRemovedRoots();
+  });
+
+  it('still cleans residue when a LOCK-SHAPED error fires AFTER core landed on disk (PR #1526 review P2)', async () => {
+    // The old cleanup condition excluded EPERM/EACCES/EBUSY from
+    // cleanUnactivatedFreshInstall on the assumption lock errors only fire
+    // BEFORE any mutation. They do not: core deploys fine, then a later
+    // cpSync dies with EACCES — and the old code left the residue behind a
+    // "No changes were made" report. Cleanup must key on mutationStarted
+    // (actual write state), not on the error class.
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
+    mockFreshInstallDestinations(realExistsSync);
+    mockPluginManifestReads();
+    // First cpSync (core deploy) succeeds — core IS on disk when the failure
+    // hits; the second (host-runtime deploy) dies with a lock-shaped EACCES.
+    let cpCalls = 0;
+    vi.mocked(fs.cpSync).mockImplementation((_src, _dest, _options) => {
+      cpCalls += 1;
+      deployedPhase = true; // core landed on disk before the failure
+      if (cpCalls > 1) throw new Error('EACCES: permission denied, copyfile');
+    });
+
+    const result = await install({ ...baseInstallOptions }, fixtureDir, { quiet: true });
+
+    expect(result.success).toBe(false);
+    // Truthful reason: mutation happened and residue was cleaned — NOT
+    // install_aborted_lock / "No changes were made".
+    expect(result.reason).toMatch(/^install_failed_unactivated_cleaned:/);
+    expect(result.error).toMatch(/removed/);
+    expect(result.error).not.toMatch(/not modified/);
+    // The deployment roots this run created were removed (rc-9 observable).
+    expectFreshCleanupRemovedRoots();
+  });
+
+  it('creates the workspace directory early, inside the unified failure boundary (CP-9 + review R1)', async () => {
+    // The workspace must exist before console verification / pd runtime init
+    // consume it, and its creation failure must surface as a structured
+    // InstallResult instead of a bare rejection. Verified against the REAL
+    // filesystem (fs-extra is not mocked; throwaway temp dirs).
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
+    const realFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const realPath = await vi.importActual<typeof import('node:path')>('node:path');
+    const realOs = await vi.importActual<typeof import('node:os')>('node:os');
+    const wsRoot = realFs.mkdtempSync(realPath.join(realFs.realpathSync.native(realOs.tmpdir()), 'pd-cp9-'));
+    const workspaceDir = realPath.join(wsRoot, 'ws', 'nested');
+    try {
+      // Deterministic mid-flow failure AFTER ensureDir: the form gate passes
+      // against the real fixture, and the run then stops at the
+      // release-manager authority smoke (its installed path is forced
+      // absent — the module is never really imported in a test).
+      vi.mocked(fs.existsSync).mockImplementation((value) => {
+        const s = String(value);
+        if (s.endsWith('install.json')) return false;
+        if (s.includes(path.join('.pd', 'runtime', 'release-manager'))) return false;
+        return realExistsSync(s);
+      });
+      mockPluginManifestReads();
+      const result = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
+      expect(result.success).toBe(false);
+      expect(result.reason).not.toMatch(/^npm_bundle_incomplete:/);
+      expect(realFs.existsSync(workspaceDir)).toBe(true);
+    } finally {
+      realFs.rmSync(wsRoot, { recursive: true, force: true });
+    }
+  });
+});
