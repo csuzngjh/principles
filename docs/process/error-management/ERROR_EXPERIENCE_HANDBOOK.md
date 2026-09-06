@@ -169,6 +169,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-102 | Optional governance gate conflates disabled/unavailable/loading states and fails open to the legacy path | PRI-553 |
 | ERR-104 | Auth bootstrap redirects overwrite authenticated deep links because splash/onboarding state is not scoped to entry routes | RuleCode Owner Live Decision E2E |
 | ERR-119 | Route/identity matcher extracted from legacy prefix code keeps the prefix form — adjacent-but-different routes inherit the exemption | PRI-643 / PR #1530 review |
+| ERR-120 | ReDoS fix removes ONE backtracking factor, keeps the unbounded quantifier — alert stays open; "alert auto-closes post-merge" asserted but never verified as acceptance evidence | PRI-627 / PR #1529 closeout + PR #1532 |
 | ERR-111 | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them | PRI-581 |
 
 ---
@@ -625,7 +626,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 111 |
+| Total lessons | 112 |
 | Last updated | 2026-09-06 |
 | Top category | Schema & Type |
 | Recurring errors | 59 |
@@ -1395,5 +1396,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: The PRI-643 console 401 session route test suite, including the negative case asserting the prefix-sharing adjacent route does not receive the exemption.
 - **Related ERRs**: ERR-108 (both sides written from a summary drift together — here the extracted matcher and its tests were consistent with each other but not with the identity registry), EP-09
 - **Source**: PRI-643 / PR #1530 review round
+- **Date**: 2026-09-06
+- **Recurrence**: None (first recording)
+
+---
+**[ERR-120]** | Removing ONE backtracking factor in a ReDoS-flagged regex is declared as the fix — the greedy quantifier itself still sustains the polynomial, and the PR's "alert will close post-merge" claim was never treated as acceptance evidence to verify
+
+- **What happened**: PRI-627 / PR #1529 (2026-09-06). CodeQL flagged `js/polynomial-redos` on `/<empathy[^>]*\/?>(?:<\/empathy>)?/gi`. The fix removed the ambiguous `\/?` branch overlap (a real backtracking factor) and the PR declared "post-merge the alerts auto-close". Post-merge acceptance check found #23 closed but **#25 still open, re-reported on the fixed commit** — because `<empathy[^>]*>` itself sustains worst-case O(restarts × run) unwinding: every restart position pays a full greedy-run backtrack when no `>` terminates it. V8 benchmark on `('<empathy'+'x'*118).repeat(N)`: regex ~29ms at N=1000 with super-linear growth vs 0.1ms linear.
+- **Why it's wrong**: A polynomial-redos flag is a property of the MATCH SHAPE (unbounded quantifier + mandatory follow-up over untrusted input), not of the most obvious ambiguity in it. Removing one contributing factor while keeping the shape fixes neither the risk nor the flag. And "the alert will auto-close" was asserted from static reasoning in the PR instead of being verified post-merge as acceptance evidence — the miss was caught only because the closeout happened to re-check the alert state.
+- **Generalized failure mode**: Any fix for an externally-flagged defect (CodeQL/CodeRabbit/linter security finding) where the fix removes ONE cited trigger while a second independent trigger of the same flag remains in the changed construct; and any PR whose acceptance evidence is "the external system will update itself" without a post-merge re-check step.
+- **Correct approach**: When a ReDoS flag points at a regex, enumerate ALL backtracking contributors in the shape; if any unbounded quantifier over untrusted input remains, replace the whole match with a linear implementation (indexOf scans / atomic-emulation), not a partial rewrite. Equivalence must be proven by an old-vs-new battery (which in this fix also caught 12 case-sensitivity diffs — `/gi` semantics). Treat "flag closes" as acceptance evidence requiring verification after merge; state the expected close in the PR but re-check it during closeout.
+- **How to prevent**: For any ReDoS fix: (1) rewrite the pattern mentally and ask what CodeQL's naive model still sees as ambiguous/unbounded, (2) prefer linear replacement over pattern surgery when input is untrusted, (3) run a timing benchmark on the worst-case restart-heavy shape, (4) after merge, re-fetch the alert state and close the task only when it matches the PR's claim.
+- **Regression guard**: `evidence-sanitizer.test.ts` worst-case timing regression (5000 restarts × 118-char non-close runs, bounded <250ms — tight enough that the vulnerable regex at ~1.5s would fail it); the flagged empathy regex shape no longer remains in the file (other regexes in the file were never flagged and remain in place).
+- **Related ERRs**: ERR-119 (sibling: matcher semantics during extraction; this entry: fix-completeness for flagged defects), ERR-073 (partial characterization — same family: refactor verified on the happy path only), EP-08 (the flagged construct was a security boundary)
+- **Source**: PRI-627 / PR #1529 post-merge acceptance check + PR #1532
 - **Date**: 2026-09-06
 - **Recurrence**: None (first recording)
