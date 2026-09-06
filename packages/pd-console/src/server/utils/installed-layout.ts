@@ -76,6 +76,16 @@ export function resolvePluginDir(_workspaceDir: string): string {
   return resolveUpdateLayout()?.pluginDir ?? path.join(resolveExtensionsDir(), 'principles-disciple');
 }
 
+/**
+ * The canonical runtime root (~/.pd/runtime) — the PD-owned directory the
+ * canonical layout keeps plugin/console/core/host-runtime/pd-cli under.
+ * Pure path computation (no manifest read), so it is safe to use as a path
+ * guard allow-root even when the install resolves to legacy mode.
+ */
+export function resolveCanonicalRuntimeRoot(): string {
+  return getInstallLayoutPaths(os.homedir()).runtimeDir;
+}
+
 // rc-2: type-guard the parsed JSON instead of an `as` cast (ERR-001).
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

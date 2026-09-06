@@ -34,6 +34,7 @@ import {
   resolveExtensionsDir,
   resolveUpdateLayout,
   resolvePluginDir,
+  resolveCanonicalRuntimeRoot,
   readCurrentVersion,
   type UpdateLayout,
 } from '../utils/installed-layout.js';
@@ -124,14 +125,18 @@ function validatePathInWorkspace(target: string, workspaceDir: string): boolean 
   const resolved = path.resolve(target);
   const resolvedWorkspace = path.resolve(workspaceDir);
   // Allow paths within workspace, within the OpenClaw extensions directory,
-  // or within the PD backups root. The extensions dir and backups root are
-  // under the OpenClaw install home (~/.openclaw), which is NOT derived from
-  // the workspace dir (the two may be on different drives).
+  // within the PD backups root, or within the canonical PD runtime root
+  // (~/.pd/runtime). The extensions dir and backups root are under the
+  // OpenClaw install home (~/.openclaw) and the runtime root under ~/.pd —
+  // none are derived from the workspace dir (the two may be on different
+  // drives). The runtime root must be allowed since the canonical layout
+  // (ADR-0020) keeps the governed plugin/console at ~/.pd/runtime/*.
   const extensionsDir = path.resolve(resolveExtensionsDir());
   const backupsRoot = path.resolve(resolvePdBackupsRoot());
+  const runtimeRoot = path.resolve(resolveCanonicalRuntimeRoot());
   const insideRoot = (root: string): boolean =>
     resolved.startsWith(root + path.sep) || resolved === root;
-  return insideRoot(resolvedWorkspace) || insideRoot(extensionsDir) || insideRoot(backupsRoot);
+  return insideRoot(resolvedWorkspace) || insideRoot(extensionsDir) || insideRoot(backupsRoot) || insideRoot(runtimeRoot);
 }
 
 /**
@@ -146,6 +151,49 @@ function logLegacyBackupMigration(source: string): void {
   for (const failure of legacy.failed) {
     console.warn(`[${source}] Could not migrate legacy PD backup "${failure.name}" out of the extensions dir: ${failure.reason}. Move it out manually to silence the OpenClaw "duplicate plugin id" warning.`);
   }
+}
+
+// CP-8 (2026-09-05 investigation): interrupted full updates leak their staging
+// dir in os.tmpdir() (a crash between mkdtemp and the success/cleanup rmSync
+// has no sweeper). ~140 orphaned pd-update-* dirs were observed on one
+// machine over a week. Best-effort sweep of week-old staging dirs at the
+// start of each full update. Concurrency window (review finding): a LIVE
+// update's staging dir is at most minutes old — its top-level mtime updates
+// when tar extraction creates direct child dirs (verified: creating a
+// subdir bumps the parent mtime; grandchild file writes do not) — so a
+// >7-day-old top-level mtime means no direct child was ever created, i.e.
+// the update died before extraction started. Two concurrent console
+// processes both running full updates >7 days apart would be needed to
+// sweep a live dir; that residual risk is accepted (a process lock would be
+// the follow-up).
+const STALE_UPDATE_TEMP_DIR_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const UPDATE_TEMP_DIR_PREFIXES = ['pd-update-', 'pd-full-update-'];
+
+export function sweepStaleUpdateTempDirs(now: number = Date.now()): { swept: string[]; failed: { dir: string; error: string }[] } {
+  const swept: string[] = [];
+  const failed: { dir: string; error: string }[] = [];
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(os.tmpdir(), { withFileTypes: true });
+  } catch (error) {
+    console.warn(`[pd-update] Stale update temp sweep skipped (tmpdir unreadable): ${error instanceof Error ? error.message : String(error)}`);
+    return { swept, failed };
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!UPDATE_TEMP_DIR_PREFIXES.some((prefix) => entry.name.startsWith(prefix))) continue;
+    const dirPath = path.join(os.tmpdir(), entry.name);
+    try {
+      if (now - fs.statSync(dirPath).mtimeMs < STALE_UPDATE_TEMP_DIR_AGE_MS) continue;
+      fs.rmSync(dirPath, { recursive: true, force: true });
+      swept.push(dirPath);
+      console.log(`[pd-update] Swept stale update staging dir: ${dirPath}`);
+    } catch (error) {
+      failed.push({ dir: dirPath, error: error instanceof Error ? error.message : String(error) });
+      console.warn(`[pd-update] Could not sweep stale staging dir ${dirPath}: ${failed[failed.length - 1]?.error}`);
+    }
+  }
+  return { swept, failed };
 }
 
 // ---------------------------------------------------------------------------
@@ -626,34 +674,60 @@ async function doApplyUpdate(
     // installed extension also has console/, core/, pd-cli/, node_modules/,
     // bin/, docs/. Deleting those would destroy the installation.
     appliedChanges = true;
-    const diff = computeDiffLocal(targetDir, tempDir);
-    const updatedFiles: string[] = [];
 
-    for (const file of diff.modified) {
-      if (isWorkspaceFile(file)) {
-        switch (mergeStrategy) {
-          case 'smart': {
-            const content = fs.readFileSync(path.join(tempDir, file), 'utf-8');
-            fs.writeFileSync(path.join(targetDir, `${file}.update`), content);
-            break;
+    // Apply the update's file diff to a plugin tree with the update's merge
+    // strategy. Runs against targetDir AND the OpenClaw extension copy
+    // (below) so both physical plugin trees land on the same version —
+    // applying to only one tree is exactly the "update succeeded, gateway
+    // still runs old code" split-brain the 2026-09-05 investigation banned
+    // (CP-5 invariant; rollback and apply-full enforce the same sync).
+    // PR #1526 review recheck: the diff is computed PER TARGET TREE. A single
+    // diff computed against targetDir only describes targetDir's delta —
+    // reusing it for the extension copy skips files where a PREVIOUS drift
+    // already left targetDir at the new content while the extension copy
+    // still runs the old one, and the version stamp would then relabel stale
+    // files as updated. computeDiffLocal(current, new) diffs an existing tree
+    // against the staged release, so each tree gets its own honest delta.
+    const applyFileDiff = (destDir: string): string[] => {
+      const treeDiff = computeDiffLocal(destDir, tempDir);
+      const files: string[] = [];
+      for (const file of treeDiff.modified) {
+        if (isWorkspaceFile(file)) {
+          switch (mergeStrategy) {
+            case 'smart': {
+              const content = fs.readFileSync(path.join(tempDir, file), 'utf-8');
+              fs.writeFileSync(path.join(destDir, `${file}.update`), content);
+              break;
+            }
+            case 'overwrite':
+              copyFileTo(path.join(tempDir, file), path.join(destDir, file));
+              files.push(file);
+              break;
+            case 'keep':
+              break;
           }
-          case 'overwrite':
-            copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
-            updatedFiles.push(file);
-            break;
-          case 'keep':
-            break;
+        } else {
+          copyFileTo(path.join(tempDir, file), path.join(destDir, file));
+          files.push(file);
         }
-      } else {
-        copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
-        updatedFiles.push(file);
       }
-    }
+      for (const file of treeDiff.added) {
+        copyFileTo(path.join(tempDir, file), path.join(destDir, file));
+        files.push(file);
+      }
+      return files;
+    };
 
-    for (const file of diff.added) {
-      copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
-      updatedFiles.push(file);
-    }
+    // Note: there is NO separate package.json version-stamp step. The staged
+    // tarball carries its own package.json (identity-verified by the
+    // staged-package guard above), and each tree's per-target diff copies it
+    // whenever it differs from the tree's current one — so after
+    // applyFileDiff both trees carry the release's package.json verbatim.
+    // The historic re-parse-and-restamp step was removed in the PR #1526
+    // recheck: it duplicated that copy and its parse→re-serialize→write chain
+    // was flagged by CodeQL as untrusted-data-to-file.
+
+    const updatedFiles = applyFileDiff(targetDir);
 
     // 4b. The incoming manifest declares the product-default skill language
     // (zh); restore the language this install was materialized with.
@@ -661,14 +735,17 @@ async function doApplyUpdate(
 
     // Fix 3: deletions intentionally skipped — see comment above.
 
-    // 5. Update package.json version
-    const pkgPath = path.join(targetDir, 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      const rawPkg: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      if (typeof rawPkg === 'object' && rawPkg !== null) {
-        const pkg = { ...(rawPkg as Record<string, unknown>), version: toVersion };
-        fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-      }
+    // 5b. CP-5 invariant: OpenClaw loads ~/.openclaw/extensions/principles-disciple,
+    // not this tree. When both physical plugin trees exist (canonical runtime +
+    // extension copy), the extension copy MUST move to the same version or the
+    // gateway keeps running the old code while history reports success. Same
+    // sync rollback (Fix 4 region) and apply-full perform.
+    const openClawPluginCopy = path.join(resolveExtensionsDir(), 'principles-disciple');
+    let extCopySynced = false;
+    if (path.resolve(openClawPluginCopy) !== path.resolve(targetDir) && fs.existsSync(openClawPluginCopy)) {
+      applyFileDiff(openClawPluginCopy);
+      reapplySkillLanguage(openClawPluginCopy, skillLanguage);
+      extCopySynced = true;
     }
 
     // 6. Cleanup temp dir
@@ -685,7 +762,9 @@ async function doApplyUpdate(
 
     return {
       success: true,
-      message: 'Update applied successfully',
+      message: extCopySynced
+        ? 'Update applied successfully (OpenClaw extension copy synced too).'
+        : 'Update applied successfully',
       updatedFiles,
       backupPath,
       newVersion: toVersion,
@@ -703,11 +782,13 @@ async function doApplyUpdate(
     }
 
     if (isLockError) {
+      // CP-10: same honest lock attribution as the full-update catch — the
+      // holder may be this Console process or an indexer, not just the gateway.
       return {
         success: false,
-        message: 'Update blocked by file lock (OpenClaw gateway may still be running)',
+        message: 'Update blocked by a file lock (OpenClaw gateway, this Console process, or antivirus/file indexing may hold it)',
         reason: 'file_locked',
-        nextAction: '请重启电脑后再次尝试更新。',
+        nextAction: 'Stop the OpenClaw gateway and retry the update; restart the computer only if it fails again.',
       };
     }
     return {
@@ -736,6 +817,19 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
     // core/ (not in the backup) are left untouched.
     copyDirRecursive(backupDir, targetDir);
 
+    // Keep the OpenClaw extension copy in sync with the restored canonical
+    // plugin (CP-5 invariant from the 2026-09-05 investigation): OpenClaw
+    // loads ~/.openclaw/extensions/principles-disciple, so a rollback that
+    // only restores ~/.pd/runtime/plugin would leave the gateway running the
+    // version the upgrade just broke. Only synced when the copy exists and
+    // differs from the restore target (canonical mode).
+    const openClawPluginCopy = path.join(resolveExtensionsDir(), 'principles-disciple');
+    let extCopySynced = false;
+    if (path.resolve(openClawPluginCopy) !== path.resolve(targetDir) && fs.existsSync(openClawPluginCopy)) {
+      copyDirRecursive(backupDir, openClawPluginCopy);
+      extCopySynced = true;
+    }
+
     // Record rollback history
     appendUpdateHistory(workspaceDir, {
       fromVersion: 'rolled-back',
@@ -745,7 +839,12 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
       backupPath: backupDir,
     });
 
-    return { success: true, message: 'Rollback completed successfully' };
+    return {
+      success: true,
+      message: extCopySynced
+        ? 'Rollback completed successfully (OpenClaw extension copy restored too). Note: only the plugin was rolled back; console/core/host-runtime/pd-cli keep the upgraded version. For a full step-back, re-run the official installer pinned to the older release.'
+        : 'Rollback completed successfully. Note: only the plugin was rolled back; console/core/host-runtime/pd-cli keep the upgraded version. For a full step-back, re-run the official installer pinned to the older release.',
+    };
   } catch (error) {
     return {
       success: false,
@@ -1066,6 +1165,10 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
   }
   const extDir = layout.pluginDir;
 
+  // CP-8: reclaim staging dirs orphaned by previously interrupted updates
+  // before staging this update's own temp dir (best-effort, never fatal).
+  sweepStaleUpdateTempDirs();
+
   // Legacy-contract preflight BEFORE stopping the gateway or touching files:
   // refuse while an active rule still uses a removed RuleHost contract
   // symbol — the running installation stays exactly as it was.
@@ -1091,6 +1194,10 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
   // overwrites it (PR #1332 companion — see reapplySkillLanguage).
   const skillLanguage = detectInstalledSkillLanguage(extDir);
   let tempDir: string | undefined;
+  // CP-4: pre-swap backup of the canonical plugin tree; recorded in
+  // update-history (success and failure) so /rollback can find it. Declared
+  // at function scope: the failure history in the catch block references it.
+  let pluginBackupDir: string | undefined;
   // Dependency entries quarantined during resolution-link reconciliation;
   // restored on failure, discarded on success (PRI-665).
   let reconciledQuarantine: readonly QuarantinedSlot[] = [];
@@ -1253,6 +1360,32 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     //        them. On fresh installs this is an overlay refresh + link no-op.
     const hostRuntimeSrc = path.join(tempDir, 'host-runtime');
     const hostRuntimeDest = layout.hostRuntimeDir;
+    // Backup the canonical plugin tree BEFORE the first mutation so a full
+    // update is recoverable via /rollback (the diff /apply path has always
+    // had this via createBackup; the full path never did — CP-4 of the
+    // 2026-09-05 install/upgrade investigation). The backup excludes
+    // node_modules (same SKIP_DIRS contract as /apply), and the backup dir
+    // is recorded in update-history (success AND failure) so the rollback
+    // handler can find it. Console self-update owns the console dir backup;
+    // core/host-runtime/pd-cli are plain dist overlays re-fetched on any
+    // next update, so only the version authority (plugin) is backed up.
+    // R5 (review): reservePdBackupDestination creates the directory BEFORE
+    // the copy — a mid-copy failure must not leave backupPath pointing at a
+    // partial backup (a later /rollback would happily restore the fragment).
+    // Copy into the reserved dir inside its own try: on failure remove the
+    // fragment and let the thrown error flow into the outer catch with
+    // pluginBackupDir still undefined (no backupPath recorded).
+    if (fs.existsSync(extDir)) {
+      const backupDest = reservePdBackupDestination(path.basename(extDir));
+      try {
+        copyDirRecursive(extDir, backupDest, SKIP_DIRS);
+      } catch (backupError) {
+        try { fs.rmSync(backupDest, { recursive: true, force: true }); } catch { /* best effort */ }
+        throw backupError;
+      }
+      pluginBackupDir = backupDest;
+      console.log(`[pd-update-full] Backed up ${extDir} → ${backupDest}`);
+    }
     if (
       fs.existsSync(hostRuntimeSrc) &&
       fs.existsSync(path.join(hostRuntimeSrc, 'package.json')) &&
@@ -1285,6 +1418,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
           toVersion: 'failed',
           success: false,
           kind: 'failure',
+          ...(pluginBackupDir ? { backupPath: pluginBackupDir } : {}),
         });
         return {
           success: false,
@@ -1303,6 +1437,20 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       // The incoming manifest declares the product-default skill language
       // (zh); restore the language this install was materialized with.
       reapplySkillLanguage(extDir, skillLanguage);
+      // CP-5 (2026-09-05 investigation): under the canonical layout extDir is
+      // ~/.pd/runtime/plugin, but OpenClaw still LOADS the plugin copy in
+      // ~/.openclaw/extensions/principles-disciple — the installer registers
+      // that path and OpenClaw discovers plugins by scanning extensions/.
+      // Leaving it stale made every "successful" upgrade half-effective (the
+      // gateway kept running the install-time code and `pd --version` kept
+      // reporting the old version). Refresh the copy whenever it exists; do
+      // NOT create one for installs that never had it (e.g. Codex-only).
+      const openClawPluginCopy = path.join(resolveExtensionsDir(), 'principles-disciple');
+      if (path.resolve(openClawPluginCopy) !== path.resolve(extDir) && fs.existsSync(openClawPluginCopy)) {
+        copyDirRecursive(pluginSrc, openClawPluginCopy, SKIP_DIRS);
+        reapplySkillLanguage(openClawPluginCopy, skillLanguage);
+        console.log(`[pd-update-full] Refreshed OpenClaw extension copy: ${openClawPluginCopy}`);
+      }
     }
 
     //    b. console/ → extDir/console/ (overwrite dist/ files; do NOT rmSync —
@@ -1370,6 +1518,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
         toVersion: newVersion,
         success: false,
         kind: 'failure',
+        ...(pluginBackupDir ? { backupPath: pluginBackupDir } : {}),
       });
       return {
         success: false,
@@ -1387,6 +1536,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       toVersion: newVersion,
       success: true,
       kind: 'update',
+      ...(pluginBackupDir ? { backupPath: pluginBackupDir } : {}),
     });
 
     return {
@@ -1419,14 +1569,19 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       toVersion: 'failed',
       success: false,
       kind: 'failure',
+      ...(pluginBackupDir ? { backupPath: pluginBackupDir } : {}),
     });
 
     if (isLockError) {
+      // CP-10 (2026-09-05 investigation): the lock holder is NOT necessarily
+      // the gateway — the console process performing this very update and
+      // file indexers/antivirus hold the same class of locks. Name the real
+      // candidates instead of prescribing a reboot first.
       return {
         success: false,
-        message: 'Update blocked by a file lock. The OpenClaw gateway may still be running.',
+        message: 'Update blocked by a file lock. Locks may be held by the OpenClaw gateway, this Console process itself (self-update), or antivirus/file indexing.',
         reason: 'file_locked',
-        nextAction: 'Please restart your computer, then try the update again.',
+        nextAction: 'Stop the OpenClaw gateway, wait a few seconds, and retry the update. If it fails again, restart the computer.',
         requiresRestart: false,
       };
     }

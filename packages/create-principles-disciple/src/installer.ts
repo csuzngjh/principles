@@ -705,6 +705,30 @@ function restoreBackup(backupDir: string | null, runtimeBackupDir: string | null
   }
 }
 
+/**
+ * CP-6: remove the runtime trees a failed FRESH install deployed. Only called
+ * when there is no pre-existing install (no backup) and a deployment step
+ * already ran — every file under these roots was created by this run, so
+ * removal cannot destroy anyone else's work. Best-effort: failures are
+ * returned and surfaced in the operator message (rc-9), never thrown.
+ */
+function cleanUnactivatedFreshInstall(): { removed: string[]; failed: { dir: string; error: string }[] } {
+  const targets: string[] = [getPdRuntimeDir()];
+  if (installsOpenClaw(activeHostTarget)) targets.push(getPluginExtDir());
+  const removed: string[] = [];
+  const failed: { dir: string; error: string }[] = [];
+  for (const dir of targets) {
+    if (!existsSync(dir)) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      removed.push(dir);
+    } catch (e) {
+      failed.push({ dir, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { removed, failed };
+}
+
 function cleanupBackup(backupDir: string | null, runtimeBackupDir: string | null): void {
   for (const backup of [backupDir, runtimeBackupDir]) {
     if (!backup || !existsSync(backup)) continue;
@@ -2357,6 +2381,10 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;
   let stepIndex = 0;
+  // CP-6: true once the run has started deploying runtime components (after
+  // the backup step). With no pre-existing install (no backup), a failure
+  // after this point must clean up instead of claiming "not modified".
+  let mutationStarted = false;
 
   const killConsoleChild = () => {
     if (consoleProcess) {
@@ -2367,6 +2395,17 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   };
 
   try {
+    // CP-9 (2026-09-05 investigation): the workspace must exist before any
+    // step touches it — console verification spawns the server with
+    // --workspace and `pd-cli runtime init` writes under it, while workspace
+    // creation used to happen only as a side effect of the LATE template
+    // copy step. An explicit --workspace pointing at a new directory
+    // therefore failed the install halfway through (leaving the CP-6
+    // residue). First statement INSIDE the try: an ensureDir failure
+    // (permissions / invalid path) flows into the unified failure result
+    // below instead of rejecting the install() promise (P1 review finding).
+    await fse.ensureDir(path.resolve(options.workspaceDir));
+
     if (spinner) updateProgress(spinner, stepIndex, 'Checking built plugin...');
     await checkBuiltPlugin(pluginDir);
     verification.manifestActivation = 'verified';
@@ -2422,6 +2461,12 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     backupDir = backupDirFromResult;
     runtimeBackupDir = runtimeBackupDirFromResult ?? null;
     stepIndex++;
+
+    // CP-6: from here on the run deploys runtime components. When there is no
+    // pre-existing install (no backup), a later failure must clean them up —
+    // the old code claimed "No changes were made" while ~/.pd/runtime was
+    // already on disk (install-upgrade investigation 2026-09-05, E-003).
+    mutationStarted = true;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/core...');
     installBundledCore(pluginDir);
@@ -2731,18 +2776,49 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     const extDir = getPluginExtDir();
     // EP-11: all operator-visible failure/rollback text goes through t().
     const hasBackup = Boolean(backupDir || runtimeBackupDir);
+    // CP-6 (2026-09-05 investigation, E-003/E-014): a FRESH install (no
+    // pre-existing install → no backup) that failed mid-deployment used to
+    // leave ~/.pd/runtime and the extension copy fully populated while the
+    // message claimed "No changes were made" — silent half-install residue
+    // that OpenClaw could load as an orphan plugin. Remove what this run
+    // deployed and report the truth instead.
+    // PR #1526 review fix: the earlier `!isLockError` exclusion assumed lock
+    // errors can only fire before any mutation. They cannot — EPERM/EACCES/
+    // EBUSY raised by a cpSync/config write AFTER core already landed on disk
+    // is still a lock-shaped error, and skipping cleanup then left residue
+    // behind a "No changes were made" report. Cleanup now keys on the actual
+    // write state (mutationStarted) alone; if the cleanup itself is
+    // permission-restricted, freshCleanup.failed names the residue (rc-9).
+    // hasBackup=true keeps its restore path, and a lock error before
+    // mutationStarted=true correctly keeps the no-changes messages below.
+    const freshCleanup = !hasBackup && mutationStarted
+      ? cleanUnactivatedFreshInstall()
+      : undefined;
+    // R2 (review): after template/config steps have run (console verified →
+    // templates copied → config generated), the WORKSPACE also holds this
+    // run's files — but the workspace is the operator's own directory and may
+    // pre-date this run, so it is NOT wholesale-removed. Report its retention
+    // honestly instead of claiming "nothing else was modified".
+    const workspaceTouched = !hasBackup && mutationStarted && journal?.lastState !== 'planned';
     const rollbackSuffix = !hasBackup
-      ? t('rollback_no_changes')
+      ? freshCleanup
+        ? freshCleanup.failed.length === 0
+          ? t('rollback_fresh_cleaned')
+          : t('rollback_fresh_clean_failed').replace('{dirs}', freshCleanup.failed.map((f) => f.dir).join(', '))
+        : t('rollback_no_changes')
       : restoreResult.restored
         ? t('rollback_restored')
         : t('rollback_failed')
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '');
+    const rollbackSuffixFinal = rollbackSuffix + (workspaceTouched && freshCleanup && freshCleanup.failed.length === 0 ? ` ${t('rollback_fresh_workspace_kept')}` : '');
     const rollbackNextAction = !hasBackup
-      ? (isLockError
-        ? t('next_no_changes_lock')
-        : t('next_no_changes_other'))
+      ? freshCleanup
+        ? (freshCleanup.failed.length === 0 ? t('next_fresh_cleaned') : t('next_fresh_clean_failed'))
+        : (isLockError
+          ? t('next_no_changes_lock')
+          : t('next_no_changes_other'))
       : restoreResult.restored
         ? t('next_restored')
         : t('next_restore_failed')
@@ -2750,7 +2826,11 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '')
           .replace('{errorMsg}', errorMsg);
     const rollbackReason = !hasBackup
-      ? (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)
+      ? freshCleanup
+        ? (freshCleanup.failed.length === 0
+          ? `install_failed_unactivated_cleaned: ${errorMsg}`
+          : `install_failed_unactivated_residue: ${errorMsg}`)
+        : (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)
       : restoreResult.restored
         ? errorMsg
         : `install_failed_rollback_failed: ${errorMsg}`;
@@ -2773,7 +2853,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
       reason,
       component: error instanceof SelfContainedDependencyError ? error.component : undefined,
       dependency: error instanceof SelfContainedDependencyError ? error.dependency : undefined,
-      error: `${errorMsg} — ${rollbackSuffix}`,
+      error: `${errorMsg} — ${rollbackSuffixFinal}`,
       journal: journal ? installerJournalRecord(journal) : undefined,
     };
   } finally {
