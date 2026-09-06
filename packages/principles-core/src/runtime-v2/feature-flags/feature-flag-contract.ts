@@ -225,6 +225,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // the Phase 4 transaction rollout). Quiet per AGENTS: default off, not
   // surfaced until Phase 6 cutover.
   { id: 'release_manager_shadow', category: 'quiet', enabled: false, since: '2026-08-25', description: 'ReleaseManager shadow mode — read-only signed-metadata update checks with legacy-updater comparison diagnostics; no activation' },
+  // PRI-698 Phase 1: ReleaseManager apply orchestration (full-runtime update
+  // through the installer + transaction journal). Requires
+  // `release_manager_shadow` AND PD_RELEASE_METADATA_URL AND the release
+  // pipeline publishing signed artifact targets (Phase 1 convention) —
+  // default off until that dependency lands. Rollback migration stays Phase 2.
+  { id: 'release_manager_write_authority', category: 'quiet', enabled: false, since: '2026-09-06', description: 'PRI-698 Phase 1 — ReleaseManager.apply() serves Console /apply-full (installer + journal deployment); flag-off = legacy console updater with explicit release_manager_write_disabled fallback reason' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
   { id: 'evolution_worker', category: 'quiet', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5)' },
   { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },

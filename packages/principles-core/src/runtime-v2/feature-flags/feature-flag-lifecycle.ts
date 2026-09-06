@@ -85,6 +85,14 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'PRI-614 Gate B wires a live update surface through ReleaseManager with parity evidence',
     retirementCriteria: 'PRI-614 update roadmap cancelled, or shadow comparison retired once ReleaseManager is the sole authority',
   },
+  release_manager_write_authority: {
+    decision: 'STAGED',
+    consumers: ['staged — pd-console/src/server/routes/update.ts routes apply-full through ReleaseManager only while this flag is on'],
+    evidence: 'PRI-698 Phase 1: ReleaseManager.apply() orchestrates the full-runtime update through the installer + transaction journal; default off until the release pipeline publishes signed artifact targets and rollback migration (Phase 2) proves same-version restore.',
+    decided: '2026-09-06',
+    graduationCriteria: 'Release pipeline publishes Phase 1 artifact targets end-to-end + N-1→N real upgrade smoke (PRI-671) green with the flag on',
+    retirementCriteria: 'Phase 2 rollback lands and ReleaseManager is the sole update authority — flag removed with the legacy updater (Gate C)',
+  },
   gfi: {
     decision: 'KEEP_QUIET',
     consumers: ['openclaw-plugin/src/commands/evolution-status*', 'host-runtime/src/production-pain-evidence*'],

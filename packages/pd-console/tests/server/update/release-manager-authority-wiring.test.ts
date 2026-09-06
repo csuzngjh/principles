@@ -35,6 +35,11 @@ vi.mock('os', async (importOriginal) => {
 
 const authorityMock = vi.hoisted(() => ({
   readiness: { ready: false, reasons: ['metadata_source_unconfigured'] as string[] },
+  /** PRI-698 Phase 1: structural readiness of the apply-full write path. */
+  applyFullReadiness: { ready: false, reasons: ['rollback_not_available'] as string[] },
+  /** Fake ReleaseManager.apply — outcome or thrown error, set per test. */
+  applyImpl: null as (() => Promise<unknown>) | null,
+  applyCalls: 0,
   checkRejection: null as (Error & { reason?: string; nextAction?: string }) | null,
   createThrows: false,
   createCalls: 0,
@@ -54,7 +59,10 @@ vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', (
       const kinds = () => ({
         check: { ready: authorityMock.readiness.ready, reasons: authorityMock.readiness.reasons },
         apply: { ready: false, reasons: ['rollback_not_available'] },
-        'apply-full': { ready: false, reasons: ['rollback_not_available'] },
+        'apply-full': {
+          ready: authorityMock.applyFullReadiness.ready,
+          reasons: authorityMock.applyFullReadiness.reasons,
+        },
         rollback: { ready: false, reasons: ['rollback_not_available'] },
       });
       const initialKinds = kinds();
@@ -69,6 +77,14 @@ vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', (
               trustedTarget: null,
               shadowComparison: { legacy: null, agrees: true, note: null },
             };
+          },
+          // PRI-698 Phase 1: the write orchestration entry. The mock returns
+          // the configured outcome or throws the configured error.
+          apply: async (options: unknown) => {
+            authorityMock.applyCalls += 1;
+            void options;
+            if (authorityMock.applyImpl === null) throw new Error('applyImpl not configured');
+            return authorityMock.applyImpl();
           },
         },
         // Registration-time snapshot; a null dispatchInstallStatus simulates
@@ -166,6 +182,9 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     process.env.OPENCLAW_HOME = tmpDir;
     vi.mocked(os.homedir).mockImplementation(() => tmpDir);
     authorityMock.readiness = { ready: false, reasons: ['metadata_source_unconfigured'] };
+    authorityMock.applyFullReadiness = { ready: false, reasons: ['rollback_not_available'] };
+    authorityMock.applyImpl = null;
+    authorityMock.applyCalls = 0;
     authorityMock.checkRejection = null;
     authorityMock.createThrows = false;
     authorityMock.dispatchReadiness = null;
@@ -204,6 +223,19 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
         '  release_manager_shadow: { category: quiet, enabled: true }',
         '',
       ].join('\n'),
+    );
+  }
+
+  /** PRI-698 Phase 1: shadow + write authority flags both on. */
+  function enableWriteFlag(): void {
+    enableFlag();
+    const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, 'utf8').replace(
+        '  release_manager_shadow: { category: quiet, enabled: true }',
+        '  release_manager_shadow: { category: quiet, enabled: true }\n  release_manager_write_authority: { category: quiet, enabled: true }',
+      ),
     );
   }
 
@@ -342,5 +374,108 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
     expect(res._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);
     expect(res._headers['x-pd-mutation-fallback-reason']).toBe('release_manager_unavailable:install_state_corrupt');
+  });
+
+  // ── PRI-698 Phase 1: the apply-full write path ──────────────────────────────
+
+  it('write flag off (default): structurally-ready apply-full stays legacy with release_manager_write_disabled', async () => {
+    enableFlag(); // shadow on, write flag off
+    authorityMock.readiness = { ready: true, reasons: [] };
+    authorityMock.applyFullReadiness = { ready: true, reasons: [] };
+    // A /check dispatch runs the registration sync; asserting the GOVERNANCE
+    // snapshot avoids executing the real legacy apply-full mutation (which
+    // would reach for the npm registry) while proving the routing decision.
+    await routes.handleUpdateRoute(createMockRequest('GET'), createMockResponse(), tmpDir, '/check');
+    const snapshot = updateMutationController.describeGovernance()['apply-full'];
+    expect(snapshot.active).toBe(LEGACY_MUTATION_AUTHORITY);
+    expect(snapshot.available).toEqual([LEGACY_MUTATION_AUTHORITY]);
+    expect(snapshot.fallbackReason).toBe('release_manager_write_disabled');
+    // The write path was never attempted — the gate is the flag, not readiness.
+    expect(authorityMock.applyCalls).toBe(0);
+  });
+
+  it('write flag on: ReleaseManager serves apply-full and the body keeps the legacy response contract', async () => {
+    enableWriteFlag();
+    authorityMock.readiness = { ready: true, reasons: [] };
+    authorityMock.applyFullReadiness = { ready: true, reasons: [] };
+    authorityMock.applyImpl = async () => ({
+      kind: 'applied',
+      productVersion: '1.223.0',
+      transactionId: 'update-1-abcdef01',
+      journalPath: '/tmp/transactions/update-1-abcdef01.jsonl',
+    });
+    const req = createMockRequest('POST');
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(req, res, tmpDir, '/apply-full');
+    expect(res.statusCode).toBe(200);
+    expect(authorityMock.applyCalls).toBe(1);
+    expect(res._headers['x-pd-mutation-authority']).toBe('release-manager');
+    expect(res._headers['x-pd-mutation-fallback-reason']).toBeUndefined();
+    expect(JSON.parse(res._body)).toEqual({
+      success: true,
+      data: {
+        success: true,
+        message: 'Updated to 1.223.0. Transaction update-1-abcdef01 confirmed in the journal.',
+        newVersion: '1.223.0',
+        requiresRestart: true,
+        nextAction: 'Restart PD Console to run the updated build.',
+      },
+    });
+  });
+
+  it('write flag on: a no_update outcome maps to a success body without restart', async () => {
+    enableWriteFlag();
+    authorityMock.readiness = { ready: true, reasons: [] };
+    authorityMock.applyFullReadiness = { ready: true, reasons: [] };
+    authorityMock.applyImpl = async () => ({
+      kind: 'no_update',
+      note: 'already_current: release 1.222.0 is the channel pointer',
+    });
+    const req = createMockRequest('POST');
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(req, res, tmpDir, '/apply-full');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual({
+      success: true,
+      data: {
+        success: true,
+        message: 'No update applied: already_current: release 1.222.0 is the channel pointer',
+        requiresRestart: false,
+      },
+    });
+  });
+
+  it('write flag on: a ReleaseManager apply failure maps onto the legacy failure body without partial state', async () => {
+    enableWriteFlag();
+    authorityMock.readiness = { ready: true, reasons: [] };
+    authorityMock.applyFullReadiness = { ready: true, reasons: [] };
+    authorityMock.applyImpl = async () => {
+      throw Object.assign(new Error('installer refused the payload'), {
+        reason: 'apply_failed',
+        nextAction: 'The runtime is unchanged. Resolve the reported cause and retry.',
+      });
+    };
+    const req = createMockRequest('POST');
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(req, res, tmpDir, '/apply-full');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual({
+      success: true,
+      data: {
+        success: false,
+        message: 'installer refused the payload',
+        reason: 'apply_failed',
+        nextAction: 'The runtime is unchanged. Resolve the reported cause and retry.',
+        requiresRestart: false,
+      },
+    });
+    // Flipping the write flag off deregisters the preferred authority for
+    // apply-full (rollback safety: the legacy path is always one flag away).
+    // Governance-snapshot assertion — no real legacy apply-full dispatch.
+    fs.rmSync(path.join(tmpDir, '.pd', 'config.yaml'));
+    await routes.handleUpdateRoute(createMockRequest('GET'), createMockResponse(), tmpDir, '/check');
+    const afterSnapshot = updateMutationController.describeGovernance()['apply-full'];
+    expect(afterSnapshot.active).toBe(LEGACY_MUTATION_AUTHORITY);
+    expect(afterSnapshot.fallbackReason).toBe('release_manager_shadow_disabled');
   });
 });

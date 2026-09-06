@@ -24,6 +24,7 @@ import { evaluateReleaseAdvancement, type ReleasePolicyDecision } from '../../sr
 import {
   appendJournalTransition,
   readActiveRecord,
+  readTransactionJournal,
   recoverUnfinishedTransaction,
   writeActiveRecord,
   type ActiveRecord,
@@ -210,26 +211,42 @@ registry.then(/决策为 allowed 且 direction 为 update/, (ctx) => {
   expect(check.decision).toEqual({ allowed: true, direction: 'update' });
 });
 
-registry.when(/在 shadow 模式下执行 ReleaseManager\.apply/, async (ctx) => {
+// PRI-698 Phase 1 contract change (Owner-directed, see PR): apply() no longer
+// refuses with `shadow_mode_read_only` — it is the real orchestrator. On a
+// repository that publishes metadata but no ARTIFACT target for the release,
+// the refusal contract under test is: refuse at acquisition with a stable
+// reason + Owner-facing next action, and close the opened transaction at a
+// terminal `failed` state (rc-9 / rc-7; a strict journal reader must never
+// see a mid-chain tail).
+registry.when(/执行 ReleaseManager\.apply 而仓库未发布工件/, async (ctx) => {
   const fixture = fixtureOf(ctx);
   const manager = new ReleaseManager({ pdHome: fixture.paths.home, metadataBaseUrl: fixture.repositoryUrl });
   try {
-    await manager.apply();
+    await manager.apply({ workspaceDir: fixture.paths.home });
     throw new Error('apply unexpectedly succeeded');
   } catch (error) {
     ctx.state['applyError'] = error;
   }
 });
 
-registry.then(/拒绝原因为 shadow_mode_read_only/, (ctx) => {
+registry.then(/拒绝原因为 metadata_refresh_failed/, (ctx) => {
   const error = ctx.state['applyError'] as ReleaseManagerError;
   expect(error).toBeInstanceOf(ReleaseManagerError);
-  expect(error.reason).toBe('shadow_mode_read_only');
+  expect(error.reason).toBe('metadata_refresh_failed');
 });
 
 registry.then(/拒绝信息包含面向 Owner 的 nextAction/, (ctx) => {
   const error = ctx.state['applyError'] as ReleaseManagerError;
   expect(error.nextAction.length).toBeGreaterThan(10);
+});
+
+registry.then(/打开的更新事务以终态 failed 关闭/, (ctx) => {
+  const fixture = fixtureOf(ctx);
+  const transactionsDir = fixture.paths.transactionsDir;
+  const journalFiles = fs.readdirSync(transactionsDir).filter((name) => name.startsWith('update-'));
+  expect(journalFiles).toHaveLength(1);
+  const transitions = readTransactionJournal(path.join(transactionsDir, journalFiles[0]));
+  expect(transitions[transitions.length - 1].to).toBe('failed');
 });
 
 registry.when(/前进策略评估同一 releaseId 的候选/, (ctx) => {
