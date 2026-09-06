@@ -950,12 +950,16 @@ export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflig
  */
 export function ensureBundledPdCliResolution(pdCliRoot: string): void {
   const packageRoot = path.resolve(pdCliRoot, '..');
+  // Unix relative targets: from <root>/pd-cli/node_modules/@principles/<name>
+  // up three levels to <root>, then into the sibling component dir.
+  // (Windows junctions take absolute targets.) A wrong level produces a
+  // DANGLING link — existsSync() is false and the second run hits EEXIST.
   const linkSpecs: { linkPath: string; windowsTarget: string; unixTarget: string }[] = [
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'core'), windowsTarget: path.join(packageRoot, 'core'), unixTarget: '../../core' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'host-runtime'), windowsTarget: path.join(packageRoot, 'host-runtime'), unixTarget: '../../host-runtime' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'), windowsTarget: path.join(packageRoot, 'codex-adapter'), unixTarget: '../../codex-adapter' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'install-layout'), windowsTarget: path.join(packageRoot, 'install-layout'), unixTarget: '../../install-layout' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', 'principles-disciple'), windowsTarget: path.join(packageRoot, 'plugin'), unixTarget: '../../plugin' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'core'), windowsTarget: path.join(packageRoot, 'core'), unixTarget: '../../../core' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'host-runtime'), windowsTarget: path.join(packageRoot, 'host-runtime'), unixTarget: '../../../host-runtime' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'), windowsTarget: path.join(packageRoot, 'codex-adapter'), unixTarget: '../../../codex-adapter' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'install-layout'), windowsTarget: path.join(packageRoot, 'install-layout'), unixTarget: '../../../install-layout' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', 'principles-disciple'), windowsTarget: path.join(packageRoot, 'plugin'), unixTarget: '../../../plugin' },
   ];
   for (const spec of linkSpecs) {
     if (existsSync(spec.linkPath)) continue;
