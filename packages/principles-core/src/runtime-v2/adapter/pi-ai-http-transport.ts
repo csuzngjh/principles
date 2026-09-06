@@ -69,6 +69,35 @@ export function getPiAiFetch(): FetchFunction {
   return cachedPiAiFetch;
 }
 
+/**
+ * Adapter APIs whose provider implementations REJECT a custom fetch outright
+ * (pi-ai 0.84.x google-generative-ai / google-vertex: "Custom fetch is not
+ * supported by the … adapter", thrown before any request is sent — the call
+ * resolves with stopReason=error). Their SDKs own the HTTP transport, so the
+ * undici cap-bypass cannot apply; those APIs keep Node's global fetch.
+ * Sourced from the locked pi-ai dist at integration time — when a pi-ai
+ * upgrade changes this set, update it with the release-notes check.
+ */
+const CUSTOM_FETCH_REJECTED_APIS: ReadonlySet<string> = new Set([
+  'google-generative-ai',
+  'google-vertex',
+]);
+
+/** Whether the given model API accepts the dedicated undici transport. */
+export function supportsCustomFetchTransport(api: string | undefined): boolean {
+  return api !== undefined && !CUSTOM_FETCH_REJECTED_APIS.has(api);
+}
+
+/**
+ * Fetch for a specific pi-ai model API: the dedicated cap-bypass transport
+ * where the provider supports fetch injection, Node's global fetch where the
+ * provider rejects it. Keeps the OpenAI/undici timeout fix intact without
+ * breaking Google/Gemini/Vertex providers (PR #1524 review P1).
+ */
+export function getPiAiFetchForApi(api: string | undefined): FetchFunction {
+  return supportsCustomFetchTransport(api) ? getPiAiFetch() : globalThis.fetch;
+}
+
 /** Test-only: reset the singleton (vitest module state isolation). */
 export function resetPiAiFetchForTest(): void {
   cachedPiAiFetch = undefined;

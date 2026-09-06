@@ -20,7 +20,7 @@
 // remains the unified Model/Context/Message contract in 0.84.
 import { getModel, completeSimple } from '@earendil-works/pi-ai/compat';
 import { builtinPiAiProviderIds } from './pi-ai-catalog.js';
-import { getPiAiFetch } from './pi-ai-http-transport.js';
+import { getPiAiFetchForApi } from './pi-ai-http-transport.js';
 import type { Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
@@ -381,9 +381,6 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private readonly runs = new Map<string, RunState>();
   private readonly eventEmitter: StoreEventEmitter;
   private readonly runtimeKind: RuntimeKind = 'pi-ai';
-  // PRI-683: LLM requests bypass Node fetch's implicit 300s undici caps via a
-  // dedicated transport, so timeoutMs is the single timeout authority.
-  private readonly piAiFetch = getPiAiFetch();
   private readonly defaultCapabilities: RuntimeCapabilities = {
     supportsStructuredJsonOutput: true,
     supportsToolUse: false,
@@ -466,7 +463,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         timeoutMs,
         maxRetries: 0,
         maxTokens: this.resolveMaxTokens(),
-        fetch: this.piAiFetch,
+        fetch: getPiAiFetchForApi(model.api),
       });
 
       // extractAssistantTextOrThrow normalizes resolved-error responses
@@ -1020,7 +1017,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
         maxTokens: this.resolveMaxTokens(),
-        fetch: this.piAiFetch,
+        fetch: getPiAiFetchForApi(params.model.api),
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
@@ -1100,7 +1097,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
         maxTokens: this.resolveMaxTokens(),
-        fetch: this.piAiFetch,
+        fetch: getPiAiFetchForApi(params.model.api),
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
@@ -1299,7 +1296,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           timeoutMs: currentTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
           maxTokens: this.resolveMaxTokens(), // PRI-621: undefined = pi-ai native model ceiling
-          fetch: this.piAiFetch,
+          fetch: getPiAiFetchForApi(model.api),
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
           completeOptions.reasoning = this.config.reasoning;

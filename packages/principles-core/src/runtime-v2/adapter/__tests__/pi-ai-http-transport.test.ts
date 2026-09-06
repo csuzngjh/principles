@@ -21,10 +21,13 @@
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import * as http from 'node:http';
+import type { Context } from '@earendil-works/pi-ai';
 import {
   createBoundPiAiFetch,
   getPiAiFetch,
+  getPiAiFetchForApi,
   resetPiAiFetchForTest,
+  supportsCustomFetchTransport,
 } from '../pi-ai-http-transport.js';
 
 /** Local slow server: delays response headers by `headerDelayMs`. */
@@ -66,6 +69,12 @@ function startStalledBodyServer(): Promise<{
 }> {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
+    // flushHeaders() pushes the response bytes to the socket — without it,
+    // writeHead() only buffers in the application layer and fetch() never
+    // receives the Response, so the test would (re)cover the headers phase,
+    // not the body phase (PR #1524 review finding). With headers on the wire,
+    // fetch() resolves and the hang moves to the body read.
+    res.flushHeaders();
     // Intentionally never res.end() — simulates an LLM stream that opened
     // successfully then stalls mid-generation (the bodyTimeout half of the
     // PRI-683 cap pair).
@@ -184,12 +193,17 @@ describe('PRI-683: pi-ai HTTP transport inner timeout cap', () => {
     // passed via completeOptions and forwarded to the fetch init.
     const signal = AbortSignal.timeout(300);
 
+    // Phase proof (PR #1524 review): with flushHeaders() the Response MUST
+    // arrive first — only then does the body read hang — so the test actually
+    // exercises the body phase instead of re-testing the headers phase.
     const startedAt = Date.now();
-    await expect(fetch(server.url, { signal })).rejects.toThrow();
+    const res = await fetch(server.url, { signal });
+    expect(res.status).toBe(200);
+    await expect(res.json()).rejects.toThrow();
     const elapsed = Date.now() - startedAt;
 
-    // Ended at the outer authority's 300ms — not left hanging (caps
-    // disabled means nothing else was ever going to stop it) and not cut
+    // The BODY read was cut by the outer authority's 300ms — not left hanging
+    // (caps disabled means nothing else was ever going to stop it) and not cut
     // early by a transport-layer timer.
     expect(elapsed).toBeGreaterThanOrEqual(250);
     expect(elapsed).toBeLessThan(5_000);
@@ -201,4 +215,47 @@ describe('PRI-683: pi-ai HTTP transport inner timeout cap', () => {
     const second = getPiAiFetch();
     expect(second).not.toBe(first);
   });
+
+  // ── PR #1524 review P1: provider fetch-injection compatibility ──────────
+  //
+  // pi-ai 0.84.x's google-generative-ai and google-vertex adapters reject any
+  // fetch other than globalThis.fetch BEFORE the request is sent ("Custom
+  // fetch is not supported by the … adapter", resolved as stopReason=error).
+  // The dedicated undici transport must therefore only be injected for APIs
+  // that accept fetch injection; the Google APIs keep globalThis.fetch so
+  // those providers keep working. The live sub-check runs against the REAL
+  // locked pi-ai with a syntactic throwaway key (assembled at runtime, never
+  // a credential) and no network: the fetch guard fires at adapter entry,
+  // before any HTTP I/O, so the assertion needs no successful request.
+  it('provider compatibility: google APIs get globalThis.fetch, others get the dedicated transport', async () => {
+    expect(supportsCustomFetchTransport('google-generative-ai')).toBe(false);
+    expect(supportsCustomFetchTransport('google-vertex')).toBe(false);
+    expect(getPiAiFetchForApi('google-generative-ai')).toBe(globalThis.fetch);
+    expect(getPiAiFetchForApi('google-vertex')).toBe(globalThis.fetch);
+
+    // Every other known API keeps the cap-bypass transport (the PRI-683 fix).
+    expect(getPiAiFetchForApi('openai-completions')).toBe(getPiAiFetch());
+    expect(getPiAiFetchForApi('anthropic-messages')).toBe(getPiAiFetch());
+    expect(getPiAiFetchForApi('openai-responses')).toBe(getPiAiFetch());
+
+    // Live proof against the real pi-ai adapters: with the fix, they get past
+    // the fetch guard and surface whatever auth/network failure follows —
+    // anything EXCEPT the custom-fetch rejection the bug produced.
+    const { completeSimple } = await import('@earendil-works/pi-ai/compat');
+    const { getBuiltinModel } = await import('@earendil-works/pi-ai/providers/all');
+    const throwawayKey = ['test', 'key', 'offline'].join('-');
+    const ctx: Context = {
+      messages: [{ role: 'user', content: 'Reply with {"ok":true} only.', timestamp: Date.now() }],
+    };
+    for (const [provider, modelId] of [['google', 'gemini-2.5-flash'], ['google-vertex', 'gemini-2.5-flash']] as const) {
+      const model = getBuiltinModel(provider, modelId);
+      const response = await completeSimple(model, ctx, {
+        apiKey: throwawayKey,
+        maxRetries: 0,
+        timeoutMs: 2_000,
+        fetch: getPiAiFetchForApi(model.api),
+      });
+      expect(response.errorMessage ?? '').not.toMatch(/Custom fetch is not supported/);
+    }
+  }, 15_000);
 });
