@@ -237,10 +237,13 @@ export function scanResidue(primaryPath) {
     const gitFile = path.join(dir, '.git');
     let raw;
     try {
-      if (!fs.statSync(gitFile).isFile()) continue;
+      // Read directly with no stat pre-check (CodeQL file-system-race): a
+      // worktree shell has a .git FILE (readable), while a plain repo
+      // checkout has a .git DIRECTORY (readFileSync throws EISDIR) and a
+      // plain dir has none (ENOENT) — both land in the catch below.
       raw = fs.readFileSync(gitFile, 'utf-8');
     } catch {
-      continue; // no .git file → not a worktree shell (plain dir) — out of scope
+      continue; // no readable .git file → not a worktree shell — out of scope
     }
     const match = /^\s*gitdir:\s*(.+)\s*$/m.exec(raw);
     if (!match) continue;
@@ -338,8 +341,7 @@ export async function collectWorkspaceState(opts = {}) {
       for (const line of listing.split(/\r?\n/)) {
         if (!line.trim()) continue;
         const tab = line.indexOf('\t');
-        const branch = tab === -1 ? line.trim() : line.slice(0, tab).trim();
-        const tipDate = tab === -1 ? null : line.slice(tab + 1).trim();
+        const branch = (tab === -1 ? line : line.slice(0, tab)).trim();
         if (!branch || seenBranches.has(branch)) continue;
         const facts = await branchFacts(cwd, branch);
         records.push({

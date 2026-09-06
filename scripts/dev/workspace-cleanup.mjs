@@ -52,16 +52,6 @@ function parseArgs(argv) {
   return args;
 }
 
-function fail(args, message, nextAction) {
-  if (args.json) {
-    console.log(JSON.stringify({ ok: false, error: message, nextAction }, null, 2));
-  } else {
-    console.error('[workspace-cleanup] FAIL: ' + message);
-    if (nextAction) console.error('  next: ' + nextAction);
-  }
-  process.exit(1);
-}
-
 function describeAction(action) {
   const lines = [];
   if (action.kind === 'remove-worktree') {
