@@ -223,7 +223,11 @@ async function runIngestionConsentStep(pd, workspaceDir, args) {
   const skip = (note) => ({ outcome: 'skipped', ...(note ? { note } : {}) });
   if (!pd) return skip('pd_cli_unavailable — run `pd codex setup --workspace <dir>` after installing @principles/pd-cli');
 
-  // Present the frozen disclosure (SSoT lives in the CLI).
+  // Present the frozen disclosure (SSoT lives in the CLI). R1-1: the text is
+  // presented on EVERY path that can record a decision — interactive prints
+  // to stdout before the prompt; non-interactive prints to stderr (visible,
+  // never pollutes the machine-readable stdout) so `--ingest accept` can
+  // never record an unseen disclosure.
   const show = spawnSync(pd.command, [...pd.prefix, 'codex', 'setup', '--show-disclosure', '--workspace', workspaceDir], { encoding: 'utf8', timeout: 60_000 });
   if (show.error || show.status !== 0 || !show.stdout) {
     return skip('disclosure_unavailable — run `pd codex setup --show-disclosure` manually');
@@ -233,7 +237,7 @@ async function runIngestionConsentStep(pd, workspaceDir, args) {
   if (args.ingest === 'accept' || args.ingest === 'decline') decision = args.ingest;
   else if (args.ingest === 'skip') return skip();
   else if (process.stdin.isTTY) {
-    if (!args.json) process.stdout.write(show.stdout + '\n');
+    process.stdout.write(show.stdout + '\n');
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
       const answer = (await rl.question('是否开启 Codex 对话观察？ y = 开启（已读上述说明） / n = 保持关闭: ')).trim().toLowerCase();
@@ -244,7 +248,8 @@ async function runIngestionConsentStep(pd, workspaceDir, args) {
       rl.close();
     }
   } else {
-    return skip('no_tty — pass --ingest accept|decline for non-interactive consent');
+    process.stderr.write(show.stdout + '\n');
+    return skip('no_tty — review the disclosure above, then pass --ingest accept|decline for non-interactive consent');
   }
 
   const apply = spawnSync(

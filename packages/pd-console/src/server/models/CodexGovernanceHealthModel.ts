@@ -32,7 +32,6 @@ import {
   readGovernanceAdmissionCounts,
   computeCodexWorkerStatusMode,
   CODEX_INGESTION_DISCLOSURE_VERSION,
-  type GovernanceCheckpointRecord,
 } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig, SqliteConnection, SqliteTaskStore } from '@principles/core/runtime-v2';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
@@ -145,9 +144,8 @@ export class CodexGovernanceHealthModel {
     // The Console surfaces checkpoint completeness and staleness.)
     const rollouts: CodexRolloutHealth[] = [];
     const listed = listGovernanceCheckpoints({ workspaceDir: this.workspaceDir, hostKind: 'codex' });
-    const listedCheckpoints = (listed as { checkpoints?: GovernanceCheckpointRecord[] }).checkpoints;
-    if (Array.isArray(listedCheckpoints)) {
-      for (const checkpoint of listedCheckpoints) {
+    if (listed.ok) {
+      for (const checkpoint of listed.checkpoints) {
         rollouts.push({
           rolloutIdentity: checkpoint.rolloutIdentity,
           byteOffset: checkpoint.byteOffset,
@@ -159,7 +157,7 @@ export class CodexGovernanceHealthModel {
         if (checkpoint.incompleteTail) noteBlocker('rollout', `${checkpoint.rolloutIdentity} incomplete_tail`);
       }
     } else {
-      noteBlocker('rollouts', 'checkpoints_unavailable');
+      noteBlocker('rollouts', listed.reason);
     }
 
     // ── Observation / admission counts ───────────────────────────────────────

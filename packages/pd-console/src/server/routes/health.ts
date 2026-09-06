@@ -23,10 +23,11 @@ function getModel(workspaceDir: string): HealthCheckModel {
 }
 
 // PRI-625 Slice D (SPEC §15): Codex governance health is read-only and cheap;
-// cache it with the same TTL discipline as the system health model.
-const codexModels = new Map<string, { model: CodexGovernanceHealthModel; cachedAt: number }>();
-let codexCache: { health: Awaited<ReturnType<CodexGovernanceHealthModel['collect']>>; cachedAt: number } | null = null;
+// cache it with the same TTL discipline as the system health model. Keyed by
+// workspace — the route can serve multiple workspaces.
 const CODEX_WORKSPACE_CACHE_TTL_MS = MODEL_CACHE_TTL_MS;
+const codexModels = new Map<string, { model: CodexGovernanceHealthModel; cachedAt: number }>();
+const codexCache = new Map<string, { health: Awaited<ReturnType<CodexGovernanceHealthModel['collect']>>; cachedAt: number }>();
 
 function getCodexModel(workspaceDir: string): CodexGovernanceHealthModel {
   const cached = codexModels.get(workspaceDir);
@@ -52,11 +53,14 @@ export async function handleHealthRoute(
 
   try {
     const health = await model.checkSystemHealth();
-    let codexGovernance = codexCache?.health;
-    if (codexGovernance === undefined || codexCache === null || Date.now() - codexCache.cachedAt >= CODEX_WORKSPACE_CACHE_TTL_MS) {
+    let codexGovernance: Awaited<ReturnType<CodexGovernanceHealthModel['collect']>> | undefined;
+    const cachedCodex = codexCache.get(options.workspaceDir);
+    if (cachedCodex !== undefined && Date.now() - cachedCodex.cachedAt < CODEX_WORKSPACE_CACHE_TTL_MS) {
+      codexGovernance = cachedCodex.health;
+    } else {
       try {
         codexGovernance = await getCodexModel(options.workspaceDir).collect();
-        codexCache = { health: codexGovernance, cachedAt: Date.now() };
+        codexCache.set(options.workspaceDir, { health: codexGovernance, cachedAt: Date.now() });
       } catch {
         // The §15 block degrades independently of the base system health —
         // the route stays 200 with the block absent rather than failing the
@@ -81,5 +85,5 @@ export function disposeHealthModels(): void {
   }
   models.clear();
   codexModels.clear();
-  codexCache = null;
+  codexCache.clear();
 }

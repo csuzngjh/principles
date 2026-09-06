@@ -37,13 +37,14 @@ import {
   listGovernanceCheckpoints,
   readGovernanceObservationStats,
   readGovernanceAdmissionCounts,
+  detectLegacyCodexHookRegistration,
   CODEX_INGESTION_DISCLOSURE_VERSION,
-  type GovernanceCheckpointRecord,
 } from '@principles/host-runtime';
 import {
   computeCodexWorkerStatusMode,
   locateCodexTranscriptByRolloutIdentity,
   CODEX_INGESTION_MIN_VERSION,
+  CODEX_INGESTION_VERIFIED_VERSION,
 } from '@principles/codex-adapter';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
 import { SqliteConnection, SqliteTaskStore, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime-v2';
@@ -64,6 +65,8 @@ interface CodexHealthReport {
   adapterVersion: string;
   runtimeVersion: string;
   codexIngestionMinVersion: string;
+  /** G1-verified Codex version (the frozen contract fixtures come from this CLI). */
+  codexIngestionVerifiedVersion: string;
   featureFlag: {
     name: 'host.codex';
     enabled: boolean;
@@ -221,32 +224,21 @@ function detectHooksTrust(codexConfigDir: string | undefined): CodexHealthReport
 }
 
 /**
- * Detect a PD-owned legacy global registration (Slice D §17 retirement): the
- * global hooks.json contains a PD marker group whose PostToolUse still uses
- * the legacy `async: true` shape the old installer wrote.
+ * Dual-registration detection for the §15/§17 health surface. The legacy
+ * predicate itself is the ONE authority in host-runtime
+ * (detectLegacyCodexHookRegistration) — shared with the retired installer.
  */
 function detectDualRegistration(codexConfigDir: string | undefined): CodexHealthReport['dualRegistration'] {
   const globalHooksPath = codexConfigDir ? path.join(codexConfigDir, 'hooks.json') : undefined;
   const globalHooksExists = globalHooksPath ? fs.existsSync(globalHooksPath) : false;
   if (globalHooksExists && globalHooksPath) {
-    let legacyAsyncPostToolUse = false;
-    try {
-      const raw = fs.readFileSync(globalHooksPath, 'utf8');
-      // Legacy installer shape: PD marker groups with an async PostToolUse.
-      // Plain substring scan over whitespace-flattened JSON — bounded, no
-      // regex over quote/colon syntax.
-      const flattened = raw.replace(/\s+/g, '');
-      legacyAsyncPostToolUse = raw.includes('__pd_marker')
-        && (flattened.includes('"PostToolUse":[{"command"') || flattened.includes('"async":true'));
-    } catch {
-      // unreadable — report presence without the legacy classification
-    }
+    const legacy = detectLegacyCodexHookRegistration(globalHooksPath);
     return {
       detected: true,
-      legacyAsyncPostToolUse,
+      legacyAsyncPostToolUse: legacy.legacyAsyncPostToolUse,
       globalHooksPath,
       reason: 'global_hooks_json_present',
-      nextAction: legacyAsyncPostToolUse
+      nextAction: legacy.detected
         ? 'A legacy PD global hook registration was detected. The Marketplace plugin is the only supported new install path (SPEC §17): remove the legacy registration with `create-principles-disciple uninstall --host codex`, then install the principles-disciple Codex plugin.'
         : 'Global ~/.codex/hooks.json is installed. If the PD Codex plugin is also installed via marketplace, this may cause double-registration. Choose ONE: keep global hooks.json (fallback path) OR uninstall it and use the plugin (recommended).',
     };
@@ -278,6 +270,9 @@ async function readDiagnosticianCounts(workspace: string): Promise<CodexHealthRe
     const connection = new SqliteConnection(workspace);
     const taskStore = new SqliteTaskStore(connection);
     const count = async (status: 'pending' | 'leased' | 'retry_wait' | 'needs_human_review'): Promise<number> => {
+      // Bounded reporting: 1000 far exceeds any realistic per-workspace
+      // Diagnostician backlog; a saturated bucket still blocks readiness via
+      // needs_human_review/pending semantics rather than hiding.
       const tasks = await taskStore.listTasks({ status, taskKind: 'diagnostician', limit: 1000 });
       return tasks.length;
     };
@@ -310,6 +305,8 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   let featureFlagSource: 'user_config' | 'defaults' | 'malformed';
   let hostCodexEnabled = false;
   let workspaceInit: CodexHealthReport['workspaceInit'] = { initialized: false, reason: 'workspace_not_resolved', nextAction: 'Run `pd runtime init --confirm` in the workspace.' };
+  // ONE config load feeds both flag states + workspace init.
+  const configLoad = loadPdConfigForPlugin(resolution.ok ? resolution.workspaceDir : workspaceDir);
 
   if (!resolution.ok) {
     featureFlagSource = 'defaults';
@@ -317,7 +314,6 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     noteReadyBlocker('workspace', resolution.reason);
   } else {
     resolvedWorkspace = resolution.workspaceDir;
-    const configLoad = loadPdConfigForPlugin(resolvedWorkspace);
     featureFlagSource = configLoad.source;
     const flags = computeFeatureFlagsFromConfig(configLoad.effective);
     hostCodexEnabled = isFeatureEnabled(flags, 'host.codex');
@@ -333,7 +329,6 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
       workspaceInit = { initialized: true };
     }
   }
-  const configLoad = loadPdConfigForPlugin(resolvedWorkspace);
   const ingestionFlag: CodexHealthReport['ingestionFlag'] = configLoad.ok
     ? {
         name: 'codex_conversation_ingestion',
@@ -398,11 +393,10 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   let rollouts: CodexHealthReport['rollouts'];
   {
     const listed = listGovernanceCheckpoints({ workspaceDir: resolvedWorkspace, hostKind: 'codex' });
-    const listedCheckpoints = listed as { checkpoints?: GovernanceCheckpointRecord[] };
-    if (Array.isArray(listedCheckpoints.checkpoints)) {
+    if (listed.ok) {
       const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
       let lagUndetectable = false;
-      const checkpoints = listedCheckpoints.checkpoints.map((checkpoint) => {
+      const checkpoints = listed.checkpoints.map((checkpoint) => {
         let lagBytes: number | null = null;
         const lookup = locateCodexTranscriptByRolloutIdentity(codexHome, checkpoint.rolloutIdentity);
         if (lookup.ok) {
@@ -433,9 +427,8 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
         warnings.push('rollout_lag_undetectable: the transcript file for at least one checkpoint could not be located (deleted rollout or non-default CODEX_HOME).');
       }
     } else {
-      const degraded = listed as { reason?: string; nextAction?: string };
-      rollouts = { reason: degraded.reason ?? 'checkpoints_unavailable', nextAction: degraded.nextAction ?? 'Inspect the workspace trajectory.db checkpoints table.' };
-      noteReadyBlocker('rollouts', degraded.reason ?? 'checkpoints_unavailable');
+      rollouts = { reason: listed.reason, nextAction: listed.nextAction };
+      noteReadyBlocker('rollouts', listed.reason);
     }
   }
 
@@ -477,6 +470,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     adapterVersion,
     runtimeVersion,
     codexIngestionMinVersion: CODEX_INGESTION_MIN_VERSION,
+    codexIngestionVerifiedVersion: CODEX_INGESTION_VERIFIED_VERSION,
     featureFlag: {
       name: 'host.codex',
       enabled: hostCodexEnabled,
@@ -519,6 +513,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   line('adapterVersion', report.adapterVersion);
   line('runtimeVersion', report.runtimeVersion);
   line('codexIngestionMinVersion', report.codexIngestionMinVersion);
+  line('codexIngestionVerifiedVersion', report.codexIngestionVerifiedVersion);
   line('featureFlag.host.codex', `${String(report.featureFlag.enabled)} (${report.featureFlag.source})`);
   if ('enabled' in report.ingestionFlag) {
     line('ingestionFlag.codex_conversation_ingestion', `${String(report.ingestionFlag.enabled)} (${report.ingestionFlag.source})`);

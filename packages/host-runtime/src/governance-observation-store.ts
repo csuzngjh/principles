@@ -998,7 +998,14 @@ export function quarantineGovernanceObservation(args: QuarantineGovernanceObserv
       if (!isRecord(row)) {
         return { ok: false, reason: 'record_not_found', nextAction: `Record ${recordId} does not exist in rollout '${rolloutIdentity}' of this workspace; verify the id.` };
       }
-      const retentionClass = String(rowField(row, 'retention_class'));
+      const retentionClassRaw = String(rowField(row, 'retention_class'));
+      // rc-2: the DB column is untrusted — only known classes enter the typed
+      // summary; anything else reads as 'expired' semantics for reporting but
+      // still fails the quarantinable check below.
+      const retentionClass: GovernanceRetentionClass = retentionClassRaw === 'operational' || retentionClassRaw === 'promoted'
+        || retentionClassRaw === 'quarantined' || retentionClassRaw === 'rolled_back'
+        ? retentionClassRaw
+        : 'expired';
       const quarantinedAt = rowField(row, 'quarantined_at');
       const sourceOrder = typeof rowField(row, 'source_order') === 'number' ? (rowField(row, 'source_order') as number) : null;
 
@@ -1018,7 +1025,7 @@ export function quarantineGovernanceObservation(args: QuarantineGovernanceObserv
         kind: String(rowField(row, 'kind')),
         logicalKey: String(rowField(row, 'logical_key')),
         observedAt: String(rowField(row, 'observed_at')),
-        retentionClass: retentionClass as GovernanceRetentionClass,
+        retentionClass,
         digest: observationDigest(row),
         gap: `prev=${neighborQuery('prev')};next=${neighborQuery('next')};record=${sourceOrder === null ? 'null' : sourceOrder}`,
       };

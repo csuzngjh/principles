@@ -37,7 +37,9 @@ import type {
   HostUninstallContext,
   HostUninstallResult,
   HostDetectResult,
+  LegacyCodexRegistration,
 } from '@principles/core/host';
+import { parseLegacyCodexHooksRegistration } from '@principles/core/host';
 
 const requireFromModule = createRequire(import.meta.url);
 
@@ -182,55 +184,20 @@ export function buildWrapperScriptContent(pdHookPath: string, workspaceDir: stri
 }
 
 // ─── Legacy registration detection (Slice D, SPEC rev 2 §17) ────────────────
+// ONE parsing authority lives in @principles/core/host
+// (parseLegacyCodexHooksRegistration — pure, no I/O); this installer is the
+// FS edge for its own refusal path. The health surface uses the same parser
+// via @principles/host-runtime.
 
-export interface LegacyCodexRegistration {
-  detected: boolean;
-  /** true when a PD-owned PostToolUse group still carries the legacy `async: true` shape. */
-  legacyAsyncPostToolUse: boolean;
-  hooksJsonPath: string;
-}
-
-/**
- * Detect a PD-owned legacy global hook registration in ~/.codex/hooks.json:
- * any `__pd_marker: "pd-owned"` group (the marker only ever came from this
- * installer). `legacyAsyncPostToolUse` additionally identifies the retired
- * `async: true` PostToolUse shape, which the Marketplace plugin does not use
- * (its hooks.json omits the async flag) — the difference health/setup use to
- * offer the §17 migration.
- */
 export function detectLegacyCodexHookRegistration(hooksJsonPathOverride?: string): LegacyCodexRegistration {
   const hooksJsonPath = hooksJsonPathOverride ?? getCodexHooksJsonPath();
-  const result: LegacyCodexRegistration = { detected: false, legacyAsyncPostToolUse: false, hooksJsonPath };
-  let raw: string;
-  try {
-    raw = readFileSync(hooksJsonPath, 'utf-8');
-  } catch {
-    return result;
-  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
   } catch {
-    return result;
+    return { detected: false, legacyAsyncPostToolUse: false };
   }
-  if (!isRecord(parsed)) return result;
-  for (const eventName of CODEX_EVENTS) {
-    const groups = parsed[eventName];
-    if (!isUnknownArray(groups)) continue;
-    for (const group of groups) {
-      if (!(isRecord(group) && Object.hasOwn(group, '__pd_marker') && group.__pd_marker === 'pd-owned')) continue;
-      result.detected = true;
-      const entries = group.hooks;
-      if (isUnknownArray(entries)) {
-        for (const entry of entries) {
-          if (isRecord(entry) && eventName === 'PostToolUse' && Object.hasOwn(entry, 'async') && entry.async === true) {
-            result.legacyAsyncPostToolUse = true;
-          }
-        }
-      }
-    }
-  }
-  return result;
+  return parseLegacyCodexHooksRegistration(parsed);
 }
 
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────

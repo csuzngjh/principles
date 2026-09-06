@@ -113,5 +113,4 @@ export async function handleCodexIngestQuarantine(options: CodexIngestQuarantine
     console.log(`  gap:         ${result.record.gap}`);
     if (result.dryRun) console.log('  next action: Dry run only — nothing was mutated. Re-run with --confirm to quarantine this record.');
   }
-  if (result.dryRun) process.exitCode = undefined;
 }

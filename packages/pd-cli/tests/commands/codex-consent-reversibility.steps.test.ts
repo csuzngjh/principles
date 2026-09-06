@@ -260,4 +260,37 @@ registry.then('previously promoted evidence remains intact', async () => {
   expect(listed.observations.find((row) => row.logicalKey === 'codex|r-evidence|t1|user')?.retentionClass).toBe('promoted');
 });
 
+// ── §18-15 / R1-4: the upgrade path never enables ingestion ──────────────────
+
+registry.given('an isolated Codex Workspace where the Owner declined ingestion', async () => {
+  ws = makeWorkspace();
+  const report = await runSetup({ workspace: ws, decline: true, json: true });
+  expect(report.status).toBe('ok');
+  expect(report.decision).toBe('declined');
+});
+
+registry.when('the production runtime initializer re-runs over the workspace', async () => {
+  // `pd runtime init` is the upgrade/re-init entry over an existing workspace.
+  const { handleRuntimeInit } = await import('../../src/commands/runtime-init.js');
+  const captured: string[] = [];
+  const logSpy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+    captured.push(args.map(String).join(' '));
+  });
+  try {
+    await handleRuntimeInit({ workspace: ws, confirm: true, json: true });
+  } finally {
+    logSpy.mockRestore();
+  }
+  void captured;
+});
+
+registry.then('the ingestion flag is still off and the declined consent record is untouched', () => {
+  const read = readCodexIngestionConsent(ws);
+  expect(read.ok && read.record?.decision).toBe('declined');
+  const config = fs.readFileSync(path.join(ws, '.pd', 'config.yaml'), 'utf8');
+  expect(config).toContain('codex_conversation_ingestion:');
+  expect(config).toContain('enabled: false');
+  expect(config).not.toMatch(/codex_conversation_ingestion:[\s\S]{0,40}enabled: true/);
+});
+
 defineFeature(fs.readFileSync(resolveFeaturePath('docs/specs/features/codex-governance/codex-consent-reversibility.feature'), 'utf8'), registry);

@@ -2,10 +2,12 @@
 # PRI-625 Slice D. Scenario ↔ §18 mapping (SPEC is the authority):
 #   §18-17 → setup consent follows R1: the disclosure is presented, declining
 #            leaves all governance intact, and declining causes no transcript read
-#   §18-15 → reversibility (flag-off + consumer pause half, bound here; the
-#            uninstall/legacy-migration half is bound by the installer suites —
-#            uninstaller.test.ts + codex-host-installer.test.ts — which prove
-#            uninstall removes PD registrations only and evidence is preserved)
+#   §18-15 → reversibility: flag-off (bound here) + upgrade-never-enables
+#            (R1-4, bound here via the production upgrade-time initializer) +
+#            uninstall/legacy-migration (bound in create-principles-disciple's
+#            installer suites: uninstall removes PD registrations only and
+#            evidence is preserved; the retired install() never writes any
+#            registration or config)
 Feature: Codex conversation-ingestion consent and reversibility
   As a PD Owner
   I want conversation observation to run only after an informed explicit yes, and to stop completely when I say no
@@ -28,10 +30,15 @@ Feature: Codex conversation-ingestion consent and reversibility
     Then the consent record exists with the declined decision and the ingestion flag is off
     And no transcript was opened by the decline
 
-  Scenario: Machine mode refuses to decide by itself (R1-4 guard)
+  Scenario: Machine mode refuses to decide by itself (decision-guard)
     Given an isolated Codex Workspace without a consent record
     When setup runs in machine mode without an explicit accept or decline
     Then nothing is recorded and nothing is enabled
+
+  Scenario: Re-running the upgrade-time initializer never enables ingestion (§18-15 / R1-4)
+    Given an isolated Codex Workspace where the Owner declined ingestion
+    When the production runtime initializer re-runs over the workspace
+    Then the ingestion flag is still off and the declined consent record is untouched
 
   Scenario: Reversibility — flag off stops ingestion and promoted evidence remains (§18-15)
     Given an isolated Codex Workspace with conversation ingestion enabled and evidence recorded

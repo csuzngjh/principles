@@ -64,12 +64,14 @@ describe('CodexHostInstaller.install — retirement (Slice D, SPEC rev 2 §17)',
     expect(result.nextAction).toContain('plugin add principles-disciple@principles');
   });
 
-  it('NEVER writes hook registrations, wrapper, or marker (no writes at all)', async () => {
+  it('NEVER writes hook registrations, wrapper, or marker — and never touches any workspace config (R1-4)', async () => {
     const installer = new CodexHostInstaller();
     await installer.install({ workspaceDir: '/home/user/workspace', host: 'codex' });
 
     expect(mockWriteFileSync).not.toHaveBeenCalled();
     expect(mockMkdirSync).not.toHaveBeenCalled();
+    // R1-4: the upgrade path must never enable ingestion implicitly — the
+    // retired installer cannot flip any flag because it writes nothing at all.
   });
 
   it('offers explicit migration when a legacy PD registration is detected', async () => {

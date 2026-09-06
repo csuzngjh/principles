@@ -70,6 +70,34 @@ vi.mock('@principles/host-runtime', () => ({
   listGovernanceCheckpoints: mockListGovernanceCheckpoints,
   readGovernanceObservationStats: mockReadObservationStats,
   readGovernanceAdmissionCounts: mockReadAdmissionCounts,
+  detectLegacyCodexHookRegistration: (hooksJsonPath?: string) => {
+    // Mirrors the host-runtime FS edge: read via the mocked fs, delegate the
+    // parse semantics (marker + legacy async PostToolUse) exactly as
+    // codex-legacy-registration.ts does over @principles/core/host.
+    try {
+      const parsed = JSON.parse(mockReadFileSync(hooksJsonPath ?? '/fake/home/.codex/hooks.json', 'utf8')) as Record<string, unknown>;
+      const result = { detected: false, legacyAsyncPostToolUse: false };
+      for (const eventName of ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart']) {
+        const groups = parsed[eventName];
+        if (!Array.isArray(groups)) continue;
+        for (const group of groups) {
+          if (typeof group !== 'object' || group === null || !Object.hasOwn(group, '__pd_marker') || (group as Record<string, unknown>).__pd_marker !== 'pd-owned') continue;
+          result.detected = true;
+          const entries = (group as Record<string, unknown>).hooks;
+          if (Array.isArray(entries)) {
+            for (const entry of entries) {
+              if (typeof entry === 'object' && entry !== null && eventName === 'PostToolUse' && Object.hasOwn(entry, 'async') && (entry as Record<string, unknown>).async === true) {
+                result.legacyAsyncPostToolUse = true;
+              }
+            }
+          }
+        }
+      }
+      return result;
+    } catch {
+      return { detected: false, legacyAsyncPostToolUse: false };
+    }
+  },
   CODEX_INGESTION_DISCLOSURE_VERSION: 'g2a-2026-08-28',
 }));
 
@@ -77,6 +105,7 @@ vi.mock('@principles/codex-adapter', () => ({
   computeCodexWorkerStatusMode: mockComputeWorkerMode,
   locateCodexTranscriptByRolloutIdentity: mockLocateTranscript,
   CODEX_INGESTION_MIN_VERSION: '0.148.0',
+  CODEX_INGESTION_VERIFIED_VERSION: '0.150.1',
 }));
 
 vi.mock('@principles/install-layout', () => ({
@@ -133,7 +162,7 @@ function greenSetup(): void {
   mockIsFeatureEnabled.mockImplementation((_flags: unknown, id: string) => (flagMap())[id]?.enabled ?? false);
   mockReadCodexIngestionConsent.mockReturnValue({ ok: true, existed: true, record: grantedConsentRecord() });
   mockDeriveConsentState.mockReturnValue('granted');
-  mockListGovernanceCheckpoints.mockReturnValue({ checkpoints: [] });
+  mockListGovernanceCheckpoints.mockReturnValue({ ok: true, checkpoints: [] });
   mockReadObservationStats.mockReturnValue({ ok: true, stats: { operational: 3, promoted: 1, quarantined: 0, terminalOther: 0, nextExpiryAt: '2026-09-07T00:00:00.000Z', lastObservationAt: '2026-09-06T00:00:00.000Z' } });
   mockReadAdmissionCounts.mockReturnValue({ ok: true, counts: { admitted: 1, admittedWithoutTask: 0, pendingTails: 0, staleTails: 0, completedTails: 1, lastAdmissionAt: '2026-09-06T00:00:00.000Z' } });
   mockComputeWorkerMode.mockReturnValue({ mode: 'ready' });
@@ -289,7 +318,10 @@ describe('pd health --host codex — legacy registration (§17 retirement)', () 
     mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
       const value = String(candidate);
       if (value.endsWith('hooks.json')) {
-        return JSON.stringify({ __pd_marker: 'pd-owned', hooks: { PostToolUse: [{ command: 'node pd-hook.cjs', async: true }] } });
+        return JSON.stringify({
+          PreToolUse: [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node pd-hook.cjs' }], __pd_marker: 'pd-owned' }],
+          PostToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: 'node pd-hook.cjs', timeout: 5, async: true }], __pd_marker: 'pd-owned' }],
+        });
       }
       if (value.endsWith('config.toml')) return '[features]\nhooks = true\n';
       if (value.includes('package.json')) return JSON.stringify({ version: '0.1.0' });
@@ -304,6 +336,7 @@ describe('pd health --host codex — legacy registration (§17 retirement)', () 
 describe('pd health --host codex — per-rollout lag', () => {
   it('checkpoint lag over zero ⇒ rollout blocker with byte lag', async () => {
     mockListGovernanceCheckpoints.mockReturnValue({
+      ok: true,
       checkpoints: [{ hostKind: 'codex', rolloutIdentity: 'r-1', byteOffset: 10, lastOrdinal: 1, cliVersion: null, rootSessionId: 'root', incompleteTail: false, lastDegradationReason: null, lastDegradationOrdinal: null, updatedAt: '2026-09-06T00:00:00.000Z' }],
     });
     mockLocateTranscript.mockReturnValue({ ok: true, transcriptPath: '/fake/home/.codex/sessions/r-1.jsonl' });

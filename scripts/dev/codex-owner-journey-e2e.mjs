@@ -46,6 +46,11 @@ const SKIP_LLM = args.includes('--skip-llm');
 const LIVE_CODEX = args.includes('--live-codex');
 const EVIDENCE_OUT = opt('--evidence-out');
 
+if (LIVE_CODEX) {
+  process.stderr.write('--live-codex is not wired in this harness yet: refusing to mislabel fixture delivery as a live session.\n');
+  process.exit(2);
+}
+
 const evidence = [];
 function stage(name, status, detail) {
   const entry = { stage: name, status, ...(detail !== undefined ? { detail } : {}) };
@@ -202,7 +207,7 @@ const ingestion = JSON.parse(counts.trim().split('\n').at(-1));
 if (ingestion.observations < 1 || ingestion.pains.n !== 1 || ingestion.pains.host !== 'codex' || ingestion.admissions !== 1) {
   fail('S4-ingestion', `unexpected post-ingestion state: ${counts}`, 'Expected >=1 observation, exactly one codex pain, one admitted marker.');
 }
-stage('S3-session', 'passed', LIVE_CODEX ? 'live codex exec' : 'authenticated fixture delivery');
+stage('S3-session', 'passed', 'authenticated fixture delivery through the real hook executable');
 stage('S4-ingestion', 'passed', ingestion);
 
 // ── S5 recovery: reconciliation ensures exactly one Diagnostician task ──────
