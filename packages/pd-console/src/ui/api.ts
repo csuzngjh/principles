@@ -131,6 +131,18 @@ function clearToken(): void {
 }
 
 /**
+ * True when an unauthorized response should route the UI to the login route.
+ *
+ * Already on the login route → false, so a failed login attempt cannot
+ * redirect-loop. The redirect target itself is the hardcoded
+ * "#/login?session_expired=true" literal at the assignment site — never
+ * derived from request data.
+ */
+export function shouldRedirectToLoginOnUnauthorized(currentHash: string): boolean {
+  return !currentHash.startsWith("#/login");
+}
+
+/**
  * Send an authenticated request to the Console API.
  *
  * Two overloads:
@@ -176,10 +188,12 @@ async function request<T = unknown>(
 
     if (!response.ok) {
       if (response.status === 401) {
-        const hadToken = getToken() !== null;
+        // Any 401 invalidates the session: clear the token even when none was
+        // attached (page loaded before the server switched to token mode —
+        // PRI-643) and route to login so a token can be entered.
         clearToken();
         // eslint-disable-next-line no-undef
-        if (hadToken && !window.location.hash.startsWith("#/login")) {
+        if (shouldRedirectToLoginOnUnauthorized(window.location.hash)) {
           // eslint-disable-next-line no-undef
           window.location.hash = "#/login?session_expired=true";
         }
@@ -206,7 +220,7 @@ async function request<T = unknown>(
       } catch {
         // ignore parse errors
       }
-      return { success: false, error: errorMessage, reason, nextAction };
+      return { success: false, error: errorMessage, reason, nextAction, status: response.status };
     }
 
     const raw = await response.json();
