@@ -462,3 +462,65 @@ describe('Security regression tests', () => {
     expect(sanitizeString('\n\t')).toBe('');
   });
 });
+
+// ── ReDoS timing regressions (PRI-627) ──────────────────────────────────────
+// CodeQL js/polynomial-redos: adversarial evidence strings reach convergePath
+// and sanitizeString from uncontrolled tool output. These inputs are sized so
+// a backtracking-prone implementation cannot finish inside the bound, while
+// the linear implementations stay in milliseconds.
+
+describe('ReDoS timing regressions', () => {
+  const TIMING_BUDGET_MS = 5000;
+
+  function expectBounded(run: () => void): number {
+    const startedAt = performance.now();
+    run();
+    return performance.now() - startedAt;
+  }
+
+  it('convergePath strips a long separator run in bounded time', () => {
+    // `[\\/]+$`-style regexes rescan from every start position on a run that
+    // does not reach the end → O(n²). The linear end-scan must stay O(n).
+    const adversarial = '/' + '/'.repeat(100_000) + 'x';
+    let result = '';
+    const elapsed = expectBounded(() => {
+      result = convergePath(adversarial, '/workspace');
+    });
+    expect(elapsed).toBeLessThan(TIMING_BUDGET_MS);
+    expect(result).toBe('x');
+  });
+
+  it('convergePath strips trailing separators from both operands in bounded time', () => {
+    const value = '/workspace/src' + '/'.repeat(100_000);
+    let result = '';
+    const elapsed = expectBounded(() => {
+      result = convergePath(value, '/workspace/');
+    });
+    expect(elapsed).toBeLessThan(TIMING_BUDGET_MS);
+    expect(result).toBe('src');
+  });
+
+  it('sanitizeString handles repeated empathy-tag openings in bounded time', () => {
+    // CodeQL example shape: many `<empathy` restart positions, each forcing a
+    // full `[^>]*` unwind before the mandatory `>` fails.
+    const adversarial = '<empathy'.repeat(2_500);
+    let result = '';
+    const elapsed = expectBounded(() => {
+      result = sanitizeString(adversarial);
+    });
+    expect(elapsed).toBeLessThan(TIMING_BUDGET_MS);
+    // No `>` anywhere → empathy tag pattern matches nothing; no token/path
+    // pattern fires either, so the value just hits the length bound.
+    expect(result).toBe('<empathy'.repeat(25) + '___TRUNCATED___');
+  });
+
+  it('sanitizeString strips empathy tags identically, including self-closing form', () => {
+    // Greedy `[^>]*` stops at the first `>`; the optional close-tag group only
+    // fires when `</empathy>` directly follows the open tag. Locks actual
+    // (pre-existing) behavior — identical for the old and rewritten pattern.
+    expect(sanitizeString('<empathy severity="high">hello</empathy>')).toBe('hello</empathy>');
+    expect(sanitizeString('<empathy></empathy>payload')).toBe('payload');
+    expect(sanitizeString('<empathy/>')).toBe('');
+    expect(sanitizeString('<empathy>fragments remain')).toBe('fragments remain');
+  });
+});
