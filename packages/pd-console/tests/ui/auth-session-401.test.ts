@@ -43,6 +43,14 @@ describe('unauthorized redirect predicate', () => {
     expect(shouldRedirectToLoginOnUnauthorized('#/login')).toBe(false);
     expect(shouldRedirectToLoginOnUnauthorized('#/login?session_expired=true')).toBe(false);
   });
+
+  it('redirects from hashes that merely share the login prefix (CodeRabbit P1)', () => {
+    // "#/login-help" is NOT the login route — prefix matching wrongly exempted
+    // it, stranding the page on an unmatched route after a 401.
+    expect(shouldRedirectToLoginOnUnauthorized('#/login-help')).toBe(true);
+    expect(shouldRedirectToLoginOnUnauthorized('#/loginpage')).toBe(true);
+    expect(shouldRedirectToLoginOnUnauthorized('#/login/x')).toBe(true);
+  });
 });
 
 describe('api.ts 401 handling contract', () => {

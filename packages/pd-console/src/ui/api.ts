@@ -133,13 +133,15 @@ function clearToken(): void {
 /**
  * True when an unauthorized response should route the UI to the login route.
  *
+ * The only registered login route is exactly "/login" (App.tsx); a hash like
+ * "#/login-help" is a different (unmatched) route and must still redirect.
  * Already on the login route → false, so a failed login attempt cannot
  * redirect-loop. The redirect target itself is the hardcoded
  * "#/login?session_expired=true" literal at the assignment site — never
  * derived from request data.
  */
 export function shouldRedirectToLoginOnUnauthorized(currentHash: string): boolean {
-  return !currentHash.startsWith("#/login");
+  return !(currentHash === "#/login" || currentHash.startsWith("#/login?"));
 }
 
 /**
