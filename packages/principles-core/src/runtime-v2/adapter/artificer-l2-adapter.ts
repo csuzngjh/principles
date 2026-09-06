@@ -38,7 +38,6 @@
 import { randomUUID } from 'node:crypto';
 import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
-import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type { Message } from '@earendil-works/pi-ai';
 import type {
   PDRuntimeAdapter,
@@ -58,7 +57,7 @@ import { PDRuntimeError } from '../error-categories.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
-import { resolveL2Model } from './l2-agent-loop-adapter.js';
+import { resolveL2Model, pdStreamSimple } from './l2-agent-loop-adapter.js';
 import {
   buildArtificerL2Tools,
   ARTIFICER_L2_TOOL_WHITELIST,
@@ -299,7 +298,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
         loopConfig,
         async (event: AgentEvent) => { void event; },
         abortController.signal,
-        streamSimple,
+        pdStreamSimple,
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
