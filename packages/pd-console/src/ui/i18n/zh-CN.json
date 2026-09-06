@@ -357,6 +357,10 @@
       "chainInternalizationTask": "内化任务 ID",
       "chainDreamerStatus": "Dreamer 状态",
       "fieldTrigger": "触发行为",
+      "hostKind": {
+        "codex": "Codex",
+        "openclaw": "OpenClaw"
+      },
       "fieldConclusion": "PD 的结论",
       "fieldApplicability": "适用/说明",
       "fieldConfidence": "置信度",

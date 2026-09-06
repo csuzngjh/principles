@@ -23,7 +23,7 @@
  * merge into it, never overwrite. The marker file is our own bookkeeping
  * for precise uninstall.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
@@ -37,13 +37,14 @@ import type {
   HostUninstallContext,
   HostUninstallResult,
   HostDetectResult,
+  LegacyCodexRegistration,
 } from '@principles/core/host';
+import { parseLegacyCodexHooksRegistration } from '@principles/core/host';
 
 const requireFromModule = createRequire(import.meta.url);
 
 // ─── Codex hook event names (SPEC v4.1 §5.7) ────────────────────────────────
 const CODEX_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart'] as const;
-type CodexEventName = (typeof CODEX_EVENTS)[number];
 
 const PD_HOOK_MARKER = 'pd-hooks.marker';
 
@@ -150,103 +151,11 @@ export function resolvePdHookPath(deps: PdHookPathDeps = {}): string | undefined
 }
 
 /**
- * Build the hook command string for hooks.json.
- *
- * The wrapper script sets PD_HOST_CODEX_ENABLED=1 and PD_WORKSPACE_DIR before
- * invoking pd-hook.js. This is cross-platform (no shell-specific env var syntax).
+ * Hook entry / matcher-group shapes (rc-2 typing for detectLegacyCodexHookRegistration).
+ * The builder that CREATED these groups was retired with the legacy installer
+ * (SPEC rev 2 §17); the shapes remain because uninstall and the legacy
+ * detector must still recognize what old installers wrote.
  */
-function buildHookCommand(entryScriptPath: string, _workspaceDir: string): string {
-  // Unix command: node <entry>
-  // workspaceDir is injected by the wrapper script (pd-hook-entry.cjs), not here.
-  void _workspaceDir;
-  return `node "${entryScriptPath}"`;
-}
-
-function buildHookCommandWindows(entryScriptPath: string, _workspaceDir: string): string {
-  // Windows command — same node invocation; the entry script handles env internally
-  void _workspaceDir;
-  return `node "${entryScriptPath}"`;
-}
-
-// ─── Hook entry builder ─────────────────────────────────────────────────────
-interface HookEntry {
-  type: 'command';
-  command: string;
-  commandWindows: string;
-  timeout: number;
-  statusMessage: string;
-  async?: boolean;
-  additionalContextLimit?: number;
-}
-
-interface HookMatcherGroup {
-  matcher?: string;
-  hooks: HookEntry[];
-  /**
-   * Internal marker for PD-owned entries. Used by uninstall to precisely
-   * filter PD entries from hooks.json. NOT a Codex field — safe to include
-   * because hooks.json is a config file (serde default), not hook output
-   * (which has deny_unknown_fields).
-   */
-  __pd_marker?: string;
-}
-
-function buildMatcherGroup(
-  eventName: CodexEventName,
-  entryScriptPath: string,
-  workspaceDir: string,
-): HookMatcherGroup {
-  const command = buildHookCommand(entryScriptPath, workspaceDir);
-  const commandWindows = buildHookCommandWindows(entryScriptPath, workspaceDir);
-
-  switch (eventName) {
-    case 'PreToolUse':
-      return {
-        matcher: 'Bash|apply_patch',
-        hooks: [{
-          type: 'command',
-          command,
-          commandWindows,
-          timeout: 5,
-          statusMessage: 'PD: checking tool call',
-        }],
-      };
-    case 'PostToolUse':
-      return {
-        matcher: '.*',
-        hooks: [{
-          type: 'command',
-          command,
-          commandWindows,
-          timeout: 5,
-          async: true,
-          statusMessage: 'PD: capturing pain signal',
-        }],
-      };
-    case 'UserPromptSubmit':
-      return {
-        hooks: [{
-          type: 'command',
-          command,
-          commandWindows,
-          timeout: 5,
-          additionalContextLimit: 10000,
-          statusMessage: 'PD: injecting principles',
-        }],
-      };
-    case 'SessionStart':
-      return {
-        hooks: [{
-          type: 'command',
-          command,
-          commandWindows,
-          timeout: 600,
-          additionalContextLimit: 10000,
-          statusMessage: 'PD: hydrating state',
-        }],
-      };
-  }
-}
 
 // ─── Wrapper script content ─────────────────────────────────────────────────
 /**
@@ -274,159 +183,58 @@ export function buildWrapperScriptContent(pdHookPath: string, workspaceDir: stri
   ].join('\n');
 }
 
+// ─── Legacy registration detection (Slice D, SPEC rev 2 §17) ────────────────
+// ONE parsing authority lives in @principles/core/host
+// (parseLegacyCodexHooksRegistration — pure, no I/O); this installer is the
+// FS edge for its own refusal path. The health surface uses the same parser
+// via @principles/host-runtime.
+
+export function detectLegacyCodexHookRegistration(hooksJsonPathOverride?: string): LegacyCodexRegistration {
+  const hooksJsonPath = hooksJsonPathOverride ?? getCodexHooksJsonPath();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
+  } catch {
+    return { detected: false, legacyAsyncPostToolUse: false };
+  }
+  return parseLegacyCodexHooksRegistration(parsed);
+}
+
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────
 export class CodexHostInstaller implements HostInstaller {
   readonly hostId = 'codex';
 
-  async install(ctx: HostInstallContext): Promise<HostInstallResult> {
-    const pdCodexDir = getPdCodexDir();
-    const hooksJsonPath = getCodexHooksJsonPath();
-    const markerPath = getPdHookMarkerPath();
-
-    // 1. Resolve codex-adapter pd-hook.js
-    const pdHookPath = resolvePdHookPath();
-    if (!pdHookPath) {
-      return {
-        success: false,
-        hostId: this.hostId,
-        configPath: hooksJsonPath,
-        configAction: 'skipped',
-        reason: '@principles/codex-adapter is not installed. The codex-adapter package provides the pd-hook.js entry Codex spawns.',
-        nextAction: 'Install it first: npm install -g @principles/codex-adapter, then re-run: npx create-principles-disciple install --host codex',
-      };
-    }
-
-    // 2. Write wrapper script to ~/.pd/codex/pd-hook-entry.cjs
-    //    (marker file is written AFTER mergeHooksJson succeeds — see step 3.
-    //    Writing the marker before the merge would make detect() report a
-    //    failed install as installed, violating rc-3-fail-loud-missing.)
-    try {
-      if (!existsSync(pdCodexDir)) {
-        mkdirSync(pdCodexDir, { recursive: true });
-      }
-      const wrapperPath = path.join(pdCodexDir, 'pd-hook-entry.cjs');
-      const wrapperContent = buildWrapperScriptContent(pdHookPath, ctx.workspaceDir);
-      writeFileSync(wrapperPath, wrapperContent, { encoding: 'utf-8' });
-
-      // 3. Merge PD hook entries into ~/.codex/hooks.json (append, never overwrite).
-      //    If hooks.json is malformed, mergeHooksJson returns 'preserved' without
-      //    writing any PD entries. This MUST surface as a failure (rc-3 / rc-9)
-      //    — otherwise the user would see "install succeeded" while Codex never
-      //    triggers PD hooks. The marker is NOT written in this branch, so
-      //    detect() correctly reports "not installed".
-      const configAction = this.mergeHooksJson(hooksJsonPath, wrapperPath, ctx.workspaceDir);
-
-      if (configAction === 'preserved') {
-        return {
-          success: false,
-          hostId: this.hostId,
-          configPath: hooksJsonPath,
-          configAction,
-          reason: `${hooksJsonPath} is malformed (not a JSON object). PD did not write any hook entries to avoid overwriting the user's config.`,
-          nextAction: `Manually fix ${hooksJsonPath} (must be a JSON object), then re-run: npx create-principles-disciple install --host codex`,
-        };
-      }
-
-      // 4. Merge succeeded — now safe to record the marker. detect() will
-      //    only report installed when hooks.json actually contains PD entries.
-      writeFileSync(markerPath, JSON.stringify({
-        installedAt: new Date().toISOString(),
-        workspaceDir: ctx.workspaceDir,
-        pdHookPath,
-        wrapperPath,
-        events: CODEX_EVENTS,
-      }, null, 2), { encoding: 'utf-8' });
-
-      return {
-        success: true,
-        hostId: this.hostId,
-        configPath: hooksJsonPath,
-        configAction,
-        nextAction: 'Open Codex and run /hooks to trust PD hooks before they execute. Verify with: codex doctor (hooks feature should be ON).',
-      };
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      return {
-        success: false,
-        hostId: this.hostId,
-        configPath: hooksJsonPath,
-        configAction: 'skipped',
-        reason: `Failed to write Codex hook config: ${reason}`,
-        nextAction: `Check write permissions on ${pdCodexDir} and ${hooksJsonPath}, then re-run installer.`,
-      };
-    }
-  }
-
   /**
-   * Merge PD hook entries into ~/.codex/hooks.json.
-   * - If file doesn't exist: create it with PD entries (configAction = 'created').
-   * - If file exists: merge PD entries into existing event arrays (configAction = 'updated').
-   * - Idempotent: re-running install replaces PD entries (matched by marker), not duplicates.
+   * RETIRED for new registrations (Codex Governance Closure Slice D; SPEC rev
+   * 2 §17 — the Marketplace plugin is the only supported new install path;
+   * this legacy global-hook installer is migration/uninstall-only).
+   *
+   * This method NEVER writes hook registrations anymore. It returns a
+   * structured refusal that points at the supported path, and when a legacy
+   * PD global registration is detected it offers the explicit migration
+   * route (precise uninstall → Marketplace plugin → $pd-setup consent).
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  private mergeHooksJson(
-    hooksJsonPath: string,
-    wrapperPath: string,
-    workspaceDir: string,
-  ): 'created' | 'updated' | 'preserved' {
-    const codexDir = getCodexDir();
-    if (!existsSync(codexDir)) {
-      mkdirSync(codexDir, { recursive: true });
+  async install(_ctx: HostInstallContext): Promise<HostInstallResult> {
+    const hooksJsonPath = getCodexHooksJsonPath();
+    const legacy = detectLegacyCodexHookRegistration();
+    if (legacy.detected) {
+      return {
+        success: false,
+        hostId: this.hostId,
+        configPath: hooksJsonPath,
+        configAction: 'skipped',
+        reason: 'A legacy PD global Codex hook registration was detected (async PostToolUse in ~/.codex/hooks.json). The legacy global installer is retired (SPEC rev 2 §17) and cannot update it.',
+        nextAction: 'Migrate to the Marketplace plugin: 1) npx create-principles-disciple uninstall --host codex  (removes ONLY PD-owned entries; evidence is preserved); 2) codex plugin add principles-disciple@principles; 3) run the plugin setup ($pd-setup) — it presents the ingestion disclosure and records consent.',
+      };
     }
-
-    let existing: Record<string, unknown> = {};
-    let action: 'created' | 'updated' | 'preserved' = 'created';
-
-    // CodeQL TOCTOU fix: try/catch read instead of existsSync+readFileSync.
-    // ENOENT → 'created' (file doesn't exist yet); other parse errors → 'preserved'.
-    try {
-      const raw = readFileSync(hooksJsonPath, 'utf-8');
-      const parsed: unknown = JSON.parse(raw);
-      if (isRecord(parsed)) {
-        existing = { ...parsed };
-        action = 'updated';
-      } else {
-        // Malformed — back off, don't overwrite
-        action = 'preserved';
-      }
-    } catch (err) {
-      const code = getErrorCode(err);
-      if (code === 'ENOENT') {
-        // File doesn't exist — 'created' (default action stays)
-      } else {
-        // Malformed JSON — back off
-        action = 'preserved';
-      }
-    }
-
-    if (action === 'preserved') {
-      return action;
-    }
-
-    // For each Codex event, replace any existing PD-owned matcher groups
-    // with our fresh set (idempotent — re-install doesn't duplicate).
-    const PD_MARKER = 'pd-owned';
-    for (const eventName of CODEX_EVENTS) {
-      const group = buildMatcherGroup(eventName, wrapperPath, workspaceDir);
-      // Tag the group so uninstall can find PD-owned entries precisely.
-      group.__pd_marker = PD_MARKER;
-
-      const existingGroups = existing[eventName];
-      if (isUnknownArray(existingGroups)) {
-        // Filter out previously-PD-owned groups, then append the new one.
-        // rc-2: no `as` bypass — use Object.hasOwn to check marker presence.
-        const filtered: unknown[] = existingGroups.filter((g) =>
-          !(isRecord(g) && Object.hasOwn(g, '__pd_marker') && g.__pd_marker === PD_MARKER),
-        );
-        filtered.push(group);
-        existing[eventName] = filtered;
-      } else {
-        existing[eventName] = [group];
-      }
-    }
-
-    writeFileSync(hooksJsonPath, JSON.stringify(existing, null, 2), { encoding: 'utf-8' });
-    return action;
+    return {
+      success: false,
+      hostId: this.hostId,
+      configPath: hooksJsonPath,
+      configAction: 'skipped',
+      reason: 'New Codex global hook registrations are retired (SPEC rev 2 §17). The Marketplace plugin is the only supported new install path for Codex.',
+      nextAction: 'Install the plugin: codex plugin add principles-disciple@principles — then run its setup ($pd-setup), which verifies Node/runtime/workspace/trust and records the conversation-ingestion consent.',
+    };
   }
 
   async uninstall(_ctx: HostUninstallContext): Promise<HostUninstallResult> {

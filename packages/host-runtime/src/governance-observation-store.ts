@@ -26,6 +26,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { sanitizeString, sanitizeValue } from '@principles/core/runtime-v2';
 
@@ -35,14 +36,15 @@ export const GOVERNANCE_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const GOVERNANCE_PROMOTION_PRECEDING_TURNS = 12;
 export const GOVERNANCE_PENDING_TAIL_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 
-const GOVERNANCE_OBSERVATION_SCHEMA_VERSION = 2;
+const GOVERNANCE_OBSERVATION_SCHEMA_VERSION = 3;
 const MAX_TEXT_BOUND = 200; // matches MAX_EVIDENCE_VALUE_CHARS; guards stored identity fields
 const MAX_JSON_COLUMN = 8_000;
 
 export type GovernanceObservationKind = 'user_turn' | 'assistant_turn' | 'tool_call';
 export type GovernanceObservationSource = 'live_hook' | 'transcript';
 export type GovernanceObservationCompleteness = 'complete' | 'partial';
-export type GovernanceRetentionClass = 'operational' | 'promoted' | 'expired' | 'rolled_back';
+/** `quarantined` (Slice D §15): audited, permanently-invalid row; bodies dropped, metadata kept. */
+export type GovernanceRetentionClass = 'operational' | 'promoted' | 'expired' | 'rolled_back' | 'quarantined';
 
 export interface GovernanceObservationInput {
   readonly hostKind: 'codex';
@@ -285,10 +287,19 @@ const V2_ADDED_COLUMNS = [
   { table: 'governance_observations', name: 'source_ordinal', type: 'INTEGER' },
 ];
 
+/** Column additions in v3 (Slice D §15 quarantine: audited recovery metadata). */
+const V3_ADDED_COLUMNS = [
+  { table: 'governance_observations', name: 'quarantined_at', type: 'TEXT' },
+  { table: 'governance_observations', name: 'quarantine_reason', type: 'TEXT' },
+  { table: 'governance_observations', name: 'quarantine_digest', type: 'TEXT' },
+  { table: 'governance_observations', name: 'quarantine_operator', type: 'TEXT' },
+  { table: 'governance_observations', name: 'quarantine_gap', type: 'TEXT' },
+];
+
 function ensureGovernanceObservationSchema(db: Database.Database): void {
   db.transaction(() => {
     for (const statement of CREATE_STATEMENTS) db.exec(statement);
-    for (const column of V2_ADDED_COLUMNS) {
+    for (const column of [...V2_ADDED_COLUMNS, ...V3_ADDED_COLUMNS]) {
       try {
         db.exec(`ALTER TABLE ${column.table} ADD COLUMN ${column.name} ${column.type}`);
       } catch (error: unknown) {
@@ -647,7 +658,7 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
 
     if (result === 'conflict') {
       return {
-        ok: false, reason: 'logical_key_content_conflict', nextAction: 'the first committed content was preserved and the observation is marked partial; run the audited quarantine/recovery command once available (Slice D) or re-ingest from a fresh rollout',
+        ok: false, reason: 'logical_key_content_conflict', nextAction: 'the first committed content was preserved and the observation is marked partial; run `pd codex ingest quarantine --workspace <path> --rollout <id> --record <id>` (audited, dry-run default) or re-ingest from a fresh rollout',
         inserted, enriched, duplicates, checkpointCommitted: false, warnings: [`conflict:${conflictKey}`],
       };
     }
@@ -889,6 +900,234 @@ export function promoteGovernanceEvidence(input: PromoteGovernanceEvidenceInput)
     if (error instanceof PromotionMissingError) return { ok: false, reason: error.reason, nextAction: error.nextAction };
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `governance_write_failed:${detail}`, nextAction: 'inspect the workspace trajectory database and retry; nothing was partially committed' };
+  } finally {
+    close();
+  }
+}
+
+// ─── Quarantine (Slice D, SPEC rev 2 §15) ────────────────────────────────────
+
+export interface QuarantineGovernanceObservationArgs {
+  readonly workspaceDir: string;
+  readonly hostKind: 'codex';
+  readonly rolloutIdentity: string;
+  /** governance_observations.id — `pd codex ingest quarantine --record <id>`. */
+  readonly recordId: number;
+  /** Why this record is permanently invalid (bounded, stored verbatim). */
+  readonly reason: string;
+  /** Who ran the quarantine (operator identity string, bounded). */
+  readonly operator: string;
+  /** false = dry run (default contract): report, never mutate. */
+  readonly confirm?: boolean;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export interface QuarantinedRecordSummary {
+  readonly id: number;
+  readonly kind: string;
+  readonly logicalKey: string;
+  readonly observedAt: string;
+  readonly retentionClass: GovernanceRetentionClass;
+  /** SHA-256 over the row's stored content (hex) — computed the same way for dry runs. */
+  readonly digest: string;
+  /** Bounded neighbor description: `prev=<order|none>;next=<order|none>;record=<order|null>`. */
+  readonly gap: string;
+}
+
+export type QuarantineGovernanceObservationResult =
+  | {
+    ok: true;
+    dryRun: boolean;
+    alreadyQuarantined: boolean;
+    record: QuarantinedRecordSummary;
+  }
+  | { ok: false; reason: string; nextAction: string };
+
+const QUARANTINE_REASON_MAX = 200;
+const QUARANTINE_OPERATOR_MAX = 80;
+
+function observationDigest(row: Record<string, unknown>): string {
+  // Digest the row's stored content exactly as persisted (rc-8: hashing
+  // string columns only — never JSON.stringify of untrusted unknowns). The
+  // digest lets a future audit recognize the same record if it reappears.
+  const hash = createHash('sha256');
+  for (const column of ['rollout_identity', 'logical_key', 'transcript_record_key', 'kind', 'source', 'completeness', 'visible_text', 'sanitized_tool_facts_json', 'observed_at']) {
+    const value = row[column];
+    hash.update(`${column}=`);
+    hash.update(value === null || value === undefined ? '<null>' : String(value));
+    hash.update('\n');
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * Audited quarantine for a permanently invalid governance observation
+ * (SPEC §15). Dry run is the contract default: without `confirm` the store
+ * reports what WOULD happen and mutates nothing. With `confirm`:
+ *  - bodies (visible_text / sanitized_tool_facts_json) are dropped;
+ *  - retention_class becomes `quarantined` (terminal class — never pruned,
+ *    never promoted);
+ *  - digest, reason, operator, timestamp, and the neighbor gap are recorded;
+ *  - the Codex transcript is never read or touched (this function opens only
+ *    the workspace trajectory.db).
+ * Promoted evidence is refused: Owner-decided evidence leaves only through
+ * the Owner governance cleanup commands.
+ */
+export function quarantineGovernanceObservation(args: QuarantineGovernanceObservationArgs): QuarantineGovernanceObservationResult {
+  const { workspaceDir, hostKind, rolloutIdentity, recordId, reason, operator, confirm = false } = args;
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    return { ok: false, reason: 'record_id_invalid', nextAction: 'Pass the numeric governance_observations.id (--record <id>); run `pd codex ingest catch-up --json` output or inspect trajectory.db to find it.' };
+  }
+  if (typeof reason !== 'string' || reason.trim().length === 0 || reason.length > QUARANTINE_REASON_MAX) {
+    return { ok: false, reason: 'reason_required', nextAction: `Provide a non-empty reason (≤ ${QUARANTINE_REASON_MAX} chars) describing why the record is permanently invalid.` };
+  }
+  if (typeof operator !== 'string' || operator.trim().length === 0 || operator.length > QUARANTINE_OPERATOR_MAX) {
+    return { ok: false, reason: 'operator_required', nextAction: `Provide the operator identity (≤ ${QUARANTINE_OPERATOR_MAX} chars).` };
+  }
+  const opened = openStore(workspaceDir, args.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const outcome = db.transaction(() => {
+      const rolloutRow = db.prepare('SELECT id FROM governance_rollouts WHERE host_kind = ? AND rollout_identity = ?').get(hostKind, rolloutIdentity);
+      if (!isRecord(rolloutRow)) {
+        return { ok: false, reason: 'rollout_not_found', nextAction: `No governed rollout '${rolloutIdentity}' for host '${hostKind}' in this workspace; check the identity (see \`pd codex ingest catch-up\` output).` };
+      }
+      const rolloutRowId = rowField(rolloutRow, 'id');
+      const row = db.prepare('SELECT * FROM governance_observations WHERE id = ? AND rollout_row_id = ?').get(recordId, rolloutRowId);
+      if (!isRecord(row)) {
+        return { ok: false, reason: 'record_not_found', nextAction: `Record ${recordId} does not exist in rollout '${rolloutIdentity}' of this workspace; verify the id.` };
+      }
+      const retentionClassRaw = String(rowField(row, 'retention_class'));
+      // rc-2: the DB column is untrusted — only known classes enter the typed
+      // summary; anything else reads as 'expired' semantics for reporting but
+      // still fails the quarantinable check below.
+      const retentionClass: GovernanceRetentionClass = retentionClassRaw === 'operational' || retentionClassRaw === 'promoted'
+        || retentionClassRaw === 'quarantined' || retentionClassRaw === 'rolled_back'
+        ? retentionClassRaw
+        : 'expired';
+      const quarantinedAt = rowField(row, 'quarantined_at');
+      const sourceOrder = typeof rowField(row, 'source_order') === 'number' ? (rowField(row, 'source_order') as number) : null;
+
+      const neighborQuery = (direction: 'prev' | 'next'): number | 'none' => {
+        if (sourceOrder === null) return 'none';
+        const comparison = direction === 'prev' ? '<' : '>';
+        const ordering = direction === 'prev' ? 'DESC' : 'ASC';
+        const neighbor = db.prepare(`SELECT source_order FROM governance_observations
+          WHERE rollout_row_id = ? AND source_order IS NOT NULL AND source_order ${comparison} ?
+          ORDER BY source_order ${ordering} LIMIT 1`).get(rolloutRowId, sourceOrder);
+        const value = isRecord(neighbor) ? rowField(neighbor, 'source_order') : undefined;
+        return typeof value === 'number' ? value : 'none';
+      };
+
+      const summary: QuarantinedRecordSummary = {
+        id: recordId,
+        kind: String(rowField(row, 'kind')),
+        logicalKey: String(rowField(row, 'logical_key')),
+        observedAt: String(rowField(row, 'observed_at')),
+        retentionClass,
+        digest: observationDigest(row),
+        gap: `prev=${neighborQuery('prev')};next=${neighborQuery('next')};record=${sourceOrder === null ? 'null' : sourceOrder}`,
+      };
+
+      if (typeof quarantinedAt === 'string' && quarantinedAt.length > 0) {
+        // Already terminal: report the RECORDED audit digest/gap, not a
+        // re-hash of the row (bodies were dropped at quarantine time, so a
+        // fresh hash would silently differ from the audited one).
+        const recordedDigest = rowField(row, 'quarantine_digest');
+        const recordedGap = rowField(row, 'quarantine_gap');
+        return {
+          ok: true, dryRun: false, alreadyQuarantined: true,
+          record: {
+            ...summary,
+            digest: typeof recordedDigest === 'string' && recordedDigest.length > 0 ? recordedDigest : summary.digest,
+            gap: typeof recordedGap === 'string' && recordedGap.length > 0 ? recordedGap : summary.gap,
+          },
+        };
+      }
+      if (retentionClass === 'promoted') {
+        return { ok: false, reason: 'record_is_promoted_evidence', nextAction: 'Promoted evidence is Owner-decided governance evidence; quarantine never touches it. Use the existing Owner governance cleanup commands if the evidence must be removed.' };
+      }
+      if (retentionClass !== 'operational') {
+        return { ok: false, reason: `record_not_quarantinable:${retentionClass}`, nextAction: 'Only operational records can be quarantined; expired and rolled-back rows are already terminal.' };
+      }
+      if (!confirm) {
+        return { ok: true, dryRun: true, alreadyQuarantined: false, record: summary };
+      }
+      const now = new Date().toISOString();
+      db.prepare(`UPDATE governance_observations
+        SET visible_text = NULL, sanitized_tool_facts_json = NULL, retention_class = 'quarantined',
+            quarantined_at = ?, quarantine_reason = ?, quarantine_digest = ?, quarantine_operator = ?, quarantine_gap = ?
+        WHERE id = ? AND retention_class = 'operational'`)
+        .run(now, reason, summary.digest, operator, summary.gap, recordId);
+      return { ok: true, dryRun: false, alreadyQuarantined: false, record: summary };
+    })();
+    return outcome as QuarantineGovernanceObservationResult;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+    return { ok: false, reason: `governance_quarantine_failed:${detail}`, nextAction: 'inspect the workspace trajectory database and retry; the transaction rolled back, nothing was partially mutated' };
+  } finally {
+    close();
+  }
+}
+
+// ─── Read-only surface stats (Slice D, SPEC rev 2 §15 health) ───────────────
+
+export interface GovernanceObservationStats {
+  readonly operational: number;
+  readonly promoted: number;
+  readonly quarantined: number;
+  readonly terminalOther: number;
+  /** Oldest operational observed_at + retention window — when the next row ages out. */
+  readonly nextExpiryAt: string | null;
+  readonly lastObservationAt: string | null;
+}
+
+export type ReadGovernanceObservationStatsResult =
+  | { ok: true; stats: GovernanceObservationStats }
+  | { ok: false; reason: string; nextAction: string };
+
+/**
+ * Bounded read-only counts for the §15 health surface. Unknown is reported
+ * as a structured degradation — never silently as zero (§15: unknown is not
+ * reported as healthy).
+ */
+export function readGovernanceObservationStats(args: { workspaceDir: string; databaseFactory?: ObservationDatabaseFactory }): ReadGovernanceObservationStatsResult {
+  const opened = openStore(args.workspaceDir, args.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const counts = db.prepare(`SELECT
+        SUM(CASE WHEN retention_class = 'operational' THEN 1 ELSE 0 END) AS operational,
+        SUM(CASE WHEN retention_class = 'promoted' THEN 1 ELSE 0 END) AS promoted,
+        SUM(CASE WHEN retention_class = 'quarantined' THEN 1 ELSE 0 END) AS quarantined,
+        SUM(CASE WHEN retention_class IN ('expired', 'rolled_back') THEN 1 ELSE 0 END) AS terminal_other,
+        MIN(CASE WHEN retention_class = 'operational' THEN observed_at END) AS oldest_operational,
+        MAX(observed_at) AS last_observation
+      FROM governance_observations`).get();
+    if (!isRecord(counts)) {
+      return { ok: false, reason: 'governance_stats_unavailable', nextAction: 'Inspect the workspace trajectory.db governance_observations table.' };
+    }
+    const numberOr = (value: unknown): number => (typeof value === 'number' ? value : 0);
+    const stringOr = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null);
+    const oldest = stringOr(own(counts, 'oldest_operational'));
+    const nextExpiry = oldest !== null && !Number.isNaN(Date.parse(oldest))
+      ? new Date(Date.parse(oldest) + GOVERNANCE_RETENTION_MAX_AGE_MS).toISOString()
+      : null;
+    return {
+      ok: true,
+      stats: {
+        operational: numberOr(own(counts, 'operational')),
+        promoted: numberOr(own(counts, 'promoted')),
+        quarantined: numberOr(own(counts, 'quarantined')),
+        terminalOther: numberOr(own(counts, 'terminal_other')),
+        nextExpiryAt: nextExpiry,
+        lastObservationAt: stringOr(own(counts, 'last_observation')),
+      },
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 160) : String(error);
+    return { ok: false, reason: `governance_stats_failed:${detail}`, nextAction: 'Inspect the workspace trajectory.db; the health surface degraded without mutating anything.' };
   } finally {
     close();
   }

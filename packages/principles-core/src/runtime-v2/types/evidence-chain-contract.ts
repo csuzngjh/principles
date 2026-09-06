@@ -90,6 +90,12 @@ export interface EvidenceChainRecord {
   /** PRI-406: How this record was linked — 'canonical' (precise via canonical_pain_id) or 'legacy' (timestamp/content heuristic). */
   linkMode?: 'canonical' | 'legacy';
   /**
+   * PRI-625 Slice D: evidence host attribution (SPEC §15 — pain/candidate
+   * views identify the Codex host with safe lineage). Validated against the
+   * known host kinds; absent/unset rows render as 'unknown'.
+   */
+  hostKind?: 'openclaw' | 'codex' | 'unknown';
+  /**
    * PRI-469: Optional intent tension surfaced from the diagnostician artifact
    * (Stage A output, SPEC §16). Present only when:
    *   1. The `intent_engineering` flag was on at diagnosis time, AND
@@ -1105,6 +1111,14 @@ export function assembleEvidenceChain(params: {
     const painId = `pain_${eventId}`;
     painEventMeta.push({ painId, createdAt, source });
 
+    // PRI-625 Slice D: evidence host attribution from pain_events.host_kind
+    // (PRI-640 column). Unknown/legacy rows (pre-migration) degrade to
+    // 'unknown' — a missing host kind must not hide the record (§15: safe
+    // lineage, no silent drops).
+    const rawHostKind = readOwnString(event, 'host_kind');
+    const hostKind: 'openclaw' | 'codex' | 'unknown' =
+      rawHostKind === 'openclaw' || rawHostKind === 'codex' ? rawHostKind : 'unknown';
+
     // PRI-406: Prefer precise join via canonical_pain_id → tasks.input_ref.
     // When a pain event carries canonical_pain_id, look up the task by that ID
     // first (the taskMap key is derived from input_ref, which equals canonical_pain_id).
@@ -1172,6 +1186,7 @@ export function assembleEvidenceChain(params: {
     if (canonicalPainId) {
       record.canonicalPainId = canonicalPainId;
     }
+    record.hostKind = hostKind;
     if (runtimeTaskId) {
       record.runtimeTaskId = runtimeTaskId;
     }

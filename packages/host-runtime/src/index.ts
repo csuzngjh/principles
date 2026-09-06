@@ -41,6 +41,17 @@ export * from './product-telemetry/eligibility.js';
 export * from './product-telemetry/exporter.js';
 export * from './product-telemetry/milestone-readers.js';
 export * from './product-telemetry/service.js';
+// PRI-625 Slice D: Codex conversation-ingestion consent — G2A frozen
+// disclosure SSoT constant + workspace consent record (governance layer; the
+// runtime gate remains the feature flag alone).
+export * from './codex-disclosure.js';
+export * from './codex-ingestion-consent.js';
+// PRI-625 Slice D: ONE §15 worker-mode authority, moved from codex-adapter so
+// the CLI, the Console, and the worker share the same semantics.
+export * from './codex-worker-status.js';
+// PRI-625 Slice D: ONE legacy-registration predicate (installer refusal,
+// health dualRegistration, and future setup flows all read the same fact).
+export * from './codex-legacy-registration.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',

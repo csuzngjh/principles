@@ -357,6 +357,10 @@
       "chainInternalizationTask": "Internalization Task ID",
       "chainDreamerStatus": "Dreamer Status",
       "fieldTrigger": "Trigger",
+      "hostKind": {
+        "codex": "Codex",
+        "openclaw": "OpenClaw"
+      },
       "fieldConclusion": "PD's Conclusion",
       "fieldApplicability": "Applicability",
       "fieldConfidence": "Confidence",

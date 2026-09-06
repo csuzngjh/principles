@@ -157,7 +157,7 @@ function ingestTranscriptDelta({ fallbackRootSessionId, canonicalPath, identity,
   if (offset > window.fileSize) {
     // The file shrank below the committed cursor: replaced or truncated —
     // never guess; hold the checkpoint and degrade explicitly.
-    return { status: 'degraded', reason: 'checkpoint_inconsistent', nextAction: 'the transcript is shorter than the committed checkpoint; run the audited recovery/quarantine path once available or re-ingest from a fresh rollout.', warnings: [] };
+    return { status: 'degraded', reason: 'checkpoint_inconsistent', nextAction: 'the transcript is shorter than the committed checkpoint; quarantine the stale rollout records via `pd codex ingest quarantine` or re-ingest from a fresh rollout.', warnings: [] };
   }
 
   const byteBoundReached = offset + window.bytes.length < window.fileSize;
@@ -187,7 +187,7 @@ function ingestTranscriptDelta({ fallbackRootSessionId, canonicalPath, identity,
 
   const degradations: GovernanceIngestDegradation[] = [];
   if (decoded.stop.kind === 'malformed') {
-    degradations.push({ reason: 'transcript_record_malformed', ...(decoded.stop.ordinal !== null ? { ordinal: decoded.stop.ordinal } : {}), nextAction: 'the record is stable-invalid; run the audited quarantine command once available (Slice D). Later records remain as lag.' });
+    degradations.push({ reason: 'transcript_record_malformed', ...(decoded.stop.ordinal !== null ? { ordinal: decoded.stop.ordinal } : {}), nextAction: 'the record is stable-invalid; quarantine this record via `pd codex ingest quarantine` (dry-run default). Later records remain as lag.' });
   } else if (decoded.stop.kind === 'oversized_record') {
     degradations.push({ reason: 'transcript_record_too_large', nextAction: 'a single transcript record exceeds the bounded-read window; inspect the rollout file.' });
   }
@@ -232,7 +232,7 @@ function ingestTranscriptDelta({ fallbackRootSessionId, canonicalPath, identity,
     return {
       status: 'degraded',
       reason: 'transcript_record_malformed',
-      nextAction: 'the record is stable-invalid; run the audited quarantine command once available (Slice D). Later records remain as lag.',
+      nextAction: 'the record is stable-invalid; quarantine this record via `pd codex ingest quarantine` (dry-run default). Later records remain as lag.',
       warnings,
     };
   }

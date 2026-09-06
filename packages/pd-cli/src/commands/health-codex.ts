@@ -1,22 +1,53 @@
 /**
- * pd health --host codex command implementation.
+ * pd health --host codex command implementation — Codex Governance Closure
+ * Slice D (PRI-625; SPEC rev 2 §15 health surface).
  *
- * Reports Codex adapter/runtime versions, host.codex feature flag state,
- * hook trust status, and dual global/plugin hook registration detection.
+ * Reports the §15 Owner-experience surface for one workspace:
+ * - adapter/runtime versions + the G1 ingestion minimum Codex version;
+ * - workspace init (config resolution), hook trust, dual registration;
+ * - BOTH flag states (host.codex, codex_conversation_ingestion);
+ * - consent state (decision metadata only — no captured text, ever);
+ * - worker mode (no Companion ⇒ `manual_action_required`, never auto-closure);
+ * - per-rollout checkpoints with completeness (incomplete tail / degradation)
+ *   and bounded byte lag against the live transcript file (stat only);
+ * - operational/promoted/quarantined counts + next expiry + last observation;
+ * - admission counts incl. admitted-pain-without-task + promotion tails;
+ * - Diagnostician task counts (pending/leased/retry_wait/needs_human_review);
+ * - §15 `ready` semantics — "unknown is not reported as healthy".
+ *
+ * Read-only throughout: this command never mutates workspace state and never
+ * opens a transcript (file SIZE stat only, never content).
  *
  * CLI gate compliance:
  * - cli-1: --json outputs exactly one parseable JSON object on stdout.
- * - cli-2: exit paths stop execution (return after process.exit).
+ * - cli-2: exit paths stop execution.
  * - cli-5: failure paths do not mutate state (read-only throughout).
- * - cli-6: every degraded/refused result includes reason + nextAction.
+ * - cli-6: every degraded/unknown section carries reason + nextAction.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
-import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime-v2';
+import {
+  loadPdConfigForPlugin,
+  resolveNearestPdWorkspace,
+  readCodexIngestionConsent,
+  deriveCodexIngestionConsentState,
+  listGovernanceCheckpoints,
+  readGovernanceObservationStats,
+  readGovernanceAdmissionCounts,
+  detectLegacyCodexHookRegistration,
+  CODEX_INGESTION_DISCLOSURE_VERSION,
+} from '@principles/host-runtime';
+import {
+  computeCodexWorkerStatusMode,
+  locateCodexTranscriptByRolloutIdentity,
+  CODEX_INGESTION_MIN_VERSION,
+  CODEX_INGESTION_VERIFIED_VERSION,
+} from '@principles/codex-adapter';
+import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
+import { SqliteConnection, SqliteTaskStore, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime-v2';
 
 const require = createRequire(import.meta.url);
 
@@ -25,12 +56,17 @@ interface CodexHealthOptions {
   json?: boolean;
 }
 
+type Degradable<T> = T | { reason: string; nextAction: string };
+
 interface CodexHealthReport {
   generatedAt: string;
   host: 'codex';
   workspace: string;
   adapterVersion: string;
   runtimeVersion: string;
+  codexIngestionMinVersion: string;
+  /** G1-verified Codex version (the frozen contract fixtures come from this CLI). */
+  codexIngestionVerifiedVersion: string;
   featureFlag: {
     name: 'host.codex';
     enabled: boolean;
@@ -38,6 +74,19 @@ interface CodexHealthReport {
     reason?: string;
     nextAction?: string;
   };
+  ingestionFlag: Degradable<{
+    name: 'codex_conversation_ingestion';
+    enabled: boolean;
+    source: 'user_config' | 'defaults' | 'malformed';
+  }>;
+  consent: Degradable<{
+    state: 'granted' | 'declined' | 'not_present' | 'flag_on_without_consent';
+    decidedAt?: string;
+    decidedVia?: string;
+    disclosureVersion?: string;
+    disclosureStale: boolean;
+  }>;
+  workspaceInit: Degradable<{ initialized: boolean }>;
   hooksTrust: {
     detectable: boolean;
     trusted?: boolean;
@@ -46,11 +95,56 @@ interface CodexHealthReport {
   };
   dualRegistration: {
     detected: boolean;
+    legacyAsyncPostToolUse?: boolean;
     globalHooksPath?: string;
     pluginHooksPath?: string;
     reason?: string;
     nextAction?: string;
   };
+  worker: {
+    mode: 'ready' | 'manual_action_required' | 'paused' | 'degraded';
+    registeredInInstallManifest: boolean;
+    reason?: string;
+    nextAction?: string;
+  };
+  rollouts: Degradable<{
+    checkpoints: {
+      rolloutIdentity: string;
+      byteOffset: number;
+      lastOrdinal: number;
+      incompleteTail: boolean;
+      lastDegradationReason: string | null;
+      updatedAt: string;
+      /** bytes past the checkpoint in the live transcript file; null = undetectable */
+      lagBytes: number | null;
+    }[];
+    lagUndetectable: boolean;
+  }>;
+  observations: Degradable<{
+    operational: number;
+    promoted: number;
+    quarantined: number;
+    terminalOther: number;
+    nextExpiryAt: string | null;
+    lastObservationAt: string | null;
+  }>;
+  admissions: Degradable<{
+    admitted: number;
+    admittedWithoutTask: number;
+    pendingTails: number;
+    staleTails: number;
+    completedTails: number;
+    lastAdmissionAt: string | null;
+  }>;
+  diagnosticianTasks: Degradable<{
+    pending: number;
+    leased: number;
+    retryWait: number;
+    needsHumanReview: number;
+  }>;
+  /** §15: ready is true only under the full §15 conjunction; unknown ⇒ not ready. */
+  ready: boolean;
+  readyBlockers: string[];
   warnings: string[];
 }
 
@@ -81,9 +175,9 @@ function detectHooksTrust(codexConfigDir: string | undefined): CodexHealthReport
     };
   }
   // Codex stores hook trust in config.toml under [features] hooks = true|false.
-  // We do a best-effort text scan rather than a full TOML parse to avoid a new
-  // dependency. If the file is missing or the hook line is absent, we report
-  // undetectable with a clear next action.
+  // Best-effort text scan (no TOML parser dependency): find the 'hooks' key,
+  // then the next '=' and inspect the value token. Deliberately plain string
+  // operations — no regex over assignment syntax.
   const configTomlPath = path.join(codexConfigDir, 'config.toml');
   if (!fs.existsSync(configTomlPath)) {
     return {
@@ -94,15 +188,31 @@ function detectHooksTrust(codexConfigDir: string | undefined): CodexHealthReport
   }
   try {
     const raw = fs.readFileSync(configTomlPath, 'utf8');
-    const match = /hooks\s*=\s*(true|false)/i.exec(raw);
-    if (!match || !match[1]) {
+    const lowered = raw.toLowerCase();
+    const hooksIndex = lowered.indexOf('hooks');
+    if (hooksIndex === -1) {
       return {
         detectable: false,
         reason: 'hooks_setting_not_found_in_config',
         nextAction: 'Open Codex and run /hooks to trust PD hooks. Codex config.toml exists but has no `hooks` setting under [features].',
       };
     }
-    return { detectable: true, trusted: match[1].toLowerCase() === 'true' };
+    const eqIndex = lowered.indexOf('=', hooksIndex);
+    if (eqIndex === -1) {
+      return {
+        detectable: false,
+        reason: 'hooks_setting_not_found_in_config',
+        nextAction: 'Open Codex and run /hooks to trust PD hooks. Codex config.toml exists but has no `hooks` setting under [features].',
+      };
+    }
+    const tail = lowered.slice(eqIndex + 1, eqIndex + 12).trim();
+    if (tail.startsWith('true')) return { detectable: true, trusted: true };
+    if (tail.startsWith('false')) return { detectable: true, trusted: false };
+    return {
+      detectable: false,
+      reason: 'hooks_setting_not_found_in_config',
+      nextAction: 'Open Codex and run /hooks to trust PD hooks. Codex config.toml exists but has no `hooks` setting under [features].',
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
@@ -113,63 +223,245 @@ function detectHooksTrust(codexConfigDir: string | undefined): CodexHealthReport
   }
 }
 
+/**
+ * Dual-registration detection for the §15/§17 health surface. The legacy
+ * predicate itself is the ONE authority in host-runtime
+ * (detectLegacyCodexHookRegistration) — shared with the retired installer.
+ */
 function detectDualRegistration(codexConfigDir: string | undefined): CodexHealthReport['dualRegistration'] {
   const globalHooksPath = codexConfigDir ? path.join(codexConfigDir, 'hooks.json') : undefined;
-  // Plugin hooks are declared in a plugin manifest; we cannot reliably detect
-  // them from outside Codex. We only flag the global-hooks path and let the
-  // operator confirm plugin registration via /hooks in Codex.
   const globalHooksExists = globalHooksPath ? fs.existsSync(globalHooksPath) : false;
-  if (globalHooksExists) {
+  if (globalHooksExists && globalHooksPath) {
+    const legacy = detectLegacyCodexHookRegistration(globalHooksPath);
     return {
       detected: true,
+      legacyAsyncPostToolUse: legacy.legacyAsyncPostToolUse,
       globalHooksPath,
       reason: 'global_hooks_json_present',
-      nextAction: 'Global ~/.codex/hooks.json is installed. If the PD Codex plugin is also installed via marketplace, this may cause double-registration. Choose ONE: keep global hooks.json (fallback path) OR uninstall it and use the plugin (recommended). To remove global PD entries, run `create-principles-disciple uninstall --host codex`.',
+      nextAction: legacy.detected
+        ? 'A legacy PD global hook registration was detected. The Marketplace plugin is the only supported new install path (SPEC §17): remove the legacy registration with `create-principles-disciple uninstall --host codex`, then install the principles-disciple Codex plugin.'
+        : 'Global ~/.codex/hooks.json is installed. If the PD Codex plugin is also installed via marketplace, this may cause double-registration. Choose ONE: keep global hooks.json (fallback path) OR uninstall it and use the plugin (recommended).',
     };
   }
   return { detected: false };
 }
 
+function readInstallManifestRegistration(workspace: string): { registered: boolean; error?: string } {
+  try {
+    const paths = getInstallLayoutPaths(os.homedir());
+    const raw: unknown = JSON.parse(fs.readFileSync(paths.manifest, 'utf8'));
+    const parsed = parseInstallManifest(raw);
+    if (parsed.manifest !== undefined) {
+      const registered = parsed.manifest.workspaces?.some((entry) => path.resolve(entry) === path.resolve(workspace)) ?? false;
+      return { registered };
+    }
+    return { registered: false, error: parsed.error ?? 'install_manifest_invalid' };
+  } catch {
+    return { registered: false, error: 'install_manifest_unreadable' };
+  }
+}
+
+/**
+ * §15 Diagnostician counts, read from the Runtime V2 task store
+ * (taskKind 'diagnostician'). Read-only; degradation is structured.
+ */
+async function readDiagnosticianCounts(workspace: string): Promise<CodexHealthReport['diagnosticianTasks']> {
+  try {
+    const connection = new SqliteConnection(workspace);
+    const taskStore = new SqliteTaskStore(connection);
+    const count = async (status: 'pending' | 'leased' | 'retry_wait' | 'needs_human_review'): Promise<number> => {
+      // Bounded reporting: 1000 far exceeds any realistic per-workspace
+      // Diagnostician backlog; a saturated bucket still blocks readiness via
+      // needs_human_review/pending semantics rather than hiding.
+      const tasks = await taskStore.listTasks({ status, taskKind: 'diagnostician', limit: 1000 });
+      return tasks.length;
+    };
+    const [pending, leased, retryWait, needsHumanReview] = await Promise.all([
+      count('pending'), count('leased'), count('retry_wait'), count('needs_human_review'),
+    ]);
+    return { pending, leased, retryWait, needsHumanReview };
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 160) : String(error);
+    return {
+      reason: `diagnostician_counts_unavailable: ${message}`,
+      nextAction: 'Run `pd runtime init --confirm` if state.db is missing, or inspect the Runtime V2 task store.',
+    };
+  }
+}
+
 export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<void> {
   const generatedAt = new Date().toISOString();
-  const workspaceDir = opts.workspace
-    ? path.resolve(opts.workspace)
-    : resolveWorkspaceDir();
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
 
   const warnings: string[] = [];
+  const readyBlockers: string[] = [];
+  const noteReadyBlocker = (label: string, reason?: string): void => {
+    readyBlockers.push(reason !== undefined ? `${label}: ${reason}` : label);
+  };
 
-  // Resolve workspace via the shared host-runtime resolver so pd-cli reports
-  // the same workspace the Codex hook would resolve.
+  // ── Workspace config → flags + workspace init ──────────────────────────────
   const resolution = resolveNearestPdWorkspace(workspaceDir);
-  let resolvedWorkspace: string;
+  let resolvedWorkspace = workspaceDir;
   let featureFlagSource: 'user_config' | 'defaults' | 'malformed';
   let hostCodexEnabled = false;
+  let workspaceInit: CodexHealthReport['workspaceInit'] = { initialized: false, reason: 'workspace_not_resolved', nextAction: 'Run `pd runtime init --confirm` in the workspace.' };
+  // ONE config load feeds both flag states + workspace init.
+  const configLoad = loadPdConfigForPlugin(resolution.ok ? resolution.workspaceDir : workspaceDir);
 
   if (!resolution.ok) {
-    resolvedWorkspace = workspaceDir;
     featureFlagSource = 'defaults';
     warnings.push(`workspace_not_resolved: ${resolution.reason} — ${resolution.nextAction}`);
+    noteReadyBlocker('workspace', resolution.reason);
   } else {
     resolvedWorkspace = resolution.workspaceDir;
-    const configLoad = loadPdConfigForPlugin(resolvedWorkspace);
     featureFlagSource = configLoad.source;
     const flags = computeFeatureFlagsFromConfig(configLoad.effective);
     hostCodexEnabled = isFeatureEnabled(flags, 'host.codex');
     if (!configLoad.ok) {
-      for (const error of configLoad.errors) {
-        warnings.push(`config_error: ${error.reason} — ${error.nextAction}`);
+      workspaceInit = {
+        initialized: false,
+        reason: `config_malformed: ${configLoad.errors[0]?.reason ?? 'unknown'}`,
+        nextAction: configLoad.errors[0]?.nextAction ?? 'Repair .pd/config.yaml.',
+      };
+      for (const error of configLoad.errors) warnings.push(`config_error: ${error.reason} — ${error.nextAction}`);
+      noteReadyBlocker('workspace', 'config_malformed');
+    } else {
+      workspaceInit = { initialized: true };
+    }
+  }
+  const ingestionFlag: CodexHealthReport['ingestionFlag'] = configLoad.ok
+    ? {
+        name: 'codex_conversation_ingestion',
+        enabled: isFeatureEnabled(computeFeatureFlagsFromConfig(configLoad.effective), 'codex_conversation_ingestion'),
+        source: configLoad.source,
       }
+    : { reason: `config_unreadable: ${configLoad.errors[0]?.reason ?? 'unknown'}`, nextAction: 'Repair .pd/config.yaml so the flag state can be evaluated.' };
+  const ingestionEnabled = 'enabled' in ingestionFlag ? ingestionFlag.enabled : false;
+
+  // ── Consent state (decision metadata only — never captured text) ──────────
+  let consent: CodexHealthReport['consent'];
+  {
+    const read = readCodexIngestionConsent(resolvedWorkspace);
+    if (!read.ok) {
+      consent = { reason: read.reason, nextAction: read.nextAction };
+      noteReadyBlocker('consent', read.reason);
+    } else {
+      const state = deriveCodexIngestionConsentState(read.record, ingestionEnabled);
+      const disclosureStale = read.record !== null && read.record.disclosureVersion !== CODEX_INGESTION_DISCLOSURE_VERSION;
+      consent = {
+        state,
+        disclosureStale,
+        ...(read.record !== null
+          ? { decidedAt: read.record.decidedAt, decidedVia: read.record.decidedVia, disclosureVersion: read.record.disclosureVersion }
+          : {}),
+        ...(state === 'flag_on_without_consent'
+          ? {
+              reason: 'flag_enabled_without_consent_record',
+              nextAction: 'The ingestion flag was enabled outside the disclosed consent flow. Run `pd codex setup` to present the disclosure and record (or reverse) the decision.',
+            }
+          : {}),
+        ...(disclosureStale
+          ? { reason: 'consent_recorded_for_older_disclosure', nextAction: 'Run `pd codex setup` to review the current disclosure and re-record the decision.' }
+          : {}),
+      };
+      if (ingestionEnabled && state !== 'granted') noteReadyBlocker('consent', state);
     }
   }
 
-  const adapterVersion = readPackageVersion('@principles/codex-adapter');
-  const runtimeVersion = readPackageVersion('@principles/host-runtime');
+  // ── Worker mode ────────────────────────────────────────────────────────────
+  const manifest = readInstallManifestRegistration(resolvedWorkspace);
+  const workerEvaluation = computeCodexWorkerStatusMode({ workspaceDir: resolvedWorkspace, registeredInInstallManifest: manifest.registered });
+  const worker: CodexHealthReport['worker'] = {
+    mode: workerEvaluation.mode,
+    registeredInInstallManifest: manifest.registered,
+    ...(workerEvaluation.reason !== undefined ? { reason: workerEvaluation.reason } : {}),
+    ...(workerEvaluation.nextAction !== undefined ? { nextAction: workerEvaluation.nextAction } : {}),
+  };
+  if (workerEvaluation.mode === 'degraded') noteReadyBlocker('worker', workerEvaluation.reason);
+  if (workerEvaluation.mode === 'manual_action_required') noteReadyBlocker('worker', 'manual_action_required');
+  if (manifest.error !== undefined) warnings.push(`install_manifest: ${manifest.error}`);
+
+  // ── Hook trust + dual registration ─────────────────────────────────────────
   const codexConfigDir = detectCodexConfigDir();
   const hooksTrust = detectHooksTrust(codexConfigDir);
   const dualRegistration = detectDualRegistration(codexConfigDir);
-
   if (hooksTrust.reason) warnings.push(`hooks_trust: ${hooksTrust.reason}`);
   if (dualRegistration.reason) warnings.push(`dual_registration: ${dualRegistration.reason}`);
+  if (hooksTrust.trusted !== true) noteReadyBlocker('hooks_trust', hooksTrust.reason ?? 'untrusted');
+
+  // ── Per-rollout checkpoints + bounded lag (stat only, never content) ───────
+  let rollouts: CodexHealthReport['rollouts'];
+  {
+    const listed = listGovernanceCheckpoints({ workspaceDir: resolvedWorkspace, hostKind: 'codex' });
+    if (listed.ok) {
+      const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+      let lagUndetectable = false;
+      const checkpoints = listed.checkpoints.map((checkpoint) => {
+        let lagBytes: number | null = null;
+        const lookup = locateCodexTranscriptByRolloutIdentity(codexHome, checkpoint.rolloutIdentity);
+        if (lookup.ok) {
+          try {
+            lagBytes = Math.max(0, fs.statSync(lookup.transcriptPath).size - checkpoint.byteOffset);
+          } catch {
+            lagUndetectable = true;
+          }
+        } else {
+          lagUndetectable = true;
+        }
+        return {
+          rolloutIdentity: checkpoint.rolloutIdentity,
+          byteOffset: checkpoint.byteOffset,
+          lastOrdinal: checkpoint.lastOrdinal,
+          incompleteTail: checkpoint.incompleteTail,
+          lastDegradationReason: checkpoint.lastDegradationReason,
+          updatedAt: checkpoint.updatedAt,
+          lagBytes,
+        };
+      });
+      rollouts = { checkpoints, lagUndetectable };
+      for (const checkpoint of checkpoints) {
+        if (checkpoint.incompleteTail) noteReadyBlocker('rollout', `${checkpoint.rolloutIdentity} incomplete_tail`);
+        else if (checkpoint.lagBytes !== null && checkpoint.lagBytes > 0) noteReadyBlocker('rollout', `${checkpoint.rolloutIdentity} lag=${checkpoint.lagBytes}B`);
+      }
+      if (checkpoints.length > 0 && lagUndetectable) {
+        warnings.push('rollout_lag_undetectable: the transcript file for at least one checkpoint could not be located (deleted rollout or non-default CODEX_HOME).');
+      }
+    } else {
+      rollouts = { reason: listed.reason, nextAction: listed.nextAction };
+      noteReadyBlocker('rollouts', listed.reason);
+    }
+  }
+
+  // ── Observation / admission / diagnostician counts ─────────────────────────
+  let observations: CodexHealthReport['observations'];
+  {
+    const stats = readGovernanceObservationStats({ workspaceDir: resolvedWorkspace });
+    observations = stats.ok ? stats.stats : { reason: stats.reason, nextAction: stats.nextAction };
+    if (!stats.ok) noteReadyBlocker('observations', stats.reason);
+  }
+  let admissions: CodexHealthReport['admissions'];
+  {
+    const counts = readGovernanceAdmissionCounts({ workspaceDir: resolvedWorkspace });
+    admissions = counts.ok ? counts.counts : { reason: counts.reason, nextAction: counts.nextAction };
+    if (!counts.ok) noteReadyBlocker('admissions', counts.reason);
+    else if (counts.counts.admittedWithoutTask > 0) {
+      noteReadyBlocker('admissions', `${counts.counts.admittedWithoutTask} admitted pain(s) without a Diagnostician task; run pd codex reconcile`);
+    }
+  }
+  const diagnosticianTasks = await readDiagnosticianCounts(resolvedWorkspace);
+  if ('pending' in diagnosticianTasks) {
+    if (diagnosticianTasks.needsHumanReview > 0) noteReadyBlocker('diagnostician', `${diagnosticianTasks.needsHumanReview} task(s) need human review`);
+  } else {
+    noteReadyBlocker('diagnostician', diagnosticianTasks.reason);
+  }
+
+  // ── §15 ready conjunction ──────────────────────────────────────────────────
+  if (!hostCodexEnabled) noteReadyBlocker('host.codex', 'disabled');
+  if (workerEvaluation.mode === 'paused') noteReadyBlocker('worker', workerEvaluation.reason);
+  const adapterVersion = readPackageVersion('@principles/codex-adapter');
+  const runtimeVersion = readPackageVersion('@principles/host-runtime');
+  if (adapterVersion === 'unknown') noteReadyBlocker('adapter', 'version_unknown');
+  const ready = readyBlockers.length === 0;
 
   const report: CodexHealthReport = {
     generatedAt,
@@ -177,6 +469,8 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
     workspace: resolvedWorkspace,
     adapterVersion,
     runtimeVersion,
+    codexIngestionMinVersion: CODEX_INGESTION_MIN_VERSION,
+    codexIngestionVerifiedVersion: CODEX_INGESTION_VERIFIED_VERSION,
     featureFlag: {
       name: 'host.codex',
       enabled: hostCodexEnabled,
@@ -188,62 +482,96 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
             nextAction: `Enable the Codex host adapter by setting features.host.codex.enabled=true in ${resolvedWorkspace}/.pd/config.yaml, then re-run \`pd health --host codex\`.`,
           }),
     },
+    ingestionFlag,
+    consent,
+    workspaceInit,
     hooksTrust,
     dualRegistration,
+    worker,
+    rollouts,
+    observations,
+    admissions,
+    diagnosticianTasks,
+    ready,
+    readyBlockers: readyBlockers.slice(0, 12),
     warnings,
   };
 
   if (opts.json) {
     // cli-1: exactly one parseable JSON object on stdout.
     console.log(JSON.stringify(report, null, 2));
-    // cli-2: exit-stops. Non-zero only when host.codex is disabled AND hooks
-    // are not trusted — the operator must act before Codex activation works.
-    if (!hostCodexEnabled && !hooksTrust.trusted) {
-      process.exitCode = 1;
-    }
+    // cli-2: exit paths stop execution. Not-ready is the actionable signal.
+    if (!ready) process.exitCode = 1;
     return;
   }
 
   // Text output — still includes explicit nextAction per cli-6.
-  console.log(`generatedAt: ${report.generatedAt}`);
-  console.log(`host: ${report.host}`);
-  console.log(`workspace: ${report.workspace}`);
-  console.log(`adapterVersion: ${report.adapterVersion}`);
-  console.log(`runtimeVersion: ${report.runtimeVersion}`);
-  console.log(`featureFlag.name: ${report.featureFlag.name}`);
-  console.log(`featureFlag.enabled: ${report.featureFlag.enabled}`);
-  console.log(`featureFlag.source: ${report.featureFlag.source}`);
-  if (report.featureFlag.reason) {
-    console.log(`featureFlag.reason: ${report.featureFlag.reason}`);
-    console.log(`featureFlag.nextAction: ${report.featureFlag.nextAction ?? ''}`);
+  const line = (label: string, value: string): void => console.log(`${label}: ${value}`);
+  line('generatedAt', report.generatedAt);
+  line('host', report.host);
+  line('workspace', report.workspace);
+  line('adapterVersion', report.adapterVersion);
+  line('runtimeVersion', report.runtimeVersion);
+  line('codexIngestionMinVersion', report.codexIngestionMinVersion);
+  line('codexIngestionVerifiedVersion', report.codexIngestionVerifiedVersion);
+  line('featureFlag.host.codex', `${String(report.featureFlag.enabled)} (${report.featureFlag.source})`);
+  if ('enabled' in report.ingestionFlag) {
+    line('ingestionFlag.codex_conversation_ingestion', `${String(report.ingestionFlag.enabled)} (${report.ingestionFlag.source})`);
+  } else {
+    line('ingestionFlag', `unknown (${report.ingestionFlag.reason})`);
+    line('ingestionFlag.nextAction', report.ingestionFlag.nextAction);
   }
-  console.log(`hooksTrust.detectable: ${report.hooksTrust.detectable}`);
-  if (report.hooksTrust.trusted !== undefined) {
-    console.log(`hooksTrust.trusted: ${report.hooksTrust.trusted}`);
+  if ('state' in report.consent) line('consent.state', report.consent.state);
+  else {
+    line('consent', `unknown (${report.consent.reason})`);
+    line('consent.nextAction', report.consent.nextAction);
   }
-  if (report.hooksTrust.reason) {
-    console.log(`hooksTrust.reason: ${report.hooksTrust.reason}`);
-    console.log(`hooksTrust.nextAction: ${report.hooksTrust.nextAction ?? ''}`);
+  const init = report.workspaceInit as { initialized?: boolean; reason?: string };
+  line('workspaceInit', init.initialized === true ? 'ok' : `not-initialized (${init.reason ?? 'unknown'})`);
+  line('hooksTrust', report.hooksTrust.trusted === undefined ? `undetectable (${report.hooksTrust.reason ?? 'unknown'})` : String(report.hooksTrust.trusted));
+  line('dualRegistration', String(report.dualRegistration.detected));
+  if (report.dualRegistration.detected) line('dualRegistration.nextAction', report.dualRegistration.nextAction ?? '');
+  line('worker.mode', `${report.worker.mode}${report.worker.reason !== undefined ? ` (${report.worker.reason})` : ''}`);
+  if ('checkpoints' in report.rollouts) {
+    line('rollouts', String(report.rollouts.checkpoints.length));
+    for (const checkpoint of report.rollouts.checkpoints.slice(0, 10)) {
+      console.log(`  - ${checkpoint.rolloutIdentity} lag=${checkpoint.lagBytes === null ? 'unknown' : `${checkpoint.lagBytes}B`} incompleteTail=${String(checkpoint.incompleteTail)} updatedAt=${checkpoint.updatedAt}`);
+    }
+  } else {
+    line('rollouts', `unknown (${report.rollouts.reason})`);
   }
-  console.log(`dualRegistration.detected: ${report.dualRegistration.detected}`);
-  if (report.dualRegistration.globalHooksPath) {
-    console.log(`dualRegistration.globalHooksPath: ${report.dualRegistration.globalHooksPath}`);
+  if ('operational' in report.observations) {
+    line('observations', `operational=${String(report.observations.operational)} promoted=${String(report.observations.promoted)} quarantined=${String(report.observations.quarantined)} terminal=${String(report.observations.terminalOther)}`);
+    line('observations.nextExpiryAt', report.observations.nextExpiryAt ?? 'n/a');
+    line('observations.lastObservationAt', report.observations.lastObservationAt ?? 'n/a');
+  } else {
+    line('observations', `unknown (${report.observations.reason})`);
   }
-  if (report.dualRegistration.reason) {
-    console.log(`dualRegistration.reason: ${report.dualRegistration.reason}`);
-    console.log(`dualRegistration.nextAction: ${report.dualRegistration.nextAction ?? ''}`);
+  if ('admitted' in report.admissions) {
+    line('admissions', `admitted=${String(report.admissions.admitted)} withoutTask=${String(report.admissions.admittedWithoutTask)} tails pending=${String(report.admissions.pendingTails)}/stale=${String(report.admissions.staleTails)}/completed=${String(report.admissions.completedTails)}`);
+    line('admissions.lastAdmissionAt', report.admissions.lastAdmissionAt ?? 'n/a');
+  } else {
+    line('admissions', `unknown (${report.admissions.reason})`);
   }
+  if ('pending' in report.diagnosticianTasks) {
+    line('diagnosticianTasks', `pending=${String(report.diagnosticianTasks.pending)} leased=${String(report.diagnosticianTasks.leased)} retryWait=${String(report.diagnosticianTasks.retryWait)} needsHumanReview=${String(report.diagnosticianTasks.needsHumanReview)}`);
+  } else {
+    line('diagnosticianTasks', `unknown (${report.diagnosticianTasks.reason})`);
+  }
+  line('ready', `${String(report.ready)}${report.readyBlockers.length > 0 ? ` (blockers: ${report.readyBlockers.join('; ')})` : ''}`);
   if (report.warnings.length > 0) {
-    console.log(`warnings:`);
-    for (const w of report.warnings) console.log(`  - ${w}`);
+    console.log('warnings:');
+    for (const warning of report.warnings) console.log(`  - ${warning}`);
   }
   console.log('');
 
+  // Product-claim boundary (PRI-625): automatic closure readiness is NOT
+  // cross-host signal parity (PRI-632 tracks that separately).
+  if (report.ready) {
+    console.log('rev2 automatic closure is ready for this workspace. This does NOT claim OpenClaw↔Codex signal-modality parity (see PRI-632).');
+  }
   if (!hostCodexEnabled) {
     console.warn(`⚠️  host.codex feature flag is disabled. Enable it in ${resolvedWorkspace}/.pd/config.yaml under features.host.codex.enabled to activate Codex hooks.`);
   }
-  if (!hooksTrust.trusted && !hooksTrust.detectable) {
-    console.warn(`⚠️  Hook trust state could not be detected. ${hooksTrust.nextAction ?? ''}`);
-    process.exitCode = 1;
-  }
+  if (!report.ready) process.exitCode = 1;
 }
