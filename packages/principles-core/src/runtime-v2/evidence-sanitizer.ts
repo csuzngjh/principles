@@ -45,7 +45,9 @@ const TOKEN_LIKE_PATTERNS: RegExp[] = [
 const PD_TAG_PATTERNS: RegExp[] = [
   /\[EMOTIONAL_DAMAGE_DETECTED(?::(?:mild|moderate|severe))?\]/gi,
   /\[EMPATHY_ROLLBACK_REQUEST\]/gi,
-  /<empathy[^>]*\/?>(?:<\/empathy>)?/gi,
+  // No `\/?` before `>`: `/` is already in `[^>]`, so the optional branch only
+  // adds backtracking paths (CodeQL js/polynomial-redos) without changing what matches.
+  /<empathy[^>]*>(?:<\/empathy>)?/gi,
 ];
 
 // ── Path detection ──
@@ -61,6 +63,18 @@ const ABSOLUTE_PATH_IN_STRING_RE =
   /(?:^|[\s"'=])([A-Za-z]:\\[^\s"'&|<>]+|[A-Za-z]:\/[^\s"'&|<>]+|\\\\[^\s"'&|<>]+|(?:\/[\w.-]+){2,}(?:\/[^\s"'&|<>]*)?)/gm;
 
 // ── Helpers ──
+
+/**
+ * Strips every trailing `\` / `/` via a linear end-scan.
+ * Constraint: keep this regex-free — trailing-separator strip regexes are
+ * js/polynomial-redos flagged (adversarial separator runs reach convergePath
+ * through untrusted evidence strings).
+ */
+function stripTrailingSeparators(value: string): string {
+  let end = value.length;
+  while (end > 0 && (value[end - 1] === '/' || value[end - 1] === '\\')) end--;
+  return end === value.length ? value : value.slice(0, end);
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -105,8 +119,8 @@ export function convergePath(value: string, workspaceDir?: string): string {
 
   // Try repo-relative
   if (workspaceDir) {
-    const normalizedWorkspace = workspaceDir.replace(/[\\/]+$/, '');
-    const normalizedValue = value.replace(/[\\/]+$/, '');
+    const normalizedWorkspace = stripTrailingSeparators(workspaceDir);
+    const normalizedValue = stripTrailingSeparators(value);
     // Case-insensitive comparison on Windows
     const compare = WINDOWS_DRIVE_RE.test(value)
       ? (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
