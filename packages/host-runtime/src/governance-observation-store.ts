@@ -1064,3 +1064,65 @@ export function quarantineGovernanceObservation(args: QuarantineGovernanceObserv
   }
 }
 
+// ─── Read-only surface stats (Slice D, SPEC rev 2 §15 health) ───────────────
+
+export interface GovernanceObservationStats {
+  readonly operational: number;
+  readonly promoted: number;
+  readonly quarantined: number;
+  readonly terminalOther: number;
+  /** Oldest operational observed_at + retention window — when the next row ages out. */
+  readonly nextExpiryAt: string | null;
+  readonly lastObservationAt: string | null;
+}
+
+export type ReadGovernanceObservationStatsResult =
+  | { ok: true; stats: GovernanceObservationStats }
+  | { ok: false; reason: string; nextAction: string };
+
+/**
+ * Bounded read-only counts for the §15 health surface. Unknown is reported
+ * as a structured degradation — never silently as zero (§15: unknown is not
+ * reported as healthy).
+ */
+export function readGovernanceObservationStats(args: { workspaceDir: string; databaseFactory?: ObservationDatabaseFactory }): ReadGovernanceObservationStatsResult {
+  const opened = openStore(args.workspaceDir, args.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const counts = db.prepare(`SELECT
+        SUM(CASE WHEN retention_class = 'operational' THEN 1 ELSE 0 END) AS operational,
+        SUM(CASE WHEN retention_class = 'promoted' THEN 1 ELSE 0 END) AS promoted,
+        SUM(CASE WHEN retention_class = 'quarantined' THEN 1 ELSE 0 END) AS quarantined,
+        SUM(CASE WHEN retention_class IN ('expired', 'rolled_back') THEN 1 ELSE 0 END) AS terminal_other,
+        MIN(CASE WHEN retention_class = 'operational' THEN observed_at END) AS oldest_operational,
+        MAX(observed_at) AS last_observation
+      FROM governance_observations`).get();
+    if (!isRecord(counts)) {
+      return { ok: false, reason: 'governance_stats_unavailable', nextAction: 'Inspect the workspace trajectory.db governance_observations table.' };
+    }
+    const numberOr = (value: unknown): number => (typeof value === 'number' ? value : 0);
+    const stringOr = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null);
+    const oldest = stringOr(own(counts, 'oldest_operational'));
+    const nextExpiry = oldest !== null && !Number.isNaN(Date.parse(oldest))
+      ? new Date(Date.parse(oldest) + GOVERNANCE_RETENTION_MAX_AGE_MS).toISOString()
+      : null;
+    return {
+      ok: true,
+      stats: {
+        operational: numberOr(own(counts, 'operational')),
+        promoted: numberOr(own(counts, 'promoted')),
+        quarantined: numberOr(own(counts, 'quarantined')),
+        terminalOther: numberOr(own(counts, 'terminal_other')),
+        nextExpiryAt: nextExpiry,
+        lastObservationAt: stringOr(own(counts, 'last_observation')),
+      },
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 160) : String(error);
+    return { ok: false, reason: `governance_stats_failed:${detail}`, nextAction: 'Inspect the workspace trajectory.db; the health surface degraded without mutating anything.' };
+  } finally {
+    close();
+  }
+}
+

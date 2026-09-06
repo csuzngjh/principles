@@ -1768,6 +1768,8 @@ export interface EvidenceChainRecordData {
   dreamerTaskStatus?: string;
   /** PRI-469: optional intent tension from diagnostician artifact (SPEC §16). */
   intentTension?: IntentTensionData;
+  /** PRI-625 Slice D: evidence host attribution — openclaw | codex | unknown. */
+  hostKind?: 'openclaw' | 'codex' | 'unknown';
 }
 
 // ── Intent Tension (PRI-469, SPEC §16) ───────────────────────────────────────
@@ -2170,6 +2172,11 @@ function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null
   };
 
   // Optional fields — fail loud when present but wrong type (ERR-009)
+  if (Object.hasOwn(v, 'hostKind')) {
+    if (!isString(v.hostKind)) return null;
+    if (v.hostKind !== 'openclaw' && v.hostKind !== 'codex' && v.hostKind !== 'unknown') return null;
+    result.hostKind = v.hostKind;
+  }
   if (Object.hasOwn(v, 'admissionDecision')) {
     if (!isString(v.admissionDecision)) return null;
     result.admissionDecision = v.admissionDecision;

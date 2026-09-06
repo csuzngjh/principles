@@ -192,11 +192,13 @@ export class EvidenceChainConsoleModel {
         trajDb = new Database(trajectoryDbPath, { readonly: true });
         try {
           painEvents = trajDb.prepare(
-            'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id FROM pain_events ORDER BY created_at DESC LIMIT 100',
+            'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id, host_kind FROM pain_events ORDER BY created_at DESC LIMIT 100',
           ).all();
         } catch (colErr: unknown) {
           const colMessage = colErr instanceof Error ? colErr.message : String(colErr);
           if (colMessage.includes('no such column')) {
+            // host_kind (PRI-640) and runtime_task_id may be absent on legacy
+            // databases — degrade the column, never the record.
             painEvents = trajDb.prepare(
               'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at FROM pain_events ORDER BY created_at DESC LIMIT 100',
             ).all();
