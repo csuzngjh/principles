@@ -36,11 +36,13 @@ import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
 import { getModel, getProviders, completeSimple, streamSimple } from '@earendil-works/pi-ai/compat';
 import type { Model, Message, KnownProvider, Context } from '@earendil-works/pi-ai/compat';
+import type { SimpleStreamOptions } from '@earendil-works/pi-ai';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { extractJsonObject } from './json-extractor.js';
 import { safeStringifyPreview } from './output-repair-contract.js';
+import { getPiAiFetchForApi } from './pi-ai-http-transport.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -207,6 +209,19 @@ function extractLastAssistantText(messages: AgentMessage[]): string | null {
     }
   }
   return null;
+}
+
+/**
+ * PRI-683: streamSimple bound to a transport whose undici idle caps are
+ * disabled, so agent-loop LLM calls are not silently aborted at Node fetch's
+ * implicit 300s boundary before the configured budget fires.
+ * PR #1524 review follow-up: the fetch is resolved per model API — the
+ * google-generative-ai / google-vertex adapters reject any non-globalThis
+ * fetch at entry, so those APIs keep Node's global fetch instead of failing
+ * every L2 call. Exported for ArtificerL2Adapter, which runs the same loop.
+ */
+export function pdStreamSimple(model: Model<string>, context: Context, options?: SimpleStreamOptions) {
+  return streamSimple(model, context, { ...options, fetch: getPiAiFetchForApi(model.api) });
 }
 
 export class L2AgentLoopAdapter implements PDRuntimeAdapter {
@@ -404,7 +419,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
           loopConfig,
           async (event: AgentEvent) => { void event; },
           abortController.signal,
-          streamSimple,
+          pdStreamSimple,
         );
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
@@ -531,7 +546,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     const model = resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl);
     const userMessage = { role: 'user' as const, content: messageContent, timestamp: Date.now() };
     const context: Context = { messages: [userMessage] };
-    const response = await completeSimple(model, context, { apiKey, signal: AbortSignal.timeout(120_000) });
+    const response = await completeSimple(model, context, { apiKey, signal: AbortSignal.timeout(120_000), fetch: getPiAiFetchForApi(model.api) });
     // Extract the text content from the response and parse JSON.
     let text: string | null = null;
     if (typeof response.content === 'string') {

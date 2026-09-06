@@ -4244,6 +4244,17 @@ describe('SEC-BASE-5: network & config isolation guards', () => {
   const REPO_ROOT = pathSync.resolve(__dirname, '../../../../..');
 
   it('core does not import node:http / node:https / undici / fetch for business', () => {
+    // PRI-683: pi-ai-http-transport.ts is the registered exception
+    // (io-seam-registry.json `pi-ai-http-transport` seam). It owns the LLM
+    // transport's undici Agent config; requests still originate from pi-ai.
+    const registryPath = pathSync.join(REPO_ROOT, 'packages', 'principles-core', 'io-seam-registry.json');
+    const registry = JSON.parse(fsSync.readFileSync(registryPath, 'utf8')) as {
+      seams: { name: string; files: string[] }[];
+    };
+    const registeredFiles = new Set<string>();
+    for (const seam of registry.seams) {
+      for (const file of seam.files) registeredFiles.add(file);
+    }
     const coreDir = pathSync.join(REPO_ROOT, 'packages', 'principles-core', 'src');
     const files = fsSync.readdirSync(coreDir, { recursive: true, encoding: 'utf8' })
       .filter((f): f is string => typeof f === 'string' && f.endsWith('.ts') && !f.includes('__tests__'));
@@ -4251,13 +4262,16 @@ describe('SEC-BASE-5: network & config isolation guards', () => {
     for (const f of files) {
       const content = fsSync.readFileSync(pathSync.join(coreDir, f), 'utf8');
       const lines = content.split('\n');
+      const isRegisteredSeam = registeredFiles.has(f.replace(/\\/g, '/'));
       lines.forEach((line, idx) => {
         if (/^import\s+type/.test(line.trim())) return;
         if (/from\s+['"]node:http['"]/.test(line) || /from\s+['"]node:https['"]/.test(line)
             || /from\s+['"]undici['"]/.test(line) || /from\s+['"]node-fetch['"]/.test(line)) {
+          if (isRegisteredSeam) return;
           violations.push(`${f}:${idx + 1}: ${line.trim()}`);
         }
         if (!/^\s*(\/\/|\/\*|\*)/.test(line) && /\bfetch\s*\(/.test(line) && !/import/.test(line)) {
+          if (isRegisteredSeam) return;
           violations.push(`${f}:${idx + 1}: ${line.trim()}`);
         }
       });
