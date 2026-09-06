@@ -1017,7 +1017,16 @@ For Linear-backed work:
 5. implement and verify;
 6. create the PR when requested;
 7. set `In Review`;
-8. leave a concise evidence-based summary.
+8. leave a concise evidence-based summary;
+9. before submitting any fix (ticketed or adhoc), search Linear for an existing ticket describing the same problem; if one exists, link it in the PR, leave an evidence comment on that ticket, and move it to `In Review` at PR creation time — do not wait for merge;
+10. when a comment overturns a ticket's diagnosis, or the described work is superseded by another mechanism, update the ticket state (`Canceled` with rationale) in the same action — a correcting comment alone is not a close-out;
+11. a merged PR whose ticket still sits in `In Review` is closed (`Done` with the PR link) by the next reconciliation audit.
+
+Rules 9–11 exist because work legitimately completes outside its own ticket
+(adhoc repair PRs, fixes landing under a sibling ticket, diagnoses overturned
+or superseded). Without an explicit close-out action at PR creation time,
+such tickets silently drift in `Todo`. A periodic reconciliation audit
+(Todo/In Review tickets × merged PRs × current source) is the safety net.
 
 Do not blindly follow inaccurate SPEC assumptions.
 
