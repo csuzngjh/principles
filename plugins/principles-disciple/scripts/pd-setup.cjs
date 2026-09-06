@@ -2,7 +2,7 @@
 /**
  * $pd-setup — per-workspace PD initialization for the Codex plugin.
  *
- * Steps (ADR-0020 §10.4):
+ * Steps (ADR-0020 §10.4; SPEC rev 2 §17 + G2A frozen disclosure, Slice D):
  *   1. Fail loud when Node < 20 or npm is unavailable (the plugin does not
  *      install a system runtime).
  *   2. Install the PINNED runtime (runtime-version.json) into the
@@ -11,7 +11,14 @@
  *   3. Initialize the workspace through the existing production command:
  *      `pd runtime init --confirm` (reuses the OpenClaw-grade path; no new
  *      bootstrap logic). Requires the pd CLI (npm i -g @principles/pd-cli).
- *   4. Report flag + hook-trust state. Never silently modify unknown config.
+ *   4. Codex conversation-ingestion consent (PRI-625): present the G2A
+ *      frozen disclosure via `pd codex setup --show-disclosure` (the text
+ *      always comes from the installed CLI — this script embeds no copy),
+ *      then record the explicit decision through the same CLI. Declining
+ *      leaves every governance surface unchanged; nothing here can enable
+ *      ingestion without an explicit accept. --ingest accept|decline|skip
+ *      forces non-interactive behavior; without a TTY the default is skip.
+ *   5. Report flag + hook-trust state. Never silently modify unknown config.
  *
  * rc-9: every refusal prints a structured reason and next action.
  */
@@ -20,6 +27,7 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const readline = require('node:readline/promises');
 const { ensurePluginData, locatePluginRoot, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
@@ -45,7 +53,7 @@ function runNpm(args, options) {
 }
 
 function parseArgs(argv) {
-  const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, skipInit: false, json: false };
+  const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, skipInit: false, json: false, ingest: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--plugin-root') {
       const value = requireFlagValue(argv, i, '--plugin-root');
@@ -61,12 +69,20 @@ function parseArgs(argv) {
       out.workspace = value.value; i += 1;
     } else if (argv[i] === '--skip-init') out.skipInit = true;
     else if (argv[i] === '--json') out.json = true;
-    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --skip-init --json' };
+    else if (argv[i] === '--ingest') {
+      const value = requireFlagValue(argv, i, '--ingest');
+      if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
+      if (value.value !== 'accept' && value.value !== 'decline' && value.value !== 'skip') {
+        return { error: 'invalid_ingest_value', nextAction: 'Supported --ingest values: accept | decline | skip (default: interactive prompt; skip when no TTY).' };
+      }
+      out.ingest = value.value; i += 1;
+    }
+    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --skip-init --ingest accept|decline|skip --json' };
   }
   return out;
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.error) { fail(args.error, args.nextAction ?? 'Check the argument list.'); return; }
   const workspaceDir = path.resolve(args.workspace ?? process.cwd());
@@ -164,7 +180,16 @@ function main() {
     initResult = 'initialized';
   }
 
-  // 4. Report (never mutates unknown config).
+  // 4. Codex conversation-ingestion consent (PRI-625, G2A frozen disclosure).
+  //    The disclosure text ALWAYS comes from the installed pd CLI
+  //    (`pd codex setup --show-disclosure`) — this script embeds no copy, so
+  //    the CLI's guard-tested frozen text is the only source. The decision is
+  //    applied by the same CLI (--accept/--decline), which records consent
+  //    BEFORE the flag moves; declining leaves all governance unchanged.
+  const pd = pdCliCommand();
+  const consent = await runIngestionConsentStep(pd, workspaceDir, args);
+
+  // 5. Report (never mutates unknown config).
   const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
   const report = {
     ok: true,
@@ -175,6 +200,8 @@ function main() {
     workspace: workspaceDir,
     workspaceConfig: fs.existsSync(configPath) ? 'present' : 'absent (run pd runtime init without --skip-init, or create .pd/config.yaml)',
     workspaceInit: initResult,
+    ingestionConsent: consent.outcome,
+    ...(consent.note ? { ingestionConsentNote: consent.note } : {}),
     hookTrustNextAction: 'In Codex, run /hooks and trust the Principles Disciple hooks — hooks never execute until trusted.',
   };
   if (args.json) console.log(JSON.stringify(report, null, 2));
@@ -182,8 +209,64 @@ function main() {
     console.log('[PD:setup] ok');
     console.log(`  runtime   : @principles/codex-adapter@${desired.codexAdapter} + host-runtime@${desired.hostRuntime} + core@${desired.core} (${report.runtimeInstalled})`);
     console.log(`  workspace : ${workspaceDir} — config ${report.workspaceConfig}`);
+    console.log(`  ingestion : ${report.ingestionConsent}${consent.note ? ` (${consent.note})` : ''}`);
     console.log(`  next      : ${report.hookTrustNextAction}`);
   }
 }
 
-main();
+/**
+ * Slice D consent step. Never throws; every path returns a structured
+ * outcome. `accepted`/`declined` are recorded decisions (the disclosure was
+ * presented first); `skipped` mutates nothing.
+ */
+async function runIngestionConsentStep(pd, workspaceDir, args) {
+  const skip = (note) => ({ outcome: 'skipped', ...(note ? { note } : {}) });
+  if (!pd) return skip('pd_cli_unavailable — run `pd codex setup --workspace <dir>` after installing @principles/pd-cli');
+
+  // Present the frozen disclosure (SSoT lives in the CLI).
+  const show = spawnSync(pd.command, [...pd.prefix, 'codex', 'setup', '--show-disclosure', '--workspace', workspaceDir], { encoding: 'utf8', timeout: 60_000 });
+  if (show.error || show.status !== 0 || !show.stdout) {
+    return skip('disclosure_unavailable — run `pd codex setup --show-disclosure` manually');
+  }
+
+  let decision;
+  if (args.ingest === 'accept' || args.ingest === 'decline') decision = args.ingest;
+  else if (args.ingest === 'skip') return skip();
+  else if (process.stdin.isTTY) {
+    if (!args.json) process.stdout.write(show.stdout + '\n');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      const answer = (await rl.question('是否开启 Codex 对话观察？ y = 开启（已读上述说明） / n = 保持关闭: ')).trim().toLowerCase();
+      if (answer === 'y' || answer === 'yes') decision = 'accept';
+      else if (answer === 'n' || answer === 'no') decision = 'decline';
+      else return skip('no_explicit_decision — nothing was changed; re-run $pd-setup or `pd codex setup`');
+    } finally {
+      rl.close();
+    }
+  } else {
+    return skip('no_tty — pass --ingest accept|decline for non-interactive consent');
+  }
+
+  const apply = spawnSync(
+    pd.command,
+    [...pd.prefix, 'codex', 'setup', '--workspace', workspaceDir, decision === 'accept' ? '--accept' : '--decline', '--json'],
+    { encoding: 'utf8', timeout: 60_000 },
+  );
+  const stdout = typeof apply.stdout === 'string' ? apply.stdout.trim() : '';
+  const lastLine = stdout.split('\n').findLast((line) => line.startsWith('{'));
+  if (apply.error || apply.status !== 0 || !lastLine) {
+    return { outcome: 'skipped', note: `consent_apply_failed:${String(apply.error ? apply.error.message : apply.status).slice(0, 80)} — run \`pd codex setup --workspace <dir>\` manually` };
+  }
+  try {
+    const parsed = JSON.parse(lastLine);
+    if (parsed.decision === 'granted' && parsed.status === 'ok') return { outcome: 'accepted' };
+    if (parsed.decision === 'declined' && parsed.status === 'ok') return { outcome: 'declined' };
+    return { outcome: 'skipped', note: `consent_apply_degraded:${String(parsed.reason ?? 'unknown').slice(0, 80)}` };
+  } catch {
+    return { outcome: 'skipped', note: 'consent_apply_output_invalid — run `pd codex setup` manually' };
+  }
+}
+
+main().catch((error) => {
+  fail(`setup_crashed:${error instanceof Error ? error.message.slice(0, 160) : String(error)}`, 'Re-run $pd-setup; if it repeats, report the reason above.');
+});
