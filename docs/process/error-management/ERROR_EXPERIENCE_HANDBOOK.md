@@ -168,6 +168,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-101 | Playwright reuses an unrelated server on a shared fixed port, testing stale UI instead of the current worktree | PRI-553 |
 | ERR-102 | Optional governance gate conflates disabled/unavailable/loading states and fails open to the legacy path | PRI-553 |
 | ERR-104 | Auth bootstrap redirects overwrite authenticated deep links because splash/onboarding state is not scoped to entry routes | RuleCode Owner Live Decision E2E |
+| ERR-119 | Route/identity matcher extracted from legacy prefix code keeps the prefix form — adjacent-but-different routes inherit the exemption | PRI-643 / PR #1530 review |
 | ERR-111 | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them | PRI-581 |
 
 ---
@@ -624,8 +625,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 110 |
-| Last updated | 2026-09-05 |
+| Total lessons | 111 |
+| Last updated | 2026-09-06 |
 | Top category | Schema & Type |
 | Recurring errors | 59 |
 
@@ -1382,3 +1383,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-683 lab evidence `pd-labs/pri653-r2b/evidence/artificer-300s-inner-cap-proof.json` + state.db runs table (8+ attempts at 300.0s, abort-family reason, vs d0a0305a chain aborting at exactly 600.0s with "after 600000ms" — fingerprint separation).
 - **Date**: 2026-09-05
 - **Recurrence**: 2026-09-04 PRI-670 (runner-layer 300s default — PR #1512) → 2026-09-05 PRI-683 (transport-layer 300s implicit default). Same week, same symptom ("requests die around 300s"), two different layers; the first fix's success (600s/900s firing precisely) is what made the second layer visible. Historical member: PRI-633 undici connectTimeout 10s (2026-08-31, documented in issue text only). Lesson: when a timeout family recurs, audit the WHOLE stack top-to-bottom in one pass instead of peeling one layer per incident.
+
+---
+**[ERR-119]** | An identity/route matcher extracted from legacy prefix code keeps the prefix form — adjacent-but-different identities silently inherit the exemption
+
+- **What happened**: PRI-643 review round (2026-09-06, PR #1530). During the Console 401 session-flow fix, a route matcher was extracted from legacy prefix-matching code (`startsWith`) while carrying the prefix form over. An adjacent route sharing the prefix (`#/login-help` under `#/login`) silently matched too — the special-case exemption (public/no-session route) applied to a route it was never meant for, stranding the user exactly where the fix promised not to.
+- **Why it's wrong**: Carrying the legacy matching FORM over re-implements its scope, not its intent. Prefix matching over an identity namespace is only correct when the namespace itself is prefix-structured and every near-miss prefix-sharing identity has been accounted for; extracting the matcher without re-deriving its semantics silently widens (or narrows) the exemption set while the diff looks like a pure refactor.
+- **Generalized failure mode**: Any extraction of a legacy conditional into a named matcher/predicate done by carrying the comparison form (`startsWith`/substring/glob) instead of re-deriving the semantics from the authoritative identity registry (registered routes, enum members, ID spaces).
+- **Correct approach**: Re-derive the matcher's semantics from the authoritative identity registry: enumerate the registered identities, justify prefix vs equality against the near-miss identities the form would also capture, and ship a NEGATIVE test proving a prefix-sharing but non-identical value does not match (the `#/login-help` case).
+- **How to prevent**: In review, treat every extracted matcher as a semantics decision, not a refactor: ask "what identities does this form capture that the registry does not?" and require the near-miss negative test beside the positive one.
+- **Regression guard**: The PRI-643 console 401 session route test suite, including the negative case asserting the prefix-sharing adjacent route does not receive the exemption.
+- **Related ERRs**: ERR-108 (both sides written from a summary drift together — here the extracted matcher and its tests were consistent with each other but not with the identity registry), EP-09
+- **Source**: PRI-643 / PR #1530 review round
+- **Date**: 2026-09-06
+- **Recurrence**: None (first recording)
