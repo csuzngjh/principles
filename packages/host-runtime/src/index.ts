@@ -41,6 +41,11 @@ export * from './product-telemetry/eligibility.js';
 export * from './product-telemetry/exporter.js';
 export * from './product-telemetry/milestone-readers.js';
 export * from './product-telemetry/service.js';
+// PRI-625 Slice D: Codex conversation-ingestion consent — G2A frozen
+// disclosure SSoT constant + workspace consent record (governance layer; the
+// runtime gate remains the feature flag alone).
+export * from './codex-disclosure.js';
+export * from './codex-ingestion-consent.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',
