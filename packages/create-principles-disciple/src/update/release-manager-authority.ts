@@ -173,18 +173,30 @@ export function createReleaseManagerAuthority(
 /**
  * Map a ReleaseManager refusal onto the console's explicit-fallback reason
  * vocabulary (rc-9: degradation must be observable with a stable reason).
+ * `transactionOpened` passes through the PRI-698 default-on safety net
+ * semantics: false ⇒ the refusal happened before any side effect, so the
+ * console may fall back to the legacy updater with an explicit reason; true
+ * ⇒ runtime-side effects may exist and the refusal must surface as a
+ * failure, never as a fallback.
  */
 export function mapReleaseManagerErrorToFallback(error: unknown): {
   reason: string;
   message: string;
   nextAction: string | null;
+  transactionOpened: boolean;
 } {
   if (error instanceof ReleaseManagerError) {
-    return { reason: error.reason, message: error.message, nextAction: error.nextAction };
+    return {
+      reason: error.reason,
+      message: error.message,
+      nextAction: error.nextAction,
+      transactionOpened: error.transactionOpened,
+    };
   }
   return {
     reason: 'release_manager_check_failed',
     message: error instanceof Error ? error.message : String(error),
     nextAction: null,
+    transactionOpened: false,
   };
 }

@@ -210,7 +210,14 @@ describe('explicit-fallback error mapping', () => {
       reason: 'shadow_mode_read_only',
       message: 'not enabled yet',
       nextAction: 'continue using the current update path',
+      transactionOpened: false,
     });
+    // PRI-698 default-on safety net: post-transaction refusals carry the flag
+    // through so the console surfaces them as failures, never as fallbacks.
+    const postTransaction = mapReleaseManagerErrorToFallback(
+      new ReleaseManagerError('apply_failed', 'installer failed mid-swap', 'inspect the journal', true),
+    );
+    expect(postTransaction.transactionOpened).toBe(true);
   });
 
   it('maps unexpected errors to a generic failure reason without losing the message', () => {

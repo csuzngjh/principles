@@ -1974,6 +1974,20 @@ async function runReleaseManagerApplyFullDispatch(
     }
   } catch (error) {
     const mapped = mod.mapReleaseManagerErrorToFallback(error);
+    // PRI-698 default-on safety net: a refusal thrown BEFORE the update
+    // transaction was opened (layout unsupported, metadata unavailable,
+    // journal unwritable) has ZERO side effects, so — exactly like the
+    // governed check — the explicit fallback serves the request with the
+    // refusal reason annotated. A refusal AFTER the transaction opened
+    // (transactionOpened) may have runtime-side effects (staging writes,
+    // journal tail): it surfaces as the legacy failure body, never as a
+    // fallback.
+    if (mapped.transactionOpened !== true) {
+      res.setHeader('X-PD-Mutation-Authority', `${LEGACY_MUTATION_AUTHORITY} (preferred: ${RELEASE_MANAGER_AUTHORITY} refused pre-transaction: ${mapped.reason})`);
+      res.setHeader('X-PD-Mutation-Fallback-Reason', `release_manager_refused_pre_transaction:${mapped.reason}`);
+      await legacyApplyFullMutation(req, res, ctx);
+      return;
+    }
     sendSuccess(res, {
       success: false,
       message: mapped.message,

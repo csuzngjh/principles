@@ -3,14 +3,18 @@
  * route (ADR-0024 D-1 adoption).
  *
  * Contracts under test:
- * 1. Flag off (default): legacy serves every kind, with the machine-readable
- *    `release_manager_shadow_disabled` fallback reason — zero behavior change.
- * 2. Flag on, authority not ready: explicit fallback with structured
- *    `release_manager_unavailable:<reasons>` per kind.
+ * 1. Default install (no config): both release_manager flags default ON
+ *    (PRI-698 graduation, Owner decision 2026-09-07) — the authority is
+ *    attempted and falls back explicitly per request when not ready
+ *    (`release_manager_unavailable:<reasons>`).
+ * 2. Explicit flags off: legacy serves every kind with
+ *    `release_manager_shadow_disabled` / `release_manager_write_disabled`.
  * 3. Flag on, check ready: ReleaseManager serves the governed check (header)
  *    while the response body stays byte-identical to the legacy contract.
- * 4. Failure: a ReleaseManager refusal re-annotates the explicit fallback and
- *    still serves the legacy body — no silent fallback, no partial state.
+ * 4. Apply-full: served by ReleaseManager when ready; a PRE-transaction
+ *    refusal (zero side effects) falls back to the legacy updater with the
+ *    reason annotated; a post-transaction failure surfaces as the legacy
+ *    failure body — no silent fallback, no partial state.
  * 5. Safety: no third mutation authority ever appears in the registry.
  *
  * The authority module is mocked here (hermetic); the real module surface is
@@ -103,11 +107,12 @@ vi.mock('create-principles-disciple/dist/update/release-manager-authority.js', (
       };
     },
     mapReleaseManagerErrorToFallback: (error: unknown) => {
-      const typed = error as { reason?: string; message?: string; nextAction?: string };
+      const typed = error as { reason?: string; message?: string; nextAction?: string; transactionOpened?: boolean };
       return {
         reason: typed?.reason ?? 'release_manager_check_failed',
         message: typed?.message ?? String(error),
         nextAction: typed?.nextAction ?? null,
+        transactionOpened: typed?.transactionOpened === true,
       };
     },
   };
@@ -185,6 +190,7 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     authorityMock.applyFullReadiness = { ready: false, reasons: ['rollback_not_available'] };
     authorityMock.applyImpl = null;
     authorityMock.applyCalls = 0;
+    authorityMock.createCalls = 0;
     authorityMock.checkRejection = null;
     authorityMock.createThrows = false;
     authorityMock.dispatchReadiness = null;
@@ -239,7 +245,41 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     );
   }
 
-  it('flag off (default): legacy serves check with the shadow-disabled fallback reason and unchanged body', async () => {
+  it('default install (no config): shadow defaults ON, authority not ready without a metadata source → explicit fallback', async () => {
+    const req = createMockRequest('GET');
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(req, res, tmpDir, '/check');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
+    expect(res._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);
+    expect(res._headers['x-pd-mutation-fallback-reason']).toBe(
+      'release_manager_unavailable:metadata_source_unconfigured',
+    );
+    // Default-on means the authority is ATTEMPTED (graduated shadow flag);
+    // availability is preserved by the explicit per-request fallback.
+    expect(authorityMock.createCalls).toBe(1);
+  });
+
+  it('explicit shadow off: legacy serves check with the shadow-disabled fallback reason and unchanged body', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.pd'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.pd', 'config.yaml'),
+      [
+        'version: 1',
+        `workspace: { default: "${tmpDir.replace(/\\/g, '\\\\')}" }`,
+        "runtimeProfiles:",
+        "  'openclaw.default': { type: openclaw, source: default }",
+        'internalAgents:',
+        "  defaultRuntime: 'openclaw.default'",
+        '  agents:',
+        '    diagnostician: { enabled: true, runtimeProfile: openclaw.default }',
+        '    dreamer: { enabled: true }',
+        '    scribe: { enabled: true }',
+        'features:',
+        '  release_manager_shadow: { category: quiet, enabled: false }',
+        '',
+      ].join('\n'),
+    );
     const req = createMockRequest('GET');
     const res = createMockResponse();
     await routes.handleUpdateRoute(req, res, tmpDir, '/check');
@@ -247,7 +287,7 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     expect(JSON.parse(res._body)).toEqual({ success: true, data: DEGRADED_LEGACY_BODY });
     expect(res._headers['x-pd-mutation-authority']).toContain(LEGACY_MUTATION_AUTHORITY);
     expect(res._headers['x-pd-mutation-fallback-reason']).toBe('release_manager_shadow_disabled');
-    // Authority never even attempted while the flag is off.
+    // Authority never even attempted while the flag is explicitly off.
     expect(authorityMock.createCalls).toBe(0);
   });
 
@@ -313,8 +353,28 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     expect(snapshot.check.active).toBe('release-manager');
     expect(snapshot.check.fallback).toBe(false);
 
-    // Rollback path: flipping the flag off deregisters the preferred authority.
-    fs.rmSync(path.join(tmpDir, '.pd', 'config.yaml'));
+    // Rollback path: explicitly disabling BOTH flags deregisters the
+    // preferred authority (the registry defaults are ON, so off requires an
+    // explicit config).
+    fs.writeFileSync(
+      path.join(tmpDir, '.pd', 'config.yaml'),
+      [
+        'version: 1',
+        `workspace: { default: "${tmpDir.replace(/\\/g, '\\\\')}" }`,
+        "runtimeProfiles:",
+        "  'openclaw.default': { type: openclaw, source: default }",
+        'internalAgents:',
+        "  defaultRuntime: 'openclaw.default'",
+        '  agents:',
+        '    diagnostician: { enabled: true, runtimeProfile: openclaw.default }',
+        '    dreamer: { enabled: true }',
+        '    scribe: { enabled: true }',
+        'features:',
+        '  release_manager_shadow: { category: quiet, enabled: false }',
+        '  release_manager_write_authority: { category: quiet, enabled: false }',
+        '',
+      ].join('\n'),
+    );
     await routes.handleUpdateRoute(createMockRequest('GET'), createMockResponse(), tmpDir, '/check');
     snapshot = updateMutationController.describeGovernance();
     for (const kind of MUTATION_KINDS) {
@@ -378,8 +438,29 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
 
   // ── PRI-698 Phase 1: the apply-full write path ──────────────────────────────
 
-  it('write flag off (default): structurally-ready apply-full stays legacy with release_manager_write_disabled', async () => {
-    enableFlag(); // shadow on, write flag off
+  it('write flag explicitly off: structurally-ready apply-full stays legacy with release_manager_write_disabled', async () => {
+    // shadow on (explicit), write authority explicitly disabled — the
+    // registry default is ON, so the off case requires an explicit config.
+    fs.mkdirSync(path.join(tmpDir, '.pd'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.pd', 'config.yaml'),
+      [
+        'version: 1',
+        `workspace: { default: "${tmpDir.replace(/\\/g, '\\\\')}" }`,
+        "runtimeProfiles:",
+        "  'openclaw.default': { type: openclaw, source: default }",
+        'internalAgents:',
+        "  defaultRuntime: 'openclaw.default'",
+        '  agents:',
+        '    diagnostician: { enabled: true, runtimeProfile: openclaw.default }',
+        '    dreamer: { enabled: true }',
+        '    scribe: { enabled: true }',
+        'features:',
+        '  release_manager_shadow: { category: quiet, enabled: true }',
+        '  release_manager_write_authority: { category: quiet, enabled: false }',
+        '',
+      ].join('\n'),
+    );
     authorityMock.readiness = { ready: true, reasons: [] };
     authorityMock.applyFullReadiness = { ready: true, reasons: [] };
     // A /check dispatch runs the registration sync; asserting the GOVERNANCE
@@ -445,14 +526,18 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
     });
   });
 
-  it('write flag on: a ReleaseManager apply failure maps onto the legacy failure body without partial state', async () => {
+  it('write flag on: a ReleaseManager post-transaction failure maps onto the legacy failure body without partial state', async () => {
     enableWriteFlag();
     authorityMock.readiness = { ready: true, reasons: [] };
     authorityMock.applyFullReadiness = { ready: true, reasons: [] };
     authorityMock.applyImpl = async () => {
+      // transactionOpened: the refusal happened AFTER the update transaction
+      // was opened — runtime-side effects may exist, so the console must
+      // surface the failure, never auto-fallback to the legacy updater.
       throw Object.assign(new Error('installer refused the payload'), {
         reason: 'apply_failed',
         nextAction: 'The runtime is unchanged. Resolve the reported cause and retry.',
+        transactionOpened: true,
       });
     };
     const req = createMockRequest('POST');
@@ -469,13 +554,58 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
         requiresRestart: false,
       },
     });
-    // Flipping the write flag off deregisters the preferred authority for
-    // apply-full (rollback safety: the legacy path is always one flag away).
-    // Governance-snapshot assertion — no real legacy apply-full dispatch.
-    fs.rmSync(path.join(tmpDir, '.pd', 'config.yaml'));
+    // Flipping the write flag off (explicit config) deregisters the preferred
+    // authority for apply-full (rollback safety: the legacy path is always one
+    // flag away). Governance-snapshot assertion — no real legacy dispatch.
+    fs.writeFileSync(
+      path.join(tmpDir, '.pd', 'config.yaml'),
+      fs.readFileSync(path.join(tmpDir, '.pd', 'config.yaml'), 'utf8').replace(
+        '  release_manager_write_authority: { category: quiet, enabled: true }',
+        '  release_manager_write_authority: { category: quiet, enabled: false }',
+      ),
+    );
     await routes.handleUpdateRoute(createMockRequest('GET'), createMockResponse(), tmpDir, '/check');
     const afterSnapshot = updateMutationController.describeGovernance()['apply-full'];
     expect(afterSnapshot.active).toBe(LEGACY_MUTATION_AUTHORITY);
-    expect(afterSnapshot.fallbackReason).toBe('release_manager_shadow_disabled');
+    expect(afterSnapshot.fallbackReason).toBe('release_manager_write_disabled');
+  });
+
+  it('write flag on: a PRE-transaction ReleaseManager refusal (zero side effects) falls back to the legacy updater with the reason annotated', async () => {
+    enableWriteFlag();
+    authorityMock.readiness = { ready: true, reasons: [] };
+    authorityMock.applyFullReadiness = { ready: true, reasons: [] };
+    authorityMock.applyImpl = async () => {
+      // transactionOpened is false: apply() refused before opening the
+      // transaction (e.g. the release pipeline has not published the signed
+      // artifact targets yet). Zero side effects ⇒ the explicit fallback
+      // serves the request, exactly like the governed check's precedent.
+      throw Object.assign(new Error('signed artifact target not found'), {
+        reason: 'metadata_refresh_failed',
+        nextAction: 'Wait for the release pipeline to publish the targets, then retry.',
+        transactionOpened: false,
+      });
+    };
+    // The legacy fallback performs its own registry check — stub fetch so it
+    // refuses fast (stale installer bundle ⇒ no mutation) without network.
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ version: '1.0.0', pd: { bundledPluginVersion: '0.0.1' } }),
+    })));
+    try {
+      const req = createMockRequest('POST');
+      const res = createMockResponse();
+      await routes.handleUpdateRoute(req, res, tmpDir, '/apply-full');
+      expect(res.statusCode).toBe(200);
+      expect(res._headers['x-pd-mutation-authority']).toContain('refused pre-transaction');
+      expect(res._headers['x-pd-mutation-fallback-reason']).toBe(
+        'release_manager_refused_pre_transaction:metadata_refresh_failed',
+      );
+      const body = JSON.parse(res._body) as { success: boolean; data: { success: boolean; reason?: string } };
+      expect(body.success).toBe(true);
+      expect(body.data.success).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

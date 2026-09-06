@@ -71,12 +71,23 @@ export type ReleaseManagerReason =
 export class ReleaseManagerError extends Error {
   readonly reason: ReleaseManagerReason;
   readonly nextAction: string;
+  /**
+   * PRI-698 Phase 1 default-on safety net: true when the refusal happened
+   * AFTER the apply transaction was opened (planned journaled) — runtime
+   * state may include staging writes and a terminal journal tail. False for
+   * pre-transaction refusals (layout, metadata, journal-unavailable): the
+   * caller can safely fall back to the legacy updater with an explicit
+   * reason, because zero side effects exist.
+   */
+  readonly transactionOpened: boolean;
 
-  constructor(reason: ReleaseManagerReason, message: string, nextAction: string) {
+  // eslint-disable-next-line @typescript-eslint/max-params -- (reason, message, nextAction, transactionOpened) mirrors the four fields of the refusal contract; the 4th is an optional PRI-698 default-on safety-net marker
+  constructor(reason: ReleaseManagerReason, message: string, nextAction: string, transactionOpened = false) {
     super(message);
     this.name = 'ReleaseManagerError';
     this.reason = reason;
     this.nextAction = nextAction;
+    this.transactionOpened = transactionOpened;
   }
 }
 
@@ -464,7 +475,14 @@ export class ReleaseManager {
         journal,
         `update failed at '${journal.lastState ?? 'planned'}': ${error instanceof Error ? error.message : String(error)}`,
       );
-      throw toReleaseManagerError(error);
+      // The transaction was opened (planned journaled): mark the refusal so
+      // the caller knows runtime-side effects may exist (staging writes +
+      // terminal journal tail) and must NOT auto-fallback to the legacy
+      // updater over it.
+      const mapped = toReleaseManagerError(error);
+      throw mapped.transactionOpened
+        ? mapped
+        : new ReleaseManagerError(mapped.reason, mapped.message, mapped.nextAction, true);
     }
   }
 
