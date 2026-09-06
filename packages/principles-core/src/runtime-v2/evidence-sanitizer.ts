@@ -63,31 +63,56 @@ const PD_TAG_PATTERNS: RegExp[] = [
  * - The optional close-tag group only fired when `</empathy>` directly
  *   followed the open tag's `>`; absent that, the close tag (if any) stayed
  *   in the output — preserved verbatim.
+ *
+ * Case-insensitivity is implemented with a length-preserving ASCII fold
+ * (`asciiCaseInsensitiveEquals` below), NOT `value.toLowerCase()` — full
+ * Unicode case folding changes string length for some code points (e.g.
+ * U+0130 `İ` lowercases to two code units), which would misalign every
+ * later index and silently corrupt adjacent content.
  */
+const EMPATHY_OPEN_TAG = '<empathy';
+const EMPATHY_CLOSE_TAG = '</empathy>';
+
+function asciiCaseInsensitiveEquals(value: string, start: number, literal: string): boolean {
+  if (start + literal.length > value.length) return false;
+  for (let i = 0; i < literal.length; i++) {
+    let ch = value.charCodeAt(start + i);
+    if (ch >= 65 && ch <= 90) ch += 32;
+    if (ch !== literal.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+function asciiCaseInsensitiveIndexOf(value: string, literal: string, from: number): number {
+  for (let i = from; i + literal.length <= value.length; i++) {
+    if (asciiCaseInsensitiveEquals(value, i, literal)) return i;
+  }
+  return -1;
+}
+
 function stripEmpathyTags(value: string): string {
-  const lower = value.toLowerCase();
   let out = '';
   let i = 0;
   while (i < value.length) {
-    const open = lower.indexOf('<empathy', i);
+    const open = asciiCaseInsensitiveIndexOf(value, EMPATHY_OPEN_TAG, i);
     if (open < 0) {
       out += value.slice(i);
       return out;
     }
     out += value.slice(i, open);
-    i = open + 8; // past '<empathy'
+    i = open + EMPATHY_OPEN_TAG.length;
     // Optional self-closing/attribute run up to the first '>'.
-    const close = lower.indexOf('>', i);
+    const close = value.indexOf('>', i);
     if (close < 0) {
       // No '>' anywhere after the prefix — the regex never matched either.
       out += value.slice(open);
       return out;
     }
     i = close + 1;
-    // Regex-level greediness nuance: when '<' immediately follows '>', the
-    // old pattern's `(?:<\/empathy>)?` consumed a directly adjacent close tag.
-    if (lower.startsWith('</empathy>', i)) {
-      i += 10;
+    // Regex-level greediness nuance: the old pattern's `(?:<\/empathy>)?`
+    // consumed a close tag only when it directly followed the open tag's `>`.
+    if (asciiCaseInsensitiveEquals(value, i, EMPATHY_CLOSE_TAG)) {
+      i += EMPATHY_CLOSE_TAG.length;
     }
   }
   return out;

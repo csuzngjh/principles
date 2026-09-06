@@ -470,7 +470,12 @@ describe('Security regression tests', () => {
 // the linear implementations stay in milliseconds.
 
 describe('ReDoS timing regressions', () => {
-  const TIMING_BUDGET_MS = 5000;
+  // Negative-control-tight bound: the old regex form completes the
+  // restart-heavy input below in ~1.5s on current hardware, so a budget
+  // above that would stay green even if the vulnerable regex were
+  // restored. 250ms keeps three orders of magnitude of headroom for the
+  // linear scanner (~0.1ms) while discriminating the fix.
+  const TIMING_BUDGET_MS = 250;
 
   function expectBounded(run: () => void): number {
     const startedAt = performance.now();
@@ -538,5 +543,17 @@ describe('ReDoS timing regressions', () => {
     expect(sanitizeString('<empathy></empathy>payload')).toBe('payload');
     expect(sanitizeString('<empathy/>')).toBe('');
     expect(sanitizeString('<empathy>fragments remain')).toBe('fragments remain');
+  });
+
+  it('empathy tag stripping is byte-identical on case-folding-length-changing inputs', () => {
+    // U+0130 (İ) lowercases to two code units under full Unicode folding; an
+    // index-misaligning implementation (value.toLowerCase() then slice) eats
+    // adjacent content here. The length-preserving ASCII fold must match the
+    // regex's span semantics exactly (review finding on the first scanner).
+    expect(sanitizeString('İ<empathy>secret</empathy>tail')).toBe('İsecret</empathy>tail');
+    expect(sanitizeString('<empathy İ><empathy>z')).toBe('z');
+    expect(sanitizeString('ıX<empathy>a')).toBe('ıXa');
+    // Mixed-case tags still strip (the /i flag's only job).
+    expect(sanitizeString('<EMPATHY/>x<EmPaThY a="b">y')).toBe('xy');
   });
 });
