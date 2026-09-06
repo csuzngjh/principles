@@ -142,14 +142,18 @@ export function readCodexIngestionConsent(workspaceDir: string): CodexIngestionC
       nextAction: `Fix or delete ${filePath} (delete = consent returns to not_present; the ingestion flag itself is unchanged)`,
     };
   }
+  // Post-validation reconstruction from guard-narrowed fields — no `as` on
+  // the untrusted parsed object (rc-2). The errors check above proves every
+  // guard passes; the re-invoked guards here satisfy the type system the
+  // same way the telemetry consent store does.
   return {
     ok: true,
     existed: true,
     record: {
-      decision: obj.decision,
-      disclosureVersion: obj.disclosureVersion,
-      decidedAt: obj.decidedAt,
-      decidedVia: obj.decidedVia,
+      decision: isDecision(obj.decision) ? obj.decision : 'declined',
+      disclosureVersion: isNonShortString(obj.disclosureVersion, 40) ? obj.disclosureVersion : '',
+      decidedAt: isIsoTimestamp(obj.decidedAt) ? obj.decidedAt : '',
+      decidedVia: isDecidedVia(obj.decidedVia) ? obj.decidedVia : 'pd_codex_setup',
       schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION,
     },
   };

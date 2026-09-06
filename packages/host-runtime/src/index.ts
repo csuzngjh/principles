@@ -46,6 +46,9 @@ export * from './product-telemetry/service.js';
 // runtime gate remains the feature flag alone).
 export * from './codex-disclosure.js';
 export * from './codex-ingestion-consent.js';
+// PRI-625 Slice D: ONE §15 worker-mode authority, moved from codex-adapter so
+// the CLI, the Console, and the worker share the same semantics.
+export * from './codex-worker-status.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',

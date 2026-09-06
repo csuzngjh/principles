@@ -1,16 +1,17 @@
 /**
- * Regression tests for CodexHostInstaller (PR #1298 review findings).
+ * Tests for CodexHostInstaller — Slice D retirement contract (PRI-625;
+ * SPEC rev 2 §17) + legacy-registration detection + fail-loud legacy rules.
  *
- * Covers the fail-loud contract for malformed ~/.codex/hooks.json:
- * when mergeHooksJson returns 'preserved', install() MUST surface the
- * failure (rc-3-fail-loud-missing / rc-9-no-silent-fallback) and MUST NOT
- * write the marker file (which would make detect() falsely report installed).
+ * Since Slice D the legacy global-hook installer is migration/uninstall-only:
+ * install() NEVER writes hook registrations — it returns a structured refusal
+ * pointing at the Marketplace plugin, with an explicit migration route when a
+ * legacy PD registration is detected. uninstall() and detect() are unchanged.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as childProcess from 'child_process';
-import { CodexHostInstaller } from '../src/installers/codex-host-installer.js';
+import { CodexHostInstaller, detectLegacyCodexHookRegistration } from '../src/installers/codex-host-installer.js';
 
 // Mock fs (hoisted). vi.mock is hoisted by vitest before imports execute,
 // so the CodexHostInstaller module sees the mocked fs.
@@ -36,7 +37,7 @@ vi.mock('os', () => ({
   homedir: () => '/home/user',
 }));
 
-describe('CodexHostInstaller.install — malformed hooks.json (rc-3 / rc-9)', () => {
+describe('CodexHostInstaller.install — retirement (Slice D, SPEC rev 2 §17)', () => {
   const mockExistsSync = vi.spyOn(fs, 'existsSync');
   const mockReadFileSync = vi.spyOn(fs, 'readFileSync');
   const mockWriteFileSync = vi.spyOn(fs, 'writeFileSync');
@@ -44,10 +45,8 @@ describe('CodexHostInstaller.install — malformed hooks.json (rc-3 / rc-9)', ()
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // All relevant paths exist: ~/.codex/, ~/.codex/hooks.json, ~/.pd/codex/.
-    // hooks.json "exists" so mergeHooksJson takes the read branch and hits
-    // the malformed-JSON path (returning 'preserved').
-    mockExistsSync.mockReturnValue(true);
+    mockExistsSync.mockReturnValue(false);
+    mockReadFileSync.mockReturnValue('');
     mockWriteFileSync.mockImplementation(() => undefined);
     mockMkdirSync.mockImplementation(() => undefined);
   });
@@ -56,44 +55,96 @@ describe('CodexHostInstaller.install — malformed hooks.json (rc-3 / rc-9)', ()
     vi.restoreAllMocks();
   });
 
-  it('returns success=false with reason+nextAction when hooks.json is malformed JSON', async () => {
-    // Malformed JSON (not parseable)
-    mockReadFileSync.mockReturnValue('not valid json {{{');
-
+  it('refuses new registrations with the Marketplace plugin as the supported path', async () => {
     const installer = new CodexHostInstaller();
     const result = await installer.install({ workspaceDir: '/home/user/workspace', host: 'codex' });
 
     expect(result.success).toBe(false);
-    expect(result.configAction).toBe('preserved');
-    expect(result.reason).toBeTruthy();
-    expect(result.nextAction).toContain('hooks.json');
+    expect(result.reason).toContain('retired');
+    expect(result.nextAction).toContain('plugin add principles-disciple@principles');
   });
 
-  it('returns success=false when hooks.json parses to a non-object (array)', async () => {
-    // Valid JSON but not an object — also a preserved case.
-    mockReadFileSync.mockReturnValue('["not", "an", "object"]');
-
-    const installer = new CodexHostInstaller();
-    const result = await installer.install({ workspaceDir: '/home/user/workspace', host: 'codex' });
-
-    expect(result.success).toBe(false);
-    expect(result.configAction).toBe('preserved');
-    expect(result.reason).toBeTruthy();
-  });
-
-  it('does NOT write the marker file when hooks.json is malformed', async () => {
-    mockReadFileSync.mockReturnValue('not valid json {{{');
-
+  it('NEVER writes hook registrations, wrapper, or marker (no writes at all)', async () => {
     const installer = new CodexHostInstaller();
     await installer.install({ workspaceDir: '/home/user/workspace', host: 'codex' });
 
-    // The marker file is at ~/.pd/codex/pd-hooks.marker — must not be written
-    // when mergeHooksJson returned 'preserved', otherwise detect() would
-    // falsely report a failed install as installed.
-    const markerWrite = mockWriteFileSync.mock.calls.find(
-      (call) => typeof call[0] === 'string' && (call[0] as string).endsWith('pd-hooks.marker'),
-    );
-    expect(markerWrite).toBeUndefined();
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    expect(mockMkdirSync).not.toHaveBeenCalled();
+  });
+
+  it('offers explicit migration when a legacy PD registration is detected', async () => {
+    // hooks.json contains a PD-owned marker group with the legacy async PostToolUse.
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
+      if (String(candidate).endsWith('hooks.json')) {
+        return JSON.stringify({
+          PostToolUse: [{
+            matcher: '.*',
+            hooks: [{ type: 'command', command: 'node pd-hook.cjs', timeout: 5, async: true }],
+            __pd_marker: 'pd-owned',
+          }],
+        });
+      }
+      return '';
+    });
+
+    const installer = new CodexHostInstaller();
+    const result = await installer.install({ workspaceDir: '/home/user/workspace', host: 'codex' });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('legacy');
+    expect(result.nextAction).toContain('uninstall --host codex');
+    expect(result.nextAction).toContain('plugin add principles-disciple@principles');
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+});
+
+describe('detectLegacyCodexHookRegistration', () => {
+  const mockExistsSync = vi.spyOn(fs, 'existsSync');
+  const mockReadFileSync = vi.spyOn(fs, 'readFileSync');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('detects PD-owned groups and the legacy async PostToolUse shape', () => {
+    mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
+      if (String(candidate).endsWith('hooks.json')) {
+        return JSON.stringify({
+          PreToolUse: [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node x' }], __pd_marker: 'pd-owned' }],
+          PostToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: 'node x', async: true }], __pd_marker: 'pd-owned' }],
+        });
+      }
+      throw new Error('unexpected read');
+    });
+    const result = detectLegacyCodexHookRegistration('/home/user/.codex/hooks.json');
+    expect(result.detected).toBe(true);
+    expect(result.legacyAsyncPostToolUse).toBe(true);
+  });
+
+  it('returns detected=false when there are no PD marker groups', () => {
+    mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
+      if (String(candidate).endsWith('hooks.json')) {
+        return JSON.stringify({ PreToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: 'other-tool' }] }] });
+      }
+      throw new Error('unexpected read');
+    });
+    const result = detectLegacyCodexHookRegistration('/home/user/.codex/hooks.json');
+    expect(result.detected).toBe(false);
+    expect(result.legacyAsyncPostToolUse).toBe(false);
+  });
+
+  it('degrades to detected=false on unreadable or malformed hooks.json', () => {
+    mockReadFileSync.mockImplementation(() => { throw Object.assign(new Error('boom'), { code: 'ENOENT' }); });
+    expect(detectLegacyCodexHookRegistration('/home/user/.codex/hooks.json').detected).toBe(false);
+
+    mockReadFileSync.mockReturnValue('{not json');
+    expect(detectLegacyCodexHookRegistration('/home/user/.codex/hooks.json').detected).toBe(false);
   });
 });
 

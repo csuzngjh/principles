@@ -7,7 +7,8 @@
  * - both flag states (host.codex, codex_conversation_ingestion);
  * - consent state (decision metadata only — no captured text);
  * - worker mode (no Companion ⇒ `manual_action_required`, never auto-closure);
- * - per-rollout checkpoints with completeness and bounded byte lag (stat only);
+ * - per-rollout checkpoints with completeness (byte lag lives in CLI health,
+ *   which owns Codex-home transcript path resolution);
  * - observation counts (operational/promoted/quarantined) + next expiry;
  * - admission counts incl. admitted-pain-without-task + promotion tails;
  * - Diagnostician task counts (via the Runtime V2 task store).
@@ -29,16 +30,12 @@ import {
   listGovernanceCheckpoints,
   readGovernanceObservationStats,
   readGovernanceAdmissionCounts,
+  computeCodexWorkerStatusMode,
   CODEX_INGESTION_DISCLOSURE_VERSION,
   type GovernanceCheckpointRecord,
 } from '@principles/host-runtime';
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
-import {
-  computeCodexWorkerStatusMode,
-  locateCodexTranscriptByRolloutIdentity,
-} from '@principles/codex-adapter';
+import { computeFeatureFlagsFromConfig, SqliteConnection, SqliteTaskStore } from '@principles/core/runtime-v2';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
-import { SqliteConnection, SqliteTaskStore } from '@principles/core/runtime-v2';
 
 export interface CodexRolloutHealth {
   rolloutIdentity: string;
@@ -47,8 +44,6 @@ export interface CodexRolloutHealth {
   incompleteTail: boolean;
   lastDegradationReason: string | null;
   updatedAt: string;
-  /** bytes past the checkpoint in the live transcript file; null = undetectable */
-  lagBytes: number | null;
 }
 
 export interface CodexGovernanceHealth {
@@ -144,22 +139,15 @@ export class CodexGovernanceHealthModel {
     const evaluation = computeCodexWorkerStatusMode({ workspaceDir: this.workspaceDir, registeredInInstallManifest: registered });
     if (evaluation.mode !== 'ready') noteBlocker('worker', evaluation.reason ?? evaluation.mode);
 
-    // ── Per-rollout checkpoints + bounded lag (stat only) ────────────────────
+    // ── Per-rollout checkpoint completeness ─────────────────────────────────
+    // (Byte lag against the live transcript is CLI-health territory: it needs
+    // Codex-home transcript path resolution, which stays inside the adapter.
+    // The Console surfaces checkpoint completeness and staleness.)
     const rollouts: CodexRolloutHealth[] = [];
     const listed = listGovernanceCheckpoints({ workspaceDir: this.workspaceDir, hostKind: 'codex' });
     const listedCheckpoints = (listed as { checkpoints?: GovernanceCheckpointRecord[] }).checkpoints;
     if (Array.isArray(listedCheckpoints)) {
-      const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
       for (const checkpoint of listedCheckpoints) {
-        let lagBytes: number | null = null;
-        const lookup = locateCodexTranscriptByRolloutIdentity(codexHome, checkpoint.rolloutIdentity);
-        if (lookup.ok) {
-          try {
-            lagBytes = Math.max(0, fs.statSync(lookup.transcriptPath).size - checkpoint.byteOffset);
-          } catch {
-            lagBytes = null;
-          }
-        }
         rollouts.push({
           rolloutIdentity: checkpoint.rolloutIdentity,
           byteOffset: checkpoint.byteOffset,
@@ -167,10 +155,8 @@ export class CodexGovernanceHealthModel {
           incompleteTail: checkpoint.incompleteTail,
           lastDegradationReason: checkpoint.lastDegradationReason,
           updatedAt: checkpoint.updatedAt,
-          lagBytes,
         });
         if (checkpoint.incompleteTail) noteBlocker('rollout', `${checkpoint.rolloutIdentity} incomplete_tail`);
-        else if (lagBytes !== null && lagBytes > 0) noteBlocker('rollout', `${checkpoint.rolloutIdentity} lag=${String(lagBytes)}B`);
       }
     } else {
       noteBlocker('rollouts', 'checkpoints_unavailable');

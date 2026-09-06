@@ -23,7 +23,6 @@
     "@principles/core": "*",
     "@principles/host-runtime": "*",
     "@principles/install-layout": "^0.2.0",
-    "@principles/codex-adapter": "*",
     "create-principles-disciple": "*",
     "principles-disciple": "*",
     "@radix-ui/react-alert-dialog": "^1.1.15",
