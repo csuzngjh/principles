@@ -4,6 +4,8 @@ PR template policy:
 - Owner Taste Audit: completed by the Owner; agent must not impersonate the Owner.
 - Stable rule IDs are defined in AGENTS.md:
  mvp-q-* / rc-* / cli-* / antipattern-*.
+- 工单状态对账字段见 AGENTS.md §21 rules 9–11：本 PR 实质解决的每一张既有工单，
+  都必须在提交 PR 时完成状态动作，防止已完成的工作滞留在 Todo。
 -->
 
 ## Owner Review Card（agent 填）
@@ -77,6 +79,8 @@ PR template policy:
 
 * 对应 Linear issue: ___
 * 解决的产品问题（一句话）: ___
+* 工单状态对账（AGENTS.md §21 rules 9–11）: ___
+  （列出被本 PR 实质解决的每张既有工单及已执行的动作：证据评论 / 置 `In Review` / 置 `Canceled`；已搜索检查且无关联工单时填 `无（已搜索检查）`，不得留空）
 
 ### 是否触及产品边界
 

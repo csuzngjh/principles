@@ -84,6 +84,13 @@
       "files": [
         "runtime-v2/owner-identity.ts"
       ]
+    },
+    {
+      "name": "pi-ai-http-transport",
+      "description": "LLM transport owner (PRI-683): builds the undici Agent-backed fetch injected into every pi-ai provider request via options.fetch, disabling Node global fetch's implicit 300s headersTimeout/bodyTimeout caps so runtimeProfile.timeoutMs is the single timeout authority. Registered seam because it imports the undici transport library (no fs/DB I/O; requests still go out through the pi-ai SDK).",
+      "files": [
+        "runtime-v2/adapter/pi-ai-http-transport.ts"
+      ]
     }
   ]
 }

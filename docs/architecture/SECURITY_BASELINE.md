@@ -171,6 +171,8 @@ PD 执行 RuleCode（owner 批准的行为规则代码）时采用三层防御�
 
 **例外**：`import type` 导入（仅类型，无运行时）允许。
 
+**登记例外（PRI-683）**：`runtime-v2/adapter/pi-ai-http-transport.ts` 允许导入 `undici`（已登记 `io-seam-registry.json` 的 `pi-ai-http-transport` seam）。它是 PD LLM 传输层唯一所有者：为绕过 Node 全局 fetch 内置 undici dispatcher 的隐式 300s `headersTimeout`/`bodyTimeout` 帽（PRI-683 根因），经 pi-ai 官方 `options.fetch` 注入点提供专用 Agent 绑定的 fetch。该文件不发起新业务请求、不监听端口——所有请求仍由 pi-ai SDK 发出，本模块只配置传输超时语义。
+
 ### 6.2 pd-console 不默认监听 0.0.0.0
 
 **守护**：`packages/pd-console/src/` 不得出现 `host: '0.0.0.0'` 默认配置。本地 Web UI 应默认绑定 `127.0.0.1` 或 `localhost`。
