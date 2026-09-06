@@ -235,9 +235,6 @@ function getWorkspacePath(): string | null {
 const REMOVE_RETRY_ATTEMPTS = 3;
 const REMOVE_RETRY_DELAY_MS = 1000;
 
-/** Console ports the installer's autoLaunchConsole can occupy (3100 + drift). */
-const CONSOLE_PORT_RANGE = { min: 3100, max: 3119 } as const;
-
 /**
  * PRI-696: find node processes running the installed PD console server and
  * stop them. Without this, a detached auto-launched console keeps native

@@ -940,6 +940,35 @@ export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflig
   return protocolInvalid(`ok is not a boolean`);
 }
 
+/**
+ * PRI-693: materialize node_modules links for the BUNDLED (not yet deployed)
+ * pd-cli so its static @principles/* / principles-disciple imports resolve
+ * during the pre-deployment compatibility scan. Mirrors the links syncPdCli
+ * creates for the deployed copy — targets are the sibling component
+ * directories of the npm package (files whitelist: core/, host-runtime/,
+ * codex-adapter/, install-layout/, plugin/). Idempotent.
+ */
+export function ensureBundledPdCliResolution(pdCliRoot: string): void {
+  const packageRoot = path.resolve(pdCliRoot, '..');
+  const linkSpecs: { linkPath: string; windowsTarget: string; unixTarget: string }[] = [
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'core'), windowsTarget: path.join(packageRoot, 'core'), unixTarget: '../../core' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'host-runtime'), windowsTarget: path.join(packageRoot, 'host-runtime'), unixTarget: '../../host-runtime' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'), windowsTarget: path.join(packageRoot, 'codex-adapter'), unixTarget: '../../codex-adapter' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'install-layout'), windowsTarget: path.join(packageRoot, 'install-layout'), unixTarget: '../../install-layout' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', 'principles-disciple'), windowsTarget: path.join(packageRoot, 'plugin'), unixTarget: '../../plugin' },
+  ];
+  for (const spec of linkSpecs) {
+    if (existsSync(spec.linkPath)) continue;
+    if (!existsSync(spec.windowsTarget)) continue; // component absent from this package layout — skip
+    mkdirSync(path.dirname(spec.linkPath), { recursive: true });
+    if (isWindows()) {
+      symlinkSync(spec.windowsTarget, spec.linkPath, 'junction');
+    } else {
+      symlinkSync(spec.unixTarget, spec.linkPath, 'dir');
+    }
+  }
+}
+
 async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir: string): Promise<LegacyRulePreflightOutcome> {
   // The entry path is boundary-checked before it is used as a subprocess
   // target, and the subprocess is invoked with an argv array (no shell).
@@ -1047,35 +1076,6 @@ export async function runLegacyRuleContractPreflight(
       reason: `compatibility_scan_failed: ${message}`,
       remediation: 'Repair the workspace database or its permissions, then retry the upgrade. The current installation has not been replaced.',
     };
-  }
-}
-
-/**
- * PRI-693: materialize node_modules links for the BUNDLED (not yet deployed)
- * pd-cli so its static @principles/* / principles-disciple imports resolve
- * during the pre-deployment compatibility scan. Mirrors the links syncPdCli
- * creates for the deployed copy — targets are the sibling component
- * directories of the npm package (files whitelist: core/, host-runtime/,
- * codex-adapter/, install-layout/, plugin/). Idempotent.
- */
-export function ensureBundledPdCliResolution(pdCliRoot: string): void {
-  const packageRoot = path.resolve(pdCliRoot, '..');
-  const linkSpecs: { linkPath: string; windowsTarget: string; unixTarget: string }[] = [
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'core'), windowsTarget: path.join(packageRoot, 'core'), unixTarget: '../../core' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'host-runtime'), windowsTarget: path.join(packageRoot, 'host-runtime'), unixTarget: '../../host-runtime' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'), windowsTarget: path.join(packageRoot, 'codex-adapter'), unixTarget: '../../codex-adapter' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'install-layout'), windowsTarget: path.join(packageRoot, 'install-layout'), unixTarget: '../../install-layout' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', 'principles-disciple'), windowsTarget: path.join(packageRoot, 'plugin'), unixTarget: '../../plugin' },
-  ];
-  for (const spec of linkSpecs) {
-    if (existsSync(spec.linkPath)) continue;
-    if (!existsSync(spec.windowsTarget)) continue; // component absent from this package layout — skip
-    mkdirSync(path.dirname(spec.linkPath), { recursive: true });
-    if (isWindows()) {
-      symlinkSync(spec.windowsTarget, spec.linkPath, 'junction');
-    } else {
-      symlinkSync(spec.unixTarget, spec.linkPath, 'dir');
-    }
   }
 }
 
