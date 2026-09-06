@@ -75,14 +75,29 @@ function signed<T extends Root | Snapshot | Targets | Timestamp>(doc: T, signer:
   return Buffer.from(JSON.stringify(metadata.toJSON()));
 }
 
-function buildRelease(productVersion: string, sequence: number): ReleaseMetadata {
+function buildRelease(
+  productVersion: string,
+  sequence: number,
+  // PRI-698 Phase 1: apply-flow scenarios must declare an asset for the
+  // CURRENT runtime, or selectReleaseAsset refuses with release_metadata_invalid
+  // before the artifact-target step the scenario is about (platform-dependent
+  // failure on Linux CI). Defaults keep the historical shape for the
+  // policy-only scenarios, which never select assets.
+  asset?: { platform: string; arch: string; nodeAbi: string },
+): ReleaseMetadata {
   return buildReleaseMetadata({
     productVersion,
     sourceCommit: '1234567890abcdef1234567890abcdef12345678',
     minBootstrapVersion: '1.0.0',
     publicationSequence: sequence,
     expiresAt: expiresFar,
-    assets: [{ platform: 'win32', arch: 'x64', nodeAbi: '147', archiveSha256: 'a'.repeat(64), archiveSizeBytes: 1024 }],
+    assets: [{
+      platform: asset?.platform ?? 'win32',
+      arch: asset?.arch ?? 'x64',
+      nodeAbi: asset?.nodeAbi ?? '147',
+      archiveSha256: 'a'.repeat(64),
+      archiveSizeBytes: 1024,
+    }],
     dataSchemaForwardReadableFrom: '1.220.0',
   });
 }
@@ -96,7 +111,11 @@ async function createFixture(ctx: { state: Record<string, unknown> }): Promise<F
   ensurePdHomeLayout(paths);
   fs.writeFileSync(withinHome(home, paths.bootstrapManifestPath), JSON.stringify({ bootstrapVersion: '1.0.0', installedAt: '2026-08-25T00:00:00Z' }));
 
-  const candidate = buildRelease('1.223.0', 9);
+  const candidate = buildRelease('1.223.0', 9, {
+    platform: process.platform,
+    arch: process.arch,
+    nodeAbi: process.versions.modules,
+  });
   const active = buildRelease('1.222.0', 8);
   for (const release of [candidate, active]) {
     const dir = withinHome(home, path.join(paths.releasesDir, release.releaseId));
