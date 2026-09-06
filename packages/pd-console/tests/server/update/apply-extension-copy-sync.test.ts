@@ -215,4 +215,29 @@ describe('POST /apply keeps the canonical tree AND the OpenClaw extension copy i
     expect(pkg.version).toBe('2.0.0');
     expect(fs.readFileSync(path.join(extensionTree, 'dist', 'update.js'), 'utf-8')).toContain('v2');
   });
+
+  it('heals a PRE-EXISTING drift: canonical already at new content, extension copy behind (PR #1526 review recheck)', async () => {
+    // The split-brain the recheck found un-healed: a previous partial state
+    // left the canonical tree's dist file at v2 content while the extension
+    // copy still runs v1. A single diff computed against the canonical tree
+    // would see NO delta for that file — and the extension copy would keep
+    // running v1 under a freshly stamped v2 label. Per-target diffs must
+    // catch the extension copy up.
+    fs.writeFileSync(path.join(canonicalTree, 'dist', 'update.js'), 'module.exports = "v2";');
+
+    const res = createMockResponse();
+    const req = createMockRequest('POST', { mergeStrategy: 'overwrite', createBackup: false });
+    await routes.handleUpdateRoute(req, res, fixtureRoot, '/apply');
+
+    const body = JSON.parse(res._body) as { success?: boolean; data?: { newVersion?: string } };
+    expect(body.success, `apply failed: ${res._body}`).toBe(true);
+
+    // Canonical was already at v2 content — unchanged in substance, still v2.
+    expect(fs.readFileSync(path.join(canonicalTree, 'dist', 'update.js'), 'utf-8')).toContain('v2');
+    // The DRIFTED extension copy gets its own diff and catches up to v2 —
+    // the file the canonical-only diff would have skipped.
+    expect(fs.readFileSync(path.join(extensionTree, 'dist', 'update.js'), 'utf-8')).toContain('v2');
+    const extPkg = JSON.parse(fs.readFileSync(path.join(extensionTree, 'package.json'), 'utf-8')) as { version: string };
+    expect(extPkg.version).toBe('2.0.0');
+  });
 });

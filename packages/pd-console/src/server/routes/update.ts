@@ -674,17 +674,24 @@ async function doApplyUpdate(
     // installed extension also has console/, core/, pd-cli/, node_modules/,
     // bin/, docs/. Deleting those would destroy the installation.
     appliedChanges = true;
-    const diff = computeDiffLocal(targetDir, tempDir);
 
-    // Apply the diff's modified+added files to a plugin tree with the update's
-    // merge strategy. Runs against targetDir AND the OpenClaw extension copy
+    // Apply the update's file diff to a plugin tree with the update's merge
+    // strategy. Runs against targetDir AND the OpenClaw extension copy
     // (below) so both physical plugin trees land on the same version —
     // applying to only one tree is exactly the "update succeeded, gateway
     // still runs old code" split-brain the 2026-09-05 investigation banned
     // (CP-5 invariant; rollback and apply-full enforce the same sync).
+    // PR #1526 review recheck: the diff is computed PER TARGET TREE. A single
+    // diff computed against targetDir only describes targetDir's delta —
+    // reusing it for the extension copy skips files where a PREVIOUS drift
+    // already left targetDir at the new content while the extension copy
+    // still runs the old one, and the version stamp would then relabel stale
+    // files as updated. computeDiffLocal(current, new) diffs an existing tree
+    // against the staged release, so each tree gets its own honest delta.
     const applyFileDiff = (destDir: string): string[] => {
+      const treeDiff = computeDiffLocal(destDir, tempDir);
       const files: string[] = [];
-      for (const file of diff.modified) {
+      for (const file of treeDiff.modified) {
         if (isWorkspaceFile(file)) {
           switch (mergeStrategy) {
             case 'smart': {
@@ -704,7 +711,7 @@ async function doApplyUpdate(
           files.push(file);
         }
       }
-      for (const file of diff.added) {
+      for (const file of treeDiff.added) {
         copyFileTo(path.join(tempDir, file), path.join(destDir, file));
         files.push(file);
       }
