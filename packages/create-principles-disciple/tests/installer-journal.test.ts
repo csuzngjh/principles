@@ -147,14 +147,16 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
   });
 
   it('records planned → failed → rolled_back when a post-backup step throws', async () => {
-    // Everything happy EXCEPT the bundled core directory is missing, which
-    // deterministically throws inside installBundledCore — AFTER the backup
-    // rename succeeded (hasBackup=true).
+    // Everything happy EXCEPT the first component copy throws (cpSync EPERM),
+    // which deterministically fails AFTER the backup rename succeeded
+    // (hasBackup=true). The form-gate consults the same existsSync calls, so
+    // the component tree must look complete for the flow to reach the copy
+    // step (the old fixture hid the failure in the missing core/ dir, which
+    // the form-gate now refuses before the journal gate).
     vi.mocked(fs.existsSync).mockImplementation((value) => {
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
-      if (s === path.join('/asset', 'core') || s.startsWith(path.join('/asset', 'core') + path.sep)) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
@@ -164,6 +166,9 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
     });
     vi.mocked(fs.readdirSync).mockReturnValue([]);
+    vi.mocked(fs.cpSync).mockImplementation(() => {
+      throw new Error('EPERM: operation not permitted, copy locked');
+    });
 
     const result = await install(baseInstallOptions, '/asset', { quiet: true });
 

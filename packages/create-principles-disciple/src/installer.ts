@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent } from 'fs';
 import { createHash, randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as http from 'http';
@@ -316,6 +317,109 @@ function legacyNpmInstallEnabled(): boolean {
 }
 
 /**
+ * Installer payload shape, decided once per install run (see
+ * `decideInstallPayloadMode` below):
+ * - `self-contained` — the package ships the immutable release asset
+ *   (`_release/asset.json` + per-component node_modules); the default
+ *   for the release-asset publication channel.
+ * - `npm-distributed` — the npm registry package ships the bundled
+ *   component trees WITHOUT node_modules/_release (the registry package
+ *   is ~8MB vs ~792MB for the self-contained payload); dependencies
+ *   resolve from the npm registry at install time (the
+ *   PD_ALLOW_LEGACY_NPM_INSTALL recovery path).
+ */
+type InstallerPayloadMode = 'self-contained' | 'npm-distributed';
+
+const NPM_DISTRIBUTED_COMPONENTS = [
+  ['Core', 'core'],
+  ['Host runtime', 'host-runtime'],
+  ['Codex adapter', 'codex-adapter'],
+  ['Plugin', 'plugin'],
+  ['PD CLI', 'pd-cli'],
+  ['Console', 'console'],
+  ['Install layout', 'install-layout'],
+] as const;
+
+// Components whose install step demands MORE than the generic
+// package.json+dist shape check — the per-component extra files are
+// preflighted here so the form-gate refusal is exact (a truncated package
+// must fail BEFORE any mutation, matching the per-component install
+// requirements instead of discovering them mid-deployment).
+const NPM_DISTRIBUTED_REQUIRED_FILES: Record<string, string[]> = {
+  'release-manager': ['package.json', path.join('dist', 'update', 'release-manager-authority.js')],
+  console: ['package.json', path.join('dist', 'server.js'), path.join('dist', 'web', 'index.html')],
+};
+
+function releaseAssetPresent(pluginDir: string): boolean {
+  return existsSync(path.join(pluginDir, '_release', 'asset.json'));
+}
+
+/**
+ * Form-gate for the npm-distributed package shape: every bundled component
+ * directory must carry its required files. Returns the missing items
+ * (empty = complete) so the refusal can name them (rc-3: fail loud with
+ * specifics, not a generic "invalid asset"). release-manager and console
+ * are checked against their ACTUAL install-time requirements — they are
+ * consumed unconditionally during deployment, so a package missing them
+ * must be refused before the backup step, not mid-copy (review blocker,
+ * PR #1525).
+ */
+function missingNpmDistributedComponents(pluginDir: string): string[] {
+  const missing: string[] = [];
+  // Components with exact install-time file demands replace the generic
+  // package.json+dist check (console appears in both lists — the exact list
+  // subsumes the generic one, so dedupe to avoid reporting each miss twice).
+  const exactShapeComponents = new Set(Object.keys(NPM_DISTRIBUTED_REQUIRED_FILES));
+  const componentDirs = [
+    ...NPM_DISTRIBUTED_COMPONENTS.map(([, directory]) => directory).filter((directory) => !exactShapeComponents.has(directory)),
+    ...exactShapeComponents,
+  ];
+  for (const componentDirectory of componentDirs) {
+    const componentDir = path.join(pluginDir, componentDirectory);
+    const requiredFiles = NPM_DISTRIBUTED_REQUIRED_FILES[componentDirectory]
+      ?? ['package.json', componentDirectory === 'plugin' ? '' : 'dist'];
+    for (const requiredFile of requiredFiles) {
+      if (!existsSync(path.join(componentDir, requiredFile))) {
+        missing.push(`${componentDirectory}/${requiredFile}`);
+      }
+    }
+  }
+  return missing;
+}
+
+/**
+ * Decide which payload shape this package instance carries and whether
+ * registry dependency resolution (npm install) is required. Env override
+ * first (explicit operator intent), then the physical shape: a present
+ * `_release/asset.json` always takes the self-contained path (a present
+ * but CORRUPT asset still fails hard inside the preflight — never
+ * silently falling back to registry resolution); a package without the
+ * release asset but with complete component trees is the npm-distributed
+ * shape and resolves dependencies from the registry.
+ */
+export function decideInstallPayloadMode(pluginDir: string): InstallerPayloadMode {
+  if (legacyNpmInstallEnabled()) return 'npm-distributed';
+  if (releaseAssetPresent(pluginDir)) return 'self-contained';
+  return 'npm-distributed';
+}
+
+// Per-run payload mode, set by install() alongside activeHostTarget (same
+// module-level idiom) — prepareComponentDependencies' call sites are the
+// per-component wrappers, which have no natural parameter path from install().
+let activePayloadMode: InstallerPayloadMode = 'self-contained';
+
+/**
+ * Whether registry dependency resolution (npm install / global root
+ * discovery) may run: true for the npm-distributed payload shape and the
+ * PD_ALLOW_LEGACY_NPM_INSTALL recovery path. Host installers consume this
+ * gate instead of re-reading the env (their concern is payload shape, not
+ * the specific env var).
+ */
+export function isNpmDependencyResolutionEnabled(): boolean {
+  return activePayloadMode === 'npm-distributed';
+}
+
+/**
  * Supported release assets are self-contained: installation validates the
  * copied component and never resolves dependencies or runs lifecycle scripts.
  * The old npm path remains opt-in for development/legacy recovery only.
@@ -431,7 +535,7 @@ export async function preflightSelfContainedReleaseAsset(assetDir: string): Prom
 }
 
 async function prepareComponentDependencies(cwd: string, componentName: string): Promise<void> {
-  if (!legacyNpmInstallEnabled()) {
+  if (activePayloadMode === 'self-contained') {
     await prepareBundledComponentDependencies(cwd, componentName);
     return;
   }
@@ -1353,6 +1457,43 @@ function installBundledReleaseManagerPackage(pluginDir: string): void {
   cpSync(source, destination, { recursive: true });
 }
 
+/**
+ * PR #1525 review: the npm-distributed payload ships release-manager/ as
+ * package.json + dist only — no node_modules. Without its own dependencies
+ * (tuf-js / @tufjs/models) the authority module's static import chain
+ * (release-manager → trust-metadata → tuf-js) cannot resolve, and the gap
+ * would only surface later as `installer_missing` in the console. The
+ * self-contained payload ships the bundle-time npm ci node_modules, so
+ * registry resolution runs for the npm-distributed shape only.
+ */
+async function installReleaseManagerDependencies(): Promise<void> {
+  if (!isNpmDependencyResolutionEnabled()) return;
+  await runNpmInstall(getInstalledReleaseManagerDir(), 'ReleaseManager');
+}
+
+/**
+ * PR #1525 review smoke: import the REAL authority module from the installed
+ * tree so a dependency gap fails the install loudly here with a structured
+ * message instead of surfacing as `installer_missing` at console runtime.
+ * Mode-independent — the self-contained payload's shipped node_modules is
+ * proven the same way.
+ */
+async function verifyReleaseManagerAuthorityImports(): Promise<void> {
+  const authorityPath = path.join(getInstalledReleaseManagerDir(), 'dist', 'update', 'release-manager-authority.js');
+  if (!existsSync(authorityPath)) {
+    throw new Error('Installed release-manager authority module not found — installation is incomplete.');
+  }
+  try {
+    await import(pathToFileURL(authorityPath).href);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `ReleaseManager authority module failed to load — its runtime dependencies are incomplete. Re-run the installer to repair the installation. (${detail})`,
+      { cause: error },
+    );
+  }
+}
+
 function installConsole(consoleDir: string): void {
   const consoleSrc = path.join(consoleDir, 'console');
   const consoleDest = getInstalledConsoleDir();
@@ -2140,7 +2281,12 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
   const quiet = mode.quiet === true;
   const nonInteractive = mode.nonInteractive ?? quiet;
   activeHostTarget = options.host;
-  if (!legacyNpmInstallEnabled()) {
+  // Decide the payload shape once: self-contained (release asset) or
+  // npm-distributed (registry-resolved dependencies). A present `_release`
+  // asset keeps the hard preflight; the npm-distributed shape must pass
+  // the component form-gate or fail loud naming what is missing.
+  activePayloadMode = decideInstallPayloadMode(pluginDir);
+  if (activePayloadMode === 'self-contained') {
     try {
       await preflightSelfContainedReleaseAsset(pluginDir);
     } catch (error) {
@@ -2166,6 +2312,24 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
         component: preflightError.component,
         dependency: preflightError.dependency,
         error: `${preflightError.message} — ${t('rollback_no_changes')}`,
+      };
+    }
+  } else {
+    if (!quiet) logger.warn('npm-distributed package detected — resolving component dependencies from the npm registry.');
+    const missing = missingNpmDistributedComponents(pluginDir);
+    if (missing.length > 0) {
+      return {
+        success: false,
+        workspaceDir: options.workspaceDir,
+        configYamlPath: getConfigYamlPath(options.workspaceDir),
+        templatesCount: 0,
+        components: { plugin: 'skipped', cli: 'skipped', console: 'skipped' },
+        verification: { features: 'skipped', storyA: 'skipped' },
+        enabledChannels: options.channels,
+        nextAction: 'The package is incomplete — reinstall it: npm cache clear --force && npx create-principles-disciple@latest. No changes were made.',
+        reason: `npm_bundle_incomplete: missing ${missing.join(', ')}`,
+        component: 'Release asset',
+        error: `Bundled components incomplete (missing ${missing.join(', ')}) — the npm package is corrupted or truncated. No changes were made.`,
       };
     }
   }
@@ -2328,6 +2492,8 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
     installBundledReleaseManagerPackage(pluginDir);
+    await installReleaseManagerDependencies();
+    await verifyReleaseManagerAuthorityImports();
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');

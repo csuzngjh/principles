@@ -29,6 +29,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
+import { isNpmDependencyResolutionEnabled } from '../installer.js';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -101,9 +102,10 @@ function getPdHookMarkerPath(): string {
  * 3. Fall back to undefined — installer reports the missing dependency.
  */
 function getGlobalNpmRoot(): string | undefined {
-  const legacyNpmEnabled = process.env.PD_ALLOW_LEGACY_NPM_INSTALL === '1'
-    || process.env.PD_ALLOW_LEGACY_NPM_INSTALL === 'true';
-  if (!legacyNpmEnabled) return undefined;
+  // Registry dependency resolution is legitimate whenever the package is not
+  // self-contained (the npm-distributed shape resolves from the registry
+  // just like the PD_ALLOW_LEGACY_NPM_INSTALL recovery path).
+  if (!isNpmDependencyResolutionEnabled()) return undefined;
   try {
     const root = execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     return root.length > 0 ? root : undefined;
