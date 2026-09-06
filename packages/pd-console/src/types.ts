@@ -75,4 +75,4 @@ export interface TaskZones {
 
 export type ApiResponse<T> =
   | { success: true; data: T }
-  | { success: false; error: string; reason?: string; nextAction?: string };
+  | { success: false; error: string; reason?: string; nextAction?: string; status?: number };
