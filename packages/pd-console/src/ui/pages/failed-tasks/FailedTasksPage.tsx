@@ -44,7 +44,7 @@ import {
 } from "../../components/ui/alert-dialog.js";
 import { ShinyText } from "../../components/ui/shiny-text.js";
 import { formatDate } from "../../utils/format.js";
-import { recoverFailedTask, fetchConfigSummary } from "../../api.js";
+import { recoverFailedTask, fetchConfigSummary, request } from "../../api.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -235,64 +235,21 @@ export function FailedTasksPage() {
 
   const loadData = useCallback(async () => {
     setState({ status: "loading" });
-    try {
-      // Auth header — read from sessionStorage (same storage as api.ts)
-      const token = sessionStorage.getItem("pd_token");
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-
-      const response = await fetch("/api/v1/failed-tasks", { headers });
-
-      // 403 = feature flag disabled — show disabled state (rc-9: surface reason)
-      if (response.status === 403) {
-        setState({ status: "disabled" });
-        return;
-      }
-
-      if (!response.ok) {
-        let errorMessage = `HTTP ${response.status}`;
-        let nextAction: string | undefined;
-        try {
-          const raw = await response.json();
-          if (isObject(raw)) {
-            const msg = readString(raw, "message") ?? readString(raw, "error");
-            if (msg) errorMessage = msg;
-            const na = readNullableString(raw, "nextAction");
-            if (na) nextAction = na;
-          }
-        } catch {
-          // ignore parse errors — fall back to HTTP status message
-        }
-        setState({ status: "error", message: errorMessage, nextAction });
-        return;
-      }
-
-      const raw = await response.json();
-      // Unwrap { success: true, data: {...} } envelope
-      const dataRaw =
-        isObject(raw) && Object.hasOwn(raw, "success") && Object.hasOwn(raw, "data")
-          ? raw.data
-          : raw;
-      const validated = validateFailedTasksData(dataRaw);
-      if (validated === null) {
-        setState({
-          status: "error",
-          message: t("pages.failedTasks.error"),
-        });
-        return;
-      }
-      setState({ status: "loaded", data: validated });
-    } catch (err) {
-      setState({
-        status: "error",
-        message: err instanceof Error ? err.message : "Network error",
-      });
+    // Shared request(): same auth header and global 401 session-expiry
+    // handling as every other page (PRI-643 — a manual fetch here bypassed
+    // session-expiry routing entirely).
+    const result = await request("/api/v1/failed-tasks", undefined, validateFailedTasksData);
+    if (result.success) {
+      setState({ status: "loaded", data: result.data });
+      return;
     }
-  }, [t]);
+    // 403 = feature flag disabled — show disabled state (rc-9: surface reason)
+    if (result.status === 403) {
+      setState({ status: "disabled" });
+      return;
+    }
+    setState({ status: "error", message: result.error, nextAction: result.nextAction });
+  }, []);
 
   useEffect(() => {
     loadData();

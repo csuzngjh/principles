@@ -57,6 +57,22 @@ function AuthRoutes() {
     verifyAuth();
   }, [verifyAuth]);
 
+  // PRI-643: verifyAuth otherwise runs only on mount. If the server switches
+  // auth mode (or the token expires) while the page stays open, re-verify
+  // when the tab becomes visible or the window regains focus; a 401 from the
+  // probe also triggers api.ts's global redirect to the login route.
+  useEffect(() => {
+    const recheck = () => {
+      if (document.visibilityState === "visible") verifyAuth();
+    };
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", recheck);
+    return () => {
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", recheck);
+    };
+  }, [verifyAuth]);
+
   useEffect(() => {
     if (!showSplash) return;
     if (authed === null) return; // still checking
