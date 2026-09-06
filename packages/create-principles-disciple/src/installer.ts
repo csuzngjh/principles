@@ -2615,10 +2615,17 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     // leave ~/.pd/runtime and the extension copy fully populated while the
     // message claimed "No changes were made" — silent half-install residue
     // that OpenClaw could load as an orphan plugin. Remove what this run
-    // deployed and report the truth instead. (Lock errors fire before any
-    // mutation, and hasBackup=true runs restore the previous state — both
-    // keep their existing messages.)
-    const freshCleanup = !hasBackup && mutationStarted && !isLockError
+    // deployed and report the truth instead.
+    // PR #1526 review fix: the earlier `!isLockError` exclusion assumed lock
+    // errors can only fire before any mutation. They cannot — EPERM/EACCES/
+    // EBUSY raised by a cpSync/config write AFTER core already landed on disk
+    // is still a lock-shaped error, and skipping cleanup then left residue
+    // behind a "No changes were made" report. Cleanup now keys on the actual
+    // write state (mutationStarted) alone; if the cleanup itself is
+    // permission-restricted, freshCleanup.failed names the residue (rc-9).
+    // hasBackup=true keeps its restore path, and a lock error before
+    // mutationStarted=true correctly keeps the no-changes messages below.
+    const freshCleanup = !hasBackup && mutationStarted
       ? cleanUnactivatedFreshInstall()
       : undefined;
     // R2 (review): after template/config steps have run (console verified →

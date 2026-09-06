@@ -675,33 +675,59 @@ async function doApplyUpdate(
     // bin/, docs/. Deleting those would destroy the installation.
     appliedChanges = true;
     const diff = computeDiffLocal(targetDir, tempDir);
-    const updatedFiles: string[] = [];
 
-    for (const file of diff.modified) {
-      if (isWorkspaceFile(file)) {
-        switch (mergeStrategy) {
-          case 'smart': {
-            const content = fs.readFileSync(path.join(tempDir, file), 'utf-8');
-            fs.writeFileSync(path.join(targetDir, `${file}.update`), content);
-            break;
+    // Apply the diff's modified+added files to a plugin tree with the update's
+    // merge strategy. Runs against targetDir AND the OpenClaw extension copy
+    // (below) so both physical plugin trees land on the same version —
+    // applying to only one tree is exactly the "update succeeded, gateway
+    // still runs old code" split-brain the 2026-09-05 investigation banned
+    // (CP-5 invariant; rollback and apply-full enforce the same sync).
+    const applyFileDiff = (destDir: string): string[] => {
+      const files: string[] = [];
+      for (const file of diff.modified) {
+        if (isWorkspaceFile(file)) {
+          switch (mergeStrategy) {
+            case 'smart': {
+              const content = fs.readFileSync(path.join(tempDir, file), 'utf-8');
+              fs.writeFileSync(path.join(destDir, `${file}.update`), content);
+              break;
+            }
+            case 'overwrite':
+              copyFileTo(path.join(tempDir, file), path.join(destDir, file));
+              files.push(file);
+              break;
+            case 'keep':
+              break;
           }
-          case 'overwrite':
-            copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
-            updatedFiles.push(file);
-            break;
-          case 'keep':
-            break;
+        } else {
+          copyFileTo(path.join(tempDir, file), path.join(destDir, file));
+          files.push(file);
         }
-      } else {
-        copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
-        updatedFiles.push(file);
       }
-    }
+      for (const file of diff.added) {
+        copyFileTo(path.join(tempDir, file), path.join(destDir, file));
+        files.push(file);
+      }
+      return files;
+    };
 
-    for (const file of diff.added) {
-      copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
-      updatedFiles.push(file);
-    }
+    // Stamp a plugin tree's package.json with the new version (best effort —
+    // a tree without package.json keeps its own).
+    const stampPackageVersion = (destDir: string): void => {
+      const pkgPath = path.join(destDir, 'package.json');
+      if (!fs.existsSync(pkgPath)) return;
+      try {
+        const rawPkg: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        if (isRecord(rawPkg)) {
+          fs.writeFileSync(pkgPath, JSON.stringify({ ...rawPkg, version: toVersion }, null, 2));
+        }
+      } catch {
+        // rc-9: a malformed package.json must not fail an otherwise-applied
+        // update; the version stamp is derived state.
+      }
+    };
+
+    const updatedFiles = applyFileDiff(targetDir);
 
     // 4b. The incoming manifest declares the product-default skill language
     // (zh); restore the language this install was materialized with.
@@ -710,13 +736,20 @@ async function doApplyUpdate(
     // Fix 3: deletions intentionally skipped — see comment above.
 
     // 5. Update package.json version
-    const pkgPath = path.join(targetDir, 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      const rawPkg: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      if (typeof rawPkg === 'object' && rawPkg !== null) {
-        const pkg = { ...(rawPkg as Record<string, unknown>), version: toVersion };
-        fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-      }
+    stampPackageVersion(targetDir);
+
+    // 5b. CP-5 invariant: OpenClaw loads ~/.openclaw/extensions/principles-disciple,
+    // not this tree. When both physical plugin trees exist (canonical runtime +
+    // extension copy), the extension copy MUST move to the same version or the
+    // gateway keeps running the old code while history reports success. Same
+    // sync rollback (Fix 4 region) and apply-full perform.
+    const openClawPluginCopy = path.join(resolveExtensionsDir(), 'principles-disciple');
+    let extCopySynced = false;
+    if (path.resolve(openClawPluginCopy) !== path.resolve(targetDir) && fs.existsSync(openClawPluginCopy)) {
+      applyFileDiff(openClawPluginCopy);
+      reapplySkillLanguage(openClawPluginCopy, skillLanguage);
+      stampPackageVersion(openClawPluginCopy);
+      extCopySynced = true;
     }
 
     // 6. Cleanup temp dir
@@ -733,7 +766,9 @@ async function doApplyUpdate(
 
     return {
       success: true,
-      message: 'Update applied successfully',
+      message: extCopySynced
+        ? 'Update applied successfully (OpenClaw extension copy synced too).'
+        : 'Update applied successfully',
       updatedFiles,
       backupPath,
       newVersion: toVersion,

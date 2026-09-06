@@ -480,6 +480,63 @@ describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', 
     );
   });
 
+  it('still cleans residue when a LOCK-SHAPED error fires AFTER core landed on disk (PR #1526 review P2)', async () => {
+    // The old cleanup condition excluded EPERM/EACCES/EBUSY from
+    // cleanUnactivatedFreshInstall on the assumption lock errors only fire
+    // BEFORE any mutation. They do not: core deploys fine, then a later
+    // cpSync dies with EACCES — and the old code left the residue behind a
+    // "No changes were made" report. Cleanup must key on mutationStarted
+    // (actual write state), not on the error class.
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
+    // Fresh install: no pre-existing ext copy / runtime root (no backup).
+    let deployed = false;
+    vi.mocked(fs.existsSync).mockImplementation((value) => {
+      const s = String(value);
+      if (s.endsWith('install.json') || s.endsWith(path.join('.pd', 'state.db'))) return false;
+      // Pre-deployment phase: only the package sources exist; deployment
+      // flips every probe to true from the first core probe onward.
+      if (!deployed) {
+        if (s.includes(path.join('/asset', 'core'))) deployed = true;
+        else return s.includes(path.join('/asset', 'plugin'));
+      }
+      return true;
+    });
+    vi.mocked(fs.readFileSync).mockImplementation((value) => {
+      const filePath = String(value);
+      if (filePath.endsWith('openclaw.plugin.json')) {
+        return JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } });
+      }
+      if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
+      return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
+    });
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+    // First cpSync (core deploy) succeeds — core IS on disk when the failure
+    // hits; the second (host-runtime deploy) dies with a lock-shaped EACCES.
+    let cpCalls = 0;
+    vi.mocked(fs.cpSync).mockImplementation((_src, _dest, _options) => {
+      cpCalls += 1;
+      if (cpCalls > 1) throw new Error('EACCES: permission denied, copyfile');
+    });
+
+    const result = await install({ ...baseInstallOptions }, '/asset', { quiet: true });
+
+    expect(result.success).toBe(false);
+    // Truthful reason: mutation happened and residue was cleaned — NOT
+    // install_aborted_lock / "No changes were made".
+    expect(result.reason).toMatch(/^install_failed_unactivated_cleaned:/);
+    expect(result.error).toMatch(/removed/);
+    expect(result.error).not.toMatch(/not modified/);
+    // The deployment roots this run created were removed (rc-9 observable).
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.pd[/\\]runtime$/),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringMatching(/extensions[/\\]principles-disciple$/),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+  });
+
   it('creates the workspace directory early, inside the unified failure boundary (CP-9 + review R1)', async () => {
     // The workspace must exist before console verification / pd runtime init
     // consume it, and its creation failure must surface as a structured
