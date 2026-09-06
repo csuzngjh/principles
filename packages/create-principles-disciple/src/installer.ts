@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent } from 'fs';
 import { createHash, randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as http from 'http';
@@ -1432,6 +1433,43 @@ function installBundledReleaseManagerPackage(pluginDir: string): void {
   cpSync(source, destination, { recursive: true });
 }
 
+/**
+ * PR #1525 review: the npm-distributed payload ships release-manager/ as
+ * package.json + dist only — no node_modules. Without its own dependencies
+ * (tuf-js / @tufjs/models) the authority module's static import chain
+ * (release-manager → trust-metadata → tuf-js) cannot resolve, and the gap
+ * would only surface later as `installer_missing` in the console. The
+ * self-contained payload ships the bundle-time npm ci node_modules, so
+ * registry resolution runs for the npm-distributed shape only.
+ */
+async function installReleaseManagerDependencies(): Promise<void> {
+  if (!isNpmDependencyResolutionEnabled()) return;
+  await runNpmInstall(getInstalledReleaseManagerDir(), 'ReleaseManager');
+}
+
+/**
+ * PR #1525 review smoke: import the REAL authority module from the installed
+ * tree so a dependency gap fails the install loudly here with a structured
+ * message instead of surfacing as `installer_missing` at console runtime.
+ * Mode-independent — the self-contained payload's shipped node_modules is
+ * proven the same way.
+ */
+async function verifyReleaseManagerAuthorityImports(): Promise<void> {
+  const authorityPath = path.join(getInstalledReleaseManagerDir(), 'dist', 'update', 'release-manager-authority.js');
+  if (!existsSync(authorityPath)) {
+    throw new Error('Installed release-manager authority module not found — installation is incomplete.');
+  }
+  try {
+    await import(pathToFileURL(authorityPath).href);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `ReleaseManager authority module failed to load — its runtime dependencies are incomplete. Re-run the installer to repair the installation. (${detail})`,
+      { cause: error },
+    );
+  }
+}
+
 function installConsole(consoleDir: string): void {
   const consoleSrc = path.join(consoleDir, 'console');
   const consoleDest = getInstalledConsoleDir();
@@ -2409,6 +2447,8 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
     installBundledReleaseManagerPackage(pluginDir);
+    await installReleaseManagerDependencies();
+    await verifyReleaseManagerAuthorityImports();
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
