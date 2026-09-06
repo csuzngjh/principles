@@ -51,10 +51,16 @@ describe('install payload form-gate (npm-distributed shape)', () => {
     const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
     const realPath = await vi.importActual<typeof import('node:path')>('node:path');
     fixtureDir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-form-gate-'));
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
       actualFs.mkdirSync(realPath.join(fixtureDir, component, 'dist'), { recursive: true });
       actualFs.writeFileSync(realPath.join(fixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
     }
+    // Components whose install steps demand more than package.json+dist.
+    actualFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    actualFs.mkdirSync(realPath.join(fixtureDir, 'console', 'dist', 'web'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'server.js'), 'export {};');
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
     // 'fs' is auto-mocked at module scope; the form-gate consults
     // existsSync, so delegate it to the real fs so the real fixture is
     // visible to install() while the rest of the mocked fs still fails
@@ -83,12 +89,41 @@ describe('install payload form-gate (npm-distributed shape)', () => {
 
   it('refuses an incomplete component bundle naming the missing items (rc-3)', async () => {
     actualFs.rmSync(path.join(fixtureDir, 'codex-adapter'), { recursive: true, force: true });
-    actualFs.rmSync(path.join(fixtureDir, 'console', 'dist'), { recursive: true, force: true });
+    actualFs.rmSync(path.join(fixtureDir, 'console', 'dist', 'web'), { recursive: true, force: true });
 
     const result = await install(baseInstallOptions, fixtureDir, { quiet: true });
 
     expect(result.success).toBe(false);
-    expect(result.reason).toMatch(/^npm_bundle_incomplete: missing codex-adapter\/package\.json, console\/dist/);
+    // Path separators are platform-dependent — match them agnostically.
+    expect(result.reason).toMatch(/^npm_bundle_incomplete: missing codex-adapter[/\\]package\.json, codex-adapter[/\\]dist, console[/\\]dist[/\\]web[/\\]index\.html/);
     expect(result.error).toMatch(/No changes were made/);
+  });
+
+  it('refuses a package missing release-manager BEFORE any mutation (review blocker)', async () => {
+    // installBundledReleaseManagerPackage runs unconditionally mid-deploy
+    // and demands package.json + dist/update/release-manager-authority.js;
+    // a package truncated before that component used to pass the form-gate
+    // and die AFTER the backup + five component copies. The gate must name
+    // the exact missing files and leave the system untouched.
+    actualFs.rmSync(path.join(fixtureDir, 'release-manager', 'dist'), { recursive: true, force: true });
+
+    const result = await install(baseInstallOptions, fixtureDir, { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^npm_bundle_incomplete: missing release-manager[/\\]dist[/\\]update[/\\]release-manager-authority\.js/);
+    expect(result.error).toMatch(/No changes were made/);
+    // Zero mutation: no backup rename, no component copies (cli-5).
+    expect(fs.renameSync).not.toHaveBeenCalled();
+    expect(fs.cpSync).not.toHaveBeenCalled();
+    expect(fs.rmSync).not.toHaveBeenCalled();
+  });
+
+  it('refuses a package with a console bundle missing its real entrypoint (exact-shape check)', async () => {
+    actualFs.rmSync(path.join(fixtureDir, 'console', 'dist', 'server.js'));
+
+    const result = await install(baseInstallOptions, fixtureDir, { quiet: true });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toMatch(/^npm_bundle_incomplete: missing console[/\\]dist[/\\]server\.js/);
   });
 });

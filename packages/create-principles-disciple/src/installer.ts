@@ -339,26 +339,48 @@ const NPM_DISTRIBUTED_COMPONENTS = [
   ['Install layout', 'install-layout'],
 ] as const;
 
+// Components whose install step demands MORE than the generic
+// package.json+dist shape check — the per-component extra files are
+// preflighted here so the form-gate refusal is exact (a truncated package
+// must fail BEFORE any mutation, matching the per-component install
+// requirements instead of discovering them mid-deployment).
+const NPM_DISTRIBUTED_REQUIRED_FILES: Record<string, string[]> = {
+  'release-manager': ['package.json', path.join('dist', 'update', 'release-manager-authority.js')],
+  console: ['package.json', path.join('dist', 'server.js'), path.join('dist', 'web', 'index.html')],
+};
+
 function releaseAssetPresent(pluginDir: string): boolean {
   return existsSync(path.join(pluginDir, '_release', 'asset.json'));
 }
 
 /**
- * Form-gate for the npm-distributed package shape: every bundled
- * component directory must at least carry package.json + dist. Returns
- * the missing items (empty = complete) so the refusal can name them
- * (rc-3: fail loud with specifics, not a generic "invalid asset").
+ * Form-gate for the npm-distributed package shape: every bundled component
+ * directory must carry its required files. Returns the missing items
+ * (empty = complete) so the refusal can name them (rc-3: fail loud with
+ * specifics, not a generic "invalid asset"). release-manager and console
+ * are checked against their ACTUAL install-time requirements — they are
+ * consumed unconditionally during deployment, so a package missing them
+ * must be refused before the backup step, not mid-copy (review blocker,
+ * PR #1525).
  */
 function missingNpmDistributedComponents(pluginDir: string): string[] {
   const missing: string[] = [];
-  for (const [, componentDirectory] of NPM_DISTRIBUTED_COMPONENTS) {
+  // Components with exact install-time file demands replace the generic
+  // package.json+dist check (console appears in both lists — the exact list
+  // subsumes the generic one, so dedupe to avoid reporting each miss twice).
+  const exactShapeComponents = new Set(Object.keys(NPM_DISTRIBUTED_REQUIRED_FILES));
+  const componentDirs = [
+    ...NPM_DISTRIBUTED_COMPONENTS.map(([, directory]) => directory).filter((directory) => !exactShapeComponents.has(directory)),
+    ...exactShapeComponents,
+  ];
+  for (const componentDirectory of componentDirs) {
     const componentDir = path.join(pluginDir, componentDirectory);
-    if (!existsSync(path.join(componentDir, 'package.json'))) {
-      missing.push(`${componentDirectory}/package.json`);
-      continue;
-    }
-    if (componentDirectory !== 'plugin' && !existsSync(path.join(componentDir, 'dist'))) {
-      missing.push(`${componentDirectory}/dist`);
+    const requiredFiles = NPM_DISTRIBUTED_REQUIRED_FILES[componentDirectory]
+      ?? ['package.json', componentDirectory === 'plugin' ? '' : 'dist'];
+    for (const requiredFile of requiredFiles) {
+      if (!existsSync(path.join(componentDir, requiredFile))) {
+        missing.push(`${componentDirectory}/${requiredFile}`);
+      }
     }
   }
   return missing;

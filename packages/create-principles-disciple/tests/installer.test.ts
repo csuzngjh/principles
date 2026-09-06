@@ -290,10 +290,17 @@ describe('install() gateway lock pre-flight', () => {
     const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
     const realPath = await vi.importActual<typeof import('node:path')>('node:path');
     npmBundleFixtureDir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-npm-bundle-'));
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
       actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, component, 'dist'), { recursive: true });
       actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
     }
+    // Exact-shape components the form-gate checks beyond package.json+dist
+    // (mirror of installBundledReleaseManagerPackage / installConsole demands).
+    actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'web'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'server.js'), 'export {};');
+    actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
     // The fixture is REAL on disk, but 'fs' is auto-mocked (every function
     // returns undefined), so delegate the existsSync the form-gate consults
     // to the real fs. Later steps (checkBuiltPlugin) still see the mocked
