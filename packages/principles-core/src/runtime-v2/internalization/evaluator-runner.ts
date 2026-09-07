@@ -1393,14 +1393,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // rc-1/rc-2 (ERR-001): adversarialResult.failedCases is untrusted
     // artifact content — narrow via the class's isRecord/Array guards, no `as`.
     if (!EvaluatorRunner.isRecord(output)) return [];
-    const adversarialResult = output.adversarialResult;
+    const {adversarialResult} = output;
     if (!EvaluatorRunner.isRecord(adversarialResult)) return [];
-    const failedCases = adversarialResult.failedCases;
+    const {failedCases} = adversarialResult;
     if (!Array.isArray(failedCases)) return [];
     const ids: string[] = [];
     for (const entry of failedCases) {
       if (!EvaluatorRunner.isRecord(entry)) continue;
-      const caseId = entry.caseId;
+      const {caseId} = entry;
       if (typeof caseId === 'string' && caseId.trim() !== '') ids.push(caseId);
     }
     return ids;
