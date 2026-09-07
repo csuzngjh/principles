@@ -1102,3 +1102,64 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
     close();
   }
 }
+
+// ─── Read-only admission counts (Slice D, SPEC rev 2 §15 health) ────────────
+
+export interface GovernanceAdmissionCounts {
+  readonly admitted: number;
+  /** Admitted pains with no Diagnostician task link — the §15 orphan count. */
+  readonly admittedWithoutTask: number;
+  readonly pendingTails: number;
+  readonly staleTails: number;
+  readonly completedTails: number;
+  readonly lastAdmissionAt: string | null;
+}
+
+export type ReadGovernanceAdmissionCountsResult =
+  | { ok: true; counts: GovernanceAdmissionCounts }
+  | { ok: false; reason: string; nextAction: string };
+
+/**
+ * Bounded read-only counts for the §15 health surface: admitted-pain-without-
+ * task count and promotion-tail states. Read-only — reconciliation itself
+ * stays in `reconcileGovernanceContinuation`.
+ */
+export function readGovernanceAdmissionCounts(args: { workspaceDir: string; databaseFactory?: ObservationDatabaseFactory }): ReadGovernanceAdmissionCountsResult {
+  const opened = openAdmissionStore(args.workspaceDir, args.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const admissions = db.prepare(`SELECT
+        SUM(CASE WHEN decision = 'admitted' THEN 1 ELSE 0 END) AS admitted,
+        SUM(CASE WHEN decision = 'admitted' AND diagnostician_task_id IS NULL THEN 1 ELSE 0 END) AS admitted_without_task,
+        MAX(created_at) AS last_admission
+      FROM governance_signal_admissions`).get();
+    if (!isRecord(admissions)) {
+      return { ok: false, reason: 'governance_admission_counts_unavailable', nextAction: 'Inspect the governance_signal_admissions table in the workspace trajectory.db.' };
+    }
+    const numberOr = (value: unknown): number => (typeof value === 'number' ? value : 0);
+    const stringOr = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null);
+    const tails = db.prepare(`SELECT
+        SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END) AS pending,
+        SUM(CASE WHEN state = 'stale' THEN 1 ELSE 0 END) AS stale,
+        SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END) AS completed
+      FROM governance_pending_promotion_tails`).get();
+    const tailRow = isRecord(tails) ? tails : {};
+    return {
+      ok: true,
+      counts: {
+        admitted: numberOr(own(admissions, 'admitted')),
+        admittedWithoutTask: numberOr(own(admissions, 'admitted_without_task')),
+        pendingTails: numberOr(own(tailRow, 'pending')),
+        staleTails: numberOr(own(tailRow, 'stale')),
+        completedTails: numberOr(own(tailRow, 'completed')),
+        lastAdmissionAt: stringOr(own(admissions, 'last_admission')),
+      },
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 160) : String(error);
+    return { ok: false, reason: `governance_admission_counts_failed:${detail}`, nextAction: 'Inspect the workspace trajectory.db; the health surface degraded without mutating anything.' };
+  } finally {
+    close();
+  }
+}

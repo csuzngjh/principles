@@ -44,3 +44,12 @@ export {
   isHostInstallResult,
   isHostUninstallResult,
 } from './host-installer.js';
+
+// PRI-625 Slice D: ONE legacy-registration predicate (§17 retirement). Pure
+// parse — consumers do their own hooks.json I/O at the edge.
+export {
+  parseLegacyCodexHooksRegistration,
+  PD_HOOKS_MARKER,
+  CODEX_HOOK_EVENT_NAMES,
+} from './legacy-registration.js';
+export type { LegacyCodexRegistration } from './legacy-registration.js';
