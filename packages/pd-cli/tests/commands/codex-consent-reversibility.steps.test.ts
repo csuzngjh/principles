@@ -63,8 +63,10 @@ function snapshot(root: string): Map<string, string> {
   for (const name of FILENAME_ALLOWLIST) {
     const full = pdFile(root, name);
     if (full === null) continue;
+    // Read first, no stat-then-read window (CodeQL FS race): ENOENT simply
+    // means the file is absent for this snapshot.
     try {
-      if (fs.statSync(full).isFile()) files.set(full, fs.readFileSync(full, 'utf8'));
+      files.set(full, fs.readFileSync(full, 'utf8'));
     } catch {
       // absent file — snapshot stays empty for it
     }
