@@ -353,6 +353,10 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={stateVariant}>{stateLabel}</Badge>
             <Badge variant="outline">{sourceLabel}</Badge>
+            {/* PRI-625 Slice D: evidence host attribution (SPEC §15). */}
+            {record.hostKind && record.hostKind !== 'unknown' && (
+              <Badge variant="secondary">{t(`pages.pain.hostKind.${record.hostKind}`)}</Badge>
+            )}
             {record.admissionDecision && (
               <Badge variant="secondary">
                 {enumLabel('admission', record.admissionDecision, t)}
