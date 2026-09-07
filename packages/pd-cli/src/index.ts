@@ -584,6 +584,32 @@ const codexCmd = program
   .command('codex')
   .description('Codex host governance operations');
 
+// ── pd codex setup — consent UX for conversation ingestion (Slice D) ─────────
+// PRI-625, SPEC rev 2 §17 + G2A frozen disclosure: the ONE authority that can
+// enable codex_conversation_ingestion — presents the frozen disclosure and
+// records the explicit Owner decision BEFORE flipping the flag. Declining
+// leaves all existing governance unchanged and reads no transcript.
+codexCmd
+  .command('setup')
+  .description('Present the frozen ingestion disclosure and record the explicit consent decision (accept enables codex_conversation_ingestion; decline keeps everything off)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--accept', 'Explicitly accept after the disclosure has been presented (non-interactive)')
+  .option('--decline', 'Explicitly decline; the ingestion flag stays off and no transcript is ever read')
+  .option('--show-disclosure', 'Print the frozen disclosure text (zh default, --lang en) and exit without mutating anything')
+  .option('--lang <zh|en>', 'Disclosure language for presentation', undefined)
+  .option('--json', 'Output raw JSON (decision must be explicit: --accept or --decline)')
+  .action(async (opts) => {
+    const { handleCodexSetup } = await import('./commands/codex-setup.js');
+    await handleCodexSetup({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      accept: opts.accept === true,
+      decline: opts.decline === true,
+      showDisclosure: opts.showDisclosure === true,
+      ...(typeof opts.lang === 'string' ? { lang: opts.lang } : {}),
+    });
+  });
+
 codexCmd
   .command('reconcile')
   .description('Reconcile admitted Codex pains with Diagnostician tasks and promotion tails (idempotent)')
@@ -621,6 +647,33 @@ codexIngestCmd
       workspace: opts.workspace,
       json: opts.json === true,
       ...(maxRollouts !== undefined && Number.isInteger(maxRollouts) ? { maxRollouts } : {}),
+    });
+  });
+
+// ── pd codex ingest quarantine — audited recovery for invalid records ────────
+// Codex Governance Closure Slice D (PRI-625, SPEC §15): dry-run by default,
+// --confirm required to mutate; records digest/reason/operator/timestamp/gap;
+// never edits the Codex transcript; promoted evidence is refused.
+codexIngestCmd
+  .command('quarantine')
+  .description('Quarantine a permanently invalid governance observation (dry-run by default; --confirm to apply; never touches the transcript)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--rollout <id>', 'Rollout identity that owns the record (required)')
+  .option('--record <id>', 'Numeric governance_observations.id to quarantine (required)')
+  .option('--reason <text>', 'Why the record is permanently invalid, 1-200 chars (required)')
+  .option('--operator <id>', 'Operator identity recorded in the audit metadata (default: current OS user)')
+  .option('--confirm', 'Apply the quarantine; without this flag the command is a dry run')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleCodexIngestQuarantine } = await import('./commands/codex-ingest-quarantine.js');
+    await handleCodexIngestQuarantine({
+      workspace: opts.workspace,
+      rollout: opts.rollout,
+      record: opts.record,
+      reason: opts.reason,
+      ...(typeof opts.operator === 'string' ? { operator: opts.operator } : {}),
+      confirm: opts.confirm === true,
+      json: opts.json === true,
     });
   });
 

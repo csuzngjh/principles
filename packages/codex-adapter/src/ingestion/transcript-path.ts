@@ -32,26 +32,12 @@ export interface TranscriptFileIdentity {
 
 export type TranscriptPathValidation =
   | { ok: true; canonicalPath: string; rolloutIdentity: string; identity: TranscriptFileIdentity }
-  | { ok: false; reason: 'transcript_path_invalid' | 'transcript_path_outside_codex_home'; nextAction: string };
+  | { ok: false, reason: 'transcript_path_invalid' | 'transcript_path_outside_codex_home'; nextAction: string };
 
-const UUID_HEX = /^[0-9a-fA-F]+$/;
-
-function isHex(value: string): boolean {
-  return UUID_HEX.test(value);
-}
-
-/** rollout-<timestamp>-<uuid>.jsonl — returns the rollout uuid, or null when the name is off-contract. */
-export function parseRolloutFileName(fileName: string): string | null {
-  if (!fileName.startsWith('rollout-') || !fileName.endsWith('.jsonl')) return null;
-  const stem = fileName.slice('rollout-'.length, -'.jsonl'.length);
-  const parts = stem.split('-');
-  if (parts.length < 6) return null; // at least one timestamp segment + the five uuid groups
-  const [a, b, c, d, e] = parts.slice(-5);
-  if (a === undefined || b === undefined || c === undefined || d === undefined || e === undefined) return null;
-  if (a.length !== 8 || b.length !== 4 || c.length !== 4 || d.length !== 4 || e.length !== 12) return null;
-  if (!isHex(a) || !isHex(b) || !isHex(c) || !isHex(d) || !isHex(e)) return null;
-  return parts.slice(-5).join('-').toLowerCase();
-}
+// PRI-625 Slice D: the rollout filename contract has ONE implementation,
+// moved to @principles/host-runtime with the transcript locator.
+import { parseRolloutFileName } from '@principles/host-runtime';
+export { parseRolloutFileName };
 
 function isAbsolutePath(value: string): boolean {
   return path.isAbsolute(value);
