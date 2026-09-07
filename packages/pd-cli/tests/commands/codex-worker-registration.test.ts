@@ -18,6 +18,16 @@ function buildTestProgram(): Command {
   const program = new Command();
   const codex = program.command('codex');
   codex.command('reconcile');
+  // PRI-625 Slice D: consent UX command (mirrors src/index.ts registration).
+  codex
+    .command('setup')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('--accept', 'Explicitly accept after the disclosure has been presented (non-interactive)')
+    .option('--decline', 'Explicitly decline; the ingestion flag stays off and no transcript is ever read')
+    .option('--show-disclosure', 'Print the frozen disclosure text (zh default, --lang en) and exit without mutating anything')
+    .option('--lang <zh|en>', 'Disclosure language for presentation')
+    .option('--json', 'Output raw JSON (decision must be explicit: --accept or --decline)')
+    .action(() => {});
   const ingest = codex.command('ingest');
   ingest
     .command('catch-up')
@@ -35,6 +45,25 @@ function buildTestProgram(): Command {
     .action(() => {});
   return program;
 }
+
+describe('codex Slice D setup command registration (cli-7)', () => {
+  it('parses codex setup flags including --accept/--decline/--show-disclosure', () => {
+    const program = buildTestProgram();
+    program.parse(['node', 'pd', 'codex', 'setup', '--workspace', '/tmp/ws', '--accept', '--lang', 'en']);
+    const codex = program.commands.find((c) => c.name() === 'codex');
+    const setup = codex?.commands.find((c) => c.name() === 'setup');
+    expect(setup).toBeDefined();
+    expect(setup?.opts().workspace).toBe('/tmp/ws');
+    expect(setup?.opts().accept).toBe(true);
+    expect(setup?.opts().decline).toBeUndefined();
+    expect(setup?.opts().lang).toBe('en');
+
+    const program2 = buildTestProgram();
+    program2.parse(['node', 'pd', 'codex', 'setup', '--show-disclosure']);
+    const setup2 = program2.commands.find((c) => c.name() === 'codex')?.commands.find((c) => c.name() === 'setup');
+    expect(setup2?.opts().showDisclosure).toBe(true);
+  });
+});
 
 describe('codex Slice C command registration (cli-7)', () => {
   it('parses codex ingest catch-up flags', () => {
