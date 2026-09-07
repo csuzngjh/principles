@@ -39,7 +39,14 @@ import type {
   HostDetectResult,
   LegacyCodexRegistration,
 } from '@principles/core/host';
-import { parseLegacyCodexHooksRegistration } from '@principles/core/host';
+
+// NOTE (PRI-625 review round 3 / PRI-669 gate): this installer ships as the
+// self-contained npx package — @principles/core is NOT in its dependencies,
+// and type-only imports are erased at compile time, so the import above is
+// safe. The legacy-registration PARSER must therefore NOT be value-imported
+// here. Its single authority lives in @principles/core/host
+// (parseLegacyCodexHooksRegistration); the local classification below is the
+// npx-parity edge, and a CI parity test pins the two shapes together.
 
 const requireFromModule = createRequire(import.meta.url);
 
@@ -184,10 +191,12 @@ export function buildWrapperScriptContent(pdHookPath: string, workspaceDir: stri
 }
 
 // ─── Legacy registration detection (Slice D, SPEC rev 2 §17) ────────────────
-// ONE parsing authority lives in @principles/core/host
-// (parseLegacyCodexHooksRegistration — pure, no I/O); this installer is the
-// FS edge for its own refusal path. The health surface uses the same parser
-// via @principles/host-runtime.
+// The single PARSING authority lives in @principles/core/host
+// (parseLegacyCodexHooksRegistration — pure, no I/O). This installer is the
+// npx-parity FS edge: same classification semantics, mirrored here because
+// @principles/core is not a runtime dependency of this self-contained
+// package. CI pins the two shapes together (codex-host-installer.test.ts →
+// parseLegacyCodexHooksRegistration parity).
 
 export function detectLegacyCodexHookRegistration(hooksJsonPathOverride?: string): LegacyCodexRegistration {
   const hooksJsonPath = hooksJsonPathOverride ?? getCodexHooksJsonPath();
@@ -197,7 +206,28 @@ export function detectLegacyCodexHookRegistration(hooksJsonPathOverride?: string
   } catch {
     return { detected: false, legacyAsyncPostToolUse: false };
   }
-  return parseLegacyCodexHooksRegistration(parsed);
+  // npx-parity mirror of @principles/core/host parseLegacyCodexHooksRegistration
+  // (kept here because @principles/core is not a runtime dep of this package;
+  // parity with the core parser is enforced by codex-host-installer.test.ts).
+  if (!isRecord(parsed)) return { detected: false, legacyAsyncPostToolUse: false };
+  let detected = false;
+  let legacyAsyncPostToolUse = false;
+  for (const eventName of CODEX_EVENTS) {
+    const groups = parsed[eventName];
+    if (!isUnknownArray(groups)) continue;
+    for (const group of groups) {
+      if (!(isRecord(group) && Object.hasOwn(group, '__pd_marker') && group.__pd_marker === 'pd-owned')) continue;
+      detected = true;
+      const entries = group.hooks;
+      if (!isUnknownArray(entries)) continue;
+      for (const entry of entries) {
+        if (isRecord(entry) && eventName === 'PostToolUse' && Object.hasOwn(entry, 'async') && entry.async === true) {
+          legacyAsyncPostToolUse = true;
+        }
+      }
+    }
+  }
+  return { detected, legacyAsyncPostToolUse };
 }
 
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────

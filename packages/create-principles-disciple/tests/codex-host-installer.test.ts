@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as childProcess from 'child_process';
 import { CodexHostInstaller, detectLegacyCodexHookRegistration } from '../src/installers/codex-host-installer.js';
+import { parseLegacyCodexHooksRegistration } from '@principles/core/host';
 
 // Mock fs (hoisted). vi.mock is hoisted by vitest before imports execute,
 // so the CodexHostInstaller module sees the mocked fs.
@@ -147,6 +148,58 @@ describe('detectLegacyCodexHookRegistration', () => {
 
     mockReadFileSync.mockReturnValue('{not json');
     expect(detectLegacyCodexHookRegistration('/home/user/.codex/hooks.json').detected).toBe(false);
+  });
+
+  it('npx-parity: local classifier matches @principles/core parser on a fixture matrix (review round 3)', () => {
+    // The installer is the npx-parity FS edge for the legacy classification;
+    // @principles/core is its single parsing authority but is NOT a runtime
+    // dependency of this package. This matrix pins the two shapes together so
+    // a drift in either fails CI.
+    const fixtures: Array<{ name: string; json: string; expected: { detected: boolean; legacyAsyncPostToolUse: boolean } }> = [
+      {
+        name: 'legacy async PostToolUse',
+        json: JSON.stringify({
+          PreToolUse: [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node x' }], __pd_marker: 'pd-owned' }],
+          PostToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: 'node x', async: true }], __pd_marker: 'pd-owned' }],
+        }),
+        expected: { detected: true, legacyAsyncPostToolUse: true },
+      },
+      {
+        name: 'PD-owned groups without async PostToolUse',
+        json: JSON.stringify({
+          PreToolUse: [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node x' }], __pd_marker: 'pd-owned' }],
+        }),
+        expected: { detected: true, legacyAsyncPostToolUse: false },
+      },
+      {
+        name: 'non-PD hooks.json',
+        json: JSON.stringify({ PreToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: 'other' }] }] }),
+        expected: { detected: false, legacyAsyncPostToolUse: false },
+      },
+      {
+        name: 'malformed JSON',
+        json: '{not json',
+        expected: { detected: false, legacyAsyncPostToolUse: false },
+      },
+    ];
+    for (const fixture of fixtures) {
+      mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
+        if (String(candidate).endsWith('hooks.json')) return fixture.json;
+        throw new Error('unexpected read');
+      });
+      const local = detectLegacyCodexHookRegistration('/home/user/.codex/hooks.json');
+      expect(local.detected, `local detected: ${fixture.name}`).toBe(fixture.expected.detected);
+      expect(local.legacyAsyncPostToolUse, `local async: ${fixture.name}`).toBe(fixture.expected.legacyAsyncPostToolUse);
+      // Core parser parity (rc-1/rc-2): parse the same JSON (malformed →
+      // both must report not-detected).
+      let coreParsed: { detected: boolean; legacyAsyncPostToolUse: boolean };
+      try {
+        coreParsed = parseLegacyCodexHooksRegistration(JSON.parse(fixture.json));
+      } catch {
+        coreParsed = { detected: false, legacyAsyncPostToolUse: false };
+      }
+      expect(coreParsed, `core parity: ${fixture.name}`).toEqual(fixture.expected);
+    }
   });
 });
 
