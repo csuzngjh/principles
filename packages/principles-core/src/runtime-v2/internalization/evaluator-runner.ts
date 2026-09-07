@@ -59,6 +59,7 @@ import type {
 import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { EVALUATOR_STAGE1_MANIFEST, EVALUATOR_STAGE2_MANIFEST } from './context-manifests.js';
+import { extractIntentContract, type IntentContractV1 } from './intent-contract.js';
 import { evaluateFlaggedCriteria, isForcedStage2 } from './progressive-evaluator.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
 import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
@@ -818,6 +819,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? '',
       previousEvaluation: context.previousEvaluation,
       hostToolCatalog: this.hostToolCatalog ?? undefined,
+      // PRI-703 Phase 1: the scribe artifact's Owner-intent contract is the
+      // primary intentConsistency anchor. Extracted from the FULL parsed
+      // scribe artifact (before any manifest narrowing — the contract is
+      // injected as its own block). Absent on pre-contract artifacts →
+      // undefined → prompt unchanged (backward compatible).
+      intentContract: extractIntentContract(parsedScribeArtifact) ?? undefined,
     });
     return { message, stage2Evidence: resolutionOutcome };
   }
@@ -2650,37 +2657,41 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       ? affectedTools.filter((t): t is string => typeof t === 'string')
       : [];
 
-    const ruleContent = {
-      implementationCode,
-      goldenTrace: traceBuild.trace,
-      goldenTraceCases,
-      affectedTools: validatedAffectedTools,
-      // adversarialResult.passed === true is the precondition for this method;
-      // the gate decision is therefore accepted_shadow.
-      ruleHostGateDecision: 'accepted_shadow',
-      sourceArtificerArtifactId: assemblyInput.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
-      adversarialResult: output.adversarialResult,
-      ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
-      // PRI-490: preserve evidenceRefs from Artificer artifact into rule artifact.
-      // Only include when the array is valid (non-empty strings) — v1 rules may omit.
-      ...(requiresContextVersion === 2 && Array.isArray(evidenceRefs) && evidenceRefs.every((e: unknown) => typeof e === 'string' && e.trim() !== '')
-        ? { evidenceRefs: evidenceRefs as string[] }
-        : {}),
-    };
-
     // P1 #7 (cross-package acceptance test discovery): resolve the scribe
     // principle artifact and carry forward its principle ID as
     // sourcePrincipleId on the rule artifact. Without this, extractPrincipleId()
     // in the activation dispatcher returns null for rule artifacts, causing
     // activateArtifact() to fail with 'invalid_artifact'/'no_principle_id'.
     // The rule artifact must carry lineage to the principle it enforces.
+    //
+    // PRI-703 Phase 1: the same resolution deterministically forwards the
+    // principle's intent contract onto the rule artifact (single author of the
+    // rule's intent anchor = the scribe principle; the rule echoes it, it
+    // never re-derives it — no second source of truth). Resolved BEFORE the
+    // ruleContent build so the contract rides in the same contentJson write.
     let resolvedSourcePrincipleId: string | undefined;
+    let forwardedIntentContract: IntentContractV1 | undefined;
     try {
       const principleBearerId = await this.resolvePrincipleBearerArtifact(output, taskId);
       if (principleBearerId) {
         const principleArtifact = await this.artifactStore.getArtifactById(principleBearerId);
         if (principleArtifact) {
           resolvedSourcePrincipleId = EvaluatorRunner.extractPrincipleIdFromArtifact(principleArtifact);
+          let parsedPrincipleContent: unknown;
+          try {
+            parsedPrincipleContent = JSON.parse(principleArtifact.contentJson);
+          } catch {
+            parsedPrincipleContent = principleArtifact.contentJson;
+          }
+          const contract = extractIntentContract(parsedPrincipleContent);
+          if (contract !== null) {
+            forwardedIntentContract = contract;
+          } else {
+            this.emitEvent('intent_contract_absent_on_principle', taskId, {
+              principleArtifactId: principleBearerId,
+              nextAction: 'pre_contract_scribe_artifact_backward_compatible',
+            });
+          }
         }
       }
     } catch (resolveErr) {
@@ -2701,6 +2712,28 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
       return null;
     }
+
+    const ruleContent = {
+      implementationCode,
+      goldenTrace: traceBuild.trace,
+      goldenTraceCases,
+      affectedTools: validatedAffectedTools,
+      // adversarialResult.passed === true is the precondition for this method;
+      // the gate decision is therefore accepted_shadow.
+      ruleHostGateDecision: 'accepted_shadow',
+      sourceArtificerArtifactId: assemblyInput.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
+      adversarialResult: output.adversarialResult,
+      ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
+      // PRI-490: preserve evidenceRefs from Artificer artifact into rule artifact.
+      // Only include when the array is valid (non-empty strings) — v1 rules may omit.
+      ...(requiresContextVersion === 2 && Array.isArray(evidenceRefs) && evidenceRefs.every((e: unknown) => typeof e === 'string' && e.trim() !== '')
+        ? { evidenceRefs: evidenceRefs as string[] }
+        : {}),
+      // PRI-703 Phase 1: forward the principle's intent contract verbatim —
+      // the rule artifact self-carries the intent anchor it was validated
+      // against (echo of the scribe single source, never a re-derivation).
+      ...(forwardedIntentContract !== undefined ? { intentContract: forwardedIntentContract } : {}),
+    };
 
     const ruleArtifactId = `pi-rule-${taskId}-${runId}`;
     const ruleId = `rule-${taskId}`;

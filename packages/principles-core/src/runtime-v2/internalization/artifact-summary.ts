@@ -266,12 +266,20 @@ function resolvePhilosopher(output: Record<string, unknown>): StageResolution {
 function resolveScribe(output: Record<string, unknown>): StageResolution {
   const principleDraft = readRecord(output, 'principleDraft');
   const statement = readString(principleDraft, 'statement');
+  // PRI-703 Phase 1: surface the intent contract's core fields as summary
+  // tier1 fields so the focused-manifest channel can inject them without
+  // reading the full artifact. Absent on pre-contract scribe artifacts
+  // (readString returns null → recorded in omittedFields, never silent).
+  const intentContract = readRecord(output, 'intentContract');
   return {
     headlineSource: statement === null ? null : firstSentence(statement),
     resolved: {
       principleText: statement,
       scope: readStringList(principleDraft, 'applicability'),
       exceptions: readStringList(principleDraft, 'antiPatterns'),
+      intentOwner: readString(intentContract, 'ownerIntent'),
+      intentForbidden: readString(intentContract, 'forbiddenBehavior'),
+      intentValidation: readString(intentContract, 'validationExpectation'),
     },
   };
 }

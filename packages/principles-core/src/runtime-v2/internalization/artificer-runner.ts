@@ -39,6 +39,7 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors } from './pitask-metadata.js';
+import { extractIntentContract } from './intent-contract.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
 import { ARTIFICER_MANIFEST, ARTIFICER_REPAIR_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
@@ -860,6 +861,14 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       repairFeedback = formatRepairFeedback(repairPayload, formatReplayEvidenceBlock(replayContext));
     }
 
+    // PRI-703 Phase 1: extract the scribe artifact's Owner-intent contract
+    // (additive metadata; absent on pre-contract artifacts → undefined, the
+    // prompt stays unchanged). Note extraction runs on the full scribe
+    // artifact BEFORE the focused-manifest narrowing above — the manifest
+    // projects only summary fields for injection, while the contract here is
+    // injected as its own structured block via the prompt builder.
+    const intentContract = extractIntentContract(scribeArtifactInput);
+
     const builder = new ArtificerPromptBuilder();
     const { message } = builder.buildPrompt({
       contextMode: this.contextMode,
@@ -881,6 +890,10 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // so the repair attempt fixes the exact contract violations instead of
       // re-emitting the same invalid shape (18/18 death-loop breaker).
       priorValidatorErrors: context.priorValidatorErrors,
+      // PRI-703 Phase 1: forward the scribe Owner-intent contract so rule
+      // generation anchors to the explicit intent. extract returns null for
+      // pre-contract artifacts → undefined keeps the prompt unchanged.
+      intentContract: intentContract ?? undefined,
     });
     // P1-1: rollout revision feedback 注入 (与 scribe 同模式; repairFeedback
     // 走 prompt builder 字段,revisionFeedback 是路由文本,直接附加)

@@ -38,6 +38,10 @@ export { buildToolSemanticRegistry, validateToolSemanticMappings } from './tool-
 export type { FailureLayer, RuleReliabilityFailure, RuleReliabilityValidationInput, RuleReliabilityValidationResult } from './rule-reliability-validation.js';
 export { validateRuleReliability, classifyReplayFailure } from './rule-reliability-validation.js';
 
+// Owner-intent contract (PRI-703 Phase 1)
+export type { IntentContractV1 } from './intent-contract.js';
+export { INTENT_CONTRACT_SCHEMA_VERSION, isValidIntentContractV1, extractIntentContract } from './intent-contract.js';
+
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization-route.js';
 export { decideInternalizationRoute } from './internalization-route.js';

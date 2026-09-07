@@ -2,6 +2,7 @@ import { serializePromptInput } from './prompt-serializer.js';
 import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { LastValidatorErrors } from './pitask-metadata.js';
+import type { IntentContractV1 } from './intent-contract.js';
 
 /**
  * Dreamer candidate 5-dim context (PRI-508).
@@ -62,6 +63,14 @@ export interface ArtificerPromptBuilderInput {
    * 前次 attempt 成功通过校验）。
    */
   priorValidatorErrors?: LastValidatorErrors;
+  /**
+   * PRI-703 Phase 1: the scribe artifact's structured Owner-intent contract
+   * (runtime-validated via extractIntentContract). The generated rule must
+   * serve ownerIntent/targetBehavior and MUST NOT implement
+   * forbiddenBehavior. Undefined for pre-contract scribe artifacts
+   * (backward compatible).
+   */
+  intentContract?: IntentContractV1;
 }
 
 export interface ArtificerPromptInput {
@@ -81,6 +90,15 @@ export interface ArtificerPromptInput {
   repairFeedback?: string;
   /** Present only when the prior attempt was rejected by the output-contract gate (PRI-700 factor B). */
   priorValidatorErrors?: LastValidatorErrors;
+  /**
+   * PRI-703 Phase 1: the scribe artifact's structured Owner-intent contract
+   * (already runtime-validated by extractIntentContract). Forwarded into the
+   * prompt so rule generation anchors to the explicit intent — the
+   * implementationCode must serve ownerIntent/targetBehavior and MUST NOT
+   * implement forbiddenBehavior. Undefined for pre-contract scribe artifacts
+   * (backward compatible).
+   */
+  intentContract?: IntentContractV1;
 }
 
 export interface ArtificerPromptBuildResult {
@@ -96,6 +114,12 @@ PROTOCOL:
 3. Preserve the lineage trace from scribe, philosopher, and dreamer artifacts
 4. Identify risks associated with implementing this principle
 5. The implementation summary should clearly describe what the code does and why
+
+OWNER INTENT CONTRACT (when \`intentContract\` is present — PRI-703):
+- \`intentContract\` is the Owner-intent anchor distilled from the real failure. Your rule exists to serve it.
+- implementationCode MUST operationalize \`targetBehavior\` and MUST NOT implement \`forbiddenBehavior\`.
+- If a repair/revision instruction (repairFeedback, revisionFeedback) contradicts the intentContract, the intentContract wins: implement the contract-faithful behavior and document the conflict in implementationSummary — do NOT silently satisfy the contradicting instruction.
+- Use \`validationExpectation\` as your self-check before emitting: would an evaluator observing that expectation accept this rule as faithful?
 
 OUTPUT FORMAT (pure JSON, no markdown):
 {
@@ -253,6 +277,9 @@ export class ArtificerPromptBuilder {
       // PRI-700 因子 B: only include priorValidatorErrors when present, so
       // first-attempt prompts stay backward-compatible.
       ...(input.priorValidatorErrors !== undefined ? { priorValidatorErrors: input.priorValidatorErrors } : {}),
+      // PRI-703 Phase 1: only include intentContract when present (pre-contract
+      // scribe artifacts), so prompts stay backward-compatible.
+      ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),
     };
 
     const message = serializePromptInput(promptInput);
