@@ -265,7 +265,7 @@ async function runIngestionConsentStep(pd, workspaceDir, args) {
   try {
     const parsed = JSON.parse(lastLine);
     if (parsed.decision === 'granted' && parsed.status === 'ok') return { outcome: 'accepted' };
-    if (parsed.decision === 'declined' && parsed.status === 'ok') return { outcome: 'declined' };
+    if (parsed.decision === 'revoked' && parsed.status === 'ok') return { outcome: 'declined' };
     return { outcome: 'skipped', note: `consent_apply_degraded:${String(parsed.reason ?? 'unknown').slice(0, 80)}` };
   } catch {
     return { outcome: 'skipped', note: 'consent_apply_output_invalid — run `pd codex setup` manually' };

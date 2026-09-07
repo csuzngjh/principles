@@ -52,6 +52,9 @@ export * from './codex-worker-status.js';
 // PRI-625 Slice D: ONE legacy-registration predicate (installer refusal,
 // health dualRegistration, and future setup flows all read the same fact).
 export * from './codex-legacy-registration.js';
+// PRI-625 Slice D: transcript locator moved here so the §15 health service
+// computes per-rollout lag with the SAME locator the catch-up path uses.
+export * from './codex-transcript-locate.js';
 
 export const HOST_RUNTIME_ROUTES = [
   'before_prompt_build',

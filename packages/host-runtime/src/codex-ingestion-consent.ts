@@ -10,7 +10,7 @@
  * whether ingestion runs (the hook gate reads only the flag — consent never
  * sits on the hot path). This store is the GOVERNANCE RECORD that the flag
  * may only be enabled THROUGH the disclosed consent flow (G2A); health uses
- * it to report consent state and to flag `flag_on_without_consent` as a
+ * it to report consent state and to flag `flag_on_without_grant` as a
  * governance warning. Declining must never flip the flag off by side effect
  * — the setup flow owns that ordering, not this store.
  *
@@ -31,9 +31,25 @@ import path from 'node:path';
 import { CODEX_INGESTION_DISCLOSURE_VERSION } from './codex-disclosure.js';
 
 export const CODEX_INGESTION_CONSENT_FILENAME = 'codex-ingestion-consent.json';
-export const CODEX_INGESTION_CONSENT_SCHEMA_VERSION = '1';
+export const CODEX_INGESTION_CONSENT_SCHEMA_VERSION = '2';
 
-export type CodexIngestionConsentDecision = 'granted' | 'declined';
+/**
+ * Consent transition states (review round 2, governance consistency):
+ *
+ *   absent ──(disclosure shown, explicit decision)──▶ pending
+ *   pending ──(flag enabled successfully)───────────▶ granted
+ *   pending ──(declined / flag regularized off)─────▶ revoked
+ *   pending ──(flag enable failed)──────────────────▶ failed (with reason)
+ *   granted ──(explicit decline)────────────────────▶ revoked
+ *
+ * `granted` is only ever recorded AFTER the runtime flag activation has
+ * succeeded — consent can never become granted before activation, and a
+ * failed activation leaves an EXPLAINED `failed` state (reason + nextAction),
+ * never a silent granted/disabled mismatch. The flag remains the runtime
+ * authority; this record is the governance state machine that makes every
+ * observed flag/consent combination interpretable.
+ */
+export type CodexIngestionConsentDecision = 'pending' | 'granted' | 'revoked' | 'failed';
 export type CodexIngestionConsentDecidedVia = 'pd_codex_setup' | 'codex_plugin_setup';
 
 export interface CodexIngestionConsentRecord {
@@ -41,6 +57,8 @@ export interface CodexIngestionConsentRecord {
   disclosureVersion: string;
   decidedAt: string;
   decidedVia: CodexIngestionConsentDecidedVia;
+  /** Populated when decision='failed': why the flag activation did not land. */
+  failureReason?: string;
   schemaVersion: string;
 }
 
@@ -55,16 +73,17 @@ export type CodexIngestionConsentWrite =
 /** Health-surface consent state (SPEC §15). No captured text, ever. */
 export type CodexIngestionConsentState =
   | 'granted'
-  | 'declined'
+  | 'revoked'
+  | 'pending'
+  | 'failed'
   | 'not_present'
-  | 'flag_on_without_consent';
-
+  | 'flag_on_without_grant';
 export function getCodexIngestionConsentPath(workspaceDir: string): string {
   return path.join(path.resolve(workspaceDir), '.pd', CODEX_INGESTION_CONSENT_FILENAME);
 }
 
 function isDecision(value: unknown): value is CodexIngestionConsentDecision {
-  return value === 'granted' || value === 'declined';
+  return value === 'granted' || value === 'pending' || value === 'revoked' || value === 'failed';
 }
 
 function isDecidedVia(value: unknown): value is CodexIngestionConsentDecidedVia {
@@ -123,15 +142,18 @@ export function readCodexIngestionConsent(workspaceDir: string): CodexIngestionC
     };
   }
   const obj = parsed as Record<string, unknown>;
-  const allowedKeys = ['decision', 'disclosureVersion', 'decidedAt', 'decidedVia', 'schemaVersion'];
+  const allowedKeys = ['decision', 'disclosureVersion', 'decidedAt', 'decidedVia', 'failureReason', 'schemaVersion'];
   const errors: string[] = [];
   for (const key of Object.keys(obj)) {
     if (!allowedKeys.includes(key)) errors.push(`unknown field '${key}'`);
   }
-  if (!isDecision(obj.decision)) errors.push('decision must be granted|declined');
+  if (!isDecision(obj.decision)) errors.push('decision must be pending|granted|revoked|failed');
   if (!isNonShortString(obj.disclosureVersion, 40)) errors.push('disclosureVersion must be a short non-empty string');
   if (!isIsoTimestamp(obj.decidedAt)) errors.push('decidedAt must be a parseable ISO-8601 string');
   if (!isDecidedVia(obj.decidedVia)) errors.push('decidedVia must be pd_codex_setup|codex_plugin_setup');
+  if (obj.failureReason !== undefined && !isNonShortString(obj.failureReason, 200)) {
+    errors.push('failureReason must be a non-empty string (≤200 chars) when present');
+  }
   if (obj.schemaVersion !== CODEX_INGESTION_CONSENT_SCHEMA_VERSION) {
     errors.push(`schemaVersion must be '${CODEX_INGESTION_CONSENT_SCHEMA_VERSION}'`);
   }
@@ -150,10 +172,11 @@ export function readCodexIngestionConsent(workspaceDir: string): CodexIngestionC
     ok: true,
     existed: true,
     record: {
-      decision: isDecision(obj.decision) ? obj.decision : 'declined',
+      decision: isDecision(obj.decision) ? obj.decision : 'failed',
       disclosureVersion: isNonShortString(obj.disclosureVersion, 40) ? obj.disclosureVersion : '',
       decidedAt: isIsoTimestamp(obj.decidedAt) ? obj.decidedAt : '',
       decidedVia: isDecidedVia(obj.decidedVia) ? obj.decidedVia : 'pd_codex_setup',
+      ...(isNonShortString(obj.failureReason, 200) && obj.failureReason !== undefined ? { failureReason: obj.failureReason } : {}),
       schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION,
     },
   };
@@ -167,7 +190,7 @@ export function readCodexIngestionConsent(workspaceDir: string): CodexIngestionC
  */
 export function recordCodexIngestionConsent(
   workspaceDir: string,
-  input: { decision: CodexIngestionConsentDecision; decidedVia: CodexIngestionConsentDecidedVia; decidedAt?: string },
+  input: { decision: CodexIngestionConsentDecision; decidedVia: CodexIngestionConsentDecidedVia; decidedAt?: string; failureReason?: string },
 ): CodexIngestionConsentWrite {
   const filePath = getCodexIngestionConsentPath(workspaceDir);
   const record: CodexIngestionConsentRecord = {
@@ -175,6 +198,7 @@ export function recordCodexIngestionConsent(
     disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
     decidedAt: input.decidedAt ?? new Date().toISOString(),
     decidedVia: input.decidedVia,
+    ...(input.failureReason !== undefined ? { failureReason: input.failureReason.slice(0, 200) } : {}),
     schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION,
   };
   const dir = path.dirname(filePath);
@@ -201,16 +225,34 @@ export function recordCodexIngestionConsent(
 
 /**
  * Combine the consent record with the ingestion flag into the health-surface
- * state (SPEC §15). `flag_on_without_consent` is a governance warning state:
- * the flag was enabled outside the disclosed consent flow (e.g. hand-edited
- * config.yaml) — health must surface it, and setup offers to regularize it.
+ * state (SPEC §15). Every flag×record combination maps to exactly one
+ * interpretable state — none of them reads as silently healthy:
+ *
+ *   record granted  + flag any      → 'granted'    (activation succeeded)
+ *   record revoked  + flag any      → 'revoked'    (Owner said no; flag-off
+ *                                              path also regularizes the flag)
+ *   record failed   + flag any      → 'failed'     (activation did not land;
+ *                                              failureReason explains why)
+ *   record pending  + flag off      → 'pending'    (decision recorded, activation not yet applied)
+ *   record pending  + flag on       → 'pending'    (activation applied, terminal write pending)
+ *   no record       + flag on       → 'flag_on_without_grant'  (governance warning)
+ *   no record       + flag off      → 'not_present'
  */
 export function deriveCodexIngestionConsentState(
   record: CodexIngestionConsentRecord | null,
   ingestionFlagEnabled: boolean,
 ): CodexIngestionConsentState {
-  if (record?.decision === 'granted') return 'granted';
-  if (record?.decision === 'declined') return 'declined';
-  if (ingestionFlagEnabled) return 'flag_on_without_consent';
-  return 'not_present';
+  if (record === null) {
+    return ingestionFlagEnabled ? 'flag_on_without_grant' : 'not_present';
+  }
+  switch (record.decision) {
+    case 'granted':
+      return 'granted';
+    case 'revoked':
+      return 'revoked';
+    case 'failed':
+      return 'failed';
+    case 'pending':
+      return 'pending';
+  }
 }

@@ -80,7 +80,7 @@ interface CodexHealthReport {
     source: 'user_config' | 'defaults' | 'malformed';
   }>;
   consent: Degradable<{
-    state: 'granted' | 'declined' | 'not_present' | 'flag_on_without_consent';
+    state: 'granted' | 'revoked' | 'pending' | 'failed' | 'not_present' | 'flag_on_without_grant';
     decidedAt?: string;
     decidedVia?: string;
     disclosureVersion?: string;
@@ -354,7 +354,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
         ...(read.record !== null
           ? { decidedAt: read.record.decidedAt, decidedVia: read.record.decidedVia, disclosureVersion: read.record.disclosureVersion }
           : {}),
-        ...(state === 'flag_on_without_consent'
+        ...(state === 'flag_on_without_grant'
           ? {
               reason: 'flag_enabled_without_consent_record',
               nextAction: 'The ingestion flag was enabled outside the disclosed consent flow. Run `pd codex setup` to present the disclosure and record (or reverse) the decision.',

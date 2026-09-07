@@ -42,6 +42,7 @@ import {
   loadPdConfigForPlugin,
   readCodexIngestionConsent,
   recordCodexIngestionConsent,
+  type CodexIngestionConsentDecision,
   type CodexIngestionConsentState,
   type CodexIngestionDisclosureLanguage,
 } from '@principles/host-runtime';
@@ -61,7 +62,7 @@ export interface CodexSetupReport {
   host: 'codex';
   workspace: string;
   status: 'ok' | 'degraded';
-  decision?: 'granted' | 'declined';
+  decision?: CodexIngestionConsentDecision;
   consentStateBefore: CodexIngestionConsentState;
   consentState: CodexIngestionConsentState;
   disclosureVersion: string;
@@ -354,49 +355,116 @@ export async function handleCodexSetup(options: CodexSetupOptions): Promise<void
     return;
   }
 
-  // 1. Record consent BEFORE touching the flag (the record is the evidence
-  //    that the disclosure flow ran; the flag is only the runtime gate).
-  const recorded = recordCodexIngestionConsent(workspace, { decision, decidedVia: 'pd_codex_setup' });
-  if (!recorded.ok) {
-    refuse(recorded.reason, recorded.nextAction, consentStateBefore);
+  // Consent state machine (review round 2): the record must always explain
+  // the flag. `granted` is NEVER recorded before the runtime activation has
+  // actually succeeded.
+  //
+  // ACCEPT: record 'pending' → enable flag → 'granted' on success, 'failed'
+  // (with the activation reason) on failure.
+  // DECLINE: force the flag OFF first → 'revoked' after the flag is off;
+  // if the flag-off write fails → 'failed' (a revoked record beside a live
+  // flag would be unexplainable). If the flag was already off, decline is a
+  // pure record write.
+  const recordConsent = (decisionState: CodexIngestionConsentDecision, failureReason?: string) =>
+    recordCodexIngestionConsent(workspace, {
+      decision: decisionState,
+      decidedVia: 'pd_codex_setup',
+      ...(failureReason !== undefined ? { failureReason } : {}),
+    });
+
+  if (decision === 'declined') {
+    let flagResult: FlagWriteResult = { ok: true, enabled: ingestionEnabledBefore };
+    if (ingestionEnabledBefore) {
+      flagResult = setCodexConversationIngestionFlag(workspace, false);
+    }
+    if (!flagResult.ok) {
+      const failed = recordConsent('failed', 'decline could not disable the ingestion flag: ' + flagResult.reason);
+      finish({
+        generatedAt, host: 'codex', workspace, status: 'degraded',
+        decision: 'failed', consentStateBefore,
+        consentState: failed.ok ? 'failed' : consentStateBefore,
+        disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+        ingestionFlag: { name: 'codex_conversation_ingestion', enabled: true, source: flagSource },
+        hostCodexFlagEnabled: hostCodexEnabled, warnings,
+        reason: flagResult.reason, nextAction: flagResult.nextAction,
+      });
+      return;
+    }
+    const revoked = recordConsent('revoked');
+    if (!revoked.ok) {
+      refuse(revoked.reason, revoked.nextAction, consentStateBefore);
+      return;
+    }
+    finish({
+      generatedAt, host: 'codex', workspace, status: 'ok',
+      decision: 'revoked',
+      consentStateBefore,
+      consentState: deriveCodexIngestionConsentState(revoked.record, false),
+      disclosureVersion: revoked.record.disclosureVersion,
+      ingestionFlag: { name: 'codex_conversation_ingestion', enabled: false, source: flagSource },
+      hostCodexFlagEnabled: hostCodexEnabled,
+      warnings,
+      nextAction: 'Ingestion stays off; prompt injection, RuleHost, and tool governance are unchanged. No transcript was or will be read.',
+    });
     return;
   }
 
-  // 2. Flag write: accept ⇒ enabled; decline ⇒ explicitly off (also
-  //    regularizes a hand-enabled flag-on-without-consent state).
-  const desiredEnabled = decision === 'granted';
+  // ACCEPT flow.
+  const pending = recordConsent('pending');
+  if (!pending.ok) {
+    refuse(pending.reason, pending.nextAction, consentStateBefore);
+    return;
+  }
+
   let flagResult: FlagWriteResult = { ok: true, enabled: ingestionEnabledBefore };
-  if (ingestionEnabledBefore !== desiredEnabled) {
-    flagResult = setCodexConversationIngestionFlag(workspace, desiredEnabled);
+  if (!ingestionEnabledBefore) {
+    flagResult = setCodexConversationIngestionFlag(workspace, true);
   }
   if (!flagResult.ok) {
+    // Activation failed: consent must NOT be granted. Record the explained
+    // failure and report degraded — flag stays off, state stays interpretable.
+    const failed = recordConsent('failed', 'flag activation failed: ' + flagResult.reason);
     finish({
       generatedAt, host: 'codex', workspace, status: 'degraded',
-      decision, consentStateBefore, consentState: decision === 'granted' ? 'granted' : 'declined',
+      decision: 'failed', consentStateBefore,
+      consentState: failed.ok ? 'failed' : 'pending',
       disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
-      ingestionFlag: { name: 'codex_conversation_ingestion', enabled: ingestionEnabledBefore, source: flagSource },
+      ingestionFlag: { name: 'codex_conversation_ingestion', enabled: false, source: flagSource },
       hostCodexFlagEnabled: hostCodexEnabled, warnings,
       reason: flagResult.reason, nextAction: flagResult.nextAction,
     });
     return;
   }
 
+  const granted = recordConsent('granted');
+  if (!granted.ok) {
+    // The flag IS enabled but the terminal write failed — this is exactly the
+    // 'pending + flag on' state: explainable, and health blocks on it.
+    finish({
+      generatedAt, host: 'codex', workspace, status: 'degraded',
+      decision: 'pending', consentStateBefore,
+      consentState: 'pending',
+      disclosureVersion: CODEX_INGESTION_DISCLOSURE_VERSION,
+      ingestionFlag: { name: 'codex_conversation_ingestion', enabled: true, source: flagSource },
+      hostCodexFlagEnabled: hostCodexEnabled, warnings,
+      reason: granted.reason, nextAction: granted.nextAction,
+    });
+    return;
+  }
+
   const nextWarnings = [...warnings];
-  if (decision === 'granted' && !hostCodexEnabled) {
+  if (!hostCodexEnabled) {
     nextWarnings.push('host.codex is disabled — ingestion stays inactive until features.host.codex.enabled=true; enable it explicitly if this workspace should run Codex governance at all.');
   }
 
   finish({
     generatedAt, host: 'codex', workspace, status: 'ok',
-    decision,
+    decision: 'granted',
     consentStateBefore,
-    consentState: deriveCodexIngestionConsentState(recorded.record, desiredEnabled),
-    disclosureVersion: recorded.record.disclosureVersion,
-    ingestionFlag: { name: 'codex_conversation_ingestion', enabled: desiredEnabled, source: flagSource },
+    consentState: deriveCodexIngestionConsentState(granted.record, true),
+    disclosureVersion: granted.record.disclosureVersion,
+    ingestionFlag: { name: 'codex_conversation_ingestion', enabled: true, source: flagSource },
     hostCodexFlagEnabled: hostCodexEnabled,
     warnings: nextWarnings,
-    ...(decision === 'declined'
-      ? { nextAction: 'Ingestion stays off; prompt injection, RuleHost, and tool governance are unchanged. No transcript was or will be read.' }
-      : {}),
   });
 }

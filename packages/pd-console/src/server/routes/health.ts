@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HealthCheckModel } from '../models/HealthCheckModel.js';
-import { CodexGovernanceHealthModel } from '../models/CodexGovernanceHealthModel.js';
+import { CodexGovernanceHealthModel, type CodexGovernanceHealth } from '../models/CodexGovernanceHealthModel.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -22,12 +22,16 @@ function getModel(workspaceDir: string): HealthCheckModel {
   return model;
 }
 
-// PRI-625 Slice D (SPEC §15): Codex governance health is read-only and cheap;
-// cache it with the same TTL discipline as the system health model. Keyed by
-// workspace — the route can serve multiple workspaces.
+// PRI-625 Slice D (SPEC §15): Codex governance health comes from the ONE
+// authority — `pd health --host codex --json` — executed by the Console
+// model as a subprocess. Cached per workspace with the same TTL discipline
+// as the system health model. Keyed by workspace: the route can serve
+// multiple workspaces.
 const CODEX_WORKSPACE_CACHE_TTL_MS = MODEL_CACHE_TTL_MS;
 const codexModels = new Map<string, { model: CodexGovernanceHealthModel; cachedAt: number }>();
-const codexCache = new Map<string, { health: Awaited<ReturnType<CodexGovernanceHealthModel['collect']>>; cachedAt: number }>();
+/** Either the CLI authority's report (ok) or the explicit unknown block (collection failure). */
+type CodexHealthResult = CodexGovernanceHealth | { status: 'unknown'; ready: false; readyBlockers: string[]; reason: string; nextAction: string };
+const codexCache = new Map<string, { result: CodexHealthResult; cachedAt: number }>();
 
 function getCodexModel(workspaceDir: string): CodexGovernanceHealthModel {
   const cached = codexModels.get(workspaceDir);
@@ -53,29 +57,38 @@ export async function handleHealthRoute(
 
   try {
     const health = await model.checkSystemHealth();
-    let codexGovernance: Awaited<ReturnType<CodexGovernanceHealthModel['collect']>> | undefined;
-    const cachedCodex = codexCache.get(options.workspaceDir);
-    if (cachedCodex !== undefined && Date.now() - cachedCodex.cachedAt < CODEX_WORKSPACE_CACHE_TTL_MS) {
-      codexGovernance = cachedCodex.health;
+    // Governance consistency (review round 2): a collection failure is
+    // reported as status:'unknown' + ready:false + blockers — never omitted
+    // and never rendered as healthy (rc-9). This catch owns the conversion
+    // so even a throwing model cannot degrade into an absent
+    // (healthy-looking) block.
+    let codexGovernance: CodexHealthResult;
+    const cached = codexCache.get(options.workspaceDir);
+    if (cached !== undefined && Date.now() - cached.cachedAt < CODEX_WORKSPACE_CACHE_TTL_MS) {
+      codexGovernance = cached.result;
     } else {
-      try {
-        codexGovernance = await getCodexModel(options.workspaceDir).collect();
-        codexCache.set(options.workspaceDir, { health: codexGovernance, cachedAt: Date.now() });
-      } catch {
-        // The §15 block degrades independently of the base system health —
-        // the route stays 200 with the block absent rather than failing the
-        // whole health surface (rc-9: absence is observable to clients that
-        // require it; the CLI health command reports the structured reason).
-        codexGovernance = undefined;
-      }
+      const collected = await getCodexModel(options.workspaceDir).collect();
+      codexGovernance = collected.status === 'ok' ? collected.health : collected;
+      codexCache.set(options.workspaceDir, { result: codexGovernance, cachedAt: Date.now() });
     }
     sendSuccess(res, {
       ...health,
       authenticationMode: options.authenticationMode,
-      ...(codexGovernance !== undefined ? { codexGovernance } : {}),
+      codexGovernance,
     });
-  } catch (err) {
-    sendError(res, 500, 'health_check_error', (err as Error).message);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 200) : String(error);
+    sendSuccess(res, {
+      authenticationMode: options.authenticationMode,
+      codexGovernance: {
+        status: 'unknown',
+        ready: false,
+        readyBlockers: [`health_collection_failed: ${message}`],
+        reason: 'health_collection_failed',
+        nextAction: 'Run `pd health --host codex --workspace <dir>` manually to see the structured reason.',
+        productClaim: 'degraded',
+      },
+    });
   }
 }
 

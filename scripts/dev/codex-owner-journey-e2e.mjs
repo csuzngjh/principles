@@ -252,7 +252,7 @@ if (SKIP_LLM) {
 // ── S8 reversibility (always executable) ────────────────────────────────────
 const decline = spawnSync(process.execPath, [pdCliEntry, 'codex', 'setup', '--workspace', workspace, '--decline', '--json'], { encoding: 'utf8', env: { ...process.env, PD_WORKSPACE_DIR: workspace } });
 const declineReport = JSON.parse((decline.stdout.trim().split('\n').findLast((line) => line.startsWith('{'))) ?? '{}');
-if (declineReport.status !== 'ok' || declineReport.decision !== 'declined' || declineReport.ingestionFlag?.enabled !== false) {
+if (declineReport.status !== 'ok' || declineReport.decision !== 'revoked' || declineReport.ingestionFlag?.enabled !== false) {
   fail('S8-reversibility', `decline did not disable: ${decline.stdout.slice(0, 200)}`, 'Inspect the decline path.');
 }
 const afterOff = runHook(payload('Stop', { stop_hook_active: false }));

@@ -170,17 +170,17 @@ describe('pd codex setup — accept flow', () => {
 });
 
 describe('pd codex setup — decline flow', () => {
-  it('records declined consent and regularizes a hand-enabled flag back off', async () => {
+  it('records revoked consent and regularizes a hand-enabled flag back off', async () => {
     const handEnabled = PRELUDE + 'features:\n  host.codex:\n    category: core\n    enabled: true\n  codex_conversation_ingestion:\n    category: quiet\n    enabled: true # hand-edited without consent\n';
     const ws = makeWorkspace(handEnabled);
     const { json } = await run({ workspace: ws, decline: true, json: true });
     const report = json[0] as Record<string, unknown>;
     expect(report.status, JSON.stringify(report)).toBe('ok');
-    expect(report.decision).toBe('declined');
+    expect(report.decision).toBe('revoked');
     expect((report.ingestionFlag as Record<string, unknown>).enabled).toBe(false);
     expect(report.nextAction).toContain('No transcript');
 
-    expect(readConsent(ws)?.decision).toBe('declined');
+    expect(readConsent(ws)?.decision).toBe('revoked');
     const configAfter = readConfig(ws);
     // The inline comment survives; only the value flips.
     expect(configAfter).toContain('enabled: false # hand-edited without consent');
@@ -188,6 +188,78 @@ describe('pd codex setup — decline flow', () => {
     expect(configAfter).toContain('category: core');
     expect(configAfter).toContain('host.codex:');
     expect(process.exitCode).toBeUndefined();
+  });
+});
+
+describe('pd codex setup — consent transition state machine (review round 2)', () => {
+  it('Case 1: consent write ok + flag enable ok ⇒ state=granted, runtime enabled=true', async () => {
+    const ws = makeWorkspace(PRELUDE + 'features: {}\n');
+    const { json } = await run({ workspace: ws, accept: true, json: true });
+    const report = json[0] as Record<string, unknown>;
+    expect(report.status, JSON.stringify(report)).toBe('ok');
+    expect(report.decision).toBe('granted');
+    expect(report.consentState).toBe('granted');
+    expect((report.ingestionFlag as Record<string, unknown>).enabled).toBe(true);
+    expect(readConsent(ws)?.decision).toBe('granted');
+  });
+
+  it('Case 2: flag enable fails ⇒ state != granted, runtime enabled=false, failure reason recorded and surfaced', async () => {
+    const ws = makeWorkspace(PRELUDE + 'features: {}\n');
+    // Break the config AFTER the initial validation so the round-trip
+    // verification inside the flag editor fails: consent went to 'pending'
+    // first, then the activation fails ⇒ terminal state 'failed' with the
+    // reason, and the flag stays off (no granted/disabled mismatch).
+    const original = await import('../../src/commands/codex-setup.js');
+    const brokenLoader = await import('@principles/host-runtime');
+    const realLoad = brokenLoader.loadPdConfigForPlugin;
+    let loadCalls = 0;
+    const spy = vi.spyOn(brokenLoader, 'loadPdConfigForPlugin').mockImplementation((dir: string) => {
+      loadCalls += 1;
+      // Call 1 is the handler's pre-check (ok); call 2 is the round-trip
+      // verification INSIDE setCodexConversationIngestionFlag — break it there.
+      if (loadCalls === 1) return realLoad(dir);
+      return {
+        ok: false,
+        effective: realLoad(dir).effective,
+        source: 'malformed',
+        configPath: dir,
+        warnings: [],
+        errors: [{ path: 'features', reason: 'injected round-trip failure (test)', nextAction: 'fix yaml' }],
+      };
+    });
+    try {
+      const { json } = await run({ workspace: ws, accept: true, json: true });
+      const report = json[0] as Record<string, unknown>;
+      expect(report.status, JSON.stringify(report)).toBe('degraded');
+      expect(report.decision).toBe('failed');
+      expect(report.consentState).toBe('failed');
+      expect(report.reason).toContain('injected round-trip failure');
+      expect((report.ingestionFlag as Record<string, unknown>).enabled).toBe(false);
+      // NOT granted — the whole point of the state machine.
+      expect(report.consentState).not.toBe('granted');
+      const consent = readConsent(ws);
+      expect(consent?.decision).toBe('failed');
+      expect(String(consent?.failureReason)).toContain('injected round-trip failure');
+      expect(process.exitCode).toBe(1);
+    } finally {
+      spy.mockRestore();
+      void original;
+    }
+  });
+
+  it('re-running accept after a failed attempt reaches granted (state machine recovers)', async () => {
+    const ws = makeWorkspace(PRELUDE + 'features: {}\n');
+    // Simulate the failed state on disk, then accept again.
+    fs.mkdirSync(path.join(ws, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(ws, '.pd', 'codex-ingestion-consent.json'), JSON.stringify({
+      decision: 'failed', disclosureVersion: 'g2a-2026-08-28', decidedAt: new Date().toISOString(),
+      decidedVia: 'pd_codex_setup', failureReason: 'flag activation failed: prior run', schemaVersion: '2',
+    }), 'utf8');
+    const { json } = await run({ workspace: ws, accept: true, json: true });
+    const report = json[0] as Record<string, unknown>;
+    expect(report.status, JSON.stringify(report)).toBe('ok');
+    expect(report.decision).toBe('granted');
+    expect(readConsent(ws)?.decision).toBe('granted');
   });
 });
 

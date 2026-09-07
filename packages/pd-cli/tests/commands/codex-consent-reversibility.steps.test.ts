@@ -181,12 +181,12 @@ registry.then('no config outside the workspace consent flow was modified', () =>
 registry.when('the Owner explicitly declines', async () => {
   const report = await runSetup({ workspace: ws, decline: true, json: true });
   expect(report.status).toBe('ok');
-  expect(report.decision).toBe('declined');
+  expect(report.decision).toBe('revoked');
 });
 
 registry.then('the consent record exists with the declined decision and the ingestion flag is off', () => {
   const read = readCodexIngestionConsent(ws);
-  expect(read.ok && read.record?.decision).toBe('declined');
+  expect(read.ok && read.record?.decision).toBe('revoked');
   const config = pdFile(ws, 'config.yaml');
   expect(config).not.toBeNull();
   if (config !== null) {
@@ -200,7 +200,7 @@ registry.then('no transcript was opened by the decline', () => {
   // The decline only rewrites the two allowlisted .pd files; no transcript
   // argument exists on the handler and CODEX_HOME is never consulted.
   expect(process.env.CODEX_HOME).toBeUndefined();
-  expect(readCodexIngestionConsent(ws).ok && readCodexIngestionConsent(ws).record?.decision).toBe('declined');
+  expect(readCodexIngestionConsent(ws).ok && readCodexIngestionConsent(ws).record?.decision).toBe('revoked');
 });
 
 registry.when('setup runs in machine mode without an explicit accept or decline', async () => {
@@ -266,7 +266,7 @@ registry.given('an isolated Codex Workspace where the Owner declined ingestion',
   ws = makeWorkspace();
   const report = await runSetup({ workspace: ws, decline: true, json: true });
   expect(report.status).toBe('ok');
-  expect(report.decision).toBe('declined');
+  expect(report.decision).toBe('revoked');
 });
 
 registry.when('the production runtime initializer re-runs over the workspace', async () => {
@@ -286,7 +286,7 @@ registry.when('the production runtime initializer re-runs over the workspace', a
 
 registry.then('the ingestion flag is still off and the declined consent record is untouched', () => {
   const read = readCodexIngestionConsent(ws);
-  expect(read.ok && read.record?.decision).toBe('declined');
+  expect(read.ok && read.record?.decision).toBe('revoked');
   const config = fs.readFileSync(path.join(ws, '.pd', 'config.yaml'), 'utf8');
   expect(config).toContain('codex_conversation_ingestion:');
   expect(config).toContain('enabled: false');

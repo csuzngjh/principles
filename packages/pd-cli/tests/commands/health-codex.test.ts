@@ -284,20 +284,20 @@ describe('pd health --host codex — §15 ready semantics', () => {
 describe('pd health --host codex — consent surface (no captured text)', () => {
   it('flag on without consent record ⇒ governance blocker with setup nextAction', async () => {
     mockReadCodexIngestionConsent.mockReturnValue({ ok: true, existed: false, record: null });
-    mockDeriveConsentState.mockReturnValue('flag_on_without_consent');
+    mockDeriveConsentState.mockReturnValue('flag_on_without_grant');
     const report = await runJson();
     const consent = report.consent as { state: string; nextAction?: string };
-    expect(consent.state).toBe('flag_on_without_consent');
+    expect(consent.state).toBe('flag_on_without_grant');
     expect(consent.nextAction).toContain('pd codex setup');
     expect(report.ready).toBe(false);
   });
 
   it('declined consent with flag off does not block readiness on consent', async () => {
     mockIsFeatureEnabled.mockImplementation((_flags: unknown, id: string) => id === 'host.codex');
-    mockReadCodexIngestionConsent.mockReturnValue({ ok: true, existed: true, record: { ...grantedConsentRecord(), decision: 'declined' } });
-    mockDeriveConsentState.mockReturnValue('declined');
+    mockReadCodexIngestionConsent.mockReturnValue({ ok: true, existed: true, record: { ...grantedConsentRecord(), decision: 'revoked' } });
+    mockDeriveConsentState.mockReturnValue('revoked');
     const report = await runJson();
-    expect((report.consent as { state: string }).state).toBe('declined');
+    expect((report.consent as { state: string }).state).toBe('revoked');
     expect((report.readyBlockers as string[]).some((blocker) => blocker.startsWith('consent'))).toBe(false);
   });
 
