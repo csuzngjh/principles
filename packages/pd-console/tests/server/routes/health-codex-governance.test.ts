@@ -97,6 +97,8 @@ describe('/api/health codexGovernance — explicit unknown is not healthy (revie
       throw new Error('route threw: ' + String(error instanceof Error ? error.stack : error));
     }
 
+    // 200 because the SYSTEM health succeeded; the failed codexGovernance
+    // collection is expressed as the explicit unknown block below (rc-9).
     expect(statusOf()).toBe(200);
     const body = payload();
     expect(body).not.toBeNull();
