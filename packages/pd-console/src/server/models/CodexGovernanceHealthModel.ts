@@ -121,12 +121,13 @@ export class CodexGovernanceHealthModel {
           productClaim: 'degraded',
         };
       }
-      // runtime-contract-exempt: ERR-001 CLI health authority report passed
-      // through VERBATIM by design (review round 2, single-authority
-      // requirement): field-by-field revalidation here would duplicate the
-      // CLI's own validation and recreate the two-truths problem. The report
-      // is never rendered as healthy unless `ready` came from the CLI, and
-      // every consumer-visible failure mode is an explicit unknown block.
+      // CLI health authority report passed through VERBATIM by design
+      // (review round 2, single-authority requirement): field-by-field
+      // revalidation here would duplicate the CLI's own validation and
+      // recreate the two-truths problem. The report is never rendered as
+      // healthy unless `ready` came from the CLI, and every
+      // consumer-visible failure mode is an explicit unknown block.
+      // runtime-contract-exempt: ERR-001 verbatim passthrough of our own CLI's documented JSON contract — single authority, see PRI-625 review round 2.
       const health = JSON.parse(jsonLine) as CodexGovernanceHealth;
       return { status: 'ok', health };
     } catch (error) {
