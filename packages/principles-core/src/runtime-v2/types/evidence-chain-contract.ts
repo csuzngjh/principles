@@ -1284,6 +1284,11 @@ export function assembleEvidenceChain(params: {
         // PRI-406: Read canonical fields
         const eventCanonicalPainId = readOwnString(event, 'canonical_pain_id');
         const eventRuntimeTaskId = readOwnString(event, 'runtime_task_id');
+        // PRI-625 Slice D: evidence host attribution on the cross-ref path too
+        // (review round 3) — missing/legacy host_kind degrades to 'unknown'.
+        const eventHostKind = readOwnString(event, 'host_kind');
+        const hostKind: 'openclaw' | 'codex' | 'unknown' =
+          eventHostKind === 'openclaw' || eventHostKind === 'codex' ? eventHostKind : 'unknown';
 
         // No linked task/candidate: state is admission-driven. tool_call/hook observations
         // are `evidence-only`; manual/review are `recorded-only`. (PRI-385 P1-2)
@@ -1296,6 +1301,7 @@ export function assembleEvidenceChain(params: {
           state: unmatchedState,
           summary: text || reason || `Pain signal (source: ${source}, score: ${score})`,
           admissionDecision: inferAdmissionDecision(sourceKind),
+          hostKind,
         };
 
         // PRI-406: Set canonical identity fields

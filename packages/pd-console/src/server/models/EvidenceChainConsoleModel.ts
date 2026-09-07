@@ -197,11 +197,23 @@ export class EvidenceChainConsoleModel {
         } catch (colErr: unknown) {
           const colMessage = colErr instanceof Error ? colErr.message : String(colErr);
           if (colMessage.includes('no such column')) {
-            // host_kind (PRI-640) and runtime_task_id may be absent on legacy
-            // databases — degrade the column, never the record.
-            painEvents = trajDb.prepare(
-              'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at FROM pain_events ORDER BY created_at DESC LIMIT 100',
-            ).all();
+            // Degrade per missing column (review round 3): a missing host_kind
+            // must not drop canonical_pain_id / runtime_task_id — the task join
+            // runs through those, and losing them orphans evidence records.
+            try {
+              painEvents = trajDb.prepare(
+                'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id, NULL AS host_kind FROM pain_events ORDER BY created_at DESC LIMIT 100',
+              ).all();
+            } catch (colErr2: unknown) {
+              const colMessage2 = colErr2 instanceof Error ? colErr2.message : String(colErr2);
+              if (colMessage2.includes('no such column')) {
+                painEvents = trajDb.prepare(
+                  'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at FROM pain_events ORDER BY created_at DESC LIMIT 100',
+                ).all();
+              } else {
+                throw colErr2;
+              }
+            }
           } else {
             throw colErr;
           }

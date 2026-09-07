@@ -1033,11 +1033,13 @@ export function quarantineGovernanceObservation(args: QuarantineGovernanceObserv
       if (typeof quarantinedAt === 'string' && quarantinedAt.length > 0) {
         // Already terminal: report the RECORDED audit digest/gap, not a
         // re-hash of the row (bodies were dropped at quarantine time, so a
-        // fresh hash would silently differ from the audited one).
+        // fresh hash would silently differ from the audited one). dryRun
+        // reflects THIS invocation's intent — a dry-run call reports
+        // dryRun:true even on an already-quarantined row (review round 3).
         const recordedDigest = rowField(row, 'quarantine_digest');
         const recordedGap = rowField(row, 'quarantine_gap');
         return {
-          ok: true, dryRun: false, alreadyQuarantined: true,
+          ok: true, dryRun: !confirm, alreadyQuarantined: true,
           record: {
             ...summary,
             digest: typeof recordedDigest === 'string' && recordedDigest.length > 0 ? recordedDigest : summary.digest,

@@ -73,8 +73,19 @@ export async function handleCodexIngestQuarantine(options: CodexIngestQuarantine
   }
   const operator = (typeof options.operator === 'string' && options.operator.trim().length > 0 ? options.operator.trim() : defaultOperator()).slice(0, 80);
 
+  // resolveWorkspaceDir throws when no workspace can be determined — wrap so
+  // --json still emits exactly one structured refusal (cli-1/cli-6).
+  let workspaceDir: string;
+  try {
+    workspaceDir = resolveWorkspaceDir(options.workspace);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 160) : String(error);
+    refuse('workspace_unresolved: ' + message, 'Run from inside a PD workspace or pass -w/--workspace <path> with an initialized .pd directory.');
+    return;
+  }
+
   const result = quarantineGovernanceObservation({
-    workspaceDir: resolveWorkspaceDir(options.workspace),
+    workspaceDir,
     hostKind: 'codex',
     rolloutIdentity: rollout,
     recordId,

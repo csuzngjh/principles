@@ -87,7 +87,7 @@ afterEach(() => {
 });
 
 describe('/api/health codexGovernance — explicit unknown is not healthy (review round 2)', () => {
-  it('model failure ⇒ explicit unknown block with ready=false and health_collection_failed blocker', async () => {
+  it('model failure ⇒ explicit unknown block with ready=false and health_collection_failed blocker (system health still 200)', async () => {
     mockCollect.mockRejectedValue(new Error('cli subprocess crashed'));
     const { res, payload, statusOf } = createMockRes();
 
@@ -124,7 +124,7 @@ describe('/api/health codexGovernance — explicit unknown is not healthy (revie
 
   it('ready=true passes through only when the CLI authority says so', async () => {
     mockCollect.mockResolvedValue({ status: 'ok', health: okHealth() });
-    const { res, payload } = createMockRes();
+    const { res, payload, statusOf } = createMockRes();
 
     await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth' });
 
@@ -132,5 +132,15 @@ describe('/api/health codexGovernance — explicit unknown is not healthy (revie
     const block = envelope?.codexGovernance as Record<string, unknown>;
     expect(block.ready).toBe(true);
     expect(block.productClaim).toBe('rev2_automatic_closure');
+  });
+
+  it('system-health failure (checkSystemHealth throws) keeps the 500 contract — not swallowed as 200 (review round 3)', async () => {
+    mockCheckSystemHealth.mockRejectedValue(new Error('database locked'));
+    const { res, payload, statusOf } = createMockRes();
+
+    await handleHealthRoute(createMockReq(), res, { workspaceDir: '/w', authenticationMode: 'no_auth' });
+
+    expect(statusOf()).toBe(500);
+    expect(payload()?.error).toBe('health_check_error');
   });
 });

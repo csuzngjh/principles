@@ -110,25 +110,10 @@ export class CodexGovernanceHealthModel {
         [entry, 'health', '--host', 'codex', '--workspace', this.workspaceDir, '--json'],
         { encoding: 'utf8', timeout: 30_000, windowsHide: true },
       );
-      const jsonLine = stdout.trim().split('\n').filter((line) => line.startsWith('{')).pop();
-      if (jsonLine === undefined) {
-        return {
-          status: 'unknown',
-          ready: false,
-          readyBlockers: ['health_collection_failed: cli_output_not_json'],
-          reason: 'cli_output_not_json',
-          nextAction: 'Run `pd health --host codex --json` manually and inspect its output.',
-          productClaim: 'degraded',
-        };
-      }
-      // CLI health authority report passed through VERBATIM by design
-      // (review round 2, single-authority requirement): field-by-field
-      // revalidation here would duplicate the CLI's own validation and
-      // recreate the two-truths problem. The report is never rendered as
-      // healthy unless `ready` came from the CLI, and every
-      // consumer-visible failure mode is an explicit unknown block.
+      // cli-1: the CLI's --json mode prints exactly one (pretty-printed) JSON
+      // object on stdout — parse the whole stdout, not just the first `{` line.
       // runtime-contract-exempt: ERR-001 verbatim passthrough of our own CLI's documented JSON contract — single authority, see PRI-625 review round 2.
-      const health = JSON.parse(jsonLine) as CodexGovernanceHealth;
+      const health = JSON.parse(stdout) as CodexGovernanceHealth;
       return { status: 'ok', health };
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 200) : String(error);

@@ -188,31 +188,30 @@ function detectHooksTrust(codexConfigDir: string | undefined): CodexHealthReport
   }
   try {
     const raw = fs.readFileSync(configTomlPath, 'utf8');
-    const lowered = raw.toLowerCase();
-    const hooksIndex = lowered.indexOf('hooks');
-    if (hooksIndex === -1) {
+    // Line-by-line scan: a `hooks = <bool>` assignment inside the file, with
+    // comment lines skipped — a commented-out `# hooks = false` legacy note
+    // must not flip the trust verdict (review round 3).
+    let trusted: boolean | undefined;
+    for (const rawLine of raw.split('\n')) {
+      const line = rawLine.trim();
+      if (line.startsWith('#')) continue;
+      const lowered = line.toLowerCase();
+      const hooksIndex = lowered.indexOf('hooks');
+      if (hooksIndex === -1) continue;
+      const eqIndex = lowered.indexOf('=', hooksIndex);
+      if (eqIndex === -1) continue;
+      const tail = lowered.slice(eqIndex + 1, eqIndex + 12).trim();
+      if (tail.startsWith('true')) { trusted = true; break; }
+      if (tail.startsWith('false')) { trusted = false; break; }
+    }
+    if (trusted === undefined) {
       return {
         detectable: false,
         reason: 'hooks_setting_not_found_in_config',
         nextAction: 'Open Codex and run /hooks to trust PD hooks. Codex config.toml exists but has no `hooks` setting under [features].',
       };
     }
-    const eqIndex = lowered.indexOf('=', hooksIndex);
-    if (eqIndex === -1) {
-      return {
-        detectable: false,
-        reason: 'hooks_setting_not_found_in_config',
-        nextAction: 'Open Codex and run /hooks to trust PD hooks. Codex config.toml exists but has no `hooks` setting under [features].',
-      };
-    }
-    const tail = lowered.slice(eqIndex + 1, eqIndex + 12).trim();
-    if (tail.startsWith('true')) return { detectable: true, trusted: true };
-    if (tail.startsWith('false')) return { detectable: true, trusted: false };
-    return {
-      detectable: false,
-      reason: 'hooks_setting_not_found_in_config',
-      nextAction: 'Open Codex and run /hooks to trust PD hooks. Codex config.toml exists but has no `hooks` setting under [features].',
-    };
+    return { detectable: true, trusted };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {

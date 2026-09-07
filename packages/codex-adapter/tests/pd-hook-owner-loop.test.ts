@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import fs from 'node:fs';
+import { afterEach, expect } from 'vitest';import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -232,14 +231,15 @@ registry.then('the checkpoint exposes lag and one bounded catch-up pass clears i
   expect(checkpoint.byteOffset).toBeLessThan(fullSize);
 
   const result = await catchUpCodexIngestion({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
-  expect(result.status === 'ok' || result.status === 'skipped').toBe(true);
-  if (result.status === 'ok') {
-    expect(result.rollouts).toHaveLength(1);
-    const after = listGovernanceCheckpoints({ workspaceDir: ws.root, hostKind: 'codex' });
-    expect(after.ok).toBe(true);
-    if (!after.ok) return;
-    expect(after.checkpoints[0]?.byteOffset).toBe(fullSize);
-  }
+  // §18-8 requires the lag to actually CLOSE: a 'skipped' outcome (config
+  // invalid, flag off, resolve failure) would pass with zero assertions, so
+  // only a full 'ok' pass is acceptable here (review round 3).
+  expect(result.status).toBe('ok');
+  expect(result.rollouts).toHaveLength(1);
+  const after = listGovernanceCheckpoints({ workspaceDir: ws.root, hostKind: 'codex' });
+  expect(after.ok).toBe(true);
+  if (!after.ok) return;
+  expect(after.checkpoints[0]?.byteOffset).toBe(fullSize);
 });
 
 // ── §18-9 ────────────────────────────────────────────────────────────────────

@@ -175,9 +175,15 @@ export function setCodexConversationIngestionFlag(workspaceDir: string, enabled:
         lines.splice(featuresIndex + 1, 0, ...blockLines);
         mutated = true;
       } else {
+        // enabled-line search: found → rewrite (or keep); NOT found → insert.
+        // `enabledFound` is tracked separately from `mutated` so an existing
+        // line that already carries the target value does NOT trigger a
+        // second insertion (duplicate-key bug, review round 3).
+        let enabledFound = false;
         for (let i = keyIndex + 1; i < blockEnd; i += 1) {
           const current: string | undefined = lines[i];
           if (current === undefined || !INGESTION_ENABLED_LINE.test(current)) continue;
+          enabledFound = true;
           const next = '    enabled: ' + String(enabled) + trailingComment(current);
           if (current !== next) {
             lines[i] = next;
@@ -185,7 +191,7 @@ export function setCodexConversationIngestionFlag(workspaceDir: string, enabled:
           }
           break;
         }
-        if (!mutated) {
+        if (!enabledFound) {
           // Key exists but no enabled line inside its block — add it as the
           // first entry of the block so the mapping is not folded into a sibling.
           lines.splice(keyIndex + 1, 0, '    enabled: ' + String(enabled));

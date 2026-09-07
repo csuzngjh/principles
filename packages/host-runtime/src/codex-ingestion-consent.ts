@@ -192,6 +192,23 @@ export function recordCodexIngestionConsent(
   workspaceDir: string,
   input: { decision: CodexIngestionConsentDecision; decidedVia: CodexIngestionConsentDecidedVia; decidedAt?: string; failureReason?: string },
 ): CodexIngestionConsentWrite {
+  // Write-side validation mirrors the read-side guards (review round 3): a
+  // record this writer produces must never be rejected by its own reader.
+  const errors: string[] = [];
+  if (input.decidedAt !== undefined && !isIsoTimestamp(input.decidedAt)) errors.push('decidedAt must be a parseable ISO-8601 string when provided');
+  if (input.decision === 'failed' && (input.failureReason === undefined || input.failureReason.trim().length === 0)) {
+    errors.push('decision=failed requires a non-empty failureReason');
+  }
+  if (input.failureReason !== undefined && input.decision !== 'failed' && input.failureReason.trim().length === 0) {
+    errors.push('failureReason must be non-empty when provided');
+  }
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      reason: 'codex_ingestion_consent_input_invalid: ' + errors.join('; '),
+      nextAction: 'Fix the recordCodexIngestionConsent arguments at the call site.',
+    };
+  }
   const filePath = getCodexIngestionConsentPath(workspaceDir);
   const record: CodexIngestionConsentRecord = {
     decision: input.decision,

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -197,9 +197,10 @@ registry.then('the consent record exists with the declined decision and the inge
 });
 
 registry.then('no transcript was opened by the decline', () => {
-  // The decline only rewrites the two allowlisted .pd files; no transcript
-  // argument exists on the handler and CODEX_HOME is never consulted.
-  expect(process.env.CODEX_HOME).toBeUndefined();
+  // The decline only rewrites the two allowlisted .pd files; the handler has
+  // no transcript argument and no Codex-home FS surface. (The CODEX_HOME env
+  // assertion was removed in review round 3: it depends on the developer's
+  // machine environment, not on the behavior under test.)
   expect(readCodexIngestionConsent(ws).ok && readCodexIngestionConsent(ws).record?.decision).toBe('revoked');
 });
 

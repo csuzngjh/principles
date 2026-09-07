@@ -66,7 +66,9 @@ function fail(stageName, reason, nextAction) {
 const require = createRequire(import.meta.url);
 function pkgVersion(name) {
   try {
-    return JSON.parse(require.resolve(`${name}/package.json`)).version ?? 'unknown';
+    // require.resolve returns a PATH — read the file content, then parse.
+    const pkgJsonPath = require.resolve(`${name}/package.json`);
+    return JSON.parse(readFileSync(pkgJsonPath, 'utf8')).version ?? 'unknown';
   } catch {
     return 'unknown';
   }
@@ -210,22 +212,50 @@ if (ingestion.observations < 1 || ingestion.pains.n !== 1 || ingestion.pains.hos
 stage('S3-session', 'passed', 'authenticated fixture delivery through the real hook executable');
 stage('S4-ingestion', 'passed', ingestion);
 
-// ── S5 recovery: reconciliation ensures exactly one Diagnostician task ──────
+// ── S5 recovery: prove reconciliation actually RECOVERS, not just no-ops ────
+// Round 3 review: a healthy chain (task already ensured by admission) makes
+// reconcile a no-op — that proves nothing. Force the recovery case: break the
+// task link (simulating a crash between admission and task creation), then
+// reconcile must CREATE the task (tasksEnsured >= 1), and a second reconcile
+// must be a no-op with exactly one task total.
 const hostRuntimeUrl = pathToFileURL(path.join(ROOT, 'packages', 'host-runtime', 'dist', 'index.js')).href;
 const reconcileScript = `
   const { reconcileGovernanceContinuation } = await import(${JSON.stringify(hostRuntimeUrl)});
   const result = await reconcileGovernanceContinuation({ workspaceDir: ${JSON.stringify(workspace)} });
   console.log(JSON.stringify(result));
 `;
-let reconcile;
-try {
-  reconcile = execFileSync(process.execPath, ['--input-type=module', '-e', reconcileScript], { encoding: 'utf8' });
-} catch (error) {
-  fail('S5-recovery', `reconciliation runner crashed: ${String(error.stderr ?? error.message).slice(0, 500)}`, 'Inspect the reconcile -e script import path.');
+function runReconcile() {
+  try {
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', reconcileScript], { encoding: 'utf8' });
+    return JSON.parse(out.trim().split('\n').at(-1));
+  } catch (error) {
+    fail('S5-recovery', `reconciliation runner crashed: ${String(error.stderr ?? error.message).slice(0, 500)}`, 'Inspect the reconcile -e script import path.');
+  }
 }
-const reconcileResult = JSON.parse(reconcile.trim().split('\n').at(-1));
-if (!reconcileResult.ok || reconcileResult.tasksEnsured !== 0) {
-  fail('S5-recovery', `reconciliation created unexpected tasks: ${reconcile.slice(0, 200)}`, 'The admission continuation already ensured the task; reconcile must be a no-op on a healthy chain.');
+try {
+  execFileSync(process.execPath, ['-e', `
+  const Database = require(${JSON.stringify(path.join(ROOT, 'node_modules', 'better-sqlite3'))});
+  const traj = new Database(${JSON.stringify(path.join(workspace, '.state', 'trajectory.db'))});
+  // Simulate the crash-before-task-link window: delete the Diagnostician task
+  // and clear the marker's task link, keeping the admitted marker itself.
+  // The admission marker lives in trajectory.db (governance_signal_admissions);
+  // the task lives in state.db (tasks).
+  traj.prepare("UPDATE governance_signal_admissions SET diagnostician_task_id = NULL WHERE decision = 'admitted'").run();
+  traj.close();
+  const state = new Database(${JSON.stringify(path.join(workspace, '.pd', 'state.db'))});
+  state.prepare("DELETE FROM tasks WHERE task_kind = 'diagnostician'").run();
+  state.close();
+`], { encoding: 'utf8' });
+} catch (error) {
+  fail('S5-recovery', `task-link break failed: ${String(error.stderr ?? error.message).slice(0, 300)}`, 'Inspect the state.db manipulation.');
+}
+const reconcileFirst = runReconcile();
+if (!reconcileFirst.ok || reconcileFirst.tasksEnsured < 1) {
+  fail('S5-recovery', `reconciliation did not recover the missing task: ${JSON.stringify(reconcileFirst)}`, 'Expected tasksEnsured >= 1 on the first pass over the broken link.');
+}
+const reconcileSecond = runReconcile();
+if (!reconcileSecond.ok || reconcileSecond.tasksEnsured !== 0) {
+  fail('S5-recovery', `second reconciliation was not a no-op: ${JSON.stringify(reconcileSecond)}`, 'Reconcile must be idempotent: a healthy chain yields tasksEnsured = 0.');
 }
 const taskCount = execFileSync(process.execPath, ['-e', `
   const Database = require(${JSON.stringify(path.join(ROOT, 'node_modules', 'better-sqlite3'))});
@@ -236,7 +266,7 @@ const taskCount = execFileSync(process.execPath, ['-e', `
 if (JSON.parse(taskCount.trim()).n !== 1) {
   fail('S5-recovery', `expected exactly one Diagnostician task, got ${taskCount}`, 'The admitted pain must have exactly one pending task.');
 }
-stage('S5-recovery', 'passed', { ...reconcileResult, diagnosticianTasks: 1 });
+stage('S5-recovery', 'passed', { firstPass: reconcileFirst, secondPass: reconcileSecond, diagnosticianTasks: 1 });
 
 // ── S6 diagnosis (real LLM) ──────────────────────────────────────────────────
 if (SKIP_LLM) {
@@ -255,9 +285,13 @@ const declineReport = JSON.parse((decline.stdout.trim().split('\n').findLast((li
 if (declineReport.status !== 'ok' || declineReport.decision !== 'revoked' || declineReport.ingestionFlag?.enabled !== false) {
   fail('S8-reversibility', `decline did not disable: ${decline.stdout.slice(0, 200)}`, 'Inspect the decline path.');
 }
+// Round 3 review: to prove "flag-off performs ZERO reads" (not "reads then
+// discards"), remove the transcript entirely before invoking the hook — the
+// hook must still exit cleanly WITHOUT touching the transcript location.
+rmSync(transcriptPath);
 const afterOff = runHook(payload('Stop', { stop_hook_active: false }));
 if (afterOff.status !== 0) {
-  fail('S8-reversibility', `hook exited non-zero after flag-off: ${afterOff.stderr.slice(0, 200)}`, 'Flag-off must be a clean structured skip.');
+  fail('S8-reversibility', `hook exited non-zero after flag-off: ${afterOff.stderr.slice(0, 200)}`, 'Flag-off must be a clean structured skip — it must not even look for the transcript.');
 }
 const obsAfter = execFileSync(process.execPath, ['-e', `
   const Database = require(${JSON.stringify(path.join(ROOT, 'node_modules', 'better-sqlite3'))});
@@ -270,7 +304,7 @@ const afterCount = JSON.parse(obsAfter.trim()).n;
 if (afterCount !== beforeOff) {
   fail('S8-reversibility', `observations grew after flag-off (${beforeOff} -> ${afterCount})`, 'Flag-off must stop all observation writes.');
 }
-stage('S8-reversibility', 'passed', { declined: true, flagOff: true, observationsStable: afterCount });
+stage('S8-reversibility', 'passed', { declined: true, flagOff: true, transcriptRemovedBeforeHook: true, observationsStable: afterCount });
 
 stage('journey', 'completed', {
   versions: { codexAdapter: pkgVersion('@principles/codex-adapter'), hostRuntime: pkgVersion('@principles/host-runtime') },
