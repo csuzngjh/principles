@@ -32,7 +32,7 @@
     "@radix-ui/react-tooltip": "^1.2.11",
     "@sinclair/typebox": "^0.34.48",
     "@tailwindcss/postcss": "^4.3.3",
-    "@tailwindcss/vite": "^4.3.0",
+    "@tailwindcss/vite": "^4.3.3",
     "autoprefixer": "^10.5.4",
     "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
