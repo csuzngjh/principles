@@ -94,7 +94,7 @@ export function parseManifest(json) {
             problems.push("behaviorObservation with status CONFIRMED/IMPROVED requires evidence: at least 1 entry (session evidence / tool trajectory evidence / behavior diff evidence) — an unsupported positive claim is not a valid observation");
           } else {
             for (const e of evidenceList) {
-              if (!isPlainObject(e) || typeof (e.detail ?? e.source) !== 'string' || String(e.detail ?? e.source).trim() === '') {
+              if (!isPlainObject(e) || ![e.detail, e.source].some((value) => typeof value === 'string' && value.trim() !== '')) {
                 problems.push('behaviorObservation.evidence entries must be objects with a non-empty detail or source string');
                 break;
               }

@@ -369,15 +369,18 @@ export async function buildOwnerDecisionReview(
     //     context (a single-context principle risks over-fitting one file
     //     /task — Episode-001's over-generalization review axis);
     //   boundary — explicit antiPatterns present (what the principle
-    //     FORBIDS must be stated, not just what it wants).
-    const intentOwner = scribeSummary?.ok ? scribeSummary.value.fields.intentOwner : null;
+    //     FORBIDS must be stated, not just what it wants). The intent
+    //     contract's FORBIDDEN field (intentForbidden) is the only accepted
+    //     fallback — ownerIntent is a goal statement, not a prohibition
+    //     (评审 P1: 不得用 intentOwner 冒充 forbidden 证据).
+    const intentForbidden = scribeSummary?.ok ? scribeSummary.value.fields.intentForbidden : null;
     const checklistFacts = {
       title: readString(draft, 'title'),
       statement: principleStatement ?? null,
       rationale: readString(draft, 'rationale'),
       antiPatterns: readStringArray(draft, 'antiPatterns', 10),
       scope: readStringArray(draft, 'applicability', 10),
-      intentContractOwner: intentOwner,
+      intentContractForbidden: intentForbidden,
     };
     const qualityChecklist: PrincipleQualityChecklist = {
       schemaVersion: 1,
@@ -414,12 +417,12 @@ export async function buildOwnerDecisionReview(
         },
         {
           id: 'boundary',
-          pass: checklistFacts.antiPatterns.length > 0 || Boolean(checklistFacts.intentContractOwner),
+          pass: checklistFacts.antiPatterns.length > 0 || Boolean(checklistFacts.intentContractForbidden),
           note: checklistFacts.antiPatterns.length > 0
             ? `${checklistFacts.antiPatterns.length} explicit anti-pattern(s) bound the principle's forbidden behavior`
-            : checklistFacts.intentContractOwner
+            : checklistFacts.intentContractForbidden
               ? 'intent contract forbiddenBehavior present (pre-contract-era draft without antiPatterns)'
-              : 'no antiPatterns and no intent contract — the principle states what it wants but not what it forbids',
+              : 'no antiPatterns and no intent-contract forbiddenBehavior — the principle states what it wants but not what it forbids',
         },
       ],
     };

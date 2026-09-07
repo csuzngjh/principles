@@ -63,7 +63,7 @@ import { extractIntentContract, type IntentContractV1 } from './intent-contract.
 import { evaluateFlaggedCriteria, isForcedStage2 } from './progressive-evaluator.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
 import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
-import { partitionV2OutOfScopeFailures } from './rule-reliability-validation.js';
+import { attributionFromLayer, partitionV2OutOfScopeFailures, resolveRequiresContextVersionFromArtifact } from './rule-reliability-validation.js';
 import { adversarialCasesToGoldenTrace } from './adversarial-case.js';
 import { buildGoldenTraceFromArtificer } from '../golden-trace.js';
 import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
@@ -1409,26 +1409,24 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   /**
    * PRI-703 Phase 2: resolve the rule's requiresContextVersion from the
    * DURABLE artificer artifact (never from the LLM-forgible evaluator copy).
-   * Returns null when the artifact cannot be resolved (attribution stays
-   * inconclusive — fail-open to the existing repair path, never blocks the
-   * loop on a read error).
+   * Three-way result (see resolveRequiresContextVersionFromArtifact):
+   *   2 / undefined → resolved (v2 / v1) — the scope partition MUST run;
+   *   null → unresolvable (attribution stays inconclusive — fail-open to the
+   *          existing repair path, never blocks the loop on a read error).
+   *
+   * 评审 P1 修正：key-absent on a PARSED artifact is deterministically v1
+   * (artificer schema only ever writes literal 2) and must reach the
+   * partition — collapsing it into null made the out-of-scope routing
+   * unreachable in production for exactly its target population (v1 rules).
    */
-  private async resolveRequiresContextVersion(artificerArtifactId: string, taskId: string): Promise<number | null> {
+  private async resolveRequiresContextVersion(
+    artificerArtifactId: string,
+    taskId: string,
+  ): Promise<number | undefined | null> {
     try {
       const artifact = await this.artifactStore.getArtifactById(artificerArtifactId);
       if (!artifact) return null;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(artifact.contentJson);
-      } catch {
-        return null;
-      }
-      // rc-1/rc-2 (ERR-001): contentJson parse result is untrusted — narrow
-      // via the isRecord guard + rc-5 hasOwn before reading the field.
-      if (!EvaluatorRunner.isRecord(parsed)) return null;
-      if (!Object.hasOwn(parsed, 'requiresContextVersion')) return null;
-      const value = parsed.requiresContextVersion;
-      return typeof value === 'number' ? value : null;
+      return resolveRequiresContextVersionFromArtifact(artifact.contentJson);
     } catch (err) {
       this.emitEvent('attribution_scope_resolve_failed', taskId, {
         artificerArtifactId,
@@ -1968,7 +1966,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           if (partition.isPureOutOfScope) {
             this.emitEvent('repair_loop_test_out_of_scope', evaluatorTaskId, {
               runId: evaluatorRunId,
-              attribution: 'FAILED_TEST',
+              attribution: attributionFromLayer('test'),
               outOfScopeCaseIds: [...partition.outOfScope],
               failedCaseCount: ctx.diagnosticReplayEvidence.failedCaseCount,
               reason: 'all_replay_failures_are_v2_context_cases_judging_a_v1_rule',
@@ -1978,7 +1976,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           }
           if (partition.outOfScope.length > 0) {
             repairAttribution = {
-              attribution: 'FAILED_RULE',
+              attribution: attributionFromLayer('rule'),
               outOfScopeCaseIds: [...partition.outOfScope],
               reason: `replay failures mix real rule defects (in-scope cases: ${partition.inScope.join(', ')}) with test-scope v2-context cases (${partition.outOfScope.join(', ')}) that the v1 action-only channel structurally cannot express — do NOT attempt to satisfy the out-of-scope cases`,
             };

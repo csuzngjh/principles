@@ -104,6 +104,8 @@ describe('P0-2: 失败详情可观测性', () => {
         updatedAt: '2026-01-01T00:00:00Z',
         attemptCount: 1,
         maxAttempts: 3,
+        // 预存键必须在合并写入中幸存（评审 P1：第二次写曾以旧快照整体覆盖）
+        diagnosticJson: '{"pi_metadata":{"channel":"prompt"}}',
       };
 
       await runner.testHandleValidationError({
@@ -116,11 +118,13 @@ describe('P0-2: 失败详情可观测性', () => {
       // markTaskFailed 被调用（retryOrFail 路径）
       expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith('task-001', 'output_invalid', expect.stringContaining('Validation failed:'));
 
-      // updateTask 被调用，写入了 diagnosticJson 含 output_failure_details
+      // updateTask 恰好一次：output_failure_details（PRI-559 可观测性）与
+      // lastValidatorErrors（PRI-700-B 修复回喂）在同一次合并写入中落库
       expect(deps.stateManager.updateTask).toHaveBeenCalledTimes(1);
       const {calls} = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
       const lastCall = calls[calls.length - 1];
-      const [patchTaskId, patch] = lastCall!;
+      if (lastCall === undefined) throw new Error('expected updateTask to have been called');
+      const [patchTaskId, patch] = lastCall;
       expect(patchTaskId).toBe('task-001');
       expect(patch.diagnosticJson).toBeDefined();
       const parsed = JSON.parse(patch.diagnosticJson as string);
@@ -129,6 +133,14 @@ describe('P0-2: 失败详情可观测性', () => {
       expect(parsed.output_failure_details.errorCategory).toBe('output_invalid');
       expect(parsed.output_failure_details.errorCount).toBe(2);
       expect(parsed.output_failure_details.recordedAt).toBeDefined();
+      // PRI-700-B 回喂契约：attempt 级来源标识 + 当次错误全文
+      expect(parsed.lastValidatorErrors).toBeDefined();
+      expect(parsed.lastValidatorErrors.errors).toEqual(['not an object', 'missing field: thesis']);
+      expect(parsed.lastValidatorErrors.errorCategory).toBe('output_invalid');
+      expect(parsed.lastValidatorErrors.sourceAttemptCount).toBe(1);
+      expect(parsed.lastValidatorErrors.recordedAt).toBeDefined();
+      // 合而非替换：预存 pi_metadata 键幸存
+      expect(parsed.pi_metadata).toEqual({ channel: 'prompt' });
     });
   });
 
@@ -162,7 +174,8 @@ describe('P0-2: 失败详情可观测性', () => {
       expect(deps.stateManager.updateTask).toHaveBeenCalledTimes(1);
       const {calls} = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
       const lastCall = calls[calls.length - 1];
-      const [patchTaskId, patch] = lastCall!;
+      if (lastCall === undefined) throw new Error('expected updateTask to have been called');
+      const [patchTaskId, patch] = lastCall;
       expect(patchTaskId).toBe('task-002');
       expect(patch.diagnosticJson).toBeDefined();
       const parsed = JSON.parse(patch.diagnosticJson as string);

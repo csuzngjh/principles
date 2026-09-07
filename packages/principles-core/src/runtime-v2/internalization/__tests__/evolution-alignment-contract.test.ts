@@ -26,13 +26,16 @@ import {
   attributionFromLayer,
   isV2ContextCase,
   partitionV2OutOfScopeFailures,
+  resolveRequiresContextVersionFromArtifact,
+  V2_TEMPLATE_CASE_IDS,
   type FailureLayer,
 } from '../rule-reliability-validation.js';
+import { generateV2ContextAdversarialCases } from '../v2-adversarial-cases.js';
 import { ArtificerPromptBuilder } from '../artificer-prompt-builder.js';
 import {
   DefaultArtificerValidator,
 } from '../artificer-output.js';
-import { parseLastValidatorErrors, parsePITaskMetadata } from '../pitask-metadata.js';
+import { parseLastValidatorErrors, isFreshForNextAttempt, parsePITaskMetadata } from '../pitask-metadata.js';
 
 const VALID_CONTRACT: IntentContractV1 = {
   ownerIntent: 'avoid the agent guessing configuration contracts from example files',
@@ -155,15 +158,31 @@ describe('2. Failure Attribution — where/why/what-next classification', () => 
     expect(partition.outOfScope).toEqual(['v2-unavailable']);
   });
 
-  it('isV2ContextCase matches only the v2- prefix', () => {
+  it('isV2ContextCase matches ONLY the five known evaluator template ids (allowlist, not prefix)', () => {
     expect(isV2ContextCase('v2-unavailable')).toBe(true);
+    expect(isV2ContextCase('v2-truncated')).toBe(true);
+    expect(isV2ContextCase('v2-alias')).toBe(true);
+    expect(isV2ContextCase('v2-path-boundary')).toBe(true);
     expect(isV2ContextCase('v2-combination')).toBe(true);
+    // 评审 P1 回归：LLM 自定义 v2-* id 不得被误判出界（它们引入新行为
+    // 要求，是真实的 Rule 缺陷信号，必须留在 in-scope）
+    expect(isV2ContextCase('v2-business-boundary')).toBe(false);
     expect(isV2ContextCase('negative-1')).toBe(false);
     expect(isV2ContextCase('adv-v2')).toBe(false);
   });
 
+  it('a v1 rule failing ONLY on custom v2-* ids stays IN SCOPE (no false test-out-of-scope routing)', () => {
+    const partition = partitionV2OutOfScopeFailures({
+      requiresContextVersion: undefined,
+      failedCaseIds: ['v2-business-boundary', 'v2-custom-2'],
+    });
+    expect(partition.isPureOutOfScope).toBe(false);
+    expect(partition.inScope).toEqual(['v2-business-boundary', 'v2-custom-2']);
+    expect(partition.outOfScope).toEqual([]);
+  });
+
   it('attributionFromLayer maps the full stage-answer taxonomy onto one vocabulary', () => {
-    const expected: Array<[FailureLayer, string]> = [
+    const expected: [FailureLayer, string][] = [
       ['principle', 'FAILED_PRINCIPLE'],
       ['rule', 'FAILED_RULE'],
       ['evaluation', 'FAILED_EVALUATION'],
@@ -175,6 +194,46 @@ describe('2. Failure Attribution — where/why/what-next classification', () => 
     for (const [layer, attribution] of expected) {
       expect(attributionFromLayer(layer)).toBe(attribution);
     }
+  });
+
+  it('resolveRequiresContextVersionFromArtifact distinguishes v1 (key-absent) from unresolvable — the out-of-scope wiring regression', () => {
+    // 评审 P1 回归：key-absent on a PARSED artifact is deterministically v1
+    // (artificer schema only ever writes literal 2)。此前 runner 把它折叠成
+    // null，导致 partition 在生产中永远不运行——出界路由的全部目标人群
+    // (v1 规则) 被接线断点排除。
+    expect(resolveRequiresContextVersionFromArtifact('{"title":"t","statement":"s"}')).toBeUndefined();
+    expect(resolveRequiresContextVersionFromArtifact('{"requiresContextVersion":2}')).toBe(2);
+    // unresolvable (fail-open) cases must stay null, never v1:
+    expect(resolveRequiresContextVersionFromArtifact(null)).toBeNull();
+    expect(resolveRequiresContextVersionFromArtifact(undefined)).toBeNull();
+    expect(resolveRequiresContextVersionFromArtifact('')).toBeNull();
+    expect(resolveRequiresContextVersionFromArtifact('not json')).toBeNull();
+    expect(resolveRequiresContextVersionFromArtifact('[1,2]')).toBeNull();
+    expect(resolveRequiresContextVersionFromArtifact('{"requiresContextVersion":"2"}')).toBeNull();
+  });
+
+  it('WIRING: a resolved v1 artifact whose replay failures are all v2 templates routes pure out-of-scope (the Episode-001 death loop breaker)', () => {
+    const v1ArtifactContentJson = '{"taskId":"a","ruleCode":"...","statement":"s"}';
+    const resolved = resolveRequiresContextVersionFromArtifact(v1ArtifactContentJson);
+    expect(resolved).toBeUndefined();
+    const partition = partitionV2OutOfScopeFailures({
+      requiresContextVersion: resolved === 2 ? 2 : undefined,
+      failedCaseIds: ['v2-unavailable', 'v2-combination'],
+    });
+    expect(partition.isPureOutOfScope).toBe(true);
+    expect(partition.outOfScope).toEqual(['v2-unavailable', 'v2-combination']);
+    expect(partition.inScope).toEqual([]);
+  });
+
+  it('V2_TEMPLATE_CASE_IDS stays equivalent to the generator output (drift would silently re-open the death loop)', () => {
+    const generated = generateV2ContextAdversarialCases({
+      toolName: 'write_file',
+      targetPath: '/workspace/report.md',
+      canonicalKind: 'write',
+    });
+    const generatedIds = new Set(generated.map((c) => c.caseId));
+    expect(generatedIds.size).toBe(5);
+    expect([...generatedIds].sort()).toEqual([...V2_TEMPLATE_CASE_IDS].sort());
   });
 });
 
@@ -195,6 +254,9 @@ describe('3. Repair feedback circuit — PRI-700 factors B + C', () => {
           'goldenTraceCases[0].ruleContext is required when requiresContextVersion: 2 is declared',
           "expectedDecision 'propose_correction' is forbidden in v2 seed rules",
         ],
+        // 评审修正: prompt fixture 是"本 attempt 将回喂上一轮"的形态——
+        // base runner 泄漏面按 attempt-1 新鲜度判定
+        sourceAttemptCount: 1,
       },
     });
     expect(promptInput.priorValidatorErrors?.errors).toHaveLength(2);
@@ -226,10 +288,59 @@ describe('3. Repair feedback circuit — PRI-700 factors B + C', () => {
     expect(parseLastValidatorErrors('{"other":1}')).toBeNull();
     expect(parseLastValidatorErrors('{"lastValidatorErrors":{}}')).toBeNull();
     expect(parseLastValidatorErrors('{"lastValidatorErrors":{"recordedAt":"t","errorCategory":"output_invalid","errors":[]}}')).toBeNull();
+    // legacy shape without sourceAttemptCount → null (宁可少回喂一次，不回喂
+    // 来源不明的旧错误 — 评审 P1)
+    expect(parseLastValidatorErrors('{"lastValidatorErrors":{"recordedAt":"t","errorCategory":"output_invalid","errors":["e1"]}}')).toBeNull();
+    expect(parseLastValidatorErrors('{"lastValidatorErrors":{"recordedAt":"t","errorCategory":"output_invalid","errors":["e1"],"sourceAttemptCount":-1}}')).toBeNull();
     const valid = parseLastValidatorErrors(
-      '{"lastValidatorErrors":{"recordedAt":"t","errorCategory":"output_invalid","errors":["e1"]}}',
+      '{"lastValidatorErrors":{"recordedAt":"t","errorCategory":"output_invalid","errors":["e1"],"sourceAttemptCount":3}}',
     );
     expect(valid?.errors).toEqual(['e1']);
+    expect(valid?.sourceAttemptCount).toBe(3);
+  });
+
+  it('parseLastValidatorErrors bounds the re-fed error payload (rc-8: echoed LLM output must not overflow the prompt budget)', () => {
+    const longError = 'x'.repeat(1200);
+    const parsed = parseLastValidatorErrors(
+      `{"lastValidatorErrors":{"recordedAt":"t","errorCategory":"output_invalid","errors":["${longError}"],"sourceAttemptCount":2}}`,
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed?.errors[0]?.length).toBeLessThanOrEqual(500 + '…[truncated]'.length);
+    expect(parsed?.errors[0]).toContain('…[truncated]');
+    // >10 errors: first 10 kept, remainder collapsed into a visible marker
+    const many = Array.from({ length: 15 }, (_, i) => `e${i}`);
+    const capped = parseLastValidatorErrors(
+      `{"lastValidatorErrors":{"recordedAt":"t","errorCategory":"output_invalid","errors":${JSON.stringify(many)},"sourceAttemptCount":2}}`,
+    );
+    expect(capped?.errors).toHaveLength(11);
+    expect(capped?.errors[9]).toBe('e9');
+    expect(capped?.errors[10]).toBe('[+5 more validation error(s) omitted for prompt budget]');
+  });
+
+  it('isFreshForNextAttempt: only the immediately-preceding attempt\'s record is re-fed (rc-7, restart-safe)', () => {
+    const record = { recordedAt: 't', errorCategory: 'output_invalid', errors: ['e1'], sourceAttemptCount: 2 };
+    // fresh: attempt 3 follows the failed attempt 2
+    expect(isFreshForNextAttempt(record, 3)).toBe(true);
+    // stale: attempt 4 after a runtime-error attempt 3 did not clear the record
+    expect(isFreshForNextAttempt(record, 4)).toBe(false);
+    // no lease context (non-leased invocation) → suppress, never guess
+    expect(isFreshForNextAttempt(record, undefined)).toBe(false);
+    // same attempt re-reading its own just-written record (source === current)
+    expect(isFreshForNextAttempt(record, 2)).toBe(false);
+  });
+
+  it('extractIntentContract returns null on the FOCUSED (flattened) manifest shape — documents why capture-before-narrowing is load-bearing', () => {
+    // The focused manifest resolves scribeArtifactInput to resolved.fields —
+    // flat summary strings with no root intentContract object. Extraction
+    // must yield null there; artificer-runner therefore captures the FULL
+    // artifact before resolveContextInjectionAsync (评审 P1 wiring fix).
+    const flattenedSummaryShape = {
+      summary: '…',
+      intentOwner: 'avoid guessing config contracts',
+      intentForbidden: 'inferring field existence from examples',
+      intentValidation: 'absent consumer evidence surfaces as risk',
+    };
+    expect(extractIntentContract(flattenedSummaryShape)).toBeNull();
   });
 
   it('the artificer validator still rejects the forbidden v2 declarations that killed 18/18 attempts', async () => {

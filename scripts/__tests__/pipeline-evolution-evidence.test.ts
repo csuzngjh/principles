@@ -469,6 +469,29 @@ describe('PRI-703 Phase 3: behavior observation evidence integrity (CONFIRMED wi
     expect(r.stderr).toMatch(/non-empty detail or source string/);
   });
 
+  itSpawn('accepts an evidence entry with an EMPTY detail but a valid source (评审修正: ?? 不回退空串)', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-ep3-emptydetail.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-EP3-EMPTYDETAIL',
+      behaviorObservation: { status: 'IMPROVED', evidence: [{ detail: '', source: 'session-x' }] },
+    }));
+    const r = await runScript('pipeline-evolution/collect-evidence.mjs', ['--workspace', ws, '--experiment', m, '--json']);
+    expect(r.code).toBe(0);
+  });
+
+  itSpawn('rejects an evidence entry whose detail AND source are both blank', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-ep3-bothblank.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-EP3-BOTHBLANK',
+      behaviorObservation: { status: 'IMPROVED', evidence: [{ detail: '   ', source: '' }] },
+    }));
+    const r = await runScript('pipeline-evolution/collect-evidence.mjs', ['--workspace', ws, '--experiment', m, '--json']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/non-empty detail or source string/);
+  });
+
   itSpawn('accepts IMPROVED with a real evidence entry (new outcome vocabulary)', async () => {
     const ws = seedWorkspace();
     const m = path.join(root, 'manifest-ep3-improved.json');

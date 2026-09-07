@@ -36,11 +36,11 @@ export { buildToolSemanticRegistry, validateToolSemanticMappings } from './tool-
 
 // Rule reliability validation & failure attribution (PRI-634-F Phase 3; PRI-705/PRI-703 Phase 2)
 export type { FailureLayer, FailureAttribution, RuleReliabilityFailure, RuleReliabilityValidationInput, RuleReliabilityValidationResult } from './rule-reliability-validation.js';
-export { validateRuleReliability, classifyReplayFailure, attributionFromLayer, isV2ContextCase, partitionV2OutOfScopeFailures } from './rule-reliability-validation.js';
+export { validateRuleReliability, classifyReplayFailure, attributionFromLayer, isV2ContextCase, partitionV2OutOfScopeFailures, resolveRequiresContextVersionFromArtifact } from './rule-reliability-validation.js';
 
 // Owner-intent contract (PRI-703 Phase 1)
 export type { IntentContractV1 } from './intent-contract.js';
-export { INTENT_CONTRACT_SCHEMA_VERSION, isValidIntentContractV1, extractIntentContract } from './intent-contract.js';
+export { isValidIntentContractV1, extractIntentContract } from './intent-contract.js';
 
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization-route.js';

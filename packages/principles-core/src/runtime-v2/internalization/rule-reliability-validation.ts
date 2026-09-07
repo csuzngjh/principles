@@ -85,6 +85,26 @@ export function attributionFromLayer(layer: FailureLayer): FailureAttribution {
 }
 
 /**
+ * The ONLY v2 adversarial template caseIds the evaluator generates
+ * (v2-adversarial-cases.ts). An allowlist — NOT a prefix match: the merged
+ * case set can carry LLM-supplied adversarialCases whose caseId merely needs
+ * to be a non-empty string, so a custom `v2-business-boundary` id would be
+ * misattributed as out-of-scope by a prefix rule (评审 P1: prefix 匹配会把
+ * LLM 自定义 v2-* id 误判为 test 出界，跳过真实需要的 Rule 修复).
+ *
+ * Equivalence with the generator is locked by contract test
+ * (evolution-alignment-contract.test.ts) — adding a template without
+ * updating this list silently re-opens the v2×v1 repair death loop.
+ */
+export const V2_TEMPLATE_CASE_IDS: ReadonlySet<string> = new Set([
+  'v2-unavailable',
+  'v2-truncated',
+  'v2-alias',
+  'v2-path-boundary',
+  'v2-combination',
+]);
+
+/**
  * PRI-703 Phase 2 — deterministic v2-case scope classification (Episode 001
  * PRI-700 factor A, Owner decision: evaluation cases must fall INSIDE the
  * principle's intent contract before they may judge it).
@@ -94,12 +114,46 @@ export function attributionFromLayer(layer: FailureLayer): FailureAttribution {
  * unavailable"). A v1 action-only rule structurally CANNOT express them
  * (V1_CONTEXT_INSTRUCTION forbids reading input.context), so their failure is
  * a property of the CASE × CHANNEL pairing, not of the rule. Pure string-shape
- * logic on the caseId prefix — deterministic, no LLM involved.
+ * logic against the known template-id allowlist (V2_TEMPLATE_CASE_IDS) —
+ * deterministic, no LLM involved; LLM-supplied custom `v2-*` ids are NOT
+ * matched (they introduce new behavioral requirements and stay in-scope).
  *
  * Pure function — zero I/O.
  */
 export function isV2ContextCase(caseId: string): boolean {
-  return caseId.startsWith('v2-');
+  return V2_TEMPLATE_CASE_IDS.has(caseId);
+}
+
+/**
+ * PRI-703 Phase 2（评审 P1 修正）: resolve a rule artifact's context-channel
+ * declaration from its contentJson for scope classification. Three-way
+ * result — the distinction is load-bearing wiring:
+ *   2        → resolved v2 rule (context-aware; every v2 case is in scope);
+ *   undefined → resolved v1 rule (key absent on a PARSED artifact — the
+ *              artificer schema only ever writes literal 2, so key-absent is
+ *              deterministically v1; the partition MUST run for it);
+ *   null     → unresolvable (artifact missing/unparseable/not an object/
+ *              malformed value) — callers fail open and skip the partition.
+ *
+ * 评审 P1 回归背景：此前 runner 把 key-absent（=v1，出界路由的全部目标
+ * 人群）也折叠成 null，导致 partition 在生产中永远不运行——单测直接传
+ * undefined 掩盖了接线断点。纯函数提取以使该判定可测。
+ */
+export function resolveRequiresContextVersionFromArtifact(
+  contentJson: string | null | undefined,
+): number | undefined | null {
+  if (contentJson === null || contentJson === undefined || contentJson.trim() === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contentJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  if (!Object.hasOwn(record, 'requiresContextVersion')) return undefined;
+  const value = record.requiresContextVersion;
+  return typeof value === 'number' ? value : null;
 }
 
 /**

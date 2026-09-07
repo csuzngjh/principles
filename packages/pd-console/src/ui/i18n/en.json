@@ -311,6 +311,10 @@
         "goApprovalsCta": "Go to deployment approvals",
         "goActivationCta": "Go to activation management",
         "qualityChecklistLabel": "Quality checklist",
+        "qualityCheckStatus": {
+          "passed": "passed",
+          "failed": "failed"
+        },
         "qualityCheck": {
           "understandability": "Understandability",
           "evidence": "Evidence",

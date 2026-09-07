@@ -50,8 +50,6 @@ export interface IntentContractV1 {
   readonly validationExpectation: string;
 }
 
-export const INTENT_CONTRACT_SCHEMA_VERSION = 1 as const;
-
 /** Runtime-contract guard (rc-1/rc-2): untrusted LLM output must be validated field-by-field. */
 export function isValidIntentContractV1(value: unknown): value is IntentContractV1 {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

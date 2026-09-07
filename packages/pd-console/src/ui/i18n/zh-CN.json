@@ -311,6 +311,10 @@
         "goApprovalsCta": "前往部署审批",
         "goActivationCta": "前往激活管理",
         "qualityChecklistLabel": "质量检查表",
+        "qualityCheckStatus": {
+          "passed": "已通过",
+          "failed": "未通过"
+        },
         "qualityCheck": {
           "understandability": "可理解性",
           "evidence": "证据来源",

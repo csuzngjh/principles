@@ -2927,21 +2927,34 @@ function validateOwnerDecisionReview(value: unknown): OwnerDecisionReviewData | 
     parsedBrief.concerns = concerns;
     if (brief.score !== undefined && !isNumber(brief.score)) return null;
     if (isNumber(brief.score)) parsedBrief.score = brief.score;
-    // PRI-704 / PRI-703 Phase 4: optional quality checklist — validate
-    // element shapes when present; drop malformed entries rather than
-    // failing the whole review (the checklist is a review aid, not an
-    // authority record; older snapshots legitimately lack it).
+    // PRI-704 / PRI-703 Phase 4 (评审修正): optional quality checklist —
+    // strict five-item contract: schemaVersion must be exactly 1 and the five
+    // known item ids must each appear EXACTLY once (the UI builds i18n keys
+    // from the id; an unknown id would render an untranslated label, a
+    // missing id an incomplete checklist). Anything else → omit the whole
+    // checklist (older snapshots legitimately lack it; a partial one must
+    // not masquerade as a review aid).
     if (brief.qualityChecklist !== undefined) {
-      if (isObject(brief.qualityChecklist) && Array.isArray(brief.qualityChecklist.items)) {
-        const validItems = brief.qualityChecklist.items.filter(
-          (entry: unknown) => isObject(entry) && isString((entry as { id: unknown }).id)
-            && typeof (entry as { pass: unknown }).pass === 'boolean' && isString((entry as { note: unknown }).note),
-        );
-        if (validItems.length > 0) {
-          parsedBrief.qualityChecklist = {
-            schemaVersion: typeof brief.qualityChecklist.schemaVersion === 'number' ? brief.qualityChecklist.schemaVersion : 1,
-            items: validItems as { id: string; pass: boolean; note: string }[],
-          };
+      const KNOWN_IDS = ['understandability', 'evidence', 'actionability', 'generalization', 'boundary'] as const;
+      const qc = brief.qualityChecklist;
+      if (isObject(qc) && qc.schemaVersion === 1 && Array.isArray(qc.items)) {
+        const validItems: { id: string; pass: boolean; note: string }[] = [];
+        let shapeValid = true;
+        const seen = new Set<string>();
+        for (const entry of qc.items) {
+          if (!isObject(entry) || !isString(entry.id)
+            || typeof entry.pass !== 'boolean' || !isString(entry.note)) {
+            shapeValid = false;
+            break;
+          }
+          seen.add(entry.id);
+          validItems.push({ id: entry.id, pass: entry.pass, note: entry.note });
+        }
+        const allKnownOnce = shapeValid
+          && validItems.length === KNOWN_IDS.length
+          && KNOWN_IDS.every((id) => seen.has(id));
+        if (allKnownOnce) {
+          parsedBrief.qualityChecklist = { schemaVersion: 1, items: validItems };
         }
       }
     }

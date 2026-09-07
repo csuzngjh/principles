@@ -38,7 +38,7 @@ import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
-import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors } from './pitask-metadata.js';
+import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
 import { extractIntentContract } from './intent-contract.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
 import { ARTIFICER_MANIFEST, ARTIFICER_REPAIR_MANIFEST } from './context-manifests.js';
@@ -125,8 +125,9 @@ interface ArtificerContext {
   /**
    * PRI-700 因子 B (Owner 决策 2026-09-07): 上一次 attempt 的 validator
    * 拒绝全文。从 task.diagnosticJson 顶层 lastValidatorErrors 键读取
-   * (parseLastValidatorErrors 已做信任边界验证)，仅在同一 attempt 未消费
-   * 过时携带。修复 attempt N+1 的 prompt 因此携带 attempt N 被拒的确切
+   * (parseLastValidatorErrors 已做信任边界验证)，仅在新鲜度判定通过
+   * （sourceAttemptCount === 当前 attempt-1，isFreshForNextAttempt）时
+   * 携带。修复 attempt N+1 的 prompt 因此携带 attempt N 被拒的确切
    * 契约原因——不再零新信息重试。Ephemeral，不回写、不进 RepairPayload。
    */
   readonly priorValidatorErrors?: LastValidatorErrors;
@@ -576,27 +577,6 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
   private readonly validator: ArtificerValidator;
   private readonly contextMode: 'v1' | 'v2';
   private readonly behaviorExamplePack: BehaviorExamplePack | undefined;
-  /**
-   * PRI-700 因子 B: 已消费 lastValidatorErrors 的 attempt 集合（进程内存）。
-   * 任务重跑（retry_wait→leased 新 attempt）允许再次回喂——每次 attempt 失败
-   * 后 handleValidationError 都会用当次新错误覆盖该键（rc-7），故重跑携带的
-   * 是新错误而非 stale 残留；同一 attempt 内重复 buildContext 只回喂一次。
-   * 无 DB 写入、无新状态源（键 = taskId:attemptCount）。
-   */
-  private readonly attemptCheckConsumed = new Set<string>();
-
-  private hasAttemptCheckBeenConsumed(taskId: string): boolean {
-    // base runner 在 lease 后把 leased TaskRecord 传入 buildContext（第
-    // 三个参数；非 leased 场景无该快照）。attemptCount 是 lease 获取时从
-    // runs 派生的 attempt 序号——同一 attempt 内重复 buildContext 命中
-    // 同一 key，跨 attempt（重试）产生新 key 允许回喂新错误。
-    const key = this.currentLeasedAttempt !== undefined
-      ? `${taskId}:${this.currentLeasedAttempt}`
-      : taskId;
-    if (this.attemptCheckConsumed.has(key)) return true;
-    this.attemptCheckConsumed.add(key);
-    return false;
-  }
 
   constructor(deps: ArtificerRunnerDeps, options: ArtificerRunnerOptions) {
     super(deps, options, {
@@ -612,6 +592,15 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     this.contextMode = deps.contextMode ?? 'v1';
     this.behaviorExamplePack = deps.behaviorExamplePack;
   }
+
+  /**
+   * PRI-700 因子 B（评审 P1 修正）：lastValidatorErrors 回喂的新鲜度由
+   * 持久化来源标识判定——isFreshForNextAttempt（pitask-metadata.ts，
+   * sourceAttemptCount === 当前 attempt-1），取代原先的进程内消费集合：
+   * 运行时错误不清除记录时，attempt N+2 或进程重启后的重试不得复用
+   * attempt N 的旧错误（EP-05 loop state freshness）。Suppression 在唯一
+   * 消费点发单个事件（rc-9）。
+   */
 
   // ── Abstract implementations ───────────────────────────────────────────────
 
@@ -687,13 +676,15 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     let repairPayload: RepairPayload | undefined;
     let replayContext: RepairReplayContext | undefined;
 
-    // PRI-700 因子 B: 上一次 attempt 的 validator 拒绝全文回喂。仅在本
-    // attempt 未被消费过时携带（attemptCheckConsumed 跨 attempt CAS 防串
-    // 扰——同一 task 重跑若无新失败则不重喂旧错误）。从当前 task 的
+    // PRI-700 因子 B: 上一次 attempt 的 validator 拒绝全文回喂。新鲜度由
+    // 持久化来源标识判定（sourceAttemptCount === 当前 attempt-1）：运行时
+    // 错误不清除记录也不会串 attempt，进程重启同理（评审 P1 修正——原
+    // 进程内消费集合在重启后丢失，旧错误会被再次注入）。从当前 task 的
     // diagnosticJson 顶层读取（与 pi_metadata 信封并列），trust boundary
     // 由 parseLastValidatorErrors 守卫。
     const priorValidatorErrors = parseLastValidatorErrors(task.diagnosticJson);
-    const attemptIsFresh = !this.hasAttemptCheckBeenConsumed(taskId);
+    const attemptIsFresh = priorValidatorErrors !== null
+      && isFreshForNextAttempt(priorValidatorErrors, this.currentLeasedAttempt);
 
     if (piTask?.repairPayload) {
       const payload = piTask.repairPayload;
@@ -738,12 +729,16 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // Both are read-only views of already-durable facts; neither is persisted
     // here and neither widens RepairPayload (design §21/§28).
     // PRI-700 因子 B: 上一次 attempt 的 validator 拒绝全文——同为 durable
-    // 事实的只读视图，仅在 attempt 未消费过且存在时携带（回喂窗口）。
+    // 事实的只读视图，仅在新鲜度判定通过时携带（回喂窗口）。
     if (priorValidatorErrors !== null && !attemptIsFresh) {
       this.emitEvent('prior_validator_errors_suppressed', taskId, {
         recordedAt: priorValidatorErrors.recordedAt,
         errorCount: priorValidatorErrors.errors.length,
-        reason: 'attempt_check_already_consumed',
+        sourceAttemptCount: priorValidatorErrors.sourceAttemptCount,
+        currentAttempt: this.currentLeasedAttempt,
+        reason: this.currentLeasedAttempt === undefined
+          ? 'no_lease_context'
+          : 'stale_source_attempt',
       });
     }
     const repairEvidenceExtras = {
@@ -827,6 +822,11 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     } catch {
       scribeArtifactInput = context.scribeArtifact;
     }
+    // PRI-703 Phase 1（评审 P1 修正）：intent contract 必须在 manifest 收窄
+    // 之前从完整 scribe 工件提取——focused 模式会把 scribeArtifactInput 替换
+    // 为扁平 summary 字段（intentOwner 等），根级 intentContract 对象不再
+    // 存在，收窄后提取恒为 null（context_manifest_budget 开启即丢契约）。
+    const fullScribeArtifact = scribeArtifactInput;
 
     // Layer 1 (design §6.2/§6.3, task 5.9) + PR B Shared Information Plane:
     // resolve the manifest against the scribe predecessor's summary envelope,
@@ -869,13 +869,9 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       repairFeedback = formatRepairFeedback(repairPayload, formatReplayEvidenceBlock(replayContext));
     }
 
-    // PRI-703 Phase 1: extract the scribe artifact's Owner-intent contract
-    // (additive metadata; absent on pre-contract artifacts → undefined, the
-    // prompt stays unchanged). Note extraction runs on the full scribe
-    // artifact BEFORE the focused-manifest narrowing above — the manifest
-    // projects only summary fields for injection, while the contract here is
-    // injected as its own structured block via the prompt builder.
-    const intentContract = extractIntentContract(scribeArtifactInput);
+    // PRI-703 Phase 1: extract from the FULL scribe artifact (captured before
+    // the focused-manifest narrowing — see the comment at the capture site).
+    const intentContract = extractIntentContract(fullScribeArtifact);
 
     const builder = new ArtificerPromptBuilder();
     const { message } = builder.buildPrompt({

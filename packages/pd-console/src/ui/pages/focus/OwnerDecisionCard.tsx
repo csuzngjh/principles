@@ -123,7 +123,8 @@ export function OwnerDecisionCard({ item, onResolved, governanceReady = true }: 
               <ul className="grid gap-0.5">
                 {item.review.brief.qualityChecklist?.items.map((qItem) => (
                   <li key={qItem.id} className="flex items-start gap-1.5 text-[12px]">
-                    <span className={qItem.pass ? "text-emerald" : "text-amber"} aria-hidden>{qItem.pass ? "✓" : "!"}</span>
+                    <span className={qItem.pass ? "text-emerald" : "text-amber"} aria-hidden="true">{qItem.pass ? "✓" : "!"}</span>
+                    <span className="sr-only">{qItem.pass ? t("pages.focus.ownerDecision.qualityCheckStatus.passed") : t("pages.focus.ownerDecision.qualityCheckStatus.failed")}</span>
                     <span className="text-ink-2"><span className="font-medium">{t(`pages.focus.ownerDecision.qualityCheck.${qItem.id}`)}</span>{" "}{qItem.note}</span>
                   </li>
                 ))}

@@ -179,21 +179,73 @@ export interface OwnerResolutionRecord {
  * 的结构性断路）。
  *
  * 生命周期：本 attempt 校验失败时被当次新错误覆盖（rc-7 loop state
- * freshness），成功时不清理（stale 残留由 attemptCheckConsumed 的消费时
- * 清除语义防串扰——见 ArtificerRunner）。
+ * freshness），成功时不清理（残留由读取侧 sourceAttemptCount 新鲜度判定
+ * 屏蔽——只回喂 sourceAttemptCount === 当前 attempt-1 的记录）。
  */
 export interface LastValidatorErrors {
   /** 持久化时间（ISO） */
   readonly recordedAt: string;
   /** 本 attempt 校验失败的错误类别（PDErrorCategory） */
   readonly errorCategory: string;
-  /** validator 拒绝错误全文（≥1 条） */
+  /**
+   * validator 拒绝错误（≥1 条）。持久化侧存全文；本（读取/回喂）侧有界：
+   * ≤10 条、每条 ≤500 字符（rc-8，见 boundRefedErrors）。
+   */
   readonly errors: readonly string[];
+  /**
+   * 写入时的 attempt 序号（= 写入侧 task.attemptCount）。读取侧做跨
+   * attempt/跨进程新鲜度判定：仅当 === 当前 attempt-1 时回喂。评审
+   * P1：运行时错误不清除本记录，无来源标识时 attempt N+2 或重启后的
+   * 重试会复用 attempt N 的旧错误。
+   */
+  readonly sourceAttemptCount: number;
+}
+
+/**
+ * rc-8 (评审 P2): 回喂进 prompt 的 validator 错误必须有界。错误字符串
+ * 含被回显的 LLM 输出（可能极大——历史 incident 有 500KB 级 JSON 回显），
+ * 无界回喂会把修复 attempt N+1 的 prompt 推过 MAX_PROMPT_CHARS 的抛掷
+ * 边界，制造确定性 RangeError 重试循环。持久化侧保留全文（可观测性），
+ * 只有回喂读取侧截断——截断以可见后缀标注（rc-9）。
+ */
+const REFED_ERROR_MAX_COUNT = 10;
+const REFED_ERROR_MAX_CHARS = 500;
+
+function boundRefedErrors(errors: readonly string[]): string[] {
+  const capped: string[] = [];
+  for (const error of errors) {
+    if (capped.length >= REFED_ERROR_MAX_COUNT) {
+      const omitted = errors.length - REFED_ERROR_MAX_COUNT;
+      capped.push(`[+${omitted} more validation error(s) omitted for prompt budget]`);
+      break;
+    }
+    capped.push(error.length > REFED_ERROR_MAX_CHARS
+      ? `${error.slice(0, REFED_ERROR_MAX_CHARS)}…[truncated]`
+      : error);
+  }
+  return capped;
+}
+
+/**
+ * PRI-700 因子 B（评审 P1）: 回喂新鲜度判定——纯函数，供 runner 消费。
+ * 仅当记录来自紧邻的上一个 attempt（sourceAttemptCount === 当前
+ * attempt-1）且存在 lease 上下文时回喂；否则由调用方发 suppression
+ * 事件（rc-9）。进程重启安全：判定只依赖持久化的 sourceAttemptCount
+ * 与 lease 派生的 attempt 序号。
+ */
+export function isFreshForNextAttempt(
+  record: LastValidatorErrors,
+  currentLeasedAttempt: number | undefined,
+): boolean {
+  return currentLeasedAttempt !== undefined
+    && record.sourceAttemptCount === currentLeasedAttempt - 1;
 }
 
 /**
  * Trust-boundary guard (rc-1, rc-4): diagnosticJson 顶层
- * lastValidatorErrors 是 untrusted runtime data。
+ * lastValidatorErrors 是 untrusted runtime data。sourceAttemptCount 必填
+ * 且为非负整数——缺来源标识的 legacy 记录返回 null（宁可少回喂一次，
+ * 不回喂来源不明的旧错误）。
  */
 export function parseLastValidatorErrors(diagnosticJson: string | null | undefined): LastValidatorErrors | null {
   if (!diagnosticJson || diagnosticJson.trim() === '') return null;
@@ -216,10 +268,16 @@ export function parseLastValidatorErrors(diagnosticJson: string | null | undefin
   for (const error of record.errors) {
     if (typeof error !== 'string' || error.trim() === '') return null;
   }
+  if (typeof record.sourceAttemptCount !== 'number'
+    || !Number.isInteger(record.sourceAttemptCount)
+    || record.sourceAttemptCount < 0) {
+    return null;
+  }
   return {
     recordedAt: record.recordedAt,
     errorCategory: record.errorCategory,
-    errors: record.errors as string[],
+    errors: boundRefedErrors(record.errors as string[]),
+    sourceAttemptCount: record.sourceAttemptCount,
   };
 }
 
