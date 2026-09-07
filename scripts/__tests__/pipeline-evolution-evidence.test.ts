@@ -439,3 +439,119 @@ describe('real PRI-653 lab data (AC5 — skips when lab dir is absent)', () => {
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// PRI-703 Phase 3 — evidence integrity gate & behavior outcome vocabulary
+// ---------------------------------------------------------------------------
+
+describe('PRI-703 Phase 3: behavior observation evidence integrity (CONFIRMED without evidence is invalid)', () => {
+  itSpawn('rejects a manifest whose behaviorObservation claims CONFIRMED with no evidence entries (rc-3 fail loud)', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-ep3-empty.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-EP3-EMPTY',
+      behaviorObservation: { status: 'CONFIRMED', evidence: [] },
+    }));
+    const r = await runScript('pipeline-evolution/collect-evidence.mjs', ['--workspace', ws, '--experiment', m, '--json']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/requires evidence: at least 1 entry/);
+  });
+
+  itSpawn('rejects CONFIRMED/IMPROVED whose evidence entries carry no detail/source string', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-ep3-badentry.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-EP3-BADENTRY',
+      behaviorObservation: { status: 'IMPROVED', evidence: [{ source: 42 }] },
+    }));
+    const r = await runScript('pipeline-evolution/collect-evidence.mjs', ['--workspace', ws, '--experiment', m, '--json']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/non-empty detail or source string/);
+  });
+
+  itSpawn('accepts IMPROVED with a real evidence entry (new outcome vocabulary)', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-ep3-improved.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-EP3-IMPROVED',
+      behaviorObservation: { status: 'IMPROVED', evidence: [{ source: 'session-ep2', detail: 'agent verified config consumers before writing; pain pattern absent post-activation' }] },
+    }));
+    const pkgDir = path.join(root, 'pkg-ep3-improved');
+    await runCollector(['--workspace', ws, '--experiment', m, '--package', pkgDir]);
+    const idx = readJson(path.join(pkgDir, 'evidence-index.json'));
+    // behavior claim stays NOT_REACHED without activations — the observation
+    // is accepted by the parser but cannot confirm anything (no activation).
+    const behavior = idx.claims.find((c: { claim: string }) => c.claim === 'behavior_change');
+    expect(behavior.status).toBe('NOT_REACHED');
+  });
+
+  itSpawn('normalizes the Episode-001 field-name drift (result → status)', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-ep3-drift.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-EP3-DRIFT',
+      behaviorObservation: { result: 'INCONCLUSIVE', summary: 'hand-filled post-run' },
+    }));
+    const pkgDir = path.join(root, 'pkg-ep3-drift');
+    await runCollector(['--workspace', ws, '--experiment', m, '--package', pkgDir]);
+    const idx = readJson(path.join(pkgDir, 'evidence-index.json'));
+    const behavior = idx.claims.find((c: { claim: string }) => c.claim === 'behavior_change');
+    // INCONCLUSIVE without activation derives NOT_REACHED (0 activations in fixture)
+    expect(behavior.status).toBe('NOT_REACHED');
+  });
+
+  itSpawn('with an activation present: CONFIRMED derives IMPROVED, and metrics map IMPROVED→PASS / NO_IMPROVEMENT→FAIL', async () => {
+    const ws = seedWorkspace();
+    // Seed one activation into the fixture's state.db (approved artifact).
+    const db = new Database(path.join(ws, 'main', '.pd', 'state.db'));
+    db.prepare(
+      'INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run('act-ep3-1', 'ik-1', 'pi-art-A1', 'prompt', 'activate', 'workspace', T_CONST);
+    db.close();
+
+    // (a) positive observation with evidence → IMPROVED claim, metrics PASS.
+    const mOk = path.join(root, 'manifest-ep3-act-ok.json');
+    writeJson(mOk, manifest({
+      experimentId: 'EXP-EP3-ACT-OK',
+      sessionIds: [SID_A],
+      correlations: ['candA'],
+      behaviorObservation: { status: 'CONFIRMED', evidence: [{ source: 'session-ep2', detail: 'agent verified config consumers before writing' }] },
+    }));
+    const pkgOk = path.join(root, 'pkg-ep3-act-ok');
+    await runCollector(['--workspace', ws, '--experiment', mOk, '--package', pkgOk]);
+    const idxOk = readJson(path.join(pkgOk, 'evidence-index.json'));
+    const behaviorOk = idxOk.claims.find((c: { claim: string }) => c.claim === 'behavior_change');
+    expect(behaviorOk.status).toBe('IMPROVED');
+    expect(behaviorOk.evidence.length).toBe(1);
+    const metricsOk = readJson(path.join(pkgOk, 'metrics.json'));
+    expect(metricsOk.behavior).toEqual({ status: 'IMPROVED', matrix: 'PASS' });
+
+    // (b) same workspace, negative observation → NO_IMPROVEMENT claim, metrics FAIL.
+    const mNo = path.join(root, 'manifest-ep3-act-no.json');
+    writeJson(mNo, manifest({
+      experimentId: 'EXP-EP3-ACT-NO',
+      sessionIds: [SID_A],
+      correlations: ['candA'],
+      behaviorObservation: { status: 'NO_IMPROVEMENT', evidence: [{ source: 'session-ep2', detail: 'agent repeated the old mistake post-activation' }] },
+    }));
+    const pkgNo = path.join(root, 'pkg-ep3-act-no');
+    await runCollector(['--workspace', ws, '--experiment', mNo, '--package', pkgNo]);
+    const metricsNo = readJson(path.join(pkgNo, 'metrics.json'));
+    expect(metricsNo.behavior).toEqual({ status: 'NO_IMPROVEMENT', matrix: 'FAIL' });
+  });
+
+  itSpawn('derives NO_IMPROVEMENT / REGRESSION outcome statuses without evidence gate (only positive outcomes need evidence)', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-ep3-noimp.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-EP3-NOIMP',
+      behaviorObservation: { status: 'NO_IMPROVEMENT', evidence: [] },
+    }));
+    // Negative outcomes carry no positive claim — no evidence gate, parse OK.
+    const pkgDir = path.join(root, 'pkg-ep3-noimp');
+    await runCollector(['--workspace', ws, '--experiment', m, '--package', pkgDir]);
+    const idx = readJson(path.join(pkgDir, 'evidence-index.json'));
+    const behavior = idx.claims.find((c: { claim: string }) => c.claim === 'behavior_change');
+    expect(behavior.status).toBe('NOT_REACHED');
+  });
+});

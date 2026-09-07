@@ -18,6 +18,17 @@ export const MANIFEST_SCHEMA = 'experiment-manifest.v1';
 
 const REQUIRED = ['experimentId', 'scenarioId', 'host', 'startedAt'];
 
+/**
+ * PRI-703 Phase 3 (Owner decision 2026-09-07): behavior observation outcome
+ * vocabulary. IMPROVED / NO_IMPROVEMENT / REGRESSION are observation
+ * OUTCOMES (what the post-activation behavior looked like); NOT_REACHED
+ * stays derived (never asserted — no activation in scope); INCONCLUSIVE =
+ * evidence insufficient. CONFIRMED / INCONCLUSIVE remain accepted as
+ * legacy aliases: CONFIRMED ≡ IMPROVED (and must then satisfy the same
+ * evidence gate).
+ */
+export const BEHAVIOR_OUTCOMES = ['IMPROVED', 'NO_IMPROVEMENT', 'REGRESSION', 'INCONCLUSIVE'];
+
 function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -60,8 +71,37 @@ export function parseManifest(json) {
   }
   if (m.behaviorObservation !== undefined && m.behaviorObservation !== null) {
     if (!isPlainObject(m.behaviorObservation)) problems.push('behaviorObservation must be an object');
-    else if (m.behaviorObservation.status !== 'CONFIRMED' && m.behaviorObservation.status !== 'INCONCLUSIVE') {
-      problems.push("behaviorObservation.status must be 'CONFIRMED' or 'INCONCLUSIVE' (NOT_REACHED is derived, never asserted)");
+    else {
+      const obs = m.behaviorObservation;
+      // PRI-703 Phase 3: field-name drift normalization — the Episode-001
+      // manifest hand-fill used `result` instead of the contract's `status`
+      // (real-data drift; re-running collect-evidence against it would have
+      // thrown). Accept both spellings; the canonical key stays `status`.
+      if (obs.status === undefined && typeof obs.result === 'string' && obs.result.trim() !== '') {
+        obs.status = obs.result;
+      }
+      const status = obs.status;
+      if (status !== 'CONFIRMED' && status !== 'INCONCLUSIVE' && !BEHAVIOR_OUTCOMES.includes(status)) {
+        problems.push(`behaviorObservation.status must be one of ${BEHAVIOR_OUTCOMES.join('/')}(legacy CONFIRMED/INCONCLUSIVE accepted; NOT_REACHED is derived, never asserted)`);
+      } else {
+        // Evidence integrity gate (PRI-703 Phase 3): a positive observation
+        // (CONFIRMED / IMPROVED) without at least one evidence entry is a
+        // claim with no support — reject loudly instead of deriving a
+        // CONFIRMED with evidence:[] (Episode-001 contract hole).
+        if (status === 'CONFIRMED' || status === 'IMPROVED') {
+          const evidenceList = obs.evidence;
+          if (!Array.isArray(evidenceList) || evidenceList.length === 0) {
+            problems.push("behaviorObservation with status CONFIRMED/IMPROVED requires evidence: at least 1 entry (session evidence / tool trajectory evidence / behavior diff evidence) — an unsupported positive claim is not a valid observation");
+          } else {
+            for (const e of evidenceList) {
+              if (!isPlainObject(e) || typeof (e.detail ?? e.source) !== 'string' || String(e.detail ?? e.source).trim() === '') {
+                problems.push('behaviorObservation.evidence entries must be objects with a non-empty detail or source string');
+                break;
+              }
+            }
+          }
+        }
+      }
     }
   }
   // finishedAt may be null/absent while the experiment is still running.
