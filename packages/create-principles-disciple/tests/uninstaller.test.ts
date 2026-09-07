@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import { isPdOwnedShim, checkInstallStatus } from '../src/uninstaller.js';
+import { isPdOwnedShim, checkInstallStatus, parseWmicProcessCsv } from '../src/uninstaller.js';
 import { getInstalledBinDir, isWindows } from '../src/mvp-config.js';
 
 vi.mock('fs');
@@ -141,5 +141,40 @@ describe('checkInstallStatus', () => {
     const result = checkInstallStatus();
 
     expect(result.isInstalled).toBe(false);
+  });
+});
+
+describe('parseWmicProcessCsv (PRI-696)', () => {
+  const consoleEntry = 'C:\\Users\\u\\.pd\\runtime\\console\\dist\\server.js';
+
+  it('extracts the PID of the CSV row that references the console server entry', () => {
+    const output = [
+      'Node,CommandLine,ProcessId',
+      `"node.exe","D:\\\\Program Files\\\\nodejs\\\\node.exe" ${consoleEntry} --workspace D:\\\\ws --port 3100 --no-auth,58628`,
+    ].join('\n');
+    expect(parseWmicProcessCsv(output, consoleEntry)).toEqual([{ pid: 58628 }]);
+  });
+
+  it('ignores rows that do not reference the console entry', () => {
+    const output = [
+      'Node,CommandLine,ProcessId',
+      '"node.exe","some-other-server.js --port 3100",1111',
+    ].join('\n');
+    expect(parseWmicProcessCsv(output, consoleEntry)).toEqual([]);
+  });
+
+  it('ignores the uninstaller process itself', () => {
+    const ownPid = process.pid;
+    const output = `"node.exe","${consoleEntry}",${ownPid}`;
+    expect(parseWmicProcessCsv(output, consoleEntry)).toEqual([]);
+  });
+
+  it('ignores rows whose PID suffix is not numeric', () => {
+    const output = `"node.exe","${consoleEntry}",`;
+    expect(parseWmicProcessCsv(output, consoleEntry)).toEqual([]);
+  });
+
+  it('handles empty output', () => {
+    expect(parseWmicProcessCsv('', consoleEntry)).toEqual([]);
   });
 });
