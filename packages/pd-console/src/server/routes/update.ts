@@ -1827,6 +1827,17 @@ function releaseManagerFlagEnabled(workspaceDir: string): boolean {
   return isFeatureEnabled(flags, 'release_manager_shadow');
 }
 
+/**
+ * PRI-698 Phase 1: gates routing /apply-full to the ReleaseManager write
+ * orchestration. Default off — the legacy updater serves with an explicit
+ * `release_manager_write_disabled` fallback reason. Requires the shadow flag
+ * too (the whole authority layer is gated on it first).
+ */
+function releaseManagerWriteFlagEnabled(workspaceDir: string): boolean {
+  const flags = computeFlagsFromLoadResult(loadPdConfig(workspaceDir));
+  return isFeatureEnabled(flags, 'release_manager_write_authority');
+}
+
 function fallbackToLegacyForAllKinds(reason: string): void {
   for (const kind of MUTATION_KINDS) {
     updateMutationController.unregister(kind, RELEASE_MANAGER_AUTHORITY);
@@ -1907,6 +1918,87 @@ async function runReleaseManagerCheckDispatch(
 }
 
 /**
+ * PRI-698 Phase 1: governed apply-full dispatch (flag `release_manager_write_
+ * authority` on, readiness ready at registration time). The ReleaseManager
+ * orchestrates the update through the installer + transaction journal; this
+ * layer maps the outcome into the legacy doInlineFullUpdate response contract
+ * ({success, message, reason?, nextAction?, newVersion?, requiresRestart}) —
+ * wire contract unchanged. It performs NO runtime mutation itself.
+ */
+async function runReleaseManagerApplyFullDispatch(
+  mod: ReleaseManagerAuthorityModule,
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: MutationContext,
+): Promise<void> {
+  if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
+  let authority: ReleaseManagerAuthorityHandle;
+  try {
+    authority = mod.createReleaseManagerAuthority({
+      pdHome: path.join(os.homedir(), '.pd'),
+      metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
+    });
+  } catch {
+    res.setHeader('X-PD-Mutation-Authority', `${LEGACY_MUTATION_AUTHORITY} (preferred: ${RELEASE_MANAGER_AUTHORITY} unavailable)`);
+    res.setHeader('X-PD-Mutation-Fallback-Reason', 'authority_module_unavailable');
+    await legacyApplyFullMutation(req, res, ctx);
+    return;
+  }
+  if (authority.installStatus === null || !authority.kinds['apply-full'].ready) {
+    // Readiness flipped between registration sync and dispatch — explicit
+    // fallback, never a half-governed mutation.
+    const reasons = authority.installStatus === null
+      ? 'install_state_corrupt'
+      : authority.kinds['apply-full'].reasons.join(',');
+    res.setHeader('X-PD-Mutation-Authority', `${LEGACY_MUTATION_AUTHORITY} (preferred: ${RELEASE_MANAGER_AUTHORITY} unavailable)`);
+    res.setHeader('X-PD-Mutation-Fallback-Reason', `release_manager_unavailable:${reasons}`);
+    await legacyApplyFullMutation(req, res, ctx);
+    return;
+  }
+  try {
+    const outcome = await authority.manager.apply({ workspaceDir: ctx.workspaceDir });
+    if (outcome.kind === 'applied') {
+      sendSuccess(res, {
+        success: true,
+        message: `Updated to ${outcome.productVersion}. Transaction ${outcome.transactionId} confirmed in the journal.`,
+        newVersion: outcome.productVersion,
+        requiresRestart: true,
+        nextAction: 'Restart PD Console to run the updated build.',
+      });
+    } else {
+      sendSuccess(res, {
+        success: true,
+        message: `No update applied: ${outcome.note}`,
+        requiresRestart: false,
+      });
+    }
+  } catch (error) {
+    const mapped = mod.mapReleaseManagerErrorToFallback(error);
+    // PRI-698 default-on safety net: a refusal thrown BEFORE the update
+    // transaction was opened (layout unsupported, metadata unavailable,
+    // journal unwritable) has ZERO side effects, so — exactly like the
+    // governed check — the explicit fallback serves the request with the
+    // refusal reason annotated. A refusal AFTER the transaction opened
+    // (transactionOpened) may have runtime-side effects (staging writes,
+    // journal tail): it surfaces as the legacy failure body, never as a
+    // fallback.
+    if (mapped.transactionOpened !== true) {
+      res.setHeader('X-PD-Mutation-Authority', `${LEGACY_MUTATION_AUTHORITY} (preferred: ${RELEASE_MANAGER_AUTHORITY} refused pre-transaction: ${mapped.reason})`);
+      res.setHeader('X-PD-Mutation-Fallback-Reason', `release_manager_refused_pre_transaction:${mapped.reason}`);
+      await legacyApplyFullMutation(req, res, ctx);
+      return;
+    }
+    sendSuccess(res, {
+      success: false,
+      message: mapped.message,
+      reason: mapped.reason,
+      nextAction: mapped.nextAction ?? 'The runtime is unchanged. Retry the update after resolving the cause.',
+      requiresRestart: false,
+    });
+  }
+}
+
+/**
  * Bring the authority registration in line with current flag + readiness
  * state, then dispatch happens through the controller as usual. Idempotent;
  * the dynamic import is attempted once per server run.
@@ -1939,6 +2031,7 @@ async function syncReleaseManagerAuthority(workspaceDir: string): Promise<void> 
     fallbackToLegacyForAllKinds('authority_module_unavailable');
     return;
   }
+  const writeAuthorityEnabled = releaseManagerWriteFlagEnabled(workspaceDir);
   for (const rmKind of mod.RELEASE_MANAGER_AUTHORITY_KINDS) {
     const readiness = authority.kinds[rmKind];
     if (readiness.ready && rmKind === 'check') {
@@ -1947,9 +2040,20 @@ async function syncReleaseManagerAuthority(workspaceDir: string): Promise<void> 
         handler: (req, res, ctx) => runReleaseManagerCheckDispatch(mod, req, res, ctx),
       });
       updateMutationController.setFallbackReason('check', null);
+    } else if (readiness.ready && rmKind === 'apply-full' && writeAuthorityEnabled) {
+      updateMutationController.register('apply-full', {
+        name: RELEASE_MANAGER_AUTHORITY,
+        handler: (req, res, ctx) => runReleaseManagerApplyFullDispatch(mod, req, res, ctx),
+      });
+      updateMutationController.setFallbackReason('apply-full', null);
     } else {
       updateMutationController.unregister(rmKind, RELEASE_MANAGER_AUTHORITY);
-      updateMutationController.setFallbackReason(rmKind, `release_manager_unavailable:${readiness.reasons.join(',')}`);
+      // PRI-698 Phase 1: a structurally-ready apply-full with the write flag
+      // off is a deliberate gate, not an unavailability — name it distinctly.
+      const reason = readiness.ready && rmKind === 'apply-full'
+        ? 'release_manager_write_disabled'
+        : `release_manager_unavailable:${readiness.reasons.join(',')}`;
+      updateMutationController.setFallbackReason(rmKind, reason);
     }
   }
 }

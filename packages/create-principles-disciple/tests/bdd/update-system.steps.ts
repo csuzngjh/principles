@@ -24,6 +24,7 @@ import { evaluateReleaseAdvancement, type ReleasePolicyDecision } from '../../sr
 import {
   appendJournalTransition,
   readActiveRecord,
+  readTransactionJournal,
   recoverUnfinishedTransaction,
   writeActiveRecord,
   type ActiveRecord,
@@ -74,14 +75,29 @@ function signed<T extends Root | Snapshot | Targets | Timestamp>(doc: T, signer:
   return Buffer.from(JSON.stringify(metadata.toJSON()));
 }
 
-function buildRelease(productVersion: string, sequence: number): ReleaseMetadata {
+function buildRelease(
+  productVersion: string,
+  sequence: number,
+  // PRI-698 Phase 1: apply-flow scenarios must declare an asset for the
+  // CURRENT runtime, or selectReleaseAsset refuses with release_metadata_invalid
+  // before the artifact-target step the scenario is about (platform-dependent
+  // failure on Linux CI). Defaults keep the historical shape for the
+  // policy-only scenarios, which never select assets.
+  asset?: { platform: string; arch: string; nodeAbi: string },
+): ReleaseMetadata {
   return buildReleaseMetadata({
     productVersion,
     sourceCommit: '1234567890abcdef1234567890abcdef12345678',
     minBootstrapVersion: '1.0.0',
     publicationSequence: sequence,
     expiresAt: expiresFar,
-    assets: [{ platform: 'win32', arch: 'x64', nodeAbi: '147', archiveSha256: 'a'.repeat(64), archiveSizeBytes: 1024 }],
+    assets: [{
+      platform: asset?.platform ?? 'win32',
+      arch: asset?.arch ?? 'x64',
+      nodeAbi: asset?.nodeAbi ?? '147',
+      archiveSha256: 'a'.repeat(64),
+      archiveSizeBytes: 1024,
+    }],
     dataSchemaForwardReadableFrom: '1.220.0',
   });
 }
@@ -95,7 +111,11 @@ async function createFixture(ctx: { state: Record<string, unknown> }): Promise<F
   ensurePdHomeLayout(paths);
   fs.writeFileSync(withinHome(home, paths.bootstrapManifestPath), JSON.stringify({ bootstrapVersion: '1.0.0', installedAt: '2026-08-25T00:00:00Z' }));
 
-  const candidate = buildRelease('1.223.0', 9);
+  const candidate = buildRelease('1.223.0', 9, {
+    platform: process.platform,
+    arch: process.arch,
+    nodeAbi: process.versions.modules,
+  });
   const active = buildRelease('1.222.0', 8);
   for (const release of [candidate, active]) {
     const dir = withinHome(home, path.join(paths.releasesDir, release.releaseId));
@@ -210,26 +230,42 @@ registry.then(/决策为 allowed 且 direction 为 update/, (ctx) => {
   expect(check.decision).toEqual({ allowed: true, direction: 'update' });
 });
 
-registry.when(/在 shadow 模式下执行 ReleaseManager\.apply/, async (ctx) => {
+// PRI-698 Phase 1 contract change (Owner-directed, see PR): apply() no longer
+// refuses with `shadow_mode_read_only` — it is the real orchestrator. On a
+// repository that publishes metadata but no ARTIFACT target for the release,
+// the refusal contract under test is: refuse at acquisition with a stable
+// reason + Owner-facing next action, and close the opened transaction at a
+// terminal `failed` state (rc-9 / rc-7; a strict journal reader must never
+// see a mid-chain tail).
+registry.when(/执行 ReleaseManager\.apply 而仓库未发布工件/, async (ctx) => {
   const fixture = fixtureOf(ctx);
   const manager = new ReleaseManager({ pdHome: fixture.paths.home, metadataBaseUrl: fixture.repositoryUrl });
   try {
-    await manager.apply();
+    await manager.apply({ workspaceDir: fixture.paths.home });
     throw new Error('apply unexpectedly succeeded');
   } catch (error) {
     ctx.state['applyError'] = error;
   }
 });
 
-registry.then(/拒绝原因为 shadow_mode_read_only/, (ctx) => {
+registry.then(/拒绝原因为 metadata_refresh_failed/, (ctx) => {
   const error = ctx.state['applyError'] as ReleaseManagerError;
   expect(error).toBeInstanceOf(ReleaseManagerError);
-  expect(error.reason).toBe('shadow_mode_read_only');
+  expect(error.reason).toBe('metadata_refresh_failed');
 });
 
 registry.then(/拒绝信息包含面向 Owner 的 nextAction/, (ctx) => {
   const error = ctx.state['applyError'] as ReleaseManagerError;
   expect(error.nextAction.length).toBeGreaterThan(10);
+});
+
+registry.then(/打开的更新事务以终态 failed 关闭/, (ctx) => {
+  const fixture = fixtureOf(ctx);
+  const transactionsDir = fixture.paths.transactionsDir;
+  const journalFiles = fs.readdirSync(transactionsDir).filter((name) => name.startsWith('update-'));
+  expect(journalFiles).toHaveLength(1);
+  const transitions = readTransactionJournal(path.join(transactionsDir, journalFiles[0]));
+  expect(transitions[transitions.length - 1].to).toBe('failed');
 });
 
 registry.when(/前进策略评估同一 releaseId 的候选/, (ctx) => {

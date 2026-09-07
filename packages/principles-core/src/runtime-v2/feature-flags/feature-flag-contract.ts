@@ -219,12 +219,23 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // MVP-Quiet — opt-in or opt-out via config; enabled value varies per flag
   // Only flags with real consumption paths are registered (PRI-239 constraint)
   { id: 'feedback_channel', category: 'quiet', enabled: true, since: '2026-06-01', description: 'MVP seed feedback channel — privacy-preserving report drafts. PRI-543: flag scope extended to also cover the feedback SUBMIT ladder (ingest relay / gh CLI / mailto / export-file channels + submit endpoints). Flag-off = submit endpoints 403 + submit UI hidden; config `feedback:` segment and channel parameters still available.' },
-  // Commercial update system Phase 3 (SPEC 2026-08-25): ReleaseManager shadow
-  // mode. Read-only inspect/check with legacy-updater decision comparison;
-  // apply/rollback refuse regardless of this flag (activation arrives with
-  // the Phase 4 transaction rollout). Quiet per AGENTS: default off, not
-  // surfaced until Phase 6 cutover.
-  { id: 'release_manager_shadow', category: 'quiet', enabled: false, since: '2026-08-25', description: 'ReleaseManager shadow mode — read-only signed-metadata update checks with legacy-updater comparison diagnostics; no activation' },
+  // Commercial update system Phase 3 (SPEC 2026-08-25): ReleaseManager
+  // governed check (PRI-672 wiring; Gate B graduation executed). Default-on
+  // per Owner decision 2026-09-07: /check is served under ReleaseManager
+  // governance wherever a metadata source + installation are ready, with the
+  // byte-identical legacy body and explicit per-request fallback reasons —
+  // without PD_RELEASE_METADATA_URL the dispatch falls back exactly as
+  // before, so default-on is availability-preserving.
+  { id: 'release_manager_shadow', category: 'quiet', enabled: true, since: '2026-08-25', description: 'ReleaseManager governance for the update surface — signed-metadata checks with legacy comparison; graduated default-on 2026-09-07 (Owner decision). Rollback = set enabled:false.' },
+  // PRI-698 Phase 1: ReleaseManager apply orchestration (full-runtime update
+  // through the installer + transaction journal). Default-on per Owner
+  // decision 2026-09-07 with the runtime safety net: a ReleaseManager refusal
+  // BEFORE the transaction opens (metadata/artifact targets not published
+  // yet, layout unsupported, journal unwritable) has zero side effects and
+  // falls back to the legacy updater with release_manager_refused_pre_transaction:<reason>;
+  // a post-transaction failure surfaces as a failure body, never a fallback.
+  // Requires PD_RELEASE_METADATA_URL at readiness; rollback migration stays Phase 2.
+  { id: 'release_manager_write_authority', category: 'quiet', enabled: true, since: '2026-09-06', description: 'PRI-698 Phase 1 — ReleaseManager.apply() serves Console /apply-full (installer + journal deployment); graduated default-on 2026-09-07 (Owner decision) with pre-transaction legacy fallback; flag-off = legacy console updater with explicit release_manager_write_disabled fallback reason' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
   { id: 'evolution_worker', category: 'quiet', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5)' },
   { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },

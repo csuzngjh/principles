@@ -940,6 +940,42 @@ export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflig
   return protocolInvalid(`ok is not a boolean`);
 }
 
+/**
+ * PRI-693: materialize node_modules links for the BUNDLED (not yet deployed)
+ * pd-cli so its static @principles/* / principles-disciple imports resolve
+ * during the pre-deployment compatibility scan. Mirrors the links syncPdCli
+ * creates for the deployed copy — targets are the sibling component
+ * directories of the npm package (files whitelist: core/, host-runtime/,
+ * codex-adapter/, install-layout/, plugin/). Idempotent.
+ */
+export function ensureBundledPdCliResolution(pdCliRoot: string): void {
+  const packageRoot = path.resolve(pdCliRoot, '..');
+  // Unix relative targets are computed from EACH link's own directory:
+  //   @principles/* links sit at <root>/pd-cli/node_modules/@principles/<name>
+  //     → three levels up to <root>;
+  //   principles-disciple sits at <root>/pd-cli/node_modules/principles-disciple
+  //     → two levels up to <root>.
+  // (Windows junctions take absolute targets.) A wrong level produces a
+  // DANGLING link — existsSync() is false and the second run hits EEXIST.
+  const linkSpecs: { linkPath: string; windowsTarget: string; unixTarget: string }[] = [
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'core'), windowsTarget: path.join(packageRoot, 'core'), unixTarget: '../../../core' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'host-runtime'), windowsTarget: path.join(packageRoot, 'host-runtime'), unixTarget: '../../../host-runtime' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'), windowsTarget: path.join(packageRoot, 'codex-adapter'), unixTarget: '../../../codex-adapter' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'install-layout'), windowsTarget: path.join(packageRoot, 'install-layout'), unixTarget: '../../../install-layout' },
+    { linkPath: path.join(pdCliRoot, 'node_modules', 'principles-disciple'), windowsTarget: path.join(packageRoot, 'plugin'), unixTarget: '../../plugin' },
+  ];
+  for (const spec of linkSpecs) {
+    if (existsSync(spec.linkPath)) continue;
+    if (!existsSync(spec.windowsTarget)) continue; // component absent from this package layout — skip
+    mkdirSync(path.dirname(spec.linkPath), { recursive: true });
+    if (isWindows()) {
+      symlinkSync(spec.windowsTarget, spec.linkPath, 'junction');
+    } else {
+      symlinkSync(spec.unixTarget, spec.linkPath, 'dir');
+    }
+  }
+}
+
 async function defaultLegacyRulePreflightRunner(pdCliEntry: string, workspaceDir: string): Promise<LegacyRulePreflightOutcome> {
   // The entry path is boundary-checked before it is used as a subprocess
   // target, and the subprocess is invoked with an argv array (no shell).
@@ -1014,13 +1050,37 @@ export async function runLegacyRuleContractPreflight(
         'Re-download/rebuild the installer before upgrading. The current installation has not been replaced.',
     };
   }
+  // PRI-693: the bundled pd-cli dist statically imports @principles/core,
+  // @principles/host-runtime and principles-disciple, but the npm package
+  // ships those as SIBLING directories (core/, host-runtime/, plugin/) — not
+  // as node_modules entries — and the scan runs BEFORE deployment, so the
+  // runtime symlinks created by syncPdCli do not exist yet. Node resolves
+  // ESM imports only through node_modules, hence ERR_MODULE_NOT_FOUND for
+  // every workspace with persisted state (fresh workspaces skip the scan).
+  // Materialize the same links syncPdCli creates at deploy time.
+  ensureBundledPdCliResolution(pdCliRoot);
   try {
     return await runScan(pdCliEntry, resolvedWorkspace);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('ERR_MODULE_NOT_FOUND')) {
+      // PRI-693: distinguish the packaging defect from a workspace problem —
+      // telling the user to "repair the workspace database" sent them on a
+      // hopeless path (the database is fine; the bundled dependency graph is
+      // what cannot resolve).
+      return {
+        ok: false,
+        status: 'scan_failed',
+        reason: `compatibility_scan_dependency_missing: ${message}`,
+        remediation:
+          'The bundled pd-cli could not resolve its own dependencies (packaging defect). ' +
+          'Do NOT modify the workspace database. Re-download/rebuild the installer, or report this version.',
+      };
+    }
     return {
       ok: false,
       status: 'scan_failed',
-      reason: `compatibility_scan_failed: ${err instanceof Error ? err.message : String(err)}`,
+      reason: `compatibility_scan_failed: ${message}`,
       remediation: 'Repair the workspace database or its permissions, then retry the upgrade. The current installation has not been replaced.',
     };
   }
@@ -2155,14 +2215,20 @@ export interface InstallRunMode {
 //   brick the installation.
 // ---------------------------------------------------------------------------
 
-interface InstallerJournal {
+export interface InstallerJournal {
   readonly transactionId: string;
   readonly journalPath: string;
   readonly releaseId: string;
   readonly productVersion: string;
   readonly releaseMetadataDigest: string;
-  /** PRI-664 review: provenance of releaseMetadataDigest ('manifest' | 'package_manifest' | 'fallback'). */
+  /** PRI-664 review: provenance of releaseMetadataDigest ('manifest' | 'package_manifest' | 'fallback' | 'signed_channel'). */
   readonly releaseMetadataDigestSource: ReleaseMetadataDigestSource;
+  /**
+   * PRI-698 Phase 1: dual-slot generation continuity. Standalone installs keep
+   * the historical `1`; an externally adopted transaction (ReleaseManager
+   * apply orchestration) supplies activeRecord.generation + 1.
+   */
+  readonly generation: number;
   degraded: boolean;
   /** Last successfully journaled state — the `from` for failure-path transitions. */
   lastState: TransactionState | null;
@@ -2214,7 +2280,7 @@ export function beginInstallerJournal(pluginDir: string): InstallerJournal {
   const transactionId = `install-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const journalPath = path.join(getPdDir(), 'transactions', `${transactionId}.jsonl`);
   const releaseId = `bundled-${productVersion}-${releaseMetadataDigest.slice(0, 12)}`;
-  return { transactionId, journalPath, releaseId, productVersion, releaseMetadataDigest, releaseMetadataDigestSource, degraded: false, lastState: null };
+  return { transactionId, journalPath, releaseId, productVersion, releaseMetadataDigest, releaseMetadataDigestSource, generation: 1, degraded: false, lastState: null };
 }
 
 /**
@@ -2238,10 +2304,10 @@ export function journalInstallerTransition(
     productVersion: journal.productVersion,
     releaseMetadataDigest: journal.releaseMetadataDigest,
     releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
-    // The installer model has no active.json generation chain yet (it never
-    // writes active.json); generation continuity becomes ReleaseManager's
-    // responsibility when it takes over mutations (PRI-661).
-    generation: 1,
+    // PRI-698 Phase 1: standalone installs keep generation 1; an externally
+    // adopted transaction (ReleaseManager apply) carries the dual-slot
+    // generation chain forward (activeRecord.generation + 1).
+    generation: journal.generation,
     detail,
   });
   journal.lastState = to;
@@ -2273,7 +2339,18 @@ function installerJournalRecord(journal: InstallerJournal): InstallJournalRecord
 }
 
 
-export async function install(options: InstallOptions, pluginDir: string, mode: InstallRunMode = {}): Promise<InstallResult> {
+// eslint-disable-next-line @typescript-eslint/max-params -- (options, payloadDir, runMode, adoptedTransaction) mirrors the four independent concerns of an install run; the 4th is optional and only supplied by the PRI-698 orchestrator
+export async function install(
+  options: InstallOptions,
+  pluginDir: string,
+  mode: InstallRunMode = {},
+  // PRI-698 Phase 1: optional externally-opened transaction (ReleaseManager
+  // apply orchestration). When provided, its identity and journal file are
+  // adopted verbatim and the 'planned' append is skipped (the orchestrator
+  // already journaled planned → downloaded → verified; Tier-1 applied there).
+  // Undefined keeps the historical standalone behavior byte-for-byte.
+  transaction?: InstallerJournal,
+): Promise<InstallResult> {
   // `quiet` (= jsonMode) suppresses human output / spinner. `nonInteractive`
   // (--yes/--non-interactive/--json) gates PROMPTING. They differ for `--yes`
   // (human output on, but must NOT prompt). nonInteractive defaults to quiet
@@ -2431,13 +2508,14 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     // journal cannot be written at all, refuse before mutating (fail loud,
     // zero side effects) rather than performing an unjournaled mutation
     // (refusal over silent degradation, ADR-0024 §2.4 rule 4).
-    journal = beginInstallerJournal(pluginDir);
-    try {
-      journalInstallerTransition(journal, null, 'planned', `host=${options.host} mode=${options.mode}`);
-    } catch (journalError) {
-      if (spinner) spinner.fail('Install failed');
-      const journalDetail = journalError instanceof Error ? journalError.message : String(journalError);
-      logger.error(`Transaction journal unavailable — refusing to mutate the runtime unjournaled (ADR-0024 D-2): ${journalDetail}`);
+    journal = transaction ?? beginInstallerJournal(pluginDir);
+    if (transaction === undefined) {
+      try {
+        journalInstallerTransition(journal, null, 'planned', `host=${options.host} mode=${options.mode}`);
+      } catch (journalError) {
+        if (spinner) spinner.fail('Install failed');
+        const journalDetail = journalError instanceof Error ? journalError.message : String(journalError);
+        logger.error(`Transaction journal unavailable — refusing to mutate the runtime unjournaled (ADR-0024 D-2): ${journalDetail}`);
       return {
         success: false,
         workspaceDir: options.workspaceDir,
@@ -2451,6 +2529,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
         error: `Could not write the transaction journal — refusing to mutate the runtime unjournaled (ADR-0024 D-2). No changes were made.`,
         journal: { transactionId: journal.transactionId, journalPath: journal.journalPath, degraded: true },
       };
+      }
     }
     // Validate the existing host-ownership record before mutating runtime or
     // host config. A malformed manifest must not be discovered only after the

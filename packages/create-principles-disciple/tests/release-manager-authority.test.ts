@@ -66,7 +66,7 @@ describe('ReleaseManager authority readiness', () => {
     expect(authority.kinds.check.reasons).toEqual(['metadata_source_unconfigured']);
   });
 
-  it('a dual-slot fixture is check-ready the moment a metadata source exists; mutation kinds stay blocked on rollback', async () => {
+  it('a dual-slot fixture is check- and apply-full-ready the moment a metadata source exists; apply/rollback stay blocked', async () => {
     const fixture = await createShadowFixture();
     const unconfigured = createReleaseManagerAuthority({ pdHome: fixture.pdHome, metadataBaseUrl: undefined });
     expect(unconfigured.kinds.check).toEqual({
@@ -81,7 +81,12 @@ describe('ReleaseManager authority readiness', () => {
     });
     expect(ready.installStatus).toMatchObject({ layout: 'dual-slot', productVersion: '1.222.0' });
     expect(ready.kinds.check).toEqual({ ready: true, reasons: [] });
-    for (const kind of ['apply', 'apply-full', 'rollback'] as const) {
+    // PRI-698 Phase 1: the full-runtime write path exists, so apply-full
+    // carries the base readiness; the CONSOLE gates its routing behind the
+    // release_manager_write_authority flag. The plugin-diff `apply` mechanism
+    // and the Phase 2 `rollback` stay structurally not-ready.
+    expect(ready.kinds['apply-full']).toEqual({ ready: true, reasons: [] });
+    for (const kind of ['apply', 'rollback'] as const) {
       expect(ready.kinds[kind]).toEqual({
         ready: false,
         reasons: ['rollback_not_available'],
@@ -205,7 +210,14 @@ describe('explicit-fallback error mapping', () => {
       reason: 'shadow_mode_read_only',
       message: 'not enabled yet',
       nextAction: 'continue using the current update path',
+      transactionOpened: false,
     });
+    // PRI-698 default-on safety net: post-transaction refusals carry the flag
+    // through so the console surfaces them as failures, never as fallbacks.
+    const postTransaction = mapReleaseManagerErrorToFallback(
+      new ReleaseManagerError('apply_failed', 'installer failed mid-swap', 'inspect the journal', true),
+    );
+    expect(postTransaction.transactionOpened).toBe(true);
   });
 
   it('maps unexpected errors to a generic failure reason without losing the message', () => {
