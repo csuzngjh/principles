@@ -326,6 +326,37 @@ describe('planConsoleLaunch — reused (healthy console on preferred port)', () 
       });
       expect(result.status).toBe('refused');
       expect(result.reason).toBe('console_authentication_mode_mismatch');
+      // PRI-695: the guidance names the actual running state and both ways
+      // out — it no longer references "Companion" (meaningless to CLI users)
+      // or PD_CONSOLE_TOKEN (never set by the default install).
+      expect(result.nextAction).toContain('without authentication');
+      expect(result.nextAction).toContain(`port ${addr.port}`);
+      expect(result.nextAction).not.toContain('Companion');
+      expect(result.nextAction).not.toContain('PD_CONSOLE_TOKEN');
+    } finally {
+      await new Promise<void>((resolve) => server.close(resolve));
+    }
+  });
+
+  it('reuses a no-auth Console for a tokenless caller (PRI-695 default post-install state)', async () => {
+    // The installer auto-launches the Console with --no-auth; the documented
+    // reopen command carries no flags and no token. That combination must
+    // REUSE the running console, not refuse it.
+    const server = http.createServer((_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const result = await planConsoleLaunch({
+        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
+        host: '127.0.0.1',
+      });
+      expect(result.status).toBe('reused');
+      expect(result.reused).toBe(true);
+      expect(result.url).toBe(`http://127.0.0.1:${addr.port}`);
     } finally {
       await new Promise<void>((resolve) => server.close(resolve));
     }

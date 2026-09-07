@@ -25,6 +25,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   runLegacyRuleContractPreflight,
+  ensureBundledPdCliResolution,
   parseCompatibilityScanStdout,
   type LegacyRulePreflightRunner,
 } from '../src/installer.js';
@@ -135,6 +136,83 @@ describe('runLegacyRuleContractPreflight', () => {
     expect(outcome.reason).toBe('compatibility_scan_unavailable');
     expect(outcome.remediation).toContain('scanner is missing');
     expect(outcome.remediation).toContain('Re-download/rebuild the installer');
+  });
+
+  it('PRI-693: ERR_MODULE_NOT_FOUND is split into compatibility_scan_dependency_missing with a DO-NOT-touch-DB remediation', async () => {
+    seedStateDb(workspaceDir);
+    const runner: LegacyRulePreflightRunner = async () => {
+      throw new Error(
+        "Cannot find package '@principles/core' imported from .../pd-cli/dist/commands/pain-record.js ... code: 'ERR_MODULE_NOT_FOUND'",
+      );
+    };
+    const outcome = await runLegacyRuleContractPreflight(pkgDir, workspaceDir, runner);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.status).toBe('scan_failed');
+    expect(outcome.reason).toContain('compatibility_scan_dependency_missing');
+    expect(outcome.remediation).toContain('Do NOT modify the workspace database');
+    expect(outcome.remediation).not.toContain('Repair the workspace database');
+  });
+
+  it('PRI-693: preflight materializes bundled pd-cli resolution links before scanning', async () => {
+    seedStateDb(workspaceDir);
+    // Simulate the npm-distributed package layout: sibling component dirs
+    // exist, but pd-cli has NO node_modules yet.
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'install-layout', 'plugin']) {
+      fs.mkdirSync(path.join(pkgDir, component), { recursive: true });
+    }
+    let sawLink = false;
+    const runner: LegacyRulePreflightRunner = async () => {
+      sawLink = fs.existsSync(path.join(pkgDir, 'pd-cli', 'node_modules', '@principles', 'core'));
+      return { ok: true };
+    };
+    await runLegacyRuleContractPreflight(pkgDir, workspaceDir, runner);
+    expect(sawLink).toBe(true);
+  });
+});
+
+describe('ensureBundledPdCliResolution (PRI-693)', () => {
+  function seedPackageLayout(): string {
+    const pkgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-bundled-pdcli-'));
+    fs.mkdirSync(path.join(pkgDir, 'pd-cli', 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'pd-cli', 'dist', 'index.js'), '// stub\n', 'utf8');
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'install-layout', 'plugin']) {
+      fs.mkdirSync(path.join(pkgDir, component), { recursive: true });
+      fs.writeFileSync(path.join(pkgDir, component, 'package.json'), '{"name":"x"}', 'utf8');
+    }
+    return pkgDir;
+  }
+
+  it('creates node_modules links for every bundled component', () => {
+    const pkgDir = seedPackageLayout();
+    const pdCliRoot = path.join(pkgDir, 'pd-cli');
+    ensureBundledPdCliResolution(pdCliRoot);
+    const nm = path.join(pdCliRoot, 'node_modules');
+    expect(fs.existsSync(path.join(nm, '@principles', 'core'))).toBe(true);
+    expect(fs.existsSync(path.join(nm, '@principles', 'host-runtime'))).toBe(true);
+    expect(fs.existsSync(path.join(nm, '@principles', 'codex-adapter'))).toBe(true);
+    expect(fs.existsSync(path.join(nm, '@principles', 'install-layout'))).toBe(true);
+    expect(fs.existsSync(path.join(nm, 'principles-disciple'))).toBe(true);
+    // The link resolves to the sibling component content.
+    expect(fs.existsSync(path.join(nm, '@principles', 'core', 'package.json'))).toBe(true);
+    fs.rmSync(pkgDir, { recursive: true, force: true });
+  });
+
+  it('is idempotent (second run does not throw or duplicate)', () => {
+    const pkgDir = seedPackageLayout();
+    const pdCliRoot = path.join(pkgDir, 'pd-cli');
+    ensureBundledPdCliResolution(pdCliRoot);
+    expect(() => ensureBundledPdCliResolution(pdCliRoot)).not.toThrow();
+    fs.rmSync(pkgDir, { recursive: true, force: true });
+  });
+
+  it('skips components that are absent from the package layout (defensive)', () => {
+    const pkgDir = seedPackageLayout();
+    fs.rmSync(path.join(pkgDir, 'codex-adapter'), { recursive: true, force: true });
+    const pdCliRoot = path.join(pkgDir, 'pd-cli');
+    expect(() => ensureBundledPdCliResolution(pdCliRoot)).not.toThrow();
+    expect(fs.existsSync(path.join(pdCliRoot, 'node_modules', '@principles', 'core'))).toBe(true);
+    expect(fs.existsSync(path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'))).toBe(false);
+    fs.rmSync(pkgDir, { recursive: true, force: true });
   });
 });
 

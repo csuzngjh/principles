@@ -107,6 +107,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-082 | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped | PRI-468 / PR #1063 |
 | ERR-106 | Binary ternary collapsed a 4-state review status into approved/pending — rejected/parked principles displayed as "awaiting Owner review" | PR #1377 (pr-review) |
 | ERR-109 | Tri-state fact (boolean \| null) collapsed during a merge: one source's definite `false` resolved another source's unknown into an observed-false | PR #1419 review r4 |
+| ERR-121 | Test fixture declares platform-keyed data with hardcoded values while the code under test selects by the CURRENT runtime platform — green on the author's machine, fails in CI at an earlier, different failure point | PRI-698 / PR #1535 CI |
 
 ---
 
@@ -626,7 +627,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 112 |
+| Total lessons | 113 |
 | Last updated | 2026-09-06 |
 | Top category | Schema & Type |
 | Recurring errors | 59 |
@@ -1410,5 +1411,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Regression guard**: `evidence-sanitizer.test.ts` worst-case timing regression (5000 restarts × 118-char non-close runs, bounded <250ms — tight enough that the vulnerable regex at ~1.5s would fail it); the flagged empathy regex shape no longer remains in the file (other regexes in the file were never flagged and remain in place).
 - **Related ERRs**: ERR-119 (sibling: matcher semantics during extraction; this entry: fix-completeness for flagged defects), ERR-073 (partial characterization — same family: refactor verified on the happy path only), EP-08 (the flagged construct was a security boundary)
 - **Source**: PRI-627 / PR #1529 post-merge acceptance check + PR #1532
+- **Date**: 2026-09-06
+- **Recurrence**: None (first recording)
+
+**[ERR-121]** | Test fixture declares platform-keyed data with hardcoded values while the code under test selects by the CURRENT runtime platform — green on the author's machine, fails in CI at an earlier, different failure point
+
+- **What happened**: PRI-698 Phase 1 / PR #1535 (2026-09-06). The rewritten `@update-apply` BDD scenario seeded the candidate release metadata with a hardcoded `win32/x64/nodeAbi 147` asset (copied from the historical fixture shape). `ReleaseManager.apply()` → `selectReleaseAsset()` matches assets against `process.platform/arch/versions.modules` BEFORE reaching the artifact-target resolution the scenario asserts on. Result: green on the Windows dev machine (asset matched → acquisition proceeded → artifact target missing → `metadata_refresh_failed`, the asserted reason); Linux CI refused earlier with `release_metadata_invalid` → CI failure with a mismatched reason. The identical trap had already been found and fixed in `tests/helpers/shadow-release-fixture.ts` (a `candidateAsset` parameter built from process values) during development of the SAME PR — the fix was not propagated to the second fixture feeding the same production path.
+- **Why it's wrong**: The fixture is an input to a selector that keys on runtime values; a static declaration silently encodes the author's machine into the test. And when multiple fixtures feed the same production path, fixing one does not fix the others — the trap migrates to CI, where the platform differs, and surfaces as a confusing wrong-reason failure instead of the scenario's intended assertion.
+- **Generalized failure mode**: When production code selects or branches on runtime environment values (`process.platform` / `process.arch` / `process.versions.modules` / os family), assistants must construct the test fixture's corresponding data FROM those same runtime values (or parameterize the fixture), otherwise the test is platform-pinned: it passes where it was written and fails in CI at an earlier, differently-attributed failure point.
+- **Correct approach**: Derive the fixture's platform-keyed fields from `process.*` at fixture-build time (as `createShadowFixture({ candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules } })` and the BDD `buildRelease(..., asset)` now do), keeping static defaults only for scenarios that never reach the selector.
+- **How to prevent**: In review, for any new/changed test whose code under test reads `process.platform|arch|versions.*` (one rg on the diff), check whether the fixture data it feeds declares those exact keys hardcoded — if so, derive them from `process.*`. And when a platform trap is fixed in ONE fixture, rg the tests directory for sibling fixtures feeding the same module and fix all of them in the same commit.
+- **Regression guard**: The scenario itself — with the asset derived from `process.*` it passes on every platform by construction; CI's Linux runner exercising the BDD scenario is the cross-platform assertion a single dev machine cannot provide.
+- **Related ERRs**: ERR-111 (adjacent: test must not assume its host's capabilities — that ERR covers what the machine HAS, this one covers what the fixture DECLARES); ERR-083(f) (dev-machine artifacts masking failures).
+- **Source**: PRI-698 / PR #1535 CI run 34050209739
 - **Date**: 2026-09-06
 - **Recurrence**: None (first recording)

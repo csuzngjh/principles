@@ -699,8 +699,17 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     return;
   }
 
+  // PRI-695: the caller's token presence decides the REQUIRED mode, but a
+  // tokenless caller must not refuse a no_auth console — that combination is
+  // the default post-install state (the installer auto-launches with
+  // --no-auth) and the documented reopen command has no flags. Refusal is
+  // reserved for the genuinely incompatible combination: a caller that
+  // expects authenticated access against a no_auth server (governance writes
+  // would be unauthenticated without the user realizing it).
   const expectedAuthenticationMode = token?.trim() ? 'authenticated' : 'no_auth';
-  if (readyAuthenticationMode !== expectedAuthenticationMode) {
+  const authMismatch = readyAuthenticationMode !== expectedAuthenticationMode;
+  const tokenlessCallerOnNoAuthServer = !token?.trim() && readyAuthenticationMode === 'no_auth';
+  if (authMismatch && !tokenlessCallerOnNoAuthServer) {
     try { child.kill('SIGTERM'); } catch { /* child may already have exited */ }
     const result: ConsoleLaunchResult = {
       status: 'refused',
@@ -712,7 +721,9 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       browserOpened: false,
       authenticationMode: readyAuthenticationMode,
       reason: 'console_authentication_mode_mismatch',
-      nextAction: 'Stop the Console, verify PD_CONSOLE_TOKEN propagation, and retry.',
+      nextAction:
+        'The Console is running without authentication (auto-launched default). ' +
+        'Reopen it without a token to reuse it, or stop it and start with --token for authenticated access.',
     };
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
