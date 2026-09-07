@@ -26,7 +26,7 @@ import type { RefinerRuleHostGateDecision, } from './refiner-rulehost-gate.js';
 import type { RefinerSandboxResult } from './refiner-sandbox-wrapper.js';
 import type { ToolSemanticRegistry } from './tool-semantic-registry.js';
 
-export type FailureLayer = 'rule' | 'test' | 'adapter' | 'runtime' | 'unknown';
+export type FailureLayer = 'rule' | 'test' | 'adapter' | 'runtime' | 'principle' | 'evaluation' | 'unknown';
 
 export interface RuleReliabilityFailure {
   readonly layer: FailureLayer;
@@ -34,6 +34,100 @@ export interface RuleReliabilityFailure {
   /** Bounded human-readable evidence (rc-8: never assume stringify of arbitrary values). */
   readonly evidence: string;
   readonly nextAction: string;
+}
+
+/**
+ * PRI-705 / PRI-703 Phase 2 (Owner decision 2026-09-07): pipeline-stage
+ * failure attribution — "哪里失败 / 为什么 / 下一步改哪里" at the level an
+ * operator or repair loop routes on. This EXTENDS FailureLayer (same
+ * vocabulary, one enum — no parallel taxonomy): each stage-failure answer
+ * maps onto a layer so the existing propagation paths
+ * (evaluator artifact failure.{layer,reasonCode}, CLI rulecode output)
+ * keep working.
+ *
+ * Stage answers:
+ *   FAILED_PRINCIPLE → layer 'principle' — the principle (or its intent
+ *     contract) is incomplete/wrong; repairing the rule cannot fix it.
+ *   FAILED_RULE      → layer 'rule' — the rule implementation is defective.
+ *   FAILED_EVALUATION→ layer 'evaluation' — the evaluation/judging itself was
+ *     wrong (gate correct rejections are NOT this — a correct rejection is
+ *     the system working; this value is for evaluation-side defects).
+ *   FAILED_TEST      → layer 'test' — the adversarial/golden material is
+ *     deficient or OUT OF SCOPE for this principle's intent contract
+ *     (deterministic v2-context cases judging a v1 action-only rule are the
+ *     canonical instance — Episode 001 / PRI-700 factor A).
+ *   INFRA_BLOCKED    → layer 'runtime' — infrastructure blocked the attempt.
+ *   OWNER_BLOCKED    → not a failure layer: represented by task status
+ *     needs_human_review + HumanReviewReasonCode (owner-review.ts). Listed
+ *     here for the operator-facing taxonomy completeness; classify never
+ *     returns it (task state owns it).
+ *   UNKNOWN          → layer 'unknown'.
+ */
+export type FailureAttribution =
+  | 'FAILED_PRINCIPLE'
+  | 'FAILED_RULE'
+  | 'FAILED_EVALUATION'
+  | 'FAILED_TEST'
+  | 'INFRA_BLOCKED'
+  | 'OWNER_BLOCKED'
+  | 'UNKNOWN';
+
+/** Map a FailureLayer to the operator-facing attribution stage answer. */
+export function attributionFromLayer(layer: FailureLayer): FailureAttribution {
+  switch (layer) {
+    case 'principle': return 'FAILED_PRINCIPLE';
+    case 'rule': return 'FAILED_RULE';
+    case 'evaluation': return 'FAILED_EVALUATION';
+    case 'test': return 'FAILED_TEST';
+    case 'runtime': return 'INFRA_BLOCKED';
+    default: return 'UNKNOWN';
+  }
+}
+
+/**
+ * PRI-703 Phase 2 — deterministic v2-case scope classification (Episode 001
+ * PRI-700 factor A, Owner decision: evaluation cases must fall INSIDE the
+ * principle's intent contract before they may judge it).
+ *
+ * The v2 adversarial templates (v2-unavailable/truncated/alias/path-boundary/
+ * combination) demand context-aware decisions ("allow when context
+ * unavailable"). A v1 action-only rule structurally CANNOT express them
+ * (V1_CONTEXT_INSTRUCTION forbids reading input.context), so their failure is
+ * a property of the CASE × CHANNEL pairing, not of the rule. Pure string-shape
+ * logic on the caseId prefix — deterministic, no LLM involved.
+ *
+ * Pure function — zero I/O.
+ */
+export function isV2ContextCase(caseId: string): boolean {
+  return caseId.startsWith('v2-');
+}
+
+/**
+ * Partition failed replay cases into in-scope (real rule defects — feed the
+ * repair loop) vs out-of-scope (test-material problem — must NOT enter the
+ * repair loop as a rule defect; it is surfaced as a channel-limitation signal
+ * instead). Out-of-scope = every failed case is a v2-context template AND the
+ * rule is v1 (no requiresContextVersion: 2): the v1 channel cannot express
+ * context semantics, so requiring it is a test-scope error.
+ */
+export function partitionV2OutOfScopeFailures(input: {
+  readonly requiresContextVersion: number | undefined;
+  readonly failedCaseIds: readonly string[];
+}): { readonly outOfScope: readonly string[]; readonly inScope: readonly string[]; readonly isPureOutOfScope: boolean } {
+  const { requiresContextVersion, failedCaseIds } = input;
+  if (requiresContextVersion === 2) {
+    // v2 rules CAN express context semantics — every v2 case is in scope.
+    return { outOfScope: [], inScope: [...failedCaseIds], isPureOutOfScope: false };
+  }
+  const outOfScope = failedCaseIds.filter(isV2ContextCase);
+  const inScope = failedCaseIds.filter((id) => !isV2ContextCase(id));
+  return {
+    outOfScope,
+    inScope,
+    // Pure = every failure is the v2×v1 structural mismatch → the repair loop
+    // would have nothing real to fix; route to owner review instead.
+    isPureOutOfScope: outOfScope.length > 0 && inScope.length === 0,
+  };
 }
 
 const EVIDENCE_MAX_CHARS = 300;

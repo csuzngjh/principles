@@ -42,6 +42,14 @@ export const HUMAN_REVIEW_REASON = {
   rolloutRevisionBudgetExhausted: 'rollout_revision_budget_exhausted',
   /** Rollout 语义批准但激活候选缺失 — Owner 可裁决（无 accept：候选不存在，无可批准物） */
   rolloutActivationCandidateUnresolved: 'rollout_activation_candidate_unresolved',
+  /**
+   * PRI-703 Phase 2 (Owner 决策 2026-09-07): 重放失败全部为 v2-context 模板
+   * case 对 v1 (action-only) 规则的审判 — FAILED_TEST 归因（通道设计限制，
+   * 非产物缺陷）。修复轮结构性不可收敛，直接进入 Owner 裁决：
+   * accept_current（接受 v1 通道限制）/ 通道升级 / 原则修订。
+   * decision-capable：Owner 的裁决是唯一有意义的出口。
+   */
+  evaluatorTestOutOfScope: 'evaluator_test_out_of_scope',
   // ── recovery-only ──
   evaluatorRepairSeedFailed: 'evaluator_repair_seed_failed',
   rolloutDispatchNotWired: 'rollout_dispatch_not_wired',
@@ -60,6 +68,8 @@ export const DECISION_CAPABLE_HUMAN_REVIEW_REASONS: ReadonlySet<string> = new Se
   HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted,
   HUMAN_REVIEW_REASON.rolloutRevisionBudgetExhausted,
   HUMAN_REVIEW_REASON.rolloutActivationCandidateUnresolved,
+  // PRI-703 Phase 2: test-scope 死锁的出口是 Owner 裁决,不是修复轮重试
+  HUMAN_REVIEW_REASON.evaluatorTestOutOfScope,
 ]);
 
 /**

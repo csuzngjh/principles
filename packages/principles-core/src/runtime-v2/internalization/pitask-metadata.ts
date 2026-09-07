@@ -75,6 +75,22 @@ export interface RepairPayload {
     readonly passed: boolean;
     readonly failedCaseCount: number;
   };
+  /**
+   * PRI-705 / PRI-703 Phase 2 (Owner 决策 2026-09-07): 修复轮失败归因 —
+   * "哪里失败 / 为什么 / 下一步改哪里" 随载荷流动,修复 LLM 不再盲猜。
+   * 仅在确定归因可得时携带 (evaluator 在 seed 时由确定性分类器填入):
+   *   - attribution: 失败归属于哪一层 (FailureAttribution 词表)
+   *   - outOfScopeCaseIds: 被判定为 test-out-of-scope 的 v2-context case
+   *     (v1 通道结构性不可表达 — 修复轮不得尝试满足它们;纯 out-of-scope
+   *     场景根本不会 seed 修复任务,本字段只在混合场景出现)
+   *   - reason: 人类可读归因摘要 (有界)
+   * 全部可选 — 旧载荷/未分类失败不受影响 (rc-9: 缺失不降级语义)。
+   */
+  readonly failureAttribution?: {
+    readonly attribution: string;
+    readonly outOfScopeCaseIds?: readonly string[];
+    readonly reason: string;
+  };
 }
 
 /**
@@ -476,6 +492,21 @@ function isValidRepairPayload(value: unknown): value is RepairPayload {
     if (typeof dr.ran !== 'boolean') return false;
     if (typeof dr.passed !== 'boolean') return false;
     if (typeof dr.failedCaseCount !== 'number' || !Number.isInteger(dr.failedCaseCount) || dr.failedCaseCount < 0) return false;
+  }
+  // PRI-705 / PRI-703 Phase 2: optional failureAttribution — validate when
+  // present (rc-1/rc-4; malformed attribution fails the payload loudly so a
+  // corrupted attribution context can never silently steer the repair prompt).
+  if (p.failureAttribution !== undefined) {
+    if (typeof p.failureAttribution !== 'object' || p.failureAttribution === null || Array.isArray(p.failureAttribution)) return false;
+    const fa = p.failureAttribution as Record<string, unknown>;
+    if (typeof fa.attribution !== 'string' || fa.attribution.trim() === '') return false;
+    if (typeof fa.reason !== 'string' || fa.reason.trim() === '') return false;
+    if (fa.outOfScopeCaseIds !== undefined) {
+      if (!Array.isArray(fa.outOfScopeCaseIds)) return false;
+      for (const id of fa.outOfScopeCaseIds) {
+        if (typeof id !== 'string' || id.trim() === '') return false;
+      }
+    }
   }
   return true;
 }

@@ -480,9 +480,17 @@ function formatRepairFeedback(payload: RepairPayload, replayEvidence?: string): 
           `Deterministic adversarial replay: ${payload.diagnosticReplay.ran ? (payload.diagnosticReplay.passed ? 'PASSED' : 'FAILED') : 'not run'} (failed cases: ${payload.diagnosticReplay.failedCaseCount}). This is diagnostic evidence only — the evaluator verdict remains needs_revision.`,
         ]
     : [];
+  // PRI-705 / PRI-703 Phase 2: 失败归因随载荷渲染 — "哪里失败/为什么/哪些
+  // case 属于通道限制不得尝试满足"。缺失 = 未分类 (旧行为不变)。
+  const attributionLines = payload.failureAttribution
+    ? [
+        `Failure attribution: ${payload.failureAttribution.attribution} — ${payload.failureAttribution.reason}.`,
+      ]
+    : [];
   return [
     `Previous attempt scored ${payload.previousScore} (needs_revision).`,
     ...replayLines,
+    ...attributionLines,
     `Evaluator concerns:`,
     concernsLines,
     `Required changes:`,

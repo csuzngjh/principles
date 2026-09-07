@@ -63,6 +63,7 @@ import { extractIntentContract, type IntentContractV1 } from './intent-contract.
 import { evaluateFlaggedCriteria, isForcedStage2 } from './progressive-evaluator.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
 import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
+import { partitionV2OutOfScopeFailures } from './rule-reliability-validation.js';
 import { adversarialCasesToGoldenTrace } from './adversarial-case.js';
 import { buildGoldenTraceFromArtificer } from '../golden-trace.js';
 import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
@@ -1337,10 +1338,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         { runId, output: finalOutput, sourceArtificerArtifactId, diagnosticReplayEvidence },
       );
       if (repairOutcome.kind === 'max_iterations_reached') {
-        // PRI-629: budget 耗尽(decision-capable)与 seed 失败(recovery)拆分原因码
+        // PRI-629: budget 耗尽(decision-capable)与 seed 失败(recovery)拆分原因码。
+        // PRI-703 Phase 2: test_out_of_scope 是 FAILED_TEST 归因 — v2-context
+        // case 对 v1 规则的通道设计限制,decision-capable(Owner 裁决是唯一出口)。
         const reasonCode = repairOutcome.detail === 'budget_exhausted'
           ? HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted
-          : HUMAN_REVIEW_REASON.evaluatorRepairSeedFailed;
+          : repairOutcome.detail === 'test_out_of_scope'
+            ? HUMAN_REVIEW_REASON.evaluatorTestOutOfScope
+            : HUMAN_REVIEW_REASON.evaluatorRepairSeedFailed;
         // Fail loud (rc-9, EP-03, ERR-002): mark the task needs_human_review
         // so it does NOT stay in 'leased' state (which would cause the lease
         // to expire and the evaluator to re-run the same verdict infinitely).
@@ -1376,6 +1381,57 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // rejected / needs_revision (repair loop off): 无治理效果 — commit 门的
     // transition decision 依据 durable runnerDecision fail-closed。
     return { kind: 'completed', ruleArtifactId: null };
+  }
+
+  /**
+   * PRI-703 Phase 2: extract failed replay caseIds from the evaluator output.
+   * Trust-boundary (rc-1/rc-4): adversarialResult.failedCases is untrusted
+   * artifact content — validate each element's caseId shape; malformed entries
+   * are skipped (they cannot inform scoping decisions).
+   */
+  private static extractFailedCaseIds(output: EvaluatorOutputV1): readonly string[] {
+    const record = output as unknown as Record<string, unknown>;
+    const {adversarialResult} = record;
+    if (typeof adversarialResult !== 'object' || adversarialResult === null || Array.isArray(adversarialResult)) return [];
+    const {failedCases} = (adversarialResult as Record<string, unknown>);
+    if (!Array.isArray(failedCases)) return [];
+    const ids: string[] = [];
+    for (const entry of failedCases) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+      const {caseId} = (entry as Record<string, unknown>);
+      if (typeof caseId === 'string' && caseId.trim() !== '') ids.push(caseId);
+    }
+    return ids;
+  }
+
+  /**
+   * PRI-703 Phase 2: resolve the rule's requiresContextVersion from the
+   * DURABLE artificer artifact (never from the LLM-forgible evaluator copy).
+   * Returns null when the artifact cannot be resolved (attribution stays
+   * inconclusive — fail-open to the existing repair path, never blocks the
+   * loop on a read error).
+   */
+  private async resolveRequiresContextVersion(artificerArtifactId: string, taskId: string): Promise<number | null> {
+    try {
+      const artifact = await this.artifactStore.getArtifactById(artificerArtifactId);
+      if (!artifact) return null;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(artifact.contentJson);
+      } catch {
+        return null;
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+      const value = (parsed as Record<string, unknown>).requiresContextVersion;
+      return typeof value === 'number' ? value : null;
+    } catch (err) {
+      this.emitEvent('attribution_scope_resolve_failed', taskId, {
+        artificerArtifactId,
+        reason: err instanceof Error ? err.message : String(err),
+        nextAction: 'verify_artifact_store_read_for_failure_attribution',
+      });
+      return null;
+    }
   }
 
   /**
@@ -1869,9 +1925,62 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
        */
       diagnosticReplayEvidence?: { ran: true; passed: boolean; failedCaseCount: number } | undefined;
     },
-  ): Promise<{ kind: 'repair_seeded'; taskId: string } | { kind: 'max_iterations_reached'; detail: 'budget_exhausted' | 'seed_failed' }> {
+  ): Promise<{ kind: 'repair_seeded'; taskId: string } | { kind: 'max_iterations_reached'; detail: 'budget_exhausted' | 'seed_failed' | 'test_out_of_scope' }> {
     const { runId: evaluatorRunId, output } = ctx;
     const priorRepairIteration = await this.resolvePriorRepairIteration(evaluatorTaskId);
+
+    // ── PRI-703 Phase 2 (Owner decision 2026-09-07): deterministic failure
+    // attribution BEFORE seeding a repair round. "测试失败 → 继续改 Rule" is
+    // the wrong default; a needs_revision whose replay failures are ALL
+    // v2-context template cases judging a v1 (action-only) rule is a
+    // TEST-SCOPE problem (FAILED_TEST attribution): the v1 channel
+    // structurally cannot express context semantics, so no rule repair can
+    // ever satisfy those cases (Episode 001's 18/18 death-loop). Route to
+    // owner review with the channel-limitation signal instead of seeding a
+    // doomed repair round.
+    // Provenance: adversarialResult on the output here was written by
+    // executeDeterministicReplay in THIS invocation (diagnosticReplayEvidence
+    // ran:true) or absent — never LLM-forged (the pre-replay LLM copy was
+    // replaced before the effects phase).
+    //
+    // 混合场景 (in-scope ⊕ out-of-scope 并存): 修复任务照常 seed (有真实
+    // Rule 缺陷可修),但归因上下文随 RepairPayload 流动,让修复 LLM 知道
+    // 哪些 case 是通道限制 (不得尝试满足) — "哪里失败/为什么/改哪里" 三问
+    // 在载荷层可回答 (PRI-705)。
+    let repairAttribution: RepairPayload['failureAttribution'] | undefined;
+    if (ctx.diagnosticReplayEvidence?.ran === true && ctx.diagnosticReplayEvidence.passed === false) {
+      const failedCaseIds = EvaluatorRunner.extractFailedCaseIds(output);
+      if (failedCaseIds.length > 0) {
+        const sourceArtificerArtifactIdForScope = ctx.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId;
+        const requiresContextVersion = sourceArtificerArtifactIdForScope
+          ? await this.resolveRequiresContextVersion(sourceArtificerArtifactIdForScope, evaluatorTaskId)
+          : null;
+        if (requiresContextVersion !== null) {
+          const partition = partitionV2OutOfScopeFailures({
+            requiresContextVersion: requiresContextVersion === 2 ? 2 : undefined,
+            failedCaseIds,
+          });
+          if (partition.isPureOutOfScope) {
+            this.emitEvent('repair_loop_test_out_of_scope', evaluatorTaskId, {
+              runId: evaluatorRunId,
+              attribution: 'FAILED_TEST',
+              outOfScopeCaseIds: [...partition.outOfScope],
+              failedCaseCount: ctx.diagnosticReplayEvidence.failedCaseCount,
+              reason: 'all_replay_failures_are_v2_context_cases_judging_a_v1_rule',
+              nextAction: 'owner_decision_required_channel_upgrade_or_principle_revision',
+            });
+            return { kind: 'max_iterations_reached', detail: 'test_out_of_scope' };
+          }
+          if (partition.outOfScope.length > 0) {
+            repairAttribution = {
+              attribution: 'FAILED_RULE',
+              outOfScopeCaseIds: [...partition.outOfScope],
+              reason: `replay failures mix real rule defects (in-scope cases: ${partition.inScope.join(', ')}) with test-scope v2-context cases (${partition.outOfScope.join(', ')}) that the v1 action-only channel structurally cannot express — do NOT attempt to satisfy the out-of-scope cases`,
+            };
+          }
+        }
+      }
+    }
 
     // ── Slice 5: max iterations (2) reached → fail loud ──
     if (priorRepairIteration >= 2) {
@@ -1906,6 +2015,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     //（来自 succeedTask 的 executeDeterministicReplay 调用），绝不从 LLM
     // 可伪造的 output.adversarialResult 反推。缺失 = 本次未执行确定性重放
     //（skip/error/无 live 路径），repairPayload 不包含 diagnosticReplay。
+    //
+    // PRI-705 / PRI-703 Phase 2: 混合场景 (非纯 out-of-scope) 下,归因与
+    // out-of-scope case 清单随载荷流动 — 修复 LLM 明确知道哪些失败属于
+    // 通道设计限制(不得尝试满足),哪些是真实 Rule 缺陷(必须修复)。
     const repairPayload: RepairPayload = {
       requiredChanges: [...output.evaluation.requiredChanges],
       concerns: [...output.evaluation.concerns],
@@ -1914,6 +2027,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       sourceArtificerArtifactId,
       sourceEvaluatorTaskId: evaluatorTaskId,
       ...(ctx.diagnosticReplayEvidence ? { diagnosticReplay: ctx.diagnosticReplayEvidence } : {}),
+      ...(repairAttribution !== undefined ? { failureAttribution: repairAttribution } : {}),
     };
 
     // Resolve the dependency artificer task to inherit dependencyTaskIds
