@@ -1,5 +1,6 @@
 import * as yaml from 'js-yaml';
 import * as path from 'path';
+import * as os from 'os';
 import { existsSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { errnoCode } from './utils/config-file-io.js';
@@ -601,17 +602,32 @@ export function getNpmGlobalBinDir(): string | null {
 
 /**
  * 获取所有可能的全局 pd shim 文件路径
+ *
+ * PRI-696: npm prefix is not the only place a pd shim lives. A manually
+ * redirected wrapper (~/bin/pd, recorded in ADR-0023 as an operator-created
+ * entry outside installer ownership) pointing at ~/.pd/runtime/bin turns
+ * into a DANGLING shim after uninstall — the user's `pd` then fails with a
+ * shell error instead of command-not-found. Include ~/bin in the scan set;
+ * isPdOwnedShim's content check keeps non-PD files untouched.
  */
 export function getGlobalShimPaths(): string[] {
   const globalBin = getNpmGlobalBinDir();
-  if (!globalBin) return [];
+  const paths: string[] = [];
 
-  if (isWindows()) {
-    return [
-      path.join(globalBin, 'pd.cmd'),
-      path.join(globalBin, 'pd.ps1'),
-    ];
-  } else {
-    return [path.join(globalBin, 'pd')];
+  if (globalBin) {
+    if (isWindows()) {
+      paths.push(path.join(globalBin, 'pd.cmd'), path.join(globalBin, 'pd.ps1'));
+    } else {
+      paths.push(path.join(globalBin, 'pd'));
+    }
   }
+
+  const homeBin = path.join(os.homedir(), 'bin');
+  if (isWindows()) {
+    paths.push(path.join(homeBin, 'pd.cmd'), path.join(homeBin, 'pd.ps1'));
+  } else {
+    paths.push(path.join(homeBin, 'pd'));
+  }
+
+  return paths;
 }
