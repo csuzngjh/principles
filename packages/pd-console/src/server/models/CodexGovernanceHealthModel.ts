@@ -121,7 +121,7 @@ export class CodexGovernanceHealthModel {
           productClaim: 'degraded',
         };
       }
-      // runtime-contract-exempt: ERR-002 CLI health authority report passed
+      // runtime-contract-exempt: ERR-001 CLI health authority report passed
       // through VERBATIM by design (review round 2, single-authority
       // requirement): field-by-field revalidation here would duplicate the
       // CLI's own validation and recreate the two-truths problem. The report
