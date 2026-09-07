@@ -155,6 +155,59 @@ export interface OwnerResolutionRecord {
 }
 
 /**
+ * PRI-700 因子 B (Owner 决策 2026-09-07): 上一次 attempt 的 validator 拒绝
+ * 全文。由 base-peer-runner.handleValidationError 在每次 output-invalid 后
+ * 写入 diagnosticJson 顶层（与 pi_metadata 信封并列的 lastValidatorErrors
+ * 键，best-effort 持久化），下一次 attempt 的 runner prompt 从中回喂——
+ * 修复 attempt N+1 不再与 attempt N 同 prompt 零新信息重试（18/18 死锁
+ * 的结构性断路）。
+ *
+ * 生命周期：本 attempt 校验失败时被当次新错误覆盖（rc-7 loop state
+ * freshness），成功时不清理（stale 残留由 attemptCheckConsumed 的消费时
+ * 清除语义防串扰——见 ArtificerRunner）。
+ */
+export interface LastValidatorErrors {
+  /** 持久化时间（ISO） */
+  readonly recordedAt: string;
+  /** 本 attempt 校验失败的错误类别（PDErrorCategory） */
+  readonly errorCategory: string;
+  /** validator 拒绝错误全文（≥1 条） */
+  readonly errors: readonly string[];
+}
+
+/**
+ * Trust-boundary guard (rc-1, rc-4): diagnosticJson 顶层
+ * lastValidatorErrors 是 untrusted runtime data。
+ */
+export function parseLastValidatorErrors(diagnosticJson: string | null | undefined): LastValidatorErrors | null {
+  if (!diagnosticJson || diagnosticJson.trim() === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  // rc-5: hasOwn, not in
+  if (!Object.hasOwn(parsed, 'lastValidatorErrors')) return null;
+  const value = (parsed as Record<string, unknown>).lastValidatorErrors;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.recordedAt !== 'string' || record.recordedAt.trim() === '') return null;
+  if (typeof record.errorCategory !== 'string' || record.errorCategory.trim() === '') return null;
+  if (!Array.isArray(record.errors) || record.errors.length === 0) return null;
+  // rc-4: validate array element types
+  for (const error of record.errors) {
+    if (typeof error !== 'string' || error.trim() === '') return null;
+  }
+  return {
+    recordedAt: record.recordedAt,
+    errorCategory: record.errorCategory,
+    errors: record.errors as string[],
+  };
+}
+
+/**
  * PI-specific metadata stored inside TaskRecord.diagnosticJson.
  * All fields must be present except parentTaskId and correlationId (optional).
  */

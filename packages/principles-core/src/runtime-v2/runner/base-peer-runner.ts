@@ -197,6 +197,15 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   private readonly contentHashFn?: (input: string) => string;
   private phase: RunnerPhase = RunnerPhase.Idle;
 
+  /**
+   * PRI-700 因子 B: 当前 run() 的 leased attempt 序号（每次 run() 在
+   * buildContext 前刷新）。子类用它区分"同一 attempt 的重复 buildContext"
+   * 与"跨 attempt 重试"——前者不应重复回喂同一 validator 错误，后者允许
+   * 回喂（每次 output-invalid 后 handleValidationError 已用当次新错误
+   * 覆盖 lastValidatorErrors，rc-7）。
+   */
+  protected currentLeasedAttempt: number | undefined;
+
   constructor(
     deps: PeerRunnerDeps,
     options: PeerRunnerOptions,
@@ -366,6 +375,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
       // 3. Build context
       this.phase = RunnerPhase.BuildingContext;
+      this.currentLeasedAttempt = leasedTask.attemptCount;
       const context = await this.buildContext(taskId);
       this.emitEvent('context_built', taskId, { contextHash: context.contextHash });
 
@@ -731,6 +741,38 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       validatorErrors: [...ctx.errors],
       errorCount: ctx.errors.length,
     });
+
+    // PRI-700 因子 B (Owner 决策 2026-09-07): validator 拒绝全文回喂修复轮。
+    // 此前 output_failure_details 只持久化不回读——修复 attempt N+1 重建的
+    // prompt 与 attempt N 完全相同，18/18 次重复同一困境（EP-05 同款断路）。
+    // 现在把本 attempt 的 validator 错误追加为独立的 lastValidatorErrors 键
+    // （不与 PRI-559 的 output_failure_details 复用同一键，后者会被下一次
+    // 持久化覆盖且 mixing 语义不同）。仅此任务自己的错误回喂自己——rc-7:
+    // 每次 attempt 持久化的是当次新鲜错误（旧键被覆盖，不会累积跨
+    // attempt 串扰）。Best-effort（rc-9）: 持久化失败只发事件不阻断重试。
+    try {
+      const patch: { diagnosticJson?: string } = {};
+      let parsed: Record<string, unknown> = {};
+      if (ctx.task.diagnosticJson) {
+        const candidate = JSON.parse(ctx.task.diagnosticJson) as unknown;
+        if (typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate)) {
+          // runtime-contract-exempt: ERR-001 上方 typeof/Array.isArray 守卫已收窄
+          parsed = candidate as Record<string, unknown>;
+        }
+      }
+      parsed.lastValidatorErrors = {
+        recordedAt: new Date().toISOString(),
+        errorCategory: category,
+        errors: [...ctx.errors],
+      };
+      patch.diagnosticJson = JSON.stringify(parsed);
+      await this.stateManager.updateTask(ctx.taskId, patch);
+    } catch (err) {
+      this.emitEvent('mark_failed_error', ctx.taskId, {
+        errorCategory: 'storage_unavailable',
+        errorMessage: `persistLastValidatorErrors failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
 
     return this.retryOrFail({
       taskId: ctx.taskId,

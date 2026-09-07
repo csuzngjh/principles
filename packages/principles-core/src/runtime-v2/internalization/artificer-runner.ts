@@ -38,7 +38,7 @@ import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
-import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
+import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors } from './pitask-metadata.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
 import { ARTIFICER_MANIFEST, ARTIFICER_REPAIR_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
@@ -121,6 +121,14 @@ interface ArtificerContext {
    * — the durable authority remains the source Evaluator artifact.
    */
   readonly replayContext?: RepairReplayContext;
+  /**
+   * PRI-700 因子 B (Owner 决策 2026-09-07): 上一次 attempt 的 validator
+   * 拒绝全文。从 task.diagnosticJson 顶层 lastValidatorErrors 键读取
+   * (parseLastValidatorErrors 已做信任边界验证)，仅在同一 attempt 未消费
+   * 过时携带。修复 attempt N+1 的 prompt 因此携带 attempt N 被拒的确切
+   * 契约原因——不再零新信息重试。Ephemeral，不回写、不进 RepairPayload。
+   */
+  readonly priorValidatorErrors?: LastValidatorErrors;
 }
 
 /**
@@ -559,6 +567,27 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
   private readonly validator: ArtificerValidator;
   private readonly contextMode: 'v1' | 'v2';
   private readonly behaviorExamplePack: BehaviorExamplePack | undefined;
+  /**
+   * PRI-700 因子 B: 已消费 lastValidatorErrors 的 attempt 集合（进程内存）。
+   * 任务重跑（retry_wait→leased 新 attempt）允许再次回喂——每次 attempt 失败
+   * 后 handleValidationError 都会用当次新错误覆盖该键（rc-7），故重跑携带的
+   * 是新错误而非 stale 残留；同一 attempt 内重复 buildContext 只回喂一次。
+   * 无 DB 写入、无新状态源（键 = taskId:attemptCount）。
+   */
+  private readonly attemptCheckConsumed = new Set<string>();
+
+  private hasAttemptCheckBeenConsumed(taskId: string): boolean {
+    // base runner 在 lease 后把 leased TaskRecord 传入 buildContext（第
+    // 三个参数；非 leased 场景无该快照）。attemptCount 是 lease 获取时从
+    // runs 派生的 attempt 序号——同一 attempt 内重复 buildContext 命中
+    // 同一 key，跨 attempt（重试）产生新 key 允许回喂新错误。
+    const key = this.currentLeasedAttempt !== undefined
+      ? `${taskId}:${this.currentLeasedAttempt}`
+      : taskId;
+    if (this.attemptCheckConsumed.has(key)) return true;
+    this.attemptCheckConsumed.add(key);
+    return false;
+  }
 
   constructor(deps: ArtificerRunnerDeps, options: ArtificerRunnerOptions) {
     super(deps, options, {
@@ -637,7 +666,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // hydrated value as typed text input and format it for the prompt.
     // rc-7 (loop state freshness): repairPayload comes from the CURRENT task's
     // diagnosticJson — never a cached or inferred value. repairIteration tells
-    // the artificer which round it's in.
+    // the artificer which round it's in (1 = first repair, 2 = second repair).
     //
     // PRI-634 PR-A: when the diagnostic replay ran and FAILED, the concrete
     // evidence is resolved BY REFERENCE from the source Evaluator artifact
@@ -648,6 +677,15 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     let repairFeedback: string | null = null;
     let repairPayload: RepairPayload | undefined;
     let replayContext: RepairReplayContext | undefined;
+
+    // PRI-700 因子 B: 上一次 attempt 的 validator 拒绝全文回喂。仅在本
+    // attempt 未被消费过时携带（attemptCheckConsumed 跨 attempt CAS 防串
+    // 扰——同一 task 重跑若无新失败则不重喂旧错误）。从当前 task 的
+    // diagnosticJson 顶层读取（与 pi_metadata 信封并列），trust boundary
+    // 由 parseLastValidatorErrors 守卫。
+    const priorValidatorErrors = parseLastValidatorErrors(task.diagnosticJson);
+    const attemptIsFresh = !this.hasAttemptCheckBeenConsumed(taskId);
+
     if (piTask?.repairPayload) {
       const payload = piTask.repairPayload;
       repairPayload = payload;
@@ -690,9 +728,21 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // PR B: ephemeral repair/replay evidence for the Shared Information Plane.
     // Both are read-only views of already-durable facts; neither is persisted
     // here and neither widens RepairPayload (design §21/§28).
+    // PRI-700 因子 B: 上一次 attempt 的 validator 拒绝全文——同为 durable
+    // 事实的只读视图，仅在 attempt 未消费过且存在时携带（回喂窗口）。
+    if (priorValidatorErrors !== null && !attemptIsFresh) {
+      this.emitEvent('prior_validator_errors_suppressed', taskId, {
+        recordedAt: priorValidatorErrors.recordedAt,
+        errorCount: priorValidatorErrors.errors.length,
+        reason: 'attempt_check_already_consumed',
+      });
+    }
     const repairEvidenceExtras = {
       ...(repairPayload !== undefined ? { repairPayload } : {}),
       ...(replayContext !== undefined ? { replayContext } : {}),
+      ...(priorValidatorErrors !== null && attemptIsFresh
+        ? { priorValidatorErrors }
+        : {}),
     };
 
     // P1-1 (外部复核): rollout needs_revision 路由到 artificer (code 渠道) 时,
@@ -827,6 +877,10 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // (prompt builder treats undefined as backward-compatible no-op).
       // PR B: channel-resolved — see the block above.
       repairFeedback: repairFeedback ?? undefined,
+      // PRI-700 因子 B: forward the prior attempt's validator rejection text
+      // so the repair attempt fixes the exact contract violations instead of
+      // re-emitting the same invalid shape (18/18 death-loop breaker).
+      priorValidatorErrors: context.priorValidatorErrors,
     });
     // P1-1: rollout revision feedback 注入 (与 scribe 同模式; repairFeedback
     // 走 prompt builder 字段,revisionFeedback 是路由文本,直接附加)
