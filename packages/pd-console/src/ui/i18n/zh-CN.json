@@ -309,7 +309,15 @@
         "approvalHint": "该原则的部署审批仍在审批队列中等待处理。",
         "rulecodeHint": "该规则处于影子激活期，需要在激活管理中裁决。",
         "goApprovalsCta": "前往部署审批",
-        "goActivationCta": "前往激活管理"
+        "goActivationCta": "前往激活管理",
+        "qualityChecklistLabel": "质量检查表",
+        "qualityCheck": {
+          "understandability": "可理解性",
+          "evidence": "证据来源",
+          "actionability": "可执行性",
+          "generalization": "泛化度",
+          "boundary": "适用边界"
+        }
       }
     },
     "pain": {

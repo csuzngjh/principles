@@ -70,6 +70,36 @@ export interface EvaluatorDecisionBrief {
   readonly concerns: readonly string[];
   readonly requiredChanges: readonly string[];
   readonly score?: number;
+  /**
+   * PRI-704 / PRI-703 Phase 4 (Owner decision 2026-09-07): 5-item Principle
+   * Quality Checklist — a DETERMINISTIC review aid derived from durable facts
+   * (no LLM scoring, no second evaluation pass). Each item answers one Owner
+   * question with pass/fail + evidence-based notes; a missing supporting
+   * fact = fail with an explicit note (never silently omitted — the Owner
+   * sees exactly which quality dimension lacks support). Older snapshots
+   * lack the key (forward-compatible read).
+   */
+  readonly qualityChecklist?: PrincipleQualityChecklist;
+}
+
+/**
+ * The five Owner-facing quality questions (PRI-704):
+ *   understandability — can the Owner understand it from the brief alone?
+ *   evidence          — does it come from a real pain/diagnosis?
+ *   actionability     — would an agent know what to do differently next time?
+ *   generalization    — does it avoid over-fitting to a single file/task?
+ *   boundary          — is the applicability scope explicit?
+ */
+export interface PrincipleQualityChecklist {
+  readonly schemaVersion: 1;
+  readonly items: readonly PrincipleQualityChecklistItem[];
+}
+
+export interface PrincipleQualityChecklistItem {
+  readonly id: 'understandability' | 'evidence' | 'actionability' | 'generalization' | 'boundary';
+  readonly pass: boolean;
+  /** Bounded evidence-based explanation (why pass / what is missing). */
+  readonly note: string;
 }
 
 export interface RolloutDecisionBrief {
@@ -325,6 +355,75 @@ export async function buildOwnerDecisionReview(
     completeness = principleStatement && (implementationSummary || affectedTools.length > 0)
       ? 'complete'
       : identifiable ? 'partial' : 'insufficient';
+
+    // PRI-704 / PRI-703 Phase 4: 5-item deterministic quality checklist.
+    // Derivation rules (each reads ONLY durable facts already in this scope):
+    //   understandability — non-empty title AND statement (the brief alone
+    //     must let a non-technical Owner grasp the principle);
+    //   evidence — the chain resolves to a real pain (facts carry the
+    //     diagnosis/candidate lineage; a principle with no pain anchor is
+    //     an invented principle);
+    //   actionability — the artificer produced an implementation summary
+    //     AND declared affected tools (an agent must know what to DO);
+    //   generalization — scope (applicability) declares MORE than one
+    //     context (a single-context principle risks over-fitting one file
+    //     /task — Episode-001's over-generalization review axis);
+    //   boundary — explicit antiPatterns present (what the principle
+    //     FORBIDS must be stated, not just what it wants).
+    const intentOwner = scribeSummary?.ok ? scribeSummary.value.fields.intentOwner : null;
+    const checklistFacts = {
+      title: readString(draft, 'title'),
+      statement: principleStatement ?? null,
+      rationale: readString(draft, 'rationale'),
+      antiPatterns: readStringArray(draft, 'antiPatterns', 10),
+      scope: readStringArray(draft, 'applicability', 10),
+      intentContractOwner: intentOwner,
+    };
+    const qualityChecklist: PrincipleQualityChecklist = {
+      schemaVersion: 1,
+      items: [
+        {
+          id: 'understandability',
+          pass: Boolean(checklistFacts.title && checklistFacts.statement),
+          note: checklistFacts.title && checklistFacts.statement
+            ? `title + statement present (Owner can grasp the principle from the brief)`
+            : `missing ${!checklistFacts.title ? 'title' : 'statement'} — the Owner cannot understand the principle from the brief alone`,
+        },
+        {
+          id: 'evidence',
+          pass: Boolean(facts.lineageResolvable),
+          note: facts.lineageResolvable
+            ? 'lineage resolves to the producing chain (dreamer/philosopher ancestors present) — the principle is evidence-derived'
+            : 'dependency lineage not resolvable — the principle may be invented rather than evidence-derived',
+        },
+        {
+          id: 'actionability',
+          pass: Boolean(implementationSummary && affectedTools.length > 0),
+          note: implementationSummary && affectedTools.length > 0
+            ? `implementation summary + ${affectedTools.length} affected tool(s) — an agent knows what to do differently`
+            : `missing ${!implementationSummary ? 'implementation summary' : 'affected tools'} — the principle states a goal but not an executable next action`,
+        },
+        {
+          id: 'generalization',
+          pass: checklistFacts.scope.length >= 2,
+          note: checklistFacts.scope.length >= 2
+            ? `scope spans ${checklistFacts.scope.length} contexts (${checklistFacts.scope.slice(0, 3).join('; ')})`
+            : checklistFacts.scope.length === 1
+              ? `single-context scope (${checklistFacts.scope[0]}) — risk of over-fitting one file/task`
+              : 'no applicability scope declared — generalization cannot be assessed',
+        },
+        {
+          id: 'boundary',
+          pass: checklistFacts.antiPatterns.length > 0 || Boolean(checklistFacts.intentContractOwner),
+          note: checklistFacts.antiPatterns.length > 0
+            ? `${checklistFacts.antiPatterns.length} explicit anti-pattern(s) bound the principle's forbidden behavior`
+            : checklistFacts.intentContractOwner
+              ? 'intent contract forbiddenBehavior present (pre-contract-era draft without antiPatterns)'
+              : 'no antiPatterns and no intent contract — the principle states what it wants but not what it forbids',
+        },
+      ],
+    };
+    brief = { ...brief, qualityChecklist };
   } else {
     const review = readRecord(decisionContent, 'review');
     brief = {

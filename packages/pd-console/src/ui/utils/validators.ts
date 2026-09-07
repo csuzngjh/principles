@@ -2877,6 +2877,11 @@ export interface OwnerDecisionReviewData {
     requiredChanges: string[];
     risks?: string[];
     score?: number;
+    /** PRI-704 / PRI-703 Phase 4: 5-item deterministic quality checklist (evaluator briefs only). */
+    qualityChecklist?: {
+      schemaVersion: number;
+      items: { id: string; pass: boolean; note: string }[];
+    };
   };
   evidence: {
     completeness: 'complete' | 'partial' | 'insufficient';
@@ -2922,6 +2927,24 @@ function validateOwnerDecisionReview(value: unknown): OwnerDecisionReviewData | 
     parsedBrief.concerns = concerns;
     if (brief.score !== undefined && !isNumber(brief.score)) return null;
     if (isNumber(brief.score)) parsedBrief.score = brief.score;
+    // PRI-704 / PRI-703 Phase 4: optional quality checklist — validate
+    // element shapes when present; drop malformed entries rather than
+    // failing the whole review (the checklist is a review aid, not an
+    // authority record; older snapshots legitimately lack it).
+    if (brief.qualityChecklist !== undefined) {
+      if (isObject(brief.qualityChecklist) && Array.isArray(brief.qualityChecklist.items)) {
+        const validItems = brief.qualityChecklist.items.filter(
+          (entry: unknown) => isObject(entry) && isString((entry as { id: unknown }).id)
+            && typeof (entry as { pass: unknown }).pass === 'boolean' && isString((entry as { note: unknown }).note),
+        );
+        if (validItems.length > 0) {
+          parsedBrief.qualityChecklist = {
+            schemaVersion: typeof brief.qualityChecklist.schemaVersion === 'number' ? brief.qualityChecklist.schemaVersion : 1,
+            items: validItems as { id: string; pass: boolean; note: string }[],
+          };
+        }
+      }
+    }
   } else {
     const risks = readOwnerStringArray(brief.risks);
     if (risks === null) return null;

@@ -309,7 +309,15 @@
         "approvalHint": "The deployment approval for this principle is still waiting in the approval queue.",
         "rulecodeHint": "This rule is in shadow activation and needs a decision in activation management.",
         "goApprovalsCta": "Go to deployment approvals",
-        "goActivationCta": "Go to activation management"
+        "goActivationCta": "Go to activation management",
+        "qualityChecklistLabel": "Quality checklist",
+        "qualityCheck": {
+          "understandability": "Understandability",
+          "evidence": "Evidence",
+          "actionability": "Actionability",
+          "generalization": "Generalization",
+          "boundary": "Boundary"
+        }
       }
     },
     "pain": {

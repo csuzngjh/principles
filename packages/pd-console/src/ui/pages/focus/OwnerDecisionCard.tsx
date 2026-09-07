@@ -115,6 +115,21 @@ export function OwnerDecisionCard({ item, onResolved, governanceReady = true }: 
           {(item.review.brief.concerns?.length ?? 0) > 0 && (
             <p className="text-amber"><span className="font-medium">{t("pages.focus.ownerDecision.concernLabel")}</span>{" "}{item.review.brief.concerns?.[0]}</p>
           )}
+          {(item.review.brief.qualityChecklist?.items?.length ?? 0) > 0 && (
+            <div className="mt-1 rounded-[3px] border border-line bg-surface-2 p-2" data-testid={`owner-quality-checklist-${item.taskId}`}>
+              <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-ink-3 mb-1">
+                {t("pages.focus.ownerDecision.qualityChecklistLabel")}
+              </div>
+              <ul className="grid gap-0.5">
+                {item.review.brief.qualityChecklist?.items.map((qItem) => (
+                  <li key={qItem.id} className="flex items-start gap-1.5 text-[12px]">
+                    <span className={qItem.pass ? "text-emerald" : "text-amber"} aria-hidden>{qItem.pass ? "✓" : "!"}</span>
+                    <span className="text-ink-2"><span className="font-medium">{t(`pages.focus.ownerDecision.qualityCheck.${qItem.id}`)}</span>{" "}{qItem.note}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
       {item.review?.brief.kind === "rollout" && item.review.brief.summary && (
