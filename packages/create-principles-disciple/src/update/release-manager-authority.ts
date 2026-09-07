@@ -31,6 +31,15 @@
  * activation rollout opens the `shadow_mode_read_only` gate (its own go/no-go);
  * until then these kinds explicitly fall back to the legacy console updater —
  * TEMPORARY migration debt per ADR-0024 D-1, not a supported long-term state.
+ *
+ * PRI-698 Phase 1: `apply-full` (full-runtime update) is served by the real
+ * ReleaseManager.apply() orchestration (installer + journal) and reports the
+ * same base readiness as `check`. The CONSOLE additionally gates the routing
+ * behind the `release_manager_write_authority` flag (default off) — flag-off
+ * dispatches fall back explicitly with `release_manager_write_disabled`.
+ * `apply` (the plugin-diff mechanism, which the ReleaseManager does not
+ * implement) and `rollback` (Phase 2 — must prove same-version restore first)
+ * stay structurally not-ready with explicit reasons.
  */
 
 import * as fs from 'node:fs';
@@ -58,8 +67,13 @@ export interface ReleaseManagerAuthorityReadiness {
   readonly reasons: readonly ReleaseManagerAuthorityReason[];
 }
 
-/** Structural gate: activation/rollback arrive with the Phase 4 transaction rollout. */
-const ACTIVATION_AVAILABLE = false;
+/**
+ * Structural gate for the kinds whose write path does not exist yet:
+ * `rollback` arrives with the Phase 2 restore migration; `apply` (plugin
+ * diff) is not a ReleaseManager mechanism at all. `apply-full` left this
+ * gate in PRI-698 Phase 1.
+ */
+const ROLLBACK_AVAILABLE = false;
 
 export interface ReleaseManagerAuthorityOptions {
   readonly pdHome: string;
@@ -138,15 +152,18 @@ export function createReleaseManagerAuthority(
     },
     apply: {
       ready: false,
-      reasons: ACTIVATION_AVAILABLE ? baseReasons : ([...baseReasons, 'rollback_not_available'] as const),
+      reasons: ROLLBACK_AVAILABLE ? baseReasons : ([...baseReasons, 'rollback_not_available'] as const),
     },
+    // PRI-698 Phase 1: the full-runtime write path exists (ReleaseManager.apply
+    // → installer → journal). Console routing is additionally flag-gated
+    // (`release_manager_write_authority`, default off).
     'apply-full': {
-      ready: false,
-      reasons: ACTIVATION_AVAILABLE ? baseReasons : ([...baseReasons, 'rollback_not_available'] as const),
+      ready: baseReady,
+      reasons: baseReasons,
     },
     rollback: {
       ready: false,
-      reasons: ACTIVATION_AVAILABLE ? baseReasons : ([...baseReasons, 'rollback_not_available'] as const),
+      reasons: ROLLBACK_AVAILABLE ? baseReasons : ([...baseReasons, 'rollback_not_available'] as const),
     },
   } satisfies Readonly<Record<ReleaseManagerAuthorityKind, ReleaseManagerAuthorityReadiness>>;
 
@@ -156,18 +173,30 @@ export function createReleaseManagerAuthority(
 /**
  * Map a ReleaseManager refusal onto the console's explicit-fallback reason
  * vocabulary (rc-9: degradation must be observable with a stable reason).
+ * `transactionOpened` passes through the PRI-698 default-on safety net
+ * semantics: false ⇒ the refusal happened before any side effect, so the
+ * console may fall back to the legacy updater with an explicit reason; true
+ * ⇒ runtime-side effects may exist and the refusal must surface as a
+ * failure, never as a fallback.
  */
 export function mapReleaseManagerErrorToFallback(error: unknown): {
   reason: string;
   message: string;
   nextAction: string | null;
+  transactionOpened: boolean;
 } {
   if (error instanceof ReleaseManagerError) {
-    return { reason: error.reason, message: error.message, nextAction: error.nextAction };
+    return {
+      reason: error.reason,
+      message: error.message,
+      nextAction: error.nextAction,
+      transactionOpened: error.transactionOpened,
+    };
   }
   return {
     reason: 'release_manager_check_failed',
     message: error instanceof Error ? error.message : String(error),
     nextAction: null,
+    transactionOpened: false,
   };
 }

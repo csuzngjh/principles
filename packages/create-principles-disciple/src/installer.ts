@@ -2215,14 +2215,20 @@ export interface InstallRunMode {
 //   brick the installation.
 // ---------------------------------------------------------------------------
 
-interface InstallerJournal {
+export interface InstallerJournal {
   readonly transactionId: string;
   readonly journalPath: string;
   readonly releaseId: string;
   readonly productVersion: string;
   readonly releaseMetadataDigest: string;
-  /** PRI-664 review: provenance of releaseMetadataDigest ('manifest' | 'package_manifest' | 'fallback'). */
+  /** PRI-664 review: provenance of releaseMetadataDigest ('manifest' | 'package_manifest' | 'fallback' | 'signed_channel'). */
   readonly releaseMetadataDigestSource: ReleaseMetadataDigestSource;
+  /**
+   * PRI-698 Phase 1: dual-slot generation continuity. Standalone installs keep
+   * the historical `1`; an externally adopted transaction (ReleaseManager
+   * apply orchestration) supplies activeRecord.generation + 1.
+   */
+  readonly generation: number;
   degraded: boolean;
   /** Last successfully journaled state — the `from` for failure-path transitions. */
   lastState: TransactionState | null;
@@ -2274,7 +2280,7 @@ export function beginInstallerJournal(pluginDir: string): InstallerJournal {
   const transactionId = `install-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const journalPath = path.join(getPdDir(), 'transactions', `${transactionId}.jsonl`);
   const releaseId = `bundled-${productVersion}-${releaseMetadataDigest.slice(0, 12)}`;
-  return { transactionId, journalPath, releaseId, productVersion, releaseMetadataDigest, releaseMetadataDigestSource, degraded: false, lastState: null };
+  return { transactionId, journalPath, releaseId, productVersion, releaseMetadataDigest, releaseMetadataDigestSource, generation: 1, degraded: false, lastState: null };
 }
 
 /**
@@ -2298,10 +2304,10 @@ export function journalInstallerTransition(
     productVersion: journal.productVersion,
     releaseMetadataDigest: journal.releaseMetadataDigest,
     releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
-    // The installer model has no active.json generation chain yet (it never
-    // writes active.json); generation continuity becomes ReleaseManager's
-    // responsibility when it takes over mutations (PRI-661).
-    generation: 1,
+    // PRI-698 Phase 1: standalone installs keep generation 1; an externally
+    // adopted transaction (ReleaseManager apply) carries the dual-slot
+    // generation chain forward (activeRecord.generation + 1).
+    generation: journal.generation,
     detail,
   });
   journal.lastState = to;
@@ -2333,7 +2339,18 @@ function installerJournalRecord(journal: InstallerJournal): InstallJournalRecord
 }
 
 
-export async function install(options: InstallOptions, pluginDir: string, mode: InstallRunMode = {}): Promise<InstallResult> {
+// eslint-disable-next-line @typescript-eslint/max-params -- (options, payloadDir, runMode, adoptedTransaction) mirrors the four independent concerns of an install run; the 4th is optional and only supplied by the PRI-698 orchestrator
+export async function install(
+  options: InstallOptions,
+  pluginDir: string,
+  mode: InstallRunMode = {},
+  // PRI-698 Phase 1: optional externally-opened transaction (ReleaseManager
+  // apply orchestration). When provided, its identity and journal file are
+  // adopted verbatim and the 'planned' append is skipped (the orchestrator
+  // already journaled planned → downloaded → verified; Tier-1 applied there).
+  // Undefined keeps the historical standalone behavior byte-for-byte.
+  transaction?: InstallerJournal,
+): Promise<InstallResult> {
   // `quiet` (= jsonMode) suppresses human output / spinner. `nonInteractive`
   // (--yes/--non-interactive/--json) gates PROMPTING. They differ for `--yes`
   // (human output on, but must NOT prompt). nonInteractive defaults to quiet
@@ -2491,13 +2508,14 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
     // journal cannot be written at all, refuse before mutating (fail loud,
     // zero side effects) rather than performing an unjournaled mutation
     // (refusal over silent degradation, ADR-0024 §2.4 rule 4).
-    journal = beginInstallerJournal(pluginDir);
-    try {
-      journalInstallerTransition(journal, null, 'planned', `host=${options.host} mode=${options.mode}`);
-    } catch (journalError) {
-      if (spinner) spinner.fail('Install failed');
-      const journalDetail = journalError instanceof Error ? journalError.message : String(journalError);
-      logger.error(`Transaction journal unavailable — refusing to mutate the runtime unjournaled (ADR-0024 D-2): ${journalDetail}`);
+    journal = transaction ?? beginInstallerJournal(pluginDir);
+    if (transaction === undefined) {
+      try {
+        journalInstallerTransition(journal, null, 'planned', `host=${options.host} mode=${options.mode}`);
+      } catch (journalError) {
+        if (spinner) spinner.fail('Install failed');
+        const journalDetail = journalError instanceof Error ? journalError.message : String(journalError);
+        logger.error(`Transaction journal unavailable — refusing to mutate the runtime unjournaled (ADR-0024 D-2): ${journalDetail}`);
       return {
         success: false,
         workspaceDir: options.workspaceDir,
@@ -2511,6 +2529,7 @@ export async function install(options: InstallOptions, pluginDir: string, mode: 
         error: `Could not write the transaction journal — refusing to mutate the runtime unjournaled (ADR-0024 D-2). No changes were made.`,
         journal: { transactionId: journal.transactionId, journalPath: journal.journalPath, degraded: true },
       };
+      }
     }
     // Validate the existing host-ownership record before mutating runtime or
     // host config. A malformed manifest must not be discovered only after the

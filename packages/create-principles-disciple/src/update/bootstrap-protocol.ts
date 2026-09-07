@@ -129,8 +129,20 @@ export async function handleBootstrapRequest(
       case 'check':
         return { ok: true, result: await manager.check(request.channel) };
       case 'apply':
-        await manager.apply();
-        return { ok: true, result: { applied: true } };
+        // PRI-698 Phase 1: apply() is the real write orchestrator now and
+        // requires a caller deployment context (workspaceDir) the bootstrap
+        // wire contract does not carry. This protocol surface has no
+        // production transport and never served apply (it previously refused
+        // with `shadow_mode_read_only`); returning a structured refusal keeps
+        // that parity without inventing protocol fields for a consumer that
+        // does not exist yet (P7). Extend the wire contract with the real
+        // first consumer.
+        return {
+          ok: false,
+          reason: 'apply_not_supported_over_bootstrap_protocol',
+          message: 'The bootstrap protocol does not carry the deployment context ReleaseManager.apply() requires.',
+          nextAction: 'Trigger updates through the Console update surface, which supplies the deployment context.',
+        };
       case 'rollback':
         await manager.rollback();
         return { ok: true, result: { rolledBack: true } };

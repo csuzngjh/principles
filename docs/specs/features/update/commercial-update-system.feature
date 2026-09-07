@@ -18,10 +18,11 @@ Feature: 商业级版本更新系统行为契约
     And 决策为 allowed 且 direction 为 update
 
   @update-apply
-  Scenario: shadow 模式下 apply 被拒绝并给出 Owner 下一步
-    When 在 shadow 模式下执行 ReleaseManager.apply
-    Then 拒绝原因为 shadow_mode_read_only
+  Scenario: apply 在仓库未发布工件时安全拒绝并关闭事务
+    When 执行 ReleaseManager.apply 而仓库未发布工件
+    Then 拒绝原因为 metadata_refresh_failed
     And 拒绝信息包含面向 Owner 的 nextAction
+    And 打开的更新事务以终态 failed 关闭
 
   @update-reinstall
   Scenario: 相同 releaseId 的再次安装被分类为 reinstall

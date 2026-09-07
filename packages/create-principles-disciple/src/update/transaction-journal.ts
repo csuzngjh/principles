@@ -40,8 +40,10 @@ export type TransactionKind = 'update' | 'reinstall' | 'explicit_downgrade' | 'r
  * - `manifest`          — sha256 of the self-contained asset manifest (whole-payload identity)
  * - `package_manifest`  — sha256 of the bundled component package manifest
  * - `fallback`          — synthetic digest (identity data unavailable); readable but NOT verifiable
+ * - `signed_channel`    — PRI-698 Phase 1: digest bound in the TUF-signed channel document
+ *                         (ReleaseManager apply orchestration identity chain)
  */
-export const RELEASE_METADATA_DIGEST_SOURCES = ['manifest', 'package_manifest', 'fallback'] as const;
+export const RELEASE_METADATA_DIGEST_SOURCES = ['manifest', 'package_manifest', 'fallback', 'signed_channel'] as const;
 
 export type ReleaseMetadataDigestSource = typeof RELEASE_METADATA_DIGEST_SOURCES[number];
 
