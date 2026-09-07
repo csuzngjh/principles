@@ -11,6 +11,7 @@
 docs/pipeline-evolution/                    ← 本目录：场景契约 + 演化报告层
 ├── scenarios/S00x.md                       #   演化场景定义（期望的 pain/原则/行为改变）
 ├── reports/<date>-<scenario>-run.md        #   每轮验证的结构化报告
+├── episode-playbook.md                     #   实操手册：环境配方/陷阱速查/数据集约定（R1/R2/EP001 三轮实测沉淀）
 └── baseline-report.md                      #   Step 0 管道基线（链路/证据来源/缺口）
 
 scripts/dev/pipeline-closure-lab/           ← 夹具层（PRI-634-F，唯一夹具所有者）
