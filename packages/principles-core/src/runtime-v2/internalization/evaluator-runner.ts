@@ -1390,15 +1390,17 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * are skipped (they cannot inform scoping decisions).
    */
   private static extractFailedCaseIds(output: EvaluatorOutputV1): readonly string[] {
-    const record = output as unknown as Record<string, unknown>;
-    const {adversarialResult} = record;
-    if (typeof adversarialResult !== 'object' || adversarialResult === null || Array.isArray(adversarialResult)) return [];
-    const {failedCases} = (adversarialResult as Record<string, unknown>);
+    // rc-1/rc-2 (ERR-001): adversarialResult.failedCases is untrusted
+    // artifact content — narrow via the class's isRecord/Array guards, no `as`.
+    if (!EvaluatorRunner.isRecord(output)) return [];
+    const adversarialResult = output.adversarialResult;
+    if (!EvaluatorRunner.isRecord(adversarialResult)) return [];
+    const failedCases = adversarialResult.failedCases;
     if (!Array.isArray(failedCases)) return [];
     const ids: string[] = [];
     for (const entry of failedCases) {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
-      const {caseId} = (entry as Record<string, unknown>);
+      if (!EvaluatorRunner.isRecord(entry)) continue;
+      const caseId = entry.caseId;
       if (typeof caseId === 'string' && caseId.trim() !== '') ids.push(caseId);
     }
     return ids;
@@ -1421,8 +1423,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       } catch {
         return null;
       }
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-      const value = (parsed as Record<string, unknown>).requiresContextVersion;
+      // rc-1/rc-2 (ERR-001): contentJson parse result is untrusted — narrow
+      // via the isRecord guard + rc-5 hasOwn before reading the field.
+      if (!EvaluatorRunner.isRecord(parsed)) return null;
+      if (!Object.hasOwn(parsed, 'requiresContextVersion')) return null;
+      const value = parsed.requiresContextVersion;
       return typeof value === 'number' ? value : null;
     } catch (err) {
       this.emitEvent('attribution_scope_resolve_failed', taskId, {
