@@ -19,6 +19,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
@@ -234,6 +235,67 @@ function getWorkspacePath(): string | null {
 const REMOVE_RETRY_ATTEMPTS = 3;
 const REMOVE_RETRY_DELAY_MS = 1000;
 
+/**
+ * PRI-696: find node processes running the installed PD console server and
+ * stop them. Without this, a detached auto-launched console keeps native
+ * modules under ~/.pd/runtime/console locked and the uninstall ends in a
+ * partial state that only manual PID hunting resolves.
+ *
+ * Identification is by command line: the argv must reference the installed
+ * console server entry (<pdRuntime>/console/dist/server.js) — the same
+ * command the installer spawns. Never kills anything it cannot attribute.
+ * ERR-045: argv-array execution only; every value is either a literal or a
+ * validated JS-side output match, never a shell string.
+ */
+export function parseWmicProcessCsv(output: string, consoleEntry: string): { pid: number }[] {
+  const results: { pid: number }[] = [];
+  const lines = output.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+  for (const line of lines) {
+    // wmic CSV escapes backslashes ("C:\\Users\\..."); normalize so the
+    // single-backslash filesystem path matches.
+    const normalized = line.replaceAll('\\\\', '\\');
+    if (!normalized.includes(consoleEntry)) continue;
+    // CSV format: <host>,<node>,CommandLine...,<empty>,PID
+    const pidStr = line.substring(line.lastIndexOf(',') + 1).trim();
+    const pid = Number.parseInt(pidStr, 10);
+    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
+      results.push({ pid });
+    }
+  }
+  return results;
+}
+
+function findRunningConsoleProcesses(): { pid: number }[] {
+  const consoleEntry = path.join(getPdRuntimeDir(), 'console', 'dist', 'server.js');
+  if (!existsSync(consoleEntry)) return [];
+  try {
+    // wmic is Windows-only; other platforms have no detached-console lock
+    // problem observed (the EPERM reports so far are all Windows prebuilds).
+    if (!isWindows()) return [];
+    const output = execFileSync('wmic.exe', ['process', 'where', "Name='node.exe'", 'get', 'ProcessId,CommandLine', '/format:csv'], { encoding: 'utf-8', timeout: 10_000 });
+    return parseWmicProcessCsv(output, consoleEntry);
+  } catch {
+    // wmic unavailable/failed — degrade to no-stop; removeWithRetry still
+    // handles transient locks, and the EPERM path reports the manual action.
+    return [];
+  }
+}
+
+function stopRunningConsoleProcesses(): string[] {
+  const notes: string[] = [];
+  for (const proc of findRunningConsoleProcesses()) {
+    try {
+      process.kill(proc.pid, 'SIGTERM');
+      notes.push(`stopped auto-launched console process (PID ${proc.pid})`);
+    } catch {
+      // Already exited or not ours to kill — removing files will surface any
+      // remaining lock through the normal EPERM path.
+      notes.push(`console process PID ${proc.pid} could not be stopped (already exited or access denied)`);
+    }
+  }
+  return notes;
+}
+
 async function removeWithRetry(targetPath: string, _type: 'dir' | 'file'): Promise<void> {
   for (let attempt = 1; attempt <= REMOVE_RETRY_ATTEMPTS; attempt++) {
     try {
@@ -275,6 +337,18 @@ export async function uninstall(
     skippedGlobalShims: [],
     preservedPaths: [],
   };
+
+  // PRI-694: refuse BEFORE any probing when we cannot confirm interactively —
+  // the @inquirer confirm rejects on stdin EOF with an ExitPromptError that
+  // the global uncaughtException handler swallows ("Goodbye!", exit 0),
+  // turning the whole uninstall into a silent no-op that looks like success
+  // in scripts. rc-9: fail loudly with a structured reason instead.
+  if (!options.force && !process.stdin.isTTY) {
+    logger.error(t('uninstall_confirmation_required'));
+    console.log(`   ${t('uninstall_confirmation_next')}`);
+    result.error = t('uninstall_confirmation_required');
+    return result;
+  }
 
   try {
     const gatewayStatus = hostTarget === 'codex'
@@ -340,6 +414,16 @@ export async function uninstall(
         result.success = true;
         return result;
       }
+    }
+
+    // 4b. PRI-696: a running Console (auto-launched by a prior install, kept
+    // alive detached) locks files under ~/.pd/runtime/console and turns the
+    // deletion into a partial uninstall. Find PD-identified console processes
+    // and stop them before deleting — the gateway warning above covers only
+    // half of the lock sources.
+    if (hostTarget !== 'codex') {
+      const stoppedConsoles = stopRunningConsoleProcesses();
+      for (const note of stoppedConsoles) logger.info(`[console] ${note}`);
     }
 
     // 5. Execute deletion (only plugin system files)

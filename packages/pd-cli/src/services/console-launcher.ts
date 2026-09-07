@@ -408,6 +408,11 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
   const health = await probeConsoleHealth({ host, port: preferredPort, token });
   if (health.healthy) {
     if (token && health.authenticationMode !== 'authenticated') {
+      // PRI-695: a token-bearing caller must not land on a no_auth server
+      // (governance writes would be unauthenticated). The refusal stays, but
+      // the guidance must tell the user WHAT is running and the two ways out —
+      // the old text referenced "Companion", which a CLI-only user has never
+      // configured.
       return {
         status: 'refused',
         url: '',
@@ -415,7 +420,10 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
         host,
         reused: false,
         reason: 'console_authentication_mode_mismatch',
-        nextAction: `Stop the Console on port ${preferredPort}, then retry so Companion can start an authenticated Console.`,
+        nextAction:
+          `A Console without authentication is already running on port ${preferredPort} ` +
+          '(the post-install default). Reopen without a token to reuse it, or stop that ' +
+          'Console and start with --token for authenticated access.',
       };
     }
     return {

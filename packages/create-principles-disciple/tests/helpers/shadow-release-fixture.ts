@@ -102,6 +102,21 @@ export async function createShadowFixture(overrides: {
   productVersion?: string;
   publicationSequence?: number;
   channelVersion?: number;
+  /**
+   * PRI-698 Phase 1: platform descriptor of the CANDIDATE release asset.
+   * Defaults keep the historical win32/x64/147 shape (check()-only tests do
+   * not select assets); apply()-flow tests pass the CURRENT runtime values so
+   * selectReleaseAsset matches deterministically on every platform.
+   */
+  candidateAsset?: { platform: string; arch: string; nodeAbi: string };
+  /**
+   * PRI-698 Phase 1: build the release-asset tarball served as the signed
+   * artifact target `releases/<releaseId>/release-asset-<platform>-<arch>.tar.gz`
+   * (custom identity {releaseId, channel, platform}). The tarball's REAL
+   * sha256 is bound into the signed release metadata, so the acquisition
+   * digest cross-check passes only for exactly these bytes.
+   */
+  artifact?: () => Buffer;
 } = {}): Promise<Fixture> {
   const signer = makeKeyMaterial();
   const pdHome = trackTempDir(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-shadow-home-')));
@@ -111,6 +126,14 @@ export async function createShadowFixture(overrides: {
   fs.writeFileSync(paths.bootstrapManifestPath, `${JSON.stringify({ bootstrapVersion: '1.0.0', installedAt: '2026-08-25T00:00:00Z' }, null, 2)}\n`);
   writeInstallConfig(paths, { channel: 'stable', autoCheck: false });
 
+  // The artifact bytes must exist BEFORE the release metadata: deriveReleaseId
+  // hashes the asset list, so the real tarball sha256 has to be bound into the
+  // signed metadata for the acquisition digest cross-check to pass.
+  const artifactBytes = overrides.artifact?.() ?? null;
+  const artifactSha256 = artifactBytes !== null
+    ? createHash('sha256').update(artifactBytes).digest('hex')
+    : 'a'.repeat(64);
+
   const releaseMetadata = buildReleaseMetadata({
     productVersion: overrides.productVersion ?? '1.223.0',
     sourceCommit: '1234567890abcdef1234567890abcdef12345678',
@@ -118,8 +141,11 @@ export async function createShadowFixture(overrides: {
     publicationSequence: overrides.publicationSequence ?? 9,
     expiresAt: expiresFar,
     assets: [{
-      platform: 'win32', arch: 'x64', nodeAbi: '147',
-      archiveSha256: 'a'.repeat(64), archiveSizeBytes: 1024,
+      platform: overrides.candidateAsset?.platform ?? 'win32',
+      arch: overrides.candidateAsset?.arch ?? 'x64',
+      nodeAbi: overrides.candidateAsset?.nodeAbi ?? '147',
+      archiveSha256: artifactSha256,
+      archiveSizeBytes: artifactBytes?.length ?? 1024,
     }],
     dataSchemaForwardReadableFrom: '1.220.0',
   });
@@ -164,6 +190,9 @@ export async function createShadowFixture(overrides: {
   const channelPayloadBytes = Buffer.from(`${JSON.stringify(channelPayload, null, 2)}\n`);
 
   const channelTargetPath = 'channels/stable.json';
+  // PRI-698 Phase 1: the signed artifact target (Phase 1 path convention,
+  // same computation as the acquisition module).
+  const artifactTargetPath = `releases/${releaseMetadata.releaseId}/release-asset-${overrides.candidateAsset?.platform ?? 'win32'}-${overrides.candidateAsset?.arch ?? 'x64'}.tar.gz`;
   const targets = new Targets({
     version: 1,
     specVersion: '1.0.31',
@@ -177,6 +206,18 @@ export async function createShadowFixture(overrides: {
           custom: { releaseId: releaseMetadata.releaseId, channel: 'stable', platform: 'metadata' },
         },
       }),
+      ...(artifactBytes !== null
+        ? {
+          [artifactTargetPath]: new TargetFile({
+            path: artifactTargetPath,
+            length: artifactBytes.length,
+            hashes: { sha256: artifactSha256 },
+            unrecognizedFields: {
+              custom: { releaseId: releaseMetadata.releaseId, channel: 'stable', platform: overrides.candidateAsset?.platform ?? 'win32' },
+            },
+          }),
+        }
+        : {}),
     },
   });
   const root = new Root({ version: 1, specVersion: '1.0.31', expires: expiresFar, consistentSnapshot: false });
@@ -193,6 +234,7 @@ export async function createShadowFixture(overrides: {
     }), signer)],
     ['targets.json', signedMetadata(targets, signer)],
     [`targets/${channelTargetPath}`, channelPayloadBytes],
+    ...(artifactBytes !== null ? [[`targets/${artifactTargetPath}`, artifactBytes] as const] : []),
   ]);
   fs.writeFileSync(path.join(paths.trustDir, 'root.json'), served.get('root.json') as Buffer);
 

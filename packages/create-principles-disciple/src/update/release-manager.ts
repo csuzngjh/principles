@@ -3,14 +3,24 @@
  *
  * External surface is intentionally small: inspect / check / apply /
  * rollback. The module hides metadata validation, download, extraction,
- * staging, probes, journaling, host control, rollback, and cleanup. In this
- * phase (shadow mode) apply/rollback refuse read-only: activation lands with
- * the transaction state machine, never by loosening this gate.
+ * staging, probes, journaling, host control, rollback, and cleanup.
+ *
+ * PRI-698 Phase 1: `apply()` is the update ORCHESTRATOR. It acquires the
+ * signed release payload into the staging area (apply-payload.ts) and hands
+ * deployment to the installer — the only direct artifact deployment authority
+ * (ADR-0024 §2.1) — as ONE journaled transaction (planned → downloaded →
+ * verified by this module; staged → probed → activated → confirmed by the
+ * installer's existing cycle, same journal file). This module performs ZERO
+ * deployment-side filesystem mutation: no writes under `~/.pd/runtime` or the
+ * host extension directories ever originate here. `rollback()` still refuses:
+ * rollback migration is Phase 2 and must prove same-version restore before it
+ * replaces the legacy rollback.
  *
  * Every refusal carries a stable reason and an Owner-visible next action
  * (rc-9) and is computed BEFORE any installation state is mutated.
  */
 
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -35,7 +45,16 @@ import {
   type InstallConfig,
   type PdHomePaths,
 } from './install-layout.js';
-import { readActiveRecord, TransactionJournalError } from './transaction-journal.js';
+import {
+  appendJournalTransition,
+  readActiveRecord,
+  TransactionJournalError,
+  type TransactionState,
+} from './transaction-journal.js';
+import { downloadReleaseAsset, extractAndVerifyReleaseAsset, ApplyPayloadError } from './apply-payload.js';
+import type { InstallerJournal } from '../installer.js';
+import type { Language } from '../i18n.js';
+import type { HostTarget } from '../installers/index.js';
 import type { ReleaseChannelName } from './product-identity.js';
 
 export type ReleaseManagerReason =
@@ -44,17 +63,31 @@ export type ReleaseManagerReason =
   | 'metadata_refresh_failed'
   | 'release_metadata_unavailable'
   | 'release_metadata_invalid'
-  | 'active_record_corrupt';
+  | 'active_record_corrupt'
+  | 'legacy_layout_not_supported'
+  | 'journal_unavailable'
+  | 'apply_failed';
 
 export class ReleaseManagerError extends Error {
   readonly reason: ReleaseManagerReason;
   readonly nextAction: string;
+  /**
+   * PRI-698 Phase 1 default-on safety net: true when the refusal happened
+   * AFTER the apply transaction was opened (planned journaled) — runtime
+   * state may include staging writes and a terminal journal tail. False for
+   * pre-transaction refusals (layout, metadata, journal-unavailable): the
+   * caller can safely fall back to the legacy updater with an explicit
+   * reason, because zero side effects exist.
+   */
+  readonly transactionOpened: boolean;
 
-  constructor(reason: ReleaseManagerReason, message: string, nextAction: string) {
+  // eslint-disable-next-line @typescript-eslint/max-params -- (reason, message, nextAction, transactionOpened) mirrors the four fields of the refusal contract; the 4th is an optional PRI-698 default-on safety-net marker
+  constructor(reason: ReleaseManagerReason, message: string, nextAction: string, transactionOpened = false) {
     super(message);
     this.name = 'ReleaseManagerError';
     this.reason = reason;
     this.nextAction = nextAction;
+    this.transactionOpened = transactionOpened;
   }
 }
 
@@ -91,6 +124,95 @@ export interface UpdateCheck {
     readonly agrees: boolean | null;
     readonly note: string | null;
   };
+}
+
+/** Caller-supplied deployment context for apply() (PRI-698 Phase 1). */
+export interface ApplyOptions {
+  /** Workspace the installer re-run operates on (console passes its own). */
+  readonly workspaceDir: string;
+  /** Installer language; defaults to 'zh' (the installer's default locale). */
+  readonly language?: Language;
+  /** Host installers to run; defaults to 'openclaw' (matches the legacy full-update sync). */
+  readonly host?: HostTarget;
+}
+
+export type ApplyOutcome =
+  | {
+    readonly kind: 'applied';
+    readonly productVersion: string;
+    readonly transactionId: string;
+    readonly journalPath: string;
+  }
+  | {
+    readonly kind: 'no_update';
+    /** Why nothing was applied (policy refusal reason or already-current note). */
+    readonly note: string;
+  };
+
+/** Terminal journal states (mirrors transaction-journal.ts TERMINAL_STATES semantics). */
+const APPLY_TERMINAL_STATES: ReadonlySet<TransactionState> = new Set<TransactionState>([
+  'confirmed', 'rolled_back', 'refused', 'failed',
+]);
+
+/**
+ * Append one transition to the apply transaction's journal file (journal-first
+ * append+fsync, same discipline and format as the installer's writer — one
+ * JSONL file per transaction under ~/.pd/transactions/, ADR-0024 D-2/D-6).
+ * The installer continues THIS file when it takes over deployment.
+ */
+function appendApplyTransition(journal: InstallerJournal, to: TransactionState, detail: string): void {
+  appendJournalTransition(journal.journalPath, {
+    at: new Date().toISOString(),
+    from: journal.lastState,
+    to,
+    transactionId: journal.transactionId,
+    releaseId: journal.releaseId,
+    productVersion: journal.productVersion,
+    releaseMetadataDigest: journal.releaseMetadataDigest,
+    releaseMetadataDigestSource: journal.releaseMetadataDigestSource,
+    generation: journal.generation,
+    detail,
+  });
+  journal.lastState = to;
+}
+
+/**
+ * Close the apply transaction with a terminal `failed` state when the flow
+ * dies before the installer reached one. The installer's own catch path
+ * appends rolled_back/failed for failures inside deployment; this covers
+ * acquisition-phase failures and unexpected throws so a journal never ends
+ * mid-chain (the strict reader rejects transitions after a terminal state,
+ * and a non-terminal tail means "unfinished" for Phase 3 recovery).
+ * The append itself is best-effort: if even the failure record cannot be
+ * written, the on-disk journal stays where it stopped and the thrown error
+ * still reports the failure (observable degradation, rc-9).
+ */
+function ensureTerminalFailed(journal: InstallerJournal, detail: string): void {
+  if (journal.lastState !== null && APPLY_TERMINAL_STATES.has(journal.lastState)) return;
+  try {
+    appendApplyTransition(journal, 'failed', detail);
+  } catch (appendError) {
+    // Tier-2 degradation (same policy as installer.ts): the transaction stays
+    // partially journaled; the backup/restore safety net inside the installer
+    // does not depend on the journal.
+    void appendError;
+  }
+}
+
+function toReleaseManagerError(error: unknown): ReleaseManagerError {
+  if (error instanceof ReleaseManagerError) return error;
+  if (error instanceof ApplyPayloadError) {
+    return new ReleaseManagerError(error.reason, error.message, error.nextAction);
+  }
+  if (error instanceof ReleaseTrustError) {
+    return new ReleaseManagerError('metadata_refresh_failed', error.message, error.nextAction);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return new ReleaseManagerError(
+    'apply_failed',
+    `Release application failed: ${message}`,
+    'The runtime was left on the previous release (installer backup/restore). Retry the update; if it fails again, run the official installer to repair.',
+  );
 }
 
 export interface ReleaseManagerOptions {
@@ -189,6 +311,195 @@ export class ReleaseManager {
   async check(channel: ReleaseChannelName): Promise<UpdateCheck> {
     const now = this.options.now ?? ((): Date => new Date());
     const status = this.inspect();
+
+    const { channelMetadata, trustedTarget } = await this.refreshSignedChannel(channel);
+    const releaseMetadata = this.readReleaseMetadataDocument(channelMetadata, now);
+    const decision = this.evaluateCandidateDecision({ channelMetadata, releaseMetadata, status, now: now() });
+
+    const candidate = {
+      productVersion: releaseMetadata.productVersion,
+      releaseId: releaseMetadata.releaseId,
+      publicationSequence: releaseMetadata.publicationSequence,
+      assets: releaseMetadata.assets.map((asset) => ({
+        platform: asset.platform,
+        arch: asset.arch,
+        nodeAbi: asset.nodeAbi,
+      })),
+    };
+
+    const shadowComparison = await this.compareWithLegacyUpdater(status, decision, candidate.productVersion);
+
+    return {
+      channel,
+      candidate,
+      decision,
+      trustedTarget,
+      shadowComparison,
+    };
+  }
+
+  /**
+   * PRI-698 Phase 1: the update orchestrator. Readiness → signed candidate
+   * resolution → payload acquisition into staging (journaled) → deployment
+   * through the installer (the only direct artifact deployment authority,
+   * ADR-0024 §2.1) as ONE transaction. Every failure leaves the runtime on
+   * the previous release and the journal at a terminal state.
+   */
+  async apply(options: ApplyOptions): Promise<ApplyOutcome> {
+    const status = this.inspect();
+    if (status.layout === 'none') {
+      throw new ReleaseManagerError(
+        'bootstrap_not_installed',
+        'No PD installation was found under this PD home; there is nothing to update.',
+        'Run the official installer (npx create-principles-disciple) first.',
+      );
+    }
+    if (status.layout === 'legacy-overlay') {
+      throw new ReleaseManagerError(
+        'legacy_layout_not_supported',
+        'This installation uses the legacy overlay layout, which the transactional updater does not serve.',
+        'Run the official installer once to migrate into the dual-slot layout; the current updater continues to serve this installation until then.',
+      );
+    }
+
+    // Pre-transaction resolution phase: no side effects have happened, so any
+    // refusal here is a clean, unjournaled refusal — still mapped onto the
+    // typed ReleaseManagerError contract (rc-9), never a raw transport error.
+    let channelMetadata: ChannelMetadata;
+    let releaseMetadata: ReleaseMetadata;
+    try {
+      const { channelMetadata: refreshedChannel } = await this.refreshSignedChannel(status.channel);
+      channelMetadata = refreshedChannel;
+      releaseMetadata = await this.ensureReleaseMetadataDocument(channelMetadata);
+    } catch (error) {
+      throw toReleaseManagerError(error);
+    }
+    const now = this.options.now ?? ((): Date => new Date());
+    const decision = this.evaluateCandidateDecision({ channelMetadata, releaseMetadata, status, now: now() });
+    if (!decision.allowed) {
+      return { kind: 'no_update', note: `${decision.reason}: ${decision.message}` };
+    }
+
+    const transactionId = `update-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const journalPath = path.join(this.paths.transactionsDir, `${transactionId}.jsonl`);
+    const journal: InstallerJournal = {
+      transactionId,
+      journalPath,
+      releaseId: releaseMetadata.releaseId,
+      productVersion: releaseMetadata.productVersion,
+      releaseMetadataDigest: releaseMetadata.metadataDigest,
+      releaseMetadataDigestSource: 'signed_channel',
+      generation: (status.generation ?? 0) + 1,
+      degraded: false,
+      lastState: null,
+    };
+
+    // Journal-first (ADR-0024 D-2, installer Tier-1 policy): record the
+    // transaction BEFORE the first side effect. If even 'planned' cannot be
+    // written, refuse with zero side effects.
+    try {
+      appendApplyTransition(journal, 'planned', `host=${options.host ?? 'openclaw'} mode=smart source=release-manager`);
+    } catch (error) {
+      throw new ReleaseManagerError(
+        'journal_unavailable',
+        `The transaction journal could not be written — refusing to update unjournaled (ADR-0024 D-2): ${error instanceof Error ? error.message : String(error)}`,
+        'Resolve write access to ~/.pd/transactions (disk space / permissions), then retry. No changes were made.',
+      );
+    }
+
+    try {
+      const { install } = await import('../installer.js');
+      const downloaded = await downloadReleaseAsset({
+        paths: this.paths,
+        metadataBaseUrl: this.options.metadataBaseUrl,
+        fetcher: this.options.fetcher,
+        releaseMetadata,
+        channel: status.channel,
+        transactionId,
+      });
+      appendApplyTransition(journal, 'downloaded', `artifact sha256=${downloaded.trustedTarget.artifactSha256} target=${downloaded.trustedTarget.targetPath}`);
+
+      const { payloadDir } = await extractAndVerifyReleaseAsset({
+        transactionDir: downloaded.transactionDir,
+        archivePath: downloaded.archivePath,
+      });
+      appendApplyTransition(journal, 'verified', 'release-asset preflight passed (identity + whole-payload digest)');
+
+      // Deployment is the installer's job, byte for byte the same cycle a
+      // manual run performs: digest preflight → backup rename-swap → component
+      // deploy → console probe → host installers → commit (backup cleanup).
+      // The transaction handle keeps ONE journal file for the whole update.
+      const installResult = await install(
+        {
+          language: options.language ?? 'zh',
+          mode: 'smart',
+          workspaceDir: options.workspaceDir,
+          channels: [],
+          overwriteConfig: false,
+          host: options.host ?? 'openclaw',
+          stopGateway: true,
+        },
+        payloadDir,
+        { quiet: true, nonInteractive: true },
+        journal,
+      );
+      if (!installResult.success) {
+        ensureTerminalFailed(
+          journal,
+          `installer reported failure before deploying (no runtime mutation): ${installResult.error ?? installResult.reason ?? 'unknown'}`,
+        );
+        throw new ReleaseManagerError(
+          'apply_failed',
+          `The installer refused or failed the update: ${installResult.error ?? installResult.reason ?? 'unknown'}`,
+          installResult.nextAction ?? 'The runtime is unchanged. Resolve the reported cause and retry.',
+        );
+      }
+      if (journal.lastState !== 'confirmed') {
+        // rc-7: never claim success from a non-terminal journal — the state
+        // the installer left behind is what recovery will reason about.
+        ensureTerminalFailed(journal, `installer reported success but the transaction ended at '${journal.lastState ?? 'nothing'}'`);
+        throw new ReleaseManagerError(
+          'apply_failed',
+          `The installer reported success but the transaction journal ended at '${journal.lastState ?? 'nothing'}' instead of 'confirmed'.`,
+          'Treat the update as NOT applied. Inspect the transaction journal and re-run the installer to reach a consistent state.',
+        );
+      }
+      return {
+        kind: 'applied',
+        productVersion: releaseMetadata.productVersion,
+        transactionId,
+        journalPath,
+      };
+    } catch (error) {
+      ensureTerminalFailed(
+        journal,
+        `update failed at '${journal.lastState ?? 'planned'}': ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // The transaction was opened (planned journaled): mark the refusal so
+      // the caller knows runtime-side effects may exist (staging writes +
+      // terminal journal tail) and must NOT auto-fallback to the legacy
+      // updater over it.
+      const mapped = toReleaseManagerError(error);
+      throw mapped.transactionOpened
+        ? mapped
+        : new ReleaseManagerError(mapped.reason, mapped.message, mapped.nextAction, true);
+    }
+  }
+
+  async rollback(): Promise<never> {
+    void this.paths; // reserved: Phase 2 rollback drives this.paths / this.options
+    throw new ReleaseManagerError(
+      'shadow_mode_read_only',
+      'Rollback is not enabled yet: the ReleaseManager runs in read-only shadow mode while the transactional activation system is brought up.',
+      'Continue using the current update path. Rollback arrives with the dual-slot transaction rollout.',
+    );
+  }
+
+  /**
+   * Resolve + digest-verify + cache the signed channel document (shared by
+   * check() and apply(); writes stay inside the RM-owned channels cache).
+   */
+  private async refreshSignedChannel(channel: ReleaseChannelName): Promise<{ channelMetadata: ChannelMetadata; trustedTarget: TrustedReleaseTarget }> {
     const channelTargetPath = `channels/${channel}.json`;
 
     let trustedTarget: TrustedReleaseTarget;
@@ -222,18 +533,27 @@ export class ReleaseManager {
       fetcher: this.options.fetcher,
     });
 
-    const channelMetadata = this.readChannelMetadataPayload(channel);
+    return { channelMetadata: this.readChannelMetadataPayload(channel), trustedTarget };
+  }
 
-    const releaseMetadata = this.readReleaseMetadataDocument(channelMetadata, now);
-
-    // Current state for the advancement policy comes from the ACTIVE release's
-    // own metadata when a dual-slot installation exists.
+  /**
+   * evaluateReleaseAdvancement with the ACTIVE release's own metadata as the
+   * current state when a dual-slot installation records one (shared by
+   * check() and apply()).
+   */
+  private evaluateCandidateDecision(input: {
+    channelMetadata: ChannelMetadata;
+    releaseMetadata: ReleaseMetadata;
+    status: InstallStatus;
+    now: Date;
+  }): ReleasePolicyDecision {
+    const { channelMetadata, releaseMetadata, status, now } = input;
     let decision = evaluateReleaseAdvancement({
       channel: channelMetadata,
       candidate: releaseMetadata,
       current: null,
       bootstrapVersion: status.bootstrapVersion ?? '0.0.0',
-      now: now(),
+      now,
     });
     if (status.releaseId !== null && status.productVersion !== null) {
       const activeMetadata = this.readActiveReleaseMetadata(status.releaseId);
@@ -249,49 +569,40 @@ export class ReleaseManager {
             previouslyConfirmedReleaseIds: [status.releaseId],
           },
           bootstrapVersion: status.bootstrapVersion ?? '0.0.0',
-          now: now(),
+          now,
         });
       }
     }
-
-    const candidate = {
-      productVersion: releaseMetadata.productVersion,
-      releaseId: releaseMetadata.releaseId,
-      publicationSequence: releaseMetadata.publicationSequence,
-      assets: releaseMetadata.assets.map((asset) => ({
-        platform: asset.platform,
-        arch: asset.arch,
-        nodeAbi: asset.nodeAbi,
-      })),
-    };
-
-    const shadowComparison = await this.compareWithLegacyUpdater(status, decision, candidate.productVersion);
-
-    return {
-      channel,
-      candidate,
-      decision,
-      trustedTarget,
-      shadowComparison,
-    };
+    return decision;
   }
 
-  async apply(): Promise<never> {
-    void this.paths; // reserved: Phase 4 activation drives this.paths / this.options
-    throw new ReleaseManagerError(
-      'shadow_mode_read_only',
-      'Release application is not enabled yet: the ReleaseManager runs in read-only shadow mode while the transactional activation system is brought up.',
-      'Continue using the current update path. Activation arrives with the dual-slot transaction rollout; this refusal protects against hybrid installations.',
-    );
-  }
-
-  async rollback(): Promise<never> {
-    void this.paths; // reserved: Phase 4 rollback drives this.paths / this.options
-    throw new ReleaseManagerError(
-      'shadow_mode_read_only',
-      'Rollback is not enabled yet: the ReleaseManager runs in read-only shadow mode while the transactional activation system is brought up.',
-      'Continue using the current update path. Rollback arrives with the dual-slot transaction rollout.',
-    );
+  /**
+   * The release metadata document names the bytes to deploy. check() only
+   * evaluates already-cached documents; apply() is the "transactional updater"
+   * that finally downloads it: TUF target `releases/<releaseId>/metadata.json`
+   * (Phase 1 convention, custom identity {releaseId, channel, platform:
+   * 'metadata'}) fetched digest-verified into the releases cache, then read
+   * back through the SAME strict validation path (identity + expiry + channel
+   * digest binding). A pre-seeded local document is still accepted unchanged,
+   * so check()-time behavior is untouched.
+   */
+  private async ensureReleaseMetadataDocument(channel: ChannelMetadata): Promise<ReleaseMetadata> {
+    const now = this.options.now ?? ((): Date => new Date());
+    try {
+      return this.readReleaseMetadataDocument(channel, now);
+    } catch (error) {
+      if (!(error instanceof ReleaseManagerError) || error.reason !== 'release_metadata_unavailable') {
+        throw error;
+      }
+      await downloadTrustedReleasePayload({
+        metadataDir: this.paths.trustDir,
+        metadataBaseUrl: this.options.metadataBaseUrl,
+        targetPath: `releases/${channel.releaseId}/metadata.json`,
+        destinationPath: path.join(this.paths.releasesDir, channel.releaseId, 'metadata.json'),
+        fetcher: this.options.fetcher,
+      });
+      return this.readReleaseMetadataDocument(channel, now);
+    }
   }
 
   private legacyOverlayMarker(): string {

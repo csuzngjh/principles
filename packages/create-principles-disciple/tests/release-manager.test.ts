@@ -10,7 +10,7 @@ import {
   serializeBootstrapResponse,
 } from '../src/update/bootstrap-protocol.js';
 import { ensurePdHomeLayout, resolvePdHomePaths } from '../src/update/install-layout.js';
-import { writeActiveRecord } from '../src/update/transaction-journal.js';
+import { readTransactionJournal, writeActiveRecord } from '../src/update/transaction-journal.js';
 import type { LegacyUpdaterDecision } from '../src/update/release-manager.js';
 import { createShadowFixture, disposeShadowFixtures, trackTempDir } from './helpers/shadow-release-fixture.js';
 
@@ -153,11 +153,49 @@ describe('ReleaseManager shadow mode', () => {
     expect(check.shadowComparison.note).toMatch(/legacy updater failed/);
   });
 
-  it('refuses apply and rollback in shadow mode with owner-facing next actions', async () => {
-    const fixture = await createShadowFixture();
+  it('rollback still refuses in shadow mode; apply refuses legacy-overlay and journals terminal failed when acquisition fails', async () => {
+    const fixture = await createShadowFixture({
+      candidateAsset: { platform: process.platform, arch: process.arch, nodeAbi: process.versions.modules },
+    });
     const manager = new ReleaseManager({ pdHome: fixture.pdHome, metadataBaseUrl: fixture.repository.baseUrl , openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-')});
-    await expect(manager.apply()).rejects.toMatchObject({ reason: 'shadow_mode_read_only' });
+    // PRI-698 Phase 2 (not this task): rollback keeps refusing.
     await expect(manager.rollback()).rejects.toMatchObject({ reason: 'shadow_mode_read_only' });
+
+    // PRI-698 Phase 1: apply() refuses non-dual-slot layouts BEFORE any write.
+    const overlayHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-shadow-overlay-'));
+    trackTempDir(overlayHome);
+    const overlayManager = new ReleaseManager({
+      pdHome: path.join(overlayHome, '.pd'),
+      metadataBaseUrl: 'http://127.0.0.1:1',
+      openclawHome: overlayHome,
+    });
+    fs.mkdirSync(path.join(overlayHome, 'extensions', 'principles-disciple'), { recursive: true });
+    await expect(overlayManager.apply({ workspaceDir: overlayHome })).rejects.toMatchObject({
+      reason: 'legacy_layout_not_supported',
+    });
+    expect(fs.existsSync(path.join(overlayHome, '.pd', 'transactions'))).toBe(false);
+
+    // On a dual-slot install whose repository publishes no ARTIFACT target,
+    // apply() proceeds past policy, opens the transaction (planned), fails
+    // acquisition, and closes the journal at a terminal `failed` — a strict
+    // reader must see a complete chain and no success claim.
+    const dualManager = new ReleaseManager({
+      pdHome: fixture.pdHome,
+      metadataBaseUrl: fixture.repository.baseUrl,
+      openclawHome: path.join(os.tmpdir(), 'pd-test-no-openclaw-'),
+    });
+    const applyError: ReleaseManagerError = await dualManager
+      .apply({ workspaceDir: fixture.pdHome })
+      .then(
+        () => { throw new Error('apply should have refused'); },
+        (error: unknown) => error as ReleaseManagerError,
+      );
+    expect(applyError.reason).toBe('metadata_refresh_failed');
+    const transactionsDir = path.join(fixture.pdHome, 'transactions');
+    const journalFiles = fs.readdirSync(transactionsDir).filter((name) => name.startsWith('update-'));
+    expect(journalFiles).toHaveLength(1);
+    const transitions = readTransactionJournal(path.join(transactionsDir, journalFiles[0]));
+    expect(transitions.map((t) => t.to)).toEqual(['planned', 'failed']);
   });
 });
 
@@ -211,9 +249,12 @@ describe('bootstrap protocol', () => {
     expect(inspect).toMatchObject({ ok: true, result: { layout: 'none' } });
 
     const apply = await handleBootstrapRequest({ op: 'apply', releaseId: 'a'.repeat(64) }, manager);
+    // PRI-698 Phase 1: apply() needs a deployment context the bootstrap wire
+    // contract does not carry — a structured protocol refusal, same shape as
+    // any manager refusal (rc-9).
     expect(apply).toMatchObject({
       ok: false,
-      reason: 'shadow_mode_read_only',
+      reason: 'apply_not_supported_over_bootstrap_protocol',
     });
     if (!apply.ok) {
       expect(apply.nextAction.length).toBeGreaterThan(10);
