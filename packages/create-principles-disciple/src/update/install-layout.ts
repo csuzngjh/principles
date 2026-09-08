@@ -21,6 +21,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseProductVersion, ProductIdentityError, isReleaseChannelName, type ReleaseChannelName } from './product-identity.js';
+import { normalizeReleaseMetadataUrl } from './release-metadata-source.js';
 
 export interface PdHomePaths {
   readonly home: string;
@@ -123,12 +124,39 @@ export function readBootstrapManifest(paths: PdHomePaths): BootstrapManifest | n
 export interface InstallConfig {
   readonly channel: ReleaseChannelName;
   readonly autoCheck: boolean;
+  /**
+   * PRI-709 P0-1: durable base URL of the signed release metadata repository.
+   *
+   * Additive and optional — an install.json written before this field existed
+   * (or by a writer that does not know about it) stays valid and resolves to
+   * `unconfigured`. Written by the installer at install time so a new shell,
+   * a new process or a restarted Console resolves the same source without an
+   * environment variable (see `release-metadata-source.ts`).
+   */
+  readonly releaseMetadataUrl?: string;
+}
+
+/** Strict validator for the optional `releaseMetadataUrl` field (rc-3). */
+function parseReleaseMetadataUrlField(value: unknown, paths: PdHomePaths): string | undefined {
+  if (value === undefined) return undefined;
+  // An empty or whitespace-only value is "not configured", consistent with how
+  // the resolver treats an unset environment override — it must not brick
+  // readiness for the whole install (PRI-709 review).
+  if (typeof value === 'string' && value.trim().length === 0) return undefined;
+  const normalized = normalizeReleaseMetadataUrl(value);
+  if (normalized === null) {
+    throw new InstallLayoutError(
+      'releaseMetadataUrl',
+      `install.json releaseMetadataUrl must be a non-empty http(s) URL, got: ${JSON.stringify(value)} (${paths.installConfigPath})`,
+    );
+  }
+  return normalized;
 }
 
 /**
  * Installation-level settings (SPEC §2.3). Missing file yields the safe
- * default (stable channel, automatic checks off); a malformed file fails
- * loud instead of degrading to guesses.
+ * default (stable channel, automatic checks off, no metadata source); a
+ * malformed file fails loud instead of degrading to guesses.
  */
 export function readInstallConfig(paths: PdHomePaths): InstallConfig {
   const value = readJsonFileIfExists(paths.installConfigPath, 'install.json');
@@ -145,14 +173,71 @@ export function readInstallConfig(paths: PdHomePaths): InstallConfig {
   if (typeof autoCheckValue !== 'boolean') {
     throw new InstallLayoutError('autoCheck', `install.json autoCheck must be a boolean, got: ${JSON.stringify(autoCheckValue)}`);
   }
-  return { channel: channelValue, autoCheck: autoCheckValue };
+  const releaseMetadataUrl = parseReleaseMetadataUrlField(
+    Object.hasOwn(record, 'releaseMetadataUrl') ? record.releaseMetadataUrl : undefined,
+    paths,
+  );
+  return {
+    channel: channelValue,
+    autoCheck: autoCheckValue,
+    ...(releaseMetadataUrl !== undefined ? { releaseMetadataUrl } : {}),
+  };
 }
 
+/**
+ * Read `install.json` as an untyped record for merge-preserving writers.
+ *
+ * PRI-709 P0-1: `~/.pd/install.json` historically had more than one writer
+ * with disjoint schemas — the installer wrote `{layoutVersion, mode, hosts,
+ * workspaces}` and `writeInstallConfig` wrote `{channel, autoCheck}`, each
+ * wholesale-clobbering the other's fields (and making the manifest parser fail
+ * on the victim's shape). Every writer of this file must therefore merge into
+ * the existing record instead of replacing it. Corrupt JSON still fails loud
+ * (rc-3): overwriting an unreadable file would destroy state we cannot
+ * inspect.
+ */
+export function readInstallJsonRecord(filePath: string): Record<string, unknown> | undefined {
+  const value = readJsonFileIfExists(filePath, 'install.json');
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new InstallLayoutError('install.json', `install.json must be a JSON object: ${filePath}`);
+  }
+  return { ...(value as Record<string, unknown>) };
+}
+
+/**
+ * Merge-preserving write (PRI-709 P0-1). Own fields are overwritten; every
+ * other field already present is preserved so the installer-owned manifest
+ * fields (`layoutVersion`, `mode`, `hosts`, `workspaces`) survive an
+ * update-side config write and vice versa.
+ *
+ * PRI-709 review: a caller that does not know about `releaseMetadataUrl` (and
+ * therefore leaves it `undefined`) must not silently DELETE the durable tier
+ * the installer wrote. An absent field in `config` preserves whatever is on
+ * disk; only an explicit value overwrites it. There is no programmatic way to
+ * clear the field — clearing is an installer-level decision.
+ */
 export function writeInstallConfig(paths: PdHomePaths, config: InstallConfig): void {
-  const payload = {
+  const existing = readInstallJsonRecord(paths.installConfigPath);
+  const payload: Record<string, unknown> = {
+    ...(existing ?? {}),
     channel: config.channel,
     autoCheck: config.autoCheck,
   };
+  if (config.releaseMetadataUrl !== undefined) {
+    payload.releaseMetadataUrl = config.releaseMetadataUrl;
+  }
   fs.mkdirSync(paths.home, { recursive: true });
   fs.writeFileSync(paths.installConfigPath, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
+/** Field-level merge for writers that do not own the whole record. */
+export function mergeIntoInstallJson(
+  filePath: string,
+  patch: Record<string, unknown>,
+): void {
+  const existing = readInstallJsonRecord(filePath);
+  const payload: Record<string, unknown> = { ...(existing ?? {}), ...patch };
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
 }
