@@ -24,6 +24,13 @@ updates:
       day: 'monday'
       time: '09:00'
     open-pull-requests-limit: 3
+    # tuf-js 是签名发布验证客户端（安全边界）：跨 major 升级会连带
+    # @tufjs/models 精确 peer + node engines 门槛（6.0 要求 node ≥22.22.2，
+    # 而安装器声明 >=22.0.0），必须作为专门迁移处理，不走自动 major PR
+    # （PR #1543 实证）。minor/patch 仍自动提。
+    ignore:
+      - dependency-name: 'tuf-js'
+        update-types: ['version-update:semver-major']
     commit-message:
       prefix: 'chore'
       include: 'scope'
@@ -40,6 +47,12 @@ updates:
       day: 'monday'
       time: '09:00'
     open-pull-requests-limit: 3
+    # @principles/* 是 monorepo workspace 内部包：本地版本永远落后于发布管线
+    # 在 registry 上 bump 出的版本（CI publish 时 reset-then-bump，不回写 main），
+    # dependabot 按 registry 版本提的 PR 会让 npm 绕过 workspace link 装到已发布
+    # tarball，破坏 parity/本地开发环（PR #1541 实证）。
+    ignore:
+      - dependency-name: '@principles/*'
     commit-message:
       prefix: 'chore'
       include: 'scope'
