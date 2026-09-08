@@ -15,7 +15,7 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
@@ -25,6 +25,7 @@ import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
 import { getGlobalShimPaths, getInstalledBinDir, getPdRuntimeDir, getInstallManifestPath, isWindows } from './mvp-config.js';
 import { parseInstallManifest } from '@principles/install-layout';
+import { mergeIntoInstallJson } from './update/install-layout.js';
 import { setLanguage, t, getLanguage } from './i18n.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostUninstallContext, HostUninstallResult } from '@principles/core/host';
@@ -581,11 +582,14 @@ export async function uninstall(
         deleteErrors.push({ name: 'PD install manifest', error: err instanceof Error ? err.message : String(err) });
       }
     } else if (!runtimePlan.removeSharedRuntime && runtimePlan.remainingHosts.length > 0) {
-      writeFileSync(getInstallManifestPath(), JSON.stringify({
+      // PRI-709 P0-1: merge instead of replace — a wholesale rewrite dropped
+      // `workspaces` and every update-side field (channel / autoCheck /
+      // releaseMetadataUrl).
+      mergeIntoInstallJson(getInstallManifestPath(), {
         layoutVersion: 1,
         mode: 'canonical',
         hosts: runtimePlan.remainingHosts,
-      }, null, 2) + '\n', 'utf8');
+      });
     }
 
     // 7. Record preserved paths
