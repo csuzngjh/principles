@@ -13,6 +13,15 @@ export interface FailedTaskRecoveryInfo {
   maxAttempts: number;
   isExhausted: boolean;
   status: string;
+  /**
+   * Persisted inputRef of the task record. For diag_* stage tasks this is
+   * the parent diagnostician task ID (linkage written by
+   * SplitDiagnosticianRunner.ensureSubTask); for diagnostician parent tasks
+   * it is the source painId. null when absent — consumers that need the
+   * stage→parent linkage must fall back to the diag_<stage>-<parentTaskId>
+   * ID convention and report unresolved linkage honestly.
+   */
+  inputRef: string | null;
 }
 
 export interface FailedTaskRecoveryResult {
@@ -70,6 +79,7 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
         maxAttempts: t.maxAttempts,
         isExhausted: t.attemptCount >= t.maxAttempts,
         status: t.status,
+        inputRef: t.inputRef ?? null,
       }));
   }
 

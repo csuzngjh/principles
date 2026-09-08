@@ -123,10 +123,10 @@ describe('detectFailedTasks — recovery discovery (PRI-674)', () => {
 
   it('returns failed diagnostician parent and diag_* stage tasks (GAP-1 regression)', async () => {
     mockListTasks.mockResolvedValue([
-      makeTask({ taskId: 'diag-parent', taskKind: 'diagnostician' }),
-      makeTask({ taskId: 'diag-a', taskKind: 'diag_rootcause' }),
-      makeTask({ taskId: 'diag-b', taskKind: 'diag_distiller' }),
-      makeTask({ taskId: 'diag-c', taskKind: 'diag_router' }),
+      makeTask({ taskId: 'diag-parent', taskKind: 'diagnostician', inputRef: 'pain-001' }),
+      makeTask({ taskId: 'diag-a', taskKind: 'diag_rootcause', inputRef: 'diag-parent' }),
+      makeTask({ taskId: 'diag-b', taskKind: 'diag_distiller', inputRef: 'diag-parent' }),
+      makeTask({ taskId: 'diag-c', taskKind: 'diag_router', inputRef: 'diag-parent' }),
     ]);
 
     const handle = await createRecoverySweepService({ workspaceDir: '/tmp/test-ws' });
@@ -134,6 +134,22 @@ describe('detectFailedTasks — recovery discovery (PRI-674)', () => {
 
     expect(results.map((r) => r.taskId).sort())
       .toEqual(['diag-a', 'diag-b', 'diag-c', 'diag-parent']);
+    // inputRef is the persisted stage→parent linkage consumed by CLI
+    // execution guidance (PRI-674 review P2).
+    expect(results.find((r) => r.taskId === 'diag-a')?.inputRef).toBe('diag-parent');
+    expect(results.find((r) => r.taskId === 'diag-parent')?.inputRef).toBe('pain-001');
+  });
+
+  it('returns inputRef null when the task record has none', async () => {
+    mockListTasks.mockResolvedValue([
+      makeTask({ taskId: 'no-ref', taskKind: 'diag_router', inputRef: undefined }),
+    ]);
+
+    const handle = await createRecoverySweepService({ workspaceDir: '/tmp/test-ws' });
+    const results = await handle.service.detectFailedTasks();
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.inputRef).toBeNull();
   });
 
   it('still returns peer runner kinds with isExhausted computed', async () => {
