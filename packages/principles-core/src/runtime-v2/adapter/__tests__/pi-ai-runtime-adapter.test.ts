@@ -2417,6 +2417,17 @@ describe('PiAiRuntimeAdapter', () => {
       expect(evidencePack?.truncated).toBe(true);
       expect(evidencePack?.stopReason).toBe('length');
 
+      // Terminal telemetry must carry the same truncation evidence so
+      // monitoring can distinguish a token-limit cut from an ordinary
+      // schema failure (PR #1574 review finding). Default helper usage
+      // reports output: 5.
+      const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
+      expect(exhaustedEvent?.payload).toMatchObject({
+        stopReason: 'length',
+        truncated: true,
+        outputTokens: 5,
+      });
+
       // The FIRST completeSimple call is the original generation; repair
       // calls follow. Their user message must carry the truncation notice so
       // the repair LLM stops treating a cut fragment as a misunderstanding.

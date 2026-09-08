@@ -842,6 +842,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 validationErrors: validationErrorEntries,
                 repairAttempts: evidencePack.repairAttempts,
                 finalFailureReason: evidencePack.finalFailureReason,
+                // PRI-707: keep the terminal repair-exhausted event able to
+                // distinguish a token-limit cut from an ordinary schema
+                // failure — mirror the evidencePack finish metadata (PR #1574
+                // review finding).
+                stopReason: finishStopReason,
+                truncated: truncatedByProvider || undefined,
+                outputTokens: finishOutputTokens,
               },
             });
 
