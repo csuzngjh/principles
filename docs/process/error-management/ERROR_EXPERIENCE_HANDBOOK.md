@@ -510,6 +510,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Fix: when adding optional deps/fields/handlers to a constructor/service interface, grep ALL construction sites and update each one; add a test exercising the production construction path (not just the helper in isolation).
 
 ---
+  - 2026-09-08 PRI-705 / PR #1551 review round: `partitionV2OutOfScopeFailures` shipped with direct-call unit tests (hand-built `requiresContextVersion: undefined`), but the production resolver `resolveRequiresContextVersion` collapsed "key absent on a PARSED artifact" (deterministically v1 — the classifier's entire target population) into the same `null` as "unresolvable", so the out-of-scope routing could never fire in production. Fixed with a three-state resolver (literal 2 / `undefined` = resolved-v1 / `null` = unresolvable) extracted as a pure function + a WIRING-level regression test that enters through the real artifact `contentJson` shape. Lesson: when a pure classifier sits behind a production resolver, "absent on valid input" and "input unresolvable" are different states — collapsing them creates dead branches direct-call tests cannot catch; always add one test driving the resolver→classifier composition with the production input shape.
+
+---
+
 **[ERR-025]** | Test coverage proves isolated helper behavior, not real production defense
 
 - **What happened**: `broken-artifact-simulation.ts` was added with `decideDownstreamGate()` and 54 tests, but no production code called it. The real `InternalizationChainIntegrityReadModel` and `InternalizationIntegrityRemediation` were completely untested. Tests proved the helper's logic, but the production system had no defense against the scenarios the helper covered.
@@ -628,7 +632,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 113 |
-| Last updated | 2026-09-06 |
+| Last updated | 2026-09-08 |
 | Top category | Schema & Type |
 | Recurring errors | 59 |
 
@@ -1129,6 +1133,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-08-27 / PR #1421 (PRI-606, self-review during implementation): `validatePdConfig` reconstructed the validated `PdConfig` field-by-field and never extracted the `principles` section — `principles.outputLanguage` (canonical language SSOT since PRI-336) was silently dropped between raw YAML and `effective.config` for every `loadPdConfigForPlugin` consumer. The SSOT only *appeared* to work because pd-cli (`config-reader.ts`) and pd-console (`pd-config-store.ts`) re-read the raw YAML in parallel shadow paths. Fixed by extracting/validating `principles` (strict `outputLanguage` via `isValidOutputLanguage`) into the returned config; regression guard `pd-config-principles.test.ts`; prompt.ts now reads the language through this canonical path.
 
 ---
+  - 2026-09-08 PRI-700 / PR #1551 review round (CodeRabbit P1 + CI failure): `handleValidationError` persisted `output_failure_details`, then wrote `lastValidatorErrors` via a SECOND `updateTask` whose diagnosticJson base was re-parsed from the `ctx.task.diagnosticJson` snapshot taken BEFORE the first write — the second write replaced the whole column and silently erased `output_failure_details`. CI caught it as "updateTask called 2 times, expected 1". Fixed by generalizing `persistOutputFailureDetails` with an `extraTopLevelKeys` param so both keys land in ONE read-modify-write. Broaden — additive is not safe at the WRITE level either: keys appended to the same persisted record within one flow must coalesce into a single read-modify-write; a second RMW built from a pre-first-write in-memory snapshot is a lost update.
+
+---
+
 **[ERR-096]** | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal
 
 - **What happened**: In the `create-principles-disciple` installer gateway pre-flight, `install()` showed a 3-way interactive `@inquirer/prompts` `select` (stop / proceed / abort) when the OpenClaw gateway was running. Prompting was gated on `!quiet`, where `quiet` is `install()`'s mode parameter set to `jsonMode` (true only under `--json`). The CLI also exposes `--yes` / `--non-interactive`, which are non-interactive but NOT `--json`. So a `--yes` run with the gateway up had `quiet=false` → `interactive=true` → `install()` invoked `select` and **hung waiting for stdin**, breaking the `--yes` non-interactive contract and any CI/script relying on `--yes`. Caught in adversarial self-review before PR handoff; no `--yes` user was affected.
