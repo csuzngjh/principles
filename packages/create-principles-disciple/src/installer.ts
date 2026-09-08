@@ -46,6 +46,11 @@ import {
   verifyReleaseAssetManifestAsync,
   verifyReleaseAssetTarget,
 } from './update/release-asset-manifest.js';
+import {
+  mergeIntoInstallJson,
+  readInstallJsonRecord,
+} from './update/install-layout.js';
+import { RELEASE_METADATA_URL_ENV, normalizeReleaseMetadataUrl } from './update/release-metadata-source.js';
 import { appendJournalTransition, type ReleaseMetadataDigestSource, type TransactionState } from './update/transaction-journal.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
@@ -198,7 +203,45 @@ function resolveInstallManifestWorkspaces(workspaceDir: string): string[] {
 
 function writeInstallManifest(hosts: ('codex' | 'openclaw')[], workspaces: string[]): void {
   mkdirSync(getPdDir(), { recursive: true });
-  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts, workspaces }, null, 2) + '\n', 'utf8');
+  // PRI-709 P0-1: merge into the existing record. This file has more than one
+  // writer (the update side owns `channel` / `autoCheck` / `releaseMetadataUrl`);
+  // a wholesale replace silently deleted those fields.
+  const existing = readInstallJsonRecord(getInstallManifestPath());
+  const payload: Record<string, unknown> = {
+    ...(existing ?? {}),
+    layoutVersion: 1,
+    mode: 'canonical',
+    hosts,
+    workspaces,
+  };
+  writeFileSync(getInstallManifestPath(), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * PRI-709 P0-1 — installer supply path for the release metadata source.
+ *
+ * The installer is the only component that legitimately knows the metadata
+ * repository at install time, so it persists `PD_RELEASE_METADATA_URL` into
+ * `~/.pd/install.json` (the durable `install_config` tier). Without this the
+ * variable had to be exported in every shell that wanted a governed update
+ * check (PRI-698 audit F-4).
+ *
+ * Absent env is a no-op — an install with no metadata source stays
+ * unconfigured rather than persisting a guessed URL. A malformed env value is
+ * reported and skipped: it must never be written into install.json, where the
+ * strict reader would then fail loud and mark the install corrupt.
+ */
+export function persistReleaseMetadataSource(): void {
+  const raw = process.env[RELEASE_METADATA_URL_ENV];
+  if (raw === undefined || raw.trim().length === 0) return;
+  const normalized = normalizeReleaseMetadataUrl(raw);
+  if (normalized === null) {
+    logger.warn(
+      `${RELEASE_METADATA_URL_ENV} is not a valid http(s) URL and was not persisted to install.json: ${JSON.stringify(raw)}. Release metadata source stays unconfigured.`,
+    );
+    return;
+  }
+  mergeIntoInstallJson(getInstallManifestPath(), { releaseMetadataUrl: normalized });
 }
 
 function installBundledLayoutPackage(pluginDir: string): void {
@@ -2759,6 +2802,9 @@ export async function install(
       throw new Error(`Host installation failed: ${hostFailures.join(' | ')}`);
     }
     writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir));
+    // PRI-709 P0-1: persist the metadata source after the manifest write, so
+    // the durable tier cannot be clobbered by the same install.
+    persistReleaseMetadataSource();
     // ADR-0024 D-2: host installers completed and the install manifest is
     // written — the new installation is fully activated (backups not yet
     // discarded, so a crash here still recovers via the backup).

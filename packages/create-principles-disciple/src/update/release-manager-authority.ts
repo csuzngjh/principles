@@ -49,7 +49,8 @@ import {
   type InstallStatus,
   type LegacyUpdaterDecision,
 } from './release-manager.js';
-import { InstallLayoutError, resolvePdHomePaths } from './install-layout.js';
+import { InstallLayoutError, readInstallConfig, resolvePdHomePaths } from './install-layout.js';
+import { resolveReleaseMetadataSource, type ReleaseMetadataSource } from './release-metadata-source.js';
 
 /** Mutation kinds the console MutationController routes (PRI-659 contract). */
 export const RELEASE_MANAGER_AUTHORITY_KINDS = ['check', 'apply', 'apply-full', 'rollback'] as const;
@@ -90,6 +91,13 @@ export interface ReleaseManagerAuthority {
   /** Install status snapshot; null when the install state failed a strict reader. */
   readonly installStatus: InstallStatus | null;
   readonly kinds: Readonly<Record<ReleaseManagerAuthorityKind, ReleaseManagerAuthorityReadiness>>;
+  /**
+   * PRI-709 P0-1: how the metadata base URL was resolved. `metadataBaseUrl` is
+   * `undefined` for `invalid` / `unconfigured` — the same condition that
+   * produces the `metadata_source_unconfigured` readiness reason, so an
+   * unconfigured install still falls back exactly as before.
+   */
+  readonly metadataSource: ReleaseMetadataSource;
 }
 
 /**
@@ -113,13 +121,33 @@ export function createReleaseManagerAuthority(
 ): ReleaseManagerAuthority {
   const reasons = new Set<ReleaseManagerAuthorityReason>();
 
-  if (options.metadataBaseUrl === undefined || options.metadataBaseUrl.length === 0) {
+  // PRI-709 P0-1: resolve the metadata source BEFORE constructing the manager.
+  // `install_config` is the durable tier — an install that was installed with
+  // a metadata URL resolves it from ~/.pd/install.json with no env present.
+  // A corrupt install.json is reported, not swallowed: it is also the state
+  // `manager.inspect()` reads, so both surface as `install_state_corrupt`.
+  let installConfig: ReturnType<typeof readInstallConfig> | null = null;
+  try {
+    installConfig = readInstallConfig(resolvePdHomePaths(options.pdHome));
+  } catch (error) {
+    if (error instanceof InstallLayoutError) {
+      reasons.add('install_state_corrupt');
+    } else {
+      throw error;
+    }
+  }
+
+  const metadataSource = resolveReleaseMetadataSource({
+    explicit: options.metadataBaseUrl,
+    installConfig,
+  });
+  if (metadataSource.metadataBaseUrl === undefined) {
     reasons.add('metadata_source_unconfigured');
   }
 
   const manager = new ReleaseManager({
     pdHome: options.pdHome,
-    metadataBaseUrl: options.metadataBaseUrl ?? '',
+    metadataBaseUrl: metadataSource.metadataBaseUrl ?? '',
     ...(options.openclawHome !== undefined ? { openclawHome: options.openclawHome } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
     ...(options.legacyCheck !== undefined ? { legacyCheck: options.legacyCheck } : {}),
@@ -167,7 +195,7 @@ export function createReleaseManagerAuthority(
     },
   } satisfies Readonly<Record<ReleaseManagerAuthorityKind, ReleaseManagerAuthorityReadiness>>;
 
-  return { manager, installStatus, kinds };
+  return { manager, installStatus, kinds, metadataSource };
 }
 
 /**
