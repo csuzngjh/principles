@@ -2,7 +2,7 @@ import { createRuntimeStateHandle } from './runtime-state-handle.js';
 import type { RuntimeStateHandle } from './runtime-state-handle.js';
 import type { RecoveryResult } from './store/lifecycle/recovery-sweep.js';
 import { PDRuntimeError } from './error-categories.js';
-import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
+import { isRunnerKind } from './internalization/peer-runner-contracts.js';
 import { ownerRetryNeedsHumanReviewTask } from './internalization/owner-retry.js';
 import type { OwnerRetryOutcome } from './internalization/owner-retry.js';
 
@@ -58,7 +58,11 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
   async detectFailedTasks(): Promise<FailedTaskRecoveryInfo[]> {
     const failedTasks = await this.stateManager.listTasks({ status: 'failed' });
     return failedTasks
-      .filter(t => isPeerRunnerKind(t.taskKind))
+      // Discovery must cover everything recoverFailedTask() can recover: the
+      // 6 peer runners, the diag_* split-pipeline stages (isRunnerKind), and
+      // the parent 'diagnostician' task (a TaskRecord kind, not a RunnerKind).
+      // Unrelated kinds (e.g. principle_candidate_intake) stay excluded.
+      .filter(t => isRunnerKind(t.taskKind) || t.taskKind === 'diagnostician')
       .map(t => ({
         taskId: t.taskId,
         taskKind: t.taskKind,

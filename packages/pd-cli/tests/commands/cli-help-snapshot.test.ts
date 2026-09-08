@@ -81,12 +81,18 @@ describe('PRI-455: pd runtime --help shows only MVP owner subcommands', () => {
     expect(runtimeHelp).toMatch(/\bfeatures\b/);
   });
 
+  // PRI-674: recovery is now owner-facing — it is the only failed-task
+  // recovery re-entry point for an Owner without Console access, so hiding
+  // it made failed diagnostician tasks undiscoverable.
+  it('runtime --help shows recovery', () => {
+    expect(runtimeHelp).toMatch(/^\s+recovery\b/m);
+  });
+
   // Operator subcommands that should be hidden
   const HIDDEN_RUNTIME_SUBCOMMANDS = [
     'canary',
     'synthetic',
     'uat',
-    'recovery',
     'pruning',
     'diagnostics',
     'probe',

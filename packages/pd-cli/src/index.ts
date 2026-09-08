@@ -870,9 +870,12 @@ const diagnosticsCmd = runtimeCmd
   .command('diagnostics', { hidden: true })
   .description('Control plane diagnostic bundle operations');
 
+// PRI-674: visible (was hidden) — the only recovery re-entry point for an
+// Owner without Console access; hidden-ness left failed diagnostician tasks
+// undiscoverable.
 const recoveryCmd = runtimeCmd
-  .command('recovery', { hidden: true })
-  .description('Runtime V2 lease recovery operations');
+  .command('recovery')
+  .description('Runtime V2 recovery operations (expired-lease sweep, failed-task recovery)');
 
 // PRI-555 phase 1: dry-run-only artifact identity drift repair planner.
 runtimeCmd
@@ -907,7 +910,7 @@ recoveryCmd
 
 recoveryCmd
   .command('failed-tasks')
-  .description('Recover failed internalization tasks')
+  .description('Recover failed internalization and diagnostician tasks')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--dry-run', 'Report only, no modifications (default)')
   .option('--confirm', 'Actually recover failed tasks')

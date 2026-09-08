@@ -117,7 +117,7 @@ export async function handleRuntimeRecoveryFailedTasks(opts: RecoveryFailedTasks
 
     if (isDryRun) {
       if (taskDetails.length === 0) {
-        summaryReason = 'No failed internalization tasks found';
+        summaryReason = 'No failed internalization or diagnostician tasks found';
         summaryNextAction = 'Nothing to recover';
       } else {
         summaryReason = `Found ${recoveredCount} recoverable and ${skippedCount} exhausted failed tasks`;
