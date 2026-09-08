@@ -44,7 +44,7 @@
   "license": "MIT",
   "dependencies": {
     "@principles/install-layout": "^0.2.0",
-    "@tufjs/models": "3.0.1",
+    "@tufjs/models": "5.0.0",
     "@inquirer/prompts": "^8.5.2",
     "commander": "^14.0.3",
     "fs-extra": "^11.4.0",
