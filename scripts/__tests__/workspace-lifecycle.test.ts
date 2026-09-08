@@ -232,7 +232,7 @@ describe('workspace-cleanup (integration)', () => {
     expect(out.applied).toBeGreaterThanOrEqual(2);
     expect(out.refused).toEqual([]);
     expect(fs.existsSync(wt)).toBe(false);
-    expect(git(fixture.primary, 'rev-parse', '--verify', 'refs/heads/' + branch)).rejects.toThrow();
+    await expect(git(fixture.primary, 'rev-parse', '--verify', 'refs/heads/' + branch)).rejects.toThrow();
   });
 
   it('default grace period keeps a freshly merged worktree alive', async () => {
