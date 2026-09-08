@@ -70,6 +70,36 @@ export interface EvaluatorDecisionBrief {
   readonly concerns: readonly string[];
   readonly requiredChanges: readonly string[];
   readonly score?: number;
+  /**
+   * PRI-704 / PRI-703 Phase 4 (Owner decision 2026-09-07): 5-item Principle
+   * Quality Checklist — a DETERMINISTIC review aid derived from durable facts
+   * (no LLM scoring, no second evaluation pass). Each item answers one Owner
+   * question with pass/fail + evidence-based notes; a missing supporting
+   * fact = fail with an explicit note (never silently omitted — the Owner
+   * sees exactly which quality dimension lacks support). Older snapshots
+   * lack the key (forward-compatible read).
+   */
+  readonly qualityChecklist?: PrincipleQualityChecklist;
+}
+
+/**
+ * The five Owner-facing quality questions (PRI-704):
+ *   understandability — can the Owner understand it from the brief alone?
+ *   evidence          — does it come from a real pain/diagnosis?
+ *   actionability     — would an agent know what to do differently next time?
+ *   generalization    — does it avoid over-fitting to a single file/task?
+ *   boundary          — is the applicability scope explicit?
+ */
+export interface PrincipleQualityChecklist {
+  readonly schemaVersion: 1;
+  readonly items: readonly PrincipleQualityChecklistItem[];
+}
+
+export interface PrincipleQualityChecklistItem {
+  readonly id: 'understandability' | 'evidence' | 'actionability' | 'generalization' | 'boundary';
+  readonly pass: boolean;
+  /** Bounded evidence-based explanation (why pass / what is missing). */
+  readonly note: string;
 }
 
 export interface RolloutDecisionBrief {
@@ -325,6 +355,83 @@ export async function buildOwnerDecisionReview(
     completeness = principleStatement && (implementationSummary || affectedTools.length > 0)
       ? 'complete'
       : identifiable ? 'partial' : 'insufficient';
+
+    // PRI-704 / PRI-703 Phase 4 (Round-2 R3 事实化, Owner 指令 2026-09-08):
+    // 5 项 checklist 只报告 **durable 事实**，绝不冒充质量判断。每项 note
+    // 陈述检查了什么、发现了什么；pass 的语义是"该事实存在"，不是"质量
+    // 优秀"。真正的质量裁决（可理解？泛化是否恰当？）是 Owner 在决策面
+    // 上的判断——checklist 只是把判断所需的事实放在一起。
+    //
+    //   understandability — title 与 statement 字段在场（字段完整性事实）；
+    //   evidence — 血缘 BFS 实际解析到 scribe 之外的祖先工件
+    //     (philosopher/dreamer/diag_)——lineageResolvable 只证明上游
+    //     artificer 任务存在，不足以宣称证据来源（R3 反例 1）；
+    //   actionability — implementation summary 与 affected tools 在场；
+    //   generalization — applicability 去重后的 distinct 计数（R3 反例 2：
+    //     重复同一文件不得计为多上下文）；
+    //   boundary — antiPatterns 或 intent contract forbiddenBehavior 在场
+    //     （ownerIntent 是目标陈述，不是禁止声明）。
+    const intentForbidden = scribeSummary?.ok ? scribeSummary.value.fields.intentForbidden : null;
+    const scopeEntries = readStringArray(draft, 'applicability', 10);
+    const distinctScopes = [...new Set(scopeEntries.map((entry) => entry.trim()))].filter((entry) => entry !== '');
+    const ancestorKindsBeyondScribe = artificerLineage
+      .map((entry) => entry.taskKind)
+      .filter((kind) => kind === 'philosopher' || kind === 'dreamer' || kind === 'diagnostician' || kind.startsWith('diag_'));
+    const hasResolvableAncestor = ancestorKindsBeyondScribe.length > 0;
+    const checklistFacts = {
+      title: readString(draft, 'title'),
+      statement: principleStatement ?? null,
+      rationale: readString(draft, 'rationale'),
+      antiPatterns: readStringArray(draft, 'antiPatterns', 10),
+      scopeDistinctCount: distinctScopes.length,
+      intentContractForbidden: intentForbidden,
+      ancestorKinds: [...new Set(ancestorKindsBeyondScribe)],
+    };
+    const qualityChecklist: PrincipleQualityChecklist = {
+      schemaVersion: 1,
+      items: [
+        {
+          id: 'understandability',
+          pass: Boolean(checklistFacts.title && checklistFacts.statement),
+          note: checklistFacts.title && checklistFacts.statement
+            ? 'title and statement fields present'
+            : `field missing: ${!checklistFacts.title ? 'title' : 'statement'} (field-completeness fact, not a comprehension judgment)`,
+        },
+        {
+          id: 'evidence',
+          pass: hasResolvableAncestor,
+          note: hasResolvableAncestor
+            ? `ancestor artifacts resolvable beyond scribe: ${checklistFacts.ancestorKinds.join(', ')}`
+            : 'no ancestor artifact resolvable beyond scribe (only evaluator→artificer→scribe verified) — no pain/diagnosis source in the resolvable lineage',
+        },
+        {
+          id: 'actionability',
+          pass: Boolean(implementationSummary && affectedTools.length > 0),
+          note: implementationSummary && affectedTools.length > 0
+            ? `implementation summary present, ${affectedTools.length} affected tool(s) declared`
+            : `field missing: ${!implementationSummary ? 'implementation summary' : 'affected tools'}`,
+        },
+        {
+          id: 'generalization',
+          pass: checklistFacts.scopeDistinctCount >= 2,
+          note: checklistFacts.scopeDistinctCount >= 2
+            ? `distinct applicability entries: ${checklistFacts.scopeDistinctCount} (of ${scopeEntries.length} declared)`
+            : checklistFacts.scopeDistinctCount === 1
+              ? `distinct applicability entries: 1 (of ${scopeEntries.length} declared; duplicates removed) — single-context declaration`
+              : 'no applicability entries declared',
+        },
+        {
+          id: 'boundary',
+          pass: checklistFacts.antiPatterns.length > 0 || Boolean(checklistFacts.intentContractForbidden),
+          note: checklistFacts.antiPatterns.length > 0
+            ? `${checklistFacts.antiPatterns.length} anti-pattern entries present`
+            : checklistFacts.intentContractForbidden
+              ? 'intent contract forbiddenBehavior present (antiPatterns absent)'
+              : 'no antiPatterns and no intent-contract forbiddenBehavior present',
+        },
+      ],
+    };
+    brief = { ...brief, qualityChecklist };
   } else {
     const review = readRecord(decisionContent, 'review');
     brief = {

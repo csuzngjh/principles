@@ -120,7 +120,16 @@ export const ARTIFICER_MANIFEST: ContextManifest = {
   schemaVersion: CONTEXT_MANIFEST_SCHEMA_VERSION,
   runnerKind: 'artificer',
   tier0: ['scribe.summary.headline', 'scribe.predecessorSummary.headline'],
-  tier1: ['scribe.summary.principleText', 'scribe.summary.scope', 'scribe.summary.exceptions'],
+  tier1: [
+    'scribe.summary.principleText',
+    'scribe.summary.scope',
+    'scribe.summary.exceptions',
+    // PRI-703 Phase 1: intent-contract anchor fields (absent on pre-contract
+    // scribe artifacts → surfaced as absent degradation, never silent).
+    'scribe.summary.intentOwner',
+    'scribe.summary.intentForbidden',
+    'scribe.summary.intentValidation',
+  ],
   tier2: [
     'dreamer.raw.candidates.0.betterDecision',
     'dreamer.raw.candidates.0.rationale',
@@ -129,11 +138,14 @@ export const ARTIFICER_MANIFEST: ContextManifest = {
   budgetTokens: 2000,
   priority: [
     'scribe.summary.principleText',
+    'scribe.summary.intentOwner',
     'dreamer.raw.candidates.0.betterDecision',
     'scribe.summary.scope',
+    'scribe.summary.intentForbidden',
     'dreamer.raw.candidates.0.rationale',
     'dreamer.raw.candidates.0.riskLevel',
     'scribe.summary.exceptions',
+    'scribe.summary.intentValidation',
     'scribe.summary.headline',
     'scribe.predecessorSummary.headline',
   ],
@@ -164,16 +176,29 @@ export const ARTIFICER_REPAIR_MANIFEST: ContextManifest = {
   schemaVersion: CONTEXT_MANIFEST_SCHEMA_VERSION,
   runnerKind: 'artificer',
   tier0: ['scribe.summary.principleText', 'replay.summary.passed', 'replay.summary.failedCaseCount'],
-  tier1: ['repair.summary.requiredChanges', 'repair.summary.concerns', 'replay.summary.failureTypes'],
+  tier1: [
+    'repair.summary.requiredChanges',
+    'repair.summary.concerns',
+    'replay.summary.failureTypes',
+    // PRI-703 Phase 1: the repair round must carry the intent anchor — a
+    // required change contradicting it is the evaluator's problem to
+    // re-derive, not the rule's to blindly satisfy.
+    'scribe.summary.intentOwner',
+    'scribe.summary.intentForbidden',
+    'scribe.summary.intentValidation',
+  ],
   tier2: ['replay.raw.traceFailures', 'replay.raw.systemFailures', 'replay.raw.globalViolations'],
   budgetTokens: 2400,
   priority: [
     'scribe.summary.principleText',
+    'scribe.summary.intentOwner',
     'replay.raw.traceFailures',
     'repair.summary.requiredChanges',
+    'scribe.summary.intentForbidden',
     'replay.raw.systemFailures',
     'replay.raw.globalViolations',
     'repair.summary.concerns',
+    'scribe.summary.intentValidation',
     'replay.summary.passed',
     'replay.summary.failedCaseCount',
     'replay.summary.failureTypes',
@@ -211,6 +236,11 @@ export const EVALUATOR_STAGE1_MANIFEST: ContextManifest = {
   tier1: [
     'scribe.summary.principleText',
     'scribe.summary.scope',
+    // PRI-703 Phase 1: intent anchor fields — intentConsistency judging and
+    // adversarial-case scoping ("test-scope" concern) read these.
+    'scribe.summary.intentOwner',
+    'scribe.summary.intentForbidden',
+    'scribe.summary.intentValidation',
     'artificer.summary.changedFiles',
     'artificer.summary.apiSurface',
     'artificer.summary.risks',
@@ -225,14 +255,17 @@ export const EVALUATOR_STAGE1_MANIFEST: ContextManifest = {
   budgetTokens: 3000,
   priority: [
     'scribe.summary.principleText',
+    'scribe.summary.intentOwner',
     'dreamer.summary.betterDecision',
     'diagnostician.summary.rootSymptom',
     'artificer.summary.apiSurface',
     'dreamer.summary.riskLevel',
     'dreamer.summary.rationale',
     'scribe.summary.scope',
+    'scribe.summary.intentForbidden',
     'artificer.summary.risks',
     'diagnostician.summary.category',
+    'scribe.summary.intentValidation',
     'artificer.summary.changedFiles',
     'dreamer.summary.badDecision',
     'artificer.summary.headline',

@@ -94,6 +94,74 @@ describe('cr10: validateOwnerDecisionsData (ERR-001/005/009/013)', () => {
   });
 });
 
+describe('PRI-704: qualityChecklist validation (strict five-item contract, 评审修正)', () => {
+  const QC_IDS = ['understandability', 'evidence', 'actionability', 'generalization', 'boundary'];
+  const validChecklist = {
+    schemaVersion: 1,
+    items: QC_IDS.map((id, index) => ({ id, pass: index !== 3, note: `note-${id}` })),
+  };
+
+  /** Run one item through the envelope validator; return its parsed brief checklist. */
+  function parseChecklist(qualityChecklist: unknown): unknown {
+    const base = makeItem() as { review: { brief: Record<string, unknown> } };
+    base.review.brief.qualityChecklist = qualityChecklist;
+    const data = validateOwnerDecisionsData({ items: [base], total: 1, generatedAt: 't' });
+    expect(data).not.toBeNull();
+    const brief = (data?.items[0] as { review?: { brief?: { qualityChecklist?: unknown } } } | undefined)?.review?.brief;
+    return brief?.qualityChecklist;
+  }
+
+  it('passes a valid five-item checklist through verbatim', () => {
+    const parsed = parseChecklist(validChecklist);
+    expect(parsed).toEqual(validChecklist);
+  });
+
+  it('omits the checklist when an entry is malformed (item itself stays valid)', () => {
+    expect(parseChecklist({
+      schemaVersion: 1,
+      items: QC_IDS.map((id) => ({ id, pass: 'yes', note: 'n' })),
+    })).toBeUndefined();
+    expect(parseChecklist({
+      schemaVersion: 1,
+      items: QC_IDS.map((id) => ({ id, pass: true, note: 42 })),
+    })).toBeUndefined();
+  });
+
+  it('omits the checklist on unknown / duplicate / missing ids', () => {
+    // unknown id in place of a known one
+    expect(parseChecklist({
+      schemaVersion: 1,
+      items: QC_IDS.slice(0, 4).map((id) => ({ id, pass: true, note: 'n' })).concat([{ id: 'clarity', pass: true, note: 'n' }]),
+    })).toBeUndefined();
+    // duplicate (6 items)
+    expect(parseChecklist({
+      schemaVersion: 1,
+      items: QC_IDS.map((id) => ({ id, pass: true, note: 'n' })).concat([{ id: 'boundary', pass: false, note: 'dup' }]),
+    })).toBeUndefined();
+    // missing (4 items)
+    expect(parseChecklist({
+      schemaVersion: 1,
+      items: QC_IDS.slice(0, 4).map((id) => ({ id, pass: true, note: 'n' })),
+    })).toBeUndefined();
+  });
+
+  it('omits the checklist on schemaVersion !== 1 (number 2 / string \'1\')', () => {
+    expect(parseChecklist({ ...validChecklist, schemaVersion: 2 })).toBeUndefined();
+    expect(parseChecklist({ ...validChecklist, schemaVersion: '1' })).toBeUndefined();
+  });
+
+  it('omits a non-object checklist and keeps absent = undefined (older snapshots)', () => {
+    expect(parseChecklist('x')).toBeUndefined();
+    expect(parseChecklist(null)).toBeUndefined();
+    expect(parseChecklist([1, 2])).toBeUndefined();
+    // absent → brief.qualityChecklist undefined, review still valid
+    const base = makeItem() as { review: { brief: Record<string, unknown> } };
+    const data = validateOwnerDecisionsData({ items: [base], total: 1, generatedAt: 't' });
+    const brief = (data?.items[0] as { review?: { brief?: { qualityChecklist?: unknown } } } | undefined)?.review?.brief;
+    expect(brief?.qualityChecklist).toBeUndefined();
+  });
+});
+
 describe('cr10: validateOwnerResolutionResult', () => {
   it('accepts resolved and rejects non-resolved / malformed', () => {
     expect(validateOwnerResolutionResult({
@@ -154,10 +222,20 @@ describe('PRI-629 §34 architecture regression guards', () => {
     for (const locale of ['zh-CN', 'en']) {
       const raw = fs.readFileSync(path.resolve(__dirname, `../../src/ui/i18n/${locale}.json`), 'utf-8');
       const data = JSON.parse(raw) as { pages: { focus: Record<string, unknown>; failedTasks: Record<string, unknown> } };
-      const od = data.pages.focus.ownerDecision as Record<string, string> | undefined;
+      const od = data.pages.focus.ownerDecision as Record<string, unknown> | undefined;
       expect(od, `${locale} pages.focus.ownerDecision missing`).toBeDefined();
-      for (const key of ['sectionTitle', 'empty', 'acceptCurrent', 'reviseOnce', 'rejectCurrent', 'staleError']) {
+      for (const key of ['sectionTitle', 'empty', 'acceptCurrent', 'reviseOnce', 'rejectCurrent', 'staleError', 'qualityChecklistLabel']) {
         expect(typeof od?.[key], `${locale} ownerDecision.${key}`).toBe('string');
+      }
+      // PRI-704: quality checklist 状态文案 + 五项检查名（OwnerDecisionCard
+      // 按 id 构造 i18n 键，缺键会渲染未本地化标签）
+      const status = od?.qualityCheckStatus as Record<string, unknown> | undefined;
+      for (const key of ['passed', 'failed']) {
+        expect(typeof status?.[key], `${locale} ownerDecision.qualityCheckStatus.${key}`).toBe('string');
+      }
+      const check = od?.qualityCheck as Record<string, unknown> | undefined;
+      for (const key of ['understandability', 'evidence', 'actionability', 'generalization', 'boundary']) {
+        expect(typeof check?.[key], `${locale} ownerDecision.qualityCheck.${key}`).toBe('string');
       }
       expect(data.pages.failedTasks.awaitingOwnerDecision).toBeDefined();
       expect(data.pages.failedTasks.goGovernanceFocus).toBeDefined();
