@@ -58,12 +58,20 @@ export interface RepairConfig {
    * when absent, keys are parsed defensively from schemaJson.
    */
   readonly requiredKeys?: readonly string[];
+  /**
+   * PRI-707: present when provider finish metadata proves the previous output
+   * was cut by the token limit (finish_reason=length). The repair prompt then
+   * says so — a truncated fragment must be shortened/completed structurally,
+   * not "corrected" field by field as if the model had misunderstood the
+   * schema. Absent when there is no truncation evidence (conservative).
+   */
+  readonly truncationNotice?: string;
   /** Internal override for jitter between repair attempts (PRI-271 A3). Set to 0 to disable. */
   readonly _testJitterMs?: number;
 }
 
 /** Sensible defaults for repair configuration. */
-export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput' | 'schemaSummary' | 'schemaJson' | 'requiredKeys' | '_testJitterMs'>> = {
+export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput' | 'schemaSummary' | 'schemaJson' | 'requiredKeys' | 'truncationNotice' | '_testJitterMs'>> = {
   maxRepairAttempts: 3,
   maxErrorsInPrompt: 10,
   maxErrorChars: 200,
@@ -206,9 +214,18 @@ export function formatRepairPrompt(
     schemaBlock = ['EXPECTED SCHEMA:', cfg.schemaSummary, ''];
   }
 
+  // PRI-707: when provider finish metadata proves the previous output was
+  // truncated, say so up front — repairing a cut fragment as if it were a
+  // misunderstanding produced blind fixes (PRI-707 evidence: repair attempts
+  // on a length-cut answer inventing missing tail content).
+  const truncationBlock: string[] = cfg.truncationNotice
+    ? [`TRUNCATION NOTICE: ${cfg.truncationNotice}`, '']
+    : [];
+
   return [
     'This is a schema validation repair loop. Your previous JSON output still has errors. Fix ALL remaining errors and return the complete corrected JSON object.',
     '',
+    ...truncationBlock,
     ...schemaRefLine,
     ...schemaBlock,
     'PREVIOUS OUTPUT:',
