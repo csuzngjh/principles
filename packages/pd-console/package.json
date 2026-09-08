@@ -45,7 +45,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-i18next": "^17.0.11",
-    "react-router-dom": "^7.18.2",
+    "react-router-dom": "^7.18.3",
     "semver": "^7.8.5",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
