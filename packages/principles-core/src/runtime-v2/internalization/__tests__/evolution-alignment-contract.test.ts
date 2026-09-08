@@ -24,7 +24,6 @@ import {
 import { DefaultScribeValidator } from '../scribe-output.js';
 import {
   attributionFromLayer,
-  isV2ContextCase,
   partitionV2OutOfScopeFailures,
   v2TemplateOracleExpectedDecision,
   resolveRequiresContextVersionFromArtifact,

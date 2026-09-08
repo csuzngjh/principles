@@ -1599,7 +1599,6 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         },
       });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
-      console.log('DBG record: wrote intent:', JSON.stringify(merged.completionIntent));
     } catch (err) {
       // P0-3 (外部复核): 吞掉写失败 = succeeded 任务无 durable verdict,
       // commit 门退化为不可判定 — fail loud,由重试机制重写 (verdict 仍在 runs)。
@@ -2051,7 +2050,6 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   ): Promise<{ selectedEffect?: 'needs_human_review'; effectReasonCode?: string } | undefined> {
     if (ctx.output.evaluation?.decision !== 'needs_revision') return undefined;
     if (!this.isRepairLoopEnabled()) return undefined;
-    console.log('DBG derive: decision ok, loop enabled, replayEvidence:', JSON.stringify(ctx.diagnosticReplayEvidence));
 
     // P1 provenance: fresh 要求 ran:true;resume 无 live 重放时等价判据为
     // durable adversarialResult 形态 (passed:false + failedCases>0)。
@@ -2066,7 +2064,6 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
     if (!freshReplayFailed && !durableReplayFailed) return undefined;
-    console.log('DBG derive: passed replay gate, failedCases:', JSON.stringify(EvaluatorRunner.extractFailedCases(ctx.output).map((c) => c.caseId)));
 
     const failedCases = EvaluatorRunner.extractFailedCases(ctx.output);
     if (failedCases.length === 0) return undefined;
@@ -2074,13 +2071,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       ? await this.resolveRequiresContextVersion(ctx.sourceArtificerArtifactId, evaluatorTaskId)
       : null;
     if (requiresContextVersion === null) return undefined;
-    console.log('DBG derive: rcv resolved:', requiresContextVersion);
 
     const partition = partitionV2OutOfScopeFailures({
       requiresContextVersion: requiresContextVersion === 2 ? 2 : undefined,
       failedCases,
     });
-    console.log('DBG derive: partition pure:', partition.isPureOutOfScope, 'out:', JSON.stringify(partition.outOfScope));
     if (partition.isPureOutOfScope) {
       this.emitEvent('governance_effect_out_of_scope_selected', evaluatorTaskId, {
         outOfScopeCaseIds: [...partition.outOfScope],
@@ -2140,8 +2135,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // 派生时的 provenance 校验, 不再是出界判定的唯一载体 (R2 漂移断点)。
     {
       const intent = await this.readPendingOrAppliedCompletionIntent(evaluatorTaskId);
-      if (intent?.selectedEffect === 'needs_human_review'
-        && intent.effectReasonCode === 'evaluator_test_out_of_scope') {
+      // Round-3: hydrate 将 selectedEffect 归一化为 effect —— 读侧必须两键
+      // 同读，否则 fresh 分支永不命中、静默回退瞬时 evidence (ERR-024 键不对称)。
+      if ((intent?.selectedEffect ?? intent?.effect) === 'needs_human_review'
+        && intent?.effectReasonCode === 'evaluator_test_out_of_scope') {
         this.emitEvent('repair_loop_test_out_of_scope', evaluatorTaskId, {
           runId: evaluatorRunId,
           attribution: attributionFromLayer('test'),

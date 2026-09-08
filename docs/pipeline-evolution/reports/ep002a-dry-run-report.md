@@ -117,5 +117,7 @@ config 覆写（diagnostician→flatkey-ds）绕过，不在此 PR 修 resolver�
 
 **纪律声明**：live 网关与安装版零触碰；lab workspace 为 ep001 一次性副本
 （重开的两个 failed 任务是 ep001 自身死锁任务的复跑，非人工制造新状态）；
-无 gate 弱化；Owner 决策未被 AI 代投（本轮 NHR 为 recovery-only，本来也
-不存在 AI 代投的合法通道）。
+无 gate 弱化。**Owner 决策陈述按可用证据收窄（Round-3）**：本轮未观察到
+AI 代投——lab DB 中不存在任何 decision 写入或 owner-decision 审计事件
+（approvals=0、NHR 为 recovery-only 本就不可裁决）；"Owner 决策流程未被
+AI 代"的更强断言需 owner-decision.json/审计事件留痕后才可作出。
