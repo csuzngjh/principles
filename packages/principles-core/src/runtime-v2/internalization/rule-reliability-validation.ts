@@ -26,7 +26,7 @@ import type { RefinerRuleHostGateDecision, } from './refiner-rulehost-gate.js';
 import type { RefinerSandboxResult } from './refiner-sandbox-wrapper.js';
 import type { ToolSemanticRegistry } from './tool-semantic-registry.js';
 
-export type FailureLayer = 'rule' | 'test' | 'adapter' | 'runtime' | 'unknown';
+export type FailureLayer = 'rule' | 'test' | 'adapter' | 'runtime' | 'principle' | 'evaluation' | 'unknown';
 
 export interface RuleReliabilityFailure {
   readonly layer: FailureLayer;
@@ -34,6 +34,226 @@ export interface RuleReliabilityFailure {
   /** Bounded human-readable evidence (rc-8: never assume stringify of arbitrary values). */
   readonly evidence: string;
   readonly nextAction: string;
+}
+
+/**
+ * PRI-705 / PRI-703 Phase 2 (Owner decision 2026-09-07): pipeline-stage
+ * failure attribution — "哪里失败 / 为什么 / 下一步改哪里" at the level an
+ * operator or repair loop routes on. This EXTENDS FailureLayer (same
+ * vocabulary, one enum — no parallel taxonomy): each stage-failure answer
+ * maps onto a layer so the existing propagation paths
+ * (evaluator artifact failure.{layer,reasonCode}, CLI rulecode output)
+ * keep working.
+ *
+ * Stage answers:
+ *   FAILED_PRINCIPLE → layer 'principle' — the principle (or its intent
+ *     contract) is incomplete/wrong; repairing the rule cannot fix it.
+ *   FAILED_RULE      → layer 'rule' — the rule implementation is defective.
+ *   FAILED_EVALUATION→ layer 'evaluation' — the evaluation/judging itself was
+ *     wrong (gate correct rejections are NOT this — a correct rejection is
+ *     the system working; this value is for evaluation-side defects).
+ *   FAILED_TEST      → layer 'test' — the adversarial/golden material is
+ *     deficient or OUT OF SCOPE for this principle's intent contract
+ *     (deterministic v2-context cases judging a v1 action-only rule are the
+ *     canonical instance — Episode 001 / PRI-700 factor A).
+ *   INFRA_BLOCKED    → layer 'runtime' — infrastructure blocked the attempt.
+ *   OWNER_BLOCKED    → not a failure layer: represented by task status
+ *     needs_human_review + HumanReviewReasonCode (owner-review.ts). Listed
+ *     here for the operator-facing taxonomy completeness; classify never
+ *     returns it (task state owns it).
+ *   UNKNOWN          → layer 'unknown'.
+ */
+export type FailureAttribution =
+  | 'FAILED_PRINCIPLE'
+  | 'FAILED_RULE'
+  | 'FAILED_EVALUATION'
+  | 'FAILED_TEST'
+  | 'INFRA_BLOCKED'
+  | 'OWNER_BLOCKED'
+  | 'UNKNOWN';
+
+/** Map a FailureLayer to the operator-facing attribution stage answer. */
+export function attributionFromLayer(layer: FailureLayer): FailureAttribution {
+  switch (layer) {
+    case 'principle': return 'FAILED_PRINCIPLE';
+    case 'rule': return 'FAILED_RULE';
+    case 'evaluation': return 'FAILED_EVALUATION';
+    case 'test': return 'FAILED_TEST';
+    case 'runtime': return 'INFRA_BLOCKED';
+    default: return 'UNKNOWN';
+  }
+}
+
+/**
+ * The ONLY v2 adversarial template caseIds the evaluator generates
+ * (v2-adversarial-cases.ts). An allowlist — NOT a prefix match: the merged
+ * case set can carry LLM-supplied adversarialCases whose caseId merely needs
+ * to be a non-empty string, so a custom `v2-business-boundary` id would be
+ * misattributed as out-of-scope by a prefix rule (评审 P1: prefix 匹配会把
+ * LLM 自定义 v2-* id 误判为 test 出界，跳过真实需要的 Rule 修复).
+ *
+ * Equivalence with the generator is locked by contract test
+ * (evolution-alignment-contract.test.ts) — adding a template without
+ * updating this list silently re-opens the v2×v1 repair death loop.
+ */
+export const V2_TEMPLATE_CASE_IDS: ReadonlySet<string> = new Set([
+  'v2-unavailable',
+  'v2-truncated',
+  'v2-alias',
+  'v2-path-boundary',
+  'v2-combination',
+]);
+
+/**
+ * Round-2 R1（Owner 口径 b，2026-09-08）：出界判据不按模板名单断言，按
+ * **模板定义的期望决策（oracle）** 判定。三个 context-only 模板
+ * （unavailable/truncated/alias）期望 allow 且该期望 v1 action-only 规则
+ * 结构上无法表达（context 不可用→必须 allow 是 context 语义）。另两个
+ * 模板（path-boundary/combination）期望 **block**——风险路径写门，v1 完全
+ * 可以实现，因此永远 in-scope（R1 复现：禁写 /etc/passwd 的规则正是被
+ * 名单判据错误豁免）。
+ *
+ * TRUST BOUNDARY（Oracle-only expectedDecision）：这里的映射是编译期
+ * 事实（generateV2ContextAdversarialCases 的模板定义），不是从运行时
+ * 工件读取的 expectedDecision——后者对 LLM-supplied adversarialCases
+ * 混入了不可信来源。出界判定只用本常量 + 沙箱回带值的**一致性比对**
+ * （防 caseId 冒名），绝不信任工件里的期望值本身。
+ */
+export const V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW: ReadonlyMap<string, 'allow'> = new Map([
+  ['v2-unavailable', 'allow'],
+  ['v2-truncated', 'allow'],
+  ['v2-alias', 'allow'],
+]);
+
+/** The oracle expected decision for a known v2 template caseId (compile-time fact), or null for unknown ids. */
+export function v2TemplateOracleExpectedDecision(caseId: string): 'allow' | 'block' | null {
+  if (V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW.has(caseId)) return 'allow';
+  if (caseId === 'v2-path-boundary' || caseId === 'v2-combination') return 'block';
+  return null;
+}
+
+/**
+ * PRI-703 Phase 2 — deterministic v2-case scope classification (Episode 001
+ * PRI-700 factor A, Owner decision: evaluation cases must fall INSIDE the
+ * principle's intent contract before they may judge it).
+ *
+ * The v2 adversarial templates (v2-unavailable/truncated/alias/path-boundary/
+ * combination) demand context-aware decisions ("allow when context
+ * unavailable"). A v1 action-only rule structurally CANNOT express them
+ * (V1_CONTEXT_INSTRUCTION forbids reading input.context), so their failure is
+ * a property of the CASE × CHANNEL pairing, not of the rule. Pure string-shape
+ * logic against the known template-id allowlist (V2_TEMPLATE_CASE_IDS) —
+ * deterministic, no LLM involved; LLM-supplied custom `v2-*` ids are NOT
+ * matched (they introduce new behavioral requirements and stay in-scope).
+ *
+ * Pure function — zero I/O.
+ */
+export function isV2ContextCase(caseId: string): boolean {
+  return V2_TEMPLATE_CASE_IDS.has(caseId);
+}
+
+/**
+ * PRI-703 Phase 2（评审 P1 修正）: resolve a rule artifact's context-channel
+ * declaration from its contentJson for scope classification. Three-way
+ * result — the distinction is load-bearing wiring:
+ *   2        → resolved v2 rule (context-aware; every v2 case is in scope);
+ *   undefined → resolved v1 rule (key absent on a PARSED artifact — the
+ *              artificer schema only ever writes literal 2, so key-absent is
+ *              deterministically v1; the partition MUST run for it);
+ *   null     → unresolvable (artifact missing/unparseable/not an object/
+ *              malformed value) — callers fail open and skip the partition.
+ *
+ * 评审 P1 回归背景：此前 runner 把 key-absent（=v1，出界路由的全部目标
+ * 人群）也折叠成 null，导致 partition 在生产中永远不运行——单测直接传
+ * undefined 掩盖了接线断点。纯函数提取以使该判定可测。
+ */
+export function resolveRequiresContextVersionFromArtifact(
+  contentJson: string | null | undefined,
+): number | undefined | null {
+  if (contentJson === null || contentJson === undefined || contentJson.trim() === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contentJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  if (!Object.hasOwn(record, 'requiresContextVersion')) return undefined;
+  const value = record.requiresContextVersion;
+  return typeof value === 'number' ? value : null;
+}
+
+/**
+ * Partition failed replay cases into in-scope (real rule defects — feed the
+ * repair loop) vs out-of-scope (test-material problem — must NOT enter the
+ * repair loop as a rule defect; it is surfaced as a channel-limitation signal
+ * instead). Out-of-scope = every failed case is a v2-context template AND the
+ * rule is v1 (no requiresContextVersion: 2): the v1 channel cannot express
+ * context semantics, so requiring it is a test-scope error.
+ */
+/**
+ * PRI-703 Phase 2 — deterministic v2-case scope classification (Episode 001
+ * PRI-700 factor A, Owner decision: evaluation cases must fall INSIDE the
+ * principle's intent contract before they may judge it).
+ *
+ * Round-2 R1 (Owner 口径 b): out-of-scope is granted ONLY per-case, and only
+ * when BOTH hold:
+ *   1. the caseId belongs to a context-only template (unavailable/truncated/
+ *      alias) whose ORACLE expected decision is 'allow' — the v1 channel
+ *      structurally cannot express "must allow when context is unavailable";
+ *   2. the sandbox-reported expectedDecision for that case MATCHES the
+ *      oracle (anti-spoofing: a case re-using a template id with a different
+ *      expectation is not the template case).
+ * Everything else — including v2-path-boundary / v2-combination (expected
+ * block; risk-path gating a v1 rule CAN implement), LLM-invented v2-* ids,
+ * and any case whose reported expectation is missing or disagrees — stays
+ * IN SCOPE (fail-closed: a missing/malformed expectation never exempts the
+ * rule from repair). R1 regression: a rule that fails an explicit block
+ * requirement must always reach the repair loop.
+ *
+ * Pure function — zero I/O. The expectedDecision input is the value carried
+ * on the durable evaluator artifact's failedCases (sandbox-authoritative for
+ * template-generated traces); it is only used as a consistency CHECK against
+ * the compile-time oracle — never as the classification source of truth.
+ */
+export interface OutOfScopeFailedCase {
+  readonly caseId: string;
+  /** Sandbox-carried expectation for the case; undefined when absent. */
+  readonly expectedDecision?: string;
+}
+
+export function partitionV2OutOfScopeFailures(input: {
+  readonly requiresContextVersion: number | undefined;
+  readonly failedCases: readonly OutOfScopeFailedCase[];
+}): { readonly outOfScope: readonly string[]; readonly inScope: readonly string[]; readonly isPureOutOfScope: boolean } {
+  const { requiresContextVersion, failedCases } = input;
+  if (requiresContextVersion === 2) {
+    // v2 rules CAN express context semantics — every v2 case is in scope.
+    return { outOfScope: [], inScope: failedCases.map((c) => c.caseId), isPureOutOfScope: false };
+  }
+  const outOfScope: string[] = [];
+  const inScope: string[] = [];
+  for (const failed of failedCases) {
+    const oracle = v2TemplateOracleExpectedDecision(failed.caseId);
+    // Only a context-only template with oracle-expected allow, corroborated
+    // by the sandbox-carried expectation, can be structurally unexpressible
+    // for a v1 rule. block-expecting templates, unknown ids, and missing/
+    // mismatched expectations all remain rule-defect signals.
+    const isVerifiedOutOfScope = oracle === 'allow' && failed.expectedDecision === 'allow';
+    if (isVerifiedOutOfScope) {
+      outOfScope.push(failed.caseId);
+    } else {
+      inScope.push(failed.caseId);
+    }
+  }
+  return {
+    outOfScope,
+    inScope,
+    // Pure = every failure is the v2×v1 structural mismatch → the repair loop
+    // would have nothing real to fix; route to owner review instead.
+    isPureOutOfScope: outOfScope.length > 0 && inScope.length === 0,
+  };
 }
 
 const EVIDENCE_MAX_CHARS = 300;

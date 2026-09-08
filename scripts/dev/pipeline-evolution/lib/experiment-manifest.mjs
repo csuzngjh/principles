@@ -18,6 +18,17 @@ export const MANIFEST_SCHEMA = 'experiment-manifest.v1';
 
 const REQUIRED = ['experimentId', 'scenarioId', 'host', 'startedAt'];
 
+/**
+ * PRI-703 Phase 3 (Owner decision 2026-09-07): behavior observation outcome
+ * vocabulary. IMPROVED / NO_IMPROVEMENT / REGRESSION are observation
+ * OUTCOMES (what the post-activation behavior looked like); NOT_REACHED
+ * stays derived (never asserted — no activation in scope); INCONCLUSIVE =
+ * evidence insufficient. CONFIRMED / INCONCLUSIVE remain accepted as
+ * legacy aliases: CONFIRMED ≡ IMPROVED (and must then satisfy the same
+ * evidence gate).
+ */
+export const BEHAVIOR_OUTCOMES = ['IMPROVED', 'NO_IMPROVEMENT', 'REGRESSION', 'INCONCLUSIVE'];
+
 function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -60,8 +71,56 @@ export function parseManifest(json) {
   }
   if (m.behaviorObservation !== undefined && m.behaviorObservation !== null) {
     if (!isPlainObject(m.behaviorObservation)) problems.push('behaviorObservation must be an object');
-    else if (m.behaviorObservation.status !== 'CONFIRMED' && m.behaviorObservation.status !== 'INCONCLUSIVE') {
-      problems.push("behaviorObservation.status must be 'CONFIRMED' or 'INCONCLUSIVE' (NOT_REACHED is derived, never asserted)");
+    else {
+      const obs = m.behaviorObservation;
+      // PRI-703 Phase 3: field-name drift normalization — the Episode-001
+      // manifest hand-fill used `result` instead of the contract's `status`
+      // (real-data drift; re-running collect-evidence against it would have
+      // thrown). Accept both spellings; the canonical key stays `status`.
+      if (obs.status === undefined && typeof obs.result === 'string' && obs.result.trim() !== '') {
+        obs.status = obs.result;
+      }
+      const status = obs.status;
+      if (status !== 'CONFIRMED' && status !== 'INCONCLUSIVE' && !BEHAVIOR_OUTCOMES.includes(status)) {
+        problems.push(`behaviorObservation.status must be one of ${BEHAVIOR_OUTCOMES.join('/')}(legacy CONFIRMED/INCONCLUSIVE accepted; NOT_REACHED is derived, never asserted)`);
+      } else {
+        // Evidence integrity gate (PRI-703 Phase 3; Round-2 R4 hardening):
+        // IMPROVED / NO_IMPROVEMENT / REGRESSION (and legacy CONFIRMED) are
+        // all OBSERVATIONAL CONCLUSIONS — each requires at least one valid
+        // evidence entry, and EVERY provided evidence element is validated
+        // regardless of status (a `[null]` element used to slip through on
+        // negative outcomes and crash the package builder downstream).
+        // INCONCLUSIVE is the only evidence-free outcome (it MEANS
+        // insufficient evidence). NOT_REACHED stays derived, never asserted.
+        const evidenceRequired = status === 'CONFIRMED' || status === 'IMPROVED'
+          || status === 'NO_IMPROVEMENT' || status === 'REGRESSION';
+        if (evidenceRequired) {
+          const evidenceList = obs.evidence;
+          if (!Array.isArray(evidenceList) || evidenceList.length === 0) {
+            problems.push(`behaviorObservation with status ${status} requires evidence: at least 1 entry (session evidence / tool trajectory evidence / behavior diff evidence) — an unsupported conclusion is not a valid observation (use INCONCLUSIVE when evidence is genuinely unavailable)`);
+          } else {
+            for (const e of evidenceList) {
+              if (!isPlainObject(e) || ![e.detail, e.source].some((value) => typeof value === 'string' && value.trim() !== '')) {
+                problems.push('behaviorObservation.evidence entries must be objects with a non-empty detail or source string');
+                break;
+              }
+            }
+          }
+        } else if (obs.evidence !== undefined && obs.evidence !== null) {
+          // INCONCLUSIVE with supplied evidence: still validate element shapes
+          // (a malformed element must not crash the derivation layer later).
+          if (!Array.isArray(obs.evidence)) {
+            problems.push('behaviorObservation.evidence must be an array when present');
+          } else {
+            for (const e of obs.evidence) {
+              if (!isPlainObject(e) || ![e.detail, e.source].some((value) => typeof value === 'string' && value.trim() !== '')) {
+                problems.push('behaviorObservation.evidence entries must be objects with a non-empty detail or source string');
+                break;
+              }
+            }
+          }
+        }
+      }
     }
   }
   // finishedAt may be null/absent while the experiment is still running.

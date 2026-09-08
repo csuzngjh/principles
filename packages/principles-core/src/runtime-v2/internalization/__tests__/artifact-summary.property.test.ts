@@ -278,7 +278,7 @@ describe('deriveArtifactSummary — CP-03 missing fields land in omittedFields',
     diag_router: ['rootCause', 'affectedComponents', 'rootSymptom', 'category', 'severity'],
     dreamer: ['badDecision', 'betterDecision', 'rationale', 'riskLevel', 'strategicPerspective'],
     philosopher: ['thesis', 'principleTitle', 'principleScope', 'principleConfidence'],
-    scribe: ['principleText', 'scope', 'exceptions'],
+    scribe: ['principleText', 'scope', 'exceptions', 'intentOwner', 'intentForbidden', 'intentValidation'],
     artificer: ['changedFiles', 'apiSurface', 'risks'],
     evaluator: ['verdict', 'concernCount', 'intentConsistency'],
   };
@@ -298,7 +298,7 @@ describe('deriveArtifactSummary — CP-03 missing fields land in omittedFields',
       artificer: [],
       evaluator: [],
     };
-    for (const [runnerKind, keys] of Object.entries(alwaysOmitted) as Array<[SummaryRunnerKind, readonly string[]]>) {
+    for (const [runnerKind, keys] of Object.entries(alwaysOmitted) as [SummaryRunnerKind, readonly string[]][]) {
       if (keys.length === 0) continue;
       const result = deriveArtifactSummary(runnerKind, FULL_OUTPUTS[runnerKind]);
       expect(result.ok, runnerKind).toBe(true);
