@@ -84,16 +84,35 @@ export function parseManifest(json) {
       if (status !== 'CONFIRMED' && status !== 'INCONCLUSIVE' && !BEHAVIOR_OUTCOMES.includes(status)) {
         problems.push(`behaviorObservation.status must be one of ${BEHAVIOR_OUTCOMES.join('/')}(legacy CONFIRMED/INCONCLUSIVE accepted; NOT_REACHED is derived, never asserted)`);
       } else {
-        // Evidence integrity gate (PRI-703 Phase 3): a positive observation
-        // (CONFIRMED / IMPROVED) without at least one evidence entry is a
-        // claim with no support — reject loudly instead of deriving a
-        // CONFIRMED with evidence:[] (Episode-001 contract hole).
-        if (status === 'CONFIRMED' || status === 'IMPROVED') {
+        // Evidence integrity gate (PRI-703 Phase 3; Round-2 R4 hardening):
+        // IMPROVED / NO_IMPROVEMENT / REGRESSION (and legacy CONFIRMED) are
+        // all OBSERVATIONAL CONCLUSIONS — each requires at least one valid
+        // evidence entry, and EVERY provided evidence element is validated
+        // regardless of status (a `[null]` element used to slip through on
+        // negative outcomes and crash the package builder downstream).
+        // INCONCLUSIVE is the only evidence-free outcome (it MEANS
+        // insufficient evidence). NOT_REACHED stays derived, never asserted.
+        const evidenceRequired = status === 'CONFIRMED' || status === 'IMPROVED'
+          || status === 'NO_IMPROVEMENT' || status === 'REGRESSION';
+        if (evidenceRequired) {
           const evidenceList = obs.evidence;
           if (!Array.isArray(evidenceList) || evidenceList.length === 0) {
-            problems.push("behaviorObservation with status CONFIRMED/IMPROVED requires evidence: at least 1 entry (session evidence / tool trajectory evidence / behavior diff evidence) — an unsupported positive claim is not a valid observation");
+            problems.push(`behaviorObservation with status ${status} requires evidence: at least 1 entry (session evidence / tool trajectory evidence / behavior diff evidence) — an unsupported conclusion is not a valid observation (use INCONCLUSIVE when evidence is genuinely unavailable)`);
           } else {
             for (const e of evidenceList) {
+              if (!isPlainObject(e) || ![e.detail, e.source].some((value) => typeof value === 'string' && value.trim() !== '')) {
+                problems.push('behaviorObservation.evidence entries must be objects with a non-empty detail or source string');
+                break;
+              }
+            }
+          }
+        } else if (obs.evidence !== undefined && obs.evidence !== null) {
+          // INCONCLUSIVE with supplied evidence: still validate element shapes
+          // (a malformed element must not crash the derivation layer later).
+          if (!Array.isArray(obs.evidence)) {
+            problems.push('behaviorObservation.evidence must be an array when present');
+          } else {
+            for (const e of obs.evidence) {
               if (!isPlainObject(e) || ![e.detail, e.source].some((value) => typeof value === 'string' && value.trim() !== '')) {
                 problems.push('behaviorObservation.evidence entries must be objects with a non-empty detail or source string');
                 break;

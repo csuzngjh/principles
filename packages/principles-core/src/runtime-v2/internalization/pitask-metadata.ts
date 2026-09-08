@@ -399,6 +399,21 @@ export interface RunnerCompletionIntent {
    *   — crash resume 必须继续该效果 (重写 needs_human_review),禁止重问 LLM。
    */
   readonly effect?: 'governance_transition' | 'needs_human_review';
+  /**
+   * Round-2 R2 (Owner 指令 2026-09-08): deriveGovernanceEffect 从 durable 证据
+   * 派生的选定治理效果（与 P0-A 的 effect 同义；写侧统一写本键）。
+   * 'needs_human_review' ⇒ resume 必须恢复同一 NHR 效果（重写状态 +
+   * reasonCode），禁止重新计算路由 / 重问 LLM / 再 seed repair。
+   * 缺失 = governance_transition（旧行为）。解析层 effect 与本键同读。
+   */
+  readonly selectedEffect?: 'needs_human_review';
+  /**
+   * Round-2 R2: selectedEffect 的结构化原因码（evaluator_test_out_of_scope /
+   * evaluator_repair_budget_exhausted / evaluator_repair_seed_failed）。
+   * resume 重放 NHR 时以本字段为准；缺失时兜底 evaluator_repair_seed_failed
+   * （fail-closed 到 recovery 语义，绝不凭空升级为 decision-capable）。
+   */
+  readonly effectReasonCode?: string;
 }
 
 /** rollout needs_revision 的修订路由载荷 */
@@ -821,9 +836,18 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
       ({ revisionIteration } = r);
     }
     // P0-A: 可选效果类型,缺失 = governance_transition
+    // Round-2 R2: 旧 'effect' 键与新的 selectedEffect 同义——两者都读，冲突
+    // 不可能由合法写入产生（写侧只写 selectedEffect + effectReasonCode）。
     let effect: 'governance_transition' | 'needs_human_review' | undefined;
-    if (r.effect !== undefined && r.effect !== 'governance_transition' && r.effect !== 'needs_human_review') return null;
-    if (r.effect === 'needs_human_review') ({ effect } = r);
+    const rawEffect = r.effect !== undefined ? r.effect : r.selectedEffect;
+    if (rawEffect !== undefined && rawEffect !== 'governance_transition' && rawEffect !== 'needs_human_review') return null;
+    if (rawEffect === 'needs_human_review') effect = 'needs_human_review';
+    // Round-2 R2: effectReasonCode — 非空字符串,缺失容忍 (resume 兜底)。
+    let effectReasonCode: string | undefined;
+    if (r.effectReasonCode !== undefined) {
+      if (typeof r.effectReasonCode !== 'string' || r.effectReasonCode.trim() === '') return null;
+      ({ effectReasonCode } = r);
+    }
     completionIntent = {
       decision: r.decision as RunnerDecision,
       sourceRunId: r.sourceRunId,
@@ -831,6 +855,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
       status: r.status,
       revisionIteration,
       ...(effect !== undefined ? { effect } : {}),
+      ...(effectReasonCode !== undefined ? { effectReasonCode } : {}),
     };
   }
 

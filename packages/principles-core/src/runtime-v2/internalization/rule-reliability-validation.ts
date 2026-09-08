@@ -105,6 +105,34 @@ export const V2_TEMPLATE_CASE_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Round-2 R1（Owner 口径 b，2026-09-08）：出界判据不按模板名单断言，按
+ * **模板定义的期望决策（oracle）** 判定。三个 context-only 模板
+ * （unavailable/truncated/alias）期望 allow 且该期望 v1 action-only 规则
+ * 结构上无法表达（context 不可用→必须 allow 是 context 语义）。另两个
+ * 模板（path-boundary/combination）期望 **block**——风险路径写门，v1 完全
+ * 可以实现，因此永远 in-scope（R1 复现：禁写 /etc/passwd 的规则正是被
+ * 名单判据错误豁免）。
+ *
+ * TRUST BOUNDARY（Oracle-only expectedDecision）：这里的映射是编译期
+ * 事实（generateV2ContextAdversarialCases 的模板定义），不是从运行时
+ * 工件读取的 expectedDecision——后者对 LLM-supplied adversarialCases
+ * 混入了不可信来源。出界判定只用本常量 + 沙箱回带值的**一致性比对**
+ * （防 caseId 冒名），绝不信任工件里的期望值本身。
+ */
+export const V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW: ReadonlyMap<string, 'allow'> = new Map([
+  ['v2-unavailable', 'allow'],
+  ['v2-truncated', 'allow'],
+  ['v2-alias', 'allow'],
+]);
+
+/** The oracle expected decision for a known v2 template caseId (compile-time fact), or null for unknown ids. */
+export function v2TemplateOracleExpectedDecision(caseId: string): 'allow' | 'block' | null {
+  if (V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW.has(caseId)) return 'allow';
+  if (caseId === 'v2-path-boundary' || caseId === 'v2-combination') return 'block';
+  return null;
+}
+
+/**
  * PRI-703 Phase 2 — deterministic v2-case scope classification (Episode 001
  * PRI-700 factor A, Owner decision: evaluation cases must fall INSIDE the
  * principle's intent contract before they may judge it).
@@ -164,17 +192,61 @@ export function resolveRequiresContextVersionFromArtifact(
  * rule is v1 (no requiresContextVersion: 2): the v1 channel cannot express
  * context semantics, so requiring it is a test-scope error.
  */
+/**
+ * PRI-703 Phase 2 — deterministic v2-case scope classification (Episode 001
+ * PRI-700 factor A, Owner decision: evaluation cases must fall INSIDE the
+ * principle's intent contract before they may judge it).
+ *
+ * Round-2 R1 (Owner 口径 b): out-of-scope is granted ONLY per-case, and only
+ * when BOTH hold:
+ *   1. the caseId belongs to a context-only template (unavailable/truncated/
+ *      alias) whose ORACLE expected decision is 'allow' — the v1 channel
+ *      structurally cannot express "must allow when context is unavailable";
+ *   2. the sandbox-reported expectedDecision for that case MATCHES the
+ *      oracle (anti-spoofing: a case re-using a template id with a different
+ *      expectation is not the template case).
+ * Everything else — including v2-path-boundary / v2-combination (expected
+ * block; risk-path gating a v1 rule CAN implement), LLM-invented v2-* ids,
+ * and any case whose reported expectation is missing or disagrees — stays
+ * IN SCOPE (fail-closed: a missing/malformed expectation never exempts the
+ * rule from repair). R1 regression: a rule that fails an explicit block
+ * requirement must always reach the repair loop.
+ *
+ * Pure function — zero I/O. The expectedDecision input is the value carried
+ * on the durable evaluator artifact's failedCases (sandbox-authoritative for
+ * template-generated traces); it is only used as a consistency CHECK against
+ * the compile-time oracle — never as the classification source of truth.
+ */
+export interface OutOfScopeFailedCase {
+  readonly caseId: string;
+  /** Sandbox-carried expectation for the case; undefined when absent. */
+  readonly expectedDecision?: string;
+}
+
 export function partitionV2OutOfScopeFailures(input: {
   readonly requiresContextVersion: number | undefined;
-  readonly failedCaseIds: readonly string[];
+  readonly failedCases: readonly OutOfScopeFailedCase[];
 }): { readonly outOfScope: readonly string[]; readonly inScope: readonly string[]; readonly isPureOutOfScope: boolean } {
-  const { requiresContextVersion, failedCaseIds } = input;
+  const { requiresContextVersion, failedCases } = input;
   if (requiresContextVersion === 2) {
     // v2 rules CAN express context semantics — every v2 case is in scope.
-    return { outOfScope: [], inScope: [...failedCaseIds], isPureOutOfScope: false };
+    return { outOfScope: [], inScope: failedCases.map((c) => c.caseId), isPureOutOfScope: false };
   }
-  const outOfScope = failedCaseIds.filter(isV2ContextCase);
-  const inScope = failedCaseIds.filter((id) => !isV2ContextCase(id));
+  const outOfScope: string[] = [];
+  const inScope: string[] = [];
+  for (const failed of failedCases) {
+    const oracle = v2TemplateOracleExpectedDecision(failed.caseId);
+    // Only a context-only template with oracle-expected allow, corroborated
+    // by the sandbox-carried expectation, can be structurally unexpressible
+    // for a v1 rule. block-expecting templates, unknown ids, and missing/
+    // mismatched expectations all remain rule-defect signals.
+    const isVerifiedOutOfScope = oracle === 'allow' && failed.expectedDecision === 'allow';
+    if (isVerifiedOutOfScope) {
+      outOfScope.push(failed.caseId);
+    } else {
+      inScope.push(failed.caseId);
+    }
+  }
   return {
     outOfScope,
     inScope,

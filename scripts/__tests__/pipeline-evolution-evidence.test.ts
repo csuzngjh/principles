@@ -523,6 +523,42 @@ describe('PRI-703 Phase 3: behavior observation evidence integrity (CONFIRMED wi
     expect(behavior.status).toBe('NOT_REACHED');
   });
 
+  itSpawn('R4: negative outcomes demand evidence — NO_IMPROVEMENT with no evidence is rejected', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-r4-noimp.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-R4-NOIMP',
+      behaviorObservation: { status: 'NO_IMPROVEMENT' },
+    }));
+    const r = await runScript('pipeline-evolution/collect-evidence.mjs', ['--workspace', ws, '--experiment', m, '--json']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/NO_IMPROVEMENT requires evidence/);
+  });
+
+  itSpawn('R4: REGRESSION with a null evidence element is rejected (used to crash the builder)', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-r4-null.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-R4-NULL',
+      behaviorObservation: { status: 'REGRESSION', evidence: [null] },
+    }));
+    const r = await runScript('pipeline-evolution/collect-evidence.mjs', ['--workspace', ws, '--experiment', m, '--json']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/non-empty detail or source string/);
+  });
+
+  itSpawn('R4: INCONCLUSIVE without evidence stays accepted (it MEANS insufficient evidence)', async () => {
+    const ws = seedWorkspace();
+    const m = path.join(root, 'manifest-r4-inconclusive.json');
+    writeJson(m, manifest({
+      experimentId: 'EXP-R4-INCONCLUSIVE',
+      behaviorObservation: { status: 'INCONCLUSIVE' },
+    }));
+    const out = await runCollector(['--workspace', ws, '--experiment', m, '--json']);
+    const collected = parseCollectorJson(out);
+    expect(collected).toBeTruthy();
+  });
+
   itSpawn('with an activation present: CONFIRMED derives IMPROVED, and metrics map IMPROVED→PASS / NO_IMPROVEMENT→FAIL', async () => {
     const ws = seedWorkspace();
     // Seed one activation into the fixture's state.db (approved artifact).
@@ -563,18 +599,4 @@ describe('PRI-703 Phase 3: behavior observation evidence integrity (CONFIRMED wi
     expect(metricsNo.behavior).toEqual({ status: 'NO_IMPROVEMENT', matrix: 'FAIL' });
   });
 
-  itSpawn('derives NO_IMPROVEMENT / REGRESSION outcome statuses without evidence gate (only positive outcomes need evidence)', async () => {
-    const ws = seedWorkspace();
-    const m = path.join(root, 'manifest-ep3-noimp.json');
-    writeJson(m, manifest({
-      experimentId: 'EXP-EP3-NOIMP',
-      behaviorObservation: { status: 'NO_IMPROVEMENT', evidence: [] },
-    }));
-    // Negative outcomes carry no positive claim — no evidence gate, parse OK.
-    const pkgDir = path.join(root, 'pkg-ep3-noimp');
-    await runCollector(['--workspace', ws, '--experiment', m, '--package', pkgDir]);
-    const idx = readJson(path.join(pkgDir, 'evidence-index.json'));
-    const behavior = idx.claims.find((c: { claim: string }) => c.claim === 'behavior_change');
-    expect(behavior.status).toBe('NOT_REACHED');
-  });
 });

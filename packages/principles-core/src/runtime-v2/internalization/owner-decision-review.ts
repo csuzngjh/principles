@@ -356,31 +356,36 @@ export async function buildOwnerDecisionReview(
       ? 'complete'
       : identifiable ? 'partial' : 'insufficient';
 
-    // PRI-704 / PRI-703 Phase 4: 5-item deterministic quality checklist.
-    // Derivation rules (each reads ONLY durable facts already in this scope):
-    //   understandability — non-empty title AND statement (the brief alone
-    //     must let a non-technical Owner grasp the principle);
-    //   evidence — the chain resolves to a real pain (facts carry the
-    //     diagnosis/candidate lineage; a principle with no pain anchor is
-    //     an invented principle);
-    //   actionability — the artificer produced an implementation summary
-    //     AND declared affected tools (an agent must know what to DO);
-    //   generalization — scope (applicability) declares MORE than one
-    //     context (a single-context principle risks over-fitting one file
-    //     /task — Episode-001's over-generalization review axis);
-    //   boundary — explicit antiPatterns present (what the principle
-    //     FORBIDS must be stated, not just what it wants). The intent
-    //     contract's FORBIDDEN field (intentForbidden) is the only accepted
-    //     fallback — ownerIntent is a goal statement, not a prohibition
-    //     (评审 P1: 不得用 intentOwner 冒充 forbidden 证据).
+    // PRI-704 / PRI-703 Phase 4 (Round-2 R3 事实化, Owner 指令 2026-09-08):
+    // 5 项 checklist 只报告 **durable 事实**，绝不冒充质量判断。每项 note
+    // 陈述检查了什么、发现了什么；pass 的语义是"该事实存在"，不是"质量
+    // 优秀"。真正的质量裁决（可理解？泛化是否恰当？）是 Owner 在决策面
+    // 上的判断——checklist 只是把判断所需的事实放在一起。
+    //
+    //   understandability — title 与 statement 字段在场（字段完整性事实）；
+    //   evidence — 血缘 BFS 实际解析到 scribe 之外的祖先工件
+    //     (philosopher/dreamer/diag_)——lineageResolvable 只证明上游
+    //     artificer 任务存在，不足以宣称证据来源（R3 反例 1）；
+    //   actionability — implementation summary 与 affected tools 在场；
+    //   generalization — applicability 去重后的 distinct 计数（R3 反例 2：
+    //     重复同一文件不得计为多上下文）；
+    //   boundary — antiPatterns 或 intent contract forbiddenBehavior 在场
+    //     （ownerIntent 是目标陈述，不是禁止声明）。
     const intentForbidden = scribeSummary?.ok ? scribeSummary.value.fields.intentForbidden : null;
+    const scopeEntries = readStringArray(draft, 'applicability', 10);
+    const distinctScopes = [...new Set(scopeEntries.map((entry) => entry.trim()))].filter((entry) => entry !== '');
+    const ancestorKindsBeyondScribe = artificerLineage
+      .map((entry) => entry.taskKind)
+      .filter((kind) => kind === 'philosopher' || kind === 'dreamer' || kind === 'diagnostician' || kind.startsWith('diag_'));
+    const hasResolvableAncestor = ancestorKindsBeyondScribe.length > 0;
     const checklistFacts = {
       title: readString(draft, 'title'),
       statement: principleStatement ?? null,
       rationale: readString(draft, 'rationale'),
       antiPatterns: readStringArray(draft, 'antiPatterns', 10),
-      scope: readStringArray(draft, 'applicability', 10),
+      scopeDistinctCount: distinctScopes.length,
       intentContractForbidden: intentForbidden,
+      ancestorKinds: [...new Set(ancestorKindsBeyondScribe)],
     };
     const qualityChecklist: PrincipleQualityChecklist = {
       schemaVersion: 1,
@@ -389,40 +394,40 @@ export async function buildOwnerDecisionReview(
           id: 'understandability',
           pass: Boolean(checklistFacts.title && checklistFacts.statement),
           note: checklistFacts.title && checklistFacts.statement
-            ? `title + statement present (Owner can grasp the principle from the brief)`
-            : `missing ${!checklistFacts.title ? 'title' : 'statement'} — the Owner cannot understand the principle from the brief alone`,
+            ? 'title and statement fields present'
+            : `field missing: ${!checklistFacts.title ? 'title' : 'statement'} (field-completeness fact, not a comprehension judgment)`,
         },
         {
           id: 'evidence',
-          pass: Boolean(facts.lineageResolvable),
-          note: facts.lineageResolvable
-            ? 'lineage resolves to the producing chain (dreamer/philosopher ancestors present) — the principle is evidence-derived'
-            : 'dependency lineage not resolvable — the principle may be invented rather than evidence-derived',
+          pass: hasResolvableAncestor,
+          note: hasResolvableAncestor
+            ? `ancestor artifacts resolvable beyond scribe: ${checklistFacts.ancestorKinds.join(', ')}`
+            : 'no ancestor artifact resolvable beyond scribe (only evaluator→artificer→scribe verified) — no pain/diagnosis source in the resolvable lineage',
         },
         {
           id: 'actionability',
           pass: Boolean(implementationSummary && affectedTools.length > 0),
           note: implementationSummary && affectedTools.length > 0
-            ? `implementation summary + ${affectedTools.length} affected tool(s) — an agent knows what to do differently`
-            : `missing ${!implementationSummary ? 'implementation summary' : 'affected tools'} — the principle states a goal but not an executable next action`,
+            ? `implementation summary present, ${affectedTools.length} affected tool(s) declared`
+            : `field missing: ${!implementationSummary ? 'implementation summary' : 'affected tools'}`,
         },
         {
           id: 'generalization',
-          pass: checklistFacts.scope.length >= 2,
-          note: checklistFacts.scope.length >= 2
-            ? `scope spans ${checklistFacts.scope.length} contexts (${checklistFacts.scope.slice(0, 3).join('; ')})`
-            : checklistFacts.scope.length === 1
-              ? `single-context scope (${checklistFacts.scope[0]}) — risk of over-fitting one file/task`
-              : 'no applicability scope declared — generalization cannot be assessed',
+          pass: checklistFacts.scopeDistinctCount >= 2,
+          note: checklistFacts.scopeDistinctCount >= 2
+            ? `distinct applicability entries: ${checklistFacts.scopeDistinctCount} (of ${scopeEntries.length} declared)`
+            : checklistFacts.scopeDistinctCount === 1
+              ? `distinct applicability entries: 1 (of ${scopeEntries.length} declared; duplicates removed) — single-context declaration`
+              : 'no applicability entries declared',
         },
         {
           id: 'boundary',
           pass: checklistFacts.antiPatterns.length > 0 || Boolean(checklistFacts.intentContractForbidden),
           note: checklistFacts.antiPatterns.length > 0
-            ? `${checklistFacts.antiPatterns.length} explicit anti-pattern(s) bound the principle's forbidden behavior`
+            ? `${checklistFacts.antiPatterns.length} anti-pattern entries present`
             : checklistFacts.intentContractForbidden
-              ? 'intent contract forbiddenBehavior present (pre-contract-era draft without antiPatterns)'
-              : 'no antiPatterns and no intent-contract forbiddenBehavior — the principle states what it wants but not what it forbids',
+              ? 'intent contract forbiddenBehavior present (antiPatterns absent)'
+              : 'no antiPatterns and no intent-contract forbiddenBehavior present',
         },
       ],
     };

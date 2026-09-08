@@ -1168,13 +1168,31 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
 
+    // ── Round-2 R2 (Owner 指令 2026-09-08): 出界处置先于 intent 落库派生 ──
+    // deriveGovernanceEffect 只读 durable 事实 (重放已 updateRunOutput 持久化
+    // 的 adversarialResult + durable artificer 工件 + durable repair 轮次)，
+    // 不依赖任何瞬时变量。派生结果随 intent 持久化 —— fresh 与 resume 由同
+    // 一 durable 判据得到同一处置，重启不改变已选定的治理动作 (R2 复现的
+    // 治理漂移断点)。
+    const sourceArtificerArtifactIdForGovernance = context.sourceArtificerArtifactId
+      ?? finalOutput.sourceArtificerArtifactId
+      ?? null;
+    const governanceEffect = await this.deriveGovernanceEffect(taskId, {
+      output: finalOutput,
+      sourceArtificerArtifactId: sourceArtificerArtifactIdForGovernance,
+      diagnosticReplayEvidence,
+    });
+
     // ── P0 (verdict drift): verdict + completion intent 原子落库 ──
     // 必须先于一切治理 side effect (validate bearer / seed repair / rule
     // assembly):side effect 已发生而 intent 未落 = crash 后重跑会重新问
     // LLM,新 verdict 与已发生副作用形成治理矛盾 (repair drift /
     // validation drift / validated-rule drift)。同 epoch crash/retry 重跑经
     // maybeResumePendingIntent resume,不重问。
-    await this.recordCompletionOrThrow(taskId, runId, finalOutput.evaluation.decision);
+    await this.recordCompletionOrThrow(taskId, runId, {
+      decision: finalOutput.evaluation.decision,
+      governanceEffect,
+    });
 
     const ruleAssemblyInput = {
       artificerArtifact: context.artificerArtifact ?? null,
@@ -1389,21 +1407,31 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * artifact content — validate each element's caseId shape; malformed entries
    * are skipped (they cannot inform scoping decisions).
    */
-  private static extractFailedCaseIds(output: EvaluatorOutputV1): readonly string[] {
+  private static extractFailedCases(output: EvaluatorOutputV1): readonly { caseId: string; expectedDecision?: string }[] {
     // rc-1/rc-2 (ERR-001): adversarialResult.failedCases is untrusted
     // artifact content — narrow via the class's isRecord/Array guards, no `as`.
+    // Round-2 R1: extract the sandbox-carried expectedDecision per case for
+    // the oracle-consistency check in partitionV2OutOfScopeFailures. The
+    // stored value is only ever COMPARED against the compile-time template
+    // oracle — it is never the classification source of truth.
     if (!EvaluatorRunner.isRecord(output)) return [];
     const {adversarialResult} = output;
     if (!EvaluatorRunner.isRecord(adversarialResult)) return [];
     const {failedCases} = adversarialResult;
     if (!Array.isArray(failedCases)) return [];
-    const ids: string[] = [];
+    const extracted: { caseId: string; expectedDecision?: string }[] = [];
     for (const entry of failedCases) {
       if (!EvaluatorRunner.isRecord(entry)) continue;
       const {caseId} = entry;
-      if (typeof caseId === 'string' && caseId.trim() !== '') ids.push(caseId);
+      if (typeof caseId !== 'string' || caseId.trim() === '') continue;
+      const {expectedDecision} = entry;
+      extracted.push(
+        typeof expectedDecision === 'string' && expectedDecision.trim() !== ''
+          ? { caseId, expectedDecision }
+          : { caseId },
+      );
     }
-    return ids;
+    return extracted;
   }
 
   /**
@@ -1538,7 +1566,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * 证明 output 已 durable (updateRunOutput 在 succeedTask 最前)。
    * 同 epoch crash/retry 重跑经 maybeResumePendingIntent resume,不重问 LLM。
    */
-  private async recordCompletionOrThrow(taskId: string, runId: string, decision: string): Promise<void> {
+  private async recordCompletionOrThrow(
+    taskId: string,
+    runId: string,
+    decisionAndEffect: {
+      readonly decision: string;
+      /** Round-2 R2: deriveGovernanceEffect 的结论；record 只持久化不判断。 */
+      readonly governanceEffect?: { selectedEffect?: 'needs_human_review'; effectReasonCode?: string };
+    },
+  ): Promise<void> {
+    const { decision, governanceEffect } = decisionAndEffect;
     try {
       const raw = await this.stateManager.getTask(taskId);
       if (!raw) throw new Error(`task ${taskId} not found`);
@@ -1553,9 +1590,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           sourceRunId: runId,
           revisionEpoch: piTask.revisionCount ?? 0,
           status: 'pending',
+          ...(governanceEffect?.selectedEffect !== undefined
+            ? { selectedEffect: governanceEffect.selectedEffect }
+            : {}),
+          ...(governanceEffect?.effectReasonCode !== undefined
+            ? { effectReasonCode: governanceEffect.effectReasonCode }
+            : {}),
         },
       });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
+      console.log('DBG record: wrote intent:', JSON.stringify(merged.completionIntent));
     } catch (err) {
       // P0-3 (外部复核): 吞掉写失败 = succeeded 任务无 durable verdict,
       // commit 门退化为不可判定 — fail loud,由重试机制重写 (verdict 仍在 runs)。
@@ -1633,6 +1677,50 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       decision: intent.decision,
       sourceRunId: intent.sourceRunId,
     });
+
+    // ── Round-2 R2 (Owner 指令 2026-09-08): 选定 NHR 效果的恢复直通 ──
+    // fresh 路径在 intent 落库前已把 deriveGovernanceEffect 的结论
+    // (selectedEffect='needs_human_review' + effectReasonCode) 持久化;恢复
+    // 执行读同一 durable intent,直接重放 NHR 效果 — 禁止重问 LLM、禁止
+    // 再 seed repair、禁止重新判责 (R2 复现的治理漂移断点)。照抄
+    // rollout-reviewer-runner 的 intent.effect resume 模板,零新状态源。
+    if ((intent.selectedEffect ?? intent.effect) === 'needs_human_review') {
+      const output2 = await this.recoverIntentOutput(taskId, intent.sourceRunId, intent.decision);
+      const artifactId2 = `pi-art-${taskId}-${intent.sourceRunId}`;
+      const reasonCode = intent.effectReasonCode ?? HUMAN_REVIEW_REASON.evaluatorRepairSeedFailed;
+      if (reasonCode === 'evaluator_test_out_of_scope') {
+        this.emitEvent('repair_loop_test_out_of_scope', taskId, {
+          runId: intent.sourceRunId,
+          attribution: attributionFromLayer('test'),
+          source: 'resume_from_persisted_intent',
+          nextAction: 'owner_decision_required_channel_upgrade_or_principle_revision',
+        });
+      }
+      await this.markNeedsHumanReviewOrThrow(taskId, {
+        runId: intent.sourceRunId,
+        reasonCode,
+        sourceArtifactId: artifactId2,
+      });
+      await this.markCompletionIntentAppliedOrThrow(taskId);
+      this.emitEvent('task_needs_human_review', taskId, {
+        attemptCount: leasedTask.attemptCount,
+        resultRef: `${this.config.resultRefPrefix}://${intent.sourceRunId}`,
+        evaluationDecision: output2.evaluation?.decision,
+        evaluationScore: output2.evaluation?.score,
+        ruleArtifactId: null,
+        reason: `repair_loop_${reasonCode}`,
+      });
+      return {
+        status: 'succeeded',
+        taskId,
+        runId: intent.sourceRunId,
+        artifactId: artifactId2,
+        resultRef: `${this.config.resultRefPrefix}://${intent.sourceRunId}`,
+        contextHash: `resume-${intent.sourceRunId}`,
+        output: output2,
+        attemptCount: leasedTask.attemptCount,
+      };
+    }
 
     const output = await this.recoverIntentOutput(taskId, intent.sourceRunId, intent.decision);
     const artifactId = `pi-art-${taskId}-${intent.sourceRunId}`;
@@ -1913,6 +2001,99 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * are typed as readonly string[] on EvaluatorEvaluation, so element-level
    * re-validation is not required here (rc-4 N/A — not unknown at this point).
    */
+  /**
+   * Round-2 R2 (Owner 指令 2026-09-08): 从 durable 证据派生本 verdict 的治理
+   * 效果。fresh 与 resume 调用同一派生 —— 输入全部是 durable 事实:
+   *   - output: intent 落库前已由 executeDeterministicReplay 持久化的
+   *     adversarialResult（resume 时 recoverIntentOutput 从 run.outputPayload
+   *     恢复同一对象）;
+   *   - sourceArtificerArtifactId → durable 工件的 requiresContextVersion;
+   *   - priorRepairIteration → durable dependency repairPayload。
+   * record 只持久化本函数的结论，不做判断 (指令要求: 禁止把复杂判断逻辑
+   * 塞进 recordCompletionOrThrow)。返回 undefined = governance_transition
+   * (正常效果由 applyEvaluatorDecisionEffects 执行,无需特判)。
+   *
+   * fresh 路径的 diagnosticReplayEvidence 仅用于验证"重放确实执行过"这一
+   * 控制流事实 (P1 provenance); resume 路径不传时, 以 durable adversarialResult
+   * 的形态 (passed === false 且 failedCases 非空) 为等价判据 —— intent 存在
+   * 本身即证明 fresh 侧重放已执行并持久化。
+   */
+  /**
+   * Round-2 R2: 读取当前 durable completion intent (pending 或 applied 均可读 —
+   * applied 意味着效果已 materialize, 读侧只用于一致性核对, 不会改变路由)。
+   * 解析失败/缺 intent 返回 null — 出界判定回退到 fresh 快路径判定
+   * (fail-closed, 绝不因读不到 intent 而静默 seed)。
+   */
+  private async readPendingOrAppliedCompletionIntent(
+    taskId: string,
+  ): Promise<PITaskMetadata['completionIntent'] | null> {
+    try {
+      const raw = await this.stateManager.getTask(taskId);
+      if (!raw) return null;
+      const piTask = hydratePITaskRecord(raw);
+      return piTask?.completionIntent ?? null;
+    } catch (err) {
+      this.emitEvent('completion_intent_read_failed', taskId, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+        nextAction: 'out_of_scope_disposition_falls_back_to_fresh_path_derivation',
+      });
+      return null;
+    }
+  }
+
+  private async deriveGovernanceEffect(
+    evaluatorTaskId: string,
+    ctx: {
+      output: EvaluatorOutputV1;
+      sourceArtificerArtifactId: string | null;
+      diagnosticReplayEvidence?: { ran: true; passed: boolean; failedCaseCount: number } | undefined;
+    },
+  ): Promise<{ selectedEffect?: 'needs_human_review'; effectReasonCode?: string } | undefined> {
+    if (ctx.output.evaluation?.decision !== 'needs_revision') return undefined;
+    if (!this.isRepairLoopEnabled()) return undefined;
+    console.log('DBG derive: decision ok, loop enabled, replayEvidence:', JSON.stringify(ctx.diagnosticReplayEvidence));
+
+    // P1 provenance: fresh 要求 ran:true;resume 无 live 重放时等价判据为
+    // durable adversarialResult 形态 (passed:false + failedCases>0)。
+    const freshReplayFailed = ctx.diagnosticReplayEvidence?.ran === true && ctx.diagnosticReplayEvidence.passed === false;
+    let durableReplayFailed = false;
+    if (EvaluatorRunner.isRecord(ctx.output)) {
+      const {adversarialResult} = ctx.output;
+      if (EvaluatorRunner.isRecord(adversarialResult)) {
+        const {passed} = adversarialResult;
+        const {failedCases} = adversarialResult;
+        durableReplayFailed = passed === false && Array.isArray(failedCases) && failedCases.length > 0;
+      }
+    }
+    if (!freshReplayFailed && !durableReplayFailed) return undefined;
+    console.log('DBG derive: passed replay gate, failedCases:', JSON.stringify(EvaluatorRunner.extractFailedCases(ctx.output).map((c) => c.caseId)));
+
+    const failedCases = EvaluatorRunner.extractFailedCases(ctx.output);
+    if (failedCases.length === 0) return undefined;
+    const requiresContextVersion = ctx.sourceArtificerArtifactId
+      ? await this.resolveRequiresContextVersion(ctx.sourceArtificerArtifactId, evaluatorTaskId)
+      : null;
+    if (requiresContextVersion === null) return undefined;
+    console.log('DBG derive: rcv resolved:', requiresContextVersion);
+
+    const partition = partitionV2OutOfScopeFailures({
+      requiresContextVersion: requiresContextVersion === 2 ? 2 : undefined,
+      failedCases,
+    });
+    console.log('DBG derive: partition pure:', partition.isPureOutOfScope, 'out:', JSON.stringify(partition.outOfScope));
+    if (partition.isPureOutOfScope) {
+      this.emitEvent('governance_effect_out_of_scope_selected', evaluatorTaskId, {
+        outOfScopeCaseIds: [...partition.outOfScope],
+        nextAction: 'selected_effect_needs_human_review_evaluator_test_out_of_scope',
+      });
+      return {
+        selectedEffect: 'needs_human_review',
+        effectReasonCode: 'evaluator_test_out_of_scope',
+      };
+    }
+    return undefined;
+  }
+
   private async maybeSeedArtificerRepair(
     evaluatorTaskId: string,
     ctx: {
@@ -1951,9 +2132,28 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // 哪些 case 是通道限制 (不得尝试满足) — "哪里失败/为什么/改哪里" 三问
     // 在载荷层可回答 (PRI-705)。
     let repairAttribution: RepairPayload['failureAttribution'] | undefined;
+    // Round-2 R2: 出界处置以持久化的 completion intent 为权威。fresh 路径在
+    // recordCompletionOrThrow 之前已由 deriveGovernanceEffect 写入
+    // selectedEffect='needs_human_review' —— 同一 durable 依据 (R1 oracle 校验
+    // 的 partition) 派生; resume 路径经 recoverIntentOutput 后重读本 intent,
+    // 无需重算也无需任何瞬时变量。瞬时 evidence 门只作 fresh 快路径与
+    // 派生时的 provenance 校验, 不再是出界判定的唯一载体 (R2 漂移断点)。
+    {
+      const intent = await this.readPendingOrAppliedCompletionIntent(evaluatorTaskId);
+      if (intent?.selectedEffect === 'needs_human_review'
+        && intent.effectReasonCode === 'evaluator_test_out_of_scope') {
+        this.emitEvent('repair_loop_test_out_of_scope', evaluatorTaskId, {
+          runId: evaluatorRunId,
+          attribution: attributionFromLayer('test'),
+          source: 'persisted_completion_intent',
+          nextAction: 'owner_decision_required_channel_upgrade_or_principle_revision',
+        });
+        return { kind: 'max_iterations_reached', detail: 'test_out_of_scope' };
+      }
+    }
     if (ctx.diagnosticReplayEvidence?.ran === true && ctx.diagnosticReplayEvidence.passed === false) {
-      const failedCaseIds = EvaluatorRunner.extractFailedCaseIds(output);
-      if (failedCaseIds.length > 0) {
+      const failedCases = EvaluatorRunner.extractFailedCases(output);
+      if (failedCases.length > 0) {
         const sourceArtificerArtifactIdForScope = ctx.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId;
         const requiresContextVersion = sourceArtificerArtifactIdForScope
           ? await this.resolveRequiresContextVersion(sourceArtificerArtifactIdForScope, evaluatorTaskId)
@@ -1961,7 +2161,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         if (requiresContextVersion !== null) {
           const partition = partitionV2OutOfScopeFailures({
             requiresContextVersion: requiresContextVersion === 2 ? 2 : undefined,
-            failedCaseIds,
+            failedCases,
           });
           if (partition.isPureOutOfScope) {
             this.emitEvent('repair_loop_test_out_of_scope', evaluatorTaskId, {

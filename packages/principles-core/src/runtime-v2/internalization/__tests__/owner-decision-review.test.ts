@@ -250,7 +250,35 @@ describe('Owner Decision Review Snapshot', () => {
       },
     });
     expect(ownerOnlyItem?.pass).toBe(false);
-    expect(ownerOnlyItem?.note).toContain('no antiPatterns and no intent-contract forbiddenBehavior');
+    expect(ownerOnlyItem?.note).toContain('no antiPatterns and no intent-contract forbiddenBehavior present');
+  });
+
+  it('R3: evidence item binds to resolvable ancestors beyond scribe; generalization dedups applicability (评审探针正式化)', async () => {
+    // 标准链只有 evaluator→artificer→scribe，无 philosopher/dreamer/diag
+    // 祖先 —— evidence 项必须 fail（不得宣称 "evidence-derived"）。
+    const standard = await buildOwnerDecisionReview(makeStore(), EVALUATOR_ID);
+    const stdChecklist = standard?.brief.kind === 'evaluator' ? standard.brief.qualityChecklist : undefined;
+    const stdEvidence = stdChecklist?.items.find((item) => item.id === 'evidence');
+    expect(stdEvidence?.pass).toBe(false);
+    expect(stdEvidence?.note).toContain('no ancestor artifact resolvable beyond scribe');
+
+    // 重复同一文件不得计为多上下文：generalization 按去重计数。
+    const dupStore = makeStore({
+      scribeExtra: {
+        principleDraft: {
+          title: 'x',
+          statement: 'Only patch /tmp/a.ts',
+          rationale: 'x',
+          applicability: ['/tmp/a.ts', '/tmp/a.ts'],
+          antiPatterns: ['x'],
+        },
+      },
+    });
+    const dup = await buildOwnerDecisionReview(dupStore, EVALUATOR_ID);
+    const dupChecklist = dup?.brief.kind === 'evaluator' ? dup.brief.qualityChecklist : undefined;
+    const dupGeneralization = dupChecklist?.items.find((item) => item.id === 'generalization');
+    expect(dupGeneralization?.pass).toBe(false);
+    expect(dupGeneralization?.note).toContain('distinct applicability entries: 1');
   });
 
   it('requires acknowledgement for a partial but still identifiable review', async () => {

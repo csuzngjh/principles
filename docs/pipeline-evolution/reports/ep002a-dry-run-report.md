@@ -53,49 +53,69 @@ resolve-runtime-from-pd-config.ts）硬编码读 diagnostician binding；runnerK
 PRI-677（Todo，同根因 timeout 单）留证据评论（§21 规则 9）；EP002 lab 用
 config 覆写（diagnostician→flatkey-ds）绕过，不在此 PR 修 resolver。
 
-### Attempt 11（flatkey-ds 真实通道）——修复轮首次收敛 ✅
+### Attempt 11（flatkey-ds 真实通道）——一次输出通过结构校验 ✅
 
-- **attempt 11 一次通过（succeeded）**：Episode 001 中 18/18 全灭的死锁任务
-  （artificer-73ccce2a…，ep001 里 9 attempts + force-recovery×3 耗尽）在
-  新代码（v4 prompt 契约：case-id 词汇注释 + 修复指令）+ 正确 provider
-  通道下**单次收敛**。
-- 产物：v2 规则（6 goldenTraceCases、1 evidenceRefs、消费者白名单
-  service/port/installToken + dead-fields 写门）——与 scribe 原则语义一致。
+> **Round-2 R5 勘误（2026-09-08）**：原结论"修复轮首次收敛/18/18→1/1 收敛"
+> 言过其实。可保留的事实只有：**一次输出通过了结构校验**。它不代表
+> repair 闭环收敛（产物仍含编译错误）、不代表 provider 稳定（单次单通道
+> 观测）、更不代表行为改善。
+
+- **attempt 11 通过结构校验（succeeded）**：Episode 001 中 18/18 全灭的
+  死锁任务（artificer-73ccce2a…）在新代码（v4 prompt 契约）+ 正确
+  provider 通道下产出了一次结构合法的 v2 规则（6 goldenTraceCases、
+  1 evidenceRefs、消费者白名单 service/port/installToken + dead-fields
+  写门）。
+- **18/18→1/1 的归因限制**：变量不止代码修复一个（provider 同时从 bai
+  切到 flatkey），且本轮产物后续死于 `__compile__`（见下），因此该对比
+  不能证明因子 B/C 的修复闭环收敛——B/C 的生产有效性由契约测试与
+  Round-2 的 R1/R2 生产路径回归（NHR 写失败+重启一致性）背书。
 - 因子 B 回喂未触发是**正确行为**：attempt 10 的失败在 adapter 层结构化
   修复（repairAttempts 内循环）而非 runner validator，旧 workspace 数据
-  也没有 lastValidatorErrors 键；新失败路径的回喂由 16 契约测试覆盖。
+  也没有 lastValidatorErrors 键。
 
-### Evaluator 轮——approved 0.88 + INFRA 归因落地
+### Evaluator 轮——approved 0.88，但归因分类暴露既有缺陷
 
 - evaluator approved 0.88（requiredChanges 空）——语义评审通过修复产物。
-- 确定性重放：`__compile__` 哨兵 → `sandbox_infrastructure_failure`（
-  layer=runtime）——**INFRA_BLOCKED 归因真实落地**（LLM 生成的 RegExp 行有
-  坏引号序列 `new RegExp('[\\"'\''…`，沙箱编译失败）。
+- 确定性重放：`__compile__` 哨兵（LLM 生成的 RegExp 行有坏引号序列）→
+  **被归因为 `sandbox_infrastructure_failure`（layer=runtime）——这是既有
+  归因分类的缺陷（生成代码语法错误 ≠ 基础设施故障），不是本 PR 归因机制
+  的正例**。Round-2 R1 已按 Owner 口径修正判据；该哨兵分类问题随
+  PRI-705 后续演化收口。
 - fail-safe 正确：approved + passed:false ⇒ rule 工件未装配（不会把编译
   不过的代码写进 RuleHost 面）。
 
-### Rollout 轮——Owner 决策面首次真实可达 ✅
+### Rollout 轮——到达 NHR 恢复路径，Owner 可裁决能力未达成 ✗
+
+> **Round-2 R5 勘误（2026-09-08）**：原结论"Owner 决策面首次真实可达"错误，
+> 已用当前代码对真实 lab DB 只读复核证实。
 
 - rollout_reviewer needs_revision（点名 __compile__ syntax error 必须修复
   并重跑零失配门）——判断准确。
-- 修订路由在 CLI run-once 路径未接线（`rollout_revision_routing_not_wired`）
-  → 任务进入 **needs_human_review**——**Episode 001 全程不可达的 Owner
-  决策面，本轮真实到达**（ep001 approvals=0、NHR 从未产生；本轮 NHR 产生、
-  reviewKey/durable facts 就绪，Owner 可裁决 revise_once/accept/reject）。
-- rollout 修订路由 CLI 缺口与 PRI-661（同路径 gateDeps 缺失）同属 CLI
-  run-once 手动推进面的既有限制，消费循环（auto_consumer）路径不受影响。
+- 任务虽进入 needs_human_review，但 reasonCode 为
+  `rollout_revision_routing_not_wired`——**recovery-only**：只读复核显示
+  `eligible:false / attention:recovery / allowedActions:[]`。任务进入
+  NHR ≠ Owner 拥有 approve/revise/reject 能力。**Episode 002 的 Owner
+  裁决→激活→行为观察段尚未完成，决策面可达性未达成**（独立评审复现，
+  详见 PR #1551 评审轮报告；CLI 修订路由缺口已立 PRI-708）。
+- 修订路由 CLI 缺口与 PRI-661（同路径 gateDeps 缺失）同属 CLI run-once
+  手动推进面的既有限制，消费循环（auto_consumer）路径不受影响。
 
-## 结论
+## 结论（Round-2 R5 勘误后）
 
-**EP002-A 达成目标**：
+**EP002-A 的实际达成**：
 
-1. PRI-700 死锁任务首次收敛（18/18 → 1/1），激活通路的质量层堵点解除；
-2. 归因分类真实落地（INFRA_BLOCKED 由 __compile__ 哨兵确定性产生）；
-3. Owner 决策面真实可达（NHR + decision facts）——Episode 002 完整闭环
-   （Owner 裁决→激活→行为观察）的入场条件全部就绪；
-4. 附带发现两个被实证加重的既有缺口（PRI-677 共享 binding / rollout 修订
-   路由 CLI 缺口），均已在对应单留证，未在本 PR 扩面。
+1. 死锁修复任务产出了一次结构合法的规则输出（此前 18/18 连结构校验都
+   不过）——但闭环收敛未证明（产物含编译错误；provider 变量未分离）；
+2. 出界判责机制在本轮后才落地并可验证（R1 oracle 判据 + R2 重启一致性
+   的生产路径回归）——本轮实验本身没有触发纯出界场景；
+3. ** Episode 002 行为闭环未完成**：Owner 可裁决能力未达成（recovery-only
+   NHR）、激活 0、行为观察未开始。可信实验基础的判断链已打牢
+   （归因按 oracle 证据、治理处置跨重启一致、行为结论必须带证据），
+   完整闭环等 PRI-708 修复后由下一次实验验证；
+4. 附带发现两个被实证加重的既有缺口（PRI-677 共享 binding / rollout
+   修订路由 CLI 缺口 PRI-708），均已在对应单留证，未在本 PR 扩面。
 
 **纪律声明**：live 网关与安装版零触碰；lab workspace 为 ep001 一次性副本
 （重开的两个 failed 任务是 ep001 自身死锁任务的复跑，非人工制造新状态）；
-无 gate 弱化；Owner 决策未被 AI 代投（NHR 留给 Owner）。
+无 gate 弱化；Owner 决策未被 AI 代投（本轮 NHR 为 recovery-only，本来也
+不存在 AI 代投的合法通道）。

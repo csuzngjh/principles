@@ -26,6 +26,7 @@ import {
   attributionFromLayer,
   isV2ContextCase,
   partitionV2OutOfScopeFailures,
+  v2TemplateOracleExpectedDecision,
   resolveRequiresContextVersionFromArtifact,
   V2_TEMPLATE_CASE_IDS,
   type FailureLayer,
@@ -127,10 +128,19 @@ describe('1. Intent Consistency — contract flows scribe → prompt → rule ar
 });
 
 describe('2. Failure Attribution — where/why/what-next classification', () => {
-  it('pure v2-context failures judging a v1 rule are test-out-of-scope (FAILED_TEST), not rule defects', () => {
+  // Round-2 R1 (Owner 口径 b): 出界判定按「oracle 期望决策 + 逐 case 验证」，
+  // 不按模板名单断言。expectedDecision 的分类真值 = 编译期模板 oracle
+  // (generateV2ContextAdversarialCases 定义)；沙箱回带值仅作一致性比对
+  // (防 caseId 冒名)，绝非判定来源。
+
+  it('Case B: pure context-only allow-template failures against a v1 rule ARE out-of-scope (Episode-001 death loop breaker preserved)', () => {
     const partition = partitionV2OutOfScopeFailures({
       requiresContextVersion: undefined, // v1 action-only rule
-      failedCaseIds: ['v2-unavailable', 'v2-truncated', 'v2-alias'],
+      failedCases: [
+        { caseId: 'v2-unavailable', expectedDecision: 'allow' },
+        { caseId: 'v2-truncated', expectedDecision: 'allow' },
+        { caseId: 'v2-alias', expectedDecision: 'allow' },
+      ],
     });
     expect(partition.isPureOutOfScope).toBe(true);
     expect(partition.outOfScope).toEqual(['v2-unavailable', 'v2-truncated', 'v2-alias']);
@@ -138,10 +148,50 @@ describe('2. Failure Attribution — where/why/what-next classification', () => 
     expect(attributionFromLayer('test')).toBe('FAILED_TEST');
   });
 
+  it('Case A: a rule that violates an explicit block requirement MUST reach repair — block-expecting v2 templates are never out-of-scope', () => {
+    // R1 复现回归：原则禁止写危险文件，规则输出 allow，v2-combination
+    // (期望 block) 失败——必须进 Rule 修复，禁止被 NHR 豁免。
+    const partition = partitionV2OutOfScopeFailures({
+      requiresContextVersion: undefined,
+      failedCases: [{ caseId: 'v2-combination', expectedDecision: 'block' }],
+    });
+    expect(partition.isPureOutOfScope).toBe(false);
+    expect(partition.outOfScope).toEqual([]);
+    expect(partition.inScope).toEqual(['v2-combination']);
+    // path-boundary 同理：期望 block 的模板 v1 完全可实现
+    const boundaryPartition = partitionV2OutOfScopeFailures({
+      requiresContextVersion: undefined,
+      failedCases: [
+        { caseId: 'v2-path-boundary', expectedDecision: 'block' },
+        { caseId: 'v2-unavailable', expectedDecision: 'allow' },
+      ],
+    });
+    expect(boundaryPartition.isPureOutOfScope).toBe(false);
+    expect(boundaryPartition.inScope).toEqual(['v2-path-boundary']);
+    expect(boundaryPartition.outOfScope).toEqual(['v2-unavailable']);
+  });
+
+  it('Case C: expectedDecision missing or mismatched → fail-closed IN SCOPE (never exempts the rule)', () => {
+    const missing = partitionV2OutOfScopeFailures({
+      requiresContextVersion: undefined,
+      failedCases: [
+        { caseId: 'v2-unavailable' },
+        { caseId: 'v2-alias', expectedDecision: 'block' }, // 冒名/不一致 → in-scope
+      ],
+    });
+    expect(missing.isPureOutOfScope).toBe(false);
+    expect(missing.outOfScope).toEqual([]);
+    expect(missing.inScope).toEqual(['v2-unavailable', 'v2-alias']);
+  });
+
   it('the same v2 cases against a v2 rule are in scope (the channel CAN express them)', () => {
     const partition = partitionV2OutOfScopeFailures({
       requiresContextVersion: 2,
-      failedCaseIds: ['v2-unavailable', 'v2-truncated', 'case-ordinary-1'],
+      failedCases: [
+        { caseId: 'v2-unavailable', expectedDecision: 'allow' },
+        { caseId: 'v2-truncated', expectedDecision: 'allow' },
+        { caseId: 'case-ordinary-1', expectedDecision: 'block' },
+      ],
     });
     expect(partition.isPureOutOfScope).toBe(false);
     expect(partition.outOfScope).toEqual([]);
@@ -151,34 +201,37 @@ describe('2. Failure Attribution — where/why/what-next classification', () => 
   it('mixed failures on a v1 rule: ordinary cases stay in-scope (real rule defect)', () => {
     const partition = partitionV2OutOfScopeFailures({
       requiresContextVersion: undefined,
-      failedCaseIds: ['case-ordinary-1', 'v2-unavailable'],
+      failedCases: [
+        { caseId: 'case-ordinary-1', expectedDecision: 'block' },
+        { caseId: 'v2-unavailable', expectedDecision: 'allow' },
+      ],
     });
     expect(partition.isPureOutOfScope).toBe(false);
     expect(partition.inScope).toEqual(['case-ordinary-1']);
     expect(partition.outOfScope).toEqual(['v2-unavailable']);
   });
 
-  it('isV2ContextCase matches ONLY the five known evaluator template ids (allowlist, not prefix)', () => {
-    expect(isV2ContextCase('v2-unavailable')).toBe(true);
-    expect(isV2ContextCase('v2-truncated')).toBe(true);
-    expect(isV2ContextCase('v2-alias')).toBe(true);
-    expect(isV2ContextCase('v2-path-boundary')).toBe(true);
-    expect(isV2ContextCase('v2-combination')).toBe(true);
-    // 评审 P1 回归：LLM 自定义 v2-* id 不得被误判出界（它们引入新行为
-    // 要求，是真实的 Rule 缺陷信号，必须留在 in-scope）
-    expect(isV2ContextCase('v2-business-boundary')).toBe(false);
-    expect(isV2ContextCase('negative-1')).toBe(false);
-    expect(isV2ContextCase('adv-v2')).toBe(false);
-  });
-
   it('a v1 rule failing ONLY on custom v2-* ids stays IN SCOPE (no false test-out-of-scope routing)', () => {
     const partition = partitionV2OutOfScopeFailures({
       requiresContextVersion: undefined,
-      failedCaseIds: ['v2-business-boundary', 'v2-custom-2'],
+      failedCases: [
+        { caseId: 'v2-business-boundary', expectedDecision: 'block' },
+        { caseId: 'v2-custom-2', expectedDecision: 'allow' },
+      ],
     });
     expect(partition.isPureOutOfScope).toBe(false);
     expect(partition.inScope).toEqual(['v2-business-boundary', 'v2-custom-2']);
     expect(partition.outOfScope).toEqual([]);
+  });
+
+  it('v2TemplateOracleExpectedDecision reflects the compile-time template definitions (block templates are never context-only)', () => {
+    expect(v2TemplateOracleExpectedDecision('v2-unavailable')).toBe('allow');
+    expect(v2TemplateOracleExpectedDecision('v2-truncated')).toBe('allow');
+    expect(v2TemplateOracleExpectedDecision('v2-alias')).toBe('allow');
+    expect(v2TemplateOracleExpectedDecision('v2-path-boundary')).toBe('block');
+    expect(v2TemplateOracleExpectedDecision('v2-combination')).toBe('block');
+    expect(v2TemplateOracleExpectedDecision('v2-business-boundary')).toBeNull();
+    expect(v2TemplateOracleExpectedDecision('negative-1')).toBeNull();
   });
 
   it('attributionFromLayer maps the full stage-answer taxonomy onto one vocabulary', () => {
@@ -212,16 +265,19 @@ describe('2. Failure Attribution — where/why/what-next classification', () => 
     expect(resolveRequiresContextVersionFromArtifact('{"requiresContextVersion":"2"}')).toBeNull();
   });
 
-  it('WIRING: a resolved v1 artifact whose replay failures are all v2 templates routes pure out-of-scope (the Episode-001 death loop breaker)', () => {
+  it('WIRING: a resolved v1 artifact whose replay failures are all oracle-verified allow templates routes pure out-of-scope', () => {
     const v1ArtifactContentJson = '{"taskId":"a","ruleCode":"...","statement":"s"}';
     const resolved = resolveRequiresContextVersionFromArtifact(v1ArtifactContentJson);
     expect(resolved).toBeUndefined();
     const partition = partitionV2OutOfScopeFailures({
       requiresContextVersion: resolved === 2 ? 2 : undefined,
-      failedCaseIds: ['v2-unavailable', 'v2-combination'],
+      failedCases: [
+        { caseId: 'v2-unavailable', expectedDecision: 'allow' },
+        { caseId: 'v2-alias', expectedDecision: 'allow' },
+      ],
     });
     expect(partition.isPureOutOfScope).toBe(true);
-    expect(partition.outOfScope).toEqual(['v2-unavailable', 'v2-combination']);
+    expect(partition.outOfScope).toEqual(['v2-unavailable', 'v2-alias']);
     expect(partition.inScope).toEqual([]);
   });
 
@@ -234,6 +290,14 @@ describe('2. Failure Attribution — where/why/what-next classification', () => 
     const generatedIds = new Set(generated.map((c) => c.caseId));
     expect(generatedIds.size).toBe(5);
     expect([...generatedIds].sort()).toEqual([...V2_TEMPLATE_CASE_IDS].sort());
+    // Round-2 R1: the oracle-expected decision per generated template must
+    // match the partition's oracle map — generator drift in expectations is
+    // caught here, not silently in production routing.
+    for (const c of generated) {
+      const oracle = v2TemplateOracleExpectedDecision(c.caseId);
+      expect(oracle).not.toBeNull();
+      expect(oracle).toBe(c.expectedDecision);
+    }
   });
 });
 

@@ -259,16 +259,25 @@ export function buildEvidenceIndex(report, manifest) {
       || obs.status === 'INCONCLUSIVE'
     );
     if (isKnownOutcome) {
+      // Round-2 R4: element validation + defensive mapping apply to ALL
+      // outcomes (parseManifest is the loud gate; this is the same-contract
+      // safety net — malformed elements must never crash the builder and
+      // unsupported conclusions must never survive as claims).
       const rawEvidence = Array.isArray(obs.evidence) ? obs.evidence : [];
-      const isPositive = obs.status === 'CONFIRMED' || obs.status === 'IMPROVED';
-      if (isPositive && rawEvidence.length === 0) {
+      const validEvidence = rawEvidence.filter((e) => e !== null && typeof e === 'object' && !Array.isArray(e)
+        && [e.detail, e.source].some((value) => typeof value === 'string' && value.trim() !== ''));
+      const claimsObservation = obs.status !== 'INCONCLUSIVE';
+      if (claimsObservation && validEvidence.length === 0) {
         behavior = {
           status: 'INCONCLUSIVE',
-          evidence: [evidence('manifest.behaviorObservation', null, 'positive observation recorded with no evidence entries — downgraded to INCONCLUSIVE (evidence integrity gate, PRI-703 Phase 3)')],
+          evidence: [evidence('manifest.behaviorObservation', null, `${obs.status} observation recorded with no valid evidence entries — downgraded to INCONCLUSIVE (evidence integrity gate, PRI-703 Phase 3 / Round-2 R4)`)],
         };
       } else {
         const derivedStatus = obs.status === 'CONFIRMED' ? 'IMPROVED' : obs.status;
-        behavior = { status: derivedStatus, evidence: rawEvidence.map((e) => evidence('manifest.behaviorObservation', e.source ?? null, e.detail ?? '')) };
+        behavior = {
+          status: derivedStatus,
+          evidence: validEvidence.map((e) => evidence('manifest.behaviorObservation', e.source ?? null, e.detail ?? '')),
+        };
       }
     } else {
       behavior = { status: 'INCONCLUSIVE', evidence: [evidence('manifest.behaviorObservation', null, 'activation present but no Phase-4 behavior observation recorded')] };
