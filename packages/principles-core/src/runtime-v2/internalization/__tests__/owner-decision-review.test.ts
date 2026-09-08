@@ -83,6 +83,7 @@ function makeStore(options: {
   concern?: string;
   evaluatorExtra?: Record<string, unknown>;
   artificerExtra?: Record<string, unknown>;
+  scribeExtra?: Record<string, unknown>;
   includeOlderRepair?: boolean;
 } = {}): OwnerDecisionReviewStore {
   const oldArtificerArtifactId = 'pi-art-artificer-review-old-run-1';
@@ -106,6 +107,7 @@ function makeStore(options: {
         applicability: ['filesystem writes'],
         antiPatterns: ['guessing the target'],
       },
+      ...options.scribeExtra,
     }}),
     artifact({ artifactId: ARTIFICER_ARTIFACT_ID, sourceTaskId: ARTIFICER_TASK_ID, lineageArtifactIds: [SCRIBE_ARTIFACT_ID], content: {
       ...(options.codeBearingArtificer
@@ -187,6 +189,96 @@ describe('Owner Decision Review Snapshot', () => {
       { check: 'adversarial_hard_gate', status: 'not_run' },
     ]);
     expect(snapshot.evidence.completeness).toBe('complete');
+  });
+
+  it('derives the 5-item quality checklist; boundary passes via antiPatterns on the standard fixture', async () => {
+    const snapshot = await buildOwnerDecisionReview(makeStore(), EVALUATOR_ID);
+    expect(snapshot?.brief.kind).toBe('evaluator');
+    if (snapshot?.brief.kind !== 'evaluator') throw new Error('expected evaluator brief');
+    const checklist = snapshot.brief.qualityChecklist;
+    expect(checklist).toBeDefined();
+    expect(checklist?.schemaVersion).toBe(1);
+    expect(checklist?.items.map((item) => item.id)).toEqual([
+      'understandability', 'evidence', 'actionability', 'generalization', 'boundary',
+    ]);
+    const byId = new Map(checklist?.items.map((item) => [item.id, item] as const));
+    expect(byId.get('understandability')?.pass).toBe(true);
+    expect(byId.get('boundary')?.pass).toBe(true);
+    expect(byId.get('boundary')?.note).toContain('anti-pattern');
+    // 标准单上下文 fixture：generalization 必须 fail（over-fitting 信号）
+    expect(byId.get('generalization')?.pass).toBe(false);
+  });
+
+  it('boundary: intent-contract forbiddenBehavior is the ONLY accepted fallback — ownerIntent (a goal) must not count (评审 P1)', async () => {
+    const draftWithoutAntiPatterns = {
+      title: 'Confirm destructive changes',
+      statement: 'Before destructive changes, confirm the exact target with the Owner.',
+      rationale: 'Prevents irreversible work against an ambiguous target.',
+      applicability: ['filesystem writes', 'shell commands'],
+    };
+    const boundaryItem = async (options: Parameters<typeof makeStore>[0]): Promise<{ pass?: boolean; note?: string } | undefined> => {
+      const snapshot = await buildOwnerDecisionReview(makeStore(options), EVALUATOR_ID);
+      expect(snapshot?.brief.kind).toBe('evaluator');
+      if (snapshot?.brief.kind !== 'evaluator') throw new Error('expected evaluator brief');
+      return snapshot.brief.qualityChecklist?.items.find((item) => item.id === 'boundary');
+    };
+    // forbiddenBehavior present → boundary pass even without antiPatterns
+    const forbiddenItem = await boundaryItem({
+      scribeExtra: {
+        principleDraft: draftWithoutAntiPatterns,
+        intentContract: {
+          ownerIntent: 'prevent ambiguous destructive targets',
+          targetBehavior: 'confirm the exact target before destructive writes',
+          forbiddenBehavior: 'guessing or inferring the target without confirmation',
+          evidenceSource: 'pain destructive-write misses',
+          validationExpectation: 'unconfirmed targets are blocked',
+        },
+      },
+    });
+    expect(forbiddenItem?.pass).toBe(true);
+    expect(forbiddenItem?.note).toContain('forbiddenBehavior');
+
+    // ownerIntent present but forbiddenBehavior EMPTY → boundary must FAIL
+    // (回归：旧实现误把 intentOwner 当 forbidden 证据)
+    const ownerOnlyItem = await boundaryItem({
+      scribeExtra: {
+        principleDraft: draftWithoutAntiPatterns,
+        intentContract: {
+          ownerIntent: 'prevent ambiguous destructive targets',
+          forbiddenBehavior: '',
+        },
+      },
+    });
+    expect(ownerOnlyItem?.pass).toBe(false);
+    expect(ownerOnlyItem?.note).toContain('no antiPatterns and no intent-contract forbiddenBehavior present');
+  });
+
+  it('R3: evidence item binds to resolvable ancestors beyond scribe; generalization dedups applicability (评审探针正式化)', async () => {
+    // 标准链只有 evaluator→artificer→scribe，无 philosopher/dreamer/diag
+    // 祖先 —— evidence 项必须 fail（不得宣称 "evidence-derived"）。
+    const standard = await buildOwnerDecisionReview(makeStore(), EVALUATOR_ID);
+    const stdChecklist = standard?.brief.kind === 'evaluator' ? standard.brief.qualityChecklist : undefined;
+    const stdEvidence = stdChecklist?.items.find((item) => item.id === 'evidence');
+    expect(stdEvidence?.pass).toBe(false);
+    expect(stdEvidence?.note).toContain('no ancestor artifact resolvable beyond scribe');
+
+    // 重复同一文件不得计为多上下文：generalization 按去重计数。
+    const dupStore = makeStore({
+      scribeExtra: {
+        principleDraft: {
+          title: 'x',
+          statement: 'Only patch /tmp/a.ts',
+          rationale: 'x',
+          applicability: ['/tmp/a.ts', '/tmp/a.ts'],
+          antiPatterns: ['x'],
+        },
+      },
+    });
+    const dup = await buildOwnerDecisionReview(dupStore, EVALUATOR_ID);
+    const dupChecklist = dup?.brief.kind === 'evaluator' ? dup.brief.qualityChecklist : undefined;
+    const dupGeneralization = dupChecklist?.items.find((item) => item.id === 'generalization');
+    expect(dupGeneralization?.pass).toBe(false);
+    expect(dupGeneralization?.note).toContain('distinct applicability entries: 1');
   });
 
   it('requires acknowledgement for a partial but still identifiable review', async () => {

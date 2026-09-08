@@ -75,6 +75,22 @@ export interface RepairPayload {
     readonly passed: boolean;
     readonly failedCaseCount: number;
   };
+  /**
+   * PRI-705 / PRI-703 Phase 2 (Owner 决策 2026-09-07): 修复轮失败归因 —
+   * "哪里失败 / 为什么 / 下一步改哪里" 随载荷流动,修复 LLM 不再盲猜。
+   * 仅在确定归因可得时携带 (evaluator 在 seed 时由确定性分类器填入):
+   *   - attribution: 失败归属于哪一层 (FailureAttribution 词表)
+   *   - outOfScopeCaseIds: 被判定为 test-out-of-scope 的 v2-context case
+   *     (v1 通道结构性不可表达 — 修复轮不得尝试满足它们;纯 out-of-scope
+   *     场景根本不会 seed 修复任务,本字段只在混合场景出现)
+   *   - reason: 人类可读归因摘要 (有界)
+   * 全部可选 — 旧载荷/未分类失败不受影响 (rc-9: 缺失不降级语义)。
+   */
+  readonly failureAttribution?: {
+    readonly attribution: string;
+    readonly outOfScopeCaseIds?: readonly string[];
+    readonly reason: string;
+  };
 }
 
 /**
@@ -151,6 +167,117 @@ export interface OwnerResolutionRecord {
     readonly kind: 'partial_evidence';
     readonly acknowledged: true;
     readonly note?: string;
+  };
+}
+
+/**
+ * PRI-700 因子 B (Owner 决策 2026-09-07): 上一次 attempt 的 validator 拒绝
+ * 全文。由 base-peer-runner.handleValidationError 在每次 output-invalid 后
+ * 写入 diagnosticJson 顶层（与 pi_metadata 信封并列的 lastValidatorErrors
+ * 键，best-effort 持久化），下一次 attempt 的 runner prompt 从中回喂——
+ * 修复 attempt N+1 不再与 attempt N 同 prompt 零新信息重试（18/18 死锁
+ * 的结构性断路）。
+ *
+ * 生命周期：本 attempt 校验失败时被当次新错误覆盖（rc-7 loop state
+ * freshness），成功时不清理（残留由读取侧 sourceAttemptCount 新鲜度判定
+ * 屏蔽——只回喂 sourceAttemptCount === 当前 attempt-1 的记录）。
+ */
+export interface LastValidatorErrors {
+  /** 持久化时间（ISO） */
+  readonly recordedAt: string;
+  /** 本 attempt 校验失败的错误类别（PDErrorCategory） */
+  readonly errorCategory: string;
+  /**
+   * validator 拒绝错误（≥1 条）。持久化侧存全文；本（读取/回喂）侧有界：
+   * ≤10 条、每条 ≤500 字符（rc-8，见 boundRefedErrors）。
+   */
+  readonly errors: readonly string[];
+  /**
+   * 写入时的 attempt 序号（= 写入侧 task.attemptCount）。读取侧做跨
+   * attempt/跨进程新鲜度判定：仅当 === 当前 attempt-1 时回喂。评审
+   * P1：运行时错误不清除本记录，无来源标识时 attempt N+2 或重启后的
+   * 重试会复用 attempt N 的旧错误。
+   */
+  readonly sourceAttemptCount: number;
+}
+
+/**
+ * rc-8 (评审 P2): 回喂进 prompt 的 validator 错误必须有界。错误字符串
+ * 含被回显的 LLM 输出（可能极大——历史 incident 有 500KB 级 JSON 回显），
+ * 无界回喂会把修复 attempt N+1 的 prompt 推过 MAX_PROMPT_CHARS 的抛掷
+ * 边界，制造确定性 RangeError 重试循环。持久化侧保留全文（可观测性），
+ * 只有回喂读取侧截断——截断以可见后缀标注（rc-9）。
+ */
+const REFED_ERROR_MAX_COUNT = 10;
+const REFED_ERROR_MAX_CHARS = 500;
+
+function boundRefedErrors(errors: readonly string[]): string[] {
+  const capped: string[] = [];
+  for (const error of errors) {
+    if (capped.length >= REFED_ERROR_MAX_COUNT) {
+      const omitted = errors.length - REFED_ERROR_MAX_COUNT;
+      capped.push(`[+${omitted} more validation error(s) omitted for prompt budget]`);
+      break;
+    }
+    capped.push(error.length > REFED_ERROR_MAX_CHARS
+      ? `${error.slice(0, REFED_ERROR_MAX_CHARS)}…[truncated]`
+      : error);
+  }
+  return capped;
+}
+
+/**
+ * PRI-700 因子 B（评审 P1）: 回喂新鲜度判定——纯函数，供 runner 消费。
+ * 仅当记录来自紧邻的上一个 attempt（sourceAttemptCount === 当前
+ * attempt-1）且存在 lease 上下文时回喂；否则由调用方发 suppression
+ * 事件（rc-9）。进程重启安全：判定只依赖持久化的 sourceAttemptCount
+ * 与 lease 派生的 attempt 序号。
+ */
+export function isFreshForNextAttempt(
+  record: LastValidatorErrors,
+  currentLeasedAttempt: number | undefined,
+): boolean {
+  return currentLeasedAttempt !== undefined
+    && record.sourceAttemptCount === currentLeasedAttempt - 1;
+}
+
+/**
+ * Trust-boundary guard (rc-1, rc-4): diagnosticJson 顶层
+ * lastValidatorErrors 是 untrusted runtime data。sourceAttemptCount 必填
+ * 且为非负整数——缺来源标识的 legacy 记录返回 null（宁可少回喂一次，
+ * 不回喂来源不明的旧错误）。
+ */
+export function parseLastValidatorErrors(diagnosticJson: string | null | undefined): LastValidatorErrors | null {
+  if (!diagnosticJson || diagnosticJson.trim() === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(diagnosticJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  // rc-5: hasOwn, not in
+  if (!Object.hasOwn(parsed, 'lastValidatorErrors')) return null;
+  const value = (parsed as Record<string, unknown>).lastValidatorErrors;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.recordedAt !== 'string' || record.recordedAt.trim() === '') return null;
+  if (typeof record.errorCategory !== 'string' || record.errorCategory.trim() === '') return null;
+  if (!Array.isArray(record.errors) || record.errors.length === 0) return null;
+  // rc-4: validate array element types
+  for (const error of record.errors) {
+    if (typeof error !== 'string' || error.trim() === '') return null;
+  }
+  if (typeof record.sourceAttemptCount !== 'number'
+    || !Number.isInteger(record.sourceAttemptCount)
+    || record.sourceAttemptCount < 0) {
+    return null;
+  }
+  return {
+    recordedAt: record.recordedAt,
+    errorCategory: record.errorCategory,
+    errors: boundRefedErrors(record.errors as string[]),
+    sourceAttemptCount: record.sourceAttemptCount,
   };
 }
 
@@ -272,6 +399,21 @@ export interface RunnerCompletionIntent {
    *   — crash resume 必须继续该效果 (重写 needs_human_review),禁止重问 LLM。
    */
   readonly effect?: 'governance_transition' | 'needs_human_review';
+  /**
+   * Round-2 R2 (Owner 指令 2026-09-08): deriveGovernanceEffect 从 durable 证据
+   * 派生的选定治理效果（与 P0-A 的 effect 同义；写侧统一写本键）。
+   * 'needs_human_review' ⇒ resume 必须恢复同一 NHR 效果（重写状态 +
+   * reasonCode），禁止重新计算路由 / 重问 LLM / 再 seed repair。
+   * 缺失 = governance_transition（旧行为）。解析层 effect 与本键同读。
+   */
+  readonly selectedEffect?: 'needs_human_review';
+  /**
+   * Round-2 R2: selectedEffect 的结构化原因码（evaluator_test_out_of_scope /
+   * evaluator_repair_budget_exhausted / evaluator_repair_seed_failed）。
+   * resume 重放 NHR 时以本字段为准；缺失时兜底 evaluator_repair_seed_failed
+   * （fail-closed 到 recovery 语义，绝不凭空升级为 decision-capable）。
+   */
+  readonly effectReasonCode?: string;
 }
 
 /** rollout needs_revision 的修订路由载荷 */
@@ -423,6 +565,21 @@ function isValidRepairPayload(value: unknown): value is RepairPayload {
     if (typeof dr.ran !== 'boolean') return false;
     if (typeof dr.passed !== 'boolean') return false;
     if (typeof dr.failedCaseCount !== 'number' || !Number.isInteger(dr.failedCaseCount) || dr.failedCaseCount < 0) return false;
+  }
+  // PRI-705 / PRI-703 Phase 2: optional failureAttribution — validate when
+  // present (rc-1/rc-4; malformed attribution fails the payload loudly so a
+  // corrupted attribution context can never silently steer the repair prompt).
+  if (p.failureAttribution !== undefined) {
+    if (typeof p.failureAttribution !== 'object' || p.failureAttribution === null || Array.isArray(p.failureAttribution)) return false;
+    const fa = p.failureAttribution as Record<string, unknown>;
+    if (typeof fa.attribution !== 'string' || fa.attribution.trim() === '') return false;
+    if (typeof fa.reason !== 'string' || fa.reason.trim() === '') return false;
+    if (fa.outOfScopeCaseIds !== undefined) {
+      if (!Array.isArray(fa.outOfScopeCaseIds)) return false;
+      for (const id of fa.outOfScopeCaseIds) {
+        if (typeof id !== 'string' || id.trim() === '') return false;
+      }
+    }
   }
   return true;
 }
@@ -679,9 +836,18 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
       ({ revisionIteration } = r);
     }
     // P0-A: 可选效果类型,缺失 = governance_transition
+    // Round-2 R2: 旧 'effect' 键与新的 selectedEffect 同义——两者都读，冲突
+    // 不可能由合法写入产生（写侧只写 selectedEffect + effectReasonCode）。
     let effect: 'governance_transition' | 'needs_human_review' | undefined;
-    if (r.effect !== undefined && r.effect !== 'governance_transition' && r.effect !== 'needs_human_review') return null;
-    if (r.effect === 'needs_human_review') ({ effect } = r);
+    const rawEffect = r.effect !== undefined ? r.effect : r.selectedEffect;
+    if (rawEffect !== undefined && rawEffect !== 'governance_transition' && rawEffect !== 'needs_human_review') return null;
+    if (rawEffect === 'needs_human_review') effect = 'needs_human_review';
+    // Round-2 R2: effectReasonCode — 非空字符串,缺失容忍 (resume 兜底)。
+    let effectReasonCode: string | undefined;
+    if (r.effectReasonCode !== undefined) {
+      if (typeof r.effectReasonCode !== 'string' || r.effectReasonCode.trim() === '') return null;
+      ({ effectReasonCode } = r);
+    }
     completionIntent = {
       decision: r.decision as RunnerDecision,
       sourceRunId: r.sourceRunId,
@@ -689,6 +855,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
       status: r.status,
       revisionIteration,
       ...(effect !== undefined ? { effect } : {}),
+      ...(effectReasonCode !== undefined ? { effectReasonCode } : {}),
     };
   }
 

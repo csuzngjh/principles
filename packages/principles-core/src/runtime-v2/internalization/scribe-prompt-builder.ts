@@ -62,6 +62,13 @@ ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
     "antiPatterns": ["<pattern this principle forbids>"],
     "confidence": 0.8
   },
+  "intentContract": {
+    "ownerIntent": "<what the Owner actually wants to prevent or achieve, one concrete sentence>",
+    "targetBehavior": "<the observable behavior a compliant agent must exhibit>",
+    "forbiddenBehavior": "<the behavior this principle explicitly forbids — the failure family>",
+    "evidenceSource": "<which real evidence (pain/diagnosis) this intent is distilled from>",
+    "validationExpectation": "<what an evaluator should observe to accept a rule as faithful to this intent>"
+  },
   "sourceTrace": {
     "dreamerArtifactId": "<from philosopher artifact if available, or omit>",
     "philosopherArtifactId": "<copy exactly from input.sourcePhilosopherArtifactId>"
@@ -69,6 +76,14 @@ ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
   "risks": ["<risk 1>", "<risk 2>"],
   "generatedAt": "<ISO-8601 timestamp>"
 }
+
+INTENT CONTRACT (required — the alignment anchor for every downstream stage):
+- The intentContract is read by rule generation, evaluation, and repair. Vague wording there becomes incoherent rules downstream.
+- ownerIntent: one concrete sentence about what the Owner wants — never a slogan. BAD: "be careful with configs". GOOD: "avoid the agent guessing configuration contracts from example files".
+- targetBehavior: the observable action a compliant agent performs (what a reviewer could SEE in a tool trajectory).
+- forbiddenBehavior: the failure family this principle exists to kill — mirror the diagnosed pain, not a generic vice.
+- evidenceSource: name the actual pain/diagnosis facts this distills from.
+- validationExpectation: what evidence an evaluator should demand before accepting a rule as faithful. A later repair round checks required changes against this field: a change that contradicts it is flagged, not blindly implemented.
 
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
@@ -78,6 +93,8 @@ CONSTRAINTS:
 - principleDraft.applicability MUST be an array of strings (at least one recommended)
 - principleDraft.antiPatterns MUST be an array of strings (can be empty)
 - principleDraft.confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
+- intentContract is REQUIRED and every one of its five fields MUST be a non-empty string (no placeholders, no "TBD")
+- intentContract.ownerIntent / targetBehavior / forbiddenBehavior MUST stay consistent with principleDraft.statement and antiPatterns — they express the SAME intent at different precision, never a different one
 - sourcePhilosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId (non-empty string)
 - sourceTrace.philosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId
 - sourceTrace.dreamerArtifactId is optional — include only if available from philosopher artifact
@@ -87,7 +104,14 @@ CONSTRAINTS:
 ${languageDirective}`;
 }
 
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v1';
+/**
+ * PRI-703 Phase 1 (Owner decision 2026-09-07): bumped v1 → v2. The scribe
+ * output contract gains the required structured intentContract — the single
+ * Owner-intent alignment anchor consumed by rule generation, evaluation, and
+ * repair. Wire shape is additive; the hand-rolled validator enforces the five
+ * non-empty fields when the key is present.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v2';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;
