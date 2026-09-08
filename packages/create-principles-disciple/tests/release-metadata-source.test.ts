@@ -184,6 +184,41 @@ describe('install.json is merge-owned', () => {
     expect('releaseMetadataUrl' in (JSON.parse(fs.readFileSync(paths.installConfigPath, 'utf8')) as object)).toBe(false);
   });
 
+  it('a config write that omits releaseMetadataUrl PRESERVES the durable tier (review fix)', () => {
+    const home = makeTempHome();
+    const paths = resolvePdHomePaths(path.join(home, '.pd'));
+    ensurePdHomeLayout(paths);
+    writeInstallConfig(paths, { channel: 'stable', autoCheck: false, releaseMetadataUrl: TEST_URL });
+
+    // A future writer that only owns channel/autoCheck must not silently drop
+    // the installer-supplied durable tier.
+    writeInstallConfig(paths, { channel: 'candidate', autoCheck: true });
+
+    const onDisk = JSON.parse(fs.readFileSync(paths.installConfigPath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk).toMatchObject({ channel: 'candidate', autoCheck: true, releaseMetadataUrl: TEST_URL });
+    expect(readInstallConfig(paths)).toEqual({
+      channel: 'candidate',
+      autoCheck: true,
+      releaseMetadataUrl: TEST_URL,
+    });
+  });
+
+  it('treats an empty releaseMetadataUrl as not configured, not as a corrupt install (review fix)', () => {
+    const home = makeTempHome();
+    const paths = resolvePdHomePaths(path.join(home, '.pd'));
+    ensurePdHomeLayout(paths);
+    for (const empty of ['', '   ']) {
+      fs.writeFileSync(paths.installConfigPath, `${JSON.stringify({
+        channel: 'stable',
+        autoCheck: false,
+        releaseMetadataUrl: empty,
+      }, null, 2)}\n`);
+      // Consistent with the resolver: an unset override is absent, and it must
+      // not brick ReleaseManager readiness for the whole install.
+      expect(readInstallConfig(paths)).toEqual({ channel: 'stable', autoCheck: false });
+    }
+  });
+
   it('fails loud on a malformed releaseMetadataUrl instead of degrading to unconfigured', () => {
     const home = makeTempHome();
     const paths = resolvePdHomePaths(path.join(home, '.pd'));

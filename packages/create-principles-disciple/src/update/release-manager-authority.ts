@@ -49,7 +49,7 @@ import {
   type InstallStatus,
   type LegacyUpdaterDecision,
 } from './release-manager.js';
-import { InstallLayoutError, readInstallConfig, resolvePdHomePaths } from './install-layout.js';
+import { InstallLayoutError, readInstallConfig, resolvePdHomePaths, type InstallConfig } from './install-layout.js';
 import { resolveReleaseMetadataSource, type ReleaseMetadataSource } from './release-metadata-source.js';
 
 /** Mutation kinds the console MutationController routes (PRI-659 contract). */
@@ -126,7 +126,7 @@ export function createReleaseManagerAuthority(
   // a metadata URL resolves it from ~/.pd/install.json with no env present.
   // A corrupt install.json is reported, not swallowed: it is also the state
   // `manager.inspect()` reads, so both surface as `install_state_corrupt`.
-  let installConfig: ReturnType<typeof readInstallConfig> | null = null;
+  let installConfig: InstallConfig | null = null;
   try {
     installConfig = readInstallConfig(resolvePdHomePaths(options.pdHome));
   } catch (error) {

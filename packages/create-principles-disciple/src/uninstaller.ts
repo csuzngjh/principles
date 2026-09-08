@@ -15,7 +15,7 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';

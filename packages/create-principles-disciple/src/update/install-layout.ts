@@ -139,6 +139,10 @@ export interface InstallConfig {
 /** Strict validator for the optional `releaseMetadataUrl` field (rc-3). */
 function parseReleaseMetadataUrlField(value: unknown, paths: PdHomePaths): string | undefined {
   if (value === undefined) return undefined;
+  // An empty or whitespace-only value is "not configured", consistent with how
+  // the resolver treats an unset environment override — it must not brick
+  // readiness for the whole install (PRI-709 review).
+  if (typeof value === 'string' && value.trim().length === 0) return undefined;
   const normalized = normalizeReleaseMetadataUrl(value);
   if (normalized === null) {
     throw new InstallLayoutError(
@@ -206,6 +210,12 @@ export function readInstallJsonRecord(filePath: string): Record<string, unknown>
  * other field already present is preserved so the installer-owned manifest
  * fields (`layoutVersion`, `mode`, `hosts`, `workspaces`) survive an
  * update-side config write and vice versa.
+ *
+ * PRI-709 review: a caller that does not know about `releaseMetadataUrl` (and
+ * therefore leaves it `undefined`) must not silently DELETE the durable tier
+ * the installer wrote. An absent field in `config` preserves whatever is on
+ * disk; only an explicit value overwrites it. There is no programmatic way to
+ * clear the field — clearing is an installer-level decision.
  */
 export function writeInstallConfig(paths: PdHomePaths, config: InstallConfig): void {
   const existing = readInstallJsonRecord(paths.installConfigPath);
@@ -216,8 +226,6 @@ export function writeInstallConfig(paths: PdHomePaths, config: InstallConfig): v
   };
   if (config.releaseMetadataUrl !== undefined) {
     payload.releaseMetadataUrl = config.releaseMetadataUrl;
-  } else {
-    delete payload.releaseMetadataUrl;
   }
   fs.mkdirSync(paths.home, { recursive: true });
   fs.writeFileSync(paths.installConfigPath, `${JSON.stringify(payload, null, 2)}\n`);
