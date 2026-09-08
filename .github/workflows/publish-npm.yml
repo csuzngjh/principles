@@ -71,7 +71,7 @@ jobs:
       matrix: ${{ steps.detect.outputs.matrix }}
       is_full_product: ${{ steps.detect.outputs.is_full_product }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -260,7 +260,7 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -713,7 +713,7 @@ jobs:
       # installer runs LAST so it re-bundles the freshly published plugin
       # (lockstep preserved). Each step re-verifies its registry
       # dependencies before publishing (see the shared action).
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

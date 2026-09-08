@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (with Git LFS)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           lfs: true
 
