@@ -10,6 +10,8 @@
  */
 
 import { Type, type Static } from '@sinclair/typebox';
+import type { IntentContractV1 } from './intent-contract.js';
+import { isValidIntentContractV1 } from './intent-contract.js';
 
 export interface ScribePrincipleDraft {
   readonly title: string;
@@ -32,6 +34,15 @@ export interface ScribeOutputV1 {
   readonly sourceTrace: ScribeSourceTrace;
   readonly risks: readonly string[];
   readonly generatedAt: string;
+  /**
+   * PRI-703 Phase 1 (Owner decision 2026-09-07): structured Owner-intent
+   * contract — the single alignment anchor for rule generation / evaluation /
+   * repair. Optional on the wire for backward compatibility: scribe outputs
+   * that predate this field lack it and downstream stages degrade
+   * best-effort (rc-9 observable, never silent). Present-but-malformed is a
+   * hard validator rejection — a corrupted anchor is worse than none.
+   */
+  readonly intentContract?: IntentContractV1;
 }
 
 export const ScribePrincipleDraftSchema = Type.Object({
@@ -55,6 +66,10 @@ export const ScribeOutputV1Schema = Type.Object({
   sourceTrace: ScribeSourceTraceSchema,
   risks: Type.Array(Type.String()),
   generatedAt: Type.String({ minLength: 1 }),
+  // PRI-703 Phase 1: optional intent contract (validated by the hand-rolled
+  // DefaultScribeValidator via isValidIntentContractV1 — TypeBox Optional
+  // keeps the wire shape additive for LLM-facing schema consumers).
+  intentContract: Type.Optional(Type.Unknown()),
 });
 
 export type ScribeOutputV1TB = Static<typeof ScribeOutputV1Schema>;
@@ -140,6 +155,15 @@ export class DefaultScribeValidator implements ScribeValidator {
       errors.push('risks must be an array');
     } else if (!output.risks.every((e: unknown) => typeof e === 'string')) {
       errors.push('risks must be an array of strings');
+    }
+
+    // intentContract — PRI-703 Phase 1: optional, but present-but-malformed
+    // is a hard rejection (the contract is the alignment anchor for rule
+    // generation / evaluation / repair; a corrupted anchor is worse than none).
+    if (Object.hasOwn(output, 'intentContract') && output.intentContract !== undefined) {
+      if (!isValidIntentContractV1(output.intentContract)) {
+        errors.push('intentContract must contain non-empty string fields: ownerIntent, targetBehavior, forbiddenBehavior, evidenceSource, validationExpectation');
+      }
     }
 
     // generatedAt — required, non-empty string (ERR-013)
