@@ -174,15 +174,24 @@ vi.mock('../../src/config-reader.js', () => ({
 // host-runtime builder. Mock just that seam here — the unit tests below prove
 // dispatch wiring; the real resolver + declaration fixture path is proven by
 // runtime-internalization-run-once-evaluator-parity.test.ts.
-const { mockCreateEvaluatorRuntimeContext } = vi.hoisted(() => {
+// PRI-708: same pattern for the canonical rollout governance factory — unit
+// tests assert the run-once handler passes its reopen callback through to the
+// runner deps; the real factory + real SQLite path is proven by
+// runtime-internalization-run-once-rollout-parity.test.ts.
+const { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps } = vi.hoisted(() => {
   const mockCreateEvaluatorRuntimeContext = vi.fn().mockReturnValue({
     ok: true,
     gateDeps: { evaluateInSandbox: vi.fn() },
   });
-  return { mockCreateEvaluatorRuntimeContext };
+  const mockCreateRolloutGovernanceDeps = vi.fn().mockReturnValue({
+    dispatchActivation: vi.fn(),
+    reopenRevisionTarget: vi.fn(),
+  });
+  return { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps };
 });
 vi.mock('@principles/host-runtime', () => ({
   createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
+  createRolloutGovernanceDeps: mockCreateRolloutGovernanceDeps,
 }));
 
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
@@ -1340,6 +1349,16 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     );
     expect(RolloutReviewerRunnerMock).toHaveBeenCalled();
     expect(mockRun).toHaveBeenCalledWith('task-rollout-reviewer-001');
+
+    // PRI-708: the run-once rollout entry must wire the canonical revision
+    // routing callback from the ONE host-runtime factory (the same builder the
+    // consumer cycle spreads). dispatchActivation stays deliberately unwired
+    // on this manual entry (P2 follow-up) — approve_rollout keeps its
+    // recovery-only NHR behavior exactly as before this change.
+    expect(mockCreateRolloutGovernanceDeps).toHaveBeenCalledTimes(1);
+    const rolloutDeps = RolloutReviewerRunnerMock.mock.calls[0][0];
+    expect(rolloutDeps.reopenRevisionTarget).toBeTypeOf('function');
+    expect(rolloutDeps.dispatchActivation).toBeUndefined();
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.runnerKind).toBe('rollout_reviewer');
