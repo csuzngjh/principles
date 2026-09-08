@@ -79,8 +79,10 @@ describe('ArtificerPromptBuilder', () => {
   it('promptContractVersion identifies the executable V2 contract', () => {
     // PRI-484 — bumped v1 → v2 to signal the RuleCode context surface is part
     // of the contract the model must obey; PRI-634 PR-A — bumped v2 → v3 for
-    // the paramsSummary-is-an-object contract + repair replay-evidence block.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v3');
+    // the paramsSummary-is-an-object contract + repair replay-evidence block;
+    // PRI-700 — bumped v3 → v4 for the case-id vocabulary note + prior
+    // output-contract rejection feedback.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v4');
   });
 
   it('instruction requires implementationSummary as a non-empty string', () => {
@@ -158,8 +160,8 @@ describe('PRI-484 Artificer prompt context modes', () => {
     expect(promptInput.artificerInstruction).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → v2 → v3 (PRI-634 PR-A)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v3');
+  it('declares the contract version bump history v1 → v2 → v3 → v4 (PRI-634 PR-A, PRI-700)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v4');
   });
 
   it('still references input.action for v1 compatibility', () => {

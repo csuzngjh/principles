@@ -240,13 +240,45 @@ export function buildEvidenceIndex(report, manifest) {
   // claimed without activation). With activation: only an operator-recorded
   // observation (manifest.behaviorObservation, Phase-4 re-run) can CONFIRM;
   // otherwise INCONCLUSIVE.
+  // PRI-703 Phase 3 (Owner decision 2026-09-07): outcome vocabulary extends
+  // to IMPROVED / NO_IMPROVEMENT / REGRESSION (legacy CONFIRMED ≡ IMPROVED
+  // on read). Defense in depth: a positive status with zero evidence
+  // entries can never derive a positive claim — parseManifest rejects it
+  // first, and the derivation downgrades to INCONCLUSIVE anyway (missing
+  // evidence may never turn into a claim, header invariant).
   let behavior;
   if (totalActivations === 0) {
     behavior = { status: 'NOT_REACHED', evidence: [evidence('state.db/activations', null, 'no activation in scope — behavior claim not reachable')] };
   } else {
     const obs = manifest?.behaviorObservation;
-    if (obs && (obs.status === 'CONFIRMED' || obs.status === 'INCONCLUSIVE')) {
-      behavior = { status: obs.status, evidence: (obs.evidence ?? []).map((e) => evidence('manifest.behaviorObservation', e.source ?? null, e.detail ?? '')) };
+    const isKnownOutcome = obs && (
+      obs.status === 'CONFIRMED'
+      || obs.status === 'IMPROVED'
+      || obs.status === 'NO_IMPROVEMENT'
+      || obs.status === 'REGRESSION'
+      || obs.status === 'INCONCLUSIVE'
+    );
+    if (isKnownOutcome) {
+      // Round-2 R4: element validation + defensive mapping apply to ALL
+      // outcomes (parseManifest is the loud gate; this is the same-contract
+      // safety net — malformed elements must never crash the builder and
+      // unsupported conclusions must never survive as claims).
+      const rawEvidence = Array.isArray(obs.evidence) ? obs.evidence : [];
+      const validEvidence = rawEvidence.filter((e) => e !== null && typeof e === 'object' && !Array.isArray(e)
+        && [e.detail, e.source].some((value) => typeof value === 'string' && value.trim() !== ''));
+      const claimsObservation = obs.status !== 'INCONCLUSIVE';
+      if (claimsObservation && validEvidence.length === 0) {
+        behavior = {
+          status: 'INCONCLUSIVE',
+          evidence: [evidence('manifest.behaviorObservation', null, `${obs.status} observation recorded with no valid evidence entries — downgraded to INCONCLUSIVE (evidence integrity gate, PRI-703 Phase 3 / Round-2 R4)`)],
+        };
+      } else {
+        const derivedStatus = obs.status === 'CONFIRMED' ? 'IMPROVED' : obs.status;
+        behavior = {
+          status: derivedStatus,
+          evidence: validEvidence.map((e) => evidence('manifest.behaviorObservation', e.source ?? null, e.detail ?? '')),
+        };
+      }
     } else {
       behavior = { status: 'INCONCLUSIVE', evidence: [evidence('manifest.behaviorObservation', null, 'activation present but no Phase-4 behavior observation recorded')] };
     }
@@ -330,11 +362,22 @@ export function buildMetrics(report, index) {
   };
 
   const behaviorClaim = byClaim.get('behavior_change');
+  // PRI-703 Phase 3: behavior metric maps outcome → matrix semantics:
+  // IMPROVED → PASS (target behavior observed, evidence-gated upstream);
+  // NO_IMPROVEMENT / REGRESSION → FAIL (activation happened but the target
+  // behavior did not improve / regressed); INCONCLUSIVE / NOT_REACHED →
+  // UNKNOWN (never force FAIL when observation did not happen — audit §3.3).
+  const behaviorMatrix = (() => {
+    const s = behaviorClaim?.status ?? 'UNKNOWN';
+    if (s === 'IMPROVED') return 'PASS';
+    if (s === 'NO_IMPROVEMENT' || s === 'REGRESSION') return 'FAIL';
+    return 'UNKNOWN';
+  })();
   return {
     schemaVersion: METRICS_SCHEMA,
     pipeline,
     governance,
-    behavior: { status: behaviorClaim?.status ?? 'UNKNOWN' },
+    behavior: { status: behaviorClaim?.status ?? 'UNKNOWN', matrix: behaviorMatrix },
   };
 }
 

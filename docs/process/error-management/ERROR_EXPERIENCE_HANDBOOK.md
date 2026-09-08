@@ -334,6 +334,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-191
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — `as Record`/`as T[]` on parsed JSON, YAML, SQLite rows, CLI args, or LLM output bypasses element/type narrowing.
+- PR #1551 round 2 (R4): evidence 元素校验只挂正向分支——负向 outcome 的 [null] 元素穿透解析层并在推导层崩溃。修法：所有 outcome 统一逐元素校验 + 推导层同契约防御（过滤+降级）。
   - 2026-06-25 PRI-466 (PR#1056): `(err as Error).message` on caught `unknown` — replaced with `instanceof Error` guard
   - 2026-06-23 PRI-446 (PR#1028): `input.consecutiveErrors as number` post-`Number.isFinite` — replaced with `typeof` narrowing
   - Earlier recurrences (PR#689-#1027): same `as`-on-untrusted-value pattern across recommendation_kind, language, SQLite rows, YAML, depIds. See git history.
@@ -498,6 +499,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
+- PR #1551 round 2 (R2): fresh 派生的出界处置（selectedEffect）未持久化，resume 从缺失的瞬时变量重新推导 → 同一裁决跨重启产生不同副作用。修法：处置在 intent 落库前派生并随 completion intent 持久化，resume 读 intent 重放效果（rollout reviewer 既有模板）。
 - 2026-08-26 PRI-606: axiom builders tested in isolation but `prompt.ts` injected via `evolutionReducer` (empty on fresh installs); barrel missed re-export — T-01..T-10 never injected. Fixed: registry-direct + barrel + empty-reducer regression test.
   - 2026-08-24 PR #1389 review round 2 (dormant consumer activation — mirror of the PRI-510 flavor): to forward two NEW telemetry events, `createPainSignalBridge` started passing `eventEmitter` into `new PainSignalBridge({...})` — an option the factory had NEVER passed on main, so the bridge's four PRE-EXISTING emission sites (`candidate_admission_decision`, `candidate_dreamer_task_seeded`, `candidate_not_internalizable`, `candidate_dreamer_task_seed_failed`) were dormant in production. The unconditional forwarding wrapper woke all four: routine admission decisions got re-emitted as `degradation_triggered` (semantic mislabeling of the degradation channel), and flag-off behavior changed despite the PR contract "flag off = zero effective surface". Fixed by extracting `mapBridgeTelemetryToStoreEvent`, which forwards ONLY the two persistence events; a negative-control test asserts the four pre-existing event names map to null (dormancy preserved). Rule of thumb: when STARTING to pass a previously-dormant optional dependency/handler into a construction path, grep ALL of the dependency's consumption sites (`this.eventEmitter?.…`), not just the newly added ones — every dormant site inherits the new wiring's channel and semantics. Route each site intentionally or filter to the intended events, and ship a negative-control test proving the unintended sites stay dormant.
   - 2026-08-19 PR #1358 external review round 5 (verdict drift, compressed; full text → ERROR_ARCHIVE.md): crash-recovery re-consulted the LLM instead of the durably persisted `runnerDecision`, overwriting verdicts whose side effects had already materialized; fixed with the atomic `completionIntent` authority protocol + `maybeResumePendingIntent` resume gate. Rule of thumb: every re-entry path must treat a durably recorded decision as the authority — never re-consult a non-deterministic advisor for a decision already recorded but not yet applied; enumerate every branch that persists the decision and every side effect that changes consumable governance state.
@@ -510,6 +512,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - Fix: when adding optional deps/fields/handlers to a constructor/service interface, grep ALL construction sites and update each one; add a test exercising the production construction path (not just the helper in isolation).
 
 ---
+  - 2026-09-08 PRI-705 / PR #1551 review round: `partitionV2OutOfScopeFailures` shipped with direct-call unit tests (hand-built `requiresContextVersion: undefined`), but the production resolver `resolveRequiresContextVersion` collapsed "key absent on a PARSED artifact" (deterministically v1 — the classifier's entire target population) into the same `null` as "unresolvable", so the out-of-scope routing could never fire in production. Fixed with a three-state resolver (literal 2 / `undefined` = resolved-v1 / `null` = unresolvable) extracted as a pure function + a WIRING-level regression test that enters through the real artifact `contentJson` shape. Lesson: when a pure classifier sits behind a production resolver, "absent on valid input" and "input unresolvable" are different states — collapsing them creates dead branches direct-call tests cannot catch; always add one test driving the resolver→classifier composition with the production input shape.
+
+---
+
 **[ERR-025]** | Test coverage proves isolated helper behavior, not real production defense
 
 - **What happened**: `broken-artifact-simulation.ts` was added with `decideDownstreamGate()` and 54 tests, but no production code called it. The real `InternalizationChainIntegrityReadModel` and `InternalizationIntegrityRemediation` were completely untested. Tests proved the helper's logic, but the production system had no defense against the scenarios the helper covered.
@@ -628,7 +634,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 113 |
-| Last updated | 2026-09-06 |
+| Last updated | 2026-09-08 |
 | Top category | Schema & Type |
 | Recurring errors | 59 |
 
@@ -1009,6 +1015,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
 - **Recurrence**: 2026-08-13 PRI-523 C1.1 spec review: the production OpenClaw BDD seeded a Runtime V2 activation only, then asserted its unique text appeared once. That signal could not exercise or prove the legacy/Runtime V2 overlap branch, so the test stayed green while shared exclusion metadata misreported `all_deduped_against_legacy` as `no_validated_activations`. Fixed by seeding the identical ID/text in the real legacy probation reducer and Runtime V2 SQLite, asserting one combined prompt occurrence, absence of a duplicate Runtime V2 directive, and the persisted exact skip reason/next action. 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
+- PR #1551 round 2 (R3/R5): 非唯一代理信号冒充目标判定——lineageResolvable（仅上游 artificer 存在）当"证据来源可达"，applicability 条目数（未去重）当"泛化"，NHR 状态当"Owner 可裁决"。修法：对外断言绑定唯一权威来源（BFS 祖先 taskKind/去重计数/capability 集合），代理信号只作提示。
 
   - 2026-08-28 PRI-614 / PR #1428 review: the gateway recovery test counted a restart but did not prove it happened after the tar step failed, so an early or unrelated restart produced the same signal. Fixed with strict call-order assertions and a negative-control run that fails when the ordering predicate is inverted.
 
@@ -1129,6 +1136,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-08-27 / PR #1421 (PRI-606, self-review during implementation): `validatePdConfig` reconstructed the validated `PdConfig` field-by-field and never extracted the `principles` section — `principles.outputLanguage` (canonical language SSOT since PRI-336) was silently dropped between raw YAML and `effective.config` for every `loadPdConfigForPlugin` consumer. The SSOT only *appeared* to work because pd-cli (`config-reader.ts`) and pd-console (`pd-config-store.ts`) re-read the raw YAML in parallel shadow paths. Fixed by extracting/validating `principles` (strict `outputLanguage` via `isValidOutputLanguage`) into the returned config; regression guard `pd-config-principles.test.ts`; prompt.ts now reads the language through this canonical path.
 
 ---
+  - 2026-09-08 PRI-700 / PR #1551 review round (CodeRabbit P1 + CI failure): `handleValidationError` persisted `output_failure_details`, then wrote `lastValidatorErrors` via a SECOND `updateTask` whose diagnosticJson base was re-parsed from the `ctx.task.diagnosticJson` snapshot taken BEFORE the first write — the second write replaced the whole column and silently erased `output_failure_details`. CI caught it as "updateTask called 2 times, expected 1". Fixed by generalizing `persistOutputFailureDetails` with an `extraTopLevelKeys` param so both keys land in ONE read-modify-write. Broaden — additive is not safe at the WRITE level either: keys appended to the same persisted record within one flow must coalesce into a single read-modify-write; a second RMW built from a pre-first-write in-memory snapshot is a lost update.
+
+---
+
 **[ERR-096]** | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal
 
 - **What happened**: In the `create-principles-disciple` installer gateway pre-flight, `install()` showed a 3-way interactive `@inquirer/prompts` `select` (stop / proceed / abort) when the OpenClaw gateway was running. Prompting was gated on `!quiet`, where `quiet` is `install()`'s mode parameter set to `jsonMode` (true only under `--json`). The CLI also exposes `--yes` / `--non-interactive`, which are non-interactive but NOT `--json`. So a `--yes` run with the gateway up had `quiet=false` → `interactive=true` → `install()` invoked `select` and **hung waiting for stdin**, breaking the `--yes` non-interactive contract and any CI/script relying on `--yes`. Caught in adversarial self-review before PR handoff; no `--yes` user was affected.
@@ -1241,6 +1252,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-584
 - **Date**: 2026-08-25
 - **Recurrence**: None
+- PR #1551 round 2 (R1/R5): 实现叙述替代规范语义——注释声称"收窄前提取"而代码在收窄后执行（oracle 判据漏 block-类模板）；实验报告把 recovery-only NHR 写成"Owner 可裁决"。修法：规范语义逐条对照代码位置复核 + 对外结论只用已验证能力事实。
 
 ---
 **[ERR-109]** | Tri-state fact (boolean | null) collapsed during a merge — one source's definite `false` resolved another source's unknown into an observed-false
