@@ -61,7 +61,7 @@
     "@typescript-eslint/parser": "^8.67.0",
     "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^10.8.1",
-    "globals": "^17.6.0",
+    "globals": "^17.12.0",
     "js-yaml": "^4.2.0",
     "lefthook": "^2.1.9",
     "lint-staged": "^17.5.0",
