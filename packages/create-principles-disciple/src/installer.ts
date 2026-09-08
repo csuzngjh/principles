@@ -49,9 +49,17 @@ import {
 import {
   mergeIntoInstallJson,
   readInstallJsonRecord,
+  resolvePdHomePaths,
 } from './update/install-layout.js';
 import { RELEASE_METADATA_URL_ENV, normalizeReleaseMetadataUrl } from './update/release-metadata-source.js';
-import { appendJournalTransition, type ReleaseMetadataDigestSource, type TransactionState } from './update/transaction-journal.js';
+import {
+  appendJournalTransition,
+  readActiveRecord,
+  writeActiveRecord,
+  type ActiveRecord,
+  type ReleaseMetadataDigestSource,
+  type TransactionState,
+} from './update/transaction-journal.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -215,6 +223,90 @@ function writeInstallManifest(hosts: ('codex' | 'openclaw')[], workspaces: strin
     workspaces,
   };
   writeFileSync(getInstallManifestPath(), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * PRI-709 P0-2 — active record commit point (ADR-0024 D-2).
+ *
+ * `~/.pd/active.json` is the deployment identity source: it records WHAT is
+ * actually deployed, keyed to the transaction that deployed it. Before PRI-709
+ * the installer never wrote it (the only writer was legacy-migration.ts), so
+ * every real install and every ReleaseManager apply left active.json absent or
+ * stale — the PRI-698 audit finding F-2.
+ *
+ * Identity is taken from the transaction, never recomputed here: the journal
+ * was opened with the payload's own identity (`_release/manifest.json` digest
+ * when the self-contained asset ships one), and active.json must agree with
+ * the journal of the transaction that produced it. A divergent second
+ * computation would break the audit trail.
+ *
+ * Ordering: journal-first. The caller appends `confirmed` and only then calls
+ * this, so a crash between the two is recoverable from the journal (the
+ * reverse order would leave an unjournaled active.json).
+ *
+ * Failure policy — Tier 2: this runs AFTER the backup was discarded, so the
+ * install is already committed and must not be failed here. A write failure is
+ * reported loud (rc-9) and returned to the caller; it never bricks the
+ * installation.
+ */
+export interface ActiveRecordCommitResult {
+  readonly written: boolean;
+  readonly activeRecordPath: string;
+  readonly generation: number;
+  readonly previousReleaseId: string | null;
+  /** Set when the record could not be written or the previous one was unreadable. */
+  readonly reason?: string;
+}
+
+export function commitInstallerActiveRecord(journal: InstallerJournal): ActiveRecordCommitResult {
+  const paths = resolvePdHomePaths(getPdDir());
+
+  let previous: ActiveRecord | null = null;
+  let previousWarning: string | null = null;
+  try {
+    previous = readActiveRecord(paths.activeRecordPath);
+  } catch (error) {
+    // A corrupt previous record must not block committing the new identity —
+    // overwriting it with a valid record is strictly an improvement.
+    previousWarning = error instanceof Error ? error.message : String(error);
+    logger.warn(`active.json was unreadable and is being replaced (${paths.activeRecordPath}): ${previousWarning}`);
+  }
+
+  // Generation continuity: never move backwards. A standalone install already
+  // carries generation 1, but re-installing over an existing deployment must
+  // advance past it — otherwise the deployment identity source would regress.
+  const generation = Math.max(journal.generation, previous === null ? 1 : previous.generation + 1);
+
+  try {
+    writeActiveRecord(paths.activeRecordPath, {
+      generation,
+      releaseId: journal.releaseId,
+      releaseMetadataDigest: journal.releaseMetadataDigest,
+      previousReleaseId: previous?.releaseId ?? null,
+      transactionId: journal.transactionId,
+      productVersion: journal.productVersion,
+    });
+    return {
+      written: true,
+      activeRecordPath: paths.activeRecordPath,
+      generation,
+      previousReleaseId: previous?.releaseId ?? null,
+      ...(previousWarning !== null ? { reason: `previous_record_unreadable: ${previousWarning}` } : {}),
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.error(
+      `active.json could not be written after a committed install (${paths.activeRecordPath}): ${reason}. `
+      + `Deployment identity is out of sync with the transaction ${journal.transactionId}; re-run the installer to repair it.`,
+    );
+    return {
+      written: false,
+      activeRecordPath: paths.activeRecordPath,
+      generation,
+      previousReleaseId: previous?.releaseId ?? null,
+      reason,
+    };
+  }
 }
 
 /**
@@ -2281,6 +2373,17 @@ function sha256File(filePath: string): string {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
+function readPackageVersion(pkgPath: string): string | null {
+  if (!existsSync(pkgPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: unknown };
+    return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : null;
+  } catch {
+    // Identity falls back; journaling must not brick install.
+    return null;
+  }
+}
+
 /**
  * Identity of the payload being installed. Prefers the self-contained asset
  * manifest (covers the whole payload); falls back to the bundled pd-cli
@@ -2289,18 +2392,19 @@ function sha256File(filePath: string): string {
  * legacy-migration.ts). The last-resort fallback hashes the literal reason
  * string only to satisfy the journal's 64-hex format requirement; it is not
  * part of any release-metadata identity chain.
+ *
+ * PRI-709 P0-2 (PRI-698 audit F-1): `productVersion` is the PRODUCT version —
+ * the plugin package manifest. It previously read `pd-cli/package.json`, but
+ * the two packages version independently (on the Owner machine: plugin
+ * 1.230.2 vs pd-cli 1.147.5), so every confirmed journal recorded a version
+ * that no runtime state could ever match. That is why active.json could not
+ * serve as the deployment identity source.
  */
 function resolveInstallerPayloadIdentity(pluginDir: string): { productVersion: string; releaseMetadataDigest: string; releaseMetadataDigestSource: ReleaseMetadataDigestSource } {
-  let productVersion = 'unknown';
+  const productVersion = readPackageVersion(path.join(pluginDir, 'package.json'))
+    ?? readPackageVersion(path.join(pluginDir, 'pd-cli', 'package.json'))
+    ?? 'unknown';
   const pdCliPkgPath = path.join(pluginDir, 'pd-cli', 'package.json');
-  if (existsSync(pdCliPkgPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(pdCliPkgPath, 'utf8')) as { version?: unknown };
-      if (typeof parsed.version === 'string' && parsed.version.length > 0) productVersion = parsed.version;
-    } catch {
-      // Identity falls back to 'unknown'; journaling must not brick install.
-    }
-  }
   const assetManifestPath = path.join(pluginDir, '_release', 'manifest.json');
   let releaseMetadataDigest: string;
   let releaseMetadataDigestSource: ReleaseMetadataDigestSource;
@@ -2813,6 +2917,9 @@ export async function install(
     cleanupBackup(backupDir, runtimeBackupDir);
     // ADR-0024 D-2: backup cleanup is the commit point of the transaction.
     journalInstallerTransitionDegrading(journal, journal.lastState, 'confirmed', 'backup cleaned up; install complete');
+    // PRI-709 P0-2: active.json is the deployment identity source, written
+    // journal-first — after `confirmed`, never before it.
+    commitInstallerActiveRecord(journal);
     if (spinner) {
       spinner.succeed('Install complete!');
     }

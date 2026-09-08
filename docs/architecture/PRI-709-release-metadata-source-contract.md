@@ -129,7 +129,10 @@ reason, so no routing behaviour depends on the new field.
 - a malformed install.json URL yields `install_state_corrupt` +
   `metadata_source_unconfigured`, never a silent fallback.
 
-Regression baseline: the pre-existing 10 failures in
-`release-manager*.test.ts` / `legacy-migration.test.ts` are unchanged
-(TUF fixture / network timeouts in the local environment), verified by
-re-running the same suite against the unmodified base commit.
+Regression check: the first run of `release-manager*.test.ts` /
+`legacy-migration.test.ts` against the unmodified base commit and against this
+change produced the **same** 10 failures, which initially looked like a stable
+baseline. A later run of the identical suite (sandbox disabled) is **fully
+green — 57/57 across 7 files**. Those failures are therefore environment
+flakiness (the TUF fixture serves over `127.0.0.1`, which the sandbox blocks),
+not deterministic failures — see §7 note in the PRI-709 Linear comments.
