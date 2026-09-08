@@ -48,6 +48,7 @@ import {
   type MutationContext,
   type MutationKind,
 } from '../update/mutation-controller.js';
+import { runLegacyJournaledMutation } from '../update/legacy-mutation-journal.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 
 /**
@@ -1660,11 +1661,34 @@ function legacyCheckMutation(
   })();
 }
 
+/**
+ * PRI-709 P0-3 (ADR-0024 D-2): the shared installation root that owns the
+ * transaction journal. Legacy console mutations journal to the SAME place as
+ * the installer and the ReleaseManager — never a console-private ledger.
+ */
+function resolvePdHome(): string {
+  return path.join(os.homedir(), '.pd');
+}
+
+/**
+ * A runtime mutation that ran without journal evidence is a governance gap,
+ * not a mutation failure: it is reported loud (rc-9) and the mutation result
+ * is still served. Blocking the Owner's update here would be worse than an
+ * unaudited one — but the gap must never be silent.
+ */
+function logLegacyJournalGap(kind: string, reason: string): void {
+  console.warn(
+    `[update] Runtime mutation "${kind}" completed WITHOUT journal evidence (${reason}). `
+    + 'ADR-0024 D-2 requires every runtime mutation to be auditable; this is usually a missing create-principles-disciple install surface.',
+  );
+}
+
 function legacyApplyMutation(
   req: IncomingMessage,
   res: ServerResponse,
   ctx: MutationContext,
 ): Promise<void> {
+  const pdHome = resolvePdHome();
   return (async () => {
     const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
@@ -1709,11 +1733,14 @@ function legacyApplyMutation(
         return;
       }
 
-      const result = await doApplyUpdate({
-        targetDir,
-        mergeStrategy,
-        createBackup,
-      }, ctx.workspaceDir);
+      // ADR-0024 D-2 (PRI-709 P0-3): every runtime mutation is journaled.
+      // `planned` lands after all request validation, so a rejected request
+      // leaves no transaction behind.
+      const { result, journal } = await runLegacyJournaledMutation(
+        { kind: 'apply', pdHome, pluginDir },
+        () => doApplyUpdate({ targetDir, mergeStrategy, createBackup }, ctx.workspaceDir),
+      );
+      if (!journal.journaled) logLegacyJournalGap('apply', journal.reason);
       sendSuccess(res, result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
@@ -1727,6 +1754,7 @@ function legacyRollbackMutation(
   res: ServerResponse,
   ctx: MutationContext,
 ): Promise<void> {
+  const pdHome = resolvePdHome();
   return (async () => {
     const pluginDir = resolvePluginDir(ctx.workspaceDir);
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
@@ -1758,7 +1786,14 @@ function legacyRollbackMutation(
         return;
       }
 
-      const result = await doRollbackUpdate({ targetDir, backupDir }, ctx.workspaceDir);
+      // ADR-0024 D-2 (PRI-709 P0-3): a rollback is a forward transition to a
+      // known-good deployment, not an undo of this transaction — that is why
+      // the terminal state is `confirmed`, not `rolled_back`.
+      const { result, journal } = await runLegacyJournaledMutation(
+        { kind: 'rollback', pdHome, pluginDir },
+        () => doRollbackUpdate({ targetDir, backupDir }, ctx.workspaceDir),
+      );
+      if (!journal.journaled) logLegacyJournalGap('rollback', journal.reason);
       sendSuccess(res, result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
@@ -1772,10 +1807,16 @@ function legacyApplyFullMutation(
   res: ServerResponse,
   ctx: MutationContext,
 ): Promise<void> {
+  const pdHome = resolvePdHome();
   return (async () => {
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
+    const pluginDir = resolvePluginDir(ctx.workspaceDir);
     try {
-      const result = await doInlineFullUpdate(ctx.workspaceDir);
+      const { result, journal } = await runLegacyJournaledMutation(
+        { kind: 'apply-full', pdHome, pluginDir },
+        () => doInlineFullUpdate(ctx.workspaceDir),
+      );
+      if (!journal.journaled) logLegacyJournalGap('apply-full', journal.reason);
       sendSuccess(res, result);
     } catch (err) {
       sendError(res, 500, 'update_apply_full_error', err instanceof Error ? err.message : 'Unknown error');
