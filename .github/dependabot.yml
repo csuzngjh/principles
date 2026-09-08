@@ -8,6 +8,13 @@ updates:
       day: 'monday'
       time: '09:00'
     open-pull-requests-limit: 5
+    # @tufjs/models 是 tuf-js 的精确 peer（3.x ↔ 3.0.1 配对锁死）：
+    # 单独升 models 会与锁定的 tuf-js 3.1.0 peer 分裂，npm 无法解析
+    # （PR #1559 实证：root npm ci 直接 EUSAGE）。须与 tuf-js 6 作为一次
+    # 专门迁移一起走（见 /packages/create-principles-disciple 目录下同款规则）。
+    ignore:
+      - dependency-name: '@tufjs/models'
+        update-types: ['version-update:semver-major']
     commit-message:
       prefix: 'chore'
       include: 'scope'
@@ -28,8 +35,13 @@ updates:
     # @tufjs/models 精确 peer + node engines 门槛（6.0 要求 node ≥22.22.2，
     # 而安装器声明 >=22.0.0），必须作为专门迁移处理，不走自动 major PR
     # （PR #1543 实证）。minor/patch 仍自动提。
+    # @tufjs/models 同理且配对锁死（3.x ↔ 3.0.1）：单独升 models 与锁定的
+    # tuf-js 3.1.0 peer 分裂，npm 无法解析（PR #1558 实证）。两条规则
+    # 必须一起进退。
     ignore:
       - dependency-name: 'tuf-js'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@tufjs/models'
         update-types: ['version-update:semver-major']
     commit-message:
       prefix: 'chore'
