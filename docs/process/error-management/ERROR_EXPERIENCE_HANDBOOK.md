@@ -78,6 +78,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-112 | Sentinel value satisfies a downstream structural check while the operator success criterion measures generation, not admission — Owner input silently lost and reported as success | PRI-642 |
 | ERR-113 | Generator reset/write/deploy loops leak stale state when cleanup base, write base, and residue-enumeration base are three different directories | PRI-634-F |
 | ERR-114 | Semantic resolvability used as an existence proof — fallback/generic lookup members pass validators that should only accept authoritative host declarations | PRI-634-F PR #1495 R2 |
+| ERR-122 | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side README/package.json and tutorial-style verifier comments ship to the subject agent's workspace; audit the DEPLOYED FILE LIST as the answer surface, enforced by a deploy-shape assertion + hint scan | PRI-684 PR #1584 |
 
 ---
 
@@ -634,8 +635,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 113 |
-| Last updated | 2026-09-09 |
+| Total lessons | 114 |
+| Last updated | 2026-09-10 |
 | Top category | Schema & Type |
 | Recurring errors | 60 |
 
@@ -1439,3 +1440,16 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-698 / PR #1535 CI run 34050209739
 - **Date**: 2026-09-06
 - **Recurrence**: None (first recording)
+
+---
+**[ERR-122]** | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side docs/packaging and tutorial-style verifier comments ship to the subject's workspace
+
+- **What happened**: PRI-684 / PR #1584 self-review (2026-09-09). The closure-lab Scenario F deploy shipped the scenario README + root package.json (both describing the trap topology) and verifiers whose comments explained the check dimensions ("fabrication check (turn 2 form)") — the subject could read the answer from its workspace, invalidating generalization rounds.
+- **Why it's wrong**: For benchmark fixtures the measured behavior is valid only if the answer comes from repository evidence, not benchmark hints. The author audited file INTENT ("README is documentation") instead of the DEPLOYED FILE LIST — every byte shipped into the subject's workspace is part of the answer surface regardless of its repo-side role.
+- **Generalized failure mode**: When fixtures/tests deploy a copy the subject works inside, assistants must treat the deployed file list as the answer surface — strip lab-side docs/packaging/oracle explanations and neutralize shipped-file comments to mechanical contract language — otherwise the experiment measures hint recall, not the target behavior.
+- **How to prevent**: For any fixture PR, list the deployed tree and ask of EACH file: "does this tell the subject what the trap or check is?" Enforce via an exact-tree assertion + hint-regex scan over every shipped file (narrow the regex so mechanical identifiers don't false-positive, or the guard gets disabled).
+- **Regression guard**: scenario-f.test.js dimension 7 (deploy tree equals exactly the four family dirs + shared lib) and dimension 6 (hint scan covering assets/examples/consumers/verifiers).
+- **Related ERRs**: ERR-113 (same lab, stale-state leaks), ERR-083 (fixture env assumptions) — different rule: answer-surface audit.
+- **Source**: PRI-684 / PR #1584 review round 1 (self-review)
+- **Date**: 2026-09-10
+- **Recurrence**: None
