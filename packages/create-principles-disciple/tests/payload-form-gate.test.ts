@@ -204,7 +204,7 @@ describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', ()
 
   it('npm-distributed shape (no env): install() logs the npm-distributed banner, and the shim gate NO LONGER claims self-contained', async () => {
     delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
-    const { dir, actualFs } = await completeNpmBundle();
+    const { dir } = await completeNpmBundle();
 
     const result = await install(baseInstallOptions, dir, { quiet: true });
 
@@ -233,17 +233,18 @@ describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', ()
     expect(result.success).toBe(false);
     expect(result.reason).toBe('self_contained_asset_identity_invalid');
     // Direct helper assertion under the self-contained mode this run set:
-    // skip fires (no npm discovery for the release-asset shape).
+    // skip fires (no npm discovery for the release-asset shape). The helper
+    // returns plain false for the skip gates (no global write attempted).
     infoLines.length = 0;
     expect(installGlobalPdShim()).toBe(false);
     expect(infoLines.some((line) => line.includes('Skipping npm global shim discovery for the self-contained release asset.'))).toBe(true);
-    expect(tryUpgradePdCliFromNpm('/nonexistent-pd-697'));
+    tryUpgradePdCliFromNpm('/nonexistent-pd-697');
     expect(infoLines.some((line) => line.includes('Skipping npm pd-cli upgrade for the self-contained release asset.'))).toBe(true);
   });
 
   it('npm-distributed shape: helpers under the npm-distributed mode report the actual mode, never the self-contained asset', async () => {
     delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
-    const { dir, actualFs } = await completeNpmBundle();
+    const { dir } = await completeNpmBundle();
 
     // Drive install() far enough to set activePayloadMode (fails later on
     // the mocked plugin manifest — the mode decision precedes deployment).
@@ -258,7 +259,7 @@ describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', ()
       // helper returns false silently at the globalBin step. The contract
       // under test is the MESSAGE: the payload gate passed, so the
       // self-contained skip message must NOT appear (it did before PRI-697).
-      installGlobalPdShim();
+      expect(installGlobalPdShim()).toBe(false);
       expect(infoLines.some((line) => line.includes('self-contained release asset'))).toBe(false);
     } finally {
       process.env.PD_SKIP_GLOBAL_SHIM = '1';
@@ -267,7 +268,7 @@ describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', ()
     infoLines.length = 0;
     delete process.env.PD_SKIP_NPM_UPGRADE;
     try {
-      expect(tryUpgradePdCliFromNpm('/nonexistent-pd-697')).toBeUndefined();
+      tryUpgradePdCliFromNpm('/nonexistent-pd-697');
       // The pd-cli upgrade gate keeps the env-var predicate (bundled pd-cli
       // stays authoritative), but the message reports the ACTUAL mode.
       expect(infoLines.some((line) => line.includes('Skipping npm pd-cli upgrade (bundled pd-cli is authoritative'))).toBe(true);
