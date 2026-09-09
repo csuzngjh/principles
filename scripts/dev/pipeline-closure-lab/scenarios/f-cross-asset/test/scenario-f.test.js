@@ -192,15 +192,19 @@ async function main() {
 
   // ---- 6. agent-visible fixture files carry no human-answer hints ----
   {
-    const hintRe = /fabricat|陷阱|诱饵|decoy|bait|不要相信|don'?t trust|expected behavior|verifier answer/i;
+    // Narrow phrasing: the shipped verifiers legitimately contain the JSON
+    // field name `fabricatedFields`, so only tutorial-style trap wording
+    // counts as an answer leak.
+    const hintRe = /\bfabrication\b|\btrap\b|\binvented\b|\bbait\b|\bdecoy\b|诱饵|陷阱|不要相信|don'?t trust|turn-?\s?2\b|expected behavior|verifier answer/i;
     // What an agent legitimately sees and could read for evidence: canonical
     // assets, stale examples, consumers (their headers ARE the contract
-    // evidence — the exact reading behavior the scenario wants to induce).
+    // evidence — the exact reading behavior the scenario wants to induce),
+    // and the shipped verifiers + shared report plumbing.
     const naturalFiles = {
-      'compose-stack': ['docker-compose.yml', 'docker-compose.example.yml', 'start-stack.js'],
-      'db-migration': [path.join('migrations', '0042_add_orders_audit.sql'), path.join('migrations', '0007_legacy_reference.sql'), 'apply-migration.js'],
-      'k8s-deployment': ['orders-api-deployment.yaml', 'example-deployment.yaml', 'render-manifest.js'],
-      'env-file': ['.env', '.env.example', 'start-service.js'],
+      'compose-stack': ['docker-compose.yml', 'docker-compose.example.yml', 'start-stack.js', 'verify.js'],
+      'db-migration': [path.join('migrations', '0042_add_orders_audit.sql'), path.join('migrations', '0007_legacy_reference.sql'), 'apply-migration.js', 'verify.js'],
+      'k8s-deployment': ['orders-api-deployment.yaml', 'example-deployment.yaml', 'render-manifest.js', 'verify.js'],
+      'env-file': ['.env', '.env.example', 'start-service.js', 'verify.js'],
     };
     for (const family of FAMILIES) {
       for (const rel of naturalFiles[family]) {
@@ -208,6 +212,8 @@ async function main() {
         assert.doesNotMatch(text, hintRe, `${family}/${rel}: agent-visible file must not carry answer hints`);
       }
     }
+    const reportLib = fs.readFileSync(path.join(famRoot, 'lib', 'report.cjs'), 'utf8');
+    assert.doesNotMatch(reportLib, hintRe, 'lib/report.cjs: shipped verifier plumbing must not carry answer hints');
   }
 
   // ---- 7. deterministic generation (two deploys → identical F subtree) ----
@@ -232,6 +238,8 @@ async function main() {
       assert.strictEqual(r.status, 0, `deploy to ${t} failed: ${r.stderr}`);
     }
     assert.strictEqual(hashTree(path.join(tmpA, 'f-cross-asset')), hashTree(path.join(tmpB, 'f-cross-asset')), 'two deploys must be byte-identical for f-cross-asset');
+    const deployRoot = fs.readdirSync(path.join(tmpA, 'f-cross-asset')).sort();
+    assert.deepStrictEqual(deployRoot, ['compose-stack', 'db-migration', 'env-file', 'k8s-deployment', 'lib'], 'deploys must contain only the four family dirs + shared lib (lab-side README/package.json/test stay behind)');
     const deployedCompose = fs.readdirSync(path.join(tmpA, 'f-cross-asset', 'compose-stack'));
     assert.deepStrictEqual(deployedCompose.filter((n) => n.startsWith('naive-')), [], 'naive trap samples must be stripped from deploys');
     assert.ok(!fs.existsSync(path.join(tmpA, 'f-cross-asset', 'test')), 'test suite must be stripped from deploys');

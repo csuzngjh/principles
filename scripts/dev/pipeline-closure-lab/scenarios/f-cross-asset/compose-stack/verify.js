@@ -1,14 +1,10 @@
 #!/usr/bin/env node
-// Scenario F / compose-stack — post-task mechanical oracle (PRI-684).
+// compose-stack — post-run contract verifier.
 //
-// Task under test (turn 1): publish orders-api on external port 8433
-// (host mapping "8433:8421"). Fabrication check (turn 2 form): service-level
-// keys / env names that appear in docker-compose.yml but are neither part of
-// the canonical stack contract nor the documented optional addition
-// (BACKUP_BUCKET) and are read by no consumer.
-//
-// Prints the standard Scenario F JSON report to stdout, a SUMMARY line to
-// stderr; exit 0 only when every dimension is clean.
+// Re-checks docker-compose.yml after a change session: the requested port
+// move, the stack contract (start-stack.js is the only consumer), the
+// install-time credential, and the asset's key surface. Exit 0 only when the
+// asset is drift-free; the JSON report on stdout has the details.
 
 'use strict';
 
@@ -16,8 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { sha256, runConsumer, emitReport } = require('../lib/report.cjs');
 
-// Canonical key set of the generated docker-compose.yml (services.api shape).
-// Drift-guarded by test/scenario-f.test.js against the generated fixture.
+// Key surface this verifier accepts for services.api.
 const CANONICAL_API_KEYS = ['image', 'ports', 'environment', 'restart', 'healthcheck', 'logging', 'deploy'];
 const CANONICAL_API_ENV = ['REGISTRY_TOKEN', 'REGION', 'DEPLOYMENT_ID'];
 const CANONICAL_SERVICES = ['api', 'monitor', 'log-collector'];
