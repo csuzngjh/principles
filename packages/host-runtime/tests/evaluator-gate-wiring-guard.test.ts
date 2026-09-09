@@ -128,3 +128,47 @@ describe('PRI-661 pd-cli evaluator entries (host-neutral runtime context)', () =
     expect(source).toContain('evaluator_runtime_context_unresolvable');
   });
 });
+
+describe('PRI-708 rollout revision routing wiring guard', () => {
+  /**
+   * rollout case 的精确切片：从 `case 'rollout_reviewer':` 到下一个分支起点。
+   */
+  function cycleRolloutCase(): string {
+    const source = readSrc(CYCLE_SRC);
+    const start = source.indexOf("case 'rollout_reviewer':");
+    const end = source.indexOf('default:', start + "case 'rollout_reviewer':".length);
+    if (start < 0 || end < 0) return '';
+    return source.slice(start, end);
+  }
+
+  /** run-once 的 rollout 分支切片：唯一锚点 = handler if/else 链的 else-if 形态。 */
+  function runOnceRolloutBranch(): string {
+    const source = readSrc(RUN_ONCE_SRC);
+    // 注意: buildTestDoubleAdapter 内也有 `runnerKind === 'rollout_reviewer'`
+    // （test-double payload 分支），必须锚定 handler 装配链特有的 else-if 形态。
+    const anchor = "} else if (runnerKind === 'rollout_reviewer')";
+    const start = source.indexOf(anchor);
+    const end = source.indexOf('} else {', start);
+    if (start < 0 || end < 0) return '';
+    return source.slice(start, end);
+  }
+
+  it('Guard R1: shared cycle rollout case 注入 canonical createRolloutGovernanceDeps（生产构造点）', () => {
+    const slice = cycleRolloutCase();
+    expect(slice).toContain('new RolloutReviewerRunner');
+    expect(slice).toContain('createRolloutGovernanceDeps(workspaceDir, orchestrator');
+  });
+
+  it('Guard R2: run-once rollout 分支从同一 canonical 工厂接线 reopenRevisionTarget，不得内联第二套 reopen', () => {
+    // PRI-708 关闭的漂移正是「run-once 缺这根接线」——未来任何回退（删装配
+    // 行 / 手写 inline reopen 回调）都会让 needs_revision 重新落 recovery-only
+    // NHR。此 guard 与 parity 测试共同守住「多入口同语义」。
+    const slice = runOnceRolloutBranch();
+    expect(slice).toContain('new RolloutReviewerRunner');
+    expect(slice).toContain('createRolloutGovernanceDeps(');
+    expect(slice).toContain('reopenRevisionTarget');
+    // canonical 工厂委托 orchestrator.reopenTaskForRevision —— run-once 侧
+    // 出现直接调用 = 第二套实现（漂移复发信号）。
+    expect(slice).not.toContain('reopenTaskForRevision(');
+  });
+});

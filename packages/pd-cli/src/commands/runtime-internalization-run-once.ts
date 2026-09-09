@@ -32,7 +32,10 @@ import {
 // path. EP-02: prior code passed only the 5 base deps, leaving the repair
 // loop as dead code at runtime.
 import { createEvaluatorRunnerDeps, contentHashFn } from '../services/rulehost-pipeline-runner.js';
-import { createEvaluatorRuntimeContext } from '@principles/host-runtime';
+// PRI-708: the canonical rollout governance factory — the ONE builder the
+// consumer cycle spreads (internalization-consumer-cycle.ts). Host-neutral
+// CLI entries wire the same reopen semantics instead of hand-rolling them.
+import { createEvaluatorRuntimeContext, createRolloutGovernanceDeps } from '@principles/host-runtime';
 import type { RefinerRuleHostGateDeps } from '@principles/core/runtime-v2';
 
 interface RunOnceOptions {
@@ -607,8 +610,19 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'rollout_reviewer') {
           const validator = new DefaultRolloutReviewerValidator();
+          // PRI-708: canonical rollout revision routing — the SAME reopen
+          // callback (causeId-idempotent reopenTaskForRevision) the consumer
+          // cycle injects, so a manual needs_revision here reopens the
+          // scribe/artificer revision target instead of dead-ending in the
+          // recovery-only `rollout_revision_routing_not_wired` NHR (INV-04:
+          // needs_revision never enters the approval queue).
+          // dispatchActivation is deliberately NOT wired on this manual entry
+          // (P2 follow-up): an approve_rollout verdict keeps its pre-existing
+          // `rollout_dispatch_not_wired` recovery NHR until the dispatch seam
+          // gets its own reviewed wiring.
+          const { reopenRevisionTarget } = createRolloutGovernanceDeps(workspaceDir, orchestrator);
           const runner = new RolloutReviewerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, reopenRevisionTarget },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
           );
           runnerResult = await runner.run(wakeResult.taskId);

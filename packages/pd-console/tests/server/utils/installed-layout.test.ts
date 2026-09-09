@@ -26,6 +26,19 @@ vi.mock('os', async (importOriginal) => {
   return { ...actual, homedir: vi.fn(() => realHomedir()) };
 });
 
+// PRI-711: allow simulating a ONE-GENERATION-OLD deployed @principles/
+// install-layout (whose getInstallLayoutPaths predates codexAdapterDir).
+// The full update runs inside the currently-running console, which resolves
+// the layout helper installed by the PREVIOUS update — that older shape is
+// a real production state the layout util must tolerate (rc-9).
+vi.mock('@principles/install-layout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@principles/install-layout')>();
+  return {
+    ...actual,
+    getInstallLayoutPaths: vi.fn(actual.getInstallLayoutPaths),
+  };
+});
+
 import {
   readInstalledPdVersion,
   readCurrentVersion,
@@ -131,6 +144,32 @@ describe('installed-layout', () => {
       expect(layout?.pluginDir).toBe(pluginDir);
       expect(resolvePluginDir('')).toBe(pluginDir);
       expect(readInstalledPdVersion()).toBe('9.9.9');
+    } finally {
+      homedirMock.mockImplementation(() => tmpDir);
+      fs.rmSync(canonicalHome, { recursive: true, force: true });
+    }
+  });
+
+  it('tolerates a one-generation-old deployed install-layout without codexAdapterDir (PRI-711)', async () => {
+    const installLayout = await import('@principles/install-layout');
+    const actual = await vi.importActual<typeof import('@principles/install-layout')>('@principles/install-layout');
+    const canonicalHome = installCanonicalHome('2.0.0');
+    const homedirMock = vi.mocked(os.homedir);
+    homedirMock.mockImplementation(() => canonicalHome);
+    // Simulate the pre-PRI-711 module shape: no codexAdapterDir field at all.
+    // The cast narrows back to the current return type — the test target is
+    // the runtime guard, not the type system.
+    vi.mocked(installLayout.getInstallLayoutPaths).mockImplementationOnce((home: string) => {
+      const withoutAdapterField = actual.getInstallLayoutPaths(home) as Record<string, unknown>;
+      delete withoutAdapterField.codexAdapterDir;
+      return withoutAdapterField as ReturnType<typeof actual.getInstallLayoutPaths>;
+    });
+    try {
+      const layout = resolveUpdateLayout();
+      expect(layout).toBeDefined();
+      expect(layout?.codexAdapterDir).toBeUndefined();
+      expect(layout?.pdCliDir).toContain(path.join('.pd', 'runtime', 'pd-cli'));
+      expect(layout?.hosts).toEqual(['openclaw']);
     } finally {
       homedirMock.mockImplementation(() => tmpDir);
       fs.rmSync(canonicalHome, { recursive: true, force: true });

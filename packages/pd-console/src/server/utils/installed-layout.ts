@@ -28,6 +28,14 @@ export interface UpdateLayout {
   pdCliDir: string;
   installLayoutDir: string;
   releaseManagerDir: string;
+  /**
+   * PRI-711: codex-adapter is a runtime-layout component pd-cli resolves
+   * eagerly. Undefined when the DEPLOYED @principles/install-layout is one
+   * generation old (this update runs inside the currently-running console,
+   * which resolves the layout helper installed by the PREVIOUS update) —
+   * consumers must degrade to skipping the adapter, never assume it.
+   */
+  codexAdapterDir: string | undefined;
   hosts: InstallHost[];
 }
 
@@ -57,6 +65,9 @@ export function resolveUpdateLayout(): UpdateLayout | undefined {
       pdCliDir: paths.pdCliDir,
       installLayoutDir: paths.installLayoutDir,
       releaseManagerDir: paths.releaseManagerDir,
+      // rc-1: the deployed install-layout may predate the codexAdapterDir
+      // field — guard instead of trusting the shape.
+      codexAdapterDir: typeof paths.codexAdapterDir === 'string' ? paths.codexAdapterDir : undefined,
       hosts: resolution.manifest?.hosts ?? [],
     };
   }
@@ -68,6 +79,7 @@ export function resolveUpdateLayout(): UpdateLayout | undefined {
     pdCliDir: path.join(legacyPluginDir, 'pd-cli'),
     installLayoutDir: path.join(legacyPluginDir, 'install-layout'),
     releaseManagerDir: path.join(legacyPluginDir, 'release-manager'),
+    codexAdapterDir: path.join(legacyPluginDir, 'codex-adapter'),
     hosts: ['openclaw'],
   };
 }
