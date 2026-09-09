@@ -1819,9 +1819,10 @@ function installBundledCodexAdapter(pluginDir: string): void {
  * existing correct link is kept; a stale physical copy (self-contained
  * payloads ship materialized node_modules) or a wrong-target link is
  * replaced with the canonical junction/symlink, mirroring syncPdCli.
- * Idempotent. Runs after installBundledCodexAdapter and the core/host-runtime
- * installs, so the sibling targets always exist — a missing sibling means a
- * corrupted payload and fails the install loudly.
+ * Idempotent. MUST run after installBundledCodexAdapter AND the
+ * core/host-runtime/install-layout installs — the manifest declares all
+ * three as file:../ siblings, and a missing sibling means a corrupted
+ * payload or a call-order regression, which fails the install loudly.
  */
 export function ensureCodexAdapterResolution(): void {
   const codexAdapterDir = getInstalledCodexAdapterDir();
@@ -2788,12 +2789,14 @@ export async function install(
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/codex-adapter...');
     installBundledCodexAdapter(pluginDir);
-    // PRI-711: the adapter's own file: deps must resolve or pd-cli's eager
-    // import graph crashes on every command (same step: one logical unit).
-    ensureCodexAdapterResolution();
     stepIndex++;
 
     installBundledLayoutPackage(pluginDir);
+    // PRI-711: the adapter's own file: deps must resolve or pd-cli's eager
+    // import graph crashes on every command. Runs only once ALL adapter
+    // siblings exist — the manifest declares file:../core, file:../host-runtime
+    // AND file:../install-layout, and install-layout lands just above.
+    ensureCodexAdapterResolution();
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
     installBundledReleaseManagerPackage(pluginDir);
