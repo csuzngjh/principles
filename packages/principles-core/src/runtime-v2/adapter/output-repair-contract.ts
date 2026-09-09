@@ -46,6 +46,16 @@ export interface OutputEvidencePack {
   readonly extractionCandidateCount?: number;
   /** PRI-621 RC3: selected object matched none of the schema's required keys. */
   readonly truncationSuspected?: true;
+  /**
+   * PRI-707: provider finish metadata, preserved only when the adapter's
+   * response actually carried it — never fabricated. `truncated` is set
+   * exclusively from finish_reason=length (definitive), unlike the
+   * `truncationSuspected` heuristic which also fires for wrong-shape output.
+   */
+  readonly stopReason?: string;
+  readonly truncated?: true;
+  /** Provider-reported output token count when usage was supplied. */
+  readonly outputTokens?: number;
 }
 
 // v2 (PRI-621 RC2): repair prompt carries the complete JSON Schema
