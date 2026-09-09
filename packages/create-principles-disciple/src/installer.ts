@@ -1443,7 +1443,7 @@ export function installGlobalPdShim(): GlobalPdShimResult | boolean {
   if (foreignPaths.length > 0) {
     const foreignList = foreignPaths.join(', ');
     logger.warn(`A non-PD "pd" command already exists in the npm global bin dir (${foreignList}) — not overwriting it.`);
-    logger.warn(`The bundled PD CLI stays available at "${path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd')}". Remove the foreign "pd" yourself if you want the global name.`);
+    logger.warn(`The bundled PD CLI stays available at "${path.join(installedBinDir, isWindows() ? 'pd.cmd' : 'pd')}". Remove the foreign "pd" yourself if you want the global name.`);
     if (existingPdOwned) {
       logger.warn('PD-owned shim files in the same dir were left untouched to keep the existing installation consistent.');
     }
@@ -1480,6 +1480,15 @@ export function installGlobalPdShim(): GlobalPdShimResult | boolean {
       const globalSh = globalShimPath(globalBin, 'pd');
       writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginSh.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
       chmodSync(globalSh, 0o755);
+    }
+    // PRI-697 review P1: the success path MUST record which targets are new
+    // (created) vs pre-existing PD-owned (replaced) — rollbackGlobalPdShim
+    // removes exactly createdPaths when a LATER install step fails. The
+    // pre-fix success path left createdPaths empty, silently no-op'ing the
+    // rollback while the failure message claimed a clean cleanup.
+    for (const shim of GLOBAL_PD_SHIM_BASENAMES) {
+      const shimPath = globalShimPath(globalBin, shim);
+      if (!preExisting.has(shimPath)) createdPaths.push(shimPath);
     }
     return { installed: true, createdPaths, replacedPaths, skippedForeignPaths: [] };
   } catch (e) {
@@ -3292,7 +3301,7 @@ export async function install(
     const rollbackSuffixFinal = rollbackSuffix
       + (workspaceTouched && freshCleanup && freshCleanup.failed.length === 0 ? ` ${t('rollback_fresh_workspace_kept')}` : '')
       + (globalShimRollback !== undefined && globalShimRollback.failed.length > 0
-        ? ` Global pd shim files this run created could not be removed (${globalShimRollback.failed.join(', ')}) — remove them manually.`
+        ? ` ${t('rollback_global_shim_residue').replace('{files}', globalShimRollback.failed.join(', '))}`
         : '');
     const rollbackNextAction = !hasBackup
       ? freshCleanup

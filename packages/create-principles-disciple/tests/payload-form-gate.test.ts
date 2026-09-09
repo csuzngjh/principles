@@ -170,18 +170,6 @@ describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', ()
     setLanguage(savedLang);
   });
 
-  /**
-   * Run install() until the payload mode is decided (immediately before the
-   * preflight), so activePayloadMode reflects the fixture shape exactly as
-   * in a real run. The fixture dir passes the form-gate, then
-   * checkBuiltPlugin fails on the mocked fs — install() returns a failure
-   * result, but the mode stays set for the helper assertions that follow.
-   */
-  const setPayloadModeViaInstall = async (pluginDir: string): Promise<void> => {
-    await install(baseInstallOptions, pluginDir, { quiet: true });
-  };
-  void setPayloadModeViaInstall;
-
   const completeNpmBundle = async (): Promise<{ dir: string; actualFs: typeof import('node:fs') }> => {
     const actualFs = await vi.importActual<typeof import('node:fs')>('node:fs');
     const actualOs = await vi.importActual<typeof import('node:os')>('node:os');

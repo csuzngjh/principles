@@ -10,12 +10,16 @@
  *  2. a foreign (non-PD) `pd` in the npm global bin dir is never
  *     overwritten — the installer's write side now carries the same
  *     ownership discipline the uninstaller already has (isPdOwnedShim);
- *  3. unit-level: PD-owned pre-existing shims are updated in place and
- *     recorded as replaced, not created — a rolled-back upgrade of a
- *     previously-shimmed install keeps its old global command.
+ *  3. PD-owned pre-existing shims are updated in place and recorded as
+ *     replaced, not created — a rolled-back upgrade of a previously-
+ *     shimmed install keeps its old global command.
  *
- * Same harness as installer.test.ts (auto-mocked fs + mocked gateway
- * control + real on-disk npm-bundle fixture).
+ * Sandbox discipline (non-negotiable): getHomeDir() reads process.env.HOME
+ * first, so redirecting HOME/USERPROFILE at a throwaway temp root places
+ * EVERY installed path (~/.pd, ~/.openclaw) inside the sandbox. `fs` is
+ * fully delegated to the real module — safe because no product path can
+ * escape the sandbox root — while `child_process` is mocked (no real npm /
+ * node spawns). The global bin dir also lives inside the sandbox.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -46,6 +50,7 @@ vi.mock('../src/utils/env.js', async (importOriginal) => {
 const baseInstallOptions: InstallOptions = {
   language: 'en',
   mode: 'smart',
+  // Overwritten per-test with the sandbox workspace path.
   workspaceDir: '/tmp/pd-697-shim-ws',
   channels: [],
   overwriteConfig: false,
@@ -53,180 +58,172 @@ const baseInstallOptions: InstallOptions = {
   stopGateway: false,
 };
 
+const SHIM_BASENAMES = process.platform === 'win32' ? ['pd.cmd', 'pd.ps1'] : ['pd'];
+
 describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
-  let savedLegacyNpmInstall: string | undefined;
-  let savedSkipShim: string | undefined;
-  let savedSkipUpgrade: string | undefined;
-  let savedLang: 'zh' | 'en';
-  let fixtureDir: string;
+  let savedEnv: Record<string, string | undefined>;
+  let sandboxRoot: string;
   let globalBinDir: string;
+  let fixtureDir: string;
+  let workspaceDir: string;
   let realFs: typeof import('node:fs');
   let realPath: typeof import('node:path');
   let infoLines: string[];
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    savedLegacyNpmInstall = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
-    savedSkipShim = process.env.PD_SKIP_GLOBAL_SHIM;
-    savedSkipUpgrade = process.env.PD_SKIP_NPM_UPGRADE;
+    savedEnv = {
+      HOME: process.env.HOME,
+      USERPROFILE: process.env.USERPROFILE,
+      PD_ALLOW_LEGACY_NPM_INSTALL: process.env.PD_ALLOW_LEGACY_NPM_INSTALL,
+      PD_SKIP_GLOBAL_SHIM: process.env.PD_SKIP_GLOBAL_SHIM,
+      PD_SKIP_NPM_UPGRADE: process.env.PD_SKIP_NPM_UPGRADE,
+    };
+    realFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const realOs = await vi.importActual<typeof import('node:os')>('node:os');
+    realPath = await vi.importActual<typeof import('node:path')>('node:path');
+
+    sandboxRoot = realFs.realpathSync.native(realFs.mkdtempSync(realPath.join(realOs.tmpdir(), 'pd-697-sandbox-')));
+    globalBinDir = realPath.join(sandboxRoot, 'global-bin');
+    fixtureDir = realPath.join(sandboxRoot, 'bundle');
+    workspaceDir = realPath.join(sandboxRoot, 'ws');
+    realFs.mkdirSync(globalBinDir, { recursive: true });
+    realFs.mkdirSync(workspaceDir, { recursive: true });
+
+    // HOME redirect: every installed path (~/.pd, ~/.openclaw) now resolves
+    // INSIDE the sandbox — the precondition that makes real-fs delegation
+    // safe. Both vars, matching getHomeDir()'s lookup order (and Windows).
+    process.env.HOME = sandboxRoot;
+    process.env.USERPROFILE = sandboxRoot;
     // npm-distributed payload shape (registry-resolved deps + global shim),
     // no smoke skip envs — the global write is the subject.
     delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     delete process.env.PD_SKIP_GLOBAL_SHIM;
     delete process.env.PD_SKIP_NPM_UPGRADE;
-    savedLang = 'zh';
+
     setLanguage('en');
     infoLines = [];
     vi.spyOn(logger, 'info').mockImplementation((msg: string) => { infoLines.push(msg); });
 
-    realFs = await vi.importActual<typeof import('node:fs')>('node:fs');
-    const realOs = await vi.importActual<typeof import('node:os')>('node:os');
-    realPath = await vi.importActual<typeof import('node:path')>('node:path');
-
-    const tmpRoot = realFs.realpathSync.native(realOs.tmpdir());
-    fixtureDir = realFs.mkdtempSync(realPath.join(tmpRoot, 'pd-697-bundle-'));
-    globalBinDir = realFs.mkdtempSync(realPath.join(tmpRoot, 'pd-697-globalbin-'));
-
+    // npm-distributed bundle fixture: package.json + dist per component,
+    // exact-shape extras the form-gate demands, the plugin manifest
+    // checkBuiltPlugin reads, a pd-cli entry file for syncPdCli, and a CJS
+    // authority module the real dynamic import in
+    // verifyReleaseManagerAuthorityImports can load on ANY machine (never
+    // the host's live runtime).
     for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
       realFs.mkdirSync(realPath.join(fixtureDir, component, 'dist'), { recursive: true });
       realFs.writeFileSync(realPath.join(fixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
     }
+    realFs.writeFileSync(realPath.join(fixtureDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
+    realFs.writeFileSync(realPath.join(fixtureDir, 'pd-cli', 'dist', 'index.js'), 'module.exports = {};\n');
     realFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
-    realFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    realFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'module.exports = {};\n');
     realFs.mkdirSync(realPath.join(fixtureDir, 'console', 'dist', 'web'), { recursive: true });
-    realFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'server.js'), 'export {};');
+    realFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'server.js'), 'module.exports = {};\n');
     realFs.writeFileSync(realPath.join(fixtureDir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
 
     vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
     vi.mocked(stopOpenClawGateway).mockResolvedValue({ ok: true });
     vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });
 
-    // execFileSync dispatch: `npm prefix -g` (via cmd.exe argv sniffing)
-    // resolves to the throwaway globalBinDir so the shim write lands in the
-    // test sandbox, never in the real npm global bin. Everything else keeps
-    // the module-scope '' stub (deterministic no-op for verification probes
-    // etc.); the deployment steps below fail deterministically at the
-    // injected point BEFORE any real subprocess can matter.
+    // execFileSync dispatch (never a real subprocess):
+    //  - `npm prefix -g` → the sandbox global bin dir,
+    //  - any `--version` probe → THROW (the post-shim failure injection:
+    //    verifyPdCliShim's local probe runs AFTER syncPdCli wrote the
+    //    global shim, so the catch path must roll the shim back),
+    //  - everything else (npm install, etc.) → '' (silent no-op).
     const execMock = vi.mocked(childProcess.execFileSync);
     execMock.mockImplementation(((_file: string, argv?: readonly string[]) => {
       if (Array.isArray(argv) && argv.includes('prefix')) return globalBinDir;
+      if (Array.isArray(argv) && argv.includes('--version')) throw new Error('injected version-probe failure (PRI-697 test)');
       return '';
     }) as typeof childProcess.execFileSync);
 
-    // Happy-ish filesystem: form gate + deployment sources exist (real
-    // fixture), no pre-existing install manifest, no workspace state.db.
-    vi.mocked(fs.existsSync).mockImplementation((value) => {
-      const s = String(value);
-      if (s.endsWith('install.json')) return false;
-      if (s.endsWith(realPath.join('.pd', 'state.db'))) return false;
-      if (s.includes(realPath.join('.pd', 'runtime', 'release-manager'))) return false; // authority smoke fails here
-      return realFs.existsSync(s);
-    });
-    vi.mocked(fs.readFileSync).mockImplementation((value) => {
-      const filePath = String(value);
-      if (filePath.endsWith('openclaw.plugin.json')) {
-        return JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } });
+    // Real fs across the board — safe by the HOME redirect above. The
+    // transaction journal, backups, component copies, junctions, local and
+    // global shims all land inside the sandbox and the assertions observe
+    // REAL on-disk state.
+    const fsMock = vi.mocked(fs) as unknown as Record<string, { mockImplementation: (impl: never) => void }>;
+    for (const key of Object.keys(realFs)) {
+      const value = (realFs as unknown as Record<string, unknown>)[key];
+      const mock = fsMock[key];
+      if (typeof value === 'function' && mock && typeof mock.mockImplementation === 'function') {
+        mock.mockImplementation(((...args: unknown[]) => (value as (...a: unknown[]) => unknown)(...args)) as never);
       }
-      if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
-      // Files inside the sandbox dirs (npm-bundle fixture + global bin)
-      // read from the REAL fs — the ownership classifier must see the
-      // actual shim bytes, not a synthetic manifest.
-      if (realFs.existsSync(filePath)) return realFs.readFileSync(filePath, 'utf-8');
-      return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
-    });
-    vi.mocked(fs.readdirSync).mockReturnValue([]);
-    // Real fs delegation for writes: the shim/rollback bookkeeping and the
-    // final assertions must observe REAL files in the sandbox dirs.
-    vi.mocked(fs.writeFileSync).mockImplementation((p, data) => realFs.writeFileSync(String(p), data as never));
-    vi.mocked(fs.mkdirSync).mockImplementation((p, opts) => realFs.mkdirSync(String(p), opts as never));
-    vi.mocked(fs.rmSync).mockImplementation((p, opts) => realFs.rmSync(String(p), opts as never));
-    vi.mocked(fs.chmodSync).mockImplementation(() => undefined);
+    }
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.mocked(fs.existsSync).mockReset();
-    vi.mocked(fs.readFileSync).mockReset();
-    vi.mocked(fs.readdirSync).mockReset();
-    vi.mocked(fs.writeFileSync).mockReset();
-    vi.mocked(fs.mkdirSync).mockReset();
-    vi.mocked(fs.rmSync).mockReset();
-    vi.mocked(fs.chmodSync).mockReset();
-    for (const [name, value] of [
-      ['PD_ALLOW_LEGACY_NPM_INSTALL', savedLegacyNpmInstall],
-      ['PD_SKIP_GLOBAL_SHIM', savedSkipShim],
-      ['PD_SKIP_NPM_UPGRADE', savedSkipUpgrade],
-    ] as const) {
+    for (const [name, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
-    setLanguage(savedLang);
-    if (fixtureDir) realFs.rmSync(fixtureDir, { recursive: true, force: true });
-    if (globalBinDir) realFs.rmSync(globalBinDir, { recursive: true, force: true });
+    setLanguage('zh');
+    if (sandboxRoot) realFs.rmSync(sandboxRoot, { recursive: true, force: true });
   });
 
-  const shimFilesInSandbox = (): string[] =>
-    ['pd.cmd', 'pd.ps1', 'pd'].map((name) => realPath.join(globalBinDir, name)).filter((p) => realFs.existsSync(p));
+  const shimFilesInGlobalBin = (): string[] =>
+    SHIM_BASENAMES.map((name) => realPath.join(globalBinDir, name)).filter((p) => realFs.existsSync(p));
 
-  it('FRESH npm-distributed install that fails after the shim step removes the global pd shim (no dangling command)', async () => {
-    // Inject the post-shim failure: the release-manager authority smoke
-    // (runs after the pd CLI step) reads as absent → structured failure
-    // AFTER syncPdCli wrote the global shim.
-    const result = await install(baseInstallOptions, fixtureDir, { quiet: true });
+  it('FRESH npm-distributed install that fails AFTER the shim step removes the global pd shim it created', async () => {
+    const result = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
 
+    // The run must have gotten past the shim write and died at the
+    // injected pd-cli verification failure — NOT at some earlier gate.
     expect(result.success).toBe(false);
-    // The failure fired at/after the pd-cli step (authority smoke), not at
-    // the form gate — proving the shim write happened before it.
     expect(result.reason).not.toMatch(/^npm_bundle_incomplete:/);
-    // Core contract: no shim files remain in the global bin dir.
-    expect(shimFilesInSandbox()).toEqual([]);
-    // The rollback message names what happened — and never claims a clean
-    // rollback while a created shim survived.
-    expect(result.error).toMatch(/removed|not modified|No changes/);
-    if (result.reason.startsWith('install_failed_unactivated_cleaned')) {
-      expect(shimFilesInSandbox()).toEqual([]);
-    }
+    expect(result.reason).not.toMatch(/^transaction_journal_unavailable:/);
+    expect(result.error).toMatch(/PD CLI verification failed/);
+    // The injected failure fired AFTER installGlobalPdShim: the pre-fix
+    // bug (createdPaths never populated) left the shims on disk here.
+    expect(shimFilesInGlobalBin()).toEqual([]);
+    // Fresh-install cleanup ran alongside: the sandbox runtime is gone.
+    expect(realFs.existsSync(realPath.join(sandboxRoot, '.pd', 'runtime'))).toBe(false);
+    expect(result.reason).toMatch(/^install_failed_unactivated_cleaned:/);
   });
 
   it('never overwrites a foreign (non-PD) pd command in the npm global bin dir', async () => {
-    // Pre-existing foreign `pd` in the sandboxed global bin dir: content
-    // that does NOT reference the PD install dir.
-    const foreignPath = realPath.join(globalBinDir, process.platform === 'win32' ? 'pd.cmd' : 'pd');
+    const foreignPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
     realFs.writeFileSync(foreignPath, '#!/bin/sh\nexec some-other-tool\n', 'utf-8');
 
-    const result = await install(baseInstallOptions, fixtureDir, { quiet: true });
+    const result = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
 
     expect(result.success).toBe(false);
     // The foreign file is byte-for-byte untouched.
     expect(realFs.readFileSync(foreignPath, 'utf-8')).toBe('#!/bin/sh\nexec some-other-tool\n');
-    // No PD-owned shim was written next to it either (the ownership gate
-    // refused the whole global-shim step).
-    expect(shimFilesInSandbox()).toEqual([foreignPath]);
+    // The ownership gate refused the whole global-shim step: no PD-owned
+    // shim was written next to it.
+    expect(shimFilesInGlobalBin()).toEqual([foreignPath]);
   });
 
   it('PD-owned pre-existing shims are updated in place and recorded as replaced, not created', async () => {
     // Drive install() once so activePayloadMode reflects the fixture's
-    // npm-distributed shape (the helpers read the module-level mode —
-    // the unit assertions below must run under the same mode a real
-    // install would set). The run fails at the injected post-shim point.
-    const firstRun = await install(baseInstallOptions, fixtureDir, { quiet: true });
+    // npm-distributed shape (the helpers read the module-level mode; the
+    // unit assertions below must run under the mode a real install sets).
+    // It fails at the injected verification point, as in test 1.
+    const firstRun = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
     expect(firstRun.success).toBe(false);
 
-    // Pre-existing PD-owned shim content: embeds the REAL installed bin
-    // dir path getInstalledBinDir() resolves — exactly what the ownership
-    // classifier checks for (uninstaller isPdOwnedShim semantics).
+    // Pre-existing PD-owned shim: embeds the installed bin dir that
+    // getInstalledBinDir() resolves (inside the sandboxed HOME) — the
+    // ownership classifier's PD-owned marker.
     const installedBinDir = getInstalledBinDir();
-    const shimPath = realPath.join(globalBinDir, process.platform === 'win32' ? 'pd.cmd' : 'pd');
+    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
     realFs.writeFileSync(shimPath, `#!/bin/sh\nexec "${realPath.join(installedBinDir, 'pd')}" "$@"\n`, 'utf-8');
 
     const shimResult = installGlobalPdShim();
 
     expect(shimResult).toMatchObject({ installed: true, skippedForeignPaths: [] });
     const record = shimResult as { installed: boolean; createdPaths: string[]; replacedPaths: string[] };
-    expect(record.replacedPaths.some((p) => realPath.resolve(p) === realPath.resolve(shimPath))).toBe(true);
-    expect(record.createdPaths).toEqual([]);
+    // The pre-existing PD-owned target is bookkept as REPLACED — the
+    // rollback must keep it — and the freshly written siblings as CREATED.
+    expect(record.replacedPaths.map((p) => realPath.resolve(p))).toContain(realPath.resolve(shimPath));
+    expect(record.createdPaths.map((p) => realPath.resolve(p))).not.toContain(realPath.resolve(shimPath));
+    expect(record.createdPaths.length).toBeGreaterThan(0);
     // And the env-gated upgrade path still reports the ACTUAL payload mode.
-    expect(tryUpgradePdCliFromNpm('/nonexistent-pd-697')).toBeUndefined();
+    tryUpgradePdCliFromNpm('/nonexistent-pd-697');
     expect(infoLines.some((line) => line.includes('Skipping npm pd-cli upgrade (bundled pd-cli is authoritative'))).toBe(true);
     expect(infoLines.some((line) => line.includes('self-contained'))).toBe(false);
   });
