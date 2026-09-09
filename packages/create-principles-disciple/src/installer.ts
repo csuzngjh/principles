@@ -1332,8 +1332,13 @@ function getNpmGlobalBinDir(): string | null {
   }
 }
 
-function installGlobalPdShim(): boolean {
-  if (!legacyNpmInstallEnabled()) {
+export function installGlobalPdShim(): boolean {
+  // Global-shim discovery consults the npm global root, so it belongs to
+  // the npm-distributed payload shape (isNpmDependencyResolutionEnabled
+  // documents "global root discovery" as its concern). Gating on the
+  // legacy env var instead fired this skip — with a self-contained-mode
+  // message — inside standard npm-channel installs (PRI-697).
+  if (!isNpmDependencyResolutionEnabled()) {
     logger.info('Skipping npm global shim discovery for the self-contained release asset.');
     return false;
   }
@@ -1374,9 +1379,19 @@ function installGlobalPdShim(): boolean {
   }
 }
 
-function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+export function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+  // The npm upgrade stays gated on the legacy env var (PRI-697 keeps the
+  // behavior): a registry pd-cli version can import exports the bundled
+  // core no longer has, so upgrading is only for the explicit recovery
+  // path where the whole shape is registry-resolved anyway. The skip
+  // message reports the ACTUAL payload mode — it used to claim
+  // "self-contained release asset" even in npm-distributed installs.
   if (!legacyNpmInstallEnabled()) {
-    logger.info('Skipping npm pd-cli upgrade for the self-contained release asset.');
+    if (activePayloadMode === 'npm-distributed') {
+      logger.info('Skipping npm pd-cli upgrade (bundled pd-cli is authoritative; set PD_ALLOW_LEGACY_NPM_INSTALL to enable registry upgrades).');
+    } else {
+      logger.info('Skipping npm pd-cli upgrade for the self-contained release asset.');
+    }
     return;
   }
   // Allow skipping the npm upgrade in smoke tests / offline environments.
