@@ -13,6 +13,7 @@ import {
   removeFixture,
   runDevScript,
 } from './dev-worktree-test-utils';
+import { normalizeGitPath } from '../dev/lib/git.mjs';
 
 let root: string;
 
@@ -176,5 +177,45 @@ describe('check-dev-worktree guard', () => {
 
     const r = await runDevScript('check-dev-worktree.mjs', ['--json'], { cwd: sub });
     expect(r.code).toBe(0);
+  }, 60_000);
+
+  it('WARNs (non-blocking) when a SIBLING registered worktree is unreadable (PRI-712)', async () => {
+    // A sibling worktree whose .git pointer is damaged reproduces the
+    // PRI-710 metadata-loss precondition: `worktree list` still registers
+    // it, but its status probe fails, so a concurrent prune could silently
+    // drop its admin entry. The guard must surface this WITHOUT gating the
+    // committing checkout.
+    const repo = path.join(root, 'guard-warning');
+    await initRepo(repo);
+    await commitFile(repo, 'a.txt');
+    await git(repo, 'switch', '-c', 'work/guard-warning');
+    const siblingWt = path.join(root, 'guard-warning-sibling');
+    await git(repo, 'worktree', 'add', '-b', 'work/sibling', siblingWt);
+    const siblingGitFile = path.join(siblingWt, '.git');
+    const gitPointer = fs.readFileSync(siblingGitFile, 'utf-8');
+    fs.rmSync(siblingGitFile); // damage: status probe now fails in the sibling
+
+    try {
+      const r = await runDevScript('check-dev-worktree.mjs', ['--json'], { cwd: repo });
+      // The committing checkout's own rules are unchanged: this repo is a
+      // primary checkout on a non-protected branch → still a violation.
+      expect(r.code).toBe(1);
+      const out = JSON.parse(r.stdout) as {
+        ok: boolean;
+        violations: Array<{ rule: string }>;
+        warnings: Array<{ rule: string; message: string }>;
+      };
+      expect(out.violations.map((v) => v.rule)).toContain('primary-worktree');
+      // The new warning layer reports the damaged sibling without blocking.
+      const warning = out.warnings.find((w) => w.rule === 'worktree-unreadable');
+      expect(warning).toBeDefined();
+      // Git reports forward slashes; normalize both sides (ERR-090 class).
+      expect(normalizeGitPath(warning?.message.replace('Registered worktree is currently unreadable: ', '') ?? '')).toBe(
+        normalizeGitPath(siblingWt)
+      );
+    } finally {
+      // Fixture hygiene: restore the pointer so removeFixture can clean up.
+      fs.writeFileSync(siblingGitFile, gitPointer, 'utf-8');
+    }
   }, 60_000);
 });

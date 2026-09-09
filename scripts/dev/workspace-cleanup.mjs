@@ -26,7 +26,7 @@
 //   node scripts/dev/workspace-cleanup.mjs [--apply] [--grace-days <n>] [--json] [--skip-gh]
 //   npm run dev:workspace:cleanup
 
-import { normalizeGitPath, runGit } from './lib/git.mjs';
+import { assessWorktreePruneSafety, normalizeGitPath, runGit } from './lib/git.mjs';
 import { GRACE_DAYS_DEFAULT, classifyRecords, collectWorkspaceState, planCleanup } from './lib/workspace-lifecycle.mjs';
 
 function parseArgs(argv) {
@@ -184,9 +184,24 @@ async function main() {
     applied.push(action);
   }
 
-  await runGit(['worktree', 'prune'], { cwd, allowFailure: true });
+  // PRI-712: the global prune drops admin metadata of worktrees whose
+  // directory git believes is gone — but a Windows lock race can make a LIVE
+  // worktree transiently unreadable and get it misclassified as missing.
+  // Prune runs only when every existing-dir worktree probes clean; otherwise
+  // it is skipped with a note (prune is an opportunistic optimization).
+  const pruneSafety = await assessWorktreePruneSafety(cwd);
+  let pruned = false;
+  if (pruneSafety.safe) {
+    await runGit(['worktree', 'prune'], { cwd, allowFailure: true });
+    pruned = true;
+  } else {
+    const detail = pruneSafety.blocked
+      .map((b) => b.path + ' (' + b.reason + (b.preview ? ': ' + b.preview : '') + ')')
+      .join(', ');
+    notes.push('skipped global worktree prune — live worktrees with unknown work must not risk metadata loss: ' + detail);
+  }
 
-  const summary = { ok: true, mode: 'apply', applied: applied.length, refused, skipped: plan.skipped, notes, actions: applied };
+  const summary = { ok: true, mode: 'apply', applied: applied.length, refused, skipped: plan.skipped, pruned, notes, actions: applied };
   if (args.json) {
     console.log(JSON.stringify(summary, null, 2));
     return;

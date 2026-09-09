@@ -23,6 +23,7 @@ import {
   removeFixture,
   runDevScript,
   setupOriginFixture,
+  worktreeList,
 } from './dev-worktree-test-utils';
 
 /** Path equality that survives Windows 8.3 short names (ERR-090 class). */
@@ -280,6 +281,58 @@ describe('workspace-cleanup (integration)', () => {
     expect(fs.existsSync(wt)).toBe(true);
     const stillThere = await git(fixture.primary, 'for-each-ref', 'refs/heads/' + branch, '--format=%(refname:short)');
     expect(stillThere.trim()).toBe(branch);
+  });
+
+  it('apply still cleans its target but SKIPS the global prune while a sibling worktree is unreadable (PRI-712)', async () => {
+    const { wt, branch } = await makeTask(fixture.primary, 'pruneguard');
+    await mergeIntoMain(fixture.primary, branch);
+
+    // Sibling: simulates the PRI-710 incident precondition — a live worktree
+    // whose git probe currently fails (damaged .git pointer here; in the
+    // wild: Windows lock races). Its admin metadata must survive the sweep.
+    const sibling = await makeTask(fixture.primary, 'pruneguard-sibling');
+    const siblingGitFile = path.join(sibling.wt, '.git');
+    const gitPointer = fs.readFileSync(siblingGitFile, 'utf-8');
+    fs.rmSync(siblingGitFile);
+
+    try {
+      const r = await runDevScript('workspace-cleanup.mjs', ['--apply', '--grace-days', '0', '--json'], { cwd: fixture.primary, env: SKIP_GH });
+      expect(r.code).toBe(0);
+      const out = JSON.parse(r.stdout) as { pruned: boolean; notes: string[] };
+      expect(out.pruned).toBe(false);
+      expect(out.notes.join(' ')).toContain('skipped global worktree prune');
+      // The sanctioned target is still cleaned — the guard only defers the prune.
+      expect(fs.existsSync(wt)).toBe(false);
+      // Negative control: the sibling's admin entry AND its work survived.
+      const list = await worktreeList(fixture.primary);
+      expect(list.some((w) => normalizeGitPath(w.path) === normalizeGitPath(sibling.wt))).toBe(true);
+      expect(fs.existsSync(path.join(sibling.wt, 'pruneguard-sibling.txt'))).toBe(true);
+    } finally {
+      // Fixture hygiene: restore the pointer so removeFixture can clean up.
+      fs.writeFileSync(siblingGitFile, gitPointer, 'utf-8');
+    }
+  });
+});
+
+describe('workspace-cleanup prune safety (PRI-712)', () => {
+  const fixture = { root: '', primary: '' };
+
+  beforeAll(async () => {
+    const f = await setupOriginFixture('pd-wslc-prune-');
+    fixture.root = f.root;
+    fixture.primary = f.primary;
+  });
+  afterAll(() => removeFixture(fixture.root));
+
+  it('runs the global prune when every live worktree probes clean', async () => {
+    const { wt, branch } = await makeTask(fixture.primary, 'allclean');
+    await mergeIntoMain(fixture.primary, branch);
+
+    const r = await runDevScript('workspace-cleanup.mjs', ['--apply', '--grace-days', '0', '--json'], { cwd: fixture.primary, env: SKIP_GH });
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout) as { pruned: boolean };
+    expect(out.pruned).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
   });
 });
 

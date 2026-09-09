@@ -24,7 +24,7 @@
 // check passed, so the only thing it can override is ignored build output
 // (node_modules). Double --force is never used.
 
-import { listWorktrees, normalizeGitPath, runGit } from './lib/git.mjs';
+import { assessWorktreePruneSafety, listWorktrees, normalizeGitPath, runGit } from './lib/git.mjs';
 
 function parseArgs(argv) {
   const args = { target: null, deleteBranch: false, json: false };
@@ -191,9 +191,24 @@ async function main() {
     }
   }
 
-  await runGit(['worktree', 'prune'], { cwd, allowFailure: true });
+  // PRI-712: the global prune drops admin metadata of worktrees whose
+  // directory git believes is gone — but a Windows lock race can make a LIVE
+  // worktree transiently unreadable and get it misclassified as missing.
+  // Prune runs only when every existing-dir worktree probes clean; otherwise
+  // it is skipped with a note (prune is an opportunistic optimization).
+  const pruneSafety = await assessWorktreePruneSafety(cwd);
+  let pruned = false;
+  if (pruneSafety.safe) {
+    await runGit(['worktree', 'prune'], { cwd, allowFailure: true });
+    pruned = true;
+  } else {
+    const detail = pruneSafety.blocked
+      .map((b) => b.path + ' (' + b.reason + (b.preview ? ': ' + b.preview : '') + ')')
+      .join(', ');
+    notes.push('skipped global worktree prune — live worktrees with unknown work must not risk metadata loss: ' + detail);
+  }
 
-  const summary = { ok: true, removedWorktree, deletedBranch: args.deleteBranch ? branchName : null, notes };
+  const summary = { ok: true, removedWorktree, deletedBranch: args.deleteBranch ? branchName : null, pruned, notes };
   if (args.json) {
     console.log(JSON.stringify(summary, null, 2));
   } else {
@@ -201,7 +216,7 @@ async function main() {
     if (removedWorktree) console.log('  removed worktree: ' + removedWorktree);
     if (summary.deletedBranch) console.log('  deleted branch:   ' + summary.deletedBranch);
     for (const note of notes) console.log('  note: ' + note);
-    console.log('  pruned stale worktree metadata');
+    if (pruned) console.log('  pruned stale worktree metadata');
   }
 }
 

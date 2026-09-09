@@ -88,6 +88,53 @@ export async function listWorktrees(cwd) {
 }
 
 /**
+ * PRI-712: assess whether a global `git worktree prune` is safe to run right
+ * now. Prune drops the admin metadata of worktrees whose directory git
+ * believes is gone — but on Windows a directory held by another process's
+ * file locks (EPERM storms are routine in this repo) can be transiently
+ * UNREADABLE rather than absent, and git then misclassifies it as missing.
+ * That silently destroyed a live agent's worktree metadata (PRI-710
+ * incident, 2026-09-08) while the worktree held uncommitted work.
+ *
+ * The prune hazard is READABILITY, not dirtiness: prune keys on directory
+ * existence, so a readable-but-dirty worktree is never its target, while an
+ * unreadable one can be misclassified as gone. The guard therefore blocks
+ * only when an existing-dir worktree cannot be probed by git (one settle
+ * re-probe filters transient EPERM failures). Dirtiness stays the REMOVE
+ * path's protection — every removal here probes `status --porcelain` and
+ * refuses on unknown work (git-4).
+ *
+ * Returns:
+ *   safe    — true when prune may run (every existing-dir worktree probed
+ *             readable; only missing/unreadable-proof dirs would be dropped).
+ *   blocked — entries { path, reason: 'unreadable' }.
+ *   checked — paths of existing-dir worktrees that probed readable.
+ */
+const PRUNE_PROBE_SETTLE_MS = 300;
+
+export async function assessWorktreePruneSafety(cwd) {
+  const worktrees = await listWorktrees(cwd);
+  const blocked = [];
+  const checked = [];
+  for (const wt of worktrees) {
+    if (wt.bare) continue;
+    if (!fs.existsSync(wt.path)) continue; // dir provably gone — prune's job
+    let probe = await runGit(['status', '--porcelain'], { cwd: wt.path, allowFailure: true });
+    if (probe === null) {
+      // Transient EPERM filter: one settle re-probe before declaring block.
+      await new Promise((resolve) => setTimeout(resolve, PRUNE_PROBE_SETTLE_MS));
+      probe = await runGit(['status', '--porcelain'], { cwd: wt.path, allowFailure: true });
+    }
+    if (probe === null) {
+      blocked.push({ path: wt.path, reason: 'unreadable' });
+    } else {
+      checked.push(wt.path);
+    }
+  }
+  return { safe: blocked.length === 0, blocked, checked };
+}
+
+/**
  * The primary checkout: the first non-bare worktree. It owns the repository
  * .git directory and acts as the control plane (AGENTS.md §23A) — AI writers
  * must not implement there.

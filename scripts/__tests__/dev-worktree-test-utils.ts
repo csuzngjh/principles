@@ -97,6 +97,12 @@ export async function setupOriginFixture(prefix: string): Promise<{ root: string
 
   await run('git', ['init', '--bare', '-b', 'main', origin]);
   await initRepo(seed);
+  // PRI-712: pin eol handling. Without this, a clone made under
+  // autocrlf=true materializes CRLF files while the per-clone
+  // autocrlf=false set below makes later `git status` calls
+  // NONDETERMINISTICALLY report ` M` on content-identical files (racy-clean
+  // stat flips) — which the prune safety guard must then treat as dirt.
+  fs.writeFileSync(path.join(seed, '.gitattributes'), '* -text\n', 'utf-8');
   fs.writeFileSync(path.join(seed, '.gitignore'), 'node_modules/\n', 'utf-8');
   await run('git', ['add', '.gitignore'], { cwd: seed });
   await run('git', ['commit', '-m', 'init'], { cwd: seed });
