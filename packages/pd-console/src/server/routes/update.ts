@@ -40,6 +40,7 @@ import {
 } from '../utils/installed-layout.js';
 import { ActivationCompatibilityReadModel, isFeatureEnabled } from '@principles/core/runtime-v2';
 import { collectFileDepLinkSpecs, type StagedComponent } from '../utils/update-links.js';
+import { runPostUpdateCliSmoke } from '../utils/cli-smoke.js';
 import {
   updateMutationController,
   LEGACY_MUTATION_AUTHORITY,
@@ -1096,6 +1097,15 @@ function ensureRuntimeResolutionLinks(
     // file:../install-layout ref, and the staged console's manifest carries
     // file:../release-manager — both derive their resolution links here.
     { manifestDir: path.join(tempDir, 'release-manager'), deployedDir: layout.releaseManagerDir },
+    // PRI-711: staged codex-adapter. Its staged manifest carries
+    // file:../core + file:../host-runtime, and the staged pd-cli manifest
+    // carries file:../codex-adapter — without this entry the derivation
+    // skipped the adapter entirely ("not part of this layout", a stale
+    // assumption) and updated installs crashed resolving it. Omitted when a
+    // one-generation-old deployed install-layout exposes no codexAdapterDir.
+    ...(layout.codexAdapterDir
+      ? [{ manifestDir: path.join(tempDir, 'codex-adapter'), deployedDir: layout.codexAdapterDir }]
+      : []),
   ];
   const readStagedDependencies = (manifestDir: string): Record<string, string> => {
     try {
@@ -1411,6 +1421,25 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       ) {
         copyDirRecursive(releaseManagerSrc, layout.releaseManagerDir, SKIP_DIRS);
       }
+      // PRI-711: same PRI-561 ordering for codex-adapter — pd-cli's eager
+      // import graph statically resolves it, so an updated pd-cli paired with
+      // a stale deployed adapter is exactly the generation drift that bricked
+      // the 1.231.2 update (health-codex imported symbols the deployed
+      // adapter happened to carry; the next API addition would not). The
+      // copy keeps the deployed node_modules (SKIP_DIRS), so its resolution
+      // links survive; the data-driven pass below re-derives them anyway.
+      // Skipped when the running console resolves a one-generation-old
+      // install-layout without codexAdapterDir — that generation also lacks
+      // the derivation entry, mirroring the old no-op behavior (rc-9).
+      const codexAdapterDest = layout.codexAdapterDir;
+      if (
+        codexAdapterDest !== undefined &&
+        fs.existsSync(path.join(tempDir, 'codex-adapter')) &&
+        fs.existsSync(path.join(tempDir, 'codex-adapter', 'package.json')) &&
+        fs.existsSync(path.join(tempDir, 'codex-adapter', 'dist'))
+      ) {
+        copyDirRecursive(path.join(tempDir, 'codex-adapter'), codexAdapterDest, SKIP_DIRS);
+      }
       const { error: linkError, quarantined } = ensureRuntimeResolutionLinks(layout, tempDir);
       reconciledQuarantine = quarantined;
       if (linkError) {
@@ -1498,6 +1527,32 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     // swapped, so restoring the stale copies would re-break resolution.
     if (reconciledQuarantine.length > 0) {
       cleanupQuarantined(reconciledQuarantine);
+    }
+
+    // 6.8 PRI-711: post-apply CLI smoke. The swap and link steps above are
+    // data-driven but not self-proving — run the updated CLI once and refuse
+    // to record a success if the eager import graph is broken (see
+    // runPostUpdateCliSmoke for the three precedents this catches). The
+    // backup recorded below keeps the failure recoverable via /rollback.
+    const smoke = runPostUpdateCliSmoke(layout.pdCliDir);
+    if (!smoke.ok) {
+      const failedVersion = readCurrentVersion(extDir) ?? toVersion ?? 'unknown';
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: failedVersion,
+        success: false,
+        kind: 'failure',
+        ...(pluginBackupDir ? { backupPath: pluginBackupDir } : {}),
+      });
+      return {
+        success: false,
+        message: `Update applied but the updated pd CLI fails to start: ${smoke.error}`,
+        reason: 'post_update_cli_smoke_failed',
+        nextAction: pluginBackupDir
+          ? 'Restore the backup recorded in update history (backupPath), then report the stderr above. The console must be restarted before further use.'
+          : 'Report the stderr above; no backup was reserved for this update. The console must be restarted before further use.',
+        requiresRestart: false,
+      };
     }
 
     // 7. Version-advance check (drift guard). The full update installs the

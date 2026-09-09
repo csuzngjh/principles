@@ -40,6 +40,14 @@ export interface InstallLayoutPaths {
    * release-manager/, npm name create-principles-disciple).
    */
   releaseManagerDir: string;
+  /**
+   * PRI-711: the Codex host adapter component (payload dir codex-adapter/,
+   * npm name @principles/codex-adapter). Lives inside the runtime layout
+   * since PRI-624 bundled it, and pd-cli's eager import graph (health-codex)
+   * statically resolves it — so updates must refresh it and its resolution
+   * links like any other runtime component.
+   */
+  codexAdapterDir: string;
 }
 
 export interface LayoutResolution {
@@ -130,6 +138,7 @@ export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {
     openClawDir,
     openClawExtensionDir: path.join(openClawDir, 'extensions', 'principles-disciple'),
     releaseManagerDir: path.join(runtimeDir, 'release-manager'),
+    codexAdapterDir: path.join(runtimeDir, 'codex-adapter'),
   };
 }
 

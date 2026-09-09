@@ -13,6 +13,16 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
+// PRI-711: the full update post-apply smokes the updated pd CLI by spawning
+// `node <pdCliDir>/dist/index.js --version` (server/utils/cli-smoke.ts). The
+// route tests assert file-copy/link semantics, not child spawning, so the
+// smoke is mocked at this boundary: success by default, with a dedicated
+// test below that overrides it to pin the failure contract. Real subprocess
+// behavior is covered by tests/integration/cli-smoke.test.ts.
+vi.mock('../../../src/server/utils/cli-smoke.js', () => ({
+  runPostUpdateCliSmoke: vi.fn(() => ({ ok: true, version: '9.9.9-fixture' })),
+}));
+
 // Partial mock of fs: copyFileSync is a vi.fn wrapping the real implementation
 // so the EPERM test can override it. All other exports pass through unchanged.
 vi.mock('fs', async (importOriginal) => {
@@ -2345,6 +2355,77 @@ describe('handleUpdateRoute', () => {
       await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
 
       expect(res.writeHead).toHaveBeenCalledWith(405, expect.any(Object));
+    });
+
+    it('fails the update with a structured reason when the updated CLI cannot boot (PRI-711 post-apply smoke)', async () => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      const cliSmoke = await import('../../../src/server/utils/cli-smoke.js');
+      const smokeTail =
+        "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@principles/host-runtime' imported from ... codex-adapter/dist/pd-hook.js";
+      vi.mocked(cliSmoke.runPostUpdateCliSmoke).mockImplementationOnce(() => ({ ok: false, error: smokeTail }));
+
+      // Canonical layout + manifest (same shape as the CP-4/CP-5 fixture).
+      writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+      writeFixture('.pd/install.json', JSON.stringify({
+        layoutVersion: 1,
+        mode: 'canonical',
+        hosts: ['openclaw'],
+        workspaces: [workspaceDir],
+      }));
+      writeFixture('extensions/principles-disciple/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url.toString() : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+        if (cmd === 'tar') {
+          const dir = tarExtractDir(cmd, args, options);
+          if (dir) {
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), 'new cli');
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0' }));
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string; message?: string; nextAction?: string; requiresRestart: boolean } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('post_update_cli_smoke_failed');
+      expect(body.data.message).toContain('host-runtime');
+      expect(body.data.message).toContain('pd CLI fails to start');
+      expect(body.data.requiresRestart).toBe(false);
+      // The failure must stay recoverable: a backup was reserved and the
+      // failure recorded (backupPath in history feeds /rollback).
+      const historyRaw = fs.readFileSync(path.join(workspaceDir, '.pd', 'update-history.json'), 'utf-8');
+      const history = JSON.parse(historyRaw) as { success: boolean; kind: string; backupPath?: string }[];
+      const failureEntry = history.at(-1);
+      expect(failureEntry?.success).toBe(false);
+      expect(failureEntry?.kind).toBe('failure');
+      expect(failureEntry?.backupPath).toBeDefined();
+      expect(fs.existsSync(failureEntry?.backupPath as string)).toBe(true);
     });
   });
 

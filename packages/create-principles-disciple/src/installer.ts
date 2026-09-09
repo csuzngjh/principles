@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent } from 'fs';
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import fse from 'fs-extra';
@@ -1804,6 +1804,82 @@ function installBundledCodexAdapter(pluginDir: string): void {
   cpSync(codexAdapterSrc, codexAdapterDest, { recursive: true });
 }
 
+/**
+ * PRI-711: materialize node_modules links for the INSTALLED codex-adapter so
+ * its declared `file:../<component>` dependencies resolve under ESM realpath
+ * rules. The adapter's dist imports @principles/host-runtime and
+ * @principles/core, and pd-cli's eager import graph (health-codex) statically
+ * imports the adapter — without these links every pd command dies with
+ * ERR_MODULE_NOT_FOUND at startup (observed 2026-09-09: the 1.231.2 full
+ * update swapped in Slice-D pd-cli while the deployed adapter, laid down by
+ * older installers, had no node_modules at all).
+ *
+ * Data-driven from the deployed adapter manifest: every dependency whose ref
+ * starts with `file:../` names a sibling runtime component directory. An
+ * existing correct link is kept; a stale physical copy (self-contained
+ * payloads ship materialized node_modules) or a wrong-target link is
+ * replaced with the canonical junction/symlink, mirroring syncPdCli.
+ * Idempotent. Runs after installBundledCodexAdapter and the core/host-runtime
+ * installs, so the sibling targets always exist — a missing sibling means a
+ * corrupted payload and fails the install loudly.
+ */
+export function ensureCodexAdapterResolution(): void {
+  const codexAdapterDir = getInstalledCodexAdapterDir();
+  const manifestPath = path.join(codexAdapterDir, 'package.json');
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  } catch (error) {
+    throw new Error(
+      `Installed @principles/codex-adapter package.json is missing or malformed (${manifestPath}): ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  if (!isRecord(manifest)) {
+    throw new Error(`Installed @principles/codex-adapter package.json must contain an object (${manifestPath}).`);
+  }
+  if (manifest.dependencies !== undefined && !isRecord(manifest.dependencies)) {
+    throw new Error(`Installed @principles/codex-adapter package.json dependencies must be an object (${manifestPath}).`);
+  }
+  const runtimeDir = getPdRuntimeDir();
+  for (const [name, ref] of Object.entries(manifest.dependencies ?? {})) {
+    if (typeof ref !== 'string' || !ref.startsWith('file:../')) continue;
+    const siblingName = ref.slice('file:../'.length);
+    // rc-1: the manifest is untrusted input — only accept single-path segment
+    // siblings so a crafted ref cannot escape the runtime dir.
+    if (!/^[A-Za-z0-9._-]+$/.test(siblingName) || siblingName === '.' || siblingName === '..') {
+      throw new Error(`Installed @principles/codex-adapter declares an unsupported file dependency ref "${ref}" for ${name}.`);
+    }
+    const siblingDir = path.join(runtimeDir, siblingName);
+    if (!existsSync(siblingDir)) {
+      throw new Error(`@principles/codex-adapter depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
+    }
+    const linkPath = path.join(codexAdapterDir, 'node_modules', name);
+    let stat: Stats | undefined;
+    try {
+      stat = lstatSync(linkPath);
+    } catch {
+      stat = undefined; // ENOENT — create below
+    }
+    if (stat !== undefined) {
+      if (stat.isSymbolicLink()) {
+        try {
+          if (realpathSync(linkPath) === realpathSync(siblingDir)) continue;
+        } catch {
+          // Unreadable link target — fall through to replace.
+        }
+      }
+      rmSync(linkPath, { recursive: stat.isDirectory() && !stat.isSymbolicLink(), force: true });
+    }
+    mkdirSync(path.dirname(linkPath), { recursive: true });
+    if (isWindows()) {
+      symlinkSync(siblingDir, linkPath, 'junction');
+    } else {
+      symlinkSync(path.relative(path.dirname(linkPath), siblingDir), linkPath, 'dir');
+    }
+  }
+}
+
 function ensureCoreDependency(_targetDir: string): void {
   const coreDir = getInstalledCoreDir();
   if (!existsSync(coreDir)) {
@@ -2712,6 +2788,9 @@ export async function install(
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/codex-adapter...');
     installBundledCodexAdapter(pluginDir);
+    // PRI-711: the adapter's own file: deps must resolve or pd-cli's eager
+    // import graph crashes on every command (same step: one logical unit).
+    ensureCodexAdapterResolution();
     stepIndex++;
 
     installBundledLayoutPackage(pluginDir);

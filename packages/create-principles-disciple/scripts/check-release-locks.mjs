@@ -10,7 +10,9 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const installerRoot = fileURLToPath(new URL('../', import.meta.url));
 const lockRoot = join(installerRoot, 'release-locks');
 const bundleScript = join(installerRoot, 'scripts', 'bundle-plugin.mjs');
-const components = ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout'];
+// PRI-711: keep in sync with generate-release-locks.mjs — release-manager was
+// never verified here before (pre-existing gap), codex-adapter is new.
+const components = ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'codex-adapter'];
 const stagingRoot = mkdtempSync(join(tmpdir(), 'pd-check-release-locks-'));
 const npmCommand = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm';
 const npmArgs = (args) => process.platform === 'win32' ? ['/d', '/s', '/c', ['npm', ...args].join(' ')] : args;
