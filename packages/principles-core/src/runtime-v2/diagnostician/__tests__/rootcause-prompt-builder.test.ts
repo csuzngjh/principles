@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildRootCauseProtocolInstruction } from '../rootcause-prompt-builder.js';
+import { RootCausePromptBuilder, buildRootCauseProtocolInstruction } from '../rootcause-prompt-builder.js';
+import type { DiagnosticianContextPayload } from '../../context-payload.js';
 
 describe('RootCausePromptBuilder', () => {
   it('prompt contains PHASE 1-3 (evidence review, causal chain, root cause classification)', () => {
@@ -116,5 +117,46 @@ describe('RootCausePromptBuilder — PHASE 3.6 Intent Tension Check (PRI-468)', 
       intentGrounding: false,
     });
     expect(after).toBe(before);
+  });
+});
+
+// ── PRI-633: oversize overflow moves the instruction budget to the system channel ──
+
+describe('RootCausePromptBuilder — oversize overflow (PRI-633)', () => {
+  function makeOversizePayload(): DiagnosticianContextPayload {
+    const longText = 'x'.repeat(2000);
+    return {
+      contextId: 'ctx-ovs-1',
+      contextHash: 'hash-ovs-1',
+      taskId: 'task-rootcause-ovs-1',
+      workspaceDir: '/tmp/ws',
+      sourceRefs: ['ref-1'],
+      diagnosisTarget: { painId: 'pain-ovs-1' },
+      // 40 entries × 2000 chars ≈ 80KB of task data — forces the overflow
+      // branch with the default maxMessageChars=80000.
+      conversationWindow: Array.from({ length: 40 }, (_, i) => ({
+        ts: `2026-09-09T00:00:${String(i % 60).padStart(2, '0')}.000Z`,
+        role: 'user' as const,
+        text: longText,
+      })),
+    };
+  }
+
+  it('truncates the base systemPrompt (not the payload) when the message exceeds maxMessageChars', () => {
+    const builder = new RootCausePromptBuilder();
+    // Baseline: same payload WITHOUT the bulk window — no overflow, instruction intact.
+    const full = builder.buildPrompt({ ...makeOversizePayload(), conversationWindow: [] });
+    const truncated = builder.buildPrompt(makeOversizePayload(), { limits: { maxConversationEntries: 30, maxEntryTextChars: 2000, maxMessageChars: 1000 } });
+
+    // The payload (user message) never carries the instruction — oversize or not.
+    expect(JSON.parse(truncated.message)).not.toHaveProperty('diagnosticInstruction');
+
+    // Overflow path: warning emitted + systemPrompt truncated with the marker.
+    expect(truncated.promptInput.truncationWarnings?.some((w) => w.startsWith('diagnosticInstruction truncated due to size'))).toBe(true);
+    expect(truncated.systemPrompt.length).toBeLessThan(full.systemPrompt.length);
+    expect(truncated.systemPrompt).toContain('[OUTPUT FORMAT section is REQUIRED');
+
+    // Keep at least the first 200 chars of the instruction (floor guard).
+    expect(truncated.systemPrompt.length).toBeGreaterThanOrEqual(200);
   });
 });

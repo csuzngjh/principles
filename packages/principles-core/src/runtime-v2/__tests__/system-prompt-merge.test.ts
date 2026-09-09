@@ -19,6 +19,7 @@ describe('mergeSystemPromptLayers (PRI-633)', () => {
     expect(mergeSystemPromptLayers()).toBeUndefined();
     expect(mergeSystemPromptLayers(undefined, '')).toBeUndefined();
     expect(mergeSystemPromptLayers('   ')).toBeUndefined();
+    expect(mergeSystemPromptLayers(null)).toBeUndefined();
   });
 
   it('returns the single layer unchanged when only one survives', () => {
