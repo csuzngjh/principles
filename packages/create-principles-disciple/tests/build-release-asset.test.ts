@@ -13,8 +13,9 @@ function createFixture(): { inputDir: string; outputDir: string } {
   const inputDir = path.join(root, 'input');
   const outputDir = path.join(root, 'output');
   // PRI-672: release-manager joined the shipped component set — the fixture
-  // mirrors REQUIRED_COMPONENTS in build-release-asset.mjs.
-  for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager']) {
+  // mirrors REQUIRED_COMPONENTS in build-release-asset.mjs. PRI-711:
+  // codex-adapter joins too.
+  for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter']) {
     fs.mkdirSync(path.join(inputDir, component, 'node_modules', 'runtime-dependency'), { recursive: true });
     fs.writeFileSync(path.join(inputDir, component, 'package.json'), JSON.stringify({
       name: component,
