@@ -1657,8 +1657,10 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       ...(pluginBackupDir ? { backupPath: pluginBackupDir } : {}),
     });
 
+    // The quarantined pre-update copies are discarded on success; no reset of
+    // the variable is needed here — the return below cannot re-enter the
+    // catch (CodeQL js/useless-assignment-to-local, PR #1580 review).
     cleanupQuarantined(reconciledQuarantine);
-    reconciledQuarantine = [];
 
     return {
       success: true,
