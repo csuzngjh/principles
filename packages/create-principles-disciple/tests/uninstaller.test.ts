@@ -163,7 +163,10 @@ describe('parseConsoleProcessCsv (PRI-710 — PowerShell Get-CimInstance, supers
   it('parses quoted argv with doubled embedded quotes and a comma inside the CommandLine', () => {
     const output = [
       realShapeHeader,
-      `"40480","""D:\\Program Files\\nodejs\\node.exe""  ""${consoleEntry}"" --workspace ""D:\\ws (2)"" --port 3100"`,
+      // The comma inside --label is the point of this test: splitCsvLine
+      // must NOT split the row there — a wrong split shifts the CommandLine
+      // field and the consoleEntry match must fail (CodeRabbit, PR #1575).
+      `"40480","""D:\\Program Files\\nodejs\\node.exe"" --label ""alpha,beta"" ""${consoleEntry}"" --workspace ""D:\\ws (2)"" --port 3100"`,
     ].join('\n');
     expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([{ pid: 40480 }]);
   });
