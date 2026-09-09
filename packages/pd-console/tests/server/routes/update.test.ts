@@ -13,6 +13,28 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
+// PRI-711: the full update post-apply smokes the updated pd CLI by spawning
+// `node <pdCliDir>/dist/index.js --version` (server/utils/cli-smoke.ts). The
+// route tests assert file-copy/link semantics, not child spawning, so the
+// smoke is mocked at this boundary: success by default, with a dedicated
+// test below that overrides it to pin the failure contract. Real subprocess
+// behavior is covered by tests/integration/cli-smoke.test.ts.
+vi.mock('../../../src/server/utils/cli-smoke.js', () => ({
+  runPostUpdateCliSmoke: vi.fn(() => ({ ok: true, version: '9.9.9-fixture' })),
+}));
+
+// PRI-711: allow simulating a ONE-GENERATION-OLD deployed install-layout
+// (no codexAdapterDir on the layout) — the update runs inside the
+// currently-running console, which resolves the layout helper installed by
+// the PREVIOUS update. Passthrough by default; individual tests override.
+vi.mock('../../../src/server/utils/installed-layout.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/server/utils/installed-layout.js')>();
+  return {
+    ...actual,
+    resolveUpdateLayout: vi.fn(actual.resolveUpdateLayout),
+  };
+});
+
 // Partial mock of fs: copyFileSync is a vi.fn wrapping the real implementation
 // so the EPERM test can override it. All other exports pass through unchanged.
 vi.mock('fs', async (importOriginal) => {
@@ -2345,6 +2367,186 @@ describe('handleUpdateRoute', () => {
       await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
 
       expect(res.writeHead).toHaveBeenCalledWith(405, expect.any(Object));
+    });
+
+    it.each(['success', 'smoke-failure', 'corrupt-backup'] as const)('recovers failed CLI updates through rollback (%s)', async (recovery) => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      const cliSmoke = await import('../../../src/server/utils/cli-smoke.js');
+      const smokeTail =
+        "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@principles/host-runtime' imported from ... codex-adapter/dist/pd-hook.js";
+      vi.mocked(cliSmoke.runPostUpdateCliSmoke).mockImplementationOnce(() => ({ ok: false, error: smokeTail }));
+
+      // A working old CLI must survive the advertised recovery path, not
+      // merely leave a plugin-only backup directory in history.
+      const oldCli = "console.log(require('../../codex-adapter/dist/index.cjs').version)";
+      writeFixture('.pd/runtime/pd-cli/dist/index.js', oldCli);
+      writeFixture('.pd/runtime/pd-cli/package.json', JSON.stringify({ name: '@principles/pd-cli', version: '1.0.0' }));
+      writeFixture('.pd/runtime/codex-adapter/dist/index.cjs', "exports.version = '1.0.0'");
+      writeFixture('.pd/runtime/codex-adapter/package.json', JSON.stringify({ name: '@principles/codex-adapter', version: '1.0.0' }));
+      const realChild = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      const cliEntry = path.join(tmpDir, '.pd/runtime/pd-cli/dist/index.js');
+      expect(realChild.execFileSync(process.execPath, [cliEntry, '--version'], { encoding: 'utf8' }).trim()).toBe('1.0.0');
+
+      // Canonical layout + manifest (same shape as the CP-4/CP-5 fixture).
+      writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+      writeFixture('.pd/install.json', JSON.stringify({
+        layoutVersion: 1,
+        mode: 'canonical',
+        hosts: ['openclaw'],
+        workspaces: [workspaceDir],
+      }));
+      writeFixture('extensions/principles-disciple/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url.toString() : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+        if (cmd === 'tar') {
+          const dir = tarExtractDir(cmd, args, options);
+          if (dir) {
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), "require('../../codex-adapter/dist/index.cjs').missingExport()");
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'), '{}');
+            fs.mkdirSync(path.join(dir, 'codex-adapter', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'codex-adapter', 'package.json'), '{}');
+            fs.writeFileSync(path.join(dir, 'codex-adapter', 'dist', 'index.cjs'), "exports.version = '2.0.0'");
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0' }));
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string; message?: string; nextAction?: string; requiresRestart: boolean } }>(res);
+      expect(body.data.success).toBe(false);
+      expect(body.data.reason).toBe('post_update_cli_smoke_failed');
+      expect(body.data.message).toContain('host-runtime');
+      expect(body.data.message).toContain('pd CLI fails to start');
+      expect(body.data.requiresRestart).toBe(false);
+      // The failure must stay recoverable: a backup was reserved and the
+      // failure recorded (backupPath in history feeds /rollback).
+      const historyRaw = fs.readFileSync(path.join(workspaceDir, '.pd', 'update-history.json'), 'utf-8');
+      const history = JSON.parse(historyRaw) as { success: boolean; kind: string; backupPath?: string }[];
+      const failureEntry = history.at(-1);
+      expect(failureEntry?.success).toBe(false);
+      expect(failureEntry?.kind).toBe('failure');
+      expect(failureEntry?.backupPath).toBeDefined();
+      expect(fs.existsSync(failureEntry?.backupPath as string)).toBe(true);
+
+      if (recovery === 'smoke-failure') {
+        vi.mocked(cliSmoke.runPostUpdateCliSmoke).mockReturnValueOnce({ ok: false, error: 'dependency still unavailable' });
+      } else if (recovery === 'corrupt-backup') {
+        fs.writeFileSync(path.join(failureEntry?.backupPath as string, '.runtime-components/components.json'), '["../../outside"]');
+      }
+      const rollbackRes = createMockResponse();
+      await handleUpdateRoute(createMockRequest('POST', {
+        targetDir: path.join(tmpDir, '.pd/runtime/plugin'),
+        backupDir: failureEntry?.backupPath,
+      }), rollbackRes, workspaceDir, '/rollback');
+      const rollback = parseResponseBody<{ data: { success: boolean; reason?: string } }>(rollbackRes).data;
+      expect(rollback.success).toBe(recovery === 'success');
+      if (recovery === 'corrupt-backup') {
+        expect(fs.readFileSync(cliEntry, 'utf8')).toContain('missingExport');
+      } else {
+        expect(realChild.execFileSync(process.execPath, [cliEntry, '--version'], { encoding: 'utf8' }).trim()).toBe('1.0.0');
+      }
+      if (recovery === 'smoke-failure') expect(rollback.reason).toBe('rollback_cli_smoke_failed');
+      const after = JSON.parse(fs.readFileSync(path.join(workspaceDir, '.pd/update-history.json'), 'utf8')) as { success: boolean; kind: string }[];
+      expect(after.some((entry) => entry.kind === 'rollback' && entry.success)).toBe(recovery === 'success');
+      if (recovery === 'smoke-failure') {
+        // The failed rollback attempt must be observable in history (rc-9),
+        // not just in the HTTP response.
+        const failedRollback = after.at(-1);
+        expect(failedRollback?.success).toBe(false);
+        expect(failedRollback?.kind).toBe('failure');
+      }
+    });
+
+    it('skips the codex-adapter copy and derivation when the deployed install-layout is one generation old (PRI-711 rc-9)', async () => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      const layoutUtil = await import('../../../src/server/utils/installed-layout.js');
+
+      // Canonical layout + manifest (same shape as the CP-4/CP-5 fixture).
+      writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+      writeFixture('.pd/install.json', JSON.stringify({
+        layoutVersion: 1,
+        mode: 'canonical',
+        hosts: ['openclaw'],
+        workspaces: [workspaceDir],
+      }));
+      writeFixture('extensions/principles-disciple/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+
+      // The real fixture layout HAS codexAdapterDir (current install-layout);
+      // force the one-generation-old shape for this update only.
+      const realLayout = layoutUtil.resolveUpdateLayout();
+      expect(realLayout?.codexAdapterDir).toBeDefined();
+      vi.mocked(layoutUtil.resolveUpdateLayout).mockImplementationOnce(() => ({ ...realLayout!, codexAdapterDir: undefined }));
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url.toString() : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+        if (cmd === 'tar') {
+          const dir = tarExtractDir(cmd, args, options);
+          if (dir) {
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), 'new cli');
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0' }));
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string; newVersion?: string } }>(res);
+      expect(body.data.success).toBe(true);
+      expect(body.data.newVersion).toBe('2.0.0');
+      // The adapter was staged in the tarball but silently skipped (rc-9):
+      // no adapter dir materializes and nothing crashes on the missing field.
+      expect(fs.existsSync(path.join(tmpDir, '.pd', 'runtime', 'codex-adapter'))).toBe(false);
     });
   });
 
