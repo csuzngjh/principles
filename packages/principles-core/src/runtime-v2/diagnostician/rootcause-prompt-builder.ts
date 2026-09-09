@@ -374,27 +374,39 @@ export class RootCausePromptBuilder {
 
     // DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls
     let message = JSON.stringify(promptInput);
-    let systemPrompt = diagnosticInstruction;
 
-    // If message exceeds maxMessageChars, truncate the system prompt
-    // (PRI-633: the instruction lives on the system channel now, so the
-    // overflow budget is applied to it there instead of inside the payload).
+    // PRI-633 review fix (P1): the instruction no longer rides in the message,
+    // so the overflow budget must bound the ACTUAL payload. Shrink the most
+    // compressible payload part — drop conversationWindow entries from the
+    // tail (keeping the head, consistent with the maxConversationEntries
+    // slice above) from BOTH the top-level field and the nested context copy
+    // until the serialized message fits. The systemPrompt is an independent
+    // channel and stays byte-intact. If even an empty window cannot fit
+    // (non-window fields alone exceed the limit), ship with an honest
+    // truncation warning instead of failing silently.
     if (message.length > limits.maxMessageChars) {
-      const surplus = message.length - limits.maxMessageChars;
-      const instruction = diagnosticInstruction;
-
-      // Keep at least the first 200 chars of the instruction + a note
-      const keepLength = Math.max(200, instruction.length - surplus - 100);
-      systemPrompt = instruction.slice(0, keepLength) +
-        '\n\n[OUTPUT FORMAT section is REQUIRED; other sections may be summarized if needed]';
-
-      promptInput.truncationWarnings = [
-        ...truncationWarnings,
-        `diagnosticInstruction truncated due to size (${message.length} > ${limits.maxMessageChars})`,
-      ];
-      message = JSON.stringify(promptInput);
+      let entries = [...conversationWindow];
+      let dropped = 0;
+      const serializeWithOverflowWarning = (droppedCount: number): string => {
+        promptInput.conversationWindow = entries;
+        promptInput.context = { ...compactContext, conversationWindow: entries };
+        promptInput.truncationWarnings = [
+          ...truncationWarnings,
+          droppedCount > 0
+            ? `payload truncated due to size (dropped ${droppedCount} conversationWindow entries; limit ${limits.maxMessageChars} chars)`
+            : `payload exceeds maxMessageChars (${message.length} > ${limits.maxMessageChars} chars); no conversationWindow entries left to drop`,
+        ];
+        return JSON.stringify(promptInput);
+      };
+      do {
+        if (entries.length > 0) {
+          entries = entries.slice(0, -1);
+          dropped += 1;
+        }
+        message = serializeWithOverflowWarning(dropped);
+      } while (entries.length > 0 && message.length > limits.maxMessageChars);
     }
 
-    return { message, promptInput, systemPrompt };
+    return { message, promptInput, systemPrompt: diagnosticInstruction };
   }
 }

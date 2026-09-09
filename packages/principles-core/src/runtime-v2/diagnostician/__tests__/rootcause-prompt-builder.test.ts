@@ -142,21 +142,27 @@ describe('RootCausePromptBuilder — oversize overflow (PRI-633)', () => {
     };
   }
 
-  it('truncates the base systemPrompt (not the payload) when the message exceeds maxMessageChars', () => {
+  it('shrinks the actual payload (conversationWindow) under maxMessageChars and keeps systemPrompt intact', () => {
     const builder = new RootCausePromptBuilder();
     // Baseline: same payload WITHOUT the bulk window — no overflow, instruction intact.
     const full = builder.buildPrompt({ ...makeOversizePayload(), conversationWindow: [] });
-    const truncated = builder.buildPrompt(makeOversizePayload(), { limits: { maxConversationEntries: 30, maxEntryTextChars: 2000, maxMessageChars: 1000 } });
+    const limits = { maxConversationEntries: 30, maxEntryTextChars: 2000, maxMessageChars: 1000 };
+    const truncated = builder.buildPrompt(makeOversizePayload(), { limits });
 
-    // The payload (user message) never carries the instruction — oversize or not.
+    // Review P1: the overflow budget must bound the ACTUAL message, not the
+    // (now independent) systemPrompt channel.
+    expect(truncated.message.length).toBeLessThanOrEqual(limits.maxMessageChars);
     expect(JSON.parse(truncated.message)).not.toHaveProperty('diagnosticInstruction');
 
-    // Overflow path: warning emitted + systemPrompt truncated with the marker.
-    expect(truncated.promptInput.truncationWarnings?.some((w) => w.startsWith('diagnosticInstruction truncated due to size'))).toBe(true);
-    expect(truncated.systemPrompt.length).toBeLessThan(full.systemPrompt.length);
-    expect(truncated.systemPrompt).toContain('[OUTPUT FORMAT section is REQUIRED');
+    // Observable degradation: warning names what was dropped.
+    expect(truncated.promptInput.truncationWarnings?.some((w) => w.startsWith('payload truncated due to size') && w.includes('dropped 30 conversationWindow entries'))).toBe(true);
 
-    // Keep at least the first 200 chars of the instruction (floor guard).
-    expect(truncated.systemPrompt.length).toBeGreaterThanOrEqual(200);
+    // The systemPrompt channel stays byte-intact — no instruction loss.
+    expect(truncated.systemPrompt).toBe(full.systemPrompt);
+
+    // The top-level window and the nested context copy shrink consistently.
+    const parsed = JSON.parse(truncated.message);
+    expect(parsed.conversationWindow).toEqual([]);
+    expect(parsed.context.conversationWindow).toEqual([]);
   });
 });
