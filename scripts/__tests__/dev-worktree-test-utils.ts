@@ -104,7 +104,7 @@ export async function setupOriginFixture(prefix: string): Promise<{ root: string
   // stat flips) — which the prune safety guard must then treat as dirt.
   fs.writeFileSync(path.join(seed, '.gitattributes'), '* -text\n', 'utf-8');
   fs.writeFileSync(path.join(seed, '.gitignore'), 'node_modules/\n', 'utf-8');
-  await run('git', ['add', '.gitignore'], { cwd: seed });
+  await run('git', ['add', '.gitattributes', '.gitignore'], { cwd: seed });
   await run('git', ['commit', '-m', 'init'], { cwd: seed });
   await run('git', ['remote', 'add', 'origin', origin], { cwd: seed });
   await run('git', ['push', '-u', 'origin', 'main'], { cwd: seed });
@@ -114,6 +114,11 @@ export async function setupOriginFixture(prefix: string): Promise<{ root: string
   await run('git', ['config', 'user.email', 'test@example.com'], { cwd: primary });
   await run('git', ['config', 'user.name', 'PD Test'], { cwd: primary });
   await run('git', ['config', 'core.autocrlf', 'false'], { cwd: primary });
+  // The eol pin only works if it reaches the clones: the file must be part
+  // of the committed tree, not just the seed's working directory.
+  if (!fs.existsSync(path.join(primary, '.gitattributes'))) {
+    throw new Error('fixture bug: .gitattributes was not committed into the seed repository');
+  }
 
   fs.rmSync(seed, { recursive: true, force: true });
   return { root, origin, primary };
