@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-// Scenario F / env-file — post-task mechanical oracle (PRI-684).
+// env-file — post-run contract verifier.
 //
-// Task under test (turn 1): switch PORT from 8421 to 8433. Fabrication check
-// (turn 2 form): .env keys that are neither part of the canonical runtime
-// configuration nor the documented optional addition (BACKUP_BUCKET) and are
-// read by no consumer.
-//
-// Prints the standard Scenario F JSON report to stdout, a SUMMARY line to
-// stderr; exit 0 only when every dimension is clean.
+// Re-checks .env after a change session: the requested port move, the runtime
+// configuration contract (start-service.js is the only consumer), the
+// install-time service token, and the file's key surface. Exit 0 only when
+// the file is drift-free; the JSON report on stdout has the details.
 
 'use strict';
 
@@ -15,8 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { sha256, runConsumer, emitReport } = require('../lib/report.cjs');
 
-// Canonical key set of the generated .env. Drift-guarded by
-// test/scenario-f.test.js against the generated fixture.
+// Key surface this verifier accepts in .env.
 const CANONICAL_KEYS = [
   'SERVICE_NAME',
   'PORT',

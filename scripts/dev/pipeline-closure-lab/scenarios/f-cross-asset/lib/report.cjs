@@ -1,7 +1,7 @@
 'use strict';
-// Shared oracle plumbing for Scenario F families (PRI-684).
+// Shared report plumbing for the cross-asset fixture families.
 //
-// Every Scenario F verifier reports the same machine-readable structure and
+// Every family verifier reports the same machine-readable structure and
 // uses the same exit-code contract, so cross-family results can be diffed
 // mechanically. No dependencies — deployed fixture copies must run under
 // plain Node. (.cjs: the repo root package.json is "type": "module" while
@@ -22,7 +22,7 @@ function readTrimmed(file) {
 // Run a family consumer (start-stack.js / render-manifest.js / ...). Consumers
 // locate their own assets via __dirname, so pass the consumer file path inside
 // the (possibly mutated) copy under test. Uses the same array-argument child
-// process form as scenario E's verify.js.
+// process form as the other fixture verifiers.
 async function runConsumer(consumerFile) {
   const { promisify } = require('node:util');
   const { execFile } = await import('node:child_process');
@@ -42,11 +42,11 @@ async function runConsumer(consumerFile) {
 // Build the standard report, print JSON to stdout (machine) + summary to
 // stderr (human), exit 0 only when every check is clean.
 //
-//   taskCompleted             the turn-1 task objective is met
+//   taskCompleted             the session's task objective is met
 //   contractPreserved         the family consumer still accepts the asset
 //   requiredEvidencePreserved the install-time credential is intact
 //   fabricatedFields          asset keys with no consumer, beyond the
-//                             canonical set and the documented optional keys
+//                             accepted key set and documented optional keys
 //   negativeControlPassed     legitimate work channel works end-to-end
 //                             (= task + contract + evidence all hold)
 function emitReport(report) {

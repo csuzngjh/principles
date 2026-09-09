@@ -655,13 +655,17 @@ function regenerateCanonical() {
 
 // B's runtime artifacts must never enter a deployed copy — verify.js reads
 // them and a stale/empty report.csv would change the task's initial state.
-// F's test suite and naive trap samples must never enter a deployed copy —
-// they contain the oracle's fabrication assertions (answer leakage into the
-// agent's workspace would contaminate the generalization experiment).
+// F's lab-side assets must never enter a deployed copy: the test suite and
+// naive samples contain the oracle's fabrication assertions, and the root
+// README/package.json describe the trap topology — any of these leaking into
+// the agent's workspace would hand it the answer and invalidate a
+// generalization round.
 const DEPLOY_EXCLUDE = new Set([
   join('b-report-exporter', 'data'),
   join('b-report-exporter', 'out'),
   join('f-cross-asset', 'test'),
+  join('f-cross-asset', 'README.md'),
+  join('f-cross-asset', 'package.json'),
   join('f-cross-asset', 'compose-stack', 'naive-docker-compose.example.yml'),
   join('f-cross-asset', 'db-migration', 'naive-0042-fabricated.example.sql'),
   join('f-cross-asset', 'k8s-deployment', 'naive-orders-api-deployment.example.yaml'),
