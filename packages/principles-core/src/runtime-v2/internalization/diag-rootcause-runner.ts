@@ -211,7 +211,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     }
 
     const builder = new RootCausePromptBuilder();
-    const { message } = builder.buildPrompt(context.painPayload, {
+    const { message, systemPrompt } = builder.buildPrompt(context.painPayload, {
       outputLanguage: this.resolvedOptions.outputLanguage,
       coreGrounding,
       intentGrounding,
@@ -226,6 +226,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
       contextItems: [],
       outputSchemaRef: 'diag-rootcause-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

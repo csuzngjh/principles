@@ -1164,7 +1164,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * This method is protected (not private) so the EvaluatorRunner can call it
    * twice (once per stage) from its overridden invokeRuntime.
    */
-  protected async runSingleEvaluation(taskId: string, promptMessage: string): Promise<unknown> {
+  protected async runSingleEvaluation(taskId: string, promptMessage: string, systemPrompt?: string): Promise<unknown> {
     const runtimeKind = this.getRuntimeKind();
     const runHandle = await this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
@@ -1175,6 +1175,8 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         ? 'evaluator-output-v1'
         : `${this.config.expectedTaskKind}-output-v1`,
       timeoutMs: this.resolvedOptions.timeoutMs,
+      // PRI-633: base-layer system prompt (role + protocol) from the prompt builder.
+      systemPrompt,
     });
     this.emitEvent('run_started', taskId, { runtimeKind, stage: 'progressive_evaluation' });
 

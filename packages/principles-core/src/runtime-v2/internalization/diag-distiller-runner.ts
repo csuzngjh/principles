@@ -189,7 +189,7 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
 
   async invokeRuntime(taskId: string, context: DiagDistillerContext): Promise<RunHandle> {
     const builder = new DistillerPromptBuilder();
-    const { message } = builder.buildPrompt(
+    const { message, systemPrompt } = builder.buildPrompt(
       {
         rootCauseArtifactId: context.rootCauseArtifactId,
         rootCauseOutput: context.rootCauseOutput,
@@ -208,6 +208,7 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
       contextItems: [],
       outputSchemaRef: 'diag-distiller-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

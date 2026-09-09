@@ -83,8 +83,6 @@ export interface RouterPromptInput {
   distillerArtifactId: string;
   /** Stage B output — distilled principle and grounding */
   distillerOutput: DiagDistillerOutputV1;
-  /** Router instruction — the system-level directive for the LLM */
-  routerInstruction: string;
 }
 
 /**
@@ -97,6 +95,12 @@ export interface RouterPromptBuildResult {
   readonly message: string;
   /** The RouterPromptInput object that was serialized to JSON */
   readonly promptInput: RouterPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + routing protocol). Previously
+   * embedded in the payload as `routerInstruction`; now delivered via the
+   * system channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 // ── Builder class ────────────────────────────────────────────────────────────
@@ -217,11 +221,10 @@ ${constraints}${languageDirective}`;
       rootCauseOutput: context.rootCauseOutput,
       distillerArtifactId: context.distillerArtifactId,
       distillerOutput: context.distillerOutput,
-      routerInstruction,
     };
 
     const message = JSON.stringify(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: routerInstruction };
   }
 }

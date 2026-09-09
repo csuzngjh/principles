@@ -120,13 +120,18 @@ export interface EvaluatorPromptInput {
   hostToolCatalog?: HostToolCatalogFacts;
   /** Present only when the scribe artifact carries a validated intent contract (PRI-703 Phase 1). */
   intentContract?: IntentContractV1;
-  evaluatorInstruction: string;
   promptContractVersion: string;
 }
 
 export interface EvaluatorPromptBuildResult {
   readonly message: string;
   readonly promptInput: EvaluatorPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `evaluatorInstruction`; now delivered via the system
+   * channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 export const EVALUATOR_PROTOCOL_INSTRUCTION = `You are an Evaluator agent in a principle internalization pipeline. Your role is to critically review the Artificer's implementation plan and produce a structured evaluation with a decision, score, and actionable feedback.
@@ -217,12 +222,11 @@ export class EvaluatorPromptBuilder {
       // PRI-703 Phase 1: only include intentContract when present (pre-contract
       // scribe artifacts), so prompts stay backward-compatible.
       ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),
-      evaluatorInstruction: EVALUATOR_PROTOCOL_INSTRUCTION,
       promptContractVersion: EVALUATOR_PROMPT_CONTRACT_VERSION,
     };
 
     const message = serializePromptInput(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: EVALUATOR_PROTOCOL_INSTRUCTION };
   }
 }

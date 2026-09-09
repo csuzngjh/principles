@@ -271,6 +271,8 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
             baseUrl,
             workspace: opts.workspaceDir,
             totalBudgetMs: adapterTimeoutMs,
+            // PRI-633: profile systemPrompt rides as the append layer.
+            ...(configFields.systemPrompt ? { systemPrompt: configFields.systemPrompt } : {}),
           },
           {
             artifactReader: opts.l2ArtifactReader,

@@ -397,6 +397,32 @@ describe('PiAiRuntimeAdapter', () => {
       const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string; messages: Record<string, unknown>[] }];
       expect(context.systemPrompt).toBeUndefined();
     });
+
+    // ── layered systemPrompt (PRI-633) ──
+
+    it('PRI-633: StartRunInput.systemPrompt rides as Context.systemPrompt (base layer)', async () => {
+      const adapter = makeAdapter();
+      await adapter.startRun(makeStartRunInput({ systemPrompt: 'You are a root cause analysis expert.' }));
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string }];
+      expect(context.systemPrompt).toBe('You are a root cause analysis expert.');
+    });
+
+    it('PRI-633: profile config.systemPrompt is appended AFTER the run base layer', async () => {
+      const adapter = makeAdapter({ systemPrompt: 'PROFILE APPEND LAYER' });
+      await adapter.startRun(makeStartRunInput({ systemPrompt: 'BASE ROLE LAYER' }));
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string }];
+      expect(context.systemPrompt).toBe('BASE ROLE LAYER\n\nPROFILE APPEND LAYER');
+    });
+
+    it('PRI-633: omit Context.systemPrompt when both layers are absent/blank (unchanged shape)', async () => {
+      const adapter = makeAdapter({ systemPrompt: '   ' });
+      await adapter.startRun(makeStartRunInput({ systemPrompt: undefined }));
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string }];
+      expect(context.systemPrompt).toBeUndefined();
+    });
   });
 
   // ── JSON extraction (balanced parsing) ──
@@ -845,6 +871,20 @@ describe('PiAiRuntimeAdapter', () => {
       expect(mockComplete).toHaveBeenCalledTimes(2);
       const output = await adapter.fetchOutput(handle.runId);
       expect(output?.payload).toMatchObject({ confidence: 0.9 });
+    });
+
+    it('PRI-633: repair calls carry the merged layered system prompt', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ systemPrompt: 'PROFILE APPEND LAYER' });
+      await adapter.startRun(makeDiagnosticianInput({ systemPrompt: 'BASE ROLE LAYER' }));
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      // Call 2 is the repair call — its Context must keep the layered prompt.
+      const [, repairContext] = mockComplete.mock.calls[1] as [unknown, { systemPrompt?: string }];
+      expect(repairContext.systemPrompt).toBe('BASE ROLE LAYER\n\nPROFILE APPEND LAYER');
     });
 
     it('repair fails — still throws output_invalid after repair attempt', async () => {

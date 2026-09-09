@@ -202,7 +202,7 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
     }
 
     const builder = new PhilosopherPromptBuilder({ coreGrounding });
-    const { message } = builder.buildPrompt({
+    const { message, systemPrompt } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       dreamerArtifact: parsedDreamerArtifact,
@@ -217,6 +217,7 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
       contextItems: [],
       outputSchemaRef: 'philosopher-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

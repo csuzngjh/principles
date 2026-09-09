@@ -80,7 +80,6 @@ export interface ArtificerPromptInput {
   contextHash: string;
   sourceScribeArtifactId: string;
   scribeArtifact: unknown;
-  artificerInstruction: string;
   promptContractVersion: string;
   /** Present only when this is a retry with prior adversarial failures. */
   adversarialFeedback?: string;
@@ -104,6 +103,12 @@ export interface ArtificerPromptInput {
 export interface ArtificerPromptBuildResult {
   readonly message: string;
   readonly promptInput: ArtificerPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol + context-mode
+   * instruction). Previously embedded in the payload as `artificerInstruction`;
+   * now delivered via the system channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 export const ARTIFICER_PROTOCOL_INSTRUCTION = `You are an Artificer agent in a principle internalization pipeline. Your role is to transform the Scribe's formal principle draft into executable RuleHost code with a concise implementation summary, tests, and rollout notes.
@@ -256,7 +261,6 @@ export class ArtificerPromptBuilder {
       contextHash: input.contextHash,
       sourceScribeArtifactId: input.sourceScribeArtifactId,
       scribeArtifact: input.scribeArtifact,
-      artificerInstruction,
       promptContractVersion: ARTIFICER_PROMPT_CONTRACT_VERSION,
       ...(input.contextMode === 'v2' && input.behaviorExamplePack !== undefined
         ? { behaviorExamplePack: input.behaviorExamplePack }
@@ -284,6 +288,6 @@ export class ArtificerPromptBuilder {
 
     const message = serializePromptInput(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: artificerInstruction };
   }
 }

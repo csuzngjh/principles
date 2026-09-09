@@ -285,7 +285,8 @@ describe('DiagRootCauseRunner — PRI-468 INTENT.md injection', () => {
     expect(intentDoc.path).toBe(INTENT_PATH);
 
     // PHASE 3.6 should be in the diagnosticInstruction
-    const instruction = parsed.diagnosticInstruction as string;
+    // PRI-633: the instruction travels on the system channel (startRun input), not in the payload.
+    const instruction = startRunCall?.[0]?.systemPrompt as string;
     expect(instruction).toContain('PHASE 3.6');
     expect(instruction).toContain('Intent Tension Check');
   });
@@ -329,7 +330,8 @@ describe('DiagRootCauseRunner — PRI-468 INTENT.md injection', () => {
     const message = startRunCall?.[0]?.inputPayload as string;
     const parsed = JSON.parse(message) as Record<string, unknown>;
     expect(parsed).not.toHaveProperty('intentDoc');
-    const instruction = parsed.diagnosticInstruction as string;
+    // PRI-633: the instruction travels on the system channel (startRun input), not in the payload.
+    const instruction = startRunCall?.[0]?.systemPrompt as string;
     expect(instruction).not.toContain('PHASE 3.6');
   });
 
@@ -392,7 +394,8 @@ describe('DiagRootCauseRunner — PRI-468 INTENT.md injection', () => {
     expect(parsed).not.toHaveProperty('intentDoc');
 
     // PHASE 3.6 NOT injected (intentGrounding downgraded to false because no reader)
-    const instruction = parsed.diagnosticInstruction as string;
+    // PRI-633: the instruction travels on the system channel (startRun input), not in the payload.
+    const instruction = startRunCall?.[0]?.systemPrompt as string;
     expect(instruction).not.toContain('PHASE 3.6');
 
     // No intent_doc_read_failed telemetry (we didn't even try to read)

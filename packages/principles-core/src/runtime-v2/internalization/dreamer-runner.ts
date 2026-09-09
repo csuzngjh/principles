@@ -217,7 +217,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
         predecessorOutput = resolved.fields;
       }
     }
-    const { message } = builder.buildPrompt({
+    const { message, systemPrompt } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       contextRefs: context.contextRefs,
@@ -232,6 +232,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
       contextItems: [],
       outputSchemaRef: 'dreamer-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

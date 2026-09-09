@@ -307,7 +307,9 @@ export class RootCausePromptBuilder {
    *
    * Per DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls.
    * Per DPB-05: This method only builds the prompt; it does NOT commit to PD database.
-   * Per DPB-07: NO extraSystemPrompt is added — agent profile is the source of truth.
+   * Per DPB-07 (as revised by PRI-633): the base-layer systemPrompt (role +
+   * protocol) is returned separately; the profile's configured systemPrompt
+   * remains the append layer owned by the agent profile.
    *
    * @see PRI-372
    */
@@ -357,6 +359,8 @@ export class RootCausePromptBuilder {
     // PRI-468: Only include `intentDoc` when intentGrounding is on AND a doc
     // was successfully read. When absent, the prompt is byte-identical to
     // the pre-PRI-468 prompt (EP-03: no silent fallback).
+    // PRI-633: the diagnostic instruction is the base-layer systemPrompt and
+    // no longer rides inside the message payload.
     const promptInput: PromptInput = {
       taskId: payload.taskId,
       contextHash: payload.contextHash,
@@ -364,25 +368,26 @@ export class RootCausePromptBuilder {
       conversationWindow,
       sourceRefs: payload.sourceRefs,
       context: compactContext,
-      diagnosticInstruction,
       ...(truncationWarnings.length > 0 ? { truncationWarnings } : {}),
       ...(intentGrounding && intentDoc ? { intentDoc } : {}),
     };
 
     // DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls
     let message = JSON.stringify(promptInput);
+    let systemPrompt = diagnosticInstruction;
 
-    // If message exceeds maxMessageChars, truncate the diagnostic instruction
+    // If message exceeds maxMessageChars, truncate the system prompt
+    // (PRI-633: the instruction lives on the system channel now, so the
+    // overflow budget is applied to it there instead of inside the payload).
     if (message.length > limits.maxMessageChars) {
       const surplus = message.length - limits.maxMessageChars;
       const instruction = diagnosticInstruction;
 
       // Keep at least the first 200 chars of the instruction + a note
       const keepLength = Math.max(200, instruction.length - surplus - 100);
-      const truncatedInstruction = instruction.slice(0, keepLength) +
+      systemPrompt = instruction.slice(0, keepLength) +
         '\n\n[OUTPUT FORMAT section is REQUIRED; other sections may be summarized if needed]';
 
-      promptInput.diagnosticInstruction = truncatedInstruction;
       promptInput.truncationWarnings = [
         ...truncationWarnings,
         `diagnosticInstruction truncated due to size (${message.length} > ${limits.maxMessageChars})`,
@@ -390,6 +395,6 @@ export class RootCausePromptBuilder {
       message = JSON.stringify(promptInput);
     }
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt };
   }
 }

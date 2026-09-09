@@ -35,6 +35,7 @@ import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-re
 import { formatValidationErrorEntry, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
 import { buildSchemaToolDefinition } from './tools/diagnostician-tool.js';
 import { DefaultSchemaPromptAdapter } from './schema-prompt-adapter.js';
+import { mergeSystemPromptLayers } from '../system-prompt-merge.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -95,11 +96,14 @@ export interface PiAiRuntimeAdapterConfig {
    */
   maxTokens?: number;
   /**
-   * Optional system prompt passed to pi-ai Context.systemPrompt.
-   * When set, the LLM receives it as a dedicated system-role message,
-   * enabling Anthropic system-prompt caching and OpenAI developer-role priority.
-   * When unset, behavior is unchanged (no systemPrompt field in Context).
-   * Design intent: "system prompt is agent profile's responsibility" (DPB-07).
+   * Optional profile-level system prompt (append layer, PRI-633).
+   * Appended AFTER the run's base-layer systemPrompt (from
+   * `StartRunInput.systemPrompt`, produced by the run's prompt builder) and
+   * sent via pi-ai Context.systemPrompt — enabling Anthropic system-prompt
+   * caching and OpenAI developer-role priority. When neither layer is present,
+   * behavior is unchanged (no systemPrompt field in Context). Semantics per
+   * DPB-07 as revised by PRI-633: the profile remains the owner of this
+   * append-only configuration surface.
    */
   systemPrompt?: string;
   /** Internal override for the retry delay backoff, primarily for fast unit testing. */
@@ -577,9 +581,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       content: messageContent,
       timestamp: Date.now(),
     };
+    // PRI-633: layered system prompt — base layer from the run's prompt
+    // builder (input.systemPrompt: agent role + protocol) + append layer from
+    // the profile config (this.config.systemPrompt). When both are absent the
+    // Context keeps its pre-PRI-633 shape (no systemPrompt field).
+    const systemPrompt = mergeSystemPromptLayers(input.systemPrompt, this.config.systemPrompt);
     const context: Context = {
       messages: [userMessage],
-      ...(this.config.systemPrompt ? { systemPrompt: this.config.systemPrompt } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
     };
 
     // Get model
@@ -764,7 +773,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             parsedOutput,
             schemaErrors,
             {
-              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
+              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt }),
               schemaCheck: (value: unknown) => Value.Check(schema, value),
               schemaErrors: (value: unknown) =>
                 [...Value.Errors(schema, value)].map(e => ({ path: e.path, message: e.message, value: e.value })),
@@ -1252,7 +1261,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private async repairLLMCall(
     model: ReturnType<typeof resolveModel>,
     prompt: string,
-    options: { signal: AbortSignal; apiKey: string },
+    options: { signal: AbortSignal; apiKey: string; systemPrompt?: string },
   ): Promise<string | null> {
     const REPAIR_TIMEOUT_MS = 60_000;
     const repairSignal = AbortSignal.timeout(REPAIR_TIMEOUT_MS);
@@ -1262,7 +1271,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       content: prompt,
       timestamp: Date.now(),
     };
-    const repairContext: Context = { messages: [repairMessage] };
+    // PRI-633: repair calls keep the run's layered system prompt so the role/
+    // protocol contract holds across repair attempts too.
+    const repairContext: Context = {
+      messages: [repairMessage],
+      ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+    };
 
     const response = await completeSimple(model, repairContext, {
       signal: repairSignal,
