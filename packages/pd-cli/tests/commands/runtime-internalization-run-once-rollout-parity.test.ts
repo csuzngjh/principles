@@ -28,7 +28,6 @@ import {
   InternalizationOrchestrator,
   RolloutReviewerRunner,
   DefaultRolloutReviewerValidator,
-  StoreEventEmitter,
   storeEmitter,
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
