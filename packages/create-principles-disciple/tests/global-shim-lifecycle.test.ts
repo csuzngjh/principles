@@ -84,7 +84,12 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     realPath = await vi.importActual<typeof import('node:path')>('node:path');
 
     sandboxRoot = realFs.realpathSync.native(realFs.mkdtempSync(realPath.join(realOs.tmpdir(), 'pd-697-sandbox-')));
-    globalBinDir = realPath.join(sandboxRoot, 'global-bin');
+    // The dir where the global pd shims land. getNpmGlobalBinDir() uses the
+    // `npm prefix -g` output AS the bin dir on Windows but appends /bin on
+    // POSIX — the mocked probe below returns the matching prefix shape so
+    // both platforms resolve to the SAME globalBinDir under assertion.
+    globalBinDir = realPath.join(sandboxRoot, 'npm-global', 'bin');
+    const npmPrefixForProbe = process.platform === 'win32' ? globalBinDir : realPath.join(sandboxRoot, 'npm-global');
     fixtureDir = realPath.join(sandboxRoot, 'bundle');
     workspaceDir = realPath.join(sandboxRoot, 'ws');
     realFs.mkdirSync(globalBinDir, { recursive: true });
@@ -135,7 +140,7 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     //  - everything else (npm install, etc.) → '' (silent no-op).
     const execMock = vi.mocked(childProcess.execFileSync);
     execMock.mockImplementation(((_file: string, argv?: readonly string[]) => {
-      if (Array.isArray(argv) && argv.includes('prefix')) return globalBinDir;
+      if (Array.isArray(argv) && argv.includes('prefix')) return npmPrefixForProbe;
       if (Array.isArray(argv) && argv.includes('--version')) throw new Error('injected version-probe failure (PRI-697 test)');
       return '';
     }) as typeof childProcess.execFileSync);
