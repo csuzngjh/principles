@@ -313,7 +313,7 @@ function classifyFailure(
  *   the same extractJsonObject → schema validation path as normal text.
  */
 function extractAssistantTextOrThrow(
-  response: { content: { type: string; text?: string; thinking?: string }[]; stopReason?: string; errorMessage?: string },
+  response: { content: { type: string; text?: string; thinking?: string }[]; stopReason?: string; errorMessage?: string; usage?: { output?: number } },
   signal?: AbortSignal,
 ): string {
   // Handle resolved-error responses from pi-ai
@@ -355,7 +355,16 @@ function extractAssistantTextOrThrow(
     throw new PDRuntimeError(
       'output_invalid',
       'LLM response truncated (finish_reason=length); no extractable content',
-      { nextAction: 'reduce input size or increase maxTokens in .pd/config.yaml' },
+      {
+        // PRI-707: same truncation evidence shape as the extraction-failure
+        // path, so diagnosticJson.output_failure_details is uniform.
+        truncated: true,
+        stopReason: response.stopReason,
+        outputTokens: typeof response.usage?.output === 'number' && Number.isFinite(response.usage.output)
+          ? response.usage.output
+          : undefined,
+        nextAction: 'reduce input size or increase maxTokens in .pd/config.yaml',
+      },
     );
   }
 
@@ -657,6 +666,18 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       if (!validatedOutput) {
         const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs, timeoutSource, input, runId });
         const text = extractAssistantTextOrThrow(response, signal);
+        // PRI-707: preserve what the provider actually told us about how the
+        // response ended. Before this, finish metadata (stopReason/usage) was
+        // read only for the error/aborted/no-text branches and silently
+        // dropped whenever any text was extractable — so a token-limit cut
+        // was indistinguishable from a true format error ("No valid JSON").
+        // Fields are kept undefined when the provider did not supply them
+        // (rc-3: no fabrication; rc-9: degradation stays observable).
+        const finishStopReason = typeof response.stopReason === 'string' ? response.stopReason : undefined;
+        const finishOutputTokens = typeof response.usage?.output === 'number' && Number.isFinite(response.usage.output)
+          ? response.usage.output
+          : undefined;
+        const truncatedByProvider = finishStopReason === 'length';
         // PRI-621 RC3: schema-aware selection — when the answer contains
         // several complete objects (truncated outer answer + parseable inner
         // fragment), pick the one matching the schema's required keys instead
@@ -685,8 +706,25 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               model: this.config.model,
               outputSchemaRef: input.outputSchemaRef ?? 'unknown',
               rawOutputPreview: text.slice(0, 500),
+              // PRI-707: finish metadata travels with the failure evidence.
+              stopReason: finishStopReason,
+              outputTokens: finishOutputTokens,
+              truncated: truncatedByProvider || undefined,
             },
           });
+          if (truncatedByProvider) {
+            throw new PDRuntimeError(
+              'output_invalid',
+              'LLM response truncated (finish_reason=length); no valid JSON could be extracted',
+              {
+                truncated: true,
+                stopReason: finishStopReason,
+                outputTokens: finishOutputTokens,
+                rawOutputPreview: text.slice(0, 500),
+                nextAction: 'The output hit the token limit, it is not a format error: shorten the expected output (split the task, reduce payload) or increase maxTokens in the runtime profile config.',
+              },
+            );
+          }
           throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
         }
 
@@ -738,6 +776,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               schemaJson,
               requiredKeys,
               maxRepairAttempts: this.config.maxRepairAttempts,
+              // PRI-707: when finish metadata proves the output was cut by the
+              // token limit, the repair LLM must know — repairing a truncated
+              // fragment like a schema misunderstanding produced blind fixes.
+              truncationNotice: truncatedByProvider
+                ? `The previous output was cut off by the token limit (finish_reason=length${finishOutputTokens !== undefined ? `, ${finishOutputTokens} output tokens` : ''}). It is incomplete, not misunderstood. Do NOT invent missing content beyond the schema; produce the SHORTEST complete JSON object that satisfies the schema.`
+                : undefined,
             },
           );
 
@@ -775,6 +819,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               // schema's required keys (classic truncation signature).
               extractionCandidateCount,
               truncationSuspected: truncationSuspected || undefined,
+              // PRI-707: definitive truncation evidence comes from provider
+              // finish metadata — kept only when the response carried it.
+              stopReason: finishStopReason,
+              truncated: truncatedByProvider || undefined,
+              outputTokens: finishOutputTokens,
             };
 
             this.eventEmitter.emitTelemetry({
@@ -793,6 +842,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 validationErrors: validationErrorEntries,
                 repairAttempts: evidencePack.repairAttempts,
                 finalFailureReason: evidencePack.finalFailureReason,
+                // PRI-707: keep the terminal repair-exhausted event able to
+                // distinguish a token-limit cut from an ordinary schema
+                // failure — mirror the evidencePack finish metadata (PR #1574
+                // review finding).
+                stopReason: finishStopReason,
+                truncated: truncatedByProvider || undefined,
+                outputTokens: finishOutputTokens,
               },
             });
 

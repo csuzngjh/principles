@@ -191,5 +191,49 @@ describe('P0-2: 失败详情可观测性', () => {
       expect(parsed.output_failure_details.evidencePack.finalFailureReason).toBe('repair_exhausted');
       expect(parsed.output_failure_details.recordedAt).toBeDefined();
     });
+
+    it('PRI-707: 适配器截断证据（truncated/stopReason/outputTokens）经 classifyError 持久化到 diagnosticJson', async () => {
+      const task: TaskRecord = {
+        taskId: 'task-707',
+        taskKind: 'dreamer',
+        status: 'leased',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        attemptCount: 1,
+        maxAttempts: 3,
+        diagnosticJson: '{"pi_metadata":{}}',
+      };
+
+      // Shape the adapter (pi-ai-runtime-adapter) throws on a token-limit cut:
+      // finish metadata travels in err.details, no evidencePack wrapper.
+      const error = new PDRuntimeError(
+        'output_invalid',
+        '[output_invalid] LLM response truncated (finish_reason=length); no valid JSON could be extracted',
+        {
+          truncated: true,
+          stopReason: 'length',
+          outputTokens: 64,
+          rawOutputPreview: '{"diagnosisId":"diag-trunc',
+          nextAction: 'The output hit the token limit...',
+        },
+      );
+
+      await runner.testHandlePostLeaseError('task-707', task, error);
+
+      expect(deps.stateManager.updateTask).toHaveBeenCalledTimes(1);
+      const { calls } = (deps.stateManager.updateTask as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock;
+      const lastCall = calls[calls.length - 1];
+      if (lastCall === undefined) throw new Error('expected updateTask to have been called');
+      const [, patch] = lastCall;
+      const parsed = JSON.parse(patch.diagnosticJson as string);
+
+      // Original pi_metadata preserved + truncation evidence durable.
+      expect(parsed.pi_metadata).toEqual({});
+      expect(parsed.output_failure_details).toBeDefined();
+      expect(parsed.output_failure_details.truncated).toBe(true);
+      expect(parsed.output_failure_details.stopReason).toBe('length');
+      expect(parsed.output_failure_details.outputTokens).toBe(64);
+      expect(parsed.output_failure_details.errorCategory).toBe('output_invalid');
+    });
   });
 });
