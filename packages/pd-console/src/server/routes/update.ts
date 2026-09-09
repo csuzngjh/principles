@@ -40,6 +40,7 @@ import {
 } from '../utils/installed-layout.js';
 import { ActivationCompatibilityReadModel, isFeatureEnabled } from '@principles/core/runtime-v2';
 import { collectFileDepLinkSpecs, type StagedComponent } from '../utils/update-links.js';
+import { runPostUpdateCliSmoke } from '../utils/cli-smoke.js';
 import {
   updateMutationController,
   LEGACY_MUTATION_AUTHORITY,
@@ -89,6 +90,10 @@ const WORKSPACE_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md', 'CLAUDE.md'];
 // .node addons locked by the gateway/console processes (EPERM on copyfile),
 // npm symlinks/junctions, and thousands of regenerable files.
 const SKIP_DIRS = new Set(['node_modules']);
+// Full-update backups extend the existing plugin backup with sibling code
+// trees. Dependency directories stay in place (native modules may be loaded).
+const RUNTIME_BACKUP_DIR = '.runtime-components';
+const BACKUP_SKIP_DIRS = new Set(['node_modules', RUNTIME_BACKUP_DIR]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -272,6 +277,60 @@ function copyFileTo(src: string, dest: string): void {
   const dir = path.dirname(dest);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.copyFileSync(src, dest);
+}
+
+function runtimeComponents(layout: UpdateLayout): Record<string, string> {
+  return {
+    console: layout.consoleDir,
+    'pd-cli': layout.pdCliDir,
+    'host-runtime': layout.hostRuntimeDir,
+    'install-layout': layout.installLayoutDir,
+    core: layout.coreDir,
+    plugin: layout.pluginDir,
+    'release-manager': layout.releaseManagerDir,
+    ...(layout.codexAdapterDir ? { 'codex-adapter': layout.codexAdapterDir } : {}),
+  };
+}
+
+/** Resolve a backup entry under the backup root, refusing escapes — the
+ * component names recorded in components.json are untrusted runtime data
+ * (rc-1/rc-2), so every join into the backup tree is boundary-checked. */
+function backupEntryPath(root: string, name: string): string {
+  const target = path.resolve(root, name);
+  if (target === root || !target.startsWith(root + path.sep)) {
+    throw new Error(`Runtime backup entry "${name}" escapes the backup root`);
+  }
+  return target;
+}
+
+function backupRuntimeComponents(layout: UpdateLayout, backupDir: string): void {
+  const root = path.join(backupDir, RUNTIME_BACKUP_DIR);
+  fs.mkdirSync(root, { recursive: true });
+  const present: string[] = [];
+  for (const [name, dir] of Object.entries(runtimeComponents(layout))) {
+    if (name === 'plugin' || !fs.existsSync(dir)) continue;
+    copyDirRecursive(dir, backupEntryPath(root, name), BACKUP_SKIP_DIRS);
+    present.push(name);
+  }
+  // Written last: a partial backup must never be accepted as recoverable.
+  fs.writeFileSync(path.join(root, 'components.json'), JSON.stringify(present));
+}
+
+function restoreRuntimeComponents(layout: UpdateLayout, backupDir: string): boolean {
+  const root = path.join(backupDir, RUNTIME_BACKUP_DIR);
+  if (!fs.existsSync(root)) return false; // Historical plugin-only backup.
+  const present: unknown = JSON.parse(fs.readFileSync(path.join(root, 'components.json'), 'utf8'));
+  const components = runtimeComponents(layout);
+  if (!Array.isArray(present) || present.some((name: unknown) =>
+    typeof name !== 'string' || name === 'plugin' || !Object.hasOwn(components, name)
+    || !fs.existsSync(backupEntryPath(root, name)))) {
+    throw new Error('Runtime backup is incomplete or incompatible with this installation');
+  }
+  for (const [name, dir] of Object.entries(components)) {
+    if (name === 'plugin' || !present.includes(name)) continue;
+    copyDirRecursive(backupEntryPath(root, name), dir, BACKUP_SKIP_DIRS);
+  }
+  return true;
 }
 
 // --- Plugin skill-language preservation (PR #1332 companion) -----------------
@@ -816,7 +875,11 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
     // dependencies. Instead, overwrite from backup: modified files (dist/,
     // package.json, etc.) get the backup version, while node_modules/console/
     // core/ (not in the backup) are left untouched.
-    copyDirRecursive(backupDir, targetDir);
+    const layout = resolveUpdateLayout();
+    const fullBackup = layout && path.resolve(layout.pluginDir) === path.resolve(targetDir)
+      ? restoreRuntimeComponents(layout, backupDir)
+      : false;
+    copyDirRecursive(backupDir, targetDir, BACKUP_SKIP_DIRS);
 
     // Keep the OpenClaw extension copy in sync with the restored canonical
     // plugin (CP-5 invariant from the 2026-09-05 investigation): OpenClaw
@@ -827,8 +890,29 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
     const openClawPluginCopy = path.join(resolveExtensionsDir(), 'principles-disciple');
     let extCopySynced = false;
     if (path.resolve(openClawPluginCopy) !== path.resolve(targetDir) && fs.existsSync(openClawPluginCopy)) {
-      copyDirRecursive(backupDir, openClawPluginCopy);
+      copyDirRecursive(backupDir, openClawPluginCopy, BACKUP_SKIP_DIRS);
       extCopySynced = true;
+    }
+
+    if (fullBackup && layout) {
+      const smoke = runPostUpdateCliSmoke(layout.pdCliDir);
+      if (!smoke.ok) {
+        // rc-9: a failed rollback must be observable in history, like every
+        // other failure path — not just in the HTTP response.
+        appendUpdateHistory(workspaceDir, {
+          fromVersion: 'rolled-back',
+          toVersion: readCurrentVersion(targetDir) ?? 'unknown',
+          success: false,
+          kind: 'failure',
+          backupPath: backupDir,
+        });
+        return {
+          success: false,
+          message: `Runtime backup restored but pd CLI still fails to start: ${smoke.error}`,
+          reason: 'rollback_cli_smoke_failed',
+          nextAction: 'Keep the backup and use the official installer pinned to the previous installer release to repair dependencies before restarting Console.',
+        };
+      }
     }
 
     // Record rollback history
@@ -842,7 +926,9 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
 
     return {
       success: true,
-      message: extCopySynced
+      message: fullBackup
+        ? 'Runtime components restored and pd CLI startup verified. Restart Console to load the restored code.'
+        : extCopySynced
         ? 'Rollback completed successfully (OpenClaw extension copy restored too). Note: only the plugin was rolled back; console/core/host-runtime/pd-cli keep the upgraded version. For a full step-back, re-run the official installer pinned to the older release.'
         : 'Rollback completed successfully. Note: only the plugin was rolled back; console/core/host-runtime/pd-cli keep the upgraded version. For a full step-back, re-run the official installer pinned to the older release.',
     };
@@ -1084,19 +1170,9 @@ function ensureRuntimeResolutionLinks(
   ];
   // Data-driven pass: derive links from the STAGED component manifests (see
   // the comment above — staged, never the deployed pre-update manifests).
-  const stagedComponents: StagedComponent[] = [
-    { manifestDir: path.join(tempDir, 'console'), deployedDir: layout.consoleDir },
-    { manifestDir: path.join(tempDir, 'pd-cli'), deployedDir: layout.pdCliDir },
-    { manifestDir: path.join(tempDir, 'host-runtime'), deployedDir: layout.hostRuntimeDir },
-    { manifestDir: path.join(tempDir, 'install-layout'), deployedDir: layout.installLayoutDir },
-    { manifestDir: path.join(tempDir, 'core'), deployedDir: layout.coreDir },
-    { manifestDir: path.join(tempDir, 'plugin'), deployedDir: layout.pluginDir },
-    // PRI-672: staged release-manager component (npm name
-    // create-principles-disciple). Its staged manifest carries the
-    // file:../install-layout ref, and the staged console's manifest carries
-    // file:../release-manager — both derive their resolution links here.
-    { manifestDir: path.join(tempDir, 'release-manager'), deployedDir: layout.releaseManagerDir },
-  ];
+  const stagedComponents: StagedComponent[] = Object.entries(runtimeComponents(layout)).map(([name, deployedDir]) => ({
+    manifestDir: path.join(tempDir, name), deployedDir,
+  }));
   const readStagedDependencies = (manifestDir: string): Record<string, string> => {
     try {
       const pkgPath = path.join(manifestDir, 'package.json');
@@ -1367,9 +1443,8 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     // 2026-09-05 install/upgrade investigation). The backup excludes
     // node_modules (same SKIP_DIRS contract as /apply), and the backup dir
     // is recorded in update-history (success AND failure) so the rollback
-    // handler can find it. Console self-update owns the console dir backup;
-    // core/host-runtime/pd-cli are plain dist overlays re-fetched on any
-    // next update, so only the version authority (plugin) is backed up.
+    // handler can find it. Include every sibling code tree: a plugin-only
+    // rollback cannot repair a CLI/adapter import failure after an update.
     // R5 (review): reservePdBackupDestination creates the directory BEFORE
     // the copy — a mid-copy failure must not leave backupPath pointing at a
     // partial backup (a later /rollback would happily restore the fragment).
@@ -1380,6 +1455,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       const backupDest = reservePdBackupDestination(path.basename(extDir));
       try {
         copyDirRecursive(extDir, backupDest, SKIP_DIRS);
+        backupRuntimeComponents(layout, backupDest);
       } catch (backupError) {
         try { fs.rmSync(backupDest, { recursive: true, force: true }); } catch { /* best effort */ }
         throw backupError;
@@ -1410,6 +1486,25 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
         fs.existsSync(path.join(releaseManagerSrc, 'dist'))
       ) {
         copyDirRecursive(releaseManagerSrc, layout.releaseManagerDir, SKIP_DIRS);
+      }
+      // PRI-711: same PRI-561 ordering for codex-adapter — pd-cli's eager
+      // import graph statically resolves it, so an updated pd-cli paired with
+      // a stale deployed adapter is exactly the generation drift that bricked
+      // the 1.231.2 update (health-codex imported symbols the deployed
+      // adapter happened to carry; the next API addition would not). The
+      // copy keeps the deployed node_modules (SKIP_DIRS), so its resolution
+      // links survive; the data-driven pass below re-derives them anyway.
+      // Skipped when the running console resolves a one-generation-old
+      // install-layout without codexAdapterDir — that generation also lacks
+      // the derivation entry, mirroring the old no-op behavior (rc-9).
+      const codexAdapterDest = layout.codexAdapterDir;
+      if (
+        codexAdapterDest !== undefined &&
+        fs.existsSync(path.join(tempDir, 'codex-adapter')) &&
+        fs.existsSync(path.join(tempDir, 'codex-adapter', 'package.json')) &&
+        fs.existsSync(path.join(tempDir, 'codex-adapter', 'dist'))
+      ) {
+        copyDirRecursive(path.join(tempDir, 'codex-adapter'), codexAdapterDest, SKIP_DIRS);
       }
       const { error: linkError, quarantined } = ensureRuntimeResolutionLinks(layout, tempDir);
       reconciledQuarantine = quarantined;
@@ -1492,12 +1587,32 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
 
-    // 6.5 Discard the quarantined stale dependency copies — the canonical
-    // components are in place now (PRI-665). Both the success return and the
-    // version-drift failure return flow through here with files already
-    // swapped, so restoring the stale copies would re-break resolution.
-    if (reconciledQuarantine.length > 0) {
-      cleanupQuarantined(reconciledQuarantine);
+    // 6.8 PRI-711: post-apply CLI smoke. The swap and link steps above are
+    // data-driven but not self-proving — run the updated CLI once and refuse
+    // to record a success if the eager import graph is broken (see
+    // runPostUpdateCliSmoke for the three precedents this catches). The
+    // backup recorded below keeps the failure recoverable via /rollback.
+    const smoke = runPostUpdateCliSmoke(layout.pdCliDir);
+    if (!smoke.ok) {
+      restoreQuarantined(reconciledQuarantine);
+      reconciledQuarantine = [];
+      const failedVersion = readCurrentVersion(extDir) ?? toVersion ?? 'unknown';
+      appendUpdateHistory(workspaceDir, {
+        fromVersion,
+        toVersion: failedVersion,
+        success: false,
+        kind: 'failure',
+        ...(pluginBackupDir ? { backupPath: pluginBackupDir } : {}),
+      });
+      return {
+        success: false,
+        message: `Update applied but the updated pd CLI fails to start: ${smoke.error}`,
+        reason: 'post_update_cli_smoke_failed',
+        nextAction: pluginBackupDir
+          ? 'Restore the backup recorded in update history (backupPath), then report the stderr above. The console must be restarted before further use.'
+          : 'Report the stderr above; no backup was reserved for this update. The console must be restarted before further use.',
+        requiresRestart: false,
+      };
     }
 
     // 7. Version-advance check (drift guard). The full update installs the
@@ -1511,6 +1626,8 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
     const installedExpectedRelease = newVersion === stagedVersion;
 
     if (!installedExpectedRelease) {
+      restoreQuarantined(reconciledQuarantine);
+      reconciledQuarantine = [];
       // Files were already rewritten to the same (or lower) version. Record a
       // FAILED history entry so the operator sees why, and return a structured
       // error with nextAction.
@@ -1539,6 +1656,11 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       kind: 'update',
       ...(pluginBackupDir ? { backupPath: pluginBackupDir } : {}),
     });
+
+    // The quarantined pre-update copies are discarded on success; no reset of
+    // the variable is needed here — the return below cannot re-enter the
+    // catch (CodeQL js/useless-assignment-to-local, PR #1580 review).
+    cleanupQuarantined(reconciledQuarantine);
 
     return {
       success: true,
