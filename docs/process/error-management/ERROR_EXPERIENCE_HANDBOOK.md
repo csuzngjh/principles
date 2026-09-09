@@ -43,7 +43,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
-| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358 |
+| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358; PR #1574 |
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
@@ -509,6 +509,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-31 PRI-631 / PR #1462: an optional Evaluator V2 shape bypassed the canonical Artificer validator, so a valid code-bearing artifact could offer acceptance without a passed hard gate. Fixed at the live review builder with a code-bearing/V1 regression.
   - 2026-06-25 PRI-467 (PR#1059, compressed; full text → ERROR_ARCHIVE.md): `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — size guard couldn't strip INTENT by priority. Fixed by adding to `blocks` + Step 1.5 strip
   - 2026-06-19 PRI-408 (PR#972, compressed; full text → ERROR_ARCHIVE.md): `activateArtifact()` accepted `rolloutDecision='approved'` without verifying approval record — require `approvalId` + independent verification
+  - 2026-09-09 PRI-707 / PR #1574 review round 1 (telemetry emission-site flavor, review finding landed OUTSIDE the diff): finish-metadata evidence (`stopReason`/`truncated`/`outputTokens`) was added to the evidencePack and the `output_extraction_failed` telemetry payload, but the sibling terminal event `output_repair_exhausted` kept its old payload — monitoring could not distinguish a token-limit cut from an ordinary schema failure. Fixed by mirroring the three fields into the terminal payload + asserting them in the T8 test. Rule of thumb: when adding evidence fields to a failure payload that is mirrored across MULTIPLE observability surfaces (error details / evidencePack / telemetry events), grep ALL emission sites of the same logical failure and assert the full field set on EACH surface — partial-surface propagation silently blinds exactly the consumers the evidence was added for.
   - Fix: when adding optional deps/fields/handlers to a constructor/service interface, grep ALL construction sites and update each one; add a test exercising the production construction path (not just the helper in isolation).
 
 ---
@@ -634,9 +635,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 113 |
-| Last updated | 2026-09-08 |
+| Last updated | 2026-09-09 |
 | Top category | Schema & Type |
-| Recurring errors | 59 |
+| Recurring errors | 60 |
 
 ---
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist

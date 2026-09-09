@@ -7,9 +7,13 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath } from 'node:url';
 import { createDeterministicReleaseArchive, parseSourceDateEpoch } from './deterministic-release-archive.mjs';
 
-// PRI-672: release-manager joins the six shipped components (mirror of the
-// bundle-plugin.mjs payload / parity-gate component set).
-const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager'];
+// PRI-672: release-manager joins the shipped components. PRI-711:
+// codex-adapter joins too (its node_modules is now materialized into the
+// payload, so it needs the same .bin strip + symlink scan + dependency
+// completeness check as every other component — the payload verifier walks
+// the WHOLE asset, a component missing here means its symlinks are never
+// cleaned and the no-symlink guard fails the build).
+const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter'];
 
 function isPathWithin(directory, candidate) {
   const candidateRelativePath = relative(directory, candidate);
