@@ -560,13 +560,18 @@ if (BUILD_SELF_CONTAINED_ASSET) {
       installBundledRuntimeDependencies(CONSOLE_DEST, 'console'),
       // install-layout has no runtime dependencies, but npm ci still verifies
       // that its committed release lock matches the bundled package. Keep all
-      // six release locks on the real PR build path without a second full
+      // release locks on the real PR build path without a second full
       // component-materialization pass.
       installBundledRuntimeDependencies(INSTALL_LAYOUT_DEST, 'install-layout'),
       // PRI-672: ships tuf-js / @tufjs/models for the ReleaseManager authority
       // module graph; its file:../install-layout dep materializes from the
       // sibling component via --install-links.
       installBundledRuntimeDependencies(RELEASE_MANAGER_DEST, 'release-manager'),
+      // PRI-711: pd-cli's eager import graph (health-codex) statically resolves
+      // @principles/codex-adapter, whose file:../core + file:../host-runtime
+      // deps must materialize here or every pd command dies with
+      // ERR_MODULE_NOT_FOUND on updated installs.
+      installBundledRuntimeDependencies(CODEX_ADAPTER_DEST, 'codex-adapter'),
     ]);
   } finally {
     rmSync(join(PLUGIN_DEST, 'core'), { recursive: true, force: true });
