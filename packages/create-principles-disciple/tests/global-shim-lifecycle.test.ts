@@ -226,7 +226,12 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     // rollback must keep it — and the freshly written siblings as CREATED.
     expect(record.replacedPaths.map((p) => realPath.resolve(p))).toContain(realPath.resolve(shimPath));
     expect(record.createdPaths.map((p) => realPath.resolve(p))).not.toContain(realPath.resolve(shimPath));
-    expect(record.createdPaths.length).toBeGreaterThan(0);
+    // Every shim target is accounted for exactly once. (On POSIX there is a
+    // single basename — the replaced one — so createdPaths is legitimately
+    // empty there; Windows has the pd.ps1 sibling in createdPaths.)
+    const allTargets = SHIM_BASENAMES.map((name) => realPath.resolve(realPath.join(globalBinDir, name))).sort();
+    const recorded = [...record.createdPaths, ...record.replacedPaths].map((p) => realPath.resolve(p)).sort();
+    expect(recorded).toEqual(allTargets);
     // And the env-gated upgrade path still reports the ACTUAL payload mode.
     tryUpgradePdCliFromNpm('/nonexistent-pd-697');
     expect(infoLines.some((line) => line.includes('Skipping npm pd-cli upgrade (bundled pd-cli is authoritative'))).toBe(true);
