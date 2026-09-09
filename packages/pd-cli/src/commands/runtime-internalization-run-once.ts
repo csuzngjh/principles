@@ -35,7 +35,9 @@ import { createEvaluatorRunnerDeps, contentHashFn } from '../services/rulehost-p
 // PRI-708: the canonical rollout governance factory — the ONE builder the
 // consumer cycle spreads (internalization-consumer-cycle.ts). Host-neutral
 // CLI entries wire the same reopen semantics instead of hand-rolling them.
-import { createEvaluatorRuntimeContext, createRolloutGovernanceDeps } from '@principles/host-runtime';
+// PRI-713: same factory now also supplies dispatchActivation; the durable
+// workspace host-tool-semantics resolver is the shared provenance source.
+import { createEvaluatorRuntimeContext, createRolloutGovernanceDeps, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 import type { RefinerRuleHostGateDeps } from '@principles/core/runtime-v2';
 
 interface RunOnceOptions {
@@ -623,13 +625,30 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           // scribe/artificer revision target instead of dead-ending in the
           // recovery-only `rollout_revision_routing_not_wired` NHR (INV-04:
           // needs_revision never enters the approval queue).
-          // dispatchActivation is deliberately NOT wired on this manual entry
-          // (P2 follow-up): an approve_rollout verdict keeps its pre-existing
-          // `rollout_dispatch_not_wired` recovery NHR until the dispatch seam
-          // gets its own reviewed wiring.
-          const { reopenRevisionTarget } = createRolloutGovernanceDeps(workspaceDir, orchestrator);
+          // PRI-713: canonical activation dispatch — the SAME
+          // dispatchActivation (approve_rollout → ActivationDispatcher:
+          // low-risk auto_activate / high-risk approvals.pending) the
+          // consumer cycle injects from this one factory, so a manual
+          // approve_rollout completes governance instead of dead-ending in
+          // the recovery-only `rollout_dispatch_not_wired` NHR. The Owner
+          // gate is NOT bypassed: high-risk channels still enqueue
+          // approvals.pending inside the dispatcher. toolSemantics comes
+          // from the durable workspace provenance (PRI-661 pattern — same
+          // resolver the evaluator context uses); when no declaration is
+          // persisted the dispatch wires without it, mirroring the consumer
+          // cycle's optional host port, with the structured reason surfaced
+          // on stderr (never a silent baseline fallback).
+          const dispatchSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
+          if (!dispatchSemantics.ok) {
+            console.error(`[PD:run-once] rollout dispatch without host tool semantics: ${dispatchSemantics.reason} — ${dispatchSemantics.nextAction}`);
+          }
+          const { dispatchActivation, reopenRevisionTarget } = createRolloutGovernanceDeps(
+            workspaceDir,
+            orchestrator,
+            dispatchSemantics.ok ? { toolSemantics: dispatchSemantics.registry } : {},
+          );
           const runner = new RolloutReviewerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, reopenRevisionTarget },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, dispatchActivation, reopenRevisionTarget },
             { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);

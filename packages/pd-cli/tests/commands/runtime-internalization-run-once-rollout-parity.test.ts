@@ -36,8 +36,12 @@ import {
   collectOwnerDecisionFacts,
   deriveOwnerDecisionCapability,
   factStoreFromStateManager,
+  SqliteConnection,
+  SqliteActivationStateStore,
+  makeIdempotencyKey,
   type PITaskMetadata,
   type PDRuntimeAdapter,
+  type ActivationStatusRecord,
 } from '@principles/core/runtime-v2';
 import { createRolloutGovernanceDeps, saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
@@ -546,5 +550,131 @@ describe('PRI-708 P0-C exhaustion safety through the run-once entry', () => {
     expect(capability.attention).toBe('owner_decision');
     expect(capability.allowedActions.length).toBeGreaterThan(0);
     expect(capability.allowedActions).toContain('accept_current');
+  });
+});
+
+// ═══ PRI-713 — dispatch wiring parity (approve_rollout → ActivationDispatcher) ═
+
+function rolloutApprovePayload(taskId: string, evaluatorArtifactId: string): Record<string, unknown> {
+  return {
+    taskId,
+    sourceEvaluatorArtifactId: evaluatorArtifactId,
+    review: {
+      decision: 'approve_rollout',
+      summary: 'parity fixture approve',
+      confidence: 0.9,
+      requiredChanges: [],
+      rolloutRisks: [],
+      safetyChecks: [],
+    },
+    sourceTrace: { evaluatorArtifactId },
+    risks: [],
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+interface DispatchOutcome {
+  rolloutStatus: string;
+  humanReviewReasonCode: string | undefined;
+  activation: ActivationStatusRecord | null;
+}
+
+/** Read the durable dispatch outcome: rollout task state + persisted activation record. */
+async function readDispatchOutcome(sm: RuntimeStateManager, workspaceDir: string, rolloutTaskId: string): Promise<DispatchOutcome> {
+  const raw = await sm.getTask(rolloutTaskId);
+  expect(raw).not.toBeNull();
+  const pi = hydratePITaskRecord(raw!)!;
+  const connection = new SqliteConnection(workspaceDir);
+  try {
+    const activationStore = new SqliteActivationStateStore(connection);
+    const activation = await activationStore.getActivationStatus(makeIdempotencyKey(SCRIBE_ART, 'prompt'));
+    return {
+      rolloutStatus: raw!.status,
+      humanReviewReasonCode: pi.humanReviewContext?.reasonCode,
+      activation,
+    };
+  } finally {
+    try { connection.close(); } catch { /* best-effort */ }
+  }
+}
+
+describe('PRI-713 dispatch parity: approve_rollout through the run-once entry', () => {
+  const dirs: string[] = [];
+  const states: RuntimeStateManager[] = [];
+
+  function makeWorkspace(prefix: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    dirs.push(dir);
+    return dir;
+  }
+
+  afterEach(async () => {
+    for (const sm of states.splice(0)) await sm.close().catch(() => undefined);
+    for (const dir of dirs.splice(0)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ }
+    }
+  });
+
+  it('run-once entry: approve_rollout completes governance via the canonical ActivationDispatcher (no NHR)', async () => {
+    const ws = makeWorkspace('pd-pri713-runonce-');
+    const sm = await seedWorkspace(ws);
+    states.push(sm);
+
+    const { rolloutTaskId, evaluatorArtifactId } = await driveEvaluatorLeg(ws);
+    scriptedPayloads['rollout_reviewer'] = rolloutApprovePayload(rolloutTaskId, evaluatorArtifactId);
+
+    await handleRuntimeInternalizationRunOnce({
+      workspace: ws, runner: 'rollout_reviewer', runtime: 'test-double', allowTestDouble: true, json: true,
+    });
+
+    const outcome = await readDispatchOutcome(sm, ws, rolloutTaskId);
+    // rollout 侧: dispatch 完成治理迁移 — 无 NHR、任务 succeeded
+    expect(outcome.rolloutStatus).toBe('succeeded');
+    expect(outcome.humanReviewReasonCode).toBeUndefined();
+    // 激活事实: prompt 渠道低风险 auto_activate — activations 表有持久记录,
+    // 幂等键 = <scribe artifact>::prompt, activationId 由 PromptWriter 生成
+    expect(outcome.activation).not.toBeNull();
+    expect(outcome.activation!.artifactId).toBe(SCRIBE_ART);
+    expect(outcome.activation!.channel).toBe('prompt');
+    expect(outcome.activation!.activationId).toBe('act_prompt_parity-p');
+    expect(outcome.activation!.deactivatedAt).toBeNull();
+  });
+
+  it('EQUIVALENCE: production consumer-cycle assembly on the same durable input yields the same dispatch outcome', async () => {
+    const ws = makeWorkspace('pd-pri713-prodcycle-');
+    const sm = await seedWorkspace(ws);
+    states.push(sm);
+
+    const { rolloutTaskId, evaluatorArtifactId } = await driveEvaluatorLeg(ws);
+    scriptedPayloads['rollout_reviewer'] = rolloutApprovePayload(rolloutTaskId, evaluatorArtifactId);
+
+    // internalization-consumer-cycle.ts 的装配公式（同工厂 + 同 options 形）
+    const orchestrator = new InternalizationOrchestrator(
+      { stateManager: sm },
+      { owner: 'parity-production', runtimeKind: 'test-double', dryRun: true },
+    );
+    const wake = await orchestrator.wakeOnce('rollout_reviewer');
+    expect(wake.decision).toBe('would_lease');
+    const runner = new RolloutReviewerRunner(
+      {
+        stateManager: sm,
+        runtimeAdapter: scriptedAdapterFor('rollout_reviewer'),
+        eventEmitter: storeEmitter,
+        artifactStore: sm.piArtifactStore,
+        validator: new DefaultRolloutReviewerValidator(),
+        ...createRolloutGovernanceDeps(ws, orchestrator, {}),
+      },
+      { owner: 'parity-production', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 15_000 },
+    );
+    expect((await runner.run(wake.taskId)).status).toBe('succeeded');
+    await orchestrator.commitNextTaskProposal(wake.taskId);
+
+    const outcome = await readDispatchOutcome(sm, ws, rolloutTaskId);
+    expect(outcome.rolloutStatus).toBe('succeeded');
+    expect(outcome.humanReviewReasonCode).toBeUndefined();
+    expect(outcome.activation).not.toBeNull();
+    expect(outcome.activation!.artifactId).toBe(SCRIBE_ART);
+    expect(outcome.activation!.channel).toBe('prompt');
+    expect(outcome.activation!.activationId).toBe('act_prompt_parity-p');
   });
 });
