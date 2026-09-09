@@ -23,6 +23,18 @@ vi.mock('../../../src/server/utils/cli-smoke.js', () => ({
   runPostUpdateCliSmoke: vi.fn(() => ({ ok: true, version: '9.9.9-fixture' })),
 }));
 
+// PRI-711: allow simulating a ONE-GENERATION-OLD deployed install-layout
+// (no codexAdapterDir on the layout) — the update runs inside the
+// currently-running console, which resolves the layout helper installed by
+// the PREVIOUS update. Passthrough by default; individual tests override.
+vi.mock('../../../src/server/utils/installed-layout.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/server/utils/installed-layout.js')>();
+  return {
+    ...actual,
+    resolveUpdateLayout: vi.fn(actual.resolveUpdateLayout),
+  };
+});
+
 // Partial mock of fs: copyFileSync is a vi.fn wrapping the real implementation
 // so the EPERM test can override it. All other exports pass through unchanged.
 vi.mock('fs', async (importOriginal) => {
@@ -2426,6 +2438,71 @@ describe('handleUpdateRoute', () => {
       expect(failureEntry?.kind).toBe('failure');
       expect(failureEntry?.backupPath).toBeDefined();
       expect(fs.existsSync(failureEntry?.backupPath as string)).toBe(true);
+    });
+
+    it('skips the codex-adapter copy and derivation when the deployed install-layout is one generation old (PRI-711 rc-9)', async () => {
+      const { execFileSync: execSyncMock } = await import('child_process');
+      const layoutUtil = await import('../../../src/server/utils/installed-layout.js');
+
+      // Canonical layout + manifest (same shape as the CP-4/CP-5 fixture).
+      writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+      writeFixture('.pd/install.json', JSON.stringify({
+        layoutVersion: 1,
+        mode: 'canonical',
+        hosts: ['openclaw'],
+        workspaces: [workspaceDir],
+      }));
+      writeFixture('extensions/principles-disciple/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
+
+      // The real fixture layout HAS codexAdapterDir (current install-layout);
+      // force the one-generation-old shape for this update only.
+      const realLayout = layoutUtil.resolveUpdateLayout();
+      expect(realLayout?.codexAdapterDir).toBeDefined();
+      vi.mocked(layoutUtil.resolveUpdateLayout).mockImplementationOnce(() => ({ ...realLayout!, codexAdapterDir: undefined }));
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url.toString() : url.toString();
+        if (urlStr.startsWith('https://registry.npmjs.org/create-principles-disciple')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '1.105.0', dist: { tarball: 'https://example.com/installer.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+        if (cmd === 'tar') {
+          const dir = tarExtractDir(cmd, args, options);
+          if (dir) {
+            fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'plugin', 'package.json'),
+              JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+            fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+            fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), 'new cli');
+            fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      fs.writeFileSync(path.join(pluginDir, 'package.json'),
+        JSON.stringify({ version: '1.0.0' }));
+
+      const req = createMockRequest('POST', {});
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+      const body = parseResponseBody<{ data: { success: boolean; reason?: string; newVersion?: string } }>(res);
+      expect(body.data.success).toBe(true);
+      expect(body.data.newVersion).toBe('2.0.0');
+      // The adapter was staged in the tarball but silently skipped (rc-9):
+      // no adapter dir materializes and nothing crashes on the missing field.
+      expect(fs.existsSync(path.join(tmpDir, '.pd', 'runtime', 'codex-adapter'))).toBe(false);
     });
   });
 
