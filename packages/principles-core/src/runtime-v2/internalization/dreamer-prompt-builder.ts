@@ -21,6 +21,7 @@
 import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
 import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.js';
 import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
 
 export interface DreamerPromptBuilderInput {
   taskId: string;
@@ -51,11 +52,21 @@ export interface DreamerPromptBuildResult {
  *
  * When `coreGrounding` is true, a CORE AXIOMS section is injected so the
  * Dreamer can correctly reference existing principles via sourcePrincipleId.
+ *
+ * PRI-714 (review fix): when `outputLanguage` is provided, a language
+ * directive is appended so the CANDIDATE OUTPUT (not just the axiom block)
+ * follows the owner's language — badDecision/betterDecision/rationale/
+ * strategicPerspective are the human-readable fields (riskLevel stays an
+ * English enum; lineage/IDs stay untranslated). Undefined = no directive
+ * (byte-identical to the pre-PRI-714 instruction).
  */
 export function buildDreamerProtocolInstruction(
   opts: CoreAxiomBlockOptions = {},
 ): string {
   const coreAxiomsBlock = buildCoreAxiomBlock(opts);
+  // PRI-714: output-language directive for the candidate fields (empty string
+  // when outputLanguage is undefined — instruction stays byte-identical).
+  const languageDirective = buildLanguageDirective(opts.outputLanguage, 'dreamer');
 
   return `You are a Dreamer agent in a principle internalization pipeline. Your role is to generate alternative decision candidates based on the predecessor's diagnosis analysis.
 
@@ -84,7 +95,7 @@ CONSTRAINTS:
 - valid MUST be true on success
 - sourcePrincipleId is OPTIONAL — only include it if you can identify a specific existing principle that this candidate relates to (use the axiom IDs from the CORE AXIOMS section above, e.g. T-01). Do NOT invent placeholder values like "pri-unknown", "pri-000", or any fabricated ID. If unsure, simply omit this field entirely
 - sourcePainId is an optional string
-`;
+${languageDirective}`;
 }
 
 export class DreamerPromptBuilder {
