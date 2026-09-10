@@ -1982,8 +1982,9 @@ updateMutationController.register('rollback', { name: LEGACY_MUTATION_AUTHORITY,
 //
 // The legacy registrations above stay verbatim (replace-then-delete). This
 // layer decides per dispatch whether the preferred authority may serve:
-//   - `release_manager_shadow` flag off (default) → legacy serves, with the
-//     machine-readable fallback reason `release_manager_shadow_disabled`;
+//   - `release_manager_shadow` explicitly off (the registry default is ON since
+//     the 2026-09-07 graduation) → legacy serves, with the machine-readable
+//     fallback reason `release_manager_shadow_disabled`;
 //   - flag on → the ReleaseManager authority module is loaded and asked for
 //     per-kind readiness. A ready `check` is served under ReleaseManager
 //     governance with the response body still computed by the legacy path
@@ -2014,7 +2015,9 @@ function releaseManagerFlagEnabled(workspaceDir: string): boolean {
 
 /**
  * PRI-698 Phase 1: gates routing /apply-full to the ReleaseManager write
- * orchestration. Default off — the legacy updater serves with an explicit
+ * orchestration. The registry default is ON (2026-09-07 graduation), so an
+ * install with no explicit config value IS served by the ReleaseManager; only
+ * an explicit `enabled: false` routes to the legacy updater, with the
  * `release_manager_write_disabled` fallback reason. Requires the shadow flag
  * too (the whole authority layer is gated on it first).
  */
@@ -2338,25 +2341,24 @@ const MUTATION_KIND_PATHS: ReadonlyMap<MutationKind, string> = new Map(
  * ONE console line whenever a kind's resolved authority CHANGES, so an operator
  * can see exactly which kinds are still served by the legacy updater and why —
  * without the noise of the Companion's 6-hourly `/check` polling.
+ *
+ * Built from `describeGovernance()` rather than `resolveAuthority()`: the
+ * former reports `active: 'none'` instead of throwing, so the telemetry needs
+ * no alternate arm for the contract-impossible "no authority registered" state
+ * (ERR-099 — a defensive alternate for an unreachable state ships uncovered).
+ * The line is assembled branch-free from reachable-only parts.
  */
 const lastLoggedRouting = new Map<MutationKind, string>();
 
 function logMutationRouting(): void {
+  const governance = updateMutationController.describeGovernance();
   for (const kind of MUTATION_KINDS) {
-    let line: string;
-    try {
-      const resolved = updateMutationController.resolveAuthority(kind);
-      if (!resolved.fallback) {
-        line = `${resolved.authority.name} (preferred authority)`;
-      } else {
-        const reason = updateMutationController.getFallbackReason(kind);
-        line = `${resolved.authority.name} (compatibility fallback${reason !== undefined ? `: ${reason}` : ''})`;
-      }
-    } catch (error) {
-      // Unresolvable is itself loud: an unregistered kind must never be a
-      // silent mutation path (the controller would refuse the dispatch anyway).
-      line = `UNRESOLVED — ${error instanceof Error ? error.message : String(error)}`;
-    }
+    const info = governance[kind];
+    const detail = [
+      info.fallback ? 'compatibility fallback' : 'preferred authority',
+      info.fallbackReason ?? '',
+    ].filter((part) => part.length > 0).join(': ');
+    const line = `${info.active} (${detail})`;
     if (lastLoggedRouting.get(kind) === line) continue;
     lastLoggedRouting.set(kind, line);
     console.log(`[update] ${MUTATION_KIND_PATHS.get(kind) ?? kind} → ${line}`);

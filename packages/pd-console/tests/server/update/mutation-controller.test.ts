@@ -236,7 +236,6 @@ describe('MutationController compatibility-fallback vocabulary (PRI-729)', () =>
   });
 
   it('accepts every declared literal and both parameterised forms', () => {
-    const controller = new MutationController();
     const declared: string[] = [
       ...COMPAT_FALLBACK_REASON_LITERALS,
       'release_manager_unavailable:metadata_source_unconfigured,rollback_not_available',

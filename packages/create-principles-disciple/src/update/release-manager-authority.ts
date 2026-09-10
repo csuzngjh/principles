@@ -196,7 +196,8 @@ export function createReleaseManagerAuthority(
     },
     // PRI-698 Phase 1: the full-runtime write path exists (ReleaseManager.apply
     // → installer → journal). Console routing is additionally flag-gated
-    // (`release_manager_write_authority`, default off).
+    // (`release_manager_write_authority`, registry default ON since the
+    // 2026-09-07 graduation — only an explicit `enabled: false` disables it).
     'apply-full': {
       ready: baseReady,
       reasons: baseReasons,

@@ -464,6 +464,31 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
 
   // ── PRI-698 Phase 1: the apply-full write path ──────────────────────────────
 
+  it('no config at all: a ready apply-full routes to the ReleaseManager on the registry default (never release_manager_write_disabled)', async () => {
+    // `release_manager_write_authority` defaults ON, so an install that never
+    // configured it must NOT be pushed onto the legacy updater. The other
+    // apply-full suites only cover explicit `enabled: true` / `enabled: false`,
+    // which is exactly the gap this closes.
+    authorityMock.readiness = { ready: true, reasons: [] };
+    authorityMock.applyFullReadiness = { ready: true, reasons: [] };
+    authorityMock.applyImpl = async () => ({
+      kind: 'applied',
+      productVersion: '1.223.0',
+      transactionId: 'update-default-abcdef01',
+      journalPath: path.join(tmpDir, '.pd', 'transactions', 'update-default-abcdef01.jsonl'),
+    });
+    const res = createMockResponse();
+    await routes.handleUpdateRoute(createMockRequest('POST'), res, tmpDir, '/apply-full');
+    expect(res.statusCode).toBe(200);
+    expect(authorityMock.applyCalls).toBe(1);
+    expect(res._headers['x-pd-mutation-authority']).toBe(RELEASE_MANAGER_AUTHORITY);
+    expect(res._headers['x-pd-mutation-fallback-reason']).toBeUndefined();
+    expect(updateMutationController.describeGovernance()['apply-full'].fallbackReason).toBeUndefined();
+    const history = readHistory(tmpDir);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ kind: 'update', authority: RELEASE_MANAGER_AUTHORITY });
+  });
+
   it('write flag explicitly off: structurally-ready apply-full stays legacy with release_manager_write_disabled', async () => {
     // shadow on (explicit), write authority explicitly disabled — the
     // registry default is ON, so the off case requires an explicit config.
