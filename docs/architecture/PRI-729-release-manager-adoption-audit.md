@@ -67,7 +67,8 @@
 
 **关键事实（Phase 2 的前提）**：
 
-- RM 对**全部 4 个 kind** 都会被咨询：`syncReleaseManagerAuthority` 无条件调用 `createReleaseManagerAuthority(...)`，后者为 4 个 kind 各算一份 readiness（`release-manager-authority.ts:176-196`）。所以「优先进入 ReleaseManager」在语义上已经成立；`apply` / `rollback` 是由 **RM 自己报告 not-ready** 才降级的，不是被跳过。
+- **RM 对全部 4 个 kind 都会被咨询**（在 `release_manager_shadow` 生效时——即生产默认值）：`syncReleaseManagerAuthority` 通过 flag 检查后调用一次 `createReleaseManagerAuthority(...)`，后者为 4 个 kind 各算一份 readiness（`release-manager-authority.ts:176-196`）。所以「优先进入 ReleaseManager」在语义上已经成立；`apply` / `rollback` 是由 **RM 自己报告 not-ready** 才降级的，不是被跳过。
+  - 唯一例外：flag **被显式关闭**时不构造 authority，直接 `fallbackToLegacyForAllKinds('release_manager_shadow_disabled')`（`update.ts:2263-2266`）——此时 RM 完全不被咨询，降级理由由 wiring 声明而非 RM 报告。
 - 两个治理开关均为 **default ON**（`feature-flag-contract.ts:229,238`，2026-09-07 Owner 毕业）。⇒ 今天唯一的实际门控是 **readiness**，不是 flag。
 - 所有降级都带稳定 reason（headers + `describeGovernance().fallbackReason`）。**但：降级本身零日志**——`syncReleaseManagerAuthority` 只 `setFallbackReason`，不打印任何东西；只有 governed check 的 *refusal* 分支会 `console.log`。这是 Phase 2 要补的 "fail-loud" 缺口。
 
