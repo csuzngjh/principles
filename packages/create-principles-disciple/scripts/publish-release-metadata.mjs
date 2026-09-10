@@ -30,15 +30,13 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const BOOLEAN_FLAGS = new Set(['dry-run', 'ephemeral-key']);
 
-function fail(message) {
-  process.stderr.write(`publish-release-metadata: ${message}\n`);
-  process.exitCode = 1;
+function isEnoent(error) {
+  return error !== null && typeof error === 'object' && error.code === 'ENOENT';
 }
 
 function readArguments(argv) {
@@ -71,10 +69,17 @@ function requireValue(values, key) {
 function readTufVersions(previousDir) {
   const readVersion = (fileName) => {
     const filePath = resolve(previousDir, fileName);
-    if (!existsSync(filePath)) return undefined;
+    // Read first, classify the error afterwards — no check-then-read window
+    // (the file may be replaced between an existsSync and this read).
+    let envelope;
+    try {
+      envelope = JSON.parse(readFileSync(filePath, 'utf8'));
+    } catch (error) {
+      if (isEnoent(error)) return undefined;
+      throw new Error(`Published ${fileName} is unreadable or invalid JSON at ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     // rc-1/rc-2: the published envelope is untrusted input — read only the
     // signed version field through a validated shape.
-    const envelope = JSON.parse(readFileSync(filePath, 'utf8'));
     const signed = envelope !== null && typeof envelope === 'object' ? envelope.signed : undefined;
     const version = signed !== null && typeof signed === 'object' ? signed.version : undefined;
     if (typeof version !== 'number' || !Number.isSafeInteger(version) || version <= 0) {
@@ -95,16 +100,23 @@ async function main() {
   const dryRun = flags.has('dry-run');
 
   const archivePath = resolve(requireValue(values, 'archive'));
-  if (!existsSync(archivePath) || !statSync(archivePath).isFile()) {
-    throw new Error(`Release archive does not exist: ${archivePath}`);
+  // Read first, classify the error — no existsSync/statSync pre-check (the
+  // file could be swapped between check and read).
+  let archiveBytes;
+  try {
+    archiveBytes = readFileSync(archivePath);
+  } catch (error) {
+    throw new Error(`Release archive does not exist or is not readable: ${archivePath} (${error instanceof Error ? error.message : String(error)})`);
   }
   const digestPath = resolve(values.get('digest') ?? `${archivePath}.sha256`);
-  if (!existsSync(digestPath)) {
-    throw new Error(`Release archive digest sidecar does not exist: ${digestPath}`);
+  let digestText;
+  try {
+    digestText = readFileSync(digestPath, 'utf8');
+  } catch (error) {
+    throw new Error(`Release archive digest sidecar does not exist or is not readable: ${digestPath} (${error instanceof Error ? error.message : String(error)})`);
   }
-  const archiveBytes = readFileSync(archivePath);
   const publisher = await import('../dist/update/release-metadata-publisher.js');
-  const declaredDigest = publisher.parseSha256DigestFile(readFileSync(digestPath, 'utf8'));
+  const declaredDigest = publisher.parseSha256DigestFile(digestText);
   const actualDigest = createHash('sha256').update(archiveBytes).digest('hex');
   if (actualDigest !== declaredDigest) {
     throw new Error(
@@ -133,11 +145,20 @@ async function main() {
   if (previousDir !== undefined) {
     const channel = requireValue(values, 'channel');
     const previousChannelPath = resolve(previousDir, 'targets', 'channels', `${channel}.json`);
-    const hasPreviousChannel = existsSync(previousChannelPath);
+    // Read first, classify the error — ENOENT means "no pointer for this
+    // channel", anything else is a corrupt published repository.
+    let previousChannelPayload = null;
+    try {
+      previousChannelPayload = JSON.parse(readFileSync(previousChannelPath, 'utf8'));
+    } catch (error) {
+      if (!isEnoent(error)) {
+        throw new Error(`The published channel pointer is unreadable or invalid JSON at ${previousChannelPath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const tufVersions = readTufVersions(previousDir);
-    if (hasPreviousChannel || tufVersions.timestamp !== undefined) {
+    if (previousChannelPayload !== null || tufVersions.timestamp !== undefined) {
       previous = {
-        channelPayload: hasPreviousChannel ? JSON.parse(readFileSync(previousChannelPath, 'utf8')) : null,
+        channelPayload: previousChannelPayload,
         tufVersions,
       };
     }
@@ -171,8 +192,17 @@ async function main() {
   mkdirSync(outputDir, { recursive: true });
   for (const file of publication.files) {
     const destination = resolve(outputDir, file.path);
-    if (existsSync(destination)) {
-      const existing = readFileSync(destination);
+    // Read first, classify the error — no existsSync pre-check before the
+    // idempotence comparison.
+    let existing;
+    try {
+      existing = readFileSync(destination);
+    } catch (error) {
+      if (!isEnoent(error)) {
+        throw new Error(`Cannot read the existing published file ${destination}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (existing !== undefined) {
       if (!existing.equals(file.bytes)) {
         throw new Error(
           `Refusing to replace published file with different content: ${destination}. The metadata repository is append-and-advance only.`,
