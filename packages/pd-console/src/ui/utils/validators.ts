@@ -2334,6 +2334,8 @@ export interface ApplyUpdateResultData {
   reason?: string;
   /** Suggested next action when the update fails. */
   nextAction?: string;
+  /** Present when the OpenClaw gateway could not be stopped/restarted around the update (PRI-723). */
+  gatewayNotice?: string;
 }
 
 export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | null {
@@ -2364,6 +2366,9 @@ export function validateApplyUpdateResult(v: unknown): ApplyUpdateResultData | n
   }
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) {
     result.nextAction = v.nextAction;
+  }
+  if (Object.hasOwn(v, 'gatewayNotice') && isString(v.gatewayNotice)) {
+    result.gatewayNotice = v.gatewayNotice;
   }
   return result;
 }
