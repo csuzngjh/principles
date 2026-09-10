@@ -25,6 +25,7 @@ import {
   SqlitePIArtifactStore,
   createProductionGateDeps,
   createPITaskDiagnosticJson,
+  artificerRepairTaskId,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
   type PIArtifactSnapshot,
@@ -161,10 +162,26 @@ export function createEvaluatorRepairDeps(
     seedArtificerRepairTask: async (params) => {
       // P0-4: 确定性 revision identity — evaluatorTaskId + iteration 唯一定位
       // 一个逻辑 repair 任务; 重放 (consumer 重复周期 / crash 恢复) reuse 而非再建。
-      const repairTaskId = `artificer-repair-${params.repairPayload.sourceEvaluatorTaskId}-r${params.repairPayload.repairIteration}`;
+      // PRI-718: id 约定收敛到 pitask-metadata 的单一 owner。
+      const repairTaskId = artificerRepairTaskId(
+        params.repairPayload.sourceEvaluatorTaskId,
+        params.repairPayload.repairIteration,
+      );
       const existing = await stateManager.getTask(repairTaskId);
       if (existing) {
-        logger?.info?.(`[PD:Consumer] repair task ${repairTaskId} already exists; reusing (idempotent seed)`);
+        // PRI-718 (revise ≠ resume): a TERMINAL repair round is finished
+        // corrective work, not a vehicle for new corrective work. Returning
+        // it here made the evaluator re-run against a superseded artifact
+        // forever (EP002-R2: same-artifact score oscillation, one LLM call
+        // per cycle, no new repair). New work requires a new revision epoch
+        // (Owner revise_once) — surface as a seed failure so the evaluator
+        // degrades to needs_human_review instead of looping.
+        if (existing.status === 'succeeded' || existing.status === 'failed' || existing.status === 'needs_human_review') {
+          throw new Error(
+            `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
+          );
+        }
+        logger?.info?.(`[PD:Consumer] repair task ${repairTaskId} already exists (in-flight ${existing.status}); reusing (idempotent seed)`);
         return repairTaskId;
       }
       await stateManager.createTask({
