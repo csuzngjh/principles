@@ -28,6 +28,7 @@
 import type { RunHandle } from '../runtime-protocol.js';
 import type { PhilosopherOutputV1, PhilosopherValidator } from './philosopher-output.js';
 import type { TaskRecord } from '../task-status.js';
+import type { OutputLanguage } from '../language-directive.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
@@ -98,6 +99,12 @@ export interface ResolvedPhilosopherRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /**
+   * Owner's preferred language for principle candidate fields (PRI-336/PRI-714).
+   * Forwarded to PhilosopherPromptBuilder so thesis/principleCandidate fields
+   * follow the owner's language. Undefined = no directive (backward compatible).
+   */
+  readonly outputLanguage?: OutputLanguage;
   /** Whether to inject CORE_PRINCIPLES into the philosopher prompt (default: true). */
   readonly coreGrounding: boolean;
 }
@@ -117,6 +124,7 @@ export function resolvePhilosopherRunnerOptions(options: PhilosopherRunnerOption
     defaultMaxAttempts: options.defaultMaxAttempts ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.defaultMaxAttempts,
     owner: options.owner,
     runtimeKind: options.runtimeKind,
+    outputLanguage: options.outputLanguage,
     agentId: options.agentId ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.agentId,
     coreGrounding: options.coreGrounding ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.coreGrounding,
   };
@@ -192,7 +200,7 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
   }
 
   async invokeRuntime(taskId: string, context: PhilosopherContext): Promise<RunHandle> {
-    const {coreGrounding} = this.resolvedOptions;
+    const {coreGrounding, outputLanguage} = this.resolvedOptions;
 
     let parsedDreamerArtifact: unknown;
     try {
@@ -201,13 +209,14 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
       parsedDreamerArtifact = context.dreamerArtifact;
     }
 
-    const builder = new PhilosopherPromptBuilder({ coreGrounding });
+    const builder = new PhilosopherPromptBuilder({ coreGrounding, outputLanguage });
     const { message, systemPrompt } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       dreamerArtifact: parsedDreamerArtifact,
       sourceDreamerArtifactId: context.sourceDreamerArtifactId,
       coreGrounding,
+      outputLanguage,
     });
 
     return this.runtimeAdapter.startRun({

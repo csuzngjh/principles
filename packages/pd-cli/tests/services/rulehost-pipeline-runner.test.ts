@@ -191,8 +191,10 @@ function evaluatorNeedsRevision(taskId: string, artificerArtifactId: string): un
 let tmpDir = '';
 
 function makeTmpDir(): string {
-  const dir = path.join(os.tmpdir(), `pd-pipe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  fs.mkdirSync(dir, { recursive: true });
+  // mkdtempSync's random suffix keeps the path unpredictable (CodeQL
+  // js/insecure-temporary-file: the pipeline language tests WRITE
+  // .pd/config.yaml under this dir).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pipe-'));
   // PRI-661: the pipeline's evaluator replay resolves the production gate
   // context from durable workspace provenance — seed a declaration like every
   // real host does on startup.
@@ -640,5 +642,144 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(dreamerStage?.status).toBe('degraded');
     // The reason must be present (Runtime Contract Rule 9: no silent degradation).
     expect(dreamerStage?.reason).toBeTruthy();
+  }, 60_000);
+});
+
+// ── PRI-714 (review fix #3): language wiring ─────────────────────────────────
+//
+// The PR's original fault class was "the parameter exists but is not wired".
+// These regressions drive the REAL pipeline and assert the LANGUAGE DIRECTIVE
+// on the actual systemPrompt handed to adapter.startRun (PRI-633: the
+// instruction left the payload for the system channel):
+//   - explicit `principles.outputLanguage: 'en'` in the workspace config
+//     overrides the zh-CN default;
+//   - no config → the zh-CN default applies.
+// Deleting the pipeline's language resolution makes these fail.
+
+function writeLanguageConfig(dir: string, outputLanguage?: 'en'): void {
+  fs.mkdirSync(path.join(dir, '.pd'), { recursive: true });
+  // Full valid-config shape (mirrors pd-config-loader.test.ts) so validation
+  // keeps `principles` intact instead of degrading to defaults.
+  const config: Record<string, unknown> = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      correction_observer: { category: 'quiet', enabled: false },
+      empathy_observer: { category: 'quiet', enabled: false },
+    },
+    runtimeProfiles: {
+      'openclaw.default': { type: 'openclaw', source: 'default' },
+    },
+    internalAgents: {
+      defaultRuntime: 'openclaw.default',
+      agents: {
+        diagnostician: { enabled: true, runtimeProfile: 'openclaw.default' },
+        dreamer: { enabled: true },
+        scribe: { enabled: true },
+        artificer: { enabled: true },
+        philosopher: { enabled: false },
+        evaluator: { enabled: false },
+        rolloutReviewer: { enabled: false },
+        correctionObserver: { enabled: false },
+        empathyObserver: { enabled: false },
+      },
+    },
+    ui: { diagnostics: { mode: 'simple' } },
+  };
+  if (outputLanguage !== undefined) config.principles = { outputLanguage };
+  // JSON is valid YAML — same trick the shared executor tests use.
+  fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), JSON.stringify(config));
+}
+
+function collectStartRunInputs(adapter: ScriptedAdapter): Array<{ taskId: string; outputSchemaRef?: string; payload: string; systemPrompt?: string }> {
+  const inputs: Array<{ taskId: string; outputSchemaRef?: string; payload: string; systemPrompt?: string }> = [];
+  for (const input of adapter.startRunInputs.values()) {
+    inputs.push({
+      taskId: input.taskRef.taskId,
+      outputSchemaRef: input.outputSchemaRef,
+      payload: typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload),
+      systemPrompt: input.systemPrompt,
+    });
+  }
+  return inputs;
+}
+
+describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messages (PRI-714 review fix)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } tmpDir = ''; }
+  });
+
+  it('explicit principles.outputLanguage=en overrides the zh-CN default on stage messages', async () => {
+    tmpDir = makeTmpDir();
+    writeLanguageConfig(tmpDir, 'en');
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-lang-en-001', 'pain-lang-en');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-lang-en', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
+
+    const inputs = collectStartRunInputs(adapter);
+    // Dreamer: dreamer-subject field list, English directive on the system channel.
+    const dreamer = inputs.find((i) => i.taskId.startsWith('dreamer'));
+    expect(dreamer).toBeDefined();
+    expect(dreamer?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(dreamer?.systemPrompt).toContain('English');
+    expect(dreamer?.systemPrompt).toContain('(candidates[].badDecision, candidates[].betterDecision, candidates[].rationale, candidates[].strategicPerspective)');
+    expect(dreamer?.payload).toContain('dreamer-lang-en-001');
+    expect(dreamer?.payload).not.toContain('LANGUAGE DIRECTIVE');
+    // Philosopher: philosopher-subject field list, English directive.
+    const philosopher = inputs.find((i) => i.taskId.includes('philosopher'));
+    expect(philosopher).toBeDefined();
+    expect(philosopher?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(philosopher?.systemPrompt).toContain('English');
+    expect(philosopher?.systemPrompt).toContain('(thesis, principleCandidate.title, principleCandidate.rationale, principleCandidate.scope, risks[])');
+    // Evaluator: review-subject explicit nested paths + PRI-630 ledger echo rule.
+    const evaluator = inputs.find((i) => i.outputSchemaRef === 'evaluator-output-v1');
+    expect(evaluator).toBeDefined();
+    expect(evaluator?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(evaluator?.systemPrompt).toContain('English');
+    expect(evaluator?.systemPrompt).toContain('codeReview.traceCoverage.gaps');
+    expect(evaluator?.systemPrompt).toContain('adversarialCases[].rationale');
+    expect(evaluator?.systemPrompt).toContain('requirementLedger[].statement MUST be copied verbatim');
+    // The explicit en must have fully replaced the zh-CN default everywhere.
+    for (const i of inputs) {
+      expect(i.systemPrompt ?? '', 'Simplified Chinese leaked into an en-configured pipeline').not.toContain('Simplified Chinese');
+      expect(i.payload, 'Simplified Chinese leaked into an en-configured pipeline').not.toContain('Simplified Chinese');
+    }
+  }, 60_000);
+
+  it('no config file resolves the zh-CN default on the dreamer message', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-lang-zh-001', 'pain-lang-zh');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-lang-zh', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
+
+    const inputs = collectStartRunInputs(adapter);
+    const dreamer = inputs.find((i) => i.taskId.startsWith('dreamer'));
+    expect(dreamer).toBeDefined();
+    expect(dreamer?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(dreamer?.systemPrompt).toContain('Simplified Chinese');
+    expect(dreamer?.payload).toContain('dreamer-lang-zh-001');
   }, 60_000);
 });

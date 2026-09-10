@@ -50,6 +50,9 @@ import {
   // computeFeatureFlagsFromConfig / isFeatureEnabled live in core).
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
+  // PRI-714: resolve outputLanguage from the same effective config the
+  // runners already receive (EP-07: canonical resolved value, not raw input).
+  resolveOutputLanguage,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -278,6 +281,12 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // createEvaluatorRunnerDeps (rc-9: malformed config → fallback defaults).
     const configLoad = loadPdConfig(opts.workspaceDir);
     const effectiveConfig = configLoad.ok ? configLoad.effective : configLoad.defaults;
+    // PRI-714: resolve outputLanguage once from the effective config so every
+    // stage runner (dreamer/philosopher/scribe/artificer/evaluator) receives
+    // the same language value. Mirrors pain-signal-runtime-factory (EP-07).
+    // Default config also resolves (to zh-CN) — pipeline stages always
+    // declare the owner's language instead of leaving review artifacts English.
+    const {outputLanguage} = resolveOutputLanguage(effectiveConfig.config.principles?.outputLanguage);
     // Allow the caller's adapter to resolve real artifactIds (needed by
     // test-double adapters whose scripted outputs must match store-assigned IDs).
     opts.onStoreReady?.(artifactStore);
@@ -288,7 +297,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       scribe: opts.runtimeAdapter,
       evaluator: opts.runtimeAdapter,
     };
-    const runnerOptsFor = (adapter: PDRuntimeAdapter) => ({ owner, runtimeKind: adapter.kind(), pollIntervalMs, timeoutMs, effectiveConfig });
+    const runnerOptsFor = (adapter: PDRuntimeAdapter) => ({ owner, runtimeKind: adapter.kind(), pollIntervalMs, timeoutMs, effectiveConfig, outputLanguage });
 
     // ── Stage: pain lookup ──
     // Find a dreamer task already seeded for this pain (the pain→dreamer bridge

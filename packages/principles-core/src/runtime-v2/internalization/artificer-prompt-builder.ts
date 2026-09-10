@@ -3,6 +3,8 @@ import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { LastValidatorErrors } from './pitask-metadata.js';
 import type { IntentContractV1 } from './intent-contract.js';
+import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
 
 /**
  * Dreamer candidate 5-dim context (PRI-508).
@@ -71,6 +73,14 @@ export interface ArtificerPromptBuilderInput {
    * (backward compatible).
    */
   intentContract?: IntentContractV1;
+  /**
+   * Owner's preferred language for implementation artifacts (PRI-714). When
+   * provided, the artificer instruction carries a language directive so
+   * implementationSummary and risks are written in the owner's language.
+   * Undefined = no directive (backward compatible). Never affects
+   * implementationCode, goldenTraceCases params, or lineage fields.
+   */
+  outputLanguage?: OutputLanguage;
 }
 
 export interface ArtificerPromptInput {
@@ -254,7 +264,10 @@ export class ArtificerPromptBuilder {
       throw new Error('behaviorExamplePack is forbidden in v1 mode');
     }
     const artificerInstruction = ARTIFICER_PROTOCOL_INSTRUCTION
-      + (input.contextMode === 'v2' ? V2_CONTEXT_INSTRUCTION : V1_CONTEXT_INSTRUCTION);
+      + (input.contextMode === 'v2' ? V2_CONTEXT_INSTRUCTION : V1_CONTEXT_INSTRUCTION)
+      // PRI-714: language directive for human-readable implementation fields
+      // (empty string when outputLanguage is undefined).
+      + buildLanguageDirective(input.outputLanguage, 'implementation');
     const promptInput: ArtificerPromptInput = {
       contextMode: input.contextMode,
       taskId: input.taskId,

@@ -58,6 +58,7 @@ import type {
 } from '../runner/peer-runner-types.js';
 import type { LoadedPredecessorArtifact } from './attach-summary-envelope.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
+import type { OutputLanguage } from '../language-directive.js';
 import { EVALUATOR_STAGE1_MANIFEST, EVALUATOR_STAGE2_MANIFEST } from './context-manifests.js';
 import { extractIntentContract, type IntentContractV1 } from './intent-contract.js';
 import { evaluateFlaggedCriteria, isForcedStage2 } from './progressive-evaluator.js';
@@ -303,6 +304,13 @@ export interface ResolvedEvaluatorRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /**
+   * Owner's preferred language for review fields (PRI-714). Forwarded to
+   * EvaluatorPromptBuilder so summary/concerns/requiredChanges/codeReview
+   * explanations follow the owner's language. Undefined = no directive
+   * (backward compatible).
+   */
+  readonly outputLanguage?: OutputLanguage;
 }
 
 export const DEFAULT_EVALUATOR_RUNNER_OPTIONS: Readonly<Omit<ResolvedEvaluatorRunnerOptions, 'owner' | 'runtimeKind'>> = {
@@ -320,6 +328,7 @@ export function resolveEvaluatorRunnerOptions(options: EvaluatorRunnerOptions): 
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_EVALUATOR_RUNNER_OPTIONS.agentId,
+    outputLanguage: options.outputLanguage,
   };
 }
 
@@ -405,6 +414,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   private readonly repairTaskSeeder: ((params: SeedArtificerRepairParams) => Promise<string>) | null;
   /** PRI-630: runtime-authoritative tool facts; null = catalog unavailable (degraded rule in prompt) */
   private readonly hostToolCatalog: HostToolCatalogFacts | null;
+  /**
+   * PRI-714: owner's preferred language for review fields, forwarded into
+   * the evaluator prompt (language directive on summary/concerns/…).
+   * Undefined = no directive (backward compatible).
+   */
+  private readonly outputLanguage: OutputLanguage | undefined;
 
   constructor(deps: EvaluatorRunnerDeps, options: EvaluatorRunnerOptions) {
     super(deps, options, {
@@ -421,6 +436,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     this.repairLoopEnabledResolver = deps.isRepairLoopEnabled ?? null;
     this.repairTaskSeeder = deps.seedArtificerRepairTask ?? null;
     this.hostToolCatalog = options.hostToolCatalog ?? null;
+    this.outputLanguage = options.outputLanguage;
   }
 
   /**
@@ -820,6 +836,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       sourceArtificerArtifactId: context.sourceArtificerArtifactId ?? '',
       previousEvaluation: context.previousEvaluation,
       hostToolCatalog: this.hostToolCatalog ?? undefined,
+      // PRI-714: language directive for review fields (undefined = none).
+      outputLanguage: this.outputLanguage,
       // PRI-703 Phase 1: the scribe artifact's Owner-intent contract is the
       // primary intentConsistency anchor. Extracted from the FULL parsed
       // scribe artifact (before any manifest narrowing — the contract is
