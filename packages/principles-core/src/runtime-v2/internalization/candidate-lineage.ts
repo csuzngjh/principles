@@ -291,7 +291,13 @@ export class CandidateLineage {
           if (!rebound.ok) return rebound;
           artifact = rebound.value;
           if (artifact === null) {
-            notes.push({ code: 'ancestor_pruned', artifactId, detail: `ancestor artifact ${artifactId} not found (pruned)` });
+            notes.push({
+              code: 'ancestor_pruned',
+              artifactId,
+              detail: rebound.ambiguousCandidates !== undefined
+                ? `ancestor artifact ${artifactId} not rebound: ambiguous current artifacts for source task (${rebound.ambiguousCandidates} same-family candidates) — refusing to pick by array order`
+                : `ancestor artifact ${artifactId} not found (pruned)`,
+            });
             this.emit({ type: 'lineage_partial', artifactId, noteCode: 'ancestor_pruned', detail: 'artifact not found' });
             continue;
           }
@@ -366,21 +372,40 @@ export class CandidateLineage {
   /**
    * PRI-717: attempt to resolve a dangling lineage edge to the producer
    * task's CURRENT artifact. Only fires when the edge id follows the
-   * producer convention AND that task still has a durable artifact; any other
-   * outcome keeps the fail-closed `ancestor_pruned` handling in the caller.
+   * producer convention AND that task still has a durable artifact of the
+   * SAME id family; any other outcome keeps the fail-closed
+   * `ancestor_pruned` handling in the caller.
+   *
+   * Review fix (rebind identity): the durable logical identity is
+   * (sourceTaskId, artifactKind) — an evaluator task may carry BOTH a
+   * `pi-art-…` principle row and a `pi-rule-…` rule row. The stale edge
+   * names a `pi-art-` instance of the task, so only the CURRENT instance of
+   * the SAME id family is a rebound candidate — never another kind's row
+   * and never array order. `matches.length !== 1` (0 = no current instance
+   * of this family, >1 = data anomaly against UNIQUE(source_task_id,
+   * artifact_kind)) stays fail-closed, with the ambiguity reported back so
+   * the caller's note says why — never a silent pick.
    *
    * The rebind result is cached under the STALE id so repeated edges to the
    * same superseded instance stay idempotent within one request (CP-18).
    */
   private async tryReboundInstance(
     staleArtifactId: string,
-  ): Promise<{ ok: true; value: PIArtifactRecord | null } | { ok: false; error: LineageError }> {
+  ): Promise<
+    | { ok: true; value: PIArtifactRecord | null; ambiguousCandidates?: number }
+    | { ok: false; error: LineageError }
+  > {
     const taskId = parseArtifactInstanceTaskId(staleArtifactId);
     if (taskId === null) return { ok: true, value: null };
     try {
-      const current = await this.artifacts.listBySourceTaskId(taskId);
-      const resolved = current[0] ?? null;
-      if (resolved === null) return { ok: true, value: null };
+      const candidates = await this.artifacts.listBySourceTaskId(taskId);
+      const instancePrefix = `${ARTIFACT_ID_PREFIX}${taskId}-run_`;
+      const matches = candidates.filter((candidate) => candidate.artifactId.startsWith(instancePrefix));
+      if (matches.length !== 1) {
+        return { ok: true, value: null, ...(matches.length > 1 ? { ambiguousCandidates: matches.length } : {}) };
+      }
+      const [resolved] = matches;
+      if (resolved === undefined) return { ok: true, value: null };
       this.cache.set(staleArtifactId, resolved);
       this.emit({
         type: 'lineage_edge_rebound',

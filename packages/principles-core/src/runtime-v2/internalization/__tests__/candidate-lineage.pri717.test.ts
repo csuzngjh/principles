@@ -241,6 +241,111 @@ describe('PRI-717 — stale lineage instance ids rebind to the current artifact'
     expect(h.listCalls).toHaveLength(0);
   });
 
+  // ── Review fix: rebind identity is (sourceTaskId, artifactKind) ─────────────
+  // An evaluator task may carry BOTH a `pi-art-…` principle row and a
+  // `pi-rule-…` rule row (evaluator-runner writes a rule artifact for
+  // code-bearing candidates). The stale edge names a `pi-art-` instance, so
+  // only the current instance of the SAME id family is a rebound candidate.
+
+  /** A current `pi-rule-…` row for a task (rule-family id shape). */
+  function makeRuleArtifact(taskId: string, seq: number, contentJson: unknown): PIArtifactRecord {
+    return {
+      artifactId: `pi-rule-${taskId}-run_${taskId}_${seq}`,
+      artifactKind: 'rule',
+      sourceTaskId: taskId,
+      lineageArtifactIds: [],
+      validationStatus: 'validated' as PIArtifactValidationStatus,
+      contentJson: typeof contentJson === 'string' ? contentJson : JSON.stringify(contentJson),
+      createdAt: '2026-09-09T11:30:00Z',
+      updatedAt: '2026-09-09T11:30:00Z',
+    };
+  }
+
+  it('multi-kind task: stale principle edge rebinds to the CURRENT PRINCIPLE row, never the rule row', async () => {
+    const stale = instanceId(SCRIBE_TASK, 1);
+    const start = makeArtifact('task-a', 1, [stale], { a: 1 });
+    const principleCurrent = makeArtifact(SCRIBE_TASK, 2, [], { principle: 'p' });
+    const ruleCurrent = makeRuleArtifact(SCRIBE_TASK, 1, { rule: 'r' });
+    const h = makeHarness([start, principleCurrent, ruleCurrent], [
+      { taskId: 'task-a', taskKind: 'artificer' },
+      { taskId: SCRIBE_TASK, taskKind: 'scribe' },
+    ]);
+    const result = await h.makeLineage().resolve(start.artifactId);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const scribeNode = result.value.nodes.find((n) => n.taskKind === 'scribe');
+    expect(scribeNode?.artifactId).toBe(instanceId(SCRIBE_TASK, 2));
+    const rebound = h.events.filter((e) => e.type === 'lineage_edge_rebound');
+    expect(rebound).toHaveLength(1);
+    if (rebound[0]?.type === 'lineage_edge_rebound') {
+      expect(rebound[0].resolvedArtifactId).toBe(instanceId(SCRIBE_TASK, 2));
+    }
+  });
+
+  it('multi-kind task: reversing the store order does NOT change the rebound target', async () => {
+    const stale = instanceId(SCRIBE_TASK, 1);
+    const principleCurrent = makeArtifact(SCRIBE_TASK, 2, [], { principle: 'p' });
+    const ruleCurrent = makeRuleArtifact(SCRIBE_TASK, 1, { rule: 'r' });
+    const start = makeArtifact('task-a', 1, [stale], { a: 1 });
+    const tasks = [
+      { taskId: 'task-a', taskKind: 'artificer' },
+      { taskId: SCRIBE_TASK, taskKind: 'scribe' },
+    ];
+    // Store iterates in insertion order — exercise BOTH orders.
+    const h1 = makeHarness([start, principleCurrent, ruleCurrent], tasks);
+    const h2 = makeHarness([start, ruleCurrent, principleCurrent], tasks);
+
+    for (const h of [h1, h2]) {
+      const result = await h.makeLineage().resolve(start.artifactId);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.nodes.find((n) => n.taskKind === 'scribe')?.artifactId)
+        .toBe(instanceId(SCRIBE_TASK, 2));
+    }
+  });
+
+  it('stale principle edge with ONLY a current rule row stays fail-closed (no kind confusion)', async () => {
+    const stale = instanceId(SCRIBE_TASK, 1);
+    const start = makeArtifact('task-a', 1, [stale], { a: 1 });
+    const ruleCurrent = makeRuleArtifact(SCRIBE_TASK, 1, { rule: 'r' });
+    const h = makeHarness([start, ruleCurrent], [
+      { taskId: 'task-a', taskKind: 'artificer' },
+      { taskId: SCRIBE_TASK, taskKind: 'scribe' },
+    ]);
+    const result = await h.makeLineage().resolve(start.artifactId);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The rule row is a DIFFERENT id family — it must not satisfy a
+    // `pi-art-` edge, even though the task has a current artifact.
+    expect(result.value.nodes.find((n) => n.taskKind === 'scribe')).toBeUndefined();
+    expect(result.value.notes.some((n) => n.code === 'ancestor_pruned')).toBe(true);
+    expect(h.events.some((e) => e.type === 'lineage_edge_rebound')).toBe(false);
+  });
+
+  it('data anomaly (two same-family current rows) → ambiguous, fail-closed with explicit detail', async () => {
+    // UNIQUE(source_task_id, artifact_kind) makes this impossible through the
+    // real stores; the resolver must still refuse to pick by order.
+    const stale = instanceId(SCRIBE_TASK, 1);
+    const start = makeArtifact('task-a', 1, [stale], { a: 1 });
+    const anomalyA = makeArtifact(SCRIBE_TASK, 2, [], { anomaly: 'a' });
+    const anomalyB = { ...makeArtifact(SCRIBE_TASK, 3, [], { anomaly: 'b' }) };
+    anomalyB.updatedAt = '2026-09-09T12:00:00Z';
+    const h = makeHarness([start, anomalyA, anomalyB], [
+      { taskId: 'task-a', taskKind: 'artificer' },
+      { taskId: SCRIBE_TASK, taskKind: 'scribe' },
+    ]);
+    const result = await h.makeLineage().resolve(start.artifactId);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.nodes.find((n) => n.taskKind === 'scribe')).toBeUndefined();
+    const note = result.value.notes.find((n) => n.code === 'ancestor_pruned');
+    expect(note?.detail).toContain('ambiguous current artifacts');
+    expect(h.events.some((e) => e.type === 'lineage_edge_rebound')).toBe(false);
+  });
+
   it('stale and fresh edges to the same task produce ONE node and no spurious cycle note', async () => {
     const scribe1 = instanceId(SCRIBE_TASK, 1);
     const scribe2 = instanceId(SCRIBE_TASK, 2);
