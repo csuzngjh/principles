@@ -1,0 +1,90 @@
+name: Linear Issue Sync
+
+# GitHub -> Linear fact bridge (PRI-725).
+#
+# Scope guard — this is a FACT COLLECTOR, not a governance system:
+#   * It reads GitHub lifecycle facts (PR link, CI outcome).
+#   * It posts Chinese reminder comments.
+#   * It NEVER writes a Linear issue's state, priority, or labels.
+#
+# Why no state write: Linear's own GitHub Integration already owns the Level-1
+# fact "PR merged -> Issue Done". Verified 2026-09-10 — PRI-722 PR #1595
+# mergedAt=10:00:01Z, issue Done at 10:00:03Z, actor = the connected user, no
+# human involved; across the 84 merged PR links in team PRI every other issue
+# reached Done the same way, and the only exceptions were the Owner
+# deliberately moving PRI-703's Done back to In Progress (a multi-PR epic that
+# was not finished). A second writer would therefore be a second source of
+# truth and would silently undo deliberate Owner governance.
+#
+# It also deliberately does NOT reimplement linear-cli's context / start /
+# handoff / reconcile / audit — those are governance operations performed by
+# the AI or the Owner. This workflow only collects facts.
+
+on:
+  pull_request:
+    types: [opened, reopened, closed]
+  workflow_run:
+    # Scoped to the main CI workflow: a failing PR check is the only CI signal
+    # that is actionable from a Linear issue. All other workflows are ignored.
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  pr:
+    name: PR <-> Linear link
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      # advisory only — always exits 0 so a reminder can never block a PR
+      - name: Sync PR fact to Linear
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/ci/linear-sync.mjs pr --event-file "$GITHUB_EVENT_PATH"
+
+  ci-failure:
+    name: CI failure reminder
+    if: |
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      - name: Notify the linked Linear issue
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/ci/linear-sync.mjs ci-failure --event-file "$GITHUB_EVENT_PATH"
