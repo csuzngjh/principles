@@ -1022,6 +1022,14 @@ For Linear-backed work:
 10. when a comment overturns a ticket's diagnosis, or the described work is superseded by another mechanism, update the ticket state (`Canceled` with rationale) in the same action — a correcting comment alone is not a close-out;
 11. a merged PR whose ticket still sits in `In Review` is closed (`Done` with the PR link) by the next reconciliation audit.
 
+12. for the mechanical parts of this workflow, prefer the local `linear-cli`
+    lifecycle commands over composing CRUD calls by hand:
+    `linear context <ID>` before coding, `linear start <ID>` to enter
+    `In Progress` (fail-closed on blockers), `linear handoff <ID> --pr <url>`
+    after creating a PR, and `linear reconcile --dry-run` for periodic drift
+    checks. The CLI lives at `scripts/linear-cli/` (single maintenance source;
+    see its `SKILL.md`). It never merges a PR and never auto-clears a blocker.
+
 Rules 9–11 exist because work legitimately completes outside its own ticket
 (adhoc repair PRs, fixes landing under a sibling ticket, diagnoses overturned
 or superseded). Without an explicit close-out action at PR creation time,
