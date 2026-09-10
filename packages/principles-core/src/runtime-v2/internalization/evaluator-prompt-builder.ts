@@ -1,11 +1,21 @@
 import { serializePromptInput } from './prompt-serializer.js';
 import type { IntentContractV1 } from './intent-contract.js';
+import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
 
 export interface EvaluatorPromptBuilderInput {
   taskId: string;
   contextHash: string;
   sourceArtificerArtifactId: string;
   artificerArtifact: unknown;
+  /**
+   * Owner's preferred language for review fields (PRI-714). When provided,
+   * the evaluator instruction carries a language directive so summary /
+   * strengths / concerns / requiredChanges / codeReview explanations are
+   * written in the owner's language. Undefined = no directive (backward
+   * compatible).
+   */
+  outputLanguage?: OutputLanguage;
   /**
    * Scribe principle artifact (RuleHost MVP Activation, PRD Decision 12).
    * Present when code review applies (artificer output is V2). Carries the
@@ -206,6 +216,9 @@ export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v4'
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(input: EvaluatorPromptBuilderInput): EvaluatorPromptBuildResult {
+    // PRI-714: language directive for review fields (empty string when
+    // outputLanguage is undefined — instruction stays byte-identical).
+    const languageDirective = buildLanguageDirective(input.outputLanguage, 'review');
     const promptInput: EvaluatorPromptInput = {
       taskId: input.taskId,
       contextHash: input.contextHash,
@@ -217,7 +230,7 @@ export class EvaluatorPromptBuilder {
       // PRI-703 Phase 1: only include intentContract when present (pre-contract
       // scribe artifacts), so prompts stay backward-compatible.
       ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),
-      evaluatorInstruction: EVALUATOR_PROTOCOL_INSTRUCTION,
+      evaluatorInstruction: EVALUATOR_PROTOCOL_INSTRUCTION + languageDirective,
       promptContractVersion: EVALUATOR_PROMPT_CONTRACT_VERSION,
     };
 

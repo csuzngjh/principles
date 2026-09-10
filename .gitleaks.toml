@@ -11,4 +11,9 @@ paths = [
   '''packages/.*/__tests__/.*\.ts''',
   '''packages/.*/src/.*/__tests__/.*\.ts''',
   '''packages/.*/tests/.*\.ts''',
+  # closure-lab fixtures carry formula-derived synthetic credentials by
+  # design (install-time token traps: scenario E config.json, scenario F
+  # four cross-asset families), regenerated deterministically by
+  # generate.mjs — never real secrets.
+  '''scripts/dev/pipeline-closure-lab/scenarios/.*''',
 ]

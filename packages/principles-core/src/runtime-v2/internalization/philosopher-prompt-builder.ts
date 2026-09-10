@@ -21,6 +21,7 @@
 import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
 import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.js';
 import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
 
 export interface PhilosopherPromptBuilderInput {
   taskId: string;
@@ -52,11 +53,20 @@ export interface PhilosopherPromptBuildResult {
  * When `coreGrounding` is true, a CORE AXIOMS section is injected so the
  * Philosopher can check whether the new principle candidate duplicates or
  * contradicts an existing core principle.
+ *
+ * PRI-714 (review fix): when `outputLanguage` is provided, a language
+ * directive is appended so the OUTPUT (not just the axiom block) follows the
+ * owner's language — thesis/principleCandidate.{title,rationale,scope}/risks
+ * are the human-readable fields (confidence stays numeric; lineage IDs stay
+ * untranslated). Undefined = no directive (byte-identical to pre-PRI-714).
  */
 export function buildPhilosopherProtocolInstruction(
   opts: CoreAxiomBlockOptions = {},
 ): string {
   const coreAxiomsBlock = buildCoreAxiomBlock(opts);
+  // PRI-714: output-language directive (empty string when outputLanguage is
+  // undefined — instruction stays byte-identical).
+  const languageDirective = buildLanguageDirective(opts.outputLanguage, 'philosopher');
 
   return `You are a Philosopher agent in a principle internalization pipeline. Your role is to distill a principle candidate from the Dreamer's alternative decision analysis.
 
@@ -92,7 +102,7 @@ CONSTRAINTS:
 - sourceDreamerArtifactId MUST be copied exactly from input.sourceDreamerArtifactId (non-empty string)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 - If the CORE AXIOMS section is provided, check whether the new principle candidate duplicates or contradicts any existing core axiom. If it does, note this in the risks array
-`;
+${languageDirective}`;
 }
 
 export class PhilosopherPromptBuilder {

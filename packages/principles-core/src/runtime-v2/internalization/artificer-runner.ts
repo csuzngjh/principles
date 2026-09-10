@@ -898,6 +898,10 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // generation anchors to the explicit intent. extract returns null for
       // pre-contract artifacts → undefined keeps the prompt unchanged.
       intentContract: intentContract ?? undefined,
+      // PRI-714: language directive for implementationSummary/risks
+      // (undefined = no directive; never touches implementationCode or
+      // goldenTraceCases params).
+      outputLanguage: this.resolvedOptions.outputLanguage,
     });
     // P1-1: rollout revision feedback 注入 (与 scribe 同模式; repairFeedback
     // 走 prompt builder 字段,revisionFeedback 是路由文本,直接附加)

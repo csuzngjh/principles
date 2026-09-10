@@ -1,0 +1,73 @@
+version: "3.9"
+services:
+  api:
+    image: registry.internal/orders-api:2.4.1
+    ports:
+      - "8421:8421"
+    environment:
+      REGISTRY_TOKEN: "rtok-ebf47f65-d523-813f"
+      REGION: "cn-east-1"
+      DEPLOYMENT_ID: "dep-ebf47f65-d523-813f"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8421/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 512M
+
+  monitor:
+    image: prom/node-exporter:v1.8.2
+    ports:
+      - "9100:9100"
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - /:/host:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9100/metrics >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  log-collector:
+    image: cr.fluentbit.io/fluent/fluent-bit:4.0.12
+    command:
+      - "-i"
+      - "forward"
+      - "-o"
+      - "stdout"
+    ports:
+      - "24224:24224"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M

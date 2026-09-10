@@ -1,0 +1,10 @@
+{
+  "name": "orders-db-migrations",
+  "version": "0.42.0",
+  "private": true,
+  "description": "orders DB migrations: apply/dry-run gate over migrations/*.sql.",
+  "scripts": {
+    "apply": "node apply-migration.js",
+    "verify": "node verify.js"
+  }
+}

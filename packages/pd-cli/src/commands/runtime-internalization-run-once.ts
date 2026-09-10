@@ -490,6 +490,15 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   const configLoad = loadPdConfig(workspaceDir);
   const effectiveConfig: EffectivePdConfig | undefined = configLoad.ok ? configLoad.effective : configLoad.defaults;
 
+  // PRI-714: resolve outputLanguage ONCE for every runner branch below —
+  // before, only the scribe branch read the workspace language (PRI-336),
+  // so dreamer/philosopher/artificer/evaluator/rollout_reviewer prompts
+  // never carried the directive. readOutputLanguageFromWorkspace (the same
+  // resolver the scribe branch uses) keeps the malformed-config degradation
+  // semantics (ERR-002/ERR-009) on this path.
+  const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
+  const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
+
   // PRI-670: profile timeout fallback for the runner deadline. The shared
   // resolver reads the diagnostician binding (the binding ALL peer stages
   // share today) — on any resolution error, fall back to the 300s default
@@ -547,20 +556,17 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           const validator = new DefaultDreamerValidator();
           const runner = new DreamerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'philosopher') {
           const validator = new DefaultPhilosopherValidator();
           const runner = new PhilosopherRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'scribe') {
-          // PRI-336: Read outputLanguage from workspace config
-          const outputLangResult = readOutputLanguageFromWorkspace(workspaceDir);
-          const outputLanguage: OutputLanguage | undefined = outputLangResult.outputLanguage;
           const validator = new DefaultScribeValidator();
           const runner = new ScribeRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
@@ -571,7 +577,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           const validator = new DefaultArtificerValidator();
           const runner = new ArtificerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, effectiveConfig },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, effectiveConfig, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'evaluator') {
@@ -605,6 +611,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
               timeoutMs: effectiveTimeoutMs,
               effectiveConfig,
               gateDeps: evaluatorGateDeps,
+              outputLanguage,
             },
           );
           runnerResult = await runner.run(wakeResult.taskId);
@@ -623,7 +630,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           const { reopenRevisionTarget } = createRolloutGovernanceDeps(workspaceDir, orchestrator);
           const runner = new RolloutReviewerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, reopenRevisionTarget },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, outputLanguage },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else {
