@@ -1022,13 +1022,29 @@ For Linear-backed work:
 10. when a comment overturns a ticket's diagnosis, or the described work is superseded by another mechanism, update the ticket state (`Canceled` with rationale) in the same action — a correcting comment alone is not a close-out;
 11. a merged PR whose ticket still sits in `In Review` is closed (`Done` with the PR link) by the next reconciliation audit.
 
-12. for the mechanical parts of this workflow, prefer the local `linear-cli`
-    lifecycle commands over composing CRUD calls by hand:
-    `linear context <ID>` before coding, `linear start <ID>` to enter
-    `In Progress` (fail-closed on blockers), `linear handoff <ID> --pr <url>`
-    after creating a PR, and `linear reconcile --dry-run` for periodic drift
-    checks. The CLI lives at `scripts/linear-cli/` (single maintenance source;
-    see its `SKILL.md`). It never merges a PR and never auto-clears a blocker.
+12. for the mechanical parts of this workflow use the `linear-cli` skill
+    rather than composing CRUD calls by hand. PD's usage is:
+
+    * before coding — `context <ID>`;
+    * to enter `In Progress` — `start <ID>` (fails closed on blockers);
+    * after creating a PR — `handoff <ID> --pr <url>`;
+    * periodic drift repair — `reconcile` (dry-run by default);
+    * workspace hygiene — `audit` (read-only).
+
+    This applies to **Linear work on PD**, and is the only Linear guidance PD
+    owns. The CLI itself is *not* PD code: it is user-level agent
+    infrastructure living at `~/.agents/skills/linear-cli/`, and any project
+    may use it. Command semantics, flags and output contract are documented by
+    that skill's `SKILL.md` — do not restate them here.
+
+    Two invariants PD relies on and must not weaken: the CLI **never merges a
+    PR**, and it **never auto-clears a blocker**. All AI-authored Linear text
+    for PD work is written in Chinese.
+
+    Rationale for the boundary: PD owns *its own* Linear workflow, not the
+    generic tool. Hosting the implementation in this repository would force
+    every other consumer to copy it, which is exactly the drift this rule
+    exists to prevent (PRI-722 boundary correction).
 
 Rules 9–11 exist because work legitimately completes outside its own ticket
 (adhoc repair PRs, fixes landing under a sibling ticket, diagnoses overturned
