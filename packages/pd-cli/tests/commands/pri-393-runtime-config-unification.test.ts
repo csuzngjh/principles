@@ -119,8 +119,10 @@ describe('PRI-393: runtime config unification', () => {
         }
 
         for (const block of importBlocks) {
-          // Allow resolveRuntimeConfigFromPdConfig but NOT bare resolveRuntimeConfig
-          if (block.includes('resolveRuntimeConfig') && !block.includes('resolveRuntimeConfigFromPdConfig')) {
+          // Allow the canonical resolver family — resolveRuntimeConfigFromPdConfig
+          // (shared diagnostician binding) and resolveRuntimeConfigForAgent (the
+          // PRI-719 per-agent variant) — but NOT bare legacy resolveRuntimeConfig
+          if (block.includes('resolveRuntimeConfig') && !block.includes('resolveRuntimeConfigFromPdConfig') && !block.includes('resolveRuntimeConfigForAgent')) {
             // This is the legacy import — fail
             expect.fail(
               `${file} still imports legacy resolveRuntimeConfig from @principles/core/runtime-v2. ` +

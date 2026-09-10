@@ -163,6 +163,19 @@ vi.mock('@principles/core/runtime-v2', () => ({
   isRuntimeConfigError: vi.fn().mockImplementation((result: unknown) => result != null && typeof result === 'object' && Object.hasOwn(result, 'reason') && !Object.hasOwn(result, 'runtimeKind')),
   validateRuntimeConfig: vi.fn(),
   resolveRuntimeConfigFromPdConfig: vi.fn().mockReturnValue({ runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main' }),
+  // PRI-719: run-once resolves the SELECTED runner's agent binding through
+  // the per-agent variant — this is the seam the PRI-670 timeout tests mock.
+  resolveRuntimeConfigForAgent: vi.fn().mockReturnValue({ runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main' }),
+  // PRI-719: the real taskKind→agent mapping (stable constant, mirrored here
+  // because the whole core module is mocked in this file).
+  AGENT_NAME_FOR_TASK_KIND: {
+    dreamer: 'dreamer',
+    philosopher: 'philosopher',
+    scribe: 'scribe',
+    artificer: 'artificer',
+    evaluator: 'evaluator',
+    rollout_reviewer: 'rolloutReviewer',
+  },
   resolveOutputLanguage: vi.fn().mockReturnValue({ outputLanguage: 'zh-CN' }),
 }));
 
@@ -508,9 +521,13 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     const customWs = '/tmp/test-workspace';
     await handleRuntimeInternalizationRunOnce({ workspace: customWs, runtime: 'config', json: true });
 
-    // PRI-393: verify resolveRuntimeFromPdConfig was called with workspace dir
+    // PRI-393 + PRI-719: resolveRuntimeFromPdConfig is called with the
+    // workspace dir AND the selected runner's agent binding (default
+    // second arg getEnvVar omitted → undefined).
     expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith(
       expect.stringContaining('test-workspace'),
+      undefined,
+      'dreamer',
     );
   });
 
@@ -824,7 +841,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     // the PRI-670 fix the runner deadline stayed hardcoded at 300s and the
     // profile value only reached the adapter as a per-request timeout.
     const coreModule = await import('@principles/core/runtime-v2');
-    vi.mocked(coreModule.resolveRuntimeConfigFromPdConfig).mockReturnValue({
+    vi.mocked(coreModule.resolveRuntimeConfigForAgent).mockReturnValue({
       runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
       apiKeyEnv: 'TEST_API_KEY', timeoutMs: 600_000, agentId: 'main',
     } as never);
@@ -857,7 +874,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
       expect(output.effectiveTimeoutMs).toBe(600_000);
     } finally {
-      vi.mocked(coreModule.resolveRuntimeConfigFromPdConfig).mockReturnValue({
+      vi.mocked(coreModule.resolveRuntimeConfigForAgent).mockReturnValue({
         runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
         apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main',
       } as never);
@@ -866,7 +883,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
   it('PRI-670: --timeout-ms still wins over the profile timeoutMs', async () => {
     const coreModule = await import('@principles/core/runtime-v2');
-    vi.mocked(coreModule.resolveRuntimeConfigFromPdConfig).mockReturnValue({
+    vi.mocked(coreModule.resolveRuntimeConfigForAgent).mockReturnValue({
       runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
       apiKeyEnv: 'TEST_API_KEY', timeoutMs: 600_000, agentId: 'main',
     } as never);
@@ -892,7 +909,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
       expect(output.effectiveTimeoutMs).toBe(120_000);
     } finally {
-      vi.mocked(coreModule.resolveRuntimeConfigFromPdConfig).mockReturnValue({
+      vi.mocked(coreModule.resolveRuntimeConfigForAgent).mockReturnValue({
         runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
         apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main',
       } as never);

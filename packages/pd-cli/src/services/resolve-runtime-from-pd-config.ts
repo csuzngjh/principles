@@ -14,7 +14,7 @@
  */
 
 import {
-  resolveRuntimeConfigFromPdConfig,
+  resolveRuntimeConfigForAgent,
   isRuntimeConfigError,
   resolveAgentRuntimeBinding,
 } from '@principles/core/runtime-v2';
@@ -23,6 +23,7 @@ import type {
   RuntimeConfig,
   RuntimeConfigError,
 } from '@principles/core/runtime-v2';
+import type { InternalAgentName } from '@principles/core/runtime-v2';
 import { loadPdConfig } from './pd-config-loader.js';
 import type { PdConfigLoadResult } from './pd-config-loader.js';
 
@@ -71,13 +72,20 @@ function buildProfileLabel(profileId: string, profile: { type: string; provider?
  * in pd-cli commands. Legacy resolveRuntimeConfig(stateDir) must NOT be
  * called by probe/run-once/diagnose/pain-retry.
  *
+ * PRI-719: `agentName` selects whose `internalAgents.agents[agent]`
+ * .runtimeProfile binding resolves (default 'diagnostician' — the
+ * pain-signal bridge path). run-once passes the leased runner's agent so
+ * each stage executes on ITS declared profile (EP002-R2 F4).
+ *
  * @param workspaceDir - The resolved workspace directory.
  * @param getEnvVar - Env var accessor, defaults to process.env.
+ * @param agentName - Internal agent whose binding resolves (default diagnostician).
  * @returns Resolved runtime config with legacy warnings.
  */
 export function resolveRuntimeFromPdConfig(
   workspaceDir: string,
   getEnvVar: (name: string) => string | undefined = (name) => process.env[name],
+  agentName: InternalAgentName = 'diagnostician',
 ): ResolvedRuntimeFromPdConfig {
   const configLoadResult = loadPdConfig(workspaceDir);
 
@@ -110,12 +118,12 @@ export function resolveRuntimeFromPdConfig(
     };
   }
 
-  const result = resolveRuntimeConfigFromPdConfig(configLoadResult.effective, getEnvVar);
+  const result = resolveRuntimeConfigForAgent(configLoadResult.effective, agentName, { getEnvVar });
 
   // PRI-402: Extract profile ID and label for probe output alignment with doctor
   let runtimeProfileId: string | null = null;
   let runtimeProfileLabel: string | null = null;
-  const bindingResult = resolveAgentRuntimeBinding(configLoadResult.effective, 'diagnostician');
+  const bindingResult = resolveAgentRuntimeBinding(configLoadResult.effective, agentName);
   if (bindingResult.ok) {
     runtimeProfileId = bindingResult.profileId;
     runtimeProfileLabel = buildProfileLabel(bindingResult.profileId, bindingResult.profile);

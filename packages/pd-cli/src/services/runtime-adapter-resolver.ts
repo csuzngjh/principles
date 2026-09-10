@@ -32,7 +32,7 @@ import {
   isRuntimeConfigError,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter, PdL2ArtifactReader, RuntimeConfig, RuntimeConfigResult } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, PdL2ArtifactReader, RuntimeConfig, RuntimeConfigResult, InternalAgentName } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfig, computeFlagsFromLoadResult } from './pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from './resolve-runtime-from-pd-config.js';
@@ -80,6 +80,12 @@ export interface ResolveAdapterOptions {
   workspaceDir: string;
   /** Runner kind (for L2 dreamer routing). Optional. */
   runnerKind?: string;
+  /**
+   * PRI-719: internal agent whose runtimeProfile binding resolves
+   * (default 'diagnostician'). run-once passes the selected runner's agent
+   * so each stage executes on its own declared profile.
+   */
+  agentName?: InternalAgentName;
   /** CLI timeout override. Takes precedence over config timeoutMs. */
   timeoutMs?: number;
   /**
@@ -163,7 +169,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   }
 
   // ── Resolve config from .pd/config.yaml (for pi-ai, openclaw-cli, config) ──
-  const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir);
+  const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir, undefined, opts.agentName);
   const configResult: RuntimeConfigResult = resolved.result;
 
   // PRI-431 Step 1d: invoke onConfigResolved callback (for telemetry, legacyWarnings, etc.)
