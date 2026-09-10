@@ -737,15 +737,19 @@ ${JSON.stringify({
     }
   });
 
-  it('real handbook has exactly the one shipped structured recurrence (PR #1472)', () => {
+  it('real handbook structured recurrences parse cleanly and include the shipped set (PR #1472, PRI-729)', () => {
     const handbook = readFileSync(
       path.join(repoRoot, 'docs', 'process', 'error-management', 'ERROR_EXPERIENCE_HANDBOOK.md'),
       'utf8',
     );
     const r = parseRecurrenceMetaCjs(handbook);
     expect(r.errors).toEqual([]);
-    expect(r.recurrences).toHaveLength(1);
-    expect(r.recurrences[0].invariant).toBe('test-asserts-source-substring-not-wiring');
+    const invariants = r.recurrences.map((x: { invariant: string }) => x.invariant);
+    // Each shipped recurrence-meta block must stay parseable; a missing
+    // invariant here means the block was corrupted or silently dropped.
+    expect(invariants).toContain('test-asserts-source-substring-not-wiring'); // PR #1472
+    expect(invariants).toContain('comment-claims-flag-default-that-registry-contradicts'); // PRI-729 / ERR-023
+    expect(invariants).toContain('defensive-alternate-for-contract-impossible-state'); // PRI-729 / ERR-099
   });
 });
 
