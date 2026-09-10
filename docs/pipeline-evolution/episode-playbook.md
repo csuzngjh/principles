@@ -106,8 +106,26 @@ evolution-dataset/episode-<NNN>/
 | Bai 大 payload 方差 | 流挂起("Request timed out.")/abort/恰好 timeoutMs 整 | force-recovery + 换 flatkey-ds；timeoutMs 是唯一权威（#1524） |
 | lmstudio VRAM 被挤 | chat 端点挂起（HTTP 000） | nvidia-smi 先查；换 runtime |
 | OpenClaw 会话续轮污染 | 新会话答非所问/旧上下文 | 显式 --session-id；ping 检查（onboarding 问答不算污染） |
+| CLI 交付超时 ≠ 轮已死 | `openclaw agent` 630s gateway timeout，但网关侧轮仍在跑 | **不要重发**；轮询 `.state/trajectory.db` tool_calls 看实际推进（EP002-R2：T1 轮超时后网关继续完成） |
+| 网关计费熔断（402） | "cannot bypass unavailable profiles"，重启网关仍拒 | 熔断有两处持久层：`agents/main/agent/openclaw-agent.sqlite` 的 `auth_profile_state` 与 `state/openclaw.sqlite` 的 `config_machine_state.authProfiles.state`（`bai:default.disabledUntil`）；冷却 10min 自动过期——先直连探针判真伪（402 可能是瞬态），过期仍拒才清 state |
+| consumer 全链单 adapter | per-agent runtimeProfiles 配置了却没用，任务打错模型 | **PRI-719（未修）**：consumer 每 cycle 只解析 diagnostician 绑定供全链使用——选型矩阵改 diagnostician 一处生效；中途换 profile = 改配置+重启网关+force-recover 受影响任务 |
+| flatkey 配额中途耗尽 | 403 `insufficient_user_quota`（余额<预扣） | 直连探针确认 → 换档 → 重启 → `pd runtime recovery failed-tasks --confirm --force` |
+| artificer 输出截断 | `[output_invalid] LLM response truncated (finish_reason=length)`（PRI-707 留痕可查） | bai profile `maxTokens: 16000→32000`（EP002-R2 实证一次通过）；根治=PRI-720 prompt 链去代码化 + 截断自愈（未实施） |
+| tier2 证据结构性不可达 | evaluator `[input_invalid] required tier2 evidence unavailable (diagnostician.raw.evidence, …)`，同血缘 r1 过 r3 拒 | **PRI-717（未修）**：diag_rootcause 产物 lineage=[]，血缘上溯永远够不到 diagnostician。缓解=关 `context_manifest_budget`（回退 legacy 全前驱注入，progressive_evaluator 保持 ON） |
+| 修复种子复用空转 | evaluator 对同一产物反复打分（分数 0.35-0.90 摆动），log 出现 `repair task ...r2 already exists; reusing (idempotent seed)` | **PRI-718（未修）**：force-recovery 后迭代计数不前进。**不要反复 force-recover 评估器**——先查该日志行，确认空转就停手走 Owner 决策 |
+| NHR 裁决能力探测 | 需要判断 NHR 是 Owner 决策点还是 recovery | 读 `tasks.diagnostic_json` 的 `pi_metadata.humanReviewContext.reasonCode`，配 `deriveOwnerDecisionCapability`（core dist 直连脚本，见 EP002-R2 `tools/q-decision.mjs`）；`rollout_revision_reopen_failed` 族=recovery-only，`*_budget_exhausted` 族=decision-capable |
+| cleanup 脚本 cwd 误报 | 在 worktree 内跑 `dev:worktree:cleanup` 报 "not a git repository" | 必须从**主 checkout** 根目录运行 |
 
-## Episode 002 入场条件（2026-09-07 快照）
+## Episode 002-R2 复盘（2026-09-09/10，NOT_REACHED 收官）
 
-- 唯一管道断点：**PRI-700**（修复轮 requiredChanges 的 v2 case 名诱导 LLM 违反通道 schema，18/18 attempts 死锁）——修复后**只需复跑修复轮之后的链段**（scribe reopen→artificer→evaluator→rollout→Owner 决策→activation→transfer），估 1-2h
-- 可直接复用资产：`D:\pd-labs\evolution-episode-001\`（见其 INDEX.md）——transfer 夹具、原生基线行为数据、90 分级原则产物、全部证据包
+- 完整报告：`docs/pipeline-evolution/reports/episode-002-r2-report.md`（PR #1588）；机器结论+全套证据：`D:\pd-labs\evolution-ep002-r2\`（manifest 冻结于任何 LLM 会话前；episode-state.json 含环境交接与三处配置偏差记录）。
+- **结构性结论**：治理门被正面证明（对抗重放每轮抓真实缺陷，5+ epoch 宁拒不放行）；非收敛根因 = **Job Graph 未按 channel 分岗**（prompt 链被迫走代码岗，代码级反馈送措辞岗）——修复 = PRI-720 Channel-aware DAG（方案已定稿在工单）。
+- EP002-R2 修复入库：PRI-713（run-once dispatch 接线）+ prompt-serializer DAG/循环误判（合并时被 Owner 精化为 replacer 版）。
+
+## Episode 002-R3 入场条件（2026-09-10 快照）
+
+1. **PRI-720 合并**（前置）：合并后 prompt/defer 链 = Scribe→Rollout 语义模式，无 artificer/evaluator——预期链路成本降一个量级、EP002-R2 的非收敛类失败整类消失；code 链行为 byte-compatible。
+2. 可直接复用资产：`D:\pd-labs\evolution-ep002-r2\`——双胞胎夹具 stack-a/stack-b、冻结 oracle（B1-B6/N1-N3）、baseline（ep2r2-base，B4=3，injections=0）、S001 两轮配方。
+3. R3 只跑 treatment 一条 prompt 链（baseline 已有效）：核心指标 **B4: 3→0** 且 negative control（合法端口修改）不被阻塞。
+4. LLM 选型：artificer 档若跑 code 链建议 flatkey-ds 充值后启用（EP001/R2 实证更稳）或 bai+32k；prompt 链全 bai 可行。
+5. 注意 PRI-717/718/719 未修：跑 code 链前先看 §上文三个对应陷阱行；prompt 链不触达这些路径。
