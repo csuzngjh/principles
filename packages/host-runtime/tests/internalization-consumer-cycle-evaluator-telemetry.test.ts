@@ -227,6 +227,10 @@ describe('runInternalizationConsumerCycle — PRI-634 A3 workspace telemetry (sh
     // all peer stages share) — per-agent profile overrides win over
     // defaultRuntime, so point it at the slow-profile explicitly.
     (config.internalAgents.agents as Record<string, { runtimeProfile: string }>).diagnostician.runtimeProfile = 'pi-ai.llamacpp';
+    // PRI-719: the consumer resolves the LEASED stage's own binding — declare
+    // the evaluator's profile explicitly (previously the shared diagnostician
+    // resolver carried it for every stage).
+    (config.internalAgents.agents as Record<string, { runtimeProfile: string }>).evaluator.runtimeProfile = 'pi-ai.llamacpp';
     fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify(config));
     process.env.LLAMACPP_API_KEY = 'test-key';
 
