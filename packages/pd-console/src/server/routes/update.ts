@@ -46,6 +46,7 @@ import {
   LEGACY_MUTATION_AUTHORITY,
   RELEASE_MANAGER_AUTHORITY,
   MUTATION_KINDS,
+  type CompatFallbackReason,
   type MutationContext,
   type MutationKind,
 } from '../update/mutation-controller.js';
@@ -1981,8 +1982,9 @@ updateMutationController.register('rollback', { name: LEGACY_MUTATION_AUTHORITY,
 //
 // The legacy registrations above stay verbatim (replace-then-delete). This
 // layer decides per dispatch whether the preferred authority may serve:
-//   - `release_manager_shadow` flag off (default) → legacy serves, with the
-//     machine-readable fallback reason `release_manager_shadow_disabled`;
+//   - `release_manager_shadow` explicitly off (the registry default is ON since
+//     the 2026-09-07 graduation) → legacy serves, with the machine-readable
+//     fallback reason `release_manager_shadow_disabled`;
 //   - flag on → the ReleaseManager authority module is loaded and asked for
 //     per-kind readiness. A ready `check` is served under ReleaseManager
 //     governance with the response body still computed by the legacy path
@@ -2013,7 +2015,9 @@ function releaseManagerFlagEnabled(workspaceDir: string): boolean {
 
 /**
  * PRI-698 Phase 1: gates routing /apply-full to the ReleaseManager write
- * orchestration. Default off — the legacy updater serves with an explicit
+ * orchestration. The registry default is ON (2026-09-07 graduation), so an
+ * install with no explicit config value IS served by the ReleaseManager; only
+ * an explicit `enabled: false` routes to the legacy updater, with the
  * `release_manager_write_disabled` fallback reason. Requires the shadow flag
  * too (the whole authority layer is gated on it first).
  */
@@ -2022,7 +2026,7 @@ function releaseManagerWriteFlagEnabled(workspaceDir: string): boolean {
   return isFeatureEnabled(flags, 'release_manager_write_authority');
 }
 
-function fallbackToLegacyForAllKinds(reason: string): void {
+function fallbackToLegacyForAllKinds(reason: CompatFallbackReason): void {
   for (const kind of MUTATION_KINDS) {
     updateMutationController.unregister(kind, RELEASE_MANAGER_AUTHORITY);
     updateMutationController.setFallbackReason(kind, reason);
@@ -2306,7 +2310,9 @@ async function syncReleaseManagerAuthority(workspaceDir: string): Promise<void> 
       updateMutationController.unregister(rmKind, RELEASE_MANAGER_AUTHORITY);
       // PRI-698 Phase 1: a structurally-ready apply-full with the write flag
       // off is a deliberate gate, not an unavailability — name it distinctly.
-      const reason = readiness.ready && rmKind === 'apply-full'
+      // PRI-729: the reason is annotated with the declared vocabulary type, so
+      // an undocumented fallback is a compile error — not a silent string.
+      const reason: CompatFallbackReason = readiness.ready && rmKind === 'apply-full'
         ? 'release_manager_write_disabled'
         : `release_manager_unavailable:${readiness.reasons.join(',')}`;
       updateMutationController.setFallbackReason(rmKind, reason);
@@ -2320,6 +2326,44 @@ const UPDATE_MUTATION_KINDS: ReadonlyMap<string, MutationKind> = new Map([
   ['/apply-full', 'apply-full'],
   ['/rollback', 'rollback'],
 ]);
+
+/** kind → wire path, for routing telemetry only. */
+const MUTATION_KIND_PATHS: ReadonlyMap<MutationKind, string> = new Map(
+  [...UPDATE_MUTATION_KINDS].map(([subPath, kind]) => [kind, `/api/update${subPath}`]),
+);
+
+/**
+ * PRI-729 — fail-loud routing telemetry (ADR-0024 D-1).
+ *
+ * The compatibility fallback is a designed migration state, and a migration
+ * state nobody can see is indistinguishable from an accident. The
+ * `X-PD-Mutation-Fallback-Reason` response header is per-request; this emits
+ * ONE console line whenever a kind's resolved authority CHANGES, so an operator
+ * can see exactly which kinds are still served by the legacy updater and why —
+ * without the noise of the Companion's 6-hourly `/check` polling.
+ *
+ * Built from `describeGovernance()` rather than `resolveAuthority()`: the
+ * former reports `active: 'none'` instead of throwing, so the telemetry needs
+ * no alternate arm for the contract-impossible "no authority registered" state
+ * (ERR-099 — a defensive alternate for an unreachable state ships uncovered).
+ * The line is assembled branch-free from reachable-only parts.
+ */
+const lastLoggedRouting = new Map<MutationKind, string>();
+
+function logMutationRouting(): void {
+  const governance = updateMutationController.describeGovernance();
+  for (const kind of MUTATION_KINDS) {
+    const info = governance[kind];
+    const detail = [
+      info.fallback ? 'compatibility fallback' : 'preferred authority',
+      info.fallbackReason ?? '',
+    ].filter((part) => part.length > 0).join(': ');
+    const line = `${info.active} (${detail})`;
+    if (lastLoggedRouting.get(kind) === line) continue;
+    lastLoggedRouting.set(kind, line);
+    console.log(`[update] ${MUTATION_KIND_PATHS.get(kind) ?? kind} → ${line}`);
+  }
+}
 
 export async function handleUpdateRoute(
   req: IncomingMessage,
@@ -2336,5 +2380,7 @@ export async function handleUpdateRoute(
   // readiness state before the controller resolves the authority. Pure
   // routing/decision work — no runtime mutation happens here.
   await syncReleaseManagerAuthority(workspaceDir);
+  // PRI-729: make the routing decision observable (log on change only).
+  logMutationRouting();
   await updateMutationController.dispatch(req, res, { workspaceDir }, kind);
 }

@@ -50,6 +50,63 @@ export type MutationKind = 'check' | 'apply' | 'apply-full' | 'rollback';
 
 export const MUTATION_KINDS: readonly MutationKind[] = ['check', 'apply', 'apply-full', 'rollback'];
 
+/**
+ * PRI-729 — the closed vocabulary of compatibility-fallback reasons (ADR-0024 D-1).
+ *
+ * The ReleaseManager is the PREFERRED authority for every mutation kind and is
+ * consulted for all of them on every request (`createReleaseManagerAuthority`
+ * reports per-kind readiness before the controller resolves anything). A
+ * mutation therefore reaches the legacy console updater ONLY through one of the
+ * reasons below: the compatibility fallback is a DESIGNED migration decision,
+ * not an accident of which authority happened to register.
+ *
+ * Keeping the vocabulary closed is what makes "only an explicitly designed
+ * compatibility fallback may exist" checkable rather than aspirational — an
+ * undeclared reason is a type error at every call site and is reported loud at
+ * runtime (see `setFallbackReason`), never served silently.
+ *
+ * The parameterised forms carry a machine-readable sub-code after `:`:
+ *   - `release_manager_unavailable:<readiness reasons>` — the authority module
+ *     reports the kind not-ready (metadata source, layout, journal, or a
+ *     capability the ReleaseManager does not implement).
+ *   - `release_manager_refused_pre_transaction:<reason>` — the authority was
+ *     ready but refused BEFORE opening a transaction (zero side effects), so
+ *     the compatibility fallback may serve the request.
+ */
+export type CompatFallbackReason =
+  | 'release_manager_shadow_disabled'
+  | 'release_manager_write_disabled'
+  | 'installer_missing'
+  | 'authority_module_unavailable'
+  | `release_manager_unavailable:${string}`
+  | `release_manager_refused_pre_transaction:${string}`;
+
+/** Literal (non-parameterised) compatibility-fallback reasons. */
+export const COMPAT_FALLBACK_REASON_LITERALS = [
+  'release_manager_shadow_disabled',
+  'release_manager_write_disabled',
+  'installer_missing',
+  'authority_module_unavailable',
+] as const;
+
+/** Parameterised compatibility-fallback reason prefixes (sub-code follows `:`). */
+export const COMPAT_FALLBACK_REASON_PREFIXES = [
+  'release_manager_unavailable:',
+  'release_manager_refused_pre_transaction:',
+] as const;
+
+/**
+ * True when `reason` belongs to the declared compatibility-fallback vocabulary.
+ * The wiring's runtime guard uses this so an undeclared reason is reported loud
+ * instead of being served as an undocumented degradation.
+ */
+export function isDeclaredCompatFallbackReason(reason: string): boolean {
+  if ((COMPAT_FALLBACK_REASON_LITERALS as readonly string[]).includes(reason)) return true;
+  return COMPAT_FALLBACK_REASON_PREFIXES.some(
+    (prefix) => reason.startsWith(prefix) && reason.length > prefix.length,
+  );
+}
+
 export interface MutationContext {
   readonly workspaceDir: string;
 }
@@ -95,13 +152,26 @@ export class MutationController {
    * Emitted as the `X-PD-Mutation-Fallback-Reason` header whenever a dispatch
    * actually resolves to the fallback, and surfaced by describeGovernance().
    * Pass null to clear.
+   *
+   * PRI-729: the reason must be a member of the closed compatibility-fallback
+   * vocabulary. An undeclared reason is a programming error — a fallback was
+   * introduced without being designed — so it is reported loud (rc-9) while
+   * still being recorded, because refusing the Owner's mutation over a
+   * diagnostic string would be the worse failure.
    */
-  setFallbackReason(kind: MutationKind, reason: string | null): void {
+  setFallbackReason(kind: MutationKind, reason: CompatFallbackReason | null): void {
     if (reason === null) {
       this.fallbackReasons.delete(kind);
-    } else {
-      this.fallbackReasons.set(kind, reason);
+      return;
     }
+    if (!isDeclaredCompatFallbackReason(reason)) {
+      console.error(
+        `[mutation-controller] undeclared compatibility-fallback reason for kind "${kind}": ${JSON.stringify(reason)}. `
+        + 'Every compatibility fallback must be declared in mutation-controller.ts '
+        + '(COMPAT_FALLBACK_REASON_LITERALS / COMPAT_FALLBACK_REASON_PREFIXES).',
+      );
+    }
+    this.fallbackReasons.set(kind, reason);
   }
 
   getFallbackReason(kind: MutationKind): string | undefined {
