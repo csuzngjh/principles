@@ -41,7 +41,7 @@ Humans are the operators, supervisors, and risk owners.
 
 ## ⚡ Start here
 
-**Prerequisites:** Node.js ≥ 18 | OpenClaw CLI installed
+**Prerequisites:** Node.js ≥ 22 | OpenClaw CLI installed
 
 ### 🤖 I am an AI agent
 

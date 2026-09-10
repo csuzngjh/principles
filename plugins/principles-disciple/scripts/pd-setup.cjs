@@ -3,7 +3,7 @@
  * $pd-setup — per-workspace PD initialization for the Codex plugin.
  *
  * Steps (ADR-0020 §10.4; SPEC rev 2 §17 + G2A frozen disclosure, Slice D):
- *   1. Fail loud when Node < 20 or npm is unavailable (the plugin does not
+ *   1. Fail loud when Node < 22 or npm is unavailable (the plugin does not
  *      install a system runtime).
  *   2. Install the PINNED runtime (runtime-version.json) into the
  *      plugin-private PLUGIN_DATA/runtime — never into the project, never
@@ -87,10 +87,12 @@ async function main() {
   if (args.error) { fail(args.error, args.nextAction ?? 'Check the argument list.'); return; }
   const workspaceDir = path.resolve(args.workspace ?? process.cwd());
 
-  // 1. Environment gate.
+  // 1. Environment gate. The pinned @principles/core runtime depends on
+  //    better-sqlite3 ^13, whose prebuilt binaries require Node >= 22 — the
+  //    same floor as the installer's env gate and engines field (PRI-697).
   const major = Number.parseInt(process.versions.node.split('.')[0], 10);
-  if (!Number.isFinite(major) || major < 20) {
-    fail(`node_version_unsupported:${process.versions.node}`, 'Install Node.js >= 20 (https://nodejs.org), restart Codex, and re-run $pd-setup.');
+  if (!Number.isFinite(major) || major < 22) {
+    fail(`node_version_unsupported:${process.versions.node}`, 'Install Node.js >= 22 (https://nodejs.org), restart Codex, and re-run $pd-setup.');
     return;
   }
   const npmProbe = runNpm(['--version'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });

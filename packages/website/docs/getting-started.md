@@ -17,7 +17,7 @@ You're always in control. Nothing activates without your approval.
 
 ## Installation
 
-**Prerequisites**: Node.js ≥ 18 | OpenClaw CLI installed
+**Prerequisites**: Node.js ≥ 22 | OpenClaw CLI installed
 
 ### 1. Install
 

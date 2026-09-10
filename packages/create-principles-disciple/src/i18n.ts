@@ -117,6 +117,8 @@ const translations: Record<Language, Record<string, string>> = {
     rollback_fresh_clean_failed: 'The install failed before activation, and some partially deployed files could NOT be removed: {dirs}. They are not activated (no install manifest), but should be removed manually.',
     next_fresh_cleaned: 'Fix the error above and re-run the installer.',
     next_fresh_clean_failed: 'Remove the listed directories manually (they are not activated), then re-run the installer.',
+    // PRI-697 review P1: global pd shim files this run created survived the rollback.
+    rollback_global_shim_residue: 'Global pd shim files this run created could not be removed ({files}) — remove them manually.',
   },
   zh: {
     select_language: '选择语言',
@@ -234,6 +236,8 @@ const translations: Record<Language, Record<string, string>> = {
     rollback_fresh_clean_failed: '安装未激活即失败，且部分已部署文件无法移除：{dirs}。它们未被激活（无安装清单），但应手动移除。',
     next_fresh_cleaned: '请修复上方错误后重新运行安装器。',
     next_fresh_clean_failed: '请手动移除上述目录（它们未被激活），然后重新运行安装器。',
+    // PRI-697 评审 P1：本次安装创建的全局 pd shim 文件在回滚后仍残留。
+    rollback_global_shim_residue: '本次安装创建的全局 pd shim 文件未能移除（{files}）——请手动移除。',
   },
 };
 
