@@ -1,0 +1,31 @@
+diff --git a/packages/pd-companion/src/main/main.ts b/packages/pd-companion/src/main/main.ts
+--- a/packages/pd-companion/src/main/main.ts
++++ b/packages/pd-companion/src/main/main.ts
+@@ -10,3 +10,9 @@
++import { safeStorage, ipcMain } from "electron";
++  webPreferences: { sandbox: true, preload: path.join(__dirname, "..", "preload.cjs") },
++function saveState(): boolean {
++  const ok = persist();
++  return ok;
++}
++function restartFromTray(): boolean {
++  stopServer();
++  return true;
++}
+diff --git a/packages/pd-companion/src/preload.cts b/packages/pd-companion/src/preload.cts
+--- a/packages/pd-companion/src/preload.cts
++++ b/packages/pd-companion/src/preload.cts
+@@ -0,0 +1,4 @@
++import { contextBridge, ipcRenderer } from "electron";
++contextBridge.exposeInMainWorld("pdCompanion", {
++  configureConsoleToken: (t: string) => ipcRenderer.invoke("pd-companion:configure-console-token", t),
++});
+diff --git a/packages/pd-companion/tests/main/coexistence.test.ts b/packages/pd-companion/tests/main/coexistence.test.ts
+--- a/packages/pd-companion/tests/main/coexistence.test.ts
++++ b/packages/pd-companion/tests/main/coexistence.test.ts
+@@ -45,0 +46,10 @@
++  it('token encrypted via safeStorage', () => {
++    const source = src();
++    expect(source).toContain('safeStorage.encryptString');
++    expect(source).toContain('path.join(__dirname, .., preload.cjs)');
++  });

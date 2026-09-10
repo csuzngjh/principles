@@ -1,10 +1,16 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  parsePatternRouting,
+  parseRecurrenceMeta,
+  aggregateHotspots,
+} = require('./error-handbook-meta.cjs');
 
 const root = process.cwd();
 const handbookPath = path.join(root, 'docs', 'process', 'error-management', 'ERROR_EXPERIENCE_HANDBOOK.md');
 const indexPath = path.join(root, 'docs', 'process', 'error-management', 'ERROR_PATTERN_INDEX.md');
 const auditMode = process.argv.includes('--audit');
+const hotspotMode = process.argv.includes('--hotspots');
 
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8');
@@ -129,6 +135,62 @@ for (const block of errBlocks) {
       warnings.push(`${id} Recurrence field is ${(recBytes / 1024).toFixed(1)}KB (> ${MAX_RECURRENCE_BYTES / 1024}KB). Truncate to 3 most recent full entries; compress older ones to one-line summaries.`);
     }
   }
+}
+
+// === New check 5: Pattern routing metadata validation (Error Experience v2) ===
+// Every active EP card carries an error-pattern-routing HTML-comment JSON block;
+// syntax, enum values, heading/ID consistency, and uniqueness are enforced.
+const routing = parsePatternRouting(index);
+errors.push(...routing.errors);
+
+// === New check 6: Recurrence metadata validation (Error Experience v2) ===
+// recurrence-meta blocks adjacent to NEW recurrences are validated (required
+// fields, enums, date format, pattern existence). Historical recurrences
+// without metadata remain valid — the structured format is mandatory only
+// for recurrences recorded from the v2 effective date (2026-09-10).
+const recurrenceMeta = parseRecurrenceMeta(handbook);
+errors.push(...recurrenceMeta.errors);
+const routingIds = new Set(routing.patterns.map((p) => p.id));
+for (const r of recurrenceMeta.recurrences) {
+  if (!routingIds.has(r.pattern)) {
+    errors.push(`recurrence metadata references unknown pattern ${r.pattern}`);
+  }
+}
+
+// === New check 7: --hotspots mode — recurrence escalation report ===
+// Aggregates structured recurrence metadata into (pattern, invariant)
+// hotspots. Same invariant recurring >= 2 times within 90 days with no
+// mechanized guard ⇒ ENFORCEMENT DECISION REQUIRED (warning in v1 — this
+// report informs, it does not block the merge gate).
+if (hotspotMode) {
+  console.log('[check:error-handbook] === RECURRENCE HOTSPOTS ===');
+  const { hotspots, decisionRequired } = aggregateHotspots(
+    recurrenceMeta.recurrences,
+    routing.patterns,
+    new Date(),
+  );
+  if (hotspots.length === 0) {
+    console.log('[check:error-handbook] No structured recurrence metadata recorded yet.');
+    console.log('[check:error-handbook] New recurrences (from 2026-09-10) should add recurrence-meta blocks next to their narrative.');
+  } else {
+    for (const h of hotspots) {
+      console.log(`${h.pattern} / ${h.invariant}`);
+      console.log(`  structured recurrences: ${h.total} (recent 90d: ${h.recent}, last: ${h.lastDate})`);
+      if (h.escapedGates.length > 0) console.log(`  escaped gates: ${h.escapedGates.join(', ')}`);
+      console.log(`  caught by: ${h.caughtBy.join(', ')}`);
+      console.log(`  current guard: ${h.guard} (enforcement: ${h.enforcement})`);
+      if (decisionRequired.includes(h)) {
+        console.log('  status: ENFORCEMENT DECISION REQUIRED — repeated escape of the same invariant without mechanization.');
+        console.log('  Decide: blocking guard / advisory guard / semantic verification obligation / not-mechanizable + reason.');
+      }
+    }
+    if (decisionRequired.length > 0) {
+      console.log(`[check:error-handbook] ${decisionRequired.length} hotspot(s) require an enforcement decision.`);
+    } else {
+      console.log('[check:error-handbook] No hotspot currently requires an enforcement decision.');
+    }
+  }
+  process.exit(0);
 }
 
 // === New check 4: --audit mode — identify archivable entries ===
