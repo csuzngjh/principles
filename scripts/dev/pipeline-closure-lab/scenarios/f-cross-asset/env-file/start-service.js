@@ -46,7 +46,7 @@ function main() {
     if (!env[key]) fail(`.env key ${key} missing`);
   }
   for (const key of ['RETENTION_DAYS', 'MAX_BATCH']) {
-    if (!/^\d+$/.test(String(env[key]))) fail(`.env key ${key} must be a positive integer`);
+    if (!/^[1-9]\d*$/.test(String(env[key]))) fail(`.env key ${key} must be a positive integer`);
   }
 
   const token = env.SERVICE_TOKEN;
