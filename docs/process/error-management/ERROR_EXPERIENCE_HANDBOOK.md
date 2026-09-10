@@ -493,6 +493,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-06-27 PR #1079 — `migrate-illegal-expected-decision.ts` docstring claimed "默认 dry-run" but `parseArgs()` defaulted to write mode (no `--write` flag required). Operator running the script with no flags would mutate the DB. Fixed by flipping to `--write` opt-in.
   - 2026-08-21 RuleCode Owner promotion self-review (no Linear issue): the shared decision service initially had no explicit dry-run result, and the first real readiness wiring opened `RuntimeStateManager` in writable mode even though no promotion commit was intended. Future completion of all readiness checks could therefore have made `--dry-run` ambiguous, while initialization itself could migrate schema or create WAL state. Fixed by adding a first-class `would_promote` service result that never calls the atomic commit port and by constructing the manager with `readonly: true` for dry-run; production CLI tests assert the real constructor option and zero legacy mutation. Lesson: dry-run safety must cover both business mutation and connection/bootstrap side effects.
 
+  - 2026-09-10 PRI-729 / PR #1601 (CodeRabbit, CHANGES_REQUESTED): three comments still said the two update-authority flags "default off" while `feature-flag-contract.ts` graduated BOTH to `enabled: true` on 2026-09-07, and an absent `.pd/config.yaml` value resolves to the registry default. A reader trusting the comments concludes an unconfigured install never reaches the ReleaseManager — the exact routing question the PR documented; PRI-698 had flagged the same drift one document over. Lesson: the default lives in `feature-flag-contract.ts` while the prose lives anywhere — grep the registry before writing any `default <value>` claim.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-10",
+    "pattern": "EP-04",
+    "invariant": "comment-claims-flag-default-that-registry-contradicts",
+    "severity": "P2",
+    "escaped": "verify-merge",
+    "caughtBy": "pr-review",
+    "guard": "none"
+  }
+  -->
+
 ---
 **[ERR-024]** | Security validator exists but is not wired into enforcement path — defense is illusory
 
@@ -1190,6 +1203,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-08-17
 - **Recurrence**: Yes
   - 2026-08-28 PRI-615 / PR #1432 (self-review round 1): a new fail-loud guard branch (`max_attempts` validation in `sqlite-task-store.rowToFailedTaskSummary`) shipped with only the happy path covered — the throw block's 2 lines were flagged by the codecov patch comment (the gate itself passed at 91.67%, but the uncovered-branch pattern recurred). Unlike the original incident the branch is NOT contract-impossible (a corrupted DB column reaches it), so the fix was the "add a test per branch" arm of the rule: a corrupt-row regression that writes `max_attempts = 0` below the `TaskRecordSchema` bound via a bound `UPDATE` and asserts `listFailedTasks` throws. Lesson flavor: fail-loud validation guards are legitimate branches, but each one must ship with a corrupt-input regression in the same PR — "the sibling guard was also uncovered" is the file's existing convention, not a license.
+
+  - 2026-09-10 PRI-729 / PR #1601 (codecov/patch comment): `logMutationRouting()` assembled each line from `resolveAuthority(kind)` — documented to THROW when a kind has no registered authority — inside a `try/catch` whose catch arm emitted an `UNRESOLVED — …` line. `routes/update.ts` registers legacy for all four kinds at module load, so that arm is unreachable and codecov flagged exactly that one line (96.67%, advisory gate still passed). Fixed per THIS entry's prescription: the line is now built branch-free from `describeGovernance()` (reports `active: 'none'` instead of throwing) via `[label, reason ?? ''].filter(part => part.length > 0).join(': ')`. Lesson: when a helper offers both a throwing resolver and a total snapshot, observability code should take the total one — the defensive catch is the tell that the wrong accessor was chosen.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-10",
+    "pattern": "EP-09",
+    "invariant": "defensive-alternate-for-contract-impossible-state",
+    "severity": "P2",
+    "escaped": "verify-merge",
+    "caughtBy": "pr-review",
+    "guard": "codecov/patch"
+  }
+  -->
 
 ---
 **[ERR-105]** | Hardcoded light-mode hex colors bypass theme tokens on a dual-theme UI — timeline dots near-invisible in dark mode
