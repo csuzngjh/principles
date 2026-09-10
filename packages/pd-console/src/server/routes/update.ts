@@ -46,6 +46,7 @@ import {
   LEGACY_MUTATION_AUTHORITY,
   RELEASE_MANAGER_AUTHORITY,
   MUTATION_KINDS,
+  type CompatFallbackReason,
   type MutationContext,
   type MutationKind,
 } from '../update/mutation-controller.js';
@@ -2022,7 +2023,7 @@ function releaseManagerWriteFlagEnabled(workspaceDir: string): boolean {
   return isFeatureEnabled(flags, 'release_manager_write_authority');
 }
 
-function fallbackToLegacyForAllKinds(reason: string): void {
+function fallbackToLegacyForAllKinds(reason: CompatFallbackReason): void {
   for (const kind of MUTATION_KINDS) {
     updateMutationController.unregister(kind, RELEASE_MANAGER_AUTHORITY);
     updateMutationController.setFallbackReason(kind, reason);
@@ -2306,7 +2307,9 @@ async function syncReleaseManagerAuthority(workspaceDir: string): Promise<void> 
       updateMutationController.unregister(rmKind, RELEASE_MANAGER_AUTHORITY);
       // PRI-698 Phase 1: a structurally-ready apply-full with the write flag
       // off is a deliberate gate, not an unavailability — name it distinctly.
-      const reason = readiness.ready && rmKind === 'apply-full'
+      // PRI-729: the reason is annotated with the declared vocabulary type, so
+      // an undocumented fallback is a compile error — not a silent string.
+      const reason: CompatFallbackReason = readiness.ready && rmKind === 'apply-full'
         ? 'release_manager_write_disabled'
         : `release_manager_unavailable:${readiness.reasons.join(',')}`;
       updateMutationController.setFallbackReason(rmKind, reason);
@@ -2320,6 +2323,45 @@ const UPDATE_MUTATION_KINDS: ReadonlyMap<string, MutationKind> = new Map([
   ['/apply-full', 'apply-full'],
   ['/rollback', 'rollback'],
 ]);
+
+/** kind → wire path, for routing telemetry only. */
+const MUTATION_KIND_PATHS: ReadonlyMap<MutationKind, string> = new Map(
+  [...UPDATE_MUTATION_KINDS].map(([subPath, kind]) => [kind, `/api/update${subPath}`]),
+);
+
+/**
+ * PRI-729 — fail-loud routing telemetry (ADR-0024 D-1).
+ *
+ * The compatibility fallback is a designed migration state, and a migration
+ * state nobody can see is indistinguishable from an accident. The
+ * `X-PD-Mutation-Fallback-Reason` response header is per-request; this emits
+ * ONE console line whenever a kind's resolved authority CHANGES, so an operator
+ * can see exactly which kinds are still served by the legacy updater and why —
+ * without the noise of the Companion's 6-hourly `/check` polling.
+ */
+const lastLoggedRouting = new Map<MutationKind, string>();
+
+function logMutationRouting(): void {
+  for (const kind of MUTATION_KINDS) {
+    let line: string;
+    try {
+      const resolved = updateMutationController.resolveAuthority(kind);
+      if (!resolved.fallback) {
+        line = `${resolved.authority.name} (preferred authority)`;
+      } else {
+        const reason = updateMutationController.getFallbackReason(kind);
+        line = `${resolved.authority.name} (compatibility fallback${reason !== undefined ? `: ${reason}` : ''})`;
+      }
+    } catch (error) {
+      // Unresolvable is itself loud: an unregistered kind must never be a
+      // silent mutation path (the controller would refuse the dispatch anyway).
+      line = `UNRESOLVED — ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (lastLoggedRouting.get(kind) === line) continue;
+    lastLoggedRouting.set(kind, line);
+    console.log(`[update] ${MUTATION_KIND_PATHS.get(kind) ?? kind} → ${line}`);
+  }
+}
 
 export async function handleUpdateRoute(
   req: IncomingMessage,
@@ -2336,5 +2378,7 @@ export async function handleUpdateRoute(
   // readiness state before the controller resolves the authority. Pure
   // routing/decision work — no runtime mutation happens here.
   await syncReleaseManagerAuthority(workspaceDir);
+  // PRI-729: make the routing decision observable (log on change only).
+  logMutationRouting();
   await updateMutationController.dispatch(req, res, { workspaceDir }, kind);
 }

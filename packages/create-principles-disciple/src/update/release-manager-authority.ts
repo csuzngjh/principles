@@ -27,19 +27,20 @@
  * decision that must stay explicit (see the analysis doc §4.3); it can never
  * be relaxed for apply/apply-full/rollback.
  *
- * apply/apply-full/rollback stay structurally not-ready until the Phase 4
- * activation rollout opens the `shadow_mode_read_only` gate (its own go/no-go);
- * until then these kinds explicitly fall back to the legacy console updater —
- * TEMPORARY migration debt per ADR-0024 D-1, not a supported long-term state.
+ * `apply` and `rollback` stay structurally not-ready until their own work
+ * lands; until then these kinds explicitly fall back to the legacy console
+ * updater — TEMPORARY migration debt per ADR-0024 D-1, not a supported
+ * long-term state. The two gaps are independent (PRI-729 audit §4):
+ * `rollback` waits on the Phase 2 same-version restore (`ROLLBACK_AVAILABLE`),
+ * while `apply` is the plugin-diff mechanism, which the ReleaseManager does not
+ * implement at all — no signed whole-payload release can express it.
  *
  * PRI-698 Phase 1: `apply-full` (full-runtime update) is served by the real
  * ReleaseManager.apply() orchestration (installer + journal) and reports the
  * same base readiness as `check`. The CONSOLE additionally gates the routing
- * behind the `release_manager_write_authority` flag (default off) — flag-off
- * dispatches fall back explicitly with `release_manager_write_disabled`.
- * `apply` (the plugin-diff mechanism, which the ReleaseManager does not
- * implement) and `rollback` (Phase 2 — must prove same-version restore first)
- * stay structurally not-ready with explicit reasons.
+ * behind the `release_manager_write_authority` flag (default ON since the
+ * 2026-09-07 graduation) — flag-off dispatches fall back explicitly with
+ * `release_manager_write_disabled`.
  */
 
 import * as fs from 'node:fs';
@@ -56,12 +57,15 @@ import { resolveReleaseMetadataSource, type ReleaseMetadataSource } from './rele
 export const RELEASE_MANAGER_AUTHORITY_KINDS = ['check', 'apply', 'apply-full', 'rollback'] as const;
 export type ReleaseManagerAuthorityKind = (typeof RELEASE_MANAGER_AUTHORITY_KINDS)[number];
 
+/** Why a capability is structurally absent from the ReleaseManager (not a mere precondition). */
+export type ReleaseManagerStructuralGap = 'rollback_not_available' | 'plugin_diff_not_supported';
+
 export type ReleaseManagerAuthorityReason =
   | 'metadata_source_unconfigured'
   | 'bootstrap_not_installed'
   | 'install_state_corrupt'
   | 'journal_not_supported'
-  | 'rollback_not_available';
+  | ReleaseManagerStructuralGap;
 
 export interface ReleaseManagerAuthorityReadiness {
   readonly ready: boolean;
@@ -70,9 +74,14 @@ export interface ReleaseManagerAuthorityReadiness {
 
 /**
  * Structural gate for the kinds whose write path does not exist yet:
- * `rollback` arrives with the Phase 2 restore migration; `apply` (plugin
- * diff) is not a ReleaseManager mechanism at all. `apply-full` left this
- * gate in PRI-698 Phase 1.
+ * `rollback` arrives with the Phase 2 restore migration. `apply-full` left
+ * this gate in PRI-698 Phase 1.
+ *
+ * `apply` (plugin diff) is NOT gated here: it is not a ReleaseManager
+ * mechanism at all (see the `apply` kind below), so its reason is a separate
+ * structural gap — a plugin-diff update needs a "current deployment → target
+ * deployment" comparison that signed whole-payload releases cannot express.
+ * Conflating the two made the fallback reason inaccurate (PRI-729 audit §4 B3).
  */
 const ROLLBACK_AVAILABLE = false;
 
@@ -180,7 +189,10 @@ export function createReleaseManagerAuthority(
     },
     apply: {
       ready: false,
-      reasons: ROLLBACK_AVAILABLE ? baseReasons : ([...baseReasons, 'rollback_not_available'] as const),
+      // Structural, and independent of rollback: the plugin-diff mechanism is
+      // not a ReleaseManager mechanism, so this kind stays not-ready even once
+      // rollback lands (PRI-729 audit §4 B3).
+      reasons: [...baseReasons, 'plugin_diff_not_supported'] as const,
     },
     // PRI-698 Phase 1: the full-runtime write path exists (ReleaseManager.apply
     // → installer → journal). Console routing is additionally flag-gated

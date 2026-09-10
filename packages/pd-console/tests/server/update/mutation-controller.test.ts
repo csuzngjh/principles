@@ -35,6 +35,9 @@ import {
   RELEASE_MANAGER_AUTHORITY,
   PREFERRED_MUTATION_AUTHORITY,
   MUTATION_KINDS,
+  COMPAT_FALLBACK_REASON_LITERALS,
+  COMPAT_FALLBACK_REASON_PREFIXES,
+  isDeclaredCompatFallbackReason,
   type MutationContext,
 } from '../../../src/server/update/mutation-controller.js';
 
@@ -199,15 +202,76 @@ describe('MutationController fallback reasons (PRI-672)', () => {
   it('describeGovernance carries the fallbackReason only while a fallback with a reason serves', () => {
     const controller = new MutationController();
     controller.register('apply', { name: LEGACY_MUTATION_AUTHORITY, handler: okHandler('legacy') });
-    controller.setFallbackReason('apply', 'release_manager_unavailable:rollback_not_available');
+    controller.setFallbackReason('apply', 'release_manager_unavailable:plugin_diff_not_supported');
     expect(controller.describeGovernance().apply).toMatchObject({
       active: LEGACY_MUTATION_AUTHORITY,
       fallback: true,
-      fallbackReason: 'release_manager_unavailable:rollback_not_available',
+      fallbackReason: 'release_manager_unavailable:plugin_diff_not_supported',
     });
 
     controller.setFallbackReason('apply', null);
     expect(controller.describeGovernance().apply.fallbackReason).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRI-729 — the compatibility fallback is a DESIGNED decision, not an accident
+// ---------------------------------------------------------------------------
+
+describe('MutationController compatibility-fallback vocabulary (PRI-729)', () => {
+  it('declares exactly the fallback reasons the production wiring can produce', () => {
+    // The closed vocabulary IS the design record: if a fallback is added
+    // without extending this list, `setFallbackReason` reports it loud and the
+    // type checker rejects the call site.
+    expect([...COMPAT_FALLBACK_REASON_LITERALS]).toEqual([
+      'release_manager_shadow_disabled',
+      'release_manager_write_disabled',
+      'installer_missing',
+      'authority_module_unavailable',
+    ]);
+    expect([...COMPAT_FALLBACK_REASON_PREFIXES]).toEqual([
+      'release_manager_unavailable:',
+      'release_manager_refused_pre_transaction:',
+    ]);
+  });
+
+  it('accepts every declared literal and both parameterised forms', () => {
+    const controller = new MutationController();
+    const declared: string[] = [
+      ...COMPAT_FALLBACK_REASON_LITERALS,
+      'release_manager_unavailable:metadata_source_unconfigured,rollback_not_available',
+      'release_manager_unavailable:plugin_diff_not_supported',
+      'release_manager_refused_pre_transaction:metadata_refresh_failed',
+    ];
+    for (const reason of declared) {
+      expect(isDeclaredCompatFallbackReason(reason)).toBe(true);
+    }
+    // A parameterised form with no sub-code is not a declared reason — the
+    // sub-code is the whole point (it names WHICH capability is missing).
+    expect(isDeclaredCompatFallbackReason('release_manager_unavailable:')).toBe(false);
+    expect(isDeclaredCompatFallbackReason('release_manager_refused_pre_transaction:')).toBe(false);
+    expect(isDeclaredCompatFallbackReason('we_just_felt_like_it')).toBe(false);
+  });
+
+  it('reports an undeclared reason loud while still recording it (never a silent degradation)', async () => {
+    const controller = new MutationController();
+    controller.register('check', { name: LEGACY_MUTATION_AUTHORITY, handler: okHandler('legacy') });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      // @ts-expect-error — deliberately outside the declared vocabulary: the
+      // runtime guard, not just the type, must report this loud.
+      controller.setFallbackReason('check', 'undeclared_reason');
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('undeclared compatibility-fallback reason for kind "check"'),
+      );
+      // Still observable on the wire: refusing the Owner's mutation over a
+      // diagnostic string would be the worse failure.
+      const res = createMockResponse();
+      await controller.dispatch(createMockRequest('GET'), res, ctx, 'check');
+      expect(res._headers['x-pd-mutation-fallback-reason']).toBe('undeclared_reason');
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 
