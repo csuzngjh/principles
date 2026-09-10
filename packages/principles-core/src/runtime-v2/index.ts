@@ -9,7 +9,6 @@
  *   error-categories → PDErrorCategory, PDRuntimeError
  *   agent-spec      → AgentSpec, well-known agent IDs
  *   runtime-protocol → PDRuntimeAdapter, RuntimeKind, run lifecycle types
- *   runtime-selector → RuntimeSelector interface
  *   task-status     → PDTaskStatus, TaskRecord, DiagnosticianTaskRecord
  *   context-payload → ContextPayload, history/trajectory types
  *   diagnostician-output → DiagnosticianOutputV1
@@ -95,7 +94,6 @@ export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetry
 export { SchemaVersionRefSchema, RuntimeV2SchemaVersionSchema } from './schema-version.js';
 export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';
 export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema, PD_TASK_STATUSES, isPDTaskStatus } from './task-status.js';
-export { RuntimeSelectionCriteriaSchema } from './runtime-selector.js';
 // Context payload schemas (Phase 2)
 export { HistoryQueryEntrySchema, TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema, HistoryQueryResultSchema, DiagnosisTargetSchema, ContextPayloadSchema, DiagnosticianContextPayloadSchema, ToolCallEntrySchema, PainContextSchema, FullTracePayloadSchema, FullTracePayloadV2Schema, TraceSourceRefSchema, TraceTimelineEntrySchema, TraceEventKindSchema, SourceRefKindSchema, validateFullTracePayload, sanitizeFullTracePayload, buildFullTraceTimeline, buildSourceRefs, checkFullTracePayloadSchema, TRACE_EVENT_KINDS, SOURCE_REF_KINDS } from './context-payload.js';
 // Trace refiner (PRI-191)
@@ -157,13 +155,6 @@ export type {
   RuntimeArtifactRef,
   PDRuntimeAdapter,
 } from './runtime-protocol.js';
-
-// Runtime selector
-export type {
-  RuntimeSelector,
-  RuntimeSelectionCriteria,
-  RuntimeSelectionResult,
-} from './runtime-selector.js';
 
 // Task status and records
 export type {
