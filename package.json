@@ -17,6 +17,8 @@
     "check:generated-artifacts": "node scripts/check-generated-artifacts.cjs",
     "check:error-handbook": "node scripts/check-error-handbook.cjs",
     "check:error-handbook:audit": "node scripts/check-error-handbook.cjs --audit",
+    "error:context": "node scripts/error-context.mjs",
+    "error:hotspots": "node scripts/check-error-handbook.cjs --hotspots",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.js all",
     "check:runtime-contract": "node scripts/check-runtime-contract.js",
     "check:docs-structure": "node scripts/check-docs-structure.cjs",
