@@ -43,7 +43,11 @@ import {
   storeEmitter,
   createProductionGateDeps,
   resolveRuntimeConfigFromPdConfig,
+  resolveRuntimeConfigForAgent,
+  AGENT_NAME_FOR_TASK_KIND,
   isRuntimeConfigError,
+  type RuntimeConfigResult,
+  type RuntimeConfigError,
   computeConsumerDecision,
   FULL_CHAIN_CONSUMER_RUNNER_KINDS,
   DEFAULT_CONSUMER_RUNNER_KINDS,
@@ -353,13 +357,54 @@ export async function runInternalizationConsumerCycle(
     // Advance the configured runner kinds in priority order (dreamer first,
     // then philosopher→…→rollout_reviewer under full-chain scope). Lease the
     // first ready task whose dependencies are satisfied.
+    //
+    // PRI-719 (EP002-R2 F4): the runtime profile is resolved PER KIND, before
+    // wakeOnce — `internalAgents.agents[kind].runtimeProfile` (fallback
+    // defaultRuntime) now actually governs the stage that runs on it. Before,
+    // the whole chain shared the diagnostician binding and every per-agent
+    // profile declaration was silently ignored. A kind whose profile cannot
+    // resolve is skipped observably (no lease taken for it).
     let wakeResult: Extract<WakeOnceResult, { decision: 'would_lease' }> | null = null;
     let lastSkipDecision = 'no_ready_tasks';
     let lastSkipReason: string | undefined;
+    let taskRuntimeConfig: Exclude<RuntimeConfigResult, RuntimeConfigError> | null = null;
     for (const kind of decision.runnerKinds) {
+      const agentName = AGENT_NAME_FOR_TASK_KIND[kind];
+      if (agentName === undefined) {
+        lastSkipDecision = 'runtime_config_error';
+        lastSkipReason = `no internal agent mapping for task kind '${kind}'`;
+        continue;
+      }
+      const kindRuntime = resolveRuntimeConfigForAgent(
+        configResult.effective,
+        agentName,
+        {
+          getEnvVar: (name: string) => envGetter(name),
+          // Consumer stage scope is the internalization_full_chain flag, not
+          // agents[kind].enabled (the shipped default disables
+          // philosopher/evaluator/rolloutReviewer yet full-chain runs them) —
+          // see ResolveRuntimeConfigForAgentOptions.
+          ignoreAgentEnabled: true,
+        },
+      );
+      if (isRuntimeConfigError(kindRuntime)) {
+        // rc-9: the degradation is observable per kind; other kinds still run.
+        emitEvent('INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({
+          reason: 'runtime_config_error',
+          taskKind: kind,
+          agentName,
+          message: kindRuntime.message,
+          nextAction: kindRuntime.nextAction,
+        }));
+        logger.warn(`[PD:${logLabel}] Runtime config error for ${kind} (agent ${agentName}): ${kindRuntime.message}`);
+        lastSkipDecision = 'runtime_config_error';
+        lastSkipReason = kindRuntime.message;
+        continue;
+      }
       const candidate = await orchestrator.wakeOnce(kind);
       if (candidate.decision === 'would_lease') {
         wakeResult = candidate;
+        taskRuntimeConfig = kindRuntime;
         break;
       }
       // Keep decision/reason paired across iterations so the final SKIP log
@@ -368,7 +413,7 @@ export async function runInternalizationConsumerCycle(
       lastSkipReason = candidate.decision === 'no_ready_tasks' ? candidate.reason : undefined;
     }
 
-    if (!wakeResult) {
+    if (!wakeResult || taskRuntimeConfig === null) {
       // A: 预算由周期 finally 统一执行 (每周期恰一次,含 backlog 场景)
       const skipPayload: Record<string, unknown> = { decision: lastSkipDecision };
       if (lastSkipReason) {
@@ -379,8 +424,12 @@ export async function runInternalizationConsumerCycle(
       return { ran: false, skipReason: lastSkipDecision };
     }
 
+    // PRI-719: everything downstream reads the LEASED TASK's resolved config —
+    // the kind-specific profile, not the shared gate resolution.
+    const taskRuntimeKind = taskRuntimeConfig.runtimeKind;
+
     let adapter: PDRuntimeAdapter;
-    if (runtimeKind === 'pi-ai') {
+    if (taskRuntimeKind === 'pi-ai') {
       // PRI-419: when l2_dreamer flag is on AND this is a dreamer task, route
       // through the L2 multi-turn agent loop. Non-dreamer runners always use PiAi.
       const l2Flag = loadFeatureFlagFromConfig(workspaceDir, 'l2_dreamer');
@@ -391,14 +440,14 @@ export async function runInternalizationConsumerCycle(
         });
         adapter = new L2AgentLoopAdapter(
           {
-            provider: runtimeConfigResult.provider ?? 'openai',
-            model: runtimeConfigResult.model ?? 'gpt-4o',
-            apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
-            baseUrl: runtimeConfigResult.baseUrl,
+            provider: taskRuntimeConfig.provider ?? 'openai',
+            model: taskRuntimeConfig.model ?? 'gpt-4o',
+            apiKeyEnv: taskRuntimeConfig.apiKeyEnv ?? 'OPENAI_API_KEY',
+            baseUrl: taskRuntimeConfig.baseUrl,
             workspace: workspaceDir,
-            totalBudgetMs: runtimeConfigResult.timeoutMs,
+            totalBudgetMs: taskRuntimeConfig.timeoutMs,
             // PRI-633: profile systemPrompt rides as the append layer.
-            ...(runtimeConfigResult.systemPrompt ? { systemPrompt: runtimeConfigResult.systemPrompt } : {}),
+            ...(taskRuntimeConfig.systemPrompt ? { systemPrompt: taskRuntimeConfig.systemPrompt } : {}),
           },
           {
             artifactReader: {
@@ -418,25 +467,25 @@ export async function runInternalizationConsumerCycle(
         );
       } else {
         adapter = new PiAiRuntimeAdapter({
-          provider: runtimeConfigResult.provider ?? 'openai',
-          model: runtimeConfigResult.model ?? 'gpt-4o',
-          apiKeyEnv: runtimeConfigResult.apiKeyEnv ?? 'OPENAI_API_KEY',
-          maxRetries: runtimeConfigResult.maxRetries,
-          maxTokens: runtimeConfigResult.maxTokens,
-          timeoutMs: runtimeConfigResult.timeoutMs,
-          baseUrl: runtimeConfigResult.baseUrl,
+          provider: taskRuntimeConfig.provider ?? 'openai',
+          model: taskRuntimeConfig.model ?? 'gpt-4o',
+          apiKeyEnv: taskRuntimeConfig.apiKeyEnv ?? 'OPENAI_API_KEY',
+          maxRetries: taskRuntimeConfig.maxRetries,
+          maxTokens: taskRuntimeConfig.maxTokens,
+          timeoutMs: taskRuntimeConfig.timeoutMs,
+          baseUrl: taskRuntimeConfig.baseUrl,
           workspace: workspaceDir,
           // PRI-633: profile systemPrompt rides as the append layer.
-          ...(runtimeConfigResult.systemPrompt ? { systemPrompt: runtimeConfigResult.systemPrompt } : {}),
+          ...(taskRuntimeConfig.systemPrompt ? { systemPrompt: taskRuntimeConfig.systemPrompt } : {}),
         });
       }
-    } else if (runtimeKind === 'openclaw-cli') {
+    } else if (taskRuntimeKind === 'openclaw-cli') {
       adapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: runtimeConfigResult.openclawMode ?? 'default',
+        runtimeMode: taskRuntimeConfig.openclawMode ?? 'default',
         workspaceDir: workspaceDir,
       });
     } else {
-      throw new Error(`Unsupported runtime kind resolved for auto-consumer: ${runtimeKind}`);
+      throw new Error(`Unsupported runtime kind resolved for auto-consumer: ${taskRuntimeKind}`);
     }
 
     const {taskId} = wakeResult;
@@ -456,9 +505,9 @@ export async function runInternalizationConsumerCycle(
     // same effective config (EP-07 canonical value).
     const runnerOptions = {
       owner,
-      runtimeKind,
+      runtimeKind: taskRuntimeKind,
       effectiveConfig: configResult.effective,
-      timeoutMs: runtimeConfigResult.timeoutMs,
+      timeoutMs: taskRuntimeConfig.timeoutMs,
       outputLanguage: resolveOutputLanguage(configResult.effective.config.principles?.outputLanguage).outputLanguage,
     };
 
@@ -560,10 +609,18 @@ export async function runInternalizationConsumerCycle(
         return { ran: false, skipReason: 'no_runner_for_kind', taskKind };
     }
 
-    logger.info(`[PD:${logLabel}] Running ${taskKind} task: ${taskId}`);
+    // PRI-719: run evidence answers "which declared profile/provider/model
+    // actually executed this task" (declared == executed contract).
+    const runtimeEvidence = {
+      ...(taskRuntimeConfig.runtimeProfileId !== undefined ? { runtimeProfileId: taskRuntimeConfig.runtimeProfileId } : {}),
+      ...(taskRuntimeConfig.provider !== undefined ? { provider: taskRuntimeConfig.provider } : {}),
+      ...(taskRuntimeConfig.model !== undefined ? { model: taskRuntimeConfig.model } : {}),
+    };
+    logger.info(`[PD:${logLabel}] Running ${taskKind} task: ${taskId}${Object.keys(runtimeEvidence).length > 0 ? ` (runtime: ${JSON.stringify(runtimeEvidence)})` : ''}`);
     emitEvent('INTERNALIZATION_CONSUMER_RUN', JSON.stringify({
       taskId,
       taskKind,
+      ...runtimeEvidence,
     }));
 
     let runResult;

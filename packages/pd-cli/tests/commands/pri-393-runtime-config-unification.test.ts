@@ -119,8 +119,10 @@ describe('PRI-393: runtime config unification', () => {
         }
 
         for (const block of importBlocks) {
-          // Allow resolveRuntimeConfigFromPdConfig but NOT bare resolveRuntimeConfig
-          if (block.includes('resolveRuntimeConfig') && !block.includes('resolveRuntimeConfigFromPdConfig')) {
+          // Allow the canonical resolver family — resolveRuntimeConfigFromPdConfig
+          // (shared diagnostician binding) and resolveRuntimeConfigForAgent (the
+          // PRI-719 per-agent variant) — but NOT bare legacy resolveRuntimeConfig
+          if (block.includes('resolveRuntimeConfig') && !block.includes('resolveRuntimeConfigFromPdConfig') && !block.includes('resolveRuntimeConfigForAgent')) {
             // This is the legacy import — fail
             expect.fail(
               `${file} still imports legacy resolveRuntimeConfig from @principles/core/runtime-v2. ` +
@@ -212,7 +214,7 @@ describe('PRI-393: runtime config unification', () => {
 
       // Dynamically import to avoid module resolution issues
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => 'test-key' });
 
       expect(resolved.configSource).toBe('.pd/config.yaml');
       expect(resolved.result).toBeDefined();
@@ -238,7 +240,7 @@ funnels:
 `);
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => 'test-key' });
 
       // Should have legacy warning
       expect(resolved.legacyWarnings.length).toBeGreaterThan(0);
@@ -259,7 +261,7 @@ funnels:
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
       const { isRuntimeConfigError: isErr } = await import('@principles/core/runtime-v2');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => 'test-key' });
 
       // Malformed config must produce a RuntimeConfigError — never fall back to defaults
       expect(resolved.configLoadResult.ok).toBe(false);
@@ -277,7 +279,7 @@ funnels:
       writeConfigYaml(tmpDir, makeValidConfigYaml());
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => 'test-key' });
 
       const jsonStr = JSON.stringify(resolved.result);
       const parsed = JSON.parse(jsonStr);
@@ -355,7 +357,7 @@ funnels:
     it('handles empty workspace directory gracefully', async () => {
       // No .pd directory at all
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => 'test-key' });
 
       // Missing config should return defaults (ok=true with source='defaults')
       expect(resolved.configLoadResult.ok).toBe(true);
@@ -371,7 +373,7 @@ funnels:
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
       const { isRuntimeConfigError } = await import('@principles/core/runtime-v2');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => 'test-key' });
 
       // Missing runtimeProfiles should either load with defaults or produce
       // a RuntimeConfigError — never silently succeed with wrong config.
@@ -400,7 +402,7 @@ funnels:
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
       const { isRuntimeConfigError } = await import('@principles/core/runtime-v2');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => 'test-key' });
 
       // Invalid type should be caught — verify external contract, not internal state
       expect(isRuntimeConfigError(resolved.result)).toBe(true);
@@ -414,7 +416,7 @@ funnels:
       writeConfigYaml(tmpDir, makeValidConfigYaml());
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => undefined);
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => undefined });
 
       // Should handle undefined env var gracefully
       expect(resolved.result).toBeDefined();
@@ -432,7 +434,7 @@ funnels:
       fs.writeFileSync(path.join(ffDir, 'feature-flags.yaml'), 'flags: []', 'utf8');
 
       const { resolveRuntimeFromPdConfig } = await import('../../src/services/resolve-runtime-from-pd-config.js');
-      const resolved = resolveRuntimeFromPdConfig(tmpDir, () => 'test-key');
+      const resolved = resolveRuntimeFromPdConfig(tmpDir, { getEnvVar: () => 'test-key' });
 
       expect(resolved.legacyWarnings.length).toBeGreaterThan(0);
       expect(resolved.configLoadResult.legacyFilesDetected.length).toBeGreaterThanOrEqual(2);
