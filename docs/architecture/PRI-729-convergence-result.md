@@ -2,7 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Phase 4 收敛检查完成（Phase 1–3 已交付；未删除 legacy 代码，未改安装布局，未改 ADR） |
+| Status | 已随 PR #1601 合并（merge commit `303a1cbc`，2026-09-10，CI 32 项全绿）；未删除 legacy 代码，未改安装布局，未改 ADR |
+| 后续任务 | **PRI-738**（Gate C 物理删除 legacy updater）— 其 Gate B 前置为 PRI-701（usage drain） |
 | Date | 2026-09-10 |
 | Source of truth | 独立工作树 @ `57f0dfebb`（= `origin/main`，PR #1600 合并点） |
 | Companion docs | `PRI-729-release-manager-adoption-audit.md`（Phase 1）、`PRI-709-migration-readiness-report.md` |
@@ -35,7 +36,7 @@ MutationController.dispatch                                      (mutation-contr
     +-- legacy-console-updater  (DESIGNED COMPATIBILITY FALLBACK, explicit reason required)
              |
              v
-        routes/update.ts mutation implementations (to be deleted in PRI-730)
+        routes/update.ts mutation implementations (to be deleted in PRI-738)
              |
              v
         Transaction Journal (same file, actor=console-updater) + Update History (same writer)
@@ -60,13 +61,13 @@ MutationController.dispatch                                      (mutation-contr
 | `legacy-console-updater` | `mutation-controller.ts:35`（常量定义）、`:18`（注释）、`legacy-mutation-journal.ts:156`（未验证 digest 的标记前缀）、`update-history.ts:138`（authority 默认值注释）+ 历史文档 | 只作为**身份标识**存在，不再作为任何 authority 的解析结果之外的路径 |
 | `legacy updater` | `update.ts` 内的 fallback 注释/日志、`mutation-controller.ts` 文档 | 只出现在「兼容 fallback」叙事里 |
 | `update-history` | console：`routes/update-history.ts`（唯一 Owner 写入 + 读取）、`server/index.ts:442`（路由）；cpd：`update/update-history.ts`（SPEC §12，唯一消费方 = `legacy-migration.ts`，**无生产接线**） | 双流仍并存，但各自单一写入方；console 流已是唯一 Owner 可见流 |
-| `appendUpdateHistory` | 定义 `routes/update-history.ts:143`；调用 15 处（全部在 `update.ts` 的 legacy 实现内）+ 1 处 RM-served 边界（`update.ts:2133` `appendGovernedUpdateHistory`） | 唯一 writer，两条 authority 共用；legacy 调用点即 PRI-730 待删代码 |
+| `appendUpdateHistory` | 定义 `routes/update-history.ts:143`；调用 15 处（全部在 `update.ts` 的 legacy 实现内）+ 1 处 RM-served 边界（`update.ts:2133` `appendGovernedUpdateHistory`） | 唯一 writer，两条 authority 共用；legacy 调用点即 PRI-738 待删代码 |
 
 **判定**：legacy 已不再是**入口**（入口只有一个：MutationController），但仍是**执行者**。因此本任务的定位是「单一入口 + 显式设计的兼容 fallback」，而非「legacy 退出生产」。
 
 ---
 
-## 3. 剩余 legacy 代码位置（PRI-730 的删除面）
+## 3. 剩余 legacy 代码位置（PRI-738 的删除面）
 
 | 位置 | 内容 | 删除前提 |
 | --- | --- | --- |
@@ -78,11 +79,11 @@ MutationController.dispatch                                      (mutation-contr
 | `pd-console/src/server/update/mutation-controller.ts:35` + 词汇表 | `LEGACY_MUTATION_AUTHORITY` 与兼容 fallback 词汇 | 随 fallback 一起删 |
 | `pd-console/src/server/routes/update-history.ts:151` | `authority ?? LEGACY_MUTATION_AUTHORITY` 默认值 | 改为必填后删默认 |
 | `create-principles-disciple/src/update/legacy-migration.ts` | dual-slot 迁移 | **不可删**：它是 B2 的解，需先接线为生产消费方 |
-| 测试：`tests/server/routes/update.test.ts`（3362 行）、`tests/server/update/apply-extension-copy-sync.test.ts`、`tests/server/update/legacy-mutation-journal.test.ts`、wiring 测试的 legacy 分支 | legacy 行为特征化 + journal 覆盖 | 随代码一起删（PRI-730 显式授权） |
+| 测试：`tests/server/routes/update.test.ts`（3362 行）、`tests/server/update/apply-extension-copy-sync.test.ts`、`tests/server/update/legacy-mutation-journal.test.ts`、wiring 测试的 legacy 分支 | legacy 行为特征化 + journal 覆盖 | 随代码一起删（PRI-738 显式授权） |
 
 ---
 
-## 4. PRI-730（删除 legacy）前置条件
+## 4. PRI-738（删除 legacy）前置条件
 
 与 Phase 1 审计 §7 一致，逐条可验证：
 
@@ -93,7 +94,9 @@ MutationController.dispatch                                      (mutation-contr
 5. **B5** installer-only `bundled-…` releaseId → 缓存元数据映射。
 6. 以上全部关闭、且 RM 在真实安装上跑过完整生命周期（check → apply-full → failure → rollback）后，才可物理删除 §3 的代码。
 
-> 关键提醒：`legacy-migration.ts` 出现在 §3 表格里但**不可删** —— 它当前无生产接线，正是 B2 未解的证据，而不是「待清理的历史代码」。PRI-730 不得顺手删它。
+> 关键提醒：`legacy-migration.ts` 出现在 §3 表格里但**不可删** —— 它当前无生产接线，正是 B2 未解的证据，而不是「待清理的历史代码」。PRI-738 不得顺手删它。
+>
+> **编号更正**：本文初稿将删除 legacy 的后续任务写作 `PRI-730`，但该编号在 Linear 上属于另一件已完成的任务（runtime-v2 公共面收敛）。正确的后续任务是 **PRI-738**（Gate C 物理删除），本文所有引用已更正。
 
 ---
 
@@ -131,4 +134,4 @@ MutationController.dispatch                                      (mutation-contr
 - ✅ **单一 preferred authority + 显式设计的兼容 fallback**：成立，且本任务把「设计」从文档约定升级为类型与测试约束。
 - ❌ **单一执行 authority**：不成立。RM 对现存安装的 3 个 kind（check / apply-full）因 B1+B2 不可达，对 2 个 kind（apply / rollback）因 B3+B4 结构性不支持。
 
-⇒ **本轮交付的是「收敛边界」，不是「收敛完成」。** PRI-730 的删除动作必须等 §4 的 6 条前置全部关闭；在那之前，任何删除都会把显式降级变成静默故障。
+⇒ **本轮交付的是「收敛边界」，不是「收敛完成」。** PRI-738 的删除动作必须等 §4 的 6 条前置全部关闭；在那之前，任何删除都会把显式降级变成静默故障。

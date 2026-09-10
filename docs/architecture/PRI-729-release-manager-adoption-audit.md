@@ -26,7 +26,7 @@
 
 > **已成立的部分**：单一入口 + RM 为 preferred authority + 每一处降级都带稳定 reason code。
 > **本任务新增**：把「兼容 fallback」从*事实上的默认路径*升级为**被声明、被封闭、可枚举、fail-loud、有测试覆盖**的设计决策——即「只有经过明确设计的兼容 fallback 才允许存在」由构造保证。
-> **明确不在本任务内**：签名元数据发布管线、Phase 2 rollback、dual-slot 迁移接线、删除 legacy 代码（PRI-730）。
+> **明确不在本任务内**：签名元数据发布管线、Phase 2 rollback、dual-slot 迁移接线、删除 legacy 代码（PRI-738）。
 
 ---
 
@@ -135,7 +135,7 @@ RM 只消费签名全量 payload；插件 diff 需要一套 RM 没有的「当�
 | Phase 2「所有 mutation 必须优先进入 RM」 | **已成立**（RM 对 4 kind 全部被咨询）。本任务补：兼容 fallback 必须是**被声明的封闭集合** + 路由决策 **fail-loud**，并由测试证明枚举完备 |
 | Phase 2「不要偷偷 fallback」 | 现状已无「静默」降级（每处都有 reason），但降级**无日志**、reason 是自由字符串（可以是任意值）⇒ 本任务加：封闭 reason 词汇 + 每次路由变更的显式日志 |
 | Phase 3 生命周期验证 | 补：check（契约 + Companion）/ apply-full（RM 被调用 + history）/ failure（可追踪 + history failure）/ rollback（显式降级 + 不产生第二 authority） |
-| Phase 4 收敛检查 | 输出 `PRI-729-convergence-result.md`：新生产路径形态 + 剩余 legacy 位置 + PRI-730 前置条件 |
+| Phase 4 收敛检查 | 输出 `PRI-729-convergence-result.md`：新生产路径形态 + 剩余 legacy 位置 + PRI-738 前置条件 |
 | 「生产路径不再执行 legacy updater」 | **不可达**（B1–B4）——本任务以 fail-loud 的方式记录该事实与前置条件，不制造假象 |
 
 ### Phase 2 实施清单（对应上表）
@@ -150,14 +150,14 @@ RM 只消费签名全量 payload；插件 diff 需要一套 RM 没有的「当�
 
 ---
 
-## 7. PRI-730（删除 legacy）前置条件
+## 7. PRI-738（删除 legacy）前置条件
 
 1. **B1 签名元数据发布管线**落地（CI 产出 `channels/<ch>.json` + 签名 release target + artifact manifest），并接通操作者供给面。
 2. **B2 dual-slot 迁移接线**：把 `legacy-migration` 作为一次显式 updater 事务接入安装/更新路径，使 RM 的服务面从 0% 扩到 100%。
 3. **B4 Phase 2 rollback**（same-version restore）证明并切换 `ROLLBACK_AVAILABLE`；在此之前 rollback 必须留 legacy。
 4. **B3 `/apply` 增量 kind 的裁决**（移植进 RM payload 体系，或 UI 降级为 apply-full）。
 5. **B5 bundled- releaseId → 缓存元数据映射**。
-6. 以上全部关闭后，才可物理删除 `routes/update.ts` 的 mutation 实现与其测试（PRI-730）。
+6. 以上全部关闭后，才可物理删除 `routes/update.ts` 的 mutation 实现与其测试（PRI-738）。
 
 ---
 
