@@ -30,13 +30,39 @@ export interface UpdateLayout {
   releaseManagerDir: string;
   /**
    * PRI-711: codex-adapter is a runtime-layout component pd-cli resolves
-   * eagerly. Undefined when the DEPLOYED @principles/install-layout is one
-   * generation old (this update runs inside the currently-running console,
-   * which resolves the layout helper installed by the PREVIOUS update) —
-   * consumers must degrade to skipping the adapter, never assume it.
+   * eagerly. Undefined only when the canonical runtime root itself cannot be
+   * resolved: a one-generation-old deployed install-layout (this update runs
+   * inside the currently-running console, which resolves the layout helper
+   * installed by the PREVIOUS update) lacks the codexAdapterDir field, but
+   * PRI-724 derives the destination from the stable runtimeDir instead of
+   * degrading to a silent skip.
    */
   codexAdapterDir: string | undefined;
   hosts: InstallHost[];
+}
+
+/**
+ * Resolve where the codex-adapter component lives in a CANONICAL layout.
+ *
+ * PRI-724: a one-generation-old deployed install-layout does not export the
+ * codexAdapterDir field (introduced 2026-09-09, PRI-711). The full update
+ * runs inside the currently-running console, which resolves the layout
+ * helper installed by the PREVIOUS update — so during exactly one update
+ * generation the field is always missing. Derive the destination from the
+ * stable runtimeDir (the adapter has always been installed at
+ * <runtimeDir>/codex-adapter) instead of degrading the update to skipping
+ * the adapter copy, which left the deployed adapter one release behind
+ * while the update reported success (observed 2026-09-10).
+ */
+function resolveCanonicalCodexAdapterDir(paths: { runtimeDir: string; codexAdapterDir?: string }): string | undefined {
+  if (typeof paths.codexAdapterDir === 'string' && paths.codexAdapterDir.length > 0) {
+    return paths.codexAdapterDir;
+  }
+  // rc-1/rc-2: the deployed module's shape is not trusted — only derive from
+  // a runtimeDir that is actually a non-empty string.
+  return typeof paths.runtimeDir === 'string' && paths.runtimeDir.length > 0
+    ? path.join(paths.runtimeDir, 'codex-adapter')
+    : undefined;
 }
 
 export function resolveUpdateLayout(): UpdateLayout | undefined {
@@ -65,9 +91,11 @@ export function resolveUpdateLayout(): UpdateLayout | undefined {
       pdCliDir: paths.pdCliDir,
       installLayoutDir: paths.installLayoutDir,
       releaseManagerDir: paths.releaseManagerDir,
-      // rc-1: the deployed install-layout may predate the codexAdapterDir
-      // field — guard instead of trusting the shape.
-      codexAdapterDir: typeof paths.codexAdapterDir === 'string' ? paths.codexAdapterDir : undefined,
+      // PRI-711: the deployed install-layout may predate the codexAdapterDir
+      // field — guard instead of trusting the shape. PRI-724: when the field
+      // is missing, derive the destination from runtimeDir so the update
+      // still swaps the adapter (see resolveCanonicalCodexAdapterDir).
+      codexAdapterDir: resolveCanonicalCodexAdapterDir(paths),
       hosts: resolution.manifest?.hosts ?? [],
     };
   }

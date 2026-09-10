@@ -35,6 +35,20 @@ vi.mock('../../../src/server/utils/installed-layout.js', async (importOriginal) 
   };
 });
 
+// PRI-724: the one-generation-old console resolves the layout PATHS through
+// the PREVIOUS install-layout module, which does not export codexAdapterDir.
+// Simulating that generation means mocking the paths helper, not the console
+// util that (since PRI-724) derives the missing destination from runtimeDir.
+let actualGetInstallLayoutPaths: (typeof import('@principles/install-layout'))['getInstallLayoutPaths'] | undefined;
+vi.mock('@principles/install-layout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@principles/install-layout')>();
+  actualGetInstallLayoutPaths = actual.getInstallLayoutPaths;
+  return {
+    ...actual,
+    getInstallLayoutPaths: vi.fn(actual.getInstallLayoutPaths),
+  };
+});
+
 // Partial mock of fs: copyFileSync is a vi.fn wrapping the real implementation
 // so the EPERM test can override it. All other exports pass through unchanged.
 vi.mock('fs', async (importOriginal) => {
@@ -220,10 +234,18 @@ beforeEach(() => {
   vi.mocked(os.homedir).mockImplementation(() => tmpDir);
 });
 
-afterEach(() => {
+afterEach(async () => {
   // Restore OPENCLAW_HOME
   if (savedOpenclawHome === undefined) delete process.env.OPENCLAW_HOME;
   else process.env.OPENCLAW_HOME = savedOpenclawHome;
+
+  // PRI-724: tests that simulate a one-generation-old install-layout override
+  // getInstallLayoutPaths — restore the passthrough so the shape cannot leak
+  // into unrelated tests (vi.clearAllMocks keeps implementations).
+  if (actualGetInstallLayoutPaths) {
+    const installLayoutModule = await import('@principles/install-layout');
+    vi.mocked(installLayoutModule.getInstallLayoutPaths).mockImplementation(actualGetInstallLayoutPaths);
+  }
 
   // Cleanup temp dir
   if (tmpDir && fs.existsSync(tmpDir)) {
@@ -2487,9 +2509,9 @@ describe('handleUpdateRoute', () => {
       }
     });
 
-    it('skips the codex-adapter copy and derivation when the deployed install-layout is one generation old (PRI-711 rc-9)', async () => {
+    it('still swaps the codex-adapter when the deployed install-layout is one generation old (PRI-724 derives the destination from runtimeDir)', async () => {
       const { execFileSync: execSyncMock } = await import('child_process');
-      const layoutUtil = await import('../../../src/server/utils/installed-layout.js');
+      const installLayoutModule = await import('@principles/install-layout');
 
       // Canonical layout + manifest (same shape as the CP-4/CP-5 fixture).
       writeFixture('.pd/runtime/plugin/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
@@ -2502,10 +2524,16 @@ describe('handleUpdateRoute', () => {
       writeFixture('extensions/principles-disciple/package.json', JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }));
 
       // The real fixture layout HAS codexAdapterDir (current install-layout);
-      // force the one-generation-old shape for this update only.
-      const realLayout = layoutUtil.resolveUpdateLayout();
-      expect(realLayout?.codexAdapterDir).toBeDefined();
-      vi.mocked(layoutUtil.resolveUpdateLayout).mockImplementationOnce(() => ({ ...realLayout!, codexAdapterDir: undefined }));
+      // simulate the PREVIOUS generation's paths shape — the field is absent —
+      // for every resolution this request makes (the flow captures the layout
+      // once per resolveUpdateLayout call, and several of those happen).
+      const realPaths = installLayoutModule.getInstallLayoutPaths(tmpDir);
+      expect(typeof realPaths.codexAdapterDir).toBe('string');
+      const legacyShape = { ...realPaths } as unknown as Record<string, unknown>;
+      delete legacyShape.codexAdapterDir;
+      vi.mocked(installLayoutModule.getInstallLayoutPaths).mockImplementation(
+        () => legacyShape as unknown as typeof realPaths,
+      );
 
       vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
         const urlStr = typeof url === 'string' ? url.toString() : url.toString();
@@ -2532,6 +2560,18 @@ describe('handleUpdateRoute', () => {
             fs.mkdirSync(path.join(dir, 'pd-cli', 'dist'), { recursive: true });
             fs.writeFileSync(path.join(dir, 'pd-cli', 'dist', 'index.js'), 'new cli');
             fs.writeFileSync(path.join(dir, 'pd-cli', 'package.json'), '{}');
+            // The runtime-components swap (adapter copy included) only runs
+            // when a staged host-runtime ships, so stage one like PRI-561.
+            fs.mkdirSync(path.join(dir, 'host-runtime', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'package.json'),
+              JSON.stringify({ name: '@principles/host-runtime', version: '0.1.0', type: 'module', main: './dist/index.js' }));
+            fs.writeFileSync(path.join(dir, 'host-runtime', 'dist', 'index.js'), 'export const x = 1;');
+            // The adapter ships in the installer bundle (0.2.9 at the time of
+            // the 2026-09-10 live observation) and must reach the runtime.
+            fs.mkdirSync(path.join(dir, 'codex-adapter', 'dist'), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'codex-adapter', 'package.json'),
+              JSON.stringify({ name: '@principles/codex-adapter', version: '0.2.9' }));
+            fs.writeFileSync(path.join(dir, 'codex-adapter', 'dist', 'index.js'), 'export const adapter = true;');
           }
         }
       }) as unknown as typeof execSyncMock);
@@ -2547,9 +2587,13 @@ describe('handleUpdateRoute', () => {
       const body = parseResponseBody<{ data: { success: boolean; reason?: string; newVersion?: string } }>(res);
       expect(body.data.success).toBe(true);
       expect(body.data.newVersion).toBe('2.0.0');
-      // The adapter was staged in the tarball but silently skipped (rc-9):
-      // no adapter dir materializes and nothing crashes on the missing field.
-      expect(fs.existsSync(path.join(tmpDir, '.pd', 'runtime', 'codex-adapter'))).toBe(false);
+      // The deployed install-layout lacked codexAdapterDir, yet the staged
+      // adapter lands in the canonical runtime root — no silent generation
+      // skew, no crash on the missing field.
+      const adapterManifest = JSON.parse(
+        fs.readFileSync(path.join(tmpDir, '.pd', 'runtime', 'codex-adapter', 'package.json'), 'utf-8'),
+      ) as { version: string };
+      expect(adapterManifest.version).toBe('0.2.9');
     });
   });
 
