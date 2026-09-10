@@ -20,7 +20,7 @@ import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clea
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
+import { createTraceId } from '../core/evolution-logger.js';
 import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed, resetSharedCooldownForTest } from './trigger-cooldown-tracker.js';
@@ -630,17 +630,6 @@ export function emitPainIfAdmitted(
     source: failureSource,
     reason: `Tool ${event.toolName} failed on ${observation.relPath}`,
     isRisky: observation.isRisk,
-  });
-
-  const evoLogger = getEvolutionLogger(workspaceDir, wctx.trajectory);
-  evoLogger.logPainDetected({
-    traceId: observation.traceId,
-    source: failureSource,
-    reason: `Tool ${event.toolName} failed on ${observation.relPath}`,
-    score: observation.painScore,
-    toolName: event.toolName,
-    filePath: observation.relPath,
-    sessionId,
   });
 
   // Create painId inline (matches original createPainId)
