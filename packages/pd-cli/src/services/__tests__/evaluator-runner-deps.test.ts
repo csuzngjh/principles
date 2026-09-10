@@ -320,6 +320,35 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     expect(id3).not.toBe(id1);
   });
 
+  it('seedArtificerRepairTask → terminal (succeeded/failed/NHR) round refuses reuse (PRI-718 revise ≠ resume)', async () => {
+    const workspaceDir = createTempWorkspace(true);
+    tmpWorkspaces.push(workspaceDir);
+    const { stateManager, createdTasks } = createMockStateManager();
+    const params = makeValidSeedParams();
+
+    const deps = createEvaluatorRunnerDeps({
+      stateManager,
+      runtimeAdapter: {} as never,
+      eventEmitter: {} as never,
+      validator: {} as never,
+      artifactStore: {} as never,
+      workspaceDir,
+    });
+    if (typeof deps.seedArtificerRepairTask !== 'function') throw new Error('seedArtificerRepairTask missing');
+
+    // Stage a pre-existing TERMINAL repair round under the deterministic id
+    // (EP002-R2: the seed found the finished r2 and "reused" it, so the
+    // evaluator re-evaluated the same artifact forever).
+    const repairTaskId = `artificer-repair-${params.repairPayload.sourceEvaluatorTaskId}-r${params.repairPayload.repairIteration}`;
+    const now = new Date().toISOString();
+    const base = { taskId: repairTaskId, taskKind: 'artificer', attemptCount: 1, maxAttempts: 3, createdAt: now, updatedAt: now, diagnosticJson: '{}' };
+    for (const terminalStatus of ['succeeded', 'failed', 'needs_human_review'] as const) {
+      createdTasks.length = 0;
+      createdTasks.push({ ...base, status: terminalStatus } as TaskRecord);
+      await expect(deps.seedArtificerRepairTask(params)).rejects.toThrow(new RegExp(`terminal status ${terminalStatus}`));
+    }
+  });
+
   it('deps spread contains all required base PeerRunnerDeps fields (EP-02: real path gets full deps)', () => {
     const workspaceDir = createTempWorkspace(true);
     tmpWorkspaces.push(workspaceDir);

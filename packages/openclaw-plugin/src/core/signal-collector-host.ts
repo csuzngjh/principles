@@ -22,6 +22,7 @@ import {
   collectSync,
   mapLlmResultToOutput,
   buildLlmPrompt,
+  SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
   resolveLlmClassificationPayload,
   safeStringifyPreview,
   PiAiRuntimeAdapter,
@@ -458,13 +459,15 @@ export function createSignalLlmClassifierFromConfig(
       void _promptTemplate;  // 用 core 的 buildLlmPrompt(标准化的),不用外部传入
       const prompt = buildLlmPrompt(text);
       try {
-        const handle = await adapter.startRun({
-          agentSpec: { agentId: 'signal-collector', schemaVersion: '1' },
-          inputPayload: { prompt },
-          contextItems: [],
-          timeoutMs: cfg.timeoutMs ?? 30_000,
-          outputSchemaRef: 'signal-classification-output-v1',
-        });
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'signal-collector', schemaVersion: '1' },
+        inputPayload: { prompt },
+        contextItems: [],
+        timeoutMs: cfg.timeoutMs ?? 30_000,
+        outputSchemaRef: 'signal-classification-output-v1',
+        // PRI-633: 角色声明走 system 通道,消息只含任务数据。
+        systemPrompt: SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
+      });
         let status = await adapter.pollRun(handle.runId);
         const deadline = Date.now() + (cfg.timeoutMs ?? 30_000);
         while (status.status === 'running' && Date.now() < deadline) {

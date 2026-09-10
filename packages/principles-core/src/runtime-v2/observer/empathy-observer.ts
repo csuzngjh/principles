@@ -34,6 +34,12 @@ export interface EmpathyObserverOptions {
 }
 
 export class EmpathyObserver {
+  /**
+   * PRI-633: base-layer system prompt (role declaration). Previously the
+   * first line of buildPrompt's message; now delivered via the system channel.
+   */
+  static readonly SYSTEM_PROMPT = 'You are an empathy observer.';
+
   private readonly runtimeAdapter: PDRuntimeAdapter;
   private readonly timeoutMs: number;
   private readonly agentId: string;
@@ -46,10 +52,10 @@ export class EmpathyObserver {
 
   /**
    * Builds the prompt exactly replicating the legacy empathyObserverWorkflowSpec
+   * (PRI-633: the role declaration moved to SYSTEM_PROMPT / the system channel).
    */
   static buildPrompt(userMessage: string): string {
     return [
-      'You are an empathy observer.',
       'Analyze ONLY the user message and return strict JSON (no markdown):',
       '{"damageDetected": boolean, "severity": "mild|moderate|severe", "confidence": number, "reason": string}',
       `User message: ${JSON.stringify(userMessage.trim())}`,
@@ -70,6 +76,7 @@ export class EmpathyObserver {
       contextItems: [],
       outputSchemaRef: 'empathy-observer-output-v1',
       timeoutMs: this.timeoutMs,
+      systemPrompt: EmpathyObserver.SYSTEM_PROMPT,
     });
 
     // Poll until terminal

@@ -397,6 +397,32 @@ describe('PiAiRuntimeAdapter', () => {
       const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string; messages: Record<string, unknown>[] }];
       expect(context.systemPrompt).toBeUndefined();
     });
+
+    // ── layered systemPrompt (PRI-633) ──
+
+    it('PRI-633: StartRunInput.systemPrompt rides as Context.systemPrompt (base layer)', async () => {
+      const adapter = makeAdapter();
+      await adapter.startRun(makeStartRunInput({ systemPrompt: 'You are a root cause analysis expert.' }));
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string }];
+      expect(context.systemPrompt).toBe('You are a root cause analysis expert.');
+    });
+
+    it('PRI-633: profile config.systemPrompt is appended AFTER the run base layer', async () => {
+      const adapter = makeAdapter({ systemPrompt: 'PROFILE APPEND LAYER' });
+      await adapter.startRun(makeStartRunInput({ systemPrompt: 'BASE ROLE LAYER' }));
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string }];
+      expect(context.systemPrompt).toBe('BASE ROLE LAYER\n\nPROFILE APPEND LAYER');
+    });
+
+    it('PRI-633: omit Context.systemPrompt when both layers are absent/blank (unchanged shape)', async () => {
+      const adapter = makeAdapter({ systemPrompt: '   ' });
+      await adapter.startRun(makeStartRunInput({ systemPrompt: undefined }));
+
+      const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string }];
+      expect(context.systemPrompt).toBeUndefined();
+    });
   });
 
   // ── JSON extraction (balanced parsing) ──
@@ -845,6 +871,20 @@ describe('PiAiRuntimeAdapter', () => {
       expect(mockComplete).toHaveBeenCalledTimes(2);
       const output = await adapter.fetchOutput(handle.runId);
       expect(output?.payload).toMatchObject({ confidence: 0.9 });
+    });
+
+    it('PRI-633: repair calls carry the merged layered system prompt', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ systemPrompt: 'PROFILE APPEND LAYER' });
+      await adapter.startRun(makeDiagnosticianInput({ systemPrompt: 'BASE ROLE LAYER' }));
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      // Call 2 is the repair call — its Context must keep the layered prompt.
+      const [, repairContext] = mockComplete.mock.calls[1] as [unknown, { systemPrompt?: string }];
+      expect(repairContext.systemPrompt).toBe('BASE ROLE LAYER\n\nPROFILE APPEND LAYER');
     });
 
     it('repair fails — still throws output_invalid after repair attempt', async () => {
@@ -2284,6 +2324,176 @@ describe('PiAiRuntimeAdapter', () => {
       const output = await adapter.fetchOutput(handle.runId);
 
       expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+    });
+  });
+
+  // ── PRI-707: finish metadata preservation + truncation classification ──
+  //
+  // Before PRI-707 the provider's stopReason/usage were dropped whenever any
+  // text was extractable, so a token-limit cut was indistinguishable from a
+  // true format error ("No valid JSON found in LLM response"). These tests
+  // pin the preserved evidence surfaces: error details (→ durable
+  // diagnosticJson via the runner's classifyError path), telemetry payloads,
+  // and the repair-prompt truncation notice.
+  describe('PRI-707: finish metadata preservation and truncation classification', () => {
+    function makeSchemaInput(overrides: Partial<StartRunInput> = {}): StartRunInput {
+      return {
+        agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+        inputPayload: 'Diagnose this pain signal',
+        contextItems: [],
+        timeoutMs: 60_000,
+        outputSchemaRef: 'diagnostician-output-v1',
+        ...overrides,
+      };
+    }
+
+    /** Type-guard the repair prompt out of a completeSimple mock call (rc-2). */
+    function repairPromptFromCall(call: unknown[] | undefined): string | undefined {
+      if (!Array.isArray(call) || call.length < 2) return undefined;
+      const [context] = call.slice(1, 2);
+      if (typeof context !== 'object' || context === null || !Object.hasOwn(context, 'messages')) return undefined;
+      const { messages } = (context as { messages: unknown });
+      if (!Array.isArray(messages) || messages.length === 0) return undefined;
+      const [first] = messages;
+      if (typeof first !== 'object' || first === null || !Object.hasOwn(first, 'content')) return undefined;
+      const { content } = (first as { content: unknown });
+      return typeof content === 'string' ? content : undefined;
+    }
+
+    function usageWith(output: number) {
+      return { input: 120, output, cacheRead: 0, cacheWrite: 0, totalTokens: 120 + output, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+    }
+
+    it('T3+T4: finish_reason=length + usage → extraction failure carries truncated evidence (details + telemetry)', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('{"diagnosisId":"diag-trunc', {
+        stopReason: 'length',
+        usage: usageWith(64),
+      }));
+
+      const adapter = makeAdapter(); // free_form_only → Path 3 directly
+      let caught: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeSchemaInput());
+      } catch (err) {
+        caught = err instanceof PDRuntimeError ? err : undefined;
+      }
+
+      expect(caught?.category).toBe('output_invalid');
+      expect(caught?.message).toContain('finish_reason=length');
+      // The runner persists err.details into diagnosticJson.output_failure_details
+      // (PRI-559 P0-2) — so these fields become durable failure evidence.
+      expect(caught?.details).toMatchObject({
+        truncated: true,
+        stopReason: 'length',
+        outputTokens: 64,
+      });
+      expect(typeof caught?.details?.nextAction).toBe('string');
+
+      const extractionEvent = findTelemetryEvent('output_extraction_failed');
+      expect(extractionEvent?.payload).toMatchObject({
+        stopReason: 'length',
+        outputTokens: 64,
+        truncated: true,
+      });
+    });
+
+    it('T5: finish_reason=stop + no extractable JSON → conservative legacy classification, no truncation claim', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('I cannot answer that.'));
+
+      const adapter = makeAdapter();
+      let caught: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeSchemaInput());
+      } catch (err) {
+        caught = err instanceof PDRuntimeError ? err : undefined;
+      }
+
+      expect(caught?.category).toBe('output_invalid');
+      expect(caught?.message).toBe('[output_invalid] No valid JSON found in LLM response');
+      expect(caught?.details).toBeUndefined();
+
+      const extractionEvent = findTelemetryEvent('output_extraction_failed');
+      const payload = extractionEvent?.payload as Record<string, unknown> | undefined;
+      expect(payload?.truncated).toBeUndefined();
+    });
+
+    it('T2: valid JSON + schema violation with finish_reason=stop → schema-invalid, never claimed as truncation', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('{"unexpected":true}'));
+      // Repair attempts fail (unparseable) → exhausted.
+      mockComplete.mockResolvedValue(makeAssistantMessage('still not json'));
+
+      const adapter = makeAdapter();
+      let caught: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeSchemaInput());
+      } catch (err) {
+        caught = err instanceof PDRuntimeError ? err : undefined;
+      }
+
+      expect(caught?.category).toBe('output_invalid');
+      expect(caught?.message).toContain('does not match');
+      const evidencePack = caught?.details?.evidencePack as Record<string, unknown> | undefined;
+      expect(evidencePack).toBeDefined();
+      // The PRI-621 RC3 heuristic fires (object matches no required key)…
+      expect(evidencePack?.truncationSuspected).toBe(true);
+      // …but the definitive finish-metadata signal must NOT claim truncation.
+      expect(evidencePack?.truncated).toBeUndefined();
+      expect(evidencePack?.stopReason).toBe('stop');
+    });
+
+    it('T8: finish_reason=length + schema violation → repair prompt carries truncation notice and evidencePack marks truncated', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('{"unexpected":true}', { stopReason: 'length' }));
+      mockComplete.mockResolvedValue(makeAssistantMessage('still not json'));
+
+      const adapter = makeAdapter();
+      let caught: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeSchemaInput());
+      } catch (err) {
+        caught = err instanceof PDRuntimeError ? err : undefined;
+      }
+
+      const evidencePack = caught?.details?.evidencePack as Record<string, unknown> | undefined;
+      expect(evidencePack?.truncated).toBe(true);
+      expect(evidencePack?.stopReason).toBe('length');
+
+      // Terminal telemetry must carry the same truncation evidence so
+      // monitoring can distinguish a token-limit cut from an ordinary
+      // schema failure (PR #1574 review finding). Default helper usage
+      // reports output: 5.
+      const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
+      expect(exhaustedEvent?.payload).toMatchObject({
+        stopReason: 'length',
+        truncated: true,
+        outputTokens: 5,
+      });
+
+      // The FIRST completeSimple call is the original generation; repair
+      // calls follow. Their user message must carry the truncation notice so
+      // the repair LLM stops treating a cut fragment as a misunderstanding.
+      const repairCalls = mockComplete.mock.calls.slice(1);
+      expect(repairCalls.length).toBeGreaterThan(0);
+      const firstRepairPrompt = repairPromptFromCall(repairCalls[0]);
+      expect(firstRepairPrompt).toContain('TRUNCATION NOTICE');
+      expect(firstRepairPrompt).toContain('finish_reason=length');
+    });
+
+    it('truncation notice absent when finish metadata shows a clean stop (repair prompt unchanged)', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('{"unexpected":true}'));
+      mockComplete.mockResolvedValue(makeAssistantMessage('still not json'));
+
+      const adapter = makeAdapter();
+      try {
+        await adapter.startRun(makeSchemaInput());
+      } catch {
+        // output_invalid expected — assertion is on the prompt below.
+      }
+
+      const repairCalls = mockComplete.mock.calls.slice(1);
+      expect(repairCalls.length).toBeGreaterThan(0);
+      const firstRepairPrompt = repairPromptFromCall(repairCalls[0]);
+      expect(firstRepairPrompt).toBeDefined();
+      expect(firstRepairPrompt).not.toContain('TRUNCATION NOTICE');
     });
   });
 });

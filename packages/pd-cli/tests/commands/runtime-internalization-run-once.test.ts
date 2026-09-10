@@ -174,15 +174,32 @@ vi.mock('../../src/config-reader.js', () => ({
 // host-runtime builder. Mock just that seam here — the unit tests below prove
 // dispatch wiring; the real resolver + declaration fixture path is proven by
 // runtime-internalization-run-once-evaluator-parity.test.ts.
-const { mockCreateEvaluatorRuntimeContext } = vi.hoisted(() => {
+// PRI-708: same pattern for the canonical rollout governance factory — unit
+// tests assert the run-once handler passes its reopen callback through to the
+// runner deps; the real factory + real SQLite path is proven by
+// runtime-internalization-run-once-rollout-parity.test.ts.
+// PRI-713: dispatchActivation rides the same factory; the durable-provenance
+// resolver seam is mocked the same way (real path in the parity test).
+const { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mockResolveWorkspaceHostToolSemantics } = vi.hoisted(() => {
   const mockCreateEvaluatorRuntimeContext = vi.fn().mockReturnValue({
     ok: true,
     gateDeps: { evaluateInSandbox: vi.fn() },
   });
-  return { mockCreateEvaluatorRuntimeContext };
+  const mockCreateRolloutGovernanceDeps = vi.fn().mockReturnValue({
+    dispatchActivation: vi.fn(),
+    reopenRevisionTarget: vi.fn(),
+  });
+  const mockResolveWorkspaceHostToolSemantics = vi.fn().mockReturnValue({
+    ok: true,
+    registry: { resolve: vi.fn() },
+    hostKinds: ['openclaw'],
+  });
+  return { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mockResolveWorkspaceHostToolSemantics };
 });
 vi.mock('@principles/host-runtime', () => ({
   createEvaluatorRuntimeContext: mockCreateEvaluatorRuntimeContext,
+  createRolloutGovernanceDeps: mockCreateRolloutGovernanceDeps,
+  resolveWorkspaceHostToolSemantics: mockResolveWorkspaceHostToolSemantics,
 }));
 
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
@@ -1340,6 +1357,19 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     );
     expect(RolloutReviewerRunnerMock).toHaveBeenCalled();
     expect(mockRun).toHaveBeenCalledWith('task-rollout-reviewer-001');
+
+    // PRI-708: the run-once rollout entry must wire the canonical revision
+    // routing callback from the ONE host-runtime factory (the same builder the
+    // consumer cycle spreads).
+    // PRI-713: the same factory now also supplies the canonical
+    // dispatchActivation (approve_rollout → ActivationDispatcher with the
+    // Owner gate intact) — wired from the durable workspace provenance
+    // resolver, exactly as the consumer cycle injects it.
+    expect(mockCreateRolloutGovernanceDeps).toHaveBeenCalledTimes(1);
+    expect(mockResolveWorkspaceHostToolSemantics).toHaveBeenCalledWith(path.resolve(WS));
+    const rolloutDeps = RolloutReviewerRunnerMock.mock.calls[0][0];
+    expect(rolloutDeps.reopenRevisionTarget).toBeTypeOf('function');
+    expect(rolloutDeps.dispatchActivation).toBeTypeOf('function');
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.runnerKind).toBe('rollout_reviewer');

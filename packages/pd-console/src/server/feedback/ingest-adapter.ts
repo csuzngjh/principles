@@ -68,7 +68,7 @@ export async function probeIngestHealth(
     return {
       available: false,
       reason: '当前运行环境不支持 fetch',
-      nextAction: '使用 Node 18+ 运行 console,或改用导出文件通道',
+      nextAction: '使用 Node 22+ 运行 console,或改用导出文件通道',
     };
   }
   try {

@@ -1,0 +1,10 @@
+{
+  "name": "orders-api-manifest",
+  "version": "2.4.1",
+  "private": true,
+  "description": "orders-api k8s deployment: render/validate gate over the manifest.",
+  "scripts": {
+    "render": "node render-manifest.js",
+    "verify": "node verify.js"
+  }
+}

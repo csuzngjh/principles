@@ -71,8 +71,8 @@ describe('EvaluatorPromptBuilder', () => {
     expect(promptInput.promptContractVersion).toBe(EVALUATOR_PROMPT_CONTRACT_VERSION);
   });
 
-  it('promptContractVersion value is evaluator-output-v1.prompt.v1', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v3');
+  it('promptContractVersion value is evaluator-output-v1.prompt.v4 (PRI-703 intent-contract anchor)', () => {
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v4');
   });
 
   it('score instruction says number not string/percentage', () => {
@@ -80,18 +80,20 @@ describe('EvaluatorPromptBuilder', () => {
   });
 
   it('message is valid JSON containing promptInput', () => {
-    const { message } = builder.buildPrompt(input);
+    const { message, systemPrompt } = builder.buildPrompt(input);
     const parsed = JSON.parse(message);
     expect(parsed.taskId).toBe(input.taskId);
     expect(parsed.contextHash).toBe(input.contextHash);
     expect(parsed.sourceArtificerArtifactId).toBe(input.sourceArtificerArtifactId);
-    expect(parsed.evaluatorInstruction).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
+    // PRI-633: the instruction left the payload for the system channel.
+    expect(parsed).not.toHaveProperty('evaluatorInstruction');
     expect(parsed.promptContractVersion).toBe(EVALUATOR_PROMPT_CONTRACT_VERSION);
+    expect(systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
   });
 
-  it('evaluatorInstruction is included in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.evaluatorInstruction).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
+  it('systemPrompt carries the evaluator instruction (PRI-633)', () => {
+    const { systemPrompt } = builder.buildPrompt(input);
+    expect(systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
   });
 
   it('instruction contains complete JSON example with all required fields', () => {

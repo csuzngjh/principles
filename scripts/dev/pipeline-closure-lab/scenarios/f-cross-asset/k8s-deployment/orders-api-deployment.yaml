@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: production
+  labels:
+    app: orders-api
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      nodeSelector:
+        disktype: ssd
+      containers:
+        - name: orders-api
+          image: registry.internal/orders-api:2.4.1
+          ports:
+            - containerPort: 8421
+          env:
+            - name: REGION
+              value: "cn-east-1"
+            - name: DEPLOYMENT_ID
+              value: "dep-16af6c8927"
+            - name: IMAGE_PULL_TOKEN
+              value: "ptok-f6f48724-a792-67e6"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1.5"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8421
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8421
+            periodSeconds: 5

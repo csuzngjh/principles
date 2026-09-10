@@ -1,6 +1,10 @@
 import { serializePromptInput } from './prompt-serializer.js';
 import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
+import type { LastValidatorErrors } from './pitask-metadata.js';
+import type { IntentContractV1 } from './intent-contract.js';
+import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
 
 /**
  * Dreamer candidate 5-dim context (PRI-508).
@@ -53,6 +57,30 @@ export interface ArtificerPromptBuilderInput {
    * Undefined on Round-1 artificer tasks (backward compatible).
    */
   repairFeedback?: string;
+  /**
+   * PRI-700 因子 B (Owner 决策 2026-09-07): 上一次 attempt 的 validator
+   * 拒绝全文（结构化 {recordedAt, errorCategory, errors[]}）。仅在同一
+   * attempt 未消费过时由 runner 携带；presence = 上次输出被 output-contract
+   * gate 拒绝的确切原因。Undefined = 本 attempt 无前次拒绝（首轮生成或
+   * 前次 attempt 成功通过校验）。
+   */
+  priorValidatorErrors?: LastValidatorErrors;
+  /**
+   * PRI-703 Phase 1: the scribe artifact's structured Owner-intent contract
+   * (runtime-validated via extractIntentContract). The generated rule must
+   * serve ownerIntent/targetBehavior and MUST NOT implement
+   * forbiddenBehavior. Undefined for pre-contract scribe artifacts
+   * (backward compatible).
+   */
+  intentContract?: IntentContractV1;
+  /**
+   * Owner's preferred language for implementation artifacts (PRI-714). When
+   * provided, the artificer instruction carries a language directive so
+   * implementationSummary and risks are written in the owner's language.
+   * Undefined = no directive (backward compatible). Never affects
+   * implementationCode, goldenTraceCases params, or lineage fields.
+   */
+  outputLanguage?: OutputLanguage;
 }
 
 export interface ArtificerPromptInput {
@@ -62,7 +90,6 @@ export interface ArtificerPromptInput {
   contextHash: string;
   sourceScribeArtifactId: string;
   scribeArtifact: unknown;
-  artificerInstruction: string;
   promptContractVersion: string;
   /** Present only when this is a retry with prior adversarial failures. */
   adversarialFeedback?: string;
@@ -70,11 +97,28 @@ export interface ArtificerPromptInput {
   dreamerContext?: ArtificerDreamerContext;
   /** Present only on Round-2+ artificer repair tasks (PRI-509). */
   repairFeedback?: string;
+  /** Present only when the prior attempt was rejected by the output-contract gate (PRI-700 factor B). */
+  priorValidatorErrors?: LastValidatorErrors;
+  /**
+   * PRI-703 Phase 1: the scribe artifact's structured Owner-intent contract
+   * (already runtime-validated by extractIntentContract). Forwarded into the
+   * prompt so rule generation anchors to the explicit intent — the
+   * implementationCode must serve ownerIntent/targetBehavior and MUST NOT
+   * implement forbiddenBehavior. Undefined for pre-contract scribe artifacts
+   * (backward compatible).
+   */
+  intentContract?: IntentContractV1;
 }
 
 export interface ArtificerPromptBuildResult {
   readonly message: string;
   readonly promptInput: ArtificerPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol + context-mode
+   * instruction). Previously embedded in the payload as `artificerInstruction`;
+   * now delivered via the system channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 export const ARTIFICER_PROTOCOL_INSTRUCTION = `You are an Artificer agent in a principle internalization pipeline. Your role is to transform the Scribe's formal principle draft into executable RuleHost code with a concise implementation summary, tests, and rollout notes.
@@ -85,6 +129,12 @@ PROTOCOL:
 3. Preserve the lineage trace from scribe, philosopher, and dreamer artifacts
 4. Identify risks associated with implementing this principle
 5. The implementation summary should clearly describe what the code does and why
+
+OWNER INTENT CONTRACT (when \`intentContract\` is present — PRI-703):
+- \`intentContract\` is the Owner-intent anchor distilled from the real failure. Your rule exists to serve it.
+- implementationCode MUST operationalize \`targetBehavior\` and MUST NOT implement \`forbiddenBehavior\`.
+- If a repair/revision instruction (repairFeedback, revisionFeedback) contradicts the intentContract, the intentContract wins: implement the contract-faithful behavior and document the conflict in implementationSummary — do NOT silently satisfy the contradicting instruction.
+- Use \`validationExpectation\` as your self-check before emitting: would an evaluator observing that expectation accept this rule as faithful?
 
 OUTPUT FORMAT (pure JSON, no markdown):
 {
@@ -155,6 +205,18 @@ REPAIR FEEDBACK (PRI-509, when \`repairFeedback\` is present):
   - Do NOT weaken safety constraints (e.g. drop risk-path blocks) just to make replay pass.
   - Respect the canonical RuleHostInput contract, including that paramsSummary is an object (see CONSTRAINTS).
   - Do NOT invent, guess, or fabricate evidence that is not listed — the list is the complete deterministic fact set (possibly truncated, as noted).
+
+ADVERSARIAL CASE VOCABULARY NOTE (apply whenever replay evidence or repair feedback mentions case ids):
+- Case ids such as "v2-unavailable", "v2-truncated", "v2-alias" (and any "v2-*" prefixed id) are INTERNAL EVALUATOR CASE NUMBERING — they describe which adversarial fixture was run, NOT a request to use context-version-2 features.
+- NEVER respond to a case id by declaring \`requiresContextVersion\`, adding case-level \`ruleContext\`, or changing \`expectedDecision\` to satisfy the case NAME. Case names are labels, not instructions.
+- Your output must ALWAYS satisfy the CONTEXT MODE block above (v1/v2 contract) regardless of which case ids appear in the feedback text.
+- In v1 mode the ONLY legal decisions are "allow" and "block"; the ONLY legal field set is the one in OUTPUT FORMAT above. Any field not listed there (e.g. requiresContextVersion, ruleContext) is a contract violation and WILL be rejected.
+
+PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
+- Your previous attempt was rejected by the OUTPUT CONTRACT GATE (schema validation) — it never reached evaluation. The \`priorValidatorErrors.errors\` list contains the exact, verbatim rejection reasons.
+- The highest-priority fix is to make your JSON satisfy EVERY listed rejection reason. Re-read each error, map it to the OUTPUT FORMAT and CONTEXT MODE rules, and correct the exact fields it names.
+- These errors describe YOUR output's shape, not the principle and not the test cases — do not change the behavioral intent while fixing them.
+- After addressing every listed error, re-check the full OUTPUT FORMAT and CONTEXT MODE blocks once more before emitting.
 `;
 
 const V1_CONTEXT_INSTRUCTION = `
@@ -181,8 +243,14 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * method prohibition; (2) deterministic replay evidence block semantics in
  * repair rounds (Case/Expected/Actual/Error/Message entries + fix/preserve/
  * no-weakening/no-fabrication instructions).
+ *
+ * PRI-700 (Owner 决策 2026-09-07): bumped v3 → v4. (1) adversarial case-id
+ * vocabulary note (v2-* ids are evaluator internal numbering, never a request
+ * to declare context-version fields); (2) prior output-contract rejection
+ * feedback block (priorValidatorErrors) — the repair attempt now receives the
+ * verbatim schema-rejection reasons from its previous attempt.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v3';
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v4';
 
 export class ArtificerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
@@ -196,14 +264,16 @@ export class ArtificerPromptBuilder {
       throw new Error('behaviorExamplePack is forbidden in v1 mode');
     }
     const artificerInstruction = ARTIFICER_PROTOCOL_INSTRUCTION
-      + (input.contextMode === 'v2' ? V2_CONTEXT_INSTRUCTION : V1_CONTEXT_INSTRUCTION);
+      + (input.contextMode === 'v2' ? V2_CONTEXT_INSTRUCTION : V1_CONTEXT_INSTRUCTION)
+      // PRI-714: language directive for human-readable implementation fields
+      // (empty string when outputLanguage is undefined).
+      + buildLanguageDirective(input.outputLanguage, 'implementation');
     const promptInput: ArtificerPromptInput = {
       contextMode: input.contextMode,
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceScribeArtifactId: input.sourceScribeArtifactId,
       scribeArtifact: input.scribeArtifact,
-      artificerInstruction,
       promptContractVersion: ARTIFICER_PROMPT_CONTRACT_VERSION,
       ...(input.contextMode === 'v2' && input.behaviorExamplePack !== undefined
         ? { behaviorExamplePack: input.behaviorExamplePack }
@@ -221,10 +291,16 @@ export class ArtificerPromptBuilder {
       ...(typeof input.repairFeedback === 'string' && input.repairFeedback.trim() !== ''
         ? { repairFeedback: input.repairFeedback }
         : {}),
+      // PRI-700 因子 B: only include priorValidatorErrors when present, so
+      // first-attempt prompts stay backward-compatible.
+      ...(input.priorValidatorErrors !== undefined ? { priorValidatorErrors: input.priorValidatorErrors } : {}),
+      // PRI-703 Phase 1: only include intentContract when present (pre-contract
+      // scribe artifacts), so prompts stay backward-compatible.
+      ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),
     };
 
     const message = serializePromptInput(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: artificerInstruction };
   }
 }

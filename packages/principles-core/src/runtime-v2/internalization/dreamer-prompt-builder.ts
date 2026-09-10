@@ -8,19 +8,24 @@
  *
  * ## Contract
  *
- * buildPrompt() takes DreamerPromptBuilderInput and returns a JSON string
- * to be passed as `inputPayload` in StartRunInput.
+ * buildPrompt() takes DreamerPromptBuilderInput and returns a build result
+ * whose `message` is the JSON string to be passed as `inputPayload` in
+ * StartRunInput, and whose `systemPrompt` is the base-layer system prompt
+ * (role + protocol) to pass via `StartRunInput.systemPrompt` (PRI-633).
  *
  * ## Constraints
  *
- * - Output is ONLY JSON — no markdown, no file ops, no tool calls
- * - NO extraSystemPrompt field — system prompt is agent profile's responsibility
+ * - Message payload is ONLY task data (JSON) — no markdown, no file ops, no tool calls
+ * - Role/protocol instructions travel as the base systemPrompt layer, NOT in
+ *   the user payload (PRI-633); the profile's configured systemPrompt remains
+ *   the append layer owned by the agent profile (DPB-07, as revised by PRI-633)
  * - buildPrompt() is a pure function — no DB calls, no side effects
  */
 
 import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
 import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.js';
 import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
 
 export interface DreamerPromptBuilderInput {
   taskId: string;
@@ -38,12 +43,17 @@ export interface DreamerPromptInput {
   contextHash: string;
   contextRefs: readonly string[];
   predecessorOutput: unknown;
-  dreamerInstruction: string;
 }
 
 export interface DreamerPromptBuildResult {
   readonly message: string;
   readonly promptInput: DreamerPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `dreamerInstruction`; now delivered via the system
+   * channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 /**
@@ -51,11 +61,21 @@ export interface DreamerPromptBuildResult {
  *
  * When `coreGrounding` is true, a CORE AXIOMS section is injected so the
  * Dreamer can correctly reference existing principles via sourcePrincipleId.
+ *
+ * PRI-714 (review fix): when `outputLanguage` is provided, a language
+ * directive is appended so the CANDIDATE OUTPUT (not just the axiom block)
+ * follows the owner's language — badDecision/betterDecision/rationale/
+ * strategicPerspective are the human-readable fields (riskLevel stays an
+ * English enum; lineage/IDs stay untranslated). Undefined = no directive
+ * (byte-identical to the pre-PRI-714 instruction).
  */
 export function buildDreamerProtocolInstruction(
   opts: CoreAxiomBlockOptions = {},
 ): string {
   const coreAxiomsBlock = buildCoreAxiomBlock(opts);
+  // PRI-714: output-language directive for the candidate fields (empty string
+  // when outputLanguage is undefined — instruction stays byte-identical).
+  const languageDirective = buildLanguageDirective(opts.outputLanguage, 'dreamer');
 
   return `You are a Dreamer agent in a principle internalization pipeline. Your role is to generate alternative decision candidates based on the predecessor's diagnosis analysis.
 
@@ -84,7 +104,7 @@ CONSTRAINTS:
 - valid MUST be true on success
 - sourcePrincipleId is OPTIONAL — only include it if you can identify a specific existing principle that this candidate relates to (use the axiom IDs from the CORE AXIOMS section above, e.g. T-01). Do NOT invent placeholder values like "pri-unknown", "pri-000", or any fabricated ID. If unsure, simply omit this field entirely
 - sourcePainId is an optional string
-`;
+${languageDirective}`;
 }
 
 export class DreamerPromptBuilder {
@@ -110,11 +130,10 @@ export class DreamerPromptBuilder {
       contextHash: input.contextHash,
       contextRefs: input.contextRefs,
       predecessorOutput: input.predecessorOutput,
-      dreamerInstruction,
     };
 
     const message = JSON.stringify(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: dreamerInstruction };
   }
 }

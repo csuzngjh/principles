@@ -55,7 +55,6 @@ export interface BuildPromptOptions {
  *
  * Per DPB-06: Explicit top-level fields make LLM's job clearer and easier to validate.
  * The DiagnosticianContextPayload is nested under `context` for backward compatibility.
- * The diagnosticInstruction field carries the 5-phase protocol so the LLM follows it.
  *
  * @see DEFAULT_LIMITS for size constraints applied during buildPrompt()
  */
@@ -76,13 +75,6 @@ export interface PromptInput {
   sourceRefs: string[];
   /** Full DiagnosticianContextPayload for backward compatibility */
   context: DiagnosticianContextPayload;
-  /**
-   * Explicit 5-phase diagnostic protocol instruction.
-   * Tells the LLM to follow Phase 1 (evidence) → Phase 2 (5 Whys causal chain)
-   * → Phase 3 (root cause classification) → Phase 4 (principle extraction),
-   * and to output DiagnosticianOutputV1 JSON.
-   */
-  diagnosticInstruction: string;
   /** Warnings added during truncation (e.g., conversationWindow entries removed) */
   truncationWarnings?: string[];
   /**
@@ -123,13 +115,19 @@ export const DEFAULT_PROMPT_BUILDER_LIMITS: PromptBuilderLimits = {
  * Build result — the JSON string to pass as --message argument.
  *
  * Per DPB-02: Output is ONLY JSON (no markdown, no file ops, no tool calls).
- * Per DPB-07: NO extraSystemPrompt field in this result.
+ * Per DPB-07 (as revised by PRI-633): the builder produces the base-layer
+ * `systemPrompt` (role + protocol); the profile's configured systemPrompt
+ * remains the append layer owned by the agent profile, and adapters own the
+ * per-runtime placement (system channel for pi-ai paths, message channel for
+ * the OpenClaw CLI path).
  */
 export interface PromptBuildResult {
   /** JSON string — the exact value to pass as openclaw agent --message argument */
   readonly message: string;
   /** The PromptInput object that was serialized to JSON */
   readonly promptInput: PromptInput;
+  /** PRI-633: base-layer system prompt (role + protocol instructions). */
+  readonly systemPrompt: string;
 }
 
 /**

@@ -2,6 +2,7 @@ export * from './types.js';
 export { scanKeywords, type KeywordScanResult } from './keyword-stage.js';
 export {
   buildLlmPrompt,
+  SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
   parseLlmClassification,
   resolveLlmClassificationPayload,
   type ParseResult,

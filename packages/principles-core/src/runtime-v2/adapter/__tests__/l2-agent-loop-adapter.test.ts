@@ -103,7 +103,7 @@ function makeStartRun(overrides: Partial<StartRunInput> = {}): StartRunInput {
   };
 }
 
-function makeAdapter(overrides: { maxTurns?: number; totalBudgetMs?: number; maxEmptyRetries?: number; l2FallbackToL1?: boolean } = {}): L2AgentLoopAdapter {
+function makeAdapter(overrides: { maxTurns?: number; totalBudgetMs?: number; maxEmptyRetries?: number; l2FallbackToL1?: boolean; systemPrompt?: string } = {}): L2AgentLoopAdapter {
   return new L2AgentLoopAdapter(
     {
       // Custom baseUrl so resolveL2Model builds the model inline (no getModel lookup).
@@ -115,6 +115,7 @@ function makeAdapter(overrides: { maxTurns?: number; totalBudgetMs?: number; max
       maxEmptyRetries: overrides.maxEmptyRetries,
       l2FallbackToL1: overrides.l2FallbackToL1,
       totalBudgetMs: overrides.totalBudgetMs ?? 60_000,
+      systemPrompt: overrides.systemPrompt,
     },
     { artifactReader, principleReader },
   );
@@ -476,4 +477,42 @@ describe('PRI-419 L2AgentLoopAdapter — runs Map is bounded (P1-1)', () => {
       expect(output).toBeNull();
     }
   }, 30_000);
+});
+
+// ── PRI-633 — layered systemPrompt placement ──
+
+describe('PRI-633 — layered systemPrompt placement', () => {
+  it('agentContext.systemPrompt = base → tool protocol → profile append; user message carries only task data', async () => {
+    let captured: { systemPrompt?: string; messages: { role: string; content: unknown }[] } | undefined;
+    hoisted.impl = async (_p: unknown, context: unknown) => {
+      captured = context as { systemPrompt?: string; messages: { role: string; content: unknown }[] };
+      return [{ role: 'assistant', content: JSON.stringify(VALID_DREAMER_OUTPUT) }];
+    };
+    const adapter = makeAdapter({ systemPrompt: 'PROFILE APPEND LAYER' });
+    await adapter.startRun(makeStartRun({ systemPrompt: 'BASE ROLE LAYER' }));
+
+    const sp = captured?.systemPrompt ?? '';
+    expect(sp).toContain('BASE ROLE LAYER');
+    expect(sp).toContain('--- Tool protocol (L2 mode) ---');
+    expect(sp).toContain('PROFILE APPEND LAYER');
+    expect(sp.indexOf('BASE ROLE LAYER')).toBeLessThan(sp.indexOf('--- Tool protocol'));
+    expect(sp.indexOf('--- Tool protocol')).toBeLessThan(sp.indexOf('PROFILE APPEND LAYER'));
+    // The user message no longer carries the tool protocol (PRI-633).
+    const first = captured?.messages[0];
+    expect(first?.role).toBe('user');
+    expect(first?.content).toBe('{"prompt":"generate candidates"}');
+  });
+
+  it('L1 fallback Context keeps base + profile append but NOT the tool protocol', async () => {
+    hoisted.impl = async () => []; // L2 produces nothing → empty → fallback
+    mockComplete.mockResolvedValueOnce({ content: JSON.stringify(VALID_DREAMER_OUTPUT) });
+
+    const adapter = makeAdapter({ maxEmptyRetries: 0, l2FallbackToL1: true, systemPrompt: 'PROFILE APPEND LAYER' });
+    const handle = await adapter.startRun(makeStartRun({ systemPrompt: 'BASE ROLE LAYER' }));
+
+    const output = await adapter.fetchOutput(handle.runId);
+    expect(output?.payload).toMatchObject({ valid: true });
+    const [, context] = mockComplete.mock.calls[0] as [unknown, { systemPrompt?: string }];
+    expect(context.systemPrompt).toBe('BASE ROLE LAYER\n\nPROFILE APPEND LAYER');
+  });
 });

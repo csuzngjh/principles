@@ -921,6 +921,7 @@ export {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
   mergePITaskMetadata,
+  artificerRepairTaskId,
 } from './internalization/pitask-metadata.js';
 
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
@@ -2142,6 +2143,7 @@ export type {
 export {
   scanKeywords,
   buildLlmPrompt,
+  SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
   parseLlmClassification,
   resolveLlmClassificationPayload,
   SignalClassificationOutputV1Schema,

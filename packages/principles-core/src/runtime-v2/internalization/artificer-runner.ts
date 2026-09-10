@@ -38,7 +38,8 @@ import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
-import { hydratePITaskRecord, type RepairPayload } from './pitask-metadata.js';
+import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
+import { extractIntentContract } from './intent-contract.js';
 import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
 import { ARTIFICER_MANIFEST, ARTIFICER_REPAIR_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
@@ -121,6 +122,15 @@ interface ArtificerContext {
    * — the durable authority remains the source Evaluator artifact.
    */
   readonly replayContext?: RepairReplayContext;
+  /**
+   * PRI-700 因子 B (Owner 决策 2026-09-07): 上一次 attempt 的 validator
+   * 拒绝全文。从 task.diagnosticJson 顶层 lastValidatorErrors 键读取
+   * (parseLastValidatorErrors 已做信任边界验证)，仅在新鲜度判定通过
+   * （sourceAttemptCount === 当前 attempt-1，isFreshForNextAttempt）时
+   * 携带。修复 attempt N+1 的 prompt 因此携带 attempt N 被拒的确切
+   * 契约原因——不再零新信息重试。Ephemeral，不回写、不进 RepairPayload。
+   */
+  readonly priorValidatorErrors?: LastValidatorErrors;
 }
 
 /**
@@ -471,9 +481,17 @@ function formatRepairFeedback(payload: RepairPayload, replayEvidence?: string): 
           `Deterministic adversarial replay: ${payload.diagnosticReplay.ran ? (payload.diagnosticReplay.passed ? 'PASSED' : 'FAILED') : 'not run'} (failed cases: ${payload.diagnosticReplay.failedCaseCount}). This is diagnostic evidence only — the evaluator verdict remains needs_revision.`,
         ]
     : [];
+  // PRI-705 / PRI-703 Phase 2: 失败归因随载荷渲染 — "哪里失败/为什么/哪些
+  // case 属于通道限制不得尝试满足"。缺失 = 未分类 (旧行为不变)。
+  const attributionLines = payload.failureAttribution
+    ? [
+        `Failure attribution: ${payload.failureAttribution.attribution} — ${payload.failureAttribution.reason}.`,
+      ]
+    : [];
   return [
     `Previous attempt scored ${payload.previousScore} (needs_revision).`,
     ...replayLines,
+    ...attributionLines,
     `Evaluator concerns:`,
     concernsLines,
     `Required changes:`,
@@ -575,6 +593,15 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     this.behaviorExamplePack = deps.behaviorExamplePack;
   }
 
+  /**
+   * PRI-700 因子 B（评审 P1 修正）：lastValidatorErrors 回喂的新鲜度由
+   * 持久化来源标识判定——isFreshForNextAttempt（pitask-metadata.ts，
+   * sourceAttemptCount === 当前 attempt-1），取代原先的进程内消费集合：
+   * 运行时错误不清除记录时，attempt N+2 或进程重启后的重试不得复用
+   * attempt N 的旧错误（EP-05 loop state freshness）。Suppression 在唯一
+   * 消费点发单个事件（rc-9）。
+   */
+
   // ── Abstract implementations ───────────────────────────────────────────────
 
   /**
@@ -637,7 +664,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // hydrated value as typed text input and format it for the prompt.
     // rc-7 (loop state freshness): repairPayload comes from the CURRENT task's
     // diagnosticJson — never a cached or inferred value. repairIteration tells
-    // the artificer which round it's in.
+    // the artificer which round it's in (1 = first repair, 2 = second repair).
     //
     // PRI-634 PR-A: when the diagnostic replay ran and FAILED, the concrete
     // evidence is resolved BY REFERENCE from the source Evaluator artifact
@@ -648,6 +675,17 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     let repairFeedback: string | null = null;
     let repairPayload: RepairPayload | undefined;
     let replayContext: RepairReplayContext | undefined;
+
+    // PRI-700 因子 B: 上一次 attempt 的 validator 拒绝全文回喂。新鲜度由
+    // 持久化来源标识判定（sourceAttemptCount === 当前 attempt-1）：运行时
+    // 错误不清除记录也不会串 attempt，进程重启同理（评审 P1 修正——原
+    // 进程内消费集合在重启后丢失，旧错误会被再次注入）。从当前 task 的
+    // diagnosticJson 顶层读取（与 pi_metadata 信封并列），trust boundary
+    // 由 parseLastValidatorErrors 守卫。
+    const priorValidatorErrors = parseLastValidatorErrors(task.diagnosticJson);
+    const attemptIsFresh = priorValidatorErrors !== null
+      && isFreshForNextAttempt(priorValidatorErrors, this.currentLeasedAttempt);
+
     if (piTask?.repairPayload) {
       const payload = piTask.repairPayload;
       repairPayload = payload;
@@ -690,9 +728,25 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // PR B: ephemeral repair/replay evidence for the Shared Information Plane.
     // Both are read-only views of already-durable facts; neither is persisted
     // here and neither widens RepairPayload (design §21/§28).
+    // PRI-700 因子 B: 上一次 attempt 的 validator 拒绝全文——同为 durable
+    // 事实的只读视图，仅在新鲜度判定通过时携带（回喂窗口）。
+    if (priorValidatorErrors !== null && !attemptIsFresh) {
+      this.emitEvent('prior_validator_errors_suppressed', taskId, {
+        recordedAt: priorValidatorErrors.recordedAt,
+        errorCount: priorValidatorErrors.errors.length,
+        sourceAttemptCount: priorValidatorErrors.sourceAttemptCount,
+        currentAttempt: this.currentLeasedAttempt,
+        reason: this.currentLeasedAttempt === undefined
+          ? 'no_lease_context'
+          : 'stale_source_attempt',
+      });
+    }
     const repairEvidenceExtras = {
       ...(repairPayload !== undefined ? { repairPayload } : {}),
       ...(replayContext !== undefined ? { replayContext } : {}),
+      ...(priorValidatorErrors !== null && attemptIsFresh
+        ? { priorValidatorErrors }
+        : {}),
     };
 
     // P1-1 (外部复核): rollout needs_revision 路由到 artificer (code 渠道) 时,
@@ -768,6 +822,11 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     } catch {
       scribeArtifactInput = context.scribeArtifact;
     }
+    // PRI-703 Phase 1（评审 P1 修正）：intent contract 必须在 manifest 收窄
+    // 之前从完整 scribe 工件提取——focused 模式会把 scribeArtifactInput 替换
+    // 为扁平 summary 字段（intentOwner 等），根级 intentContract 对象不再
+    // 存在，收窄后提取恒为 null（context_manifest_budget 开启即丢契约）。
+    const fullScribeArtifact = scribeArtifactInput;
 
     // Layer 1 (design §6.2/§6.3, task 5.9) + PR B Shared Information Plane:
     // resolve the manifest against the scribe predecessor's summary envelope,
@@ -810,8 +869,12 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       repairFeedback = formatRepairFeedback(repairPayload, formatReplayEvidenceBlock(replayContext));
     }
 
+    // PRI-703 Phase 1: extract from the FULL scribe artifact (captured before
+    // the focused-manifest narrowing — see the comment at the capture site).
+    const intentContract = extractIntentContract(fullScribeArtifact);
+
     const builder = new ArtificerPromptBuilder();
-    const { message } = builder.buildPrompt({
+    const { message, systemPrompt } = builder.buildPrompt({
       contextMode: this.contextMode,
       behaviorExamplePack: this.behaviorExamplePack,
       taskId,
@@ -827,6 +890,18 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // (prompt builder treats undefined as backward-compatible no-op).
       // PR B: channel-resolved — see the block above.
       repairFeedback: repairFeedback ?? undefined,
+      // PRI-700 因子 B: forward the prior attempt's validator rejection text
+      // so the repair attempt fixes the exact contract violations instead of
+      // re-emitting the same invalid shape (18/18 death-loop breaker).
+      priorValidatorErrors: context.priorValidatorErrors,
+      // PRI-703 Phase 1: forward the scribe Owner-intent contract so rule
+      // generation anchors to the explicit intent. extract returns null for
+      // pre-contract artifacts → undefined keeps the prompt unchanged.
+      intentContract: intentContract ?? undefined,
+      // PRI-714: language directive for implementationSummary/risks
+      // (undefined = no directive; never touches implementationCode or
+      // goldenTraceCases params).
+      outputLanguage: this.resolvedOptions.outputLanguage,
     });
     // P1-1: rollout revision feedback 注入 (与 scribe 同模式; repairFeedback
     // 走 prompt builder 字段,revisionFeedback 是路由文本,直接附加)
@@ -845,6 +920,7 @@ ${context.revisionFeedback}
       contextItems: [],
       outputSchemaRef: 'artificer-rule-output-v2',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

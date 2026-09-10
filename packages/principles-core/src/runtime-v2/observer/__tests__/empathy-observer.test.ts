@@ -3,9 +3,10 @@ import { EmpathyObserver } from '../empathy-observer.js';
 import { TestDoubleRuntimeAdapter } from '../../adapter/test-double-runtime-adapter.js';
 
 describe('EmpathyObserver', () => {
-  it('correctly builds prompt', () => {
+  it('correctly builds prompt (role declaration moved to SYSTEM_PROMPT, PRI-633)', () => {
     const prompt = EmpathyObserver.buildPrompt('I am frustrated');
-    expect(prompt).toContain('You are an empathy observer.');
+    expect(prompt).not.toContain('You are an empathy observer.');
+    expect(EmpathyObserver.SYSTEM_PROMPT).toBe('You are an empathy observer.');
     expect(prompt).toContain('I am frustrated');
   });
 

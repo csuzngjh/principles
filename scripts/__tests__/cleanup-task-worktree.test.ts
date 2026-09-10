@@ -135,6 +135,41 @@ describe('cleanup-task-worktree', () => {
     expect(fs.existsSync(primary)).toBe(true);
   }, 60_000);
 
+  it('SKIPS the global prune while a sibling worktree is unreadable, and still cleans the target (PRI-712)', async () => {
+    // Target: clean + merged → removable as usual.
+    const target = await makeTask('pruneguard-target');
+    await mergeIntoMain(target.branch);
+    await git(primary, 'switch', '-c', 'work/back-from-pruneguard-target');
+
+    // Sibling: simulates the PRI-710 incident precondition — a live worktree
+    // whose git probe currently fails (here: damaged .git pointer; in the
+    // wild: Windows lock races). Its admin metadata must survive the global
+    // prune this cleanup runs afterwards.
+    const sibling = await makeTask('pruneguard-sibling');
+    const siblingGitFile = path.join(sibling.wt, '.git');
+    const gitPointer = fs.readFileSync(siblingGitFile, 'utf-8');
+    fs.rmSync(siblingGitFile);
+
+    try {
+      const r = await runDevScript('cleanup-task-worktree.mjs', [target.branch, '--delete-branch', '--json'], { cwd: primary });
+      expect(r.code).toBe(0);
+      const out = JSON.parse(r.stdout) as { ok: boolean; pruned: boolean; notes: string[] };
+      expect(out.ok).toBe(true);
+      // The sanctioned target is still cleaned — the guard only defers the prune.
+      expect(fs.existsSync(target.wt)).toBe(false);
+      expect(out.pruned).toBe(false);
+      expect(out.notes.join(' ')).toContain('skipped global worktree prune');
+
+      // Negative control: the sibling's admin entry AND its work survived.
+      const list = await worktreeList(primary);
+      expect(list.some((w) => normalizeGitPath(w.path) === normalizeGitPath(sibling.wt))).toBe(true);
+      expect(fs.existsSync(path.join(sibling.wt, 'pruneguard-sibling.txt'))).toBe(true);
+    } finally {
+      // Fixture hygiene: restore the pointer so removeFixture can clean up.
+      fs.writeFileSync(siblingGitFile, gitPointer, 'utf-8');
+    }
+  }, 120_000);
+
   it('succeeds on a porcelain-clean worktree that still contains ignored build output (node_modules)', async () => {
     const { wt, branch } = await makeTask('with-ignored');
     await mergeIntoMain(branch);

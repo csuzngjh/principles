@@ -1,0 +1,10 @@
+{
+  "name": "orders-stack",
+  "version": "2.4.1",
+  "private": true,
+  "description": "orders-api compose stack: bootstrap contract over docker-compose.yml.",
+  "scripts": {
+    "start": "node start-stack.js",
+    "verify": "node verify.js"
+  }
+}

@@ -508,8 +508,9 @@ async function runArm1(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
       outputLanguage
     });
 
-    const systemPrompt = result.promptInput.diagnosticInstruction;
-    const userPrompt = JSON.stringify({ ...result.promptInput, diagnosticInstruction: undefined }, null, 2);
+    // PRI-633: the instruction now travels on the builder result's systemPrompt channel.
+    const systemPrompt = result.systemPrompt;
+    const userPrompt = JSON.stringify(result.promptInput, null, 2);
 
     const apiResult = await callSenseNova(model, systemPrompt, userPrompt);
     const parsed = parseJsonSafe(apiResult.content);
@@ -561,8 +562,9 @@ async function runArm2(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
       outputLanguage
     });
 
-    const systemPrompt = result.promptInput.diagnosticInstruction;
-    const userPrompt = JSON.stringify({ ...result.promptInput, diagnosticInstruction: undefined }, null, 2);
+    // PRI-633: the instruction now travels on the builder result's systemPrompt channel.
+    const systemPrompt = result.systemPrompt;
+    const userPrompt = JSON.stringify(result.promptInput, null, 2);
 
     const apiResult = await callSenseNova(model, systemPrompt, userPrompt);
     const parsed = parseJsonSafe(apiResult.content);
@@ -614,8 +616,8 @@ async function runArm3(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
       coreGrounding: true,
       outputLanguage
     });
-    const systemA = rcResult.promptInput.diagnosticInstruction;
-    const userA = JSON.stringify({ ...rcResult.promptInput, diagnosticInstruction: undefined }, null, 2);
+    const systemA = rcResult.systemPrompt;
+    const userA = JSON.stringify(rcResult.promptInput, null, 2);
     const apiA = await callSenseNova(model, systemA, userA);
     const parsedA = parseJsonSafe(apiA.content);
     if (!parsedA.ok) {
@@ -638,8 +640,8 @@ async function runArm3(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
       coreGrounding: true,
       outputLanguage
     });
-    const systemB = distResult.promptInput.distillerInstruction;
-    const userB = JSON.stringify({ ...distResult.promptInput, distillerInstruction: undefined }, null, 2);
+    const systemB = distResult.systemPrompt;
+    const userB = JSON.stringify(distResult.promptInput, null, 2);
     const apiB = await callSenseNova(model, systemB, userB);
     const parsedB = parseJsonSafe(apiB.content);
     if (!parsedB.ok) {
@@ -662,8 +664,8 @@ async function runArm3(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
     const routerResult = routerBuilder.buildPrompt(routerCtx, {
       outputLanguage
     });
-    const systemC = routerResult.promptInput.routerInstruction;
-    const userC = JSON.stringify({ ...routerResult.promptInput, routerInstruction: undefined }, null, 2);
+    const systemC = routerResult.systemPrompt;
+    const userC = JSON.stringify(routerResult.promptInput, null, 2);
     const apiC = await callSenseNova(model, systemC, userC);
     const parsedC = parseJsonSafe(apiC.content);
     if (!parsedC.ok) {

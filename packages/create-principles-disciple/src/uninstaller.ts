@@ -15,7 +15,7 @@
  * HostInstaller.uninstall() implementations. Workspace user data is always
  * preserved regardless of host target.
  */
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
@@ -25,6 +25,7 @@ import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
 import { getGlobalShimPaths, getInstalledBinDir, getPdRuntimeDir, getInstallManifestPath, isWindows } from './mvp-config.js';
 import { parseInstallManifest } from '@principles/install-layout';
+import { mergeIntoInstallJson } from './update/install-layout.js';
 import { setLanguage, t, getLanguage } from './i18n.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostUninstallContext, HostUninstallResult } from '@principles/core/host';
@@ -247,36 +248,109 @@ const REMOVE_RETRY_DELAY_MS = 1000;
  * ERR-045: argv-array execution only; every value is either a literal or a
  * validated JS-side output match, never a shell string.
  */
-export function parseWmicProcessCsv(output: string, consoleEntry: string): { pid: number }[] {
-  const results: { pid: number }[] = [];
-  const lines = output.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-  for (const line of lines) {
-    // wmic CSV escapes backslashes ("C:\\Users\\..."); normalize so the
-    // single-backslash filesystem path matches.
-    const normalized = line.replaceAll('\\\\', '\\');
-    if (!normalized.includes(consoleEntry)) continue;
-    // CSV format: <host>,<node>,CommandLine...,<empty>,PID
-    const pidStr = line.substring(line.lastIndexOf(',') + 1).trim();
-    const pid = Number.parseInt(pidStr, 10);
-    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
-      results.push({ pid });
+
+/**
+ * PRI-710: one RFC4180 CSV line → fields. Handles PowerShell ConvertTo-Csv
+ * quoting: values are wrapped in double quotes and embedded quotes are
+ * doubled (""). ConvertTo-Csv does NOT escape backslashes (wmic did), so
+ * paths arrive verbatim. A comma inside a quoted value must not split.
+ */
+function splitCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line.charAt(i);
+    if (inQuotes) {
+      if (char === '"') {
+        if (line.charAt(i + 1) === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += char;
+      }
+    } else if (char === '"' && current === '') {
+      inQuotes = true;
+    } else if (char === ',') {
+      fields.push(current);
+      current = '';
+    } else {
+      current += char;
     }
   }
-  return results;
+  fields.push(current);
+  return fields;
+}
+
+/**
+ * PRI-710 (supersedes parseWmicProcessCsv): parse
+ * `Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine |
+ * ConvertTo-Csv -NoTypeInformation` output. Header row is `ProcessId,
+ * CommandLine` (order as selected); rows without a positive integer PID or
+ * with an empty CommandLine are skipped. Attribution unchanged: only rows
+ * whose CommandLine references consoleEntry count. Duplicates are collapsed
+ * (CIM can surface the same PID twice across brief query windows).
+ */
+export function parseConsoleProcessCsv(output: string, consoleEntry: string): { pid: number }[] {
+  const results = new Map<number, { pid: number }>();
+  const lines = output.split('\n').map((l) => l.replace(/\r$/, '').trim()).filter((l) => l.length > 0);
+  let processIdColumn = -1;
+  let commandLineColumn = -1;
+  for (const line of lines) {
+    const fields = splitCsvLine(line);
+    if (processIdColumn === -1) {
+      // Header row (first non-empty line): locate columns by name so a
+      // future property reorder cannot silently misparse PIDs.
+      processIdColumn = fields.findIndex((f) => f.trim().toLowerCase() === 'processid');
+      commandLineColumn = fields.findIndex((f) => f.trim().toLowerCase() === 'commandline');
+      if (processIdColumn === -1 || commandLineColumn === -1) {
+        // Unrecognized header — refuse to guess column positions (rc-3).
+        return [];
+      }
+      continue;
+    }
+    const pidStr = (fields[processIdColumn] ?? '').trim();
+    const pid = Number.parseInt(pidStr, 10);
+    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue;
+    const commandLine = (fields[commandLineColumn] ?? '').trim();
+    if (commandLine === '') continue;
+    if (!commandLine.includes(consoleEntry)) continue;
+    results.set(pid, { pid });
+  }
+  return [...results.values()];
 }
 
 function findRunningConsoleProcesses(): { pid: number }[] {
   const consoleEntry = path.join(getPdRuntimeDir(), 'console', 'dist', 'server.js');
   if (!existsSync(consoleEntry)) return [];
   try {
-    // wmic is Windows-only; other platforms have no detached-console lock
-    // problem observed (the EPERM reports so far are all Windows prebuilds).
+    // Windows-only: other platforms have no detached-console lock problem
+    // observed (the EPERM reports so far are all Windows prebuilds).
     if (!isWindows()) return [];
-    const output = execFileSync('wmic.exe', ['process', 'where', "Name='node.exe'", 'get', 'ProcessId,CommandLine', '/format:csv'], { encoding: 'utf-8', timeout: 10_000 });
-    return parseWmicProcessCsv(output, consoleEntry);
+    // PRI-710: wmic.exe was removed from Windows 11 24H2+ and is not in the
+    // project command allowlist. Get-CimInstance is the supported successor
+    // (powershell.exe is allowlisted). The script is passed ENCODED (UTF-16LE
+    // base64) because Node→PowerShell argv quoting corrupts embedded quotes
+    // in -Command strings; -EncodedCommand is quote-safe. Output encoding is
+    // pinned to UTF-8: PowerShell 5.1 pipes use the OEM code page by default
+    // (cp936 on zh-CN hosts), which would mangle non-ASCII command lines
+    // before the consoleEntry match. Pipeline is ONE statement (a `|` before
+    // a `;` separator is an EmptyPipeElement syntax error — caught by the
+    // PRI-710 real-machine smoke).
+    const script = [
+      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8',
+      'Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation',
+    ].join('; ');
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 10_000 });
+    return parseConsoleProcessCsv(output, consoleEntry);
   } catch {
-    // wmic unavailable/failed — degrade to no-stop; removeWithRetry still
-    // handles transient locks, and the EPERM path reports the manual action.
+    // PowerShell unavailable/failed — degrade to no-stop; removeWithRetry
+    // still handles transient locks, and the EPERM path reports the manual
+    // action.
     return [];
   }
 }
@@ -508,11 +582,14 @@ export async function uninstall(
         deleteErrors.push({ name: 'PD install manifest', error: err instanceof Error ? err.message : String(err) });
       }
     } else if (!runtimePlan.removeSharedRuntime && runtimePlan.remainingHosts.length > 0) {
-      writeFileSync(getInstallManifestPath(), JSON.stringify({
+      // PRI-709 P0-1: merge instead of replace — a wholesale rewrite dropped
+      // `workspaces` and every update-side field (channel / autoCheck /
+      // releaseMetadataUrl).
+      mergeIntoInstallJson(getInstallManifestPath(), {
         layoutVersion: 1,
         mode: 'canonical',
         hosts: runtimePlan.remainingHosts,
-      }, null, 2) + '\n', 'utf8');
+      });
     }
 
     // 7. Record preserved paths

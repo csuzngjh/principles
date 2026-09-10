@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      containers:
+        - name: orders-api
+          image: orders-api:latest
+          ports:
+            - containerPort: 8080
+          log_level: info
+          retries: "3"
+          env:
+            - name: REGION
+              value: "us-east-1"

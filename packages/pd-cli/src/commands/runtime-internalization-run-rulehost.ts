@@ -141,6 +141,8 @@ function resolvePiAiAgentAdapter(
       timeoutMs: options.timeoutMs ?? binding.profile.timeoutMs,
       baseUrl: binding.profile.baseUrl,
       workspace: options.workspaceDir,
+      // PRI-633: profile systemPrompt rides as the append layer.
+      ...(binding.profile.systemPrompt ? { systemPrompt: binding.profile.systemPrompt } : {}),
     }),
   };
 }

@@ -41,7 +41,7 @@ Principles Disciple 是一个 OpenClaw 插件，用来帮助编程智能体捕�
 
 ## ⚡ 从这里开始 (Start here)
 
-**前置条件:** Node.js ≥ 18 | 已安装 OpenClaw CLI
+**前置条件:** Node.js ≥ 22 | 已安装 OpenClaw CLI
 
 ### 🤖 我是 AI 智能体
 

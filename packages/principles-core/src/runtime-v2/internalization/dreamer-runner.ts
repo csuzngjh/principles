@@ -17,6 +17,7 @@
 import type { RunHandle } from '../runtime-protocol.js';
 import type { DreamerOutput, DreamerValidator } from './dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
+import type { OutputLanguage } from '../language-directive.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
@@ -76,6 +77,12 @@ export interface ResolvedDreamerRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /**
+   * Owner's preferred language for candidate fields (PRI-336/PRI-714).
+   * Forwarded to DreamerPromptBuilder so badDecision/betterDecision/rationale
+   * follow the owner's language. Undefined = no directive (backward compatible).
+   */
+  readonly outputLanguage?: OutputLanguage;
   /** Whether to inject CORE_PRINCIPLES into the dreamer prompt (default: true). */
   readonly coreGrounding: boolean;
 }
@@ -95,6 +102,7 @@ export function resolveDreamerRunnerOptions(options: DreamerRunnerOptions): Reso
     defaultMaxAttempts: options.defaultMaxAttempts ?? DEFAULT_DREAMER_RUNNER_OPTIONS.defaultMaxAttempts,
     owner: options.owner,
     runtimeKind: options.runtimeKind,
+    outputLanguage: options.outputLanguage,
     agentId: options.agentId ?? DEFAULT_DREAMER_RUNNER_OPTIONS.agentId,
     coreGrounding: options.coreGrounding ?? DEFAULT_DREAMER_RUNNER_OPTIONS.coreGrounding,
   };
@@ -204,8 +212,8 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
   }
 
   async invokeRuntime(taskId: string, context: DreamerContext): Promise<RunHandle> {
-    const {coreGrounding} = this.resolvedOptions;
-    const builder = new DreamerPromptBuilder({ coreGrounding });
+    const {coreGrounding, outputLanguage} = this.resolvedOptions;
+    const builder = new DreamerPromptBuilder({ coreGrounding, outputLanguage });
     // Layer 1 (design §6.2/§6.3, task 5.9): when context_manifest_budget is on,
     // resolve the dreamer manifest against the loaded diag_router predecessor.
     // Focused → inject only the manifest-allocated summary fields; fallback →
@@ -217,12 +225,13 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
         predecessorOutput = resolved.fields;
       }
     }
-    const { message } = builder.buildPrompt({
+    const { message, systemPrompt } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       contextRefs: context.contextRefs,
       predecessorOutput,
       coreGrounding,
+      outputLanguage,
     });
 
     return this.runtimeAdapter.startRun({
@@ -232,6 +241,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
       contextItems: [],
       outputSchemaRef: 'dreamer-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

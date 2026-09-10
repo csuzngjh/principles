@@ -620,10 +620,19 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     const state: RunState = { runId, startedAt, cliOutput: null, completed: false, outputSchemaRef: input.outputSchemaRef };
     this.runStateMap.set(runId, state);
 
-    // Build CLI args per D-02
-    const jsonPayload = typeof input.inputPayload === 'string'
+    // Build CLI args per D-02.
+    // PRI-633: the run's base-layer systemPrompt (agent role + protocol) is
+    // folded back into the message file. The OpenClaw host keeps full
+    // ownership of its own agent system prompt (DPB-07), so PD continues to
+    // deliver its instructions through the message channel; only the
+    // placement changed (appended section after the payload JSON instead of
+    // an instruction field inside it). Absent systemPrompt → unchanged bytes.
+    const payloadJson = typeof input.inputPayload === 'string'
       ? input.inputPayload
       : JSON.stringify(input.inputPayload);
+    const jsonPayload = input.systemPrompt
+      ? payloadJson + '\n\n' + input.systemPrompt
+      : payloadJson;
     const timeoutSeconds = Math.ceil((input.timeoutMs ?? 600000) / 1000);
     const agentId = input.agentSpec?.agentId ?? 'main';
     const messageRef = await writeMessageFile(jsonPayload, this.workspaceDir);
