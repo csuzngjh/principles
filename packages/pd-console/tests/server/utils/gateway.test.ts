@@ -91,6 +91,61 @@ describe('runGatewayServiceCommand (via exported wrappers)', () => {
   });
 });
 
+describe('PRI-723: Windows-safe gateway stop/restart', () => {
+  it('stop retries with --force when the plain stop is refused, and reports ok', () => {
+    mockedExec.mockImplementation((_cmd, args) => {
+      if (args && args.includes('stop') && !args.includes('--force')) {
+        throw new Error('refuses to stop the operator gateway without --force');
+      }
+      return undefined;
+    });
+    const result = stopOpenClawGateway();
+    expect(result).toEqual({ ok: true });
+    expect(mockedExec).toHaveBeenCalledTimes(2);
+    const [, secondArgs] = mockedExec.mock.calls[1];
+    expect(secondArgs).toEqual(['gateway', 'stop', '--force']);
+  });
+
+  it('reports a combined error when both the plain and the forced stop fail', () => {
+    mockedExec.mockImplementation(() => {
+      throw new Error('spawn failed');
+    });
+    const result = stopOpenClawGateway();
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('gateway stop');
+    expect(result.error).toContain('forced retry');
+    expect(mockedExec).toHaveBeenCalledTimes(2);
+  });
+
+  it('spawns through a shell on win32 only (.cmd shim needs it; every argv stays a constant literal)', () => {
+    // The test flips the global platform — always restore it, including on
+    // assertion failure, so sibling tests never run under a hijacked
+    // process.platform (CodeRabbit finding on PR #1596).
+    const originalPlatform = process.platform;
+    try {
+      setPlatform('win32');
+      stopOpenClawGateway();
+      let [, , options] = mockedExec.mock.calls[0];
+      expect(options?.shell).toBe(true);
+
+      setPlatform('linux');
+      mockedExec.mockClear();
+      stopOpenClawGateway();
+      [, , options] = mockedExec.mock.calls[0];
+      expect(options?.shell).toBe(false);
+    } finally {
+      setPlatform(originalPlatform);
+    }
+  });
+
+  it('restart never passes --force (start has no operator guard)', () => {
+    restartOpenClawGateway();
+    expect(mockedExec).toHaveBeenCalledTimes(1);
+    const [, args] = mockedExec.mock.calls[0];
+    expect(args).toEqual(['gateway', 'start']);
+  });
+});
+
 describe('checkOpenClawGateway pid resolution', () => {
   it('win32: probes PID via powershell argv array', async () => {
     setPlatform('win32');

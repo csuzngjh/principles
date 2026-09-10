@@ -150,7 +150,7 @@ describe('installed-layout', () => {
     }
   });
 
-  it('tolerates a one-generation-old deployed install-layout without codexAdapterDir (PRI-711)', async () => {
+  it('derives codexAdapterDir from runtimeDir when the deployed install-layout predates the field (PRI-724)', async () => {
     const installLayout = await import('@principles/install-layout');
     const actual = await vi.importActual<typeof import('@principles/install-layout')>('@principles/install-layout');
     const canonicalHome = installCanonicalHome('2.0.0');
@@ -167,7 +167,10 @@ describe('installed-layout', () => {
     try {
       const layout = resolveUpdateLayout();
       expect(layout).toBeDefined();
-      expect(layout?.codexAdapterDir).toBeUndefined();
+      // PRI-724: the destination is DERIVED from the stable runtimeDir — the
+      // same path the current generation installs the adapter at — instead of
+      // degrading the update to skipping the adapter copy.
+      expect(layout?.codexAdapterDir).toBe(path.join(canonicalHome, '.pd', 'runtime', 'codex-adapter'));
       expect(layout?.pdCliDir).toContain(path.join('.pd', 'runtime', 'pd-cli'));
       expect(layout?.hosts).toEqual(['openclaw']);
     } finally {

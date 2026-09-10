@@ -593,6 +593,26 @@ async function fetchWithRetry(url: string, label: string): Promise<Response> {
   throw new Error(`${label} failed after ${MAX_RETRIES + 1} attempts: ${lastError?.message ?? 'unknown'}`);
 }
 
+// PRI-723: gateway coordination outcomes must be observable (rc-9). The flow
+// object travels through the update functions' stop/restart sites and the
+// mutation handlers merge `notice` into the response as `gatewayNotice` — a
+// failed stop/restart must never degrade silently again.
+type GatewayCoordinationFlow = { notice?: string };
+
+function stopGatewayForUpdate(flow: GatewayCoordinationFlow): boolean {
+  const stopRes = stopOpenClawGateway();
+  if (stopRes.ok) return true;
+  flow.notice = `OpenClaw gateway stop failed — the gateway kept running during the update (${stopRes.error}). Restart the gateway afterwards so it loads the updated plugin.`;
+  return false;
+}
+
+function restartGatewayAfterUpdate(flow: GatewayCoordinationFlow): void {
+  const restartRes = restartOpenClawGateway();
+  if (restartRes.ok) return;
+  const message = `OpenClaw gateway was stopped for the update but failed to restart (${restartRes.error}). Run \`openclaw gateway start\` to restore it.`;
+  flow.notice = flow.notice ? `${flow.notice} ${message}` : message;
+}
+
 async function doApplyUpdate(
   options: {
     targetDir: string;
@@ -600,6 +620,7 @@ async function doApplyUpdate(
     createBackup: boolean;
   },
   workspaceDir: string,
+  gatewayFlow: GatewayCoordinationFlow = {},
 ) {
   const { targetDir, mergeStrategy, createBackup } = options;
   let backupPath: string | undefined = undefined;
@@ -625,13 +646,11 @@ async function doApplyUpdate(
   // the gateway isn't running, we proceed (dist/*.js files are not locked).
   const gatewayStatus = await checkOpenClawGateway();
   if (gatewayStatus.isRunning) {
-    const stopRes = stopOpenClawGateway();
-    if (stopRes.ok) {
-      gatewayWasStopped = true;
-    }
+    gatewayWasStopped = stopGatewayForUpdate(gatewayFlow);
     // If stop failed, proceed anyway — the file operations below don't touch
     // node_modules (excluded from backup and diff), so locks on native modules
     // don't matter. dist/*.js files are read-once by Node, never locked.
+    // The failure itself reaches the Owner via gatewayFlow.notice (PRI-723).
   }
 
   try {
@@ -859,7 +878,7 @@ async function doApplyUpdate(
     // Fix 5: restart the gateway if we stopped it (even on failure), so the
     // user is never left without a running gateway. Mirrors installer.ts behavior.
     if (gatewayWasStopped) {
-      restartOpenClawGateway();
+      restartGatewayAfterUpdate(gatewayFlow);
     }
   }
 }
@@ -1222,13 +1241,14 @@ function ensureRuntimeResolutionLinks(
   return { quarantined };
 }
 
-async function doInlineFullUpdate(workspaceDir: string): Promise<{
+async function doInlineFullUpdate(workspaceDir: string, gatewayFlow: GatewayCoordinationFlow = {}): Promise<{
   success: boolean;
   message: string;
   reason?: string;
   nextAction?: string;
   newVersion?: string;
   requiresRestart: boolean;
+  gatewayNotice?: string;
 }> {
   const layout = resolveUpdateLayout();
   if (!layout) {
@@ -1395,8 +1415,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
       ? await checkOpenClawGateway()
       : { isRunning: false };
     if (gatewayStatus.isRunning) {
-      const stopRes = stopOpenClawGateway();
-      if (stopRes.ok) gatewayWasStopped = true;
+      gatewayWasStopped = stopGatewayForUpdate(gatewayFlow);
     }
 
     // Heal legacy installs only after candidate verification. This writes
@@ -1716,7 +1735,7 @@ async function doInlineFullUpdate(workspaceDir: string): Promise<{
   } finally {
     // 8. Restart gateway regardless of success/failure
     if (gatewayWasStopped) {
-      restartOpenClawGateway();
+      restartGatewayAfterUpdate(gatewayFlow);
     }
   }
 }
@@ -1858,12 +1877,13 @@ function legacyApplyMutation(
       // ADR-0024 D-2 (PRI-709 P0-3): every runtime mutation is journaled.
       // `planned` lands after all request validation, so a rejected request
       // leaves no transaction behind.
+      const gatewayFlow: GatewayCoordinationFlow = {};
       const { result, journal } = await runLegacyJournaledMutation(
         { kind: 'apply', pdHome, pluginDir },
-        () => doApplyUpdate({ targetDir, mergeStrategy, createBackup }, ctx.workspaceDir),
+        () => doApplyUpdate({ targetDir, mergeStrategy, createBackup }, ctx.workspaceDir, gatewayFlow),
       );
       if (!journal.journaled) logLegacyJournalGap('apply', journal.reason);
-      sendSuccess(res, result);
+      sendSuccess(res, gatewayFlow.notice ? { ...result, gatewayNotice: gatewayFlow.notice } : result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
       sendError(res, 500, 'update_apply_error', err instanceof Error ? err.message : 'Unknown error');
@@ -1934,12 +1954,13 @@ function legacyApplyFullMutation(
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     const pluginDir = resolvePluginDir(ctx.workspaceDir);
     try {
+      const gatewayFlow: GatewayCoordinationFlow = {};
       const { result, journal } = await runLegacyJournaledMutation(
         { kind: 'apply-full', pdHome, pluginDir },
-        () => doInlineFullUpdate(ctx.workspaceDir),
+        () => doInlineFullUpdate(ctx.workspaceDir, gatewayFlow),
       );
       if (!journal.journaled) logLegacyJournalGap('apply-full', journal.reason);
-      sendSuccess(res, result);
+      sendSuccess(res, gatewayFlow.notice ? { ...result, gatewayNotice: gatewayFlow.notice } : result);
     } catch (err) {
       sendError(res, 500, 'update_apply_full_error', err instanceof Error ? err.message : 'Unknown error');
     }

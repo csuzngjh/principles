@@ -79,6 +79,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-113 | Generator reset/write/deploy loops leak stale state when cleanup base, write base, and residue-enumeration base are three different directories | PRI-634-F |
 | ERR-114 | Semantic resolvability used as an existence proof — fallback/generic lookup members pass validators that should only accept authoritative host declarations | PRI-634-F PR #1495 R2 |
 | ERR-122 | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side README/package.json and tutorial-style verifier comments ship to the subject agent's workspace; audit the DEPLOYED FILE LIST as the answer surface, enforced by a deploy-shape assertion + hint scan | PRI-684 PR #1584 |
+| ERR-124 | Test mutates a process-global singleton without try/finally restore — sibling tests run under hijacked state | PRI-723 / PR #1596 review |
 
 ---
 
@@ -636,7 +637,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 115 |
+| Total lessons | 116 |
 | Last updated | 2026-09-10 |
 | Top category | Schema & Type |
 | Recurring errors | 60 |
@@ -1459,3 +1460,16 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-633 / PR #1585 review P1
 - **Date**: 2026-09-10
 - **Recurrence**: None (first recording)
+
+---
+**[ERR-124]** | Test mutates a process-global singleton (platform/env/prototype) without restoring it — sibling tests in the same worker run under hijacked state
+
+- **What happened**: PR #1596 review (CodeRabbit): a new unit test flipped `process.platform` and never restored it — a mid-test failure leaks the platform into sibling tests.
+- **Why it's wrong**: the mutation changes the ENVIRONMENT later tests run in — order-dependent leaks surface as inexplicable sibling failures.
+- **Generalized failure mode**: When a test mutates a process-global singleton (`process.platform`/`process.env`/prototype patches/module-level caches), assistants must save the original and restore it in `finally` (or afterEach), otherwise the mutation leaks into sibling tests in the same process.
+- **How to prevent**: For any diff with `setPlatform|Object.defineProperty(process, |process.env.X =` in a test file, ask "where is the restore?" — accept only `try/finally` or an `afterEach`/beforeEach that re-pins the value.
+- **Regression guard**: the try/finally itself; running the FULL test file catches residual-order failures.
+- **Related ERRs**: ERR-121 (adjacent: fixture vs global mutation).
+- **Source**: PRI-723 / PR #1596 review
+- **Date**: 2026-09-10
+- **Recurrence**: None

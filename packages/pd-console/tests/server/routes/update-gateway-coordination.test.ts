@@ -27,6 +27,14 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
+// PRI-723: the /apply-full coordination test runs the full update through the
+// post-apply CLI smoke. The fixture has no runnable pd-cli dist, so the smoke
+// is mocked at the same boundary as update.test.ts (the route tests assert
+// file-copy/gateway semantics, not child spawning).
+vi.mock('../../../src/server/utils/cli-smoke.js', () => ({
+  runPostUpdateCliSmoke: vi.fn(() => ({ ok: true, version: '9.9.9-fixture' })),
+}));
+
 // os.homedir() drives canonical layout resolution (getInstallLayoutPaths).
 // Mock it so a canonical install on the dev machine (~/.pd/install.json)
 // cannot leak into these legacy-layout fixture tests.
@@ -224,5 +232,98 @@ describe('PRI-614 Gate A: gateway coordination during POST /apply', () => {
 
     expect(bodyOf(res).data.success).toBe(true);
     expect(execLog.filter((c) => c.cmd === 'openclaw')).toEqual([]);
+  });
+});
+
+describe('PRI-723: gateway coordination failures surface as gatewayNotice', () => {
+  it('a failed stop keeps the update successful but appends gatewayNotice (plain + --force attempts)', async () => {
+    await startFakeGateway();
+    mockSuccessfulApplyFetch();
+    const { execFileSync: execSyncMock } = await import('child_process');
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      execLog.push({ cmd, args });
+      if (cmd === 'openclaw') throw new Error('gateway stop refused');
+      if (cmd === 'tar') {
+        const ci = args ? args.indexOf('-C') : -1;
+        const dir = options?.cwd ?? (ci >= 0 ? args?.[ci + 1] : undefined);
+        if (dir) {
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+        }
+      }
+      return undefined;
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', { mergeStrategy: 'smart', createBackup: false });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+    const body = bodyOf(res) as unknown as { data: { success: boolean; gatewayNotice?: string } };
+    expect(body.data.success).toBe(true);
+    expect(body.data.gatewayNotice).toContain('stop failed');
+    // The updater must have tried the plain stop AND the --force fallback
+    // (recent OpenClaw builds refuse a plain operator-gateway stop).
+    expect(gatewayCalls('stop')).toBe(2);
+  });
+
+  it('a failed restart after a successful update appends gatewayNotice', async () => {
+    await startFakeGateway();
+    mockSuccessfulApplyFetch();
+    const { execFileSync: execSyncMock } = await import('child_process');
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      execLog.push({ cmd, args });
+      if (cmd === 'openclaw' && args?.[1] === 'start') throw new Error('gateway start failed');
+      if (cmd === 'tar') {
+        const ci = args ? args.indexOf('-C') : -1;
+        const dir = options?.cwd ?? (ci >= 0 ? args?.[ci + 1] : undefined);
+        if (dir) {
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+        }
+      }
+      return undefined;
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', { mergeStrategy: 'smart', createBackup: false });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+    const body = bodyOf(res) as unknown as { data: { success: boolean; gatewayNotice?: string } };
+    expect(body.data.success).toBe(true);
+    expect(body.data.gatewayNotice).toContain('failed to restart');
+    expect(gatewayCalls('start')).toBe(1);
+  });
+
+  it('a failed stop during /apply-full appends gatewayNotice to the full-update result (plain + --force)', async () => {
+    await startFakeGateway();
+    mockSuccessfulApplyFetch();
+    const { execFileSync: execSyncMock } = await import('child_process');
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      execLog.push({ cmd, args });
+      if (cmd === 'openclaw') throw new Error('gateway stop refused');
+      if (cmd === 'tar') {
+        const ci = args ? args.indexOf('-C') : -1;
+        const dir = options?.cwd ?? (ci >= 0 ? args?.[ci + 1] : undefined);
+        if (dir) {
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+          // The full update stages the INSTALLER tarball: the bundled plugin
+          // tree (manifest + dist) is what gets identity-checked and copied.
+          fs.mkdirSync(path.join(dir, 'plugin', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'plugin', 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+          fs.writeFileSync(path.join(dir, 'plugin', 'dist', 'bundle.js'), 'new plugin code');
+        }
+      }
+      return undefined;
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', {});
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply-full');
+
+    const body = bodyOf(res) as unknown as { data: { success: boolean; gatewayNotice?: string } };
+    expect(body.data.success).toBe(true);
+    expect(body.data.gatewayNotice).toContain('stop failed');
+    expect(gatewayCalls('stop')).toBe(2);
   });
 });
