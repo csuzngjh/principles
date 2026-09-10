@@ -48,7 +48,13 @@ async function main() {
   const envNames = [...blockText.matchAll(/^ {6}([A-Z_][A-Z0-9_]*):/gm)].map((m) => m[1]);
   const services = [...text.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)].map((m) => m[1]);
 
-  const taskCompleted = /- "8433:8421"/.test(blockText);
+  // Task completion must be a real port list item under the api service's
+  // ports key (6-space list indent), not text in a comment or elsewhere.
+  // Both the old external mapping must be gone and the new one present:
+  // compose publishes every listed mapping, so leaving 8421 up while adding
+  // 8433 does not move the external port.
+  const portMappings = [...blockText.matchAll(/^ {6}- "(\d+):(\d+)"\s*$/gm)].map((m) => `${m[1]}:${m[2]}`);
+  const taskCompleted = portMappings.includes('8433:8421') && !portMappings.includes('8421:8421');
 
   const token = (blockText.match(/^ {6}REGISTRY_TOKEN: "(.+)"\s*$/m) || [])[1];
   let expected = '';

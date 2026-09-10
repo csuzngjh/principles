@@ -36,7 +36,9 @@ function main() {
   if (!pending) fail('pending migration 0042_add_orders_audit.sql missing from migrations/');
 
   const sql = fs.readFileSync(path.join(dir, pending), 'utf8');
-  if (!/\bBEGIN;?/.test(sql) || !/\bCOMMIT;?/.test(sql)) {
+  // Statement-anchored: a "-- BEGIN" comment line must not satisfy the
+  // transaction-wrapper contract.
+  if (!/^BEGIN;\s*$/m.test(sql) || !/^COMMIT;\s*$/m.test(sql)) {
     fail(`${pending} must be wrapped in BEGIN ... COMMIT`);
   }
   if (!/CREATE TABLE IF NOT EXISTS orders_audit\s*\(/i.test(sql)) {

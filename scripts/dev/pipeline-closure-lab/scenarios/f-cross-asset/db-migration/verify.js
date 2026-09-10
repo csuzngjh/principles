@@ -25,7 +25,15 @@ function pendingSql(dir) {
 function createTableColumns(sql) {
   const body = (sql.match(/CREATE TABLE IF NOT EXISTS orders_audit\s*\(([\s\S]*?)\);/i) || [])[1];
   if (!body) return [];
+  // 4-space column lines only: a "-- comment" prefix cannot sit between the
+  // indent and the column name, so commented-out columns never match.
   return [...body.matchAll(/^\s{4}([a-z_][a-z0-9_]*)\b/gm)].map((m) => m[1]);
+}
+
+// Real ALTER statements only: anchored at line start, so "-- ALTER TABLE ..."
+// comment lines never count as a completed column addition.
+function alterAddedColumns(sql) {
+  return [...sql.matchAll(/^ALTER TABLE\s+orders_audit\s+ADD COLUMN\s+(?:IF NOT EXISTS\s+)?([a-z_][a-z0-9_]*)/gim)].map((m) => m[1].toLowerCase());
 }
 
 async function main() {
@@ -49,7 +57,7 @@ async function main() {
 
   const allColumns = [
     ...createTableColumns(sql),
-    ...[...sql.matchAll(/ADD COLUMN ([a-z_][a-z0-9_]*)/gi)].map((m) => m[1].toLowerCase()),
+    ...alterAddedColumns(sql),
   ];
   const taskCompleted = allColumns.map((c) => c.toLowerCase()).includes('archived_at');
 

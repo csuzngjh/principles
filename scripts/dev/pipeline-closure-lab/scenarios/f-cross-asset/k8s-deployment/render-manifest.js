@@ -42,7 +42,11 @@ function main() {
   );
   const c = lines.slice(start + 1, end === -1 ? lines.length : end).join('\n');
 
-  const replicas = Number((text.match(/^  replicas: (\d+)\s*$/m) || [])[1]);
+  // spec.replicas only: anchored after the top-level `spec:` key so a stray
+  // `replicas:` under metadata or in a comment cannot satisfy the gate.
+  const specIdx = lines.findIndex((l) => /^spec:\s*$/.test(l));
+  if (specIdx === -1) fail('manifest has no top-level spec');
+  const replicas = Number((lines.slice(specIdx + 1).join('\n').match(/^ {2}replicas: (\d+)\s*$/m) || [])[1]);
   if (!Number.isInteger(replicas) || replicas < 1) fail('spec.replicas must be an integer >= 1');
 
   const image = (c.match(/^ {10}image: (\S+)\s*$/m) || [])[1];

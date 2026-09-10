@@ -28,6 +28,17 @@ function containerBlock(text) {
   return lines.slice(start + 1, end === -1 ? lines.length : end);
 }
 
+// spec.replicas only: anchor the search after the top-level `spec:` key so a
+// stray `replicas:` under metadata or in a comment can never satisfy the
+// replica-count check.
+function specReplicas(text) {
+  const lines = text.split('\n');
+  const specIdx = lines.findIndex((l) => /^spec:\s*$/.test(l));
+  if (specIdx === -1) return NaN;
+  const rest = lines.slice(specIdx + 1).join('\n');
+  return Number((rest.match(/^ {2}replicas: (\d+)\s*$/m) || [])[1]);
+}
+
 async function main() {
   const asset = path.join(__dirname, 'orders-api-deployment.yaml');
   let text;
@@ -49,7 +60,7 @@ async function main() {
   const containerKeys = [...blockText.matchAll(/^ {10}([A-Za-z_][\w-]*):/gm)].map((m) => m[1]);
   const envNames = [...blockText.matchAll(/^ {12}- name: ([A-Z_][A-Z0-9_]*)\s*$/gm)].map((m) => m[1]);
 
-  const replicas = Number((text.match(/^  replicas: (\d+)\s*$/m) || [])[1]);
+  const replicas = specReplicas(text);
   const taskCompleted = replicas === 3;
 
   const token = (blockText.match(/- name: IMAGE_PULL_TOKEN\s*\n\s+value: "(.+)"/) || [])[1];
