@@ -361,3 +361,89 @@ describe('PRI-629 P0: epoch-aware repair reopen (SPEC §12)', () => {
     expect(after?.completionIntent).toBeUndefined();
   });
 });
+
+// ── PRI-718: superseded-repair downgrade guard ───────────────────────────────
+
+describe('PRI-718: stale repair completion must not downgrade the evaluator dep', () => {
+  const R1_ID = 'artificer-repair-evaluator-001-r1';
+  const R2_ID = 'artificer-repair-evaluator-001-r2';
+
+  function guardHarness(completingRepairId: string, evaluatorDepIds: string[], evaluatorCauseId = `repair-${R2_ID}`) {
+    const repairPayloadFor = (iteration: number) => ({
+      requiredChanges: ['fix'], concerns: [], previousScore: 0.7, repairIteration: iteration,
+      sourceArtificerArtifactId: 'pi-art-old', sourceEvaluatorTaskId: EVAL_ID,
+    });
+    const evalTask = task(EVAL_ID, 'evaluator', 'succeeded', meta({
+      dependencyTaskIds: evaluatorDepIds,
+      runnerDecision: 'needs_revision',
+      revisionCount: 1,
+      revisionCauseId: evaluatorCauseId,
+    }));
+    const r1 = task(R1_ID, 'artificer', 'succeeded', meta({
+      dependencyTaskIds: [SCRIBE_ID], repairPayload: repairPayloadFor(1),
+    }));
+    const r2 = task(R2_ID, 'artificer', 'succeeded', meta({
+      dependencyTaskIds: [SCRIBE_ID], repairPayload: repairPayloadFor(2),
+    }));
+    const store = new MemoryTaskStore();
+    for (const t of [evalTask, r1, r2, scribeTask]) void store.createTask({ ...t });
+    const stateManager = {
+      async getTask(id: string) { return store.getTask(id); },
+      async listTasks() { return [] as TaskRecord[]; },
+      async updateTask(id: string, patch: Parameters<MemoryTaskStore['updateTask']>[1]) { return store.updateTask(id, patch); },
+      async updateTaskDiagnosticJson(id: string, json: string) { await store.updateTask(id, { diagnosticJson: json }); },
+      async getRunsByTask() { return []; },
+    };
+    return {
+      orchestrator: new InternalizationOrchestrator({ stateManager: stateManager as never }, { owner: 'test', runtimeKind: 'test' }),
+      store,
+      completingRepairId,
+    };
+  }
+
+  it('older repair (r1) completion recovery while evaluator dep is r2 → noop, dep not downgraded', async () => {
+    // EP002-R2 F3: reconciliation recovered r1's transition after the chain
+    // had already advanced to r2. Re-pointing the evaluator back at r1 made
+    // it re-evaluate the superseded artifact forever.
+    const h = guardHarness(R1_ID, [R2_ID]);
+    const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
+    expect(result.decision).toBe('revision_reopen_noop');
+    if (result.decision === 'revision_reopen_noop') expect(result.reason).toBe('stale_repair_transition_superseded');
+    const after = hydratePITaskRecord((await h.store.getTask(EVAL_ID))!);
+    expect(after?.dependencyTaskIds).toEqual([R2_ID]);
+    expect(after?.revisionCount).toBe(1);
+    expect(after?.revisionCauseId).toBe(`repair-${R2_ID}`);
+  });
+
+  it('newer repair (r2) completion while evaluator dep is r1 → real reopen with dep upgrade', async () => {
+    // The evaluator was last reopened by r1's completion (cause repair-r1);
+    // r2 completing now is a NEWER round → real reopen, dep upgraded to r2.
+    const h = guardHarness(R2_ID, [R1_ID], `repair-${R1_ID}`);
+    const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
+    expect(result.decision).toBe('revision_reopened');
+    const after = hydratePITaskRecord((await h.store.getTask(EVAL_ID))!);
+    expect(after?.dependencyTaskIds).toEqual([R2_ID]);
+    expect(after?.revisionCount).toBe(2);
+  });
+
+  it('completing the CURRENT dep repair (owner revise epoch) still reopens', async () => {
+    // revise_once reopens the evaluator's own dep repair; its re-completion
+    // (revisionCount advanced → new causeId) must NOT be misread as stale.
+    const h = guardHarness(R2_ID, [R2_ID]);
+    // Advance the completing repair's epoch so the causeId differs (rc1).
+    const r2Raw = await h.store.getTask(R2_ID);
+    const r2Pi = hydratePITaskRecord(r2Raw!);
+    await h.store.updateTask(R2_ID, {
+      diagnosticJson: createPITaskDiagnosticJson({
+        ...r2Pi!,
+        dependencyTaskIds: [SCRIBE_ID],
+        revisionCount: 1,
+      }),
+    });
+    const result = await h.orchestrator.commitNextTaskProposal(h.completingRepairId);
+    expect(result.decision).toBe('revision_reopened');
+    const after = hydratePITaskRecord((await h.store.getTask(EVAL_ID))!);
+    expect(after?.dependencyTaskIds).toEqual([R2_ID]);
+    expect(after?.revisionCount).toBe(2);
+  });
+});
