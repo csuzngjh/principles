@@ -23,6 +23,7 @@ import { RunnerPhase } from '../runner/runner-phase.js';
 import { RolloutReviewerPromptBuilder } from './rollout-reviewer-prompt-builder.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { checkRuleActivationContent } from './rule-activation-contract.js';
+import type { OutputLanguage } from '../language-directive.js';
 
 export type RolloutReviewerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 
@@ -46,6 +47,13 @@ export interface RolloutReviewerRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId?: string;
+  /**
+   * Owner's preferred language for review fields (PRI-714). Forwarded to
+   * RolloutReviewerPromptBuilder so summary/requiredChanges/rolloutRisks/
+   * safetyChecks follow the owner's language. Undefined = no directive
+   * (backward compatible).
+   */
+  readonly outputLanguage?: OutputLanguage;
 }
 
 export interface ResolvedRolloutReviewerRunnerOptions {
@@ -55,6 +63,8 @@ export interface ResolvedRolloutReviewerRunnerOptions {
   readonly owner: string;
   readonly runtimeKind: string;
   readonly agentId: string;
+  /** Owner's preferred language for review fields (PRI-714). Undefined = no directive. */
+  readonly outputLanguage?: OutputLanguage;
 }
 
 const DEFAULT_ROLLOUT_REVIEWER_RUNNER_OPTIONS: Readonly<Omit<ResolvedRolloutReviewerRunnerOptions, 'owner' | 'runtimeKind'>> = {
@@ -72,6 +82,7 @@ export function resolveRolloutReviewerRunnerOptions(options: RolloutReviewerRunn
     owner: options.owner,
     runtimeKind: options.runtimeKind,
     agentId: options.agentId ?? DEFAULT_ROLLOUT_REVIEWER_RUNNER_OPTIONS.agentId,
+    outputLanguage: options.outputLanguage,
   };
 }
 
@@ -437,6 +448,8 @@ export class RolloutReviewerRunner {
       contextHash: params.contextHash,
       evaluatorArtifact: parsedEvaluatorArtifact,
       sourceEvaluatorArtifactId: params.sourceEvaluatorArtifactId,
+      // PRI-714: language directive for review fields (undefined = none).
+      outputLanguage: this.resolvedOptions.outputLanguage,
     });
 
     const startInput: StartRunInput = {
