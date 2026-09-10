@@ -67,7 +67,7 @@ const DOCS_SUFFIX = /\.(md|mdx|png|jpg|svg)$/;
 // Release-construction surfaces beyond the installer package itself.
 const RELEASE_PATHS = [
   /^packages\/create-principles-disciple\/release-locks\//,
-  /^\.github\/workflows\/(publish-npm|release-reproducibility|release-reproducibility-full|companion-release)\.yml$/,
+  /^\.github\/workflows\/(publish-npm|release-reproducibility|release-reproducibility-full|companion-release|release-metadata)\.yml$/,
 ];
 
 // Direct components of the self-contained release asset + the release
