@@ -191,8 +191,10 @@ function evaluatorNeedsRevision(taskId: string, artificerArtifactId: string): un
 let tmpDir = '';
 
 function makeTmpDir(): string {
-  const dir = path.join(os.tmpdir(), `pd-pipe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  fs.mkdirSync(dir, { recursive: true });
+  // mkdtempSync's random suffix keeps the path unpredictable (CodeQL
+  // js/insecure-temporary-file: the pipeline language tests WRITE
+  // .pd/config.yaml under this dir).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pipe-'));
   // PRI-661: the pipeline's evaluator replay resolves the production gate
   // context from durable workspace provenance — seed a declaration like every
   // real host does on startup.
@@ -640,5 +642,133 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(dreamerStage?.status).toBe('degraded');
     // The reason must be present (Runtime Contract Rule 9: no silent degradation).
     expect(dreamerStage?.reason).toBeTruthy();
+  }, 60_000);
+});
+
+// ── PRI-714 (review fix #3): language wiring ─────────────────────────────────
+//
+// The PR's original fault class was "the parameter exists but is not wired".
+// These regressions drive the REAL pipeline and assert the LANGUAGE DIRECTIVE
+// on the actual inputPayload handed to adapter.startRun:
+//   - explicit `principles.outputLanguage: 'en'` in the workspace config
+//     overrides the zh-CN default;
+//   - no config → the zh-CN default applies.
+// Deleting the pipeline's language resolution makes these fail.
+
+function writeLanguageConfig(dir: string, outputLanguage?: 'en'): void {
+  fs.mkdirSync(path.join(dir, '.pd'), { recursive: true });
+  // Full valid-config shape (mirrors pd-config-loader.test.ts) so validation
+  // keeps `principles` intact instead of degrading to defaults.
+  const config: Record<string, unknown> = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      correction_observer: { category: 'quiet', enabled: false },
+      empathy_observer: { category: 'quiet', enabled: false },
+    },
+    runtimeProfiles: {
+      'openclaw.default': { type: 'openclaw', source: 'default' },
+    },
+    internalAgents: {
+      defaultRuntime: 'openclaw.default',
+      agents: {
+        diagnostician: { enabled: true, runtimeProfile: 'openclaw.default' },
+        dreamer: { enabled: true },
+        scribe: { enabled: true },
+        artificer: { enabled: true },
+        philosopher: { enabled: false },
+        evaluator: { enabled: false },
+        rolloutReviewer: { enabled: false },
+        correctionObserver: { enabled: false },
+        empathyObserver: { enabled: false },
+      },
+    },
+    ui: { diagnostics: { mode: 'simple' } },
+  };
+  if (outputLanguage !== undefined) config.principles = { outputLanguage };
+  // JSON is valid YAML — same trick the shared executor tests use.
+  fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), JSON.stringify(config));
+}
+
+function collectStartRunPayloads(adapter: ScriptedAdapter): string[] {
+  const payloads: string[] = [];
+  for (const input of adapter.startRunInputs.values()) {
+    if (typeof input.inputPayload === 'string') payloads.push(input.inputPayload);
+  }
+  return payloads;
+}
+
+describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messages (PRI-714 review fix)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ } tmpDir = ''; }
+  });
+
+  it('explicit principles.outputLanguage=en overrides the zh-CN default on stage messages', async () => {
+    tmpDir = makeTmpDir();
+    writeLanguageConfig(tmpDir, 'en');
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-lang-en-001', 'pain-lang-en');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-lang-en', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
+
+    const payloads = collectStartRunPayloads(adapter);
+    // Dreamer: dreamer-subject field list, English directive on the wire.
+    const dreamerMsg = payloads.find((p) => p.includes('dreamerInstruction') && p.includes('dreamer-lang-en-001'));
+    expect(dreamerMsg).toBeDefined();
+    expect(dreamerMsg).toContain('LANGUAGE DIRECTIVE');
+    expect(dreamerMsg).toContain('English');
+    expect(dreamerMsg).toContain('(candidates[].badDecision, candidates[].betterDecision, candidates[].rationale, candidates[].strategicPerspective)');
+    // Philosopher: philosopher-subject field list, English directive.
+    const philosopherMsg = payloads.find((p) => p.includes('philosopherInstruction'));
+    expect(philosopherMsg).toBeDefined();
+    expect(philosopherMsg).toContain('LANGUAGE DIRECTIVE');
+    expect(philosopherMsg).toContain('English');
+    expect(philosopherMsg).toContain('(thesis, principleCandidate.title, principleCandidate.rationale, principleCandidate.scope, risks[])');
+    // Evaluator: review-subject explicit nested paths + PRI-630 ledger echo rule.
+    const evaluatorMsg = payloads.find((p) => p.includes('evaluatorInstruction'));
+    expect(evaluatorMsg).toBeDefined();
+    expect(evaluatorMsg).toContain('LANGUAGE DIRECTIVE');
+    expect(evaluatorMsg).toContain('English');
+    expect(evaluatorMsg).toContain('codeReview.traceCoverage.gaps');
+    expect(evaluatorMsg).toContain('adversarialCases[].rationale');
+    expect(evaluatorMsg).toContain('requirementLedger[].statement MUST be copied verbatim');
+    // The explicit en must have fully replaced the zh-CN default everywhere.
+    for (const p of payloads) {
+      expect(p, 'Simplified Chinese leaked into an en-configured pipeline').not.toContain('Simplified Chinese');
+    }
+  }, 60_000);
+
+  it('no config file resolves the zh-CN default on the dreamer message', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-lang-zh-001', 'pain-lang-zh');
+    await sm.close();
+
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({
+      workspaceDir: tmpDir, painId: 'pain-lang-zh', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
+      codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      onStoreReady: (store) => { adapter.artifactStore = store; },
+    });
+    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
+
+    const dreamerMsg = collectStartRunPayloads(adapter).find((p) => p.includes('dreamer-lang-zh-001'));
+    expect(dreamerMsg).toBeDefined();
+    expect(dreamerMsg).toContain('LANGUAGE DIRECTIVE');
+    expect(dreamerMsg).toContain('Simplified Chinese');
   }, 60_000);
 });
