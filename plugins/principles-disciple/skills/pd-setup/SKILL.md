@@ -25,7 +25,7 @@ Prepares the current workspace so owner-approved principles actually steer this 
 
 2. Interpret the output for the user, calmly:
    - `[PD:setup] ok` → summarize the runtime versions and workspace path, then tell the user the one remaining step: **run `/hooks` in Codex and trust the Principles Disciple hooks** — hooks never execute until trusted.
-   - `status=failed reason=... nextAction=...` → read the reason aloud in plain language and perform the nextAction with the user. Common ones: Node < 20 (install Node ≥ 20), npm missing, `@principles` packages not yet published (wait for the release note), pd CLI missing (`npm install -g @principles/pd-cli`).
+   - `status=failed reason=... nextAction=...` → read the reason aloud in plain language and perform the nextAction with the user. Common ones: Node < 22 (install Node ≥ 22), npm missing, `@principles` packages not yet published (wait for the release note), pd CLI missing (`npm install -g @principles/pd-cli`).
 
 ## Notes
 

@@ -875,6 +875,32 @@ function cleanupBackup(backupDir: string | null, runtimeBackupDir: string | null
   }
 }
 
+/**
+ * PRI-697 review P1: undo the global `pd` shim side effect when the
+ * install transaction fails. Exactly the files THIS run created are
+ * removed; PD-owned shims that already existed before the run (a
+ * pre-existing install's global command) are left in place — rolling back
+ * to the pre-run state, not to "no PD anywhere". Best-effort with every
+ * residue named (rc-9); never throws.
+ */
+function rollbackGlobalPdShim(record: GlobalPdShimResult): { removed: string[]; failed: string[] } {
+  const removed: string[] = [];
+  const failed: string[] = [];
+  for (const shimPath of record.createdPaths) {
+    if (!existsSync(shimPath)) continue;
+    try {
+      rmSync(shimPath, { force: true });
+      removed.push(shimPath);
+    } catch (e) {
+      failed.push(`${shimPath} (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+  if (failed.length > 0) {
+    logger.warn(`Failed to remove global pd shim files created by this run: ${failed.join(', ')} — remove them manually.`);
+  }
+  return { removed, failed };
+}
+
 // --- OpenClaw gateway lock handling (EPERM prevention) ---------------------
 // The gateway holds file handles on native .node modules inside the plugin ext
 // dir. Renaming that dir for backup fails with EPERM on Windows while the
@@ -1332,8 +1358,70 @@ function getNpmGlobalBinDir(): string | null {
   }
 }
 
-function installGlobalPdShim(): boolean {
-  if (!legacyNpmInstallEnabled()) {
+/** Outcome of one global-shim discovery/install attempt (PRI-697 review P1). */
+export interface GlobalPdShimResult {
+  /** true when PD-owned shim files are in place in the npm global bin dir. */
+  installed: boolean;
+  /** Shim files this run CREATED (absent before) — the rollback set. */
+  createdPaths: string[];
+  /** PD-owned shim files that already existed and were overwritten in place. */
+  replacedPaths: string[];
+  /** Foreign-owned `pd` entries found — never written, never rolled back. */
+  skippedForeignPaths: string[];
+}
+
+/** Fixed filename whitelist for global-shim targets (no caller input). */
+const GLOBAL_PD_SHIM_BASENAMES: readonly string[] = isWindows() ? ['pd.cmd', 'pd.ps1'] : ['pd'];
+
+/** Resolve a whitelisted shim basename under the npm global bin dir. */
+function globalShimPath(globalBin: string, basename: string): string {
+  if (!GLOBAL_PD_SHIM_BASENAMES.includes(basename)) {
+    throw new Error(`Refusing to touch non-whitelisted global shim name: ${basename}`);
+  }
+  const target = path.resolve(globalBin, basename);
+  if (path.dirname(target) !== path.resolve(globalBin)) {
+    throw new Error(`Global shim path escaped the npm global bin dir: ${target}`);
+  }
+  return target;
+}
+
+/**
+ * Global `pd` shim ownership, mirroring the uninstaller's isPdOwnedShim
+ * discipline: a shim whose content points at the PD install dir belongs to
+ * us and may be updated in place; anything else (another tool's `pd`, a
+ * broken/unreadable entry) is foreign — refuse to overwrite it and surface
+ * a warning + next action instead (review P1: the pre-PRI-697 code
+ * writeFileSync'd blindly, but that path was only reachable via the
+ * explicit legacy-recovery env; the npm channel makes it default, so the
+ * write now needs the same ownership discipline the uninstaller already
+ * has).
+ */
+function classifyGlobalPdShim(globalBin: string, installedBinDir: string): { foreignPaths: string[]; existingPdOwned: boolean } {
+  const foreignPaths: string[] = [];
+  let existingPdOwned = false;
+  for (const shim of GLOBAL_PD_SHIM_BASENAMES) {
+    const shimPath = globalShimPath(globalBin, shim);
+    if (!existsSync(shimPath)) continue;
+    let content: string;
+    try {
+      content = readFileSync(shimPath, 'utf-8');
+    } catch {
+      foreignPaths.push(shimPath); // unreadable → do not touch
+      continue;
+    }
+    if (content.includes(installedBinDir)) existingPdOwned = true;
+    else foreignPaths.push(shimPath);
+  }
+  return { foreignPaths, existingPdOwned };
+}
+
+export function installGlobalPdShim(): GlobalPdShimResult | boolean {
+  // Global-shim discovery consults the npm global root, so it belongs to
+  // the npm-distributed payload shape (isNpmDependencyResolutionEnabled
+  // documents "global root discovery" as its concern). Gating on the
+  // legacy env var instead fired this skip — with a self-contained-mode
+  // message — inside standard npm-channel installs (PRI-697).
+  if (!isNpmDependencyResolutionEnabled()) {
     logger.info('Skipping npm global shim discovery for the self-contained release asset.');
     return false;
   }
@@ -1347,36 +1435,87 @@ function installGlobalPdShim(): boolean {
   }
   const globalBin = getNpmGlobalBinDir();
   if (!globalBin) return false;
+  const installedBinDir = getInstalledBinDir();
+
+  // Ownership gate before ANY write: foreign `pd` entries are never
+  // overwritten (uninstaller's isPdOwnedShim discipline, write side).
+  const { foreignPaths, existingPdOwned } = classifyGlobalPdShim(globalBin, installedBinDir);
+  if (foreignPaths.length > 0) {
+    const foreignList = foreignPaths.join(', ');
+    logger.warn(`A non-PD "pd" command already exists in the npm global bin dir (${foreignList}) — not overwriting it.`);
+    logger.warn(`The bundled PD CLI stays available at "${path.join(installedBinDir, isWindows() ? 'pd.cmd' : 'pd')}". Remove the foreign "pd" yourself if you want the global name.`);
+    if (existingPdOwned) {
+      logger.warn('PD-owned shim files in the same dir were left untouched to keep the existing installation consistent.');
+    }
+    return { installed: false, createdPaths: [], replacedPaths: [], skippedForeignPaths: foreignPaths };
+  }
+
+  // Rollback bookkeeping: which shim targets already existed (PD-owned)?
+  // preExisting drives the replaced-list and the partial-failure residue
+  // computation below.
+  const preExisting = new Set<string>(
+    GLOBAL_PD_SHIM_BASENAMES
+      .map((shim) => globalShimPath(globalBin, shim))
+      .filter((shimPath) => existsSync(shimPath)),
+  );
+  const createdPaths: string[] = [];
+  const replacedPaths: string[] = [...preExisting];
 
   try {
     mkdirSync(globalBin, { recursive: true });
-    const installedBinDir = getInstalledBinDir();
 
     if (isWindows()) {
       const pluginCmd = path.join(installedBinDir, 'pd.cmd');
-      writeFileSync(path.join(globalBin, 'pd.cmd'), `@echo off\r\ncall "${pluginCmd.replace(/"/g, '""')}" %*\r\n`, 'utf-8');
+      const globalCmdPath = globalShimPath(globalBin, 'pd.cmd');
+      writeFileSync(globalCmdPath, `@echo off\r\ncall "${pluginCmd.replace(/"/g, '""')}" %*\r\n`, 'utf-8');
       const pluginPs = path.join(installedBinDir, 'pd.ps1');
+      const globalPsPath = globalShimPath(globalBin, 'pd.ps1');
       writeFileSync(
-        path.join(globalBin, 'pd.ps1'),
+        globalPsPath,
         `$shim = "${pluginPs.replace(/`/g, '``').replace(/"/g, '`"')}"\r\n& $shim @args\r\nexit $LASTEXITCODE\r\n`,
         'utf-8',
       );
     } else {
       const pluginSh = path.join(installedBinDir, 'pd');
-      const globalSh = path.join(globalBin, 'pd');
+      const globalSh = globalShimPath(globalBin, 'pd');
       writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginSh.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
       chmodSync(globalSh, 0o755);
     }
-    return true;
+    // PRI-697 review P1: the success path MUST record which targets are new
+    // (created) vs pre-existing PD-owned (replaced) — rollbackGlobalPdShim
+    // removes exactly createdPaths when a LATER install step fails. The
+    // pre-fix success path left createdPaths empty, silently no-op'ing the
+    // rollback while the failure message claimed a clean cleanup.
+    for (const shim of GLOBAL_PD_SHIM_BASENAMES) {
+      const shimPath = globalShimPath(globalBin, shim);
+      if (!preExisting.has(shimPath)) createdPaths.push(shimPath);
+    }
+    return { installed: true, createdPaths, replacedPaths, skippedForeignPaths: [] };
   } catch (e) {
     logger.warn(`Global pd shim installation failed: ${e instanceof Error ? e.message : String(e)}`);
-    return false;
+    // Partial writes may have landed before the failure — hand the raw
+    // targets to the caller as createdPaths so the rollback can remove
+    // exactly this run's residue.
+    const landed = GLOBAL_PD_SHIM_BASENAMES
+      .map((shim) => globalShimPath(globalBin, shim))
+      .filter((shimPath) => existsSync(shimPath) && !preExisting.has(shimPath));
+    return { installed: false, createdPaths: landed, replacedPaths: [], skippedForeignPaths: [] };
   }
 }
 
-function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+export function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+  // The npm upgrade stays gated on the legacy env var (PRI-697 keeps the
+  // behavior): a registry pd-cli version can import exports the bundled
+  // core no longer has, so upgrading is only for the explicit recovery
+  // path where the whole shape is registry-resolved anyway. The skip
+  // message reports the ACTUAL payload mode — it used to claim
+  // "self-contained release asset" even in npm-distributed installs.
   if (!legacyNpmInstallEnabled()) {
-    logger.info('Skipping npm pd-cli upgrade for the self-contained release asset.');
+    if (activePayloadMode === 'npm-distributed') {
+      logger.info('Skipping npm pd-cli upgrade (bundled pd-cli is authoritative; set PD_ALLOW_LEGACY_NPM_INSTALL to enable registry upgrades).');
+    } else {
+      logger.info('Skipping npm pd-cli upgrade for the self-contained release asset.');
+    }
     return;
   }
   // Allow skipping the npm upgrade in smoke tests / offline environments.
@@ -1467,7 +1606,17 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
   }
 }
 
-function syncPdCli(pluginDir: string): boolean {
+/**
+ * Deploy the bundled pd-cli into the runtime + local bin shims + (npm-
+ * distributed payload only) the global `pd` shim. Returns the global-shim
+ * transaction bookkeeping so install() can roll the global side effect back
+ * on failure (PRI-697 review P1): globalShim is null when no global write
+ * was attempted (skip gates / payload mode), otherwise it records which
+ * shim files this run CREATED (rollback removes them) vs which PD-owned
+ * files it replaced in place (rollback keeps them — a pre-existing PD
+ * install keeps its global command).
+ */
+function syncPdCli(pluginDir: string): { ok: boolean; globalShim: GlobalPdShimResult | null } {
   const pdCliSourceDir = path.join(pluginDir, 'pd-cli');
   const distDir = path.join(pdCliSourceDir, 'dist');
 
@@ -1588,7 +1737,12 @@ function syncPdCli(pluginDir: string): boolean {
     chmodSync(target, 0o755);
   }
 
-  return installGlobalPdShim();
+  // PRI-697 review P1: propagate the structured global-shim outcome so the
+  // install transaction can roll the global side effect back on failure.
+  // Plain false (skip gates: payload mode / smoke env) carries no residue.
+  const shimResult = installGlobalPdShim();
+  if (typeof shimResult === 'boolean') return { ok: shimResult, globalShim: null };
+  return { ok: shimResult.installed, globalShim: shimResult };
 }
 
 function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: string; localError?: string } {
@@ -2686,6 +2840,10 @@ export async function install(
   // the backup step). With no pre-existing install (no backup), a failure
   // after this point must clean up instead of claiming "not modified".
   let mutationStarted = false;
+  // PRI-697 review P1: global pd shim side effect, recorded when the
+  // npm-distributed payload wrote PD-owned shims into the npm global bin
+  // dir. Null until syncPdCli runs (or when no global write was attempted).
+  let globalShimRecord: GlobalPdShimResult | null = null;
 
   const killConsoleChild = () => {
     if (consoleProcess) {
@@ -2818,7 +2976,10 @@ export async function install(
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing pd CLI...');
-    syncPdCli(pluginDir);
+    // PRI-697 review P1: keep the global-shim bookkeeping — a LATER failure
+    // must undo exactly the global side effect this run caused.
+    const pdCliSync = syncPdCli(pluginDir);
+    if (pdCliSync.globalShim !== null) globalShimRecord = pdCliSync.globalShim;
     await installPdCliDependencies();
     stepIndex++;
 
@@ -3108,6 +3269,17 @@ export async function install(
     const freshCleanup = !hasBackup && mutationStarted
       ? cleanUnactivatedFreshInstall()
       : undefined;
+    // PRI-697 review P1: the global pd shim is a side effect OUTSIDE the
+    // runtime/extension trees both cleanup paths above address. Whatever
+    // the backup state, files THIS run created in the npm global bin dir
+    // are this run's residue — remove them (rollbackGlobalPdShim keeps
+    // PD-owned shims that pre-dated the run, so a rolled-back upgrade of a
+    // previously-shimmed install keeps its old global command; the shim
+    // content targets the stable installed bin dir, which the restored
+    // backup re-populates).
+    const globalShimRollback = globalShimRecord !== null
+      ? rollbackGlobalPdShim(globalShimRecord)
+      : undefined;
     // R2 (review): after template/config steps have run (console verified →
     // templates copied → config generated), the WORKSPACE also holds this
     // run's files — but the workspace is the operator's own directory and may
@@ -3126,7 +3298,11 @@ export async function install(
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '');
-    const rollbackSuffixFinal = rollbackSuffix + (workspaceTouched && freshCleanup && freshCleanup.failed.length === 0 ? ` ${t('rollback_fresh_workspace_kept')}` : '');
+    const rollbackSuffixFinal = rollbackSuffix
+      + (workspaceTouched && freshCleanup && freshCleanup.failed.length === 0 ? ` ${t('rollback_fresh_workspace_kept')}` : '')
+      + (globalShimRollback !== undefined && globalShimRollback.failed.length > 0
+        ? ` ${t('rollback_global_shim_residue').replace('{files}', globalShimRollback.failed.join(', '))}`
+        : '');
     const rollbackNextAction = !hasBackup
       ? freshCleanup
         ? (freshCleanup.failed.length === 0 ? t('next_fresh_cleaned') : t('next_fresh_clean_failed'))
@@ -3141,7 +3317,7 @@ export async function install(
           .replace('{errorMsg}', errorMsg);
     const rollbackReason = !hasBackup
       ? freshCleanup
-        ? (freshCleanup.failed.length === 0
+        ? (freshCleanup.failed.length === 0 && (globalShimRollback === undefined || globalShimRollback.failed.length === 0)
           ? `install_failed_unactivated_cleaned: ${errorMsg}`
           : `install_failed_unactivated_residue: ${errorMsg}`)
         : (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)
