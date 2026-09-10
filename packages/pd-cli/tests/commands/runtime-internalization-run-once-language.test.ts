@@ -187,6 +187,18 @@ vi.mock('@principles/core/runtime-v2', () => ({
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   resolveRuntimeConfigFromPdConfig: vi.fn().mockReturnValue({ runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main' }),
+  // PRI-719: run-once resolves the SELECTED runner's agent binding through
+  // the per-agent variant; mirror the real taskKind→agent mapping (whole
+  // core module is mocked here).
+  resolveRuntimeConfigForAgent: vi.fn().mockReturnValue({ runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'TEST_API_KEY', timeoutMs: 300_000, agentId: 'main' }),
+  AGENT_NAME_FOR_TASK_KIND: {
+    dreamer: 'dreamer',
+    philosopher: 'philosopher',
+    scribe: 'scribe',
+    artificer: 'artificer',
+    evaluator: 'evaluator',
+    rollout_reviewer: 'rolloutReviewer',
+  },
   resolveRuntimeConfig: vi.fn().mockReturnValue({ runtimeKind: 'pi-ai', timeoutMs: 300_000, agentId: 'main', provider: 'test-provider', model: 'test-model', apiKeyEnv: 'TEST_API_KEY' }),
   validateRuntimeConfig: vi.fn(),
   isRuntimeConfigError: vi.fn().mockImplementation((result: unknown) => result != null && typeof result === 'object' && Object.hasOwn(result, 'reason') && !Object.hasOwn(result, 'runtimeKind')),

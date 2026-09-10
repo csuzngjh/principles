@@ -65,11 +65,13 @@ function makeArtifact(
 }
 
 function makeLineage(deps: StubDeps, maxDepth?: number): CandidateLineage {
-  const artifactStore: Pick<PIArtifactStore, 'getArtifactById'> = {
+  const artifactStore: Pick<PIArtifactStore, 'getArtifactById' | 'listBySourceTaskId'> = {
     getArtifactById: async (id: string) => {
       deps.artifactReads.set(id, (deps.artifactReads.get(id) ?? 0) + 1);
       return deps.artifacts.get(id) ?? null;
     },
+    listBySourceTaskId: async (taskId: string) =>
+      [...deps.artifacts.values()].filter((a) => a.sourceTaskId === taskId),
   };
   const taskReader: LineageTaskReader = {
     getTaskById: async (id: string) => {
@@ -217,8 +219,9 @@ describe('CP-19 — lineage error classification', () => {
 
   it('store throws → ok:false + store_failure + lineage_store_failure', async () => {
     const deps = makeStub([], []);
-    const failingStore: Pick<PIArtifactStore, 'getArtifactById'> = {
+    const failingStore: Pick<PIArtifactStore, 'getArtifactById' | 'listBySourceTaskId'> = {
       getArtifactById: async () => { throw new Error('db connection lost'); },
+      listBySourceTaskId: async () => { throw new Error('db connection lost'); },
     };
     const lineage = new CandidateLineage({
       artifacts: failingStore,
@@ -357,7 +360,10 @@ describe('CP-20 — lineage failures never swallowed', () => {
 
     // store_failure
     const r3 = await new CandidateLineage({
-      artifacts: { getArtifactById: async () => { throw new Error('boom'); } },
+      artifacts: {
+        getArtifactById: async () => { throw new Error('boom'); },
+        listBySourceTaskId: async () => { throw new Error('boom'); },
+      },
       tasks: { getTaskById: async () => null },
     }).resolve('c');
     expect(r3.ok).toBe(false);

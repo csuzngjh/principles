@@ -114,7 +114,7 @@ describe('buildProfileLabel', () => {
       },
     }));
     try {
-      const result = resolveRuntimeFromPdConfig(tmp, mockEnvWithKeys);
+      const result = resolveRuntimeFromPdConfig(tmp, { getEnvVar: mockEnvWithKeys });
       expect(result.runtimeProfileId).toBe('pi-ai.test');
       expect(result.runtimeProfileLabel).toBe('pi-ai: openrouter/anthropic/claude-sonnet-4');
     } finally { rmTmpDir(tmp); }
@@ -141,7 +141,7 @@ describe('buildProfileLabel', () => {
       },
     }));
     try {
-      const result = resolveRuntimeFromPdConfig(tmp, mockEnvWithKeys);
+      const result = resolveRuntimeFromPdConfig(tmp, { getEnvVar: mockEnvWithKeys });
       expect(result.runtimeProfileId).toBe(null);
       expect(result.runtimeProfileLabel).toBe(null);
     } finally { rmTmpDir(tmp); }
@@ -218,7 +218,7 @@ describe('resolveRuntimeFromPdConfig', () => {
     const tmp = mkTmpDir();
     writeConfig(tmp, makeValidPiAiConfigYaml(tmp));
     try {
-      const result = resolveRuntimeFromPdConfig(tmp, mockEnvWithKeys);
+      const result = resolveRuntimeFromPdConfig(tmp, { getEnvVar: mockEnvWithKeys });
       expect(isRuntimeConfigError(result.result)).toBe(false);
       expect(result.configSource).toBe('.pd/config.yaml');
     } finally { rmTmpDir(tmp); }
