@@ -58,6 +58,10 @@ function makeWorkspace(outputLanguage?: 'en'): string {
   };
   config.internalAgents.defaultRuntime = 'pi-ai.llamacpp';
   config.internalAgents.agents.diagnostician.runtimeProfile = 'pi-ai.llamacpp';
+  // PRI-719: the consumer resolves the LEASED stage's own binding — declare
+  // the dreamer's profile explicitly (the shipped default otherwise pins
+  // every agent to openclaw.default).
+  config.internalAgents.agents.dreamer.runtimeProfile = 'pi-ai.llamacpp';
   // Workspace-level language: present in A, absent in B (default zh-CN).
   if (outputLanguage !== undefined) {
     config.principles = { outputLanguage };

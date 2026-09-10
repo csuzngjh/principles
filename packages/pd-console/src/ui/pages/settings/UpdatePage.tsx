@@ -63,6 +63,7 @@ export function UpdatePage() {
     requiresRestart?: boolean;
     reason?: string;
     nextAction?: string;
+    gatewayNotice?: string;
   } | null>(null);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
   const [showFullUpdateDialog, setShowFullUpdateDialog] = useState(false);
@@ -152,11 +153,12 @@ export function UpdatePage() {
         updatedFiles: data.updatedFiles,
         fromVersion: statusData?.currentVersion,
         partialUpdate: data.partialUpdate,
+        gatewayNotice: data.gatewayNotice,
       });
       toast.success(t('pages.update.updateSuccess', { version: data.newVersion ?? 'latest' }));
       await loadData();
     } else {
-      setUpdateResult({ success: false, message: data.message, reason: data.reason, nextAction: data.nextAction });
+      setUpdateResult({ success: false, message: data.message, reason: data.reason, nextAction: data.nextAction, gatewayNotice: data.gatewayNotice });
       toast.error(t('pages.update.updateFailed', { message: data.message }));
     }
   }, [t, loadData]);
@@ -181,11 +183,12 @@ export function UpdatePage() {
         fromVersion: statusData?.currentVersion,
         requiresRestart: data.requiresRestart,
         partialUpdate: data.partialUpdate,
+        gatewayNotice: data.gatewayNotice,
       });
       toast.success(t('pages.update.fullUpdateSuccess'));
       await loadData();
     } else {
-      setUpdateResult({ success: false, message: data.message, reason: data.reason, nextAction: data.nextAction });
+      setUpdateResult({ success: false, message: data.message, reason: data.reason, nextAction: data.nextAction, gatewayNotice: data.gatewayNotice });
       toast.error(t('pages.update.updateFailed', { message: data.message }));
     }
   }, [t, loadData, statusData?.currentVersion]);
@@ -405,6 +408,14 @@ export function UpdatePage() {
                   {updateResult.success && updateResult.partialUpdate && (
                     <p className="mt-1 text-[12px] text-amber leading-relaxed">
                       {t("pages.update.partialUpdateHint")}
+                    </p>
+                  )}
+                  {/* Gateway coordination degraded during the update (PRI-723) —
+                      the OpenClaw side needs the Owner's hand, so surface it on
+                      both success and failure instead of degrading silently. */}
+                  {updateResult.gatewayNotice && (
+                    <p className="mt-2 p-2 rounded-[3px] bg-amber/5 border border-amber/20 text-[12px] text-amber leading-relaxed font-mono">
+                      {updateResult.gatewayNotice}
                     </p>
                   )}
                   {/* Structured next action for lock errors */}

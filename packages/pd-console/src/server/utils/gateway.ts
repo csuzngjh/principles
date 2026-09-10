@@ -132,10 +132,20 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
  * rc-9: never throws — returns {ok:false, error} so the caller can degrade
  * with a structured reason + nextAction instead of crashing mid-update.
  */
-function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlResult {
+function runGatewayServiceCommand(subcommand: 'stop' | 'start', extraArgs: readonly string[] = []): GatewayControlResult {
   try {
-    // EP-08: argv array + typed subcommand union — no shell interpolation.
-    execFileSync('openclaw', ['gateway', subcommand], { stdio: 'pipe', encoding: 'utf-8', timeout: 15000 });
+    // EP-08: argv array + typed subcommand union — every argv is a constant
+    // literal, so no external input can reach the command line. shell:true is
+    // required on Windows: the npm-global `openclaw` resolves to a .cmd shim,
+    // and Node's CVE-2024-27980 hardening refuses to spawn .cmd targets
+    // without a shell (observed 2026-09-10 as a silent ENOENT that skipped
+    // every gateway stop/restart during console updates — PRI-723).
+    execFileSync('openclaw', ['gateway', subcommand, ...extraArgs], {
+      stdio: 'pipe',
+      encoding: 'utf-8',
+      timeout: 15000,
+      shell: process.platform === 'win32',
+    });
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -146,9 +156,17 @@ function runGatewayServiceCommand(subcommand: 'stop' | 'start'): GatewayControlR
 /**
  * Stop the OpenClaw gateway service. Call before mutating the plugin ext dir
  * to release file locks held on native modules (EPERM on backup copyfile).
+ *
+ * Tries a plain stop first, then `--force`: recent OpenClaw builds refuse an
+ * operator-gateway stop without the flag, while older builds reject the
+ * unknown option instead — only trying one shape breaks the other generation.
  */
 export function stopOpenClawGateway(): GatewayControlResult {
-  return runGatewayServiceCommand('stop');
+  const plain = runGatewayServiceCommand('stop');
+  if (plain.ok) return plain;
+  const forced = runGatewayServiceCommand('stop', ['--force']);
+  if (forced.ok) return forced;
+  return { ok: false, error: `${plain.error}; forced retry: ${forced.error}` };
 }
 
 /**
