@@ -2087,7 +2087,36 @@ async function runReleaseManagerCheckDispatch(
  * layer maps the outcome into the legacy doInlineFullUpdate response contract
  * ({success, message, reason?, nextAction?, newVersion?, requiresRestart}) —
  * wire contract unchanged. It performs NO runtime mutation itself.
+ *
+ * PRI-702 (ADR-0024 D-7): this boundary is also where the Owner-facing update
+ * history is appended for an RM-served update, through the SAME
+ * `appendUpdateHistory` writer the legacy updater uses. It is the only layer
+ * that knows all three of the workspace (where the history lives), the
+ * authority that served the mutation, and the final outcome — the installer
+ * writes the transaction journal only, and a pre-transaction refusal writes
+ * NO history event (the fallback's legacy event is the single record, see
+ * `X-PD-Mutation-Fallback-Reason`).
  */
+/**
+ * A history-write failure must never misreport a mutation that already
+ * happened: the response still carries the true outcome (same policy as
+ * `logLegacyJournalGap` above — blocking the Owner's update would be worse
+ * than an unaudited one) but the audit gap is logged loud (rc-9).
+ */
+function appendGovernedUpdateHistory(
+  workspaceDir: string,
+  entry: Parameters<typeof appendUpdateHistory>[1],
+): void {
+  try {
+    appendUpdateHistory(workspaceDir, entry);
+  } catch (error) {
+    console.error(
+      `[update] ReleaseManager-served mutation completed WITHOUT an update-history record (${error instanceof Error ? error.message : String(error)}). `
+      + 'ADR-0024 D-7 requires every update to be auditable; the response still reports the real outcome.',
+    );
+  }
+}
+
 async function runReleaseManagerApplyFullDispatch(
   mod: ReleaseManagerAuthorityModule,
   req: IncomingMessage,
@@ -2118,9 +2147,26 @@ async function runReleaseManagerApplyFullDispatch(
     await legacyApplyFullMutation(req, res, ctx);
     return;
   }
+  // PRI-702 (ADR-0024 D-7): the pre-apply version, read from the SAME install
+  // state the ReleaseManager used to decide the update (active.json) — never
+  // from a second version source.
+  const fromVersion = authority.installStatus?.productVersion ?? 'unknown';
   try {
     const outcome = await authority.manager.apply({ workspaceDir: ctx.workspaceDir });
     if (outcome.kind === 'applied') {
+      // One update → one Owner-visible history event. The Console boundary is
+      // the only layer that owns workspaceDir + authority + outcome together,
+      // so the canonical writer is called here; the installer and the
+      // ReleaseManager keep writing the transaction journal only (journal =
+      // machine recovery, history = Owner audit, ADR-0024 §2.5-2).
+      appendGovernedUpdateHistory(ctx.workspaceDir, {
+        fromVersion,
+        toVersion: outcome.productVersion,
+        success: true,
+        kind: 'update',
+        authority: RELEASE_MANAGER_AUTHORITY,
+        transactionId: outcome.transactionId,
+      });
       sendSuccess(res, {
         success: true,
         message: `Updated to ${outcome.productVersion}. Transaction ${outcome.transactionId} confirmed in the journal.`,
@@ -2129,6 +2175,19 @@ async function runReleaseManagerApplyFullDispatch(
         nextAction: 'Restart PD Console to run the updated build.',
       });
     } else {
+      // Legacy parity: the legacy updater records a `refusal` event when the
+      // source does not advance the installation, so an RM-served "no update"
+      // leaves the same trace instead of silence. No runtime byte changed —
+      // toVersion stays at the installed version.
+      appendGovernedUpdateHistory(ctx.workspaceDir, {
+        fromVersion,
+        toVersion: fromVersion,
+        success: false,
+        kind: 'refusal',
+        reason: outcome.note,
+        nextAction: 'No runtime change was made. Retry when a newer signed release is published.',
+        authority: RELEASE_MANAGER_AUTHORITY,
+      });
       sendSuccess(res, {
         success: true,
         message: `No update applied: ${outcome.note}`,
@@ -2151,6 +2210,19 @@ async function runReleaseManagerApplyFullDispatch(
       await legacyApplyFullMutation(req, res, ctx);
       return;
     }
+    // PRI-702: a post-transaction failure is a real, terminal update attempt,
+    // so it gets exactly one failure event under the ReleaseManager authority.
+    // There is no legacy fallback on this path, hence no second event — the
+    // runtime is left on the previous release (installer backup/restore).
+    appendGovernedUpdateHistory(ctx.workspaceDir, {
+      fromVersion,
+      toVersion: 'failed',
+      success: false,
+      kind: 'failure',
+      reason: mapped.reason,
+      nextAction: mapped.nextAction ?? 'The runtime is unchanged. Retry the update after resolving the cause.',
+      authority: RELEASE_MANAGER_AUTHORITY,
+    });
     sendSuccess(res, {
       success: false,
       message: mapped.message,

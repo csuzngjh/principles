@@ -2473,8 +2473,11 @@ describe('handleUpdateRoute', () => {
         expect(realChild.execFileSync(process.execPath, [cliEntry, '--version'], { encoding: 'utf8' }).trim()).toBe('1.0.0');
       }
       if (recovery === 'smoke-failure') expect(rollback.reason).toBe('rollback_cli_smoke_failed');
-      const after = JSON.parse(fs.readFileSync(path.join(workspaceDir, '.pd/update-history.json'), 'utf8')) as { success: boolean; kind: string }[];
+      const after = JSON.parse(fs.readFileSync(path.join(workspaceDir, '.pd/update-history.json'), 'utf8')) as { success: boolean; kind: string; authority?: string }[];
       expect(after.some((entry) => entry.kind === 'rollback' && entry.success)).toBe(recovery === 'success');
+      // PRI-702: the legacy rollback stream is untouched — every record this
+      // PR's canonical writer produces still names the legacy authority.
+      expect(after.every((entry) => entry.authority === 'legacy-console-updater')).toBe(true);
       if (recovery === 'smoke-failure') {
         // The failed rollback attempt must be observable in history (rc-9),
         // not just in the HTTP response.
@@ -3185,9 +3188,13 @@ describe('handleUpdateRoute — install/upgrade reliability (CP-3/4/5/8)', () =>
     const backupPath = under(backupsRoot, backupName as string);
     expect(fs.readFileSync(under(backupPath, 'package.json'), 'utf-8')).toContain('1.0.0');
 
-    const history = JSON.parse(fs.readFileSync(under(workspaceDir, '.pd/update-history.json'), 'utf-8')) as { success: boolean; kind: string; backupPath?: string }[];
+    const history = JSON.parse(fs.readFileSync(under(workspaceDir, '.pd/update-history.json'), 'utf-8')) as { success: boolean; kind: string; backupPath?: string; authority?: string }[];
     const successEntry = history.filter((e) => e.success && e.kind === 'update').at(-1);
     expect(successEntry?.backupPath).toBe(backupPath);
+    // PRI-702 T1/T7: flag-off (pure legacy) behaviour is unchanged — one
+    // event, still attributed to the authority that actually mutated.
+    expect(history).toHaveLength(1);
+    expect(successEntry?.authority).toBe('legacy-console-updater');
   });
 
   it('rollback of a canonical plugin syncs the OpenClaw extension copy (CP-5 invariant)', async () => {

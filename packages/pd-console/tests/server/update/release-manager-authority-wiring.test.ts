@@ -160,6 +160,16 @@ function createMockResponse(): ServerResponse & { _headers: Record<string, strin
   return res;
 }
 
+/**
+ * PRI-702: the Owner-facing history stream of a workspace, read raw so the
+ * persisted schema (not a helper's view of it) is what the assertions see.
+ */
+function readHistory(workspaceDir: string): Record<string, unknown>[] {
+  const historyPath = path.join(workspaceDir, '.pd', 'update-history.json');
+  if (!fs.existsSync(historyPath)) return [];
+  return JSON.parse(fs.readFileSync(historyPath, 'utf8')) as Record<string, unknown>[];
+}
+
 const DEGRADED_LEGACY_BODY = {
   hasUpdate: false,
   currentVersion: 'unknown',
@@ -502,6 +512,47 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
         nextAction: 'Restart PD Console to run the updated build.',
       },
     });
+    // PRI-702 (ADR-0024 D-7): the RM-served update lands in the SAME
+    // Owner-facing history stream — exactly one event, under the authority
+    // that actually served it (not one from the installer plus one from the
+    // console, and not zero either).
+    const history = readHistory(tmpDir);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      fromVersion: '1.222.0',
+      toVersion: '1.223.0',
+      success: true,
+      kind: 'update',
+      authority: 'release-manager',
+      transactionId: 'update-1-abcdef01',
+    });
+  });
+
+  it('an unwritable history file must not misreport a mutation that already happened (PRI-702 rc-9)', async () => {
+    enableWriteFlag();
+    authorityMock.readiness = { ready: true, reasons: [] };
+    authorityMock.applyFullReadiness = { ready: true, reasons: [] };
+    authorityMock.applyImpl = async () => ({
+      kind: 'applied',
+      productVersion: '1.223.0',
+      transactionId: 'update-1-abcdef01',
+      journalPath: '/tmp/transactions/update-1-abcdef01.jsonl',
+    });
+    // Make the history append fail: the path exists as a directory.
+    fs.mkdirSync(path.join(tmpDir, '.pd', 'update-history.json'), { recursive: true });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const res = createMockResponse();
+      await routes.handleUpdateRoute(createMockRequest('POST'), res, tmpDir, '/apply-full');
+      // The update DID happen — the response must still say so.
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res._body) as { data: { success: boolean } };
+      expect(body.data.success).toBe(true);
+      // ...but the audit gap is never silent.
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('WITHOUT an update-history record'));
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('write flag on: a no_update outcome maps to a success body without restart', async () => {
@@ -523,6 +574,19 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
         message: 'No update applied: already_current: release 1.222.0 is the channel pointer',
         requiresRestart: false,
       },
+    });
+    // PRI-702: legacy parity — the legacy updater records a refusal when the
+    // source does not advance the installation, so the RM-served no-update
+    // leaves the same trace (still exactly one event, no version movement).
+    const history = readHistory(tmpDir);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      fromVersion: '1.222.0',
+      toVersion: '1.222.0',
+      success: false,
+      kind: 'refusal',
+      authority: 'release-manager',
+      reason: 'already_current: release 1.222.0 is the channel pointer',
     });
   });
 
@@ -553,6 +617,19 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
         nextAction: 'The runtime is unchanged. Resolve the reported cause and retry.',
         requiresRestart: false,
       },
+    });
+    // PRI-702: a post-transaction failure is a real update attempt that ended
+    // terminal — exactly one failure event, never a success, never a second
+    // event from a fallback (this path does not fall back).
+    const history = readHistory(tmpDir);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      fromVersion: '1.222.0',
+      toVersion: 'failed',
+      success: false,
+      kind: 'failure',
+      authority: 'release-manager',
+      reason: 'apply_failed',
     });
     // Flipping the write flag off (explicit config) deregisters the preferred
     // authority for apply-full (rollback safety: the legacy path is always one
@@ -604,6 +681,20 @@ describe('ReleaseManager authority wiring (production route, flag paths)', () =>
       const body = JSON.parse(res._body) as { success: boolean; data: { success: boolean; reason?: string } };
       expect(body.success).toBe(true);
       expect(body.data.success).toBe(false);
+
+      // PRI-702 (Principle 4 — one update, one history event): the RM refusal
+      // itself produces NO history record (it is a routing decision, carried
+      // by the response headers above). The legacy updater that actually
+      // performed the mutation owns the single surviving event, and its
+      // authority says so.
+      const history = readHistory(tmpDir);
+      expect(history).toHaveLength(1);
+      expect(history[0]).toMatchObject({
+        success: false,
+        kind: 'refusal',
+        authority: 'legacy-console-updater',
+      });
+      expect(history[0]?.authority).not.toBe('release-manager');
     } finally {
       vi.unstubAllGlobals();
     }
