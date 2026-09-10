@@ -143,7 +143,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-055 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
 | ERR-079 | Concurrency-primitive hardening gaps (age-based lock eviction, busy-spin retry) silently re-open the data-loss class the primitive was added to prevent | PRI-459 / PR #1045 |
 | ERR-080 | Control (size bound / path check) applied to the RAW input form instead of the CANONICAL/transformed form — bound is bypassable (escaped output exceeds budget; path traversal evades a /prefix match) | PRI-467 / PR #1059, PR #1302 |
-| ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
+| ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059; PRI-727 / PR #1604 |
 | ERR-089 | Fix addresses primary failure path but leaves sibling failure branches (catch/!ok/throw) with stale state, wrong command path, or CLI contract violation | PR #1124 |
 | ERR-093 | New log sink emits full external identifier despite an established minimization convention | PRI-516 / PR #1230 |
 | ERR-103 | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior | RuleCode Owner Live Decision SPEC |
@@ -175,6 +175,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-119 | Route/identity matcher extracted from legacy prefix code keeps the prefix form — adjacent-but-different routes inherit the exemption | PRI-643 / PR #1530 review |
 | ERR-120 | ReDoS fix removes ONE backtracking factor, keeps the unbounded quantifier — alert stays open; "alert auto-closes post-merge" asserted but never verified as acceptance evidence | PRI-627 / PR #1529 closeout + PR #1532 |
 | ERR-111 | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them | PRI-581 |
+| ERR-125 | New/refactored files under an eslint-ignored surface (create-principles-disciple `scripts/*.mjs`) ship dead code and lint-class defects because local lint never scans them — CodeQL on the PR is the only net; self-check unused symbols or extend lint coverage before handoff | PRI-727 / PR #1604 review (CodeQL) |
 
 ---
 
@@ -637,10 +638,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 116 |
-| Last updated | 2026-09-10 |
+| Total lessons | 117 |
+| Last updated | 2026-09-11 |
 | Top category | Schema & Type |
-| Recurring errors | 60 |
+| Recurring errors | 61 |
 
 ---
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist
@@ -922,6 +923,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-25
 - **Recurrence**: None
   - 2026-08-31 PRI-631 / PR #1462: Owner resolution checked a digest before a task-only CAS, allowing evidence rows to change in the final gap. Fixed with one SQLite mutation conditioned on each reviewed artifact's id, source, lineage and content; barrier regression proves no write.
+  - 2026-09-11 PRI-727 / PR #1604 (CodeQL): exists-then-read flavor — a release publish script gated five file reads behind `existsSync`/`statSync` pre-checks; a swap between check and read is acted on with stale assumptions (CodeQL flagged 2 of 5). Fixed by reading first and classifying the error (`ENOENT` = absent, else fail loud) at ALL five sites — fix the family, not the line.
 
 ---
 **[ERR-082]** | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped
@@ -1469,4 +1471,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-121 (adjacent: fixture vs global mutation).
 - **Source**: PRI-723 / PR #1596 review
 - **Date**: 2026-09-10
+- **Recurrence**: None
+
+---
+**[ERR-125]** | New/refactored files under an eslint-ignored surface ship dead code — local lint never scans them, so the PR-time CodeQL net is the only detector
+
+- **What happened**: PRI-727 PR #1604 review (CodeQL): a new `create-principles-disciple` publish script (`scripts/publish-release-metadata.mjs`) carried an unused import and an unused helper left over from mid-development refactoring. Local `npm run lint` passed because the package's eslint config ignores `scripts/*.mjs`; the defects surfaced only as CodeQL alerts failing the PR's code-scanning check.
+- **Why it's wrong**: "lint passed" is treated as "no hygiene defects", but that guarantee only holds for paths lint actually scans — a file outside the lint surface silently downgrades every lint-class check to "not verified".
+- **Generalized failure mode**: When writing or refactoring a file, assistants must confirm the file is inside the active guard surface (lint scope, typecheck scope, test globs) before treating those guards as evidence, otherwise lint-class defects escape to review/CI.
+- **How to prevent**: Before handoff on a new script/config path, check the lint ignore globs for the path; if ignored, run the closest covered check directly (e.g. `npx eslint --no-ignore <file>`) and state in the PR which guards do NOT cover the file. Durable fix (follow-up): include the installer package's `scripts/*.mjs` in the lint surface.
+- **Regression guard**: `npx eslint --no-ignore packages/create-principles-disciple/scripts/publish-release-metadata.mjs` catches unused symbols on this file class today.
+- **Related ERRs**: EP-09 (verification reality gap — claimed evidence not actually exercised); ERR-078 (self-reported verification without checking reality).
+- **Source**: PRI-727 / PR #1604 review (CodeQL)
+- **Date**: 2026-09-11
 - **Recurrence**: None
