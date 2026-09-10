@@ -86,6 +86,13 @@ export interface ResolveAdapterOptions {
    * so each stage executes on its own declared profile.
    */
   agentName?: InternalAgentName;
+  /**
+   * PRI-719 review: resolve the binding even when the agent is disabled —
+   * peer execution scope is the internalization_full_chain flag (auto-
+   * consumer AND explicit run-once), not agents[kind].enabled. Omitted by
+   * non-peer callers (probe/diagnose) which keep honoring `enabled`.
+   */
+  ignoreAgentEnabled?: boolean;
   /** CLI timeout override. Takes precedence over config timeoutMs. */
   timeoutMs?: number;
   /**
@@ -169,7 +176,10 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   }
 
   // ── Resolve config from .pd/config.yaml (for pi-ai, openclaw-cli, config) ──
-  const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir, undefined, opts.agentName);
+  const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir, {
+    agentName: opts.agentName,
+    ignoreAgentEnabled: opts.ignoreAgentEnabled,
+  });
   const configResult: RuntimeConfigResult = resolved.result;
 
   // PRI-431 Step 1d: invoke onConfigResolved callback (for telemetry, legacyWarnings, etc.)

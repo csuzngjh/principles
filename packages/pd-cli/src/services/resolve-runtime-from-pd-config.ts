@@ -66,27 +66,47 @@ function buildProfileLabel(profileId: string, profile: { type: string; provider?
 }
 
 /**
+ * PRI-719: per-call resolution options for resolveRuntimeFromPdConfig.
+ */
+export interface ResolveRuntimeFromPdConfigOptions {
+  /** Env var accessor, defaults to process.env. */
+  readonly getEnvVar?: (name: string) => string | undefined;
+  /**
+   * Whose `internalAgents.agents[agent]` .runtimeProfile binding resolves
+   * (default 'diagnostician' — the pain-signal bridge path). run-once passes
+   * the selected runner's agent so each stage executes on ITS declared
+   * profile (EP002-R2 F4).
+   */
+  readonly agentName?: InternalAgentName;
+  /**
+   * PRI-719 review: resolve the binding even when the agent is disabled.
+   * Peer execution scope (auto-consumer AND explicit run-once) is governed
+   * by the internalization_full_chain FLAG, not by
+   * internalAgents.agents[kind].enabled — the shipped default config
+   * disables philosopher/evaluator/rolloutReviewer yet the full chain runs
+   * them. `enabled` keeps gating the diagnostician bridge (callers that
+   * omit this option honor it, PRI-638 semantics unchanged).
+   */
+  readonly ignoreAgentEnabled?: boolean;
+}
+
+/**
  * Resolve runtime configuration exclusively from .pd/config.yaml.
  *
  * This is the ONLY production entry point for runtime config resolution
  * in pd-cli commands. Legacy resolveRuntimeConfig(stateDir) must NOT be
  * called by probe/run-once/diagnose/pain-retry.
  *
- * PRI-719: `agentName` selects whose `internalAgents.agents[agent]`
- * .runtimeProfile binding resolves (default 'diagnostician' — the
- * pain-signal bridge path). run-once passes the leased runner's agent so
- * each stage executes on ITS declared profile (EP002-R2 F4).
- *
  * @param workspaceDir - The resolved workspace directory.
- * @param getEnvVar - Env var accessor, defaults to process.env.
- * @param agentName - Internal agent whose binding resolves (default diagnostician).
+ * @param options - Per-call resolution options (defaults = diagnostician
+ *   binding, honor enabled, process.env).
  * @returns Resolved runtime config with legacy warnings.
  */
 export function resolveRuntimeFromPdConfig(
   workspaceDir: string,
-  getEnvVar: (name: string) => string | undefined = (name) => process.env[name],
-  agentName: InternalAgentName = 'diagnostician',
+  options: ResolveRuntimeFromPdConfigOptions = {},
 ): ResolvedRuntimeFromPdConfig {
+  const { getEnvVar = (name) => process.env[name], agentName = 'diagnostician', ignoreAgentEnabled = false } = options;
   const configLoadResult = loadPdConfig(workspaceDir);
 
   // Malformed config → fail loud. Do NOT fall back to defaults for execution.
@@ -118,7 +138,7 @@ export function resolveRuntimeFromPdConfig(
     };
   }
 
-  const result = resolveRuntimeConfigForAgent(configLoadResult.effective, agentName, { getEnvVar });
+  const result = resolveRuntimeConfigForAgent(configLoadResult.effective, agentName, { getEnvVar, ignoreAgentEnabled });
 
   // PRI-402: Extract profile ID and label for probe output alignment with doctor
   let runtimeProfileId: string | null = null;
@@ -127,6 +147,16 @@ export function resolveRuntimeFromPdConfig(
   if (bindingResult.ok) {
     runtimeProfileId = bindingResult.profileId;
     runtimeProfileLabel = buildProfileLabel(bindingResult.profileId, bindingResult.profile);
+  } else if (!isRuntimeConfigError(result) && result.runtimeProfileId !== undefined) {
+    // PRI-719 review: on the peer path (ignoreAgentEnabled) the runtime may
+    // resolve fine for a shipped-disabled agent while the raw binding still
+    // reports disabled — derive the label from the resolved profile identity.
+    const { runtimeProfileId: resolvedProfileId } = result;
+    const profile = configLoadResult.effective.config.runtimeProfiles[resolvedProfileId];
+    if (resolvedProfileId !== undefined && profile) {
+      runtimeProfileId = resolvedProfileId;
+      runtimeProfileLabel = buildProfileLabel(resolvedProfileId, profile);
+    }
   }
 
   const legacyWarnings = configLoadResult.legacyFilesDetected.length > 0
@@ -169,7 +199,7 @@ export function resolveRuntimeWithOverrides(
   },
   getEnvVar: (name: string) => string | undefined = (name) => process.env[name],
 ): ResolvedRuntimeFromPdConfig & { mergedConfig: RuntimeConfig | null } {
-  const base = resolveRuntimeFromPdConfig(workspaceDir, getEnvVar);
+  const base = resolveRuntimeFromPdConfig(workspaceDir, { getEnvVar });
 
   if (isRuntimeConfigError(base.result)) {
     return { ...base, mergedConfig: null };

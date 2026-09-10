@@ -422,9 +422,10 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
       });
 
       expect(result).toHaveProperty('__type', 'PiAiRuntimeAdapter');
-      // PRI-719: the resolver threads the optional agentName (undefined when
-      // the caller does not select a stage).
-      expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith('/ws', undefined, undefined);
+      // PRI-719 (+review): the resolver threads the optional per-call options
+      // (agentName + ignoreAgentEnabled, both undefined when the caller does
+      // not select a peer stage).
+      expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith('/ws', { agentName: undefined, ignoreAgentEnabled: undefined });
     });
 
     it('delegates to openclaw-cli when config resolves to openclaw-cli', () => {

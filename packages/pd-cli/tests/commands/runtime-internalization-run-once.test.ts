@@ -521,13 +521,12 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     const customWs = '/tmp/test-workspace';
     await handleRuntimeInternalizationRunOnce({ workspace: customWs, runtime: 'config', json: true });
 
-    // PRI-393 + PRI-719: resolveRuntimeFromPdConfig is called with the
-    // workspace dir AND the selected runner's agent binding (default
-    // second arg getEnvVar omitted → undefined).
+    // PRI-393 + PRI-719 (+review): resolveRuntimeFromPdConfig is called with
+    // the workspace dir AND the selected runner's agent binding under the
+    // PEER ignoreAgentEnabled semantics (same as the auto-consumer).
     expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith(
       expect.stringContaining('test-workspace'),
-      undefined,
-      'dreamer',
+      { agentName: 'dreamer', ignoreAgentEnabled: true },
     );
   });
 

@@ -507,10 +507,18 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   // ignoring per-agent runtimeProfile declarations (EP002-R2 F4). On any
   // resolution error, fall back to the 300s default rather than refusing the
   // run: the flag-off/legacy behavior was 300s.
+  // PRI-719 review: explicit run-once is a PEER execution path — its scope
+  // is the internalization_full_chain flag, not agents[kind].enabled (the
+  // shipped default disables evaluator/rolloutReviewer, which must not block
+  // an explicit stage run). Same ignoreAgentEnabled semantics as the
+  // auto-consumer; `enabled` keeps gating the diagnostician bridge.
   const runnerAgentName = AGENT_NAME_FOR_TASK_KIND[runnerKind];
   let profileTimeoutMs: number | undefined;
   if (effectiveConfig && runnerAgentName !== undefined) {
-    const resolved = resolveRuntimeConfigForAgent(effectiveConfig, runnerAgentName, { getEnvVar: (name) => process.env[name] });
+    const resolved = resolveRuntimeConfigForAgent(effectiveConfig, runnerAgentName, {
+      getEnvVar: (name) => process.env[name],
+      ignoreAgentEnabled: true,
+    });
     if (!isRuntimeConfigError(resolved)) {
       profileTimeoutMs = resolved.timeoutMs;
     }
@@ -548,8 +556,10 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         workspaceDir,
         runnerKind,
         // PRI-719: resolve the SELECTED runner's own agent binding so its
-        // declared runtimeProfile governs the adapter.
-        ...(runnerAgentName !== undefined ? { agentName: runnerAgentName } : {}),
+        // declared runtimeProfile governs the adapter — with the SAME
+        // ignoreAgentEnabled peer semantics as the timeout resolution above
+        // (declared profile == timeout profile == adapter profile).
+        ...(runnerAgentName !== undefined ? { agentName: runnerAgentName, ignoreAgentEnabled: true } : {}),
         timeoutMs: cliTimeoutMs,
         allowTestDouble: true,
         testDoublePayloadBuilder: () => buildTestDoubleAdapter(runnerKind, wakeResult.taskId),
