@@ -66,7 +66,7 @@ on:
           - dry-run
           - publish
       product_version:
-        description: 'Product version to publish ("auto" = latest published create-principles-disciple)'
+        description: 'Product version to publish ("auto" = latest published create-principles-disciple; must match the ref''s package.json version — mismatch aborts before any metadata is generated)'
         required: false
         default: 'auto'
         type: string
@@ -147,8 +147,18 @@ jobs:
             exit 1
           fi
           LOCAL_VERSION=$(node -p "require('./packages/create-principles-disciple/package.json').version")
+          # Fail-closed gate (release identity guard): productVersion is an
+          # input to deriveReleaseId, so publishing version A with an artifact
+          # built from a ref whose package.json declares version B pollutes
+          # the release identity. The ref and the requested version must name
+          # the SAME release — refuse before the asset is built or any
+          # metadata is generated (applies to dry-run too).
           if [ "$LOCAL_VERSION" != "$VERSION" ]; then
-            echo "::warning::Building ref $(git rev-parse --short HEAD) whose package version is $LOCAL_VERSION, but publishing product version $VERSION. The ref and the product version must describe the SAME release."
+            echo "::error::Product version mismatch — refusing to publish release metadata."
+            echo "package.json version=$LOCAL_VERSION"
+            echo "requested release version=$VERSION"
+            echo "Build/publish from a ref whose package.json declares the requested version, or pass the version this ref actually declares."
+            exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
