@@ -216,25 +216,38 @@ Owner / operator 如何观察它确实生效？
 
 ---
 
-## Relevant ERR Patterns（0..N）
+## Error Experience / Task Risk Contract（0..N）
 
 <!--
-Read ERROR_PATTERN_INDEX.md and list only materially relevant entries.
-Zero is valid.
-Do not manufacture three entries to satisfy process.
+Two-pass workflow (AGENTS.md §14):
+1. BEFORE implementation — read ERROR_PATTERN_INDEX.md, run
+   `npm run error:context -- --paths <expected-files> --signals <concepts>`,
+   convert each hit's Required Evidence into the verification plan.
+2. BEFORE handoff — rerun `npm run error:context` (diff mode) against the
+   actual diff, reconcile newly triggered patterns, then fill this contract.
+Zero patterns is valid. Do not manufacture entries to satisfy process.
 -->
 
-* ERR-___ — ___
-* ERR-___ — ___
+* Router command: `npm run error:context -- ___`
+* Router result: `___（e.g. "EP-02 HIGH, EP-09 HIGH" / "no automatic match"）`
+* Manual additions（router 未命中但人工判断相关）: `___`
+* Manual exclusions（router 命中但排除，HIGH 必须给理由）: `___`
 
-如无匹配：
+每个相关 Pattern 一行（EP-XX 或 ERR-XXX）：
 
-`No materially relevant existing ERR pattern identified.`
+* Pattern: `___` — Why relevant: `___`
+  * Required evidence: `___`
+  * Evidence produced: `___`
+  * Result: PASS / FAIL / N/A-with-reason: `___`
+
+禁止只写 `No materially relevant existing ERR pattern identified.`
+而不附 `error:context` result + manual review statement——
+no-match 时必须粘贴 router 输出并说明人工阅读 Pattern Index 后的结论。
 
 ### New reusable error lesson discovered?
 
 * [ ] 否
-* [ ] 是，已按 Error Experience policy 记录/更新
+* [ ] 是，已按 Error Experience policy 记录/更新（新 recurrence 须附 `recurrence-meta` 结构化块，见 record-error skill）
 
 说明：
 
