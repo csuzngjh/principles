@@ -21,7 +21,6 @@ import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
-import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed, resetSharedCooldownForTest } from './trigger-cooldown-tracker.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
@@ -233,12 +232,6 @@ export function handleFrictionTrackingForFailure(
   const deltaF = (config.get('scores.tool_failure_friction') as number) || 30;
   const updatedState = trackFriction(sessionId, deltaF, observation.errorHash, workspaceDir, { source: outcome.failureSource });
 
-  recordEvolutionFailure(workspaceDir, event.toolName, {
-    filePath: observation.relPath,
-    reason: observation.isRisk ? 'risky' : 'tool',
-    sessionId,
-  });
-
   // Record tool call failure event
   wctx.eventLog.recordToolCall(sessionId, {
     toolName: event.toolName,
@@ -301,11 +294,6 @@ export function handleFrictionTrackingForSuccess(
       amount: dispatchErrorGfi * 0.5,
     });
   }
-
-  recordEvolutionSuccess(workspaceDir, event.toolName, {
-    sessionId,
-    reason: 'tool_success',
-  });
 
   if (options.recordTrajectory !== false) wctx.trajectory?.recordToolCall?.({
     sessionId,
