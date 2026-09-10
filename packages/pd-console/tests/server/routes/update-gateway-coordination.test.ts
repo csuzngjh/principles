@@ -226,3 +226,63 @@ describe('PRI-614 Gate A: gateway coordination during POST /apply', () => {
     expect(execLog.filter((c) => c.cmd === 'openclaw')).toEqual([]);
   });
 });
+
+describe('PRI-723: gateway coordination failures surface as gatewayNotice', () => {
+  it('a failed stop keeps the update successful but appends gatewayNotice (plain + --force attempts)', async () => {
+    await startFakeGateway();
+    mockSuccessfulApplyFetch();
+    const { execFileSync: execSyncMock } = await import('child_process');
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      execLog.push({ cmd, args });
+      if (cmd === 'openclaw') throw new Error('gateway stop refused');
+      if (cmd === 'tar') {
+        const ci = args ? args.indexOf('-C') : -1;
+        const dir = options?.cwd ?? (ci >= 0 ? args?.[ci + 1] : undefined);
+        if (dir) {
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+        }
+      }
+      return undefined;
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', { mergeStrategy: 'smart', createBackup: false });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+    const body = bodyOf(res) as unknown as { data: { success: boolean; gatewayNotice?: string } };
+    expect(body.data.success).toBe(true);
+    expect(body.data.gatewayNotice).toContain('stop failed');
+    // The updater must have tried the plain stop AND the --force fallback
+    // (recent OpenClaw builds refuse a plain operator-gateway stop).
+    expect(gatewayCalls('stop')).toBe(2);
+  });
+
+  it('a failed restart after a successful update appends gatewayNotice', async () => {
+    await startFakeGateway();
+    mockSuccessfulApplyFetch();
+    const { execFileSync: execSyncMock } = await import('child_process');
+    vi.mocked(execSyncMock).mockImplementation(((cmd: string, args?: readonly string[], options?: { cwd?: string }) => {
+      execLog.push({ cmd, args });
+      if (cmd === 'openclaw' && args?.[1] === 'start') throw new Error('gateway start failed');
+      if (cmd === 'tar') {
+        const ci = args ? args.indexOf('-C') : -1;
+        const dir = options?.cwd ?? (ci >= 0 ? args?.[ci + 1] : undefined);
+        if (dir) {
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'principles-disciple' }));
+        }
+      }
+      return undefined;
+    }) as unknown as typeof execSyncMock);
+
+    const req = createMockRequest('POST', { mergeStrategy: 'smart', createBackup: false });
+    const res = createMockResponse();
+    await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+    const body = bodyOf(res) as unknown as { data: { success: boolean; gatewayNotice?: string } };
+    expect(body.data.success).toBe(true);
+    expect(body.data.gatewayNotice).toContain('failed to restart');
+    expect(gatewayCalls('start')).toBe(1);
+  });
+});
