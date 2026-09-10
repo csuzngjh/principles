@@ -98,9 +98,9 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-017 | JSON.stringify on unknown values can throw (BigInt, circular) — preview paths crash | PRI-200 |
 | ERR-018 | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors | PRI-200 |
 | ERR-072 | React component duplicates hook state as local state — desync causes silent feature failure | PR-971 |
-| ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded | PR #808/#809/#810 |
+| [archived] ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded (moved to ERROR_ARCHIVE.md) | PR #808/#809/#810 |
 | ERR-063 | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored | PR #844 |
-| ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit | PRI-337 / PR #852 |
+| [archived] ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit (moved to ERROR_ARCHIVE.md) | PRI-337 / PR #852 |
 | ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
 | ERR-067 | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI | PRI-405 |
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
@@ -109,6 +109,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-106 | Binary ternary collapsed a 4-state review status into approved/pending — rejected/parked principles displayed as "awaiting Owner review" | PR #1377 (pr-review) |
 | ERR-109 | Tri-state fact (boolean \| null) collapsed during a merge: one source's definite `false` resolved another source's unknown into an observed-false | PR #1419 review r4 |
 | ERR-121 | Test fixture declares platform-keyed data with hardcoded values while the code under test selects by the CURRENT runtime platform — green on the author's machine, fails in CI at an earlier, different failure point | PRI-698 / PR #1535 CI |
+| ERR-123 | Refactor relocates content out of a size/validation-bounded artifact; the bound's logic mechanically re-pointed at the new location silently bounds nothing — require a numeric-bound assertion on what the limit names | PRI-633 / PR #1585 review P1 |
 
 ---
 
@@ -635,7 +636,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 114 |
+| Total lessons | 115 |
 | Last updated | 2026-09-10 |
 | Top category | Schema & Type |
 | Recurring errors | 60 |
@@ -687,16 +688,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-03
 - **Recurrence**: 2026-06-18 PR #971 — the notification-sound branch was based on a stacked history and its PR diff included already-merged RuleHost work plus unrelated website assets. Fixed by rebuilding the branch from current `main` and replaying only the seven notification commits. The review guard was strengthened in practice by comparing both `git log origin/main..source-branch` and `gh pr diff --name-only` before resolving conflicts.
 
----
-**[ERR-060]** | Emitted telemetry event not registered in schema — event silently dropped or degraded
-
-- **What happened**: After migrating Scribe/Evaluator/Artificer runners to BasePeerRunner, the runners emit events like `artificer_implementation_plan_generated`, `scribe_principle_draft_generated`, etc. via `this.emitEvent()`. BasePeerRunner prefixes these with the runner name (e.g., `artificer_implementation_plan_generated`). But `telemetry-event.ts` TelemetryEventType union did not include any `artificer_*`, `evaluator_*`, or `scribe_*` event literals. Events not in the schema are silently dropped or degraded by the telemetry pipeline.
-- **Why it's wrong**: The telemetry schema is the contract for what events are valid. If an emitted event is not registered, it's silently lost — no error, no warning, no observability. This is the same class as ERR-024 (mechanism exists but is not wired) and ERR-002 (silent degradation). The runner believes it's emitting telemetry, but the pipeline discards it. Operators cannot observe runner behavior through the telemetry dashboard.
-- **Correct approach**: When adding a new runner that emits events via BasePeerRunner.emitEvent(), register ALL possible event literals (including BasePeerRunner lifecycle events prefixed with the runner name) in the TelemetryEventType union in telemetry-event.ts. Add a test that proves the schema accepts each event type.
-- **How to prevent**: When creating a new BasePeerRunner subclass, the PR checklist must include: (1) list all events the runner can emit, (2) verify each is in TelemetryEventType, (3) add a test proving the schema accepts each event. Review trigger: any PR that adds a new runner or new emitEvent() call must also update telemetry-event.ts.
-- **Source**: PR #808/#809/#810
-- **Date**: 2026-06-03
-- **Recurrence**: Yes - 2026-06-11 PR #902 (PRI-371): `diagnostician_core_grounding_result` telemetry event emitted by DiagnosticianRunner.succeedTask() but not registered in TelemetryEventType union in telemetry-event.ts. Event would be silently dropped and replaced with `degradation_triggered` fallback by StoreEventEmitter. Same class as original: new event literal added to runner but telemetry schema not updated.
 
 ---
 **[ERR-063]** | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored
@@ -710,17 +701,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes.
   - 2026-08-25 Phase 0 update safeguards self-review: the unstamped legacy-installer path staged and inspected a tarball, then returned `installer_bundle_stale` before production mutation. Because that return was inside the outer `try`, it bypassed the `catch` cleanup and left the temporary staging directory behind. Fixed by removing the staging directory before the refusal return and adding a real route test that records the tar extraction directory, asserts the stale result, and proves the directory no longer exists. Lesson: every early refusal after temporary-resource creation must either clean that resource locally or use a `finally`; test the refusal path with an observable resource-lifecycle assertion.
 
----
-**[ERR-064]** | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during edit
-
-- **What happened**: During PRI-337 implementation, the pd pain retry command lost its --baseUrl, --maxRetries, --timeoutMs, and --force options. These options ended up on a bogus top-level pd canary command that incorrectly called handlePainRetry instead of handleRuntimeCanary. Separately, pd pain evidence was hardcoded to read .state/logs/SYSTEM_*.log instead of the actual SystemLogger path <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
-- **Why it's wrong**: CLI commands with lost options silently stop working. Wrong command handlers produce confusing behavior. Wrong log paths return empty results with no error, making operators think the system is broken.
-- **Correct approach**: (1) Every time you add/remove a Commander .option() call, verify ALL options are present by parsing the full command registration. (2) After any index.ts edit that touches .command(), run a parser-level test that confirms each option routes correctly. (3) For log path code, always read the actual SystemLogger source code to verify the format/format/location, never guess.
-- **How to prevent**: (1) Add parser-level tests for EVERY CLI option on every subcommand — these are trivial to write (10 lines each) and catch regression immediately. (2) When editing Commander registration, diff against the handler's actual option usage, not against the previous registration. (3) When reading log files, trace the exact SystemLogger path resolution before writing reader code.
-- **Source**: PRI-337 / PR #852
-- **Date**: 2026-06-08
-- **Recurrence**: First occurrence (similar but distinct from ERR-053 which is about missing registration entirely)
-[ERR-064]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-064
 
 ---
 **[ERR-066]** | CLI --json failure path not structured; raw stack trace dumped to stderr on assembler throw
@@ -1453,3 +1433,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-684 / PR #1584 review round 1 (self-review)
 - **Date**: 2026-09-10
 - **Recurrence**: None
+
+---
+**[ERR-123]** | Refactor relocates content out of a size/validation-bounded artifact; the bound's logic mechanically re-pointed at the new location silently bounds nothing
+
+- **What happened**: PRI-633 / PR #1585 review P1. The rootcause builder's overflow path (message > `maxMessageChars`) truncated the embedded `diagnosticInstruction`. The same PR moved that instruction out of the payload into a `systemPrompt` field and mechanically re-pointed the truncation at it — the instruction no longer belonged to the bounded artifact, so the over-limit payload passed through unchanged, the added `truncationWarnings` grew it, and the new test asserted only warning emission, passing while the limit enforced nothing.
+- **Why it's wrong**: a bound defined against an artifact enforces nothing once its target is relocated out; side-effect-only tests cannot tell enforcement from pantomime.
+- **Generalized failure mode**: When a refactor relocates content out of an artifact carrying downstream limits, validations, or derived logic, assistants must re-derive every such rule against the artifact it bounds and assert the bound, otherwise the limit silently stops enforcing while looking intact.
+- **Correct approach**: Re-derive the budget against the actual bounded artifact — drop the most compressible remaining payload (conversationWindow entries) until `serialized.length <= maxMessageChars`; leave the relocated channel byte-intact.
+- **How to prevent**: In review of any diff that moves a field out of a serialized/persisted artifact, rg the artifact's limit/validate logic and ask "does the bounded variable still CONTAIN what this rule examines?" — then require a numeric-bound assertion (`bounded.length <= limit`), not just a warning-emission assertion.
+- **Regression guard**: the oversize test's `truncated.message.length <= maxMessageChars` assertion plus payload-instruction absence.
+- **Related ERRs**: EP-08 (bound-to-right-target family; that ERR security-scoped, this one cross-artifact relocation). Numbering note: first assigned as ERR-122, renumbered after a parallel-session ERR-122 (PRI-684, Scenario F answer-surface leak) merged to main first via PR #1587.
+- **Source**: PRI-633 / PR #1585 review P1
+- **Date**: 2026-09-10
+- **Recurrence**: None (first recording)
