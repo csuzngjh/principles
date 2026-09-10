@@ -123,10 +123,29 @@ function parsePatternRouting(markdown) {
  * Parse all structured recurrence metadata from a handbook document.
  * @returns {{recurrences: Array<object>, errors: string[]}}
  */
+/**
+ * Strict YYYY-MM-DD calendar validation. `Date.parse` silently ROLLS OVER
+ * impossible dates (2026-02-30 → 2026-03-02, 2025-02-29 → 2026-03-01), so a
+ * regex + Date.parse gate admits them. Parse the components and require the
+ * UTC round-trip to reproduce them exactly. Mirrors error-context.mjs.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isValidCalendarDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map((part) => Number.parseInt(part, 10));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() + 1 === month &&
+    date.getUTCDate() === day
+  );
+}
+
 function parseRecurrenceMeta(markdown) {
   const recurrences = [];
   const errors = [];
-  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
   for (const body of extractHtmlComments(markdown)) {
     const parsed = parseMarkerComment(body, RECURRENCE_MARKER);
@@ -138,7 +157,7 @@ function parseRecurrenceMeta(markdown) {
     const meta = parsed.meta;
     const problems = [];
     if (typeof meta.pattern !== 'string' || !/^EP-\d{2}$/.test(meta.pattern)) problems.push('pattern must match EP-NN');
-    if (typeof meta.date !== 'string' || !DATE_RE.test(meta.date) || Number.isNaN(Date.parse(meta.date))) problems.push('date must be a valid YYYY-MM-DD');
+    if (!isValidCalendarDate(meta.date)) problems.push('date must be a valid YYYY-MM-DD');
     if (typeof meta.invariant !== 'string' || meta.invariant.trim().length === 0) problems.push('invariant must be a non-empty string');
     if (typeof meta.severity !== 'string' || !/^P[0-3]$/.test(meta.severity)) problems.push('severity must be P0..P3');
     if (typeof meta.escaped !== 'string' || meta.escaped.trim().length === 0) problems.push('escaped must be a non-empty string');

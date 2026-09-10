@@ -8,7 +8,9 @@
  *   - plan mode:  `node scripts/error-context.mjs --paths <p1,p2> [--signals <s1,s2>]`
  *     Pre-implementation routing from Survey-identified paths/concepts.
  *   - diff mode:  `node scripts/error-context.mjs --base origin/main`
- *     Post-implementation routing from the actual branch diff.
+ *     Post-implementation routing from the actual branch diff — committed
+ *     (merge-base relative) PLUS staged AND unstaged working-tree changes,
+ *     so an agent can route before its first commit.
  *   - JSON mode:   append `--json` for machine-readable output.
  *
  * Design constraints (SPEC "Error Experience v2"):
@@ -201,7 +203,37 @@ export function parsePatternRouting(markdown) {
     });
   }
 
+  // Every active card must carry routing metadata — a card without a block
+  // would otherwise be silently invisible to routing (same fail-loud class
+  // as a broken block). Mirrors error-handbook-meta.cjs.
+  for (const heading of headings) {
+    const id = heading.slice(4, 9);
+    if (!seenIds.has(id)) {
+      errors.push(`${id} pattern card has no routing metadata block`);
+    }
+  }
+
   return { patterns, errors };
+}
+
+/**
+ * Strict YYYY-MM-DD calendar validation. `Date.parse` silently ROLLS OVER
+ * impossible dates (2026-02-30 → 2026-03-02, 2025-02-29 → 2026-03-01), so a
+ * regex + Date.parse gate admits them. Parse the components and require the
+ * UTC round-trip to reproduce them exactly.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isValidCalendarDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map((part) => Number.parseInt(part, 10));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() + 1 === month &&
+    date.getUTCDate() === day
+  );
 }
 
 /**
@@ -214,7 +246,6 @@ export function parsePatternRouting(markdown) {
 export function parseRecurrenceMeta(markdown) {
   const recurrences = [];
   const errors = [];
-  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
   for (const body of extractHtmlComments(markdown)) {
     const parsed = parseMetaComment(body, RECURRENCE_MARKER);
@@ -228,7 +259,7 @@ export function parseRecurrenceMeta(markdown) {
     if (typeof meta.pattern !== 'string' || !/^EP-\d{2}$/.test(meta.pattern)) {
       problems.push('pattern must match EP-NN');
     }
-    if (typeof meta.date !== 'string' || !DATE_RE.test(meta.date) || Number.isNaN(Date.parse(meta.date))) {
+    if (!isValidCalendarDate(meta.date)) {
       problems.push('date must be a valid YYYY-MM-DD');
     }
     if (typeof meta.invariant !== 'string' || meta.invariant.trim().length === 0) {
@@ -342,51 +373,16 @@ export function routeContext(patterns, files, texts) {
   return hits;
 }
 
-function refExists(ref) {
-  try {
-    execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Resolve the base for router diff mode.
- *
- * The runtime-contract `resolveBaseRef` returns a three-dot ref
- * (`base...HEAD`), which is merge-base-relative — on a freshly-cut branch
- * with no commits yet, that diff is EMPTY while the working tree is full of
- * uncommitted change. The router's contract is "route everything the task
- * will hand to review", which is the two-dot ref (`base..HEAD` semantics =
- * `git diff <base>` against the working tree, including uncommitted files).
- * So this resolver reuses the same candidate probing but returns a two-dot
- * diff spec against the working tree.
- *
- * @param {string[]} [candidates]
- * @param {(ref: string) => boolean} [existsFn]
- * @returns {import('./runtime-contract-diff.js').ResolvedBase}
- */
-export function resolveRouterBase(candidates, existsFn) {
-  const probe = typeof existsFn === 'function' ? existsFn : refExists;
-  const resolved = resolveBaseRef(candidates, probe);
-  if (resolved.kind === 'none') return resolved;
-  // Two forms describe the same working-tree diff: `git diff <ref>` and
-  // `git diff <ref>..HEAD` (the latter also includes uncommitted work).
-  return { ...resolved, ref: `${resolved.ref.replace('...HEAD', '')}..HEAD` };
-}
 /**
  * Run git and return trimmed stdout, or null on failure.
  *
  * @param {string[]} args
+ * @param {string} [cwd] - repo to run git in (tests inject a temp repo)
  * @returns {string | null}
  */
-function gitOutput(args) {
+function gitOutput(args, cwd = process.cwd()) {
   try {
-    const out = execFileSync('git', args, { encoding: 'utf8', maxBuffer: MAX_GIT_BUFFER });
+    const out = execFileSync('git', args, { encoding: 'utf8', maxBuffer: MAX_GIT_BUFFER, cwd });
     return typeof out === 'string' ? out : null;
   } catch {
     return null;
@@ -394,23 +390,83 @@ function gitOutput(args) {
 }
 
 /**
+ * Merge parsed per-segment hunks into ONE entry per file.
+ *
+ * The router matches on file PATH (once per file) and line TEXT. A file
+ * touched in committed AND staged AND unstaged segments would otherwise
+ * appear as three FileHunks entries and inflate path-signal scores 3x.
+ * Identical (lineNo, text) lines across segments are collapsed as pure
+ * duplicates; distinct content at the same line number from different
+ * segments is kept (the segments describe disjoint change ranges).
+ *
+ * @param {import('./runtime-contract-diff.js').FileHunks[][]} parsedSegments
+ * @returns {import('./runtime-contract-diff.js').FileHunks[]}
+ */
+function mergeFileHunks(parsedSegments) {
+  const byFile = new Map();
+  for (const hunks of parsedSegments) {
+    for (const hunk of hunks) {
+      let entry = byFile.get(hunk.file);
+      if (entry === undefined) {
+        entry = { file: hunk.file, newLines: [] };
+        byFile.set(hunk.file, entry);
+      }
+      const seen = new Set(entry.newLines.map((l) => `${l.lineNo}\u0000${l.text}`));
+      for (const line of hunk.newLines) {
+        const key = `${line.lineNo}\u0000${line.text}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          entry.newLines.push(line);
+        }
+      }
+    }
+  }
+  return [...byFile.values()];
+}
+
+/**
  * Wide diff acquisition for the router: unlike runtime-contract's TS-only
  * scope, the router wants the FULL diff (docs, tests, scripts, configs) —
- * routing signals live in all of those. Reuses parseDiffHunks for parsing.
+ * routing signals live in all of those. Covers every reviewable state:
+ *
+ *   1. committed — `<baseRef>` (e.g. `origin/main...HEAD`, merge-base relative)
+ *   2. staged    — `--cached` (HEAD → index)
+ *   3. unstaged  — plain (index → working tree)
+ *
+ * The three segments are disjoint by construction (each starts where the
+ * previous one ends), so the same change is not counted twice; per-file
+ * merging additionally guarantees one path match per file.
+ *
+ * Reuses parseDiffHunks for parsing.
  *
  * @param {string} baseRef - e.g. `origin/main...HEAD`
+ * @param {string} [cwd] - repo to run git in (tests inject a temp repo)
  * @returns {{ok: true, hunks: import('./runtime-contract-diff.js').FileHunks[]} | {ok: false, reason: string, nextAction: string}}
  */
-export function getRouterDiff(baseRef) {
-  const out = gitOutput(['diff', '--unified=0', '--no-color', baseRef]);
-  if (out === null) {
+export function getRouterDiff(baseRef, cwd = process.cwd()) {
+  const segments = [
+    { label: `committed (${baseRef})`, args: ['diff', '--unified=0', '--no-color', baseRef] },
+    { label: 'staged (--cached)', args: ['diff', '--unified=0', '--no-color', '--cached'] },
+    { label: 'unstaged (working tree)', args: ['diff', '--unified=0', '--no-color'] },
+  ];
+  const parsedSegments = [];
+  const failed = [];
+  for (const segment of segments) {
+    const out = gitOutput(segment.args, cwd);
+    if (out === null) {
+      failed.push(segment.label);
+      continue;
+    }
+    parsedSegments.push(parseDiffHunks(out.trim()));
+  }
+  if (failed.length > 0) {
     return {
       ok: false,
-      reason: `git diff against ${baseRef} failed (missing base ref, not a repo, or git error)`,
-      nextAction: 'Run `git fetch origin` and verify the base ref exists (`git rev-parse --verify origin/main`).',
+      reason: `git diff acquisition failed for: ${failed.join(', ')} (missing base ref, not a repo, or git error)`,
+      nextAction: 'Run `git fetch origin` and verify the base ref exists (`git rev-parse --verify origin/main`), then rerun.',
     };
   }
-  return { ok: true, hunks: parseDiffHunks(out.trim()) };
+  return { ok: true, hunks: mergeFileHunks(parsedSegments) };
 }
 
 /**
@@ -582,7 +638,7 @@ export function run(inject) {
   const repoRoot = inject?.repoRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const load = inject?.loadPatterns ?? (() => loadPatterns(repoRoot));
   const getDiff = inject?.getDiff ?? getRouterDiff;
-  const resolveBase = inject?.resolveBase ?? resolveRouterBase;
+  const resolveBase = inject?.resolveBase ?? resolveBaseRef;
 
   const parsed = parseArgs(argv);
   if (!parsed.ok) {
@@ -590,7 +646,10 @@ export function run(inject) {
   }
 
   const { patterns, errors: patternErrors } = load();
-  if (patterns.length === 0 && patternErrors.length > 0) {
+  // Fail loud on ANY metadata error — partial success (12 valid cards + 1
+  // broken) would silently drop one pattern from routing, which is exactly
+  // the invisible-loss class this tool exists to prevent.
+  if (patternErrors.length > 0) {
     return {
       exitCode: 1,
       stdout: `${TAG} FAILED: pattern routing metadata could not be parsed:\n${patternErrors.map((e) => `${TAG}   ${e}`).join('\n')}\n${TAG} Next action: fix docs/process/error-management/ERROR_PATTERN_INDEX.md routing blocks, then rerun.`,
@@ -624,7 +683,7 @@ export function run(inject) {
 
   const { files, texts } = hunksToInputs(diffResult.hunks);
   const hits = routeContext(patterns, files, texts);
-  const basis = `diff ${base.ref}${base.note ? ` (${base.note})` : ''}`;
+  const basis = `diff ${base.ref} (committed + staged + unstaged)${base.note ? ` (${base.note})` : ''}`;
   return { exitCode: 0, stdout: parsed.json ? renderJson(hits, basis) : renderText(hits, basis) };
 }
 

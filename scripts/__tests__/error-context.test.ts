@@ -17,7 +17,7 @@
  *     helpers (single implementation shared with check:error-handbook).
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   parsePatternRouting,
   parseRecurrenceMeta,
@@ -26,7 +26,7 @@ import {
   renderText,
   parseArgs,
   run,
-  resolveRouterBase,
+  getRouterDiff,
 } from '../error-context.mjs';
 import {
   parsePatternRouting as parsePatternRoutingCjs,
@@ -34,8 +34,10 @@ import {
   aggregateHotspots,
 } from '../error-handbook-meta.cjs';
 import { parseDiffHunks } from '../runtime-contract-diff.js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -104,8 +106,11 @@ describe('parsePatternRouting — synthetic edge cases', () => {
     ]);
     const r = parsePatternRouting(md);
     expect(r.patterns).toEqual([]);
-    expect(r.errors.length).toBe(1);
+    // Two true errors: the malformed JSON block AND the card left without
+    // usable metadata (fail-loud on silent invisibility).
+    expect(r.errors.length).toBe(2);
     expect(r.errors[0]).toContain('invalid JSON');
+    expect(r.errors[1]).toContain('EP-01 pattern card has no routing metadata block');
   });
 
   it('reports duplicate EP metadata', () => {
@@ -367,7 +372,7 @@ describe('run() end-to-end with injected dependencies', () => {
     );
     const result = run({
       argv: ['--base', 'origin/main'],
-      resolveBase: () => ({ ref: 'origin/main..HEAD', kind: 'origin/main' }),
+      resolveBase: () => ({ ref: 'origin/main...HEAD', kind: 'origin/main' }),
       getDiff: () => ({ ok: true, hunks: parseDiffHunks(fixtureDiff) }),
       loadPatterns: () => realParsed,
     });
@@ -393,16 +398,16 @@ describe('run() end-to-end with injected dependencies', () => {
   it('git diff failure → non-zero exit with reason + nextAction', () => {
     const result = run({
       argv: ['--base', 'origin/main'],
-      resolveBase: () => ({ ref: 'origin/main..HEAD', kind: 'origin/main' }),
+      resolveBase: () => ({ ref: 'origin/main...HEAD', kind: 'origin/main' }),
       getDiff: () => ({
         ok: false,
-        reason: 'git diff against origin/main..HEAD failed',
+        reason: 'git diff acquisition failed for: committed (origin/main...HEAD)',
         nextAction: 'Run git fetch origin.',
       }),
       loadPatterns: () => realParsed,
     });
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain('git diff against origin/main..HEAD failed');
+    expect(result.stdout).toContain('git diff acquisition failed');
     expect(result.stdout).toContain('git fetch origin');
   });
 
@@ -413,7 +418,7 @@ describe('run() end-to-end with injected dependencies', () => {
     );
     const result = run({
       argv: ['--base', 'origin/main', '--json'],
-      resolveBase: () => ({ ref: 'origin/main..HEAD', kind: 'origin/main' }),
+      resolveBase: () => ({ ref: 'origin/main...HEAD', kind: 'origin/main' }),
       getDiff: () => ({ ok: true, hunks: parseDiffHunks(fixtureDiff) }),
       loadPatterns: () => realParsed,
     });
@@ -448,19 +453,235 @@ describe('run() end-to-end with injected dependencies', () => {
   });
 });
 
-// ─── resolveRouterBase — two-dot working-tree semantics ──────────────────
+// ─── getRouterDiff — committed/staged/unstaged coverage (real temp repos) ─
 
-describe('resolveRouterBase', () => {
-  it('reuses the candidate probing but returns a two-dot working-tree ref', () => {
-    const base = resolveRouterBase(['origin/main'], (ref: string) => ref === 'origin/main');
-    expect(base.kind).toBe('origin/main');
-    expect(base.ref).toBe('origin/main..HEAD');
+/** Temp git repos created by the tests below, removed in afterEach. */
+const tempRepoDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempRepoDirs.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    } catch {
+      /* best-effort temp cleanup */
+    }
+  }
+});
+
+/**
+ * Fresh git repo: base commit on `main` (neutral tracked file at an
+ * EP-02-relevant path), then a `task` branch checked out — the exact shape
+ * the router meets during Pass 2.
+ */
+function makeTempRepo(): { dir: string; g: (args: string[]) => string } {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'eev2-diff-'));
+  tempRepoDirs.push(dir);
+  const g = (args: string[]) =>
+    execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  g(['init', '-b', 'main']);
+  g(['config', 'user.email', 'router-test@example.com']);
+  g(['config', 'user.name', 'router-test']);
+  mkdirSync(path.join(dir, 'packages', 'pd-companion', 'src', 'main'), { recursive: true });
+  writeFileSync(path.join(dir, 'packages', 'pd-companion', 'src', 'main', 'main.ts'), 'export const neutral = true;\n');
+  g(['add', '.']);
+  g(['commit', '-m', 'base']);
+  g(['checkout', '-b', 'task']);
+  return { dir, g };
+}
+
+const TARGET = path.join('packages', 'pd-companion', 'src', 'main', 'main.ts');
+const TRIGGER = 'const win = new BrowserWindow({ preload });\n';
+
+/** EP-02 must route the temp repo's main.ts at HIGH (path src/main +2, diff preload+BrowserWindow +1+1). */
+function expectRoutedEp02(result: ReturnType<typeof getRouterDiff>) {
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  const { files, texts } = hunksToInputs(result.hunks);
+  const hits = routeContext(realParsed.patterns, files, texts);
+  const ep02 = hits.find((h) => h.id === 'EP-02');
+  expect(ep02).toBeDefined();
+  expect(ep02!.confidence).toBe('high');
+  return ep02!;
+}
+
+describe('getRouterDiff — committed/staged/unstaged coverage (real git repos)', () => {
+  it('case 1: committed change is routed', () => {
+    const { dir, g } = makeTempRepo();
+    writeFileSync(path.join(dir, TARGET), TRIGGER);
+    g(['add', '.']);
+    g(['commit', '-m', 'committed change']);
+    expectRoutedEp02(getRouterDiff('main...HEAD', dir));
   });
 
-  it('propagates the none-kind with note when no candidate verifies', () => {
-    const base = resolveRouterBase(['x', 'y'], () => false);
-    expect(base.kind).toBe('none');
-    expect(base.ref).toBe('');
+  it('case 2: staged (uncommitted) change is routed', () => {
+    const { dir, g } = makeTempRepo();
+    writeFileSync(path.join(dir, TARGET), TRIGGER);
+    g(['add', '.']);
+    expectRoutedEp02(getRouterDiff('main...HEAD', dir));
+  });
+
+  it('case 3: unstaged change is routed', () => {
+    const { dir } = makeTempRepo();
+    writeFileSync(path.join(dir, TARGET), TRIGGER);
+    expectRoutedEp02(getRouterDiff('main...HEAD', dir));
+  });
+
+  it('a file touched in all three segments yields ONE path match (no score inflation)', () => {
+    const { dir, g } = makeTempRepo();
+    // committed layer
+    writeFileSync(path.join(dir, TARGET), `${TRIGGER}const committed = 1; // ipcMain\n`);
+    g(['add', '.']);
+    g(['commit', '-m', 'layer 1']);
+    // staged layer
+    writeFileSync(path.join(dir, TARGET), `${TRIGGER}const committed = 1; // ipcMain\nconst staged = 2;\n`);
+    g(['add', '.']);
+    // unstaged layer
+    writeFileSync(path.join(dir, TARGET), `${TRIGGER}const committed = 1; // ipcMain\nconst staged = 2;\nconst unstaged = 3;\n`);
+
+    const ep02 = expectRoutedEp02(getRouterDiff('main...HEAD', dir))!;
+    const pathMatches = ep02.matches.filter((m) => m.kind === 'path');
+    // One file → exactly one path match, even though all three segments saw it.
+    expect(pathMatches).toHaveLength(1);
+    // Diff signals counted from the merged text: BrowserWindow + ipcMain +
+    // 'new ' (from `new BrowserWindow`) + preload = 4.
+    const diffSignals = ep02.matches.filter((m) => m.kind === 'diff').map((m) => m.signal);
+    expect(diffSignals.sort()).toEqual(['BrowserWindow', 'ipcMain', 'new ', 'preload']);
+    expect(ep02.score).toBe(2 + 4);
+  });
+
+  it('empty staged/unstaged segments (clean tree) degrade to committed-only coverage', () => {
+    const { dir, g } = makeTempRepo();
+    writeFileSync(path.join(dir, TARGET), TRIGGER);
+    g(['add', '.']);
+    g(['commit', '-m', 'committed change']);
+    const result = getRouterDiff('main...HEAD', dir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.hunks.map((h) => h.file)).toEqual([TARGET.replace(/\\/g, '/')]);
+  });
+
+  it('unresolvable base ref → ok:false listing the failed segment (fail loud, rc-9)', () => {
+    const { dir } = makeTempRepo();
+    const result = getRouterDiff('no-such-ref...HEAD', dir);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('committed (no-such-ref...HEAD)');
+    expect(result.nextAction).toContain('git fetch origin');
+  });
+});
+
+// ─── run() — fail loud on partial metadata corruption ────────────────────
+
+describe('run() — metadata validation gate', () => {
+  const validMd = readFileSync(path.join(repoRoot, 'scripts', '__tests__', 'fixtures', 'pattern-valid.md'), 'utf8');
+  const brokenMd = readFileSync(path.join(repoRoot, 'scripts', '__tests__', 'fixtures', 'pattern-broken.md'), 'utf8');
+
+  it('valid-only metadata routes normally (exit 0 — the gate must not over-fire)', () => {
+    const parsed = parsePatternRouting(validMd);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.patterns).toHaveLength(1);
+    const result = run({
+      argv: ['--paths', 'src/adapters/x.ts'],
+      loadPatterns: () => parsed,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('EP-01');
+  });
+
+  it('broken-only metadata → exit 1 with explicit error', () => {
+    const parsed = parsePatternRouting(brokenMd);
+    expect(parsed.patterns).toHaveLength(0);
+    expect(parsed.errors.length).toBeGreaterThan(0);
+    const result = run({
+      argv: ['--paths', 'a.ts'],
+      loadPatterns: () => parsed,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('routing metadata could not be parsed');
+    expect(result.stdout).toContain('invalid JSON');
+  });
+
+  it('mixed valid + broken metadata → exit 1 (partial routing is silent loss — the regression)', () => {
+    const parsed = parsePatternRouting(`${validMd}\n${brokenMd}`);
+    // The valid card still parses — under the OLD gate (patterns.length === 0 &&)
+    // this state exited 0 and silently dropped the broken card from routing.
+    expect(parsed.patterns).toHaveLength(1);
+    expect(parsed.errors.length).toBeGreaterThan(0);
+    const result = run({
+      argv: ['--paths', 'a.ts'],
+      loadPatterns: () => parsed,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('routing metadata could not be parsed');
+  });
+
+  it('ESM and CJS parsers agree on the mixed fixture (single validation contract)', () => {
+    const esm = parsePatternRouting(`${validMd}\n${brokenMd}`);
+    const cjs = parsePatternRoutingCjs(`${validMd}\n${brokenMd}`);
+    expect(cjs.patterns).toHaveLength(esm.patterns.length);
+    expect(cjs.errors.length).toBe(esm.errors.length);
+    expect(esm.errors.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── Recurrence metadata — strict calendar date validation ───────────────
+
+describe('parseRecurrenceMeta — strict date validation (UTC round-trip)', () => {
+  const recBlockWithDate = (date: string, marker: 'ESM' | 'CJS' = 'ESM') => {
+    const block = `<!-- recurrence-meta
+${JSON.stringify({
+  date,
+  pattern: 'EP-09',
+  invariant: 'test-asserts-source-substring-not-wiring',
+  severity: 'P2',
+  escaped: 'verify-merge',
+  caughtBy: 'pr-review',
+  guard: 'none',
+})}
+-->`;
+    return marker === 'ESM'
+      ? parseRecurrenceMeta(`# H\n${block}`)
+      : parseRecurrenceMetaCjs(`# H\n${block}`);
+  };
+
+  const expectAccepted = (date: string, parser: 'ESM' | 'CJS' = 'ESM') => {
+    const r = recBlockWithDate(date, parser);
+    expect(r.errors).toEqual([]);
+    expect(r.recurrences).toHaveLength(1);
+    expect(r.recurrences[0].date).toBe(date);
+  };
+  const expectRejected = (date: string, parser: 'ESM' | 'CJS' = 'ESM') => {
+    const r = recBlockWithDate(date, parser);
+    expect(r.errors.length).toBeGreaterThan(0);
+    expect(r.errors[0]).toContain('date must be a valid YYYY-MM-DD');
+    expect(r.recurrences).toHaveLength(0);
+  };
+
+  it('accepts 2024-02-29 (leap year)', () => {
+    expectAccepted('2024-02-29');
+    expectAccepted('2024-02-29', 'CJS');
+  });
+
+  it('accepts 2026-12-31', () => {
+    expectAccepted('2026-12-31');
+    expectAccepted('2026-12-31', 'CJS');
+  });
+
+  it('rejects 2025-02-29 (non-leap year — Date.parse silently rolls it over)', () => {
+    expectRejected('2025-02-29');
+    expectRejected('2025-02-29', 'CJS');
+  });
+
+  it('rejects 2026-02-30 (impossible day — Date.parse silently rolls it over)', () => {
+    expectRejected('2026-02-30');
+    expectRejected('2026-02-30', 'CJS');
+  });
+
+  it('rejects malformed shapes (non-string, wrong format, month 13)', () => {
+    for (const bad of ['not-a-date', '2026-13-45', '2026-02', '']) {
+      expectRejected(bad);
+      expectRejected(bad, 'CJS');
+    }
   });
 });
 
