@@ -94,6 +94,19 @@ export interface RepairPayload {
 }
 
 /**
+ * PRI-718: the deterministic artificer-repair task id convention —
+ * `artificer-repair-<sourceEvaluatorTaskId>-r<iteration>`.
+ *
+ * Single owner of the convention (P4): the two production seeders
+ * (host-runtime consumer governance, pd-cli rulehost pipeline runner) and
+ * the evaluator's durable-iteration probe all derive ids from here, so the
+ * writer and the reader can never drift apart.
+ */
+export function artificerRepairTaskId(sourceEvaluatorTaskId: string, repairIteration: number): string {
+  return `artificer-repair-${sourceEvaluatorTaskId}-r${repairIteration}`;
+}
+
+/**
  * 人工裁决上下文 (PRI-629): 任务进入 needs_human_review 时与 status 同一次
  * task-row mutation 原子落库的"为什么找人"事实。classification (owner_decision
  * vs recovery) 由此派生;缺失 = legacy 任务,由 collectOwnerDecisionFacts 按

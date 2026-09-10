@@ -39,7 +39,7 @@ import { isEvaluatorOutputV2 } from './evaluator-output.js';
 import { assessArtificerCodeBearing } from './artificer-code-bearing.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type RepairPayload, type PITaskMetadata, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, artificerRepairTaskId, type RepairPayload, type PITaskMetadata, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
 import {
   HUMAN_REVIEW_REASON,
   planOwnerVerdictOverrideResume,
@@ -1492,6 +1492,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    *
    * Loop state freshness (EP-05, ERR-015/018/019): each evaluator round reads
    * the CURRENT dependency artificer's repairPayload — never a cached value.
+   *
+   * PRI-718: the dep-derived value alone is NOT the durable truth — the dep
+   * chain can be stale (e.g. an older repair's recovered transition re-pointed
+   * the evaluator at a superseded artifact). The iteration budget must reflect
+   * every durable repair round for THIS evaluator, so the result is the max of
+   * the dep-derived value and the highest existing deterministic repair id
+   * (probe is bounded: the budget gate stops at 2; the cap only guards against
+   * pathological id growth).
    */
   private async resolvePriorRepairIteration(taskId: string): Promise<number> {
     const task = await this.stateManager.getTask(taskId);
@@ -1500,6 +1508,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const piTask = hydratePITaskRecord(task);
     const deps = piTask?.dependencyTaskIds ?? [];
 
+    let depPrior = 0;
     for (const depId of deps) {
       const depTask = await this.stateManager.getTask(depId);
       if (!depTask) continue;
@@ -1508,12 +1517,18 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       const piDepTask = hydratePITaskRecord(depTask);
       // rc-5: use Object.hasOwn to check repairPayload presence.
       if (piDepTask?.repairPayload && typeof piDepTask.repairPayload.repairIteration === 'number') {
-        return piDepTask.repairPayload.repairIteration;
+        depPrior = piDepTask.repairPayload.repairIteration;
       }
       // First artificer (no repairPayload) → prior iteration = 0.
-      return 0;
+      break;
     }
-    return 0;
+
+    let durableMax = 0;
+    for (let iteration = 1; iteration <= 5; iteration++) {
+      const existing = await this.stateManager.getTask(artificerRepairTaskId(taskId, iteration));
+      if (existing) durableMax = iteration;
+    }
+    return Math.max(depPrior, durableMax);
   }
 
   /**
