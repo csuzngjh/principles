@@ -207,7 +207,7 @@ function resolveRuleHostReadinessUnchecked(
   getEnvVar: (name: string) => string | undefined,
 ): RuleHostReadinessResult {
   // ── Step 1: Load config ──
-  const { configLoadResult } = resolveRuntimeFromPdConfig(workspaceDir, getEnvVar);
+  const { configLoadResult } = resolveRuntimeFromPdConfig(workspaceDir, { getEnvVar });
 
   if (!configLoadResult.ok) {
     const [firstError] = configLoadResult.errors;
