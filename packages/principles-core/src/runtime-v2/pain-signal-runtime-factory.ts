@@ -45,7 +45,7 @@ import {
   checkAgentRuntimeReadiness,
   createAdapterConfigFromProfile,
 } from './config/pd-config-agent-binding.js';
-import type { EffectivePdConfig } from './config/pd-config-types.js';
+import type { EffectivePdConfig, InternalAgentName } from './config/pd-config-types.js';
 import {
   resolveDiagnosticianCapability,
   type DiagnosticianCapability,
@@ -107,6 +107,12 @@ export interface RuntimeConfig {
   baseUrl?: string;
   /** Optional system prompt (flows from profile to PiAiRuntimeAdapter). */
   systemPrompt?: string;
+  /**
+   * PRI-719: the runtimeProfile id this config was resolved FROM (absent on
+   * legacy/CLI-override resolutions). Lets run evidence answer
+   * "which declared profile actually executed" without a second lookup.
+   */
+  runtimeProfileId?: string;
 }
 
 export interface RuntimeConfigError {
@@ -314,20 +320,72 @@ export function validateRuntimeConfig(config: RuntimeConfig): void {
 }
 
 /**
- * PRI-306: Resolve runtime configuration from EffectivePdConfig.
- *
- * Uses resolveAgentRuntimeBinding() to determine which profile the diagnostician
- * should use, then checks readiness and produces adapter config.
- *
- * This is the new config-driven path that replaces WorkflowFunnelLoader.
- * When effectiveConfig is provided, this path takes precedence.
+ * PRI-719: taskKind → internalAgents.agents key for the consumer/run-once
+ * peer stages. `rollout_reviewer` maps to the camelCase agent name
+ * `rolloutReviewer` (INTERNAL_AGENT_NAMES); diagnostic stages are NOT here —
+ * they run through the pain-signal bridge, which owns the diagnostician
+ * binding.
  */
-export function resolveRuntimeConfigFromPdConfig(
+export const AGENT_NAME_FOR_TASK_KIND: Readonly<Record<string, InternalAgentName>> = {
+  dreamer: 'dreamer',
+  philosopher: 'philosopher',
+  scribe: 'scribe',
+  artificer: 'artificer',
+  evaluator: 'evaluator',
+  rollout_reviewer: 'rolloutReviewer',
+};
+
+export interface ResolveRuntimeConfigForAgentOptions {
+  /** Env var accessor for readiness checks. */
+  readonly getEnvVar: (name: string) => string | undefined;
+  /**
+   * PRI-719: resolve the binding even when the agent is disabled. The
+   * consumer's per-stage scope is governed by the internalization_full_chain
+   * FLAG, not by internalAgents.agents[kind].enabled — the shipped default
+   * config disables philosopher/evaluator/rolloutReviewer yet the full-chain
+   * consumer runs them. `enabled` gates the pain-signal bridge
+   * (diagnostician). Lifts only the gate, through the SAME binding
+   * authority, via a read-only re-enabled view of the config.
+   */
+  readonly ignoreAgentEnabled?: boolean;
+}
+
+/**
+ * PRI-719: per-agent runtime config resolution.
+ *
+ * Same binding → readiness → adapter-config pipeline as
+ * resolveRuntimeConfigFromPdConfig, parameterized by the internal agent name
+ * so each peer stage resolves ITS OWN
+ * `internalAgents.agents[agent].runtimeProfile` (falling back to
+ * defaultRuntime). Consumer/run-once must resolve per leased/selected task
+ * kind — sharing one agent's binding across the whole chain silently
+ * ignored every other agent's declared profile (EP002-R2 F4).
+ */
+export function resolveRuntimeConfigForAgent(
   effectiveConfig: EffectivePdConfig,
-  getEnvVar: (name: string) => string | undefined,
+  agentName: InternalAgentName,
+  options: ResolveRuntimeConfigForAgentOptions,
 ): RuntimeConfigResult {
-  // Resolve binding for the diagnostician agent
-  const bindingResult = resolveAgentRuntimeBinding(effectiveConfig, 'diagnostician');
+  const { getEnvVar, ignoreAgentEnabled } = options;
+  // Resolve binding for the requested agent
+  let bindingResult = resolveAgentRuntimeBinding(effectiveConfig, agentName);
+  if (!bindingResult.ok && ignoreAgentEnabled === true && bindingResult.readiness === 'disabled') {
+    const { agents } = effectiveConfig.config.internalAgents;
+    const agentBinding = agents[agentName];
+    bindingResult = resolveAgentRuntimeBinding({
+      ...effectiveConfig,
+      config: {
+        ...effectiveConfig.config,
+        internalAgents: {
+          ...effectiveConfig.config.internalAgents,
+          agents: {
+            ...agents,
+            [agentName]: { ...agentBinding, enabled: true },
+          },
+        },
+      },
+    }, agentName);
+  }
   if (!bindingResult.ok) {
     return {
       ok: false,
@@ -362,6 +420,8 @@ export function resolveRuntimeConfigFromPdConfig(
       maxRetries: adapterConfig.maxRetries,
       maxTokens: adapterConfig.maxTokens,
       agentId: 'main',
+      // PRI-719: profile identity for run evidence (declared == executed).
+      runtimeProfileId: bindingResult.profileId,
       ...(adapterConfig.systemPrompt ? { systemPrompt: adapterConfig.systemPrompt } : {}),
     };
   }
@@ -373,11 +433,28 @@ export function resolveRuntimeConfigFromPdConfig(
     runtimeKind: 'openclaw-cli',
     timeoutMs: DEFAULT_TIMEOUT_MS,
     agentId: 'main',
+    runtimeProfileId: bindingResult.profileId,
   };
   if (adapterConfig.openclawMode !== 'default') {
     result.openclawMode = adapterConfig.openclawMode;
   }
   return result;
+}
+
+/**
+ * PRI-306: Resolve runtime configuration from EffectivePdConfig.
+ *
+ * Uses resolveAgentRuntimeBinding() to determine which profile the diagnostician
+ * should use, then checks readiness and produces adapter config.
+ *
+ * This is the new config-driven path that replaces WorkflowFunnelLoader.
+ * When effectiveConfig is provided, this path takes precedence.
+ */
+export function resolveRuntimeConfigFromPdConfig(
+  effectiveConfig: EffectivePdConfig,
+  getEnvVar: (name: string) => string | undefined,
+): RuntimeConfigResult {
+  return resolveRuntimeConfigForAgent(effectiveConfig, 'diagnostician', { getEnvVar });
 }
 
 // Per-workspace+runtime+mode bridge cache — same lifetime as process
