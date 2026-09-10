@@ -1,0 +1,9 @@
+{
+  "name": "cross-asset-generalization-fixtures",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scenario F: cross-asset principle generalization fixtures (PRI-684 / S006).",
+  "scripts": {
+    "test": "node test/scenario-f.test.js"
+  }
+}

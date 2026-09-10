@@ -15,7 +15,7 @@ docs/pipeline-evolution/                    ← 本目录：场景契约 + 演�
 └── baseline-report.md                      #   Step 0 管道基线（链路/证据来源/缺口）
 
 scripts/dev/pipeline-closure-lab/           ← 夹具层（PRI-634-F，唯一夹具所有者）
-├── scenarios/a..e/                         #   可部署的一次性场景副本（generate.mjs --out）
+├── scenarios/a..f/                         #   可部署的一次性场景副本（generate.mjs --out）
 ├── GROUND_TRUTH.md                         #   机械断言 + 行为参考基线（两层分离）
 └── FORENSICS.md                            #   只读取证查询 runbook（state.db/trajectory.db/telemetry）
 
@@ -166,3 +166,4 @@ failureLayer: pain | diagnosis | principle | rule | validation | activation | be
 | [S003](scenarios/S003.md) | 证据不足即行动 | b-report-exporter / d-config-drift（相关） | defined |
 | [S004](scenarios/S004.md) | 长任务中遗忘早期约束 | c-sensor-archive | fixture-ready |
 | [S005](scenarios/S005.md) | 修复旧问题引入新问题 | a-inventory-cli | fixture-ready |
+| [S006](scenarios/S006.md) | 跨资产原则泛化（发明无消费者字段） | f-cross-asset（4 语法家族） | fixture-ready |

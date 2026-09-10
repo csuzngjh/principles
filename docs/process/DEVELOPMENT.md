@@ -9,7 +9,7 @@ The main codebase is located in `packages/openclaw-plugin/`. All development is 
 
 ### Prerequisites
 
-- Node.js >= 18 (peer dependency: `openclaw >=2026.4.4`)
+- Node.js >= 22 (peer dependency: `openclaw >=2026.4.4`)
 - npm
 
 ### Installation

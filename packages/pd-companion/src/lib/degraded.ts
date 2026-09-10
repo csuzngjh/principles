@@ -15,8 +15,8 @@ export interface DegradedInfo {
 const COPY: Record<DegradedReasonKey, DegradedInfo> = {
   node_missing: {
     title: '未检测到 Node.js',
-    description: 'PD Companion 需要系统 Node.js（≥ 18）来运行 PD 控制台服务。当前 PATH 中找不到 node 命令。',
-    nextAction: '安装 Node.js ≥ 18（https://nodejs.org）后，从托盘菜单选择「重启控制台服务」。',
+    description: 'PD Companion 需要系统 Node.js（≥ 22）来运行 PD 控制台服务。当前 PATH 中找不到 node 命令。',
+    nextAction: '安装 Node.js ≥ 22（https://nodejs.org）后，从托盘菜单选择「重启控制台服务」。',
   },
   pd_not_installed: {
     title: '未找到已安装的 PD',

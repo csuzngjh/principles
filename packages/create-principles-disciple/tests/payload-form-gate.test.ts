@@ -9,8 +9,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { install, decideInstallPayloadMode } from '../src/installer.js';
+import { install, decideInstallPayloadMode, installGlobalPdShim, tryUpgradePdCliFromNpm } from '../src/installer.js';
 import { setLanguage } from '../src/i18n.js';
+import { logger } from '../src/utils/logger.js';
+import { checkOpenClawGateway } from '../src/utils/env.js';
 import type { InstallOptions } from '../src/prompts.js';
 
 vi.mock('fs');
@@ -125,5 +127,142 @@ describe('install payload form-gate (npm-distributed shape)', () => {
 
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/^npm_bundle_incomplete: missing console[/\\]dist[/\\]server\.js/);
+  });
+});
+
+// PRI-697: the two "Skipping …" gates used to key on the legacy env var
+// (PD_ALLOW_LEGACY_NPM_INSTALL) while their messages blamed the payload
+// shape — a standard npm-channel install (npm-distributed shape, no env)
+// logged "npm-distributed package detected …" followed by "Skipping … for
+// the self-contained release asset". The matrix below pins each gate to its
+// intended predicate and pins the message text to the ACTUAL mode.
+describe('PRI-697 payload-mode skip gates (shim discovery + pd-cli upgrade)', () => {
+  let savedLegacyNpmInstall: string | undefined;
+  let savedSkipShim: string | undefined;
+  let savedSkipUpgrade: string | undefined;
+  let savedLang: 'zh' | 'en';
+  let infoLines: string[];
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    savedLegacyNpmInstall = process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    savedSkipShim = process.env.PD_SKIP_GLOBAL_SHIM;
+    savedSkipUpgrade = process.env.PD_SKIP_NPM_UPGRADE;
+    // Never touch the real npm global bin dir / registry from tests.
+    process.env.PD_SKIP_GLOBAL_SHIM = '1';
+    process.env.PD_SKIP_NPM_UPGRADE = '1';
+    setLanguage('en');
+    infoLines = [];
+    vi.mocked(checkOpenClawGateway).mockResolvedValue({ isRunning: false });
+    vi.spyOn(logger, 'info').mockImplementation((msg: string) => { infoLines.push(msg); });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const [name, value] of [
+      ['PD_ALLOW_LEGACY_NPM_INSTALL', savedLegacyNpmInstall],
+      ['PD_SKIP_GLOBAL_SHIM', savedSkipShim],
+      ['PD_SKIP_NPM_UPGRADE', savedSkipUpgrade],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    setLanguage(savedLang);
+  });
+
+  const completeNpmBundle = async (): Promise<{ dir: string; actualFs: typeof import('node:fs') }> => {
+    const actualFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
+    const realPath = await vi.importActual<typeof import('node:path')>('node:path');
+    const dir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-697-npm-bundle-'));
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+      actualFs.mkdirSync(realPath.join(dir, component, 'dist'), { recursive: true });
+      actualFs.writeFileSync(realPath.join(dir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
+    }
+    actualFs.mkdirSync(realPath.join(dir, 'release-manager', 'dist', 'update'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(dir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
+    actualFs.mkdirSync(realPath.join(dir, 'console', 'dist', 'web'), { recursive: true });
+    actualFs.writeFileSync(realPath.join(dir, 'console', 'dist', 'server.js'), 'export {};');
+    actualFs.writeFileSync(realPath.join(dir, 'console', 'dist', 'web', 'index.html'), '<html></html>');
+    // Form-gate consults existsSync — delegate to the real fs like the
+    // suites above.
+    vi.mocked(fs.existsSync).mockImplementation((value) => actualFs.existsSync(String(value)));
+    return { dir, actualFs };
+  };
+
+  it('npm-distributed shape (no env): install() logs the npm-distributed banner, and the shim gate NO LONGER claims self-contained', async () => {
+    delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    const { dir } = await completeNpmBundle();
+
+    const result = await install(baseInstallOptions, dir, { quiet: true });
+
+    // install() decided npm-distributed (form-gate passed; checkBuiltPlugin
+    // fails later on the mocked plugin manifest).
+    expect(result.success).toBe(false);
+    // The old bug: with the env off the shim gate fired and blamed the
+    // self-contained release asset even though this run is npm-distributed.
+    // The gate now keys on the payload mode, so in the npm-distributed shape
+    // the self-contained message must NOT appear.
+    const shape = infoLines.filter((line) => line.includes('self-contained release asset'));
+    expect(shape).toEqual([]);
+  });
+
+  it('self-contained shape: shim gate still skips and names the self-contained release asset', async () => {
+    delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    const { dir, actualFs } = await completeNpmBundle();
+    actualFs.mkdirSync(path.join(dir, '_release'), { recursive: true });
+    actualFs.writeFileSync(path.join(dir, '_release', 'asset.json'), '{}');
+
+    const result = await install(baseInstallOptions, dir, { quiet: true });
+
+    // The '{}' asset body fails identity validation — any preflight refusal
+    // proves activePayloadMode === 'self-contained' for the helper assertions
+    // that follow.
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe('self_contained_asset_identity_invalid');
+    // Direct helper assertion under the self-contained mode this run set:
+    // skip fires (no npm discovery for the release-asset shape). The helper
+    // returns plain false for the skip gates (no global write attempted).
+    infoLines.length = 0;
+    expect(installGlobalPdShim()).toBe(false);
+    expect(infoLines.some((line) => line.includes('Skipping npm global shim discovery for the self-contained release asset.'))).toBe(true);
+    tryUpgradePdCliFromNpm('/nonexistent-pd-697');
+    expect(infoLines.some((line) => line.includes('Skipping npm pd-cli upgrade for the self-contained release asset.'))).toBe(true);
+  });
+
+  it('npm-distributed shape: helpers under the npm-distributed mode report the actual mode, never the self-contained asset', async () => {
+    delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
+    const { dir } = await completeNpmBundle();
+
+    // Drive install() far enough to set activePayloadMode (fails later on
+    // the mocked plugin manifest — the mode decision precedes deployment).
+    await install(baseInstallOptions, dir, { quiet: true });
+
+    infoLines.length = 0;
+    // PD_SKIP_GLOBAL_SHIM is set → the dedicated skip fires before the
+    // payload gate; clear it so the payload gate is what we observe.
+    delete process.env.PD_SKIP_GLOBAL_SHIM;
+    try {
+      // The mocked child_process makes npm prefix -g resolve to '' — the
+      // helper returns false silently at the globalBin step. The contract
+      // under test is the MESSAGE: the payload gate passed, so the
+      // self-contained skip message must NOT appear (it did before PRI-697).
+      expect(installGlobalPdShim()).toBe(false);
+      expect(infoLines.some((line) => line.includes('self-contained release asset'))).toBe(false);
+    } finally {
+      process.env.PD_SKIP_GLOBAL_SHIM = '1';
+    }
+
+    infoLines.length = 0;
+    delete process.env.PD_SKIP_NPM_UPGRADE;
+    try {
+      tryUpgradePdCliFromNpm('/nonexistent-pd-697');
+      // The pd-cli upgrade gate keeps the env-var predicate (bundled pd-cli
+      // stays authoritative), but the message reports the ACTUAL mode.
+      expect(infoLines.some((line) => line.includes('Skipping npm pd-cli upgrade (bundled pd-cli is authoritative'))).toBe(true);
+      expect(infoLines.some((line) => line.includes('self-contained'))).toBe(false);
+    } finally {
+      process.env.PD_SKIP_NPM_UPGRADE = '1';
+    }
   });
 });

@@ -17,7 +17,8 @@ pipeline-closure-lab/
     ├── b-report-exporter/  # 过早归因（流截断真 bug + 网络超时红鲱鱼）
     ├── c-sensor-archive/   # 上下文漂移（16 脏文件 + 6 部分需求单；真实 pain 高产场景）
     ├── d-config-drift/     # 调查策略（sha256 基线 + 单文件植入漂移）
-    └── e-service-config/   # 不可逆覆盖（安装令牌唯一副本 + 过时示例诱因；PRI-653 S001）
+    ├── e-service-config/   # 不可逆覆盖（安装令牌唯一副本 + 过时示例诱因；PRI-653 S001）
+    └── f-cross-asset/      # 跨资产泛化（4 语法家族同构陷阱；PRI-684 S006）
 ```
 
 ## 使用（一轮验证的标准流程）
@@ -40,6 +41,7 @@ npm run dev:closure-lab -- <目标目录>          # = node scripts/dev/pipeline
 node scripts/dev/pipeline-closure-lab/generate.mjs     # 重建 canonical fixtures
 cd scripts/dev/pipeline-closure-lab/scenarios/a-inventory-cli && npm test && node lib/audit.js
 # audit 必须逐位输出: processed=9940 malformed=60 total=15583596986.56 avg=1567766.2964
+cd ../f-cross-asset && npm test    # scenario-f 七维自验（四家族 + 确定性 + 无泄漏）
 # B/D 断言见 GROUND_TRUTH.md
 ```
 
