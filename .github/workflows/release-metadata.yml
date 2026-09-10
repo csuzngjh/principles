@@ -1,0 +1,296 @@
+# Release metadata publish pipeline (PRI-727).
+#
+# Produces and publishes the signed release metadata / artifact targets that
+# ReleaseManager already consumes (channels/<channel>.json,
+# releases/<releaseId>/metadata.json, the release-asset tarball, and the TUF
+# root/timestamp/snapshot/targets chain). This is the SUPPLY side of the
+# metadata source contract (PRI-709) — it changes no update entry point:
+# the legacy updater, the console routes and the installer layout are
+# untouched, and the metadata source URL stays operator-configured
+# (PD_RELEASE_METADATA_URL / install.json releaseMetadataUrl). No URL is
+# baked into the product by this workflow.
+#
+# Modes (workflow_dispatch input):
+#   dry-run (default) — build, sign, verify and upload the publication as a
+#     workflow artifact. Without the PD_RELEASE_SIGNING_KEY secret it signs
+#     with a LOUDLY-labeled ephemeral key (untrusted output, pipeline smoke
+#     only). Nothing is published.
+#   publish — same pipeline, then push the bytes to the `gh-pages` branch
+#     (one atomic git push = no partially visible metadata state). REQUIRES
+#     the PD_RELEASE_SIGNING_KEY secret (ed25519 private key PEM) matching
+#     the trust root pinned on installs; the publisher fails loud without it.
+#     Monotonicity (publication sequence / channel pointer version / TUF
+#     metadata versions) is enforced against the currently published state.
+#
+# Monotonic counters are DERIVED, not invented: publication sequence and
+# channel pointer version default to previous+1 read from the published
+# channel pointer (the authoritative publication ledger). Override inputs
+# exist for the bootstrap publication and operator corrections; the
+# publisher refuses any value that is not strictly advancing, so a bad
+# override fails before any byte is emitted.
+#
+# Reproducibility: publishing the same release twice with the same inputs
+# (including expires-at) re-emits identical bytes, and re-publishing one
+# releaseId with DIFFERENT pointer content is refused (immutable release
+# identity). Pass an explicit expires-at when re-publishing a release.
+#
+# Trust material discipline: the private key lives ONLY in the GitHub
+# secret; installs pin the matching public root.json at install time. Key
+# generation, rotation and offline-root ceremony are separate governance
+# work (see docs/architecture/PRI-727-release-metadata-publishing.md).
+
+name: Release Metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build and publish from'
+        required: false
+        default: 'main'
+        type: string
+      channel:
+        description: 'Release channel to advance'
+        required: false
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - candidate
+      mode:
+        description: 'dry-run = build + sign + verify + artifact upload only'
+        required: false
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - publish
+      product_version:
+        description: 'Product version to publish ("auto" = latest published create-principles-disciple; must match the ref''s package.json version — mismatch aborts before any metadata is generated)'
+        required: false
+        default: 'auto'
+        type: string
+      expires_at:
+        description: 'Metadata expiry, RFC3339 UTC ("auto" = now + 90 days; pass explicitly when re-publishing a release)'
+        required: false
+        default: 'auto'
+        type: string
+      publication_sequence:
+        description: 'publicationSequence override ("auto" = published + 1)'
+        required: false
+        default: 'auto'
+        type: string
+      channel_version:
+        description: 'Channel pointer version override ("auto" = published + 1)'
+        required: false
+        default: 'auto'
+        type: string
+
+concurrency:
+  group: release-metadata-${{ github.event.inputs.channel || 'stable' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish-metadata:
+    name: Release metadata (${{ github.event.inputs.mode || 'dry-run' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+      MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
+
+      # Same component build order as the create-principles-disciple path in
+      # publish-npm.yml (dependency-first; the console and the fresh plugin
+      # ship inside the installer payload, so the release asset must be built
+      # from the same tree shape a published installer bundle has).
+      - name: Build release payload components
+        run: |
+          npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
+          npm run build --workspace=@principles/host-runtime
+          npm run build:production --workspace=principles-disciple
+          npm run build:types --workspace=principles-disciple
+          npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/pd-cli
+          (cd packages/create-principles-disciple && npm run build)
+          npm run build --workspace=@principles/pd-console
+
+      - name: Resolve release identity
+        id: release
+        run: |
+          VERSION="${{ github.event.inputs.product_version }}"
+          if [ "$VERSION" = "auto" ] || [ -z "$VERSION" ]; then
+            VERSION=$(npm view create-principles-disciple version 2>/dev/null || echo "")
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not resolve the product version (npm view failed and no explicit product_version was given)."
+            exit 1
+          fi
+          LOCAL_VERSION=$(node -p "require('./packages/create-principles-disciple/package.json').version")
+          # Fail-closed gate (release identity guard): productVersion is an
+          # input to deriveReleaseId, so publishing version A with an artifact
+          # built from a ref whose package.json declares version B pollutes
+          # the release identity. The ref and the requested version must name
+          # the SAME release — refuse before the asset is built or any
+          # metadata is generated (applies to dry-run too).
+          if [ "$LOCAL_VERSION" != "$VERSION" ]; then
+            echo "::error::Product version mismatch — refusing to publish release metadata."
+            echo "package.json version=$LOCAL_VERSION"
+            echo "requested release version=$VERSION"
+            echo "Build/publish from a ref whose package.json declares the requested version, or pass the version this ref actually declares."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "release identity: version=$VERSION commit=$(git rev-parse --short HEAD)"
+
+      - name: Build release asset
+        run: |
+          # Deterministic archive: fixed mtime from the source commit.
+          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          npm run build:release-asset --workspace=create-principles-disciple -- --output "$RUNNER_TEMP/release-asset"
+          ls -la "$RUNNER_TEMP/release-asset"
+
+      - name: Fetch previously published metadata state
+        id: prev
+        run: |
+          mkdir -p "$RUNNER_TEMP/prev-metadata"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages --depth=1
+            git archive refs/remotes/origin/gh-pages | tar -x -C "$RUNNER_TEMP/prev-metadata"
+          else
+            echo "No gh-pages metadata repository yet — this publication bootstraps it."
+          fi
+          POINTER="$RUNNER_TEMP/prev-metadata/targets/channels/$CHANNEL.json"
+          if [ -f "$POINTER" ]; then
+            # The channel pointer payload is a plain JSON document (the TUF
+            # envelope lives in targets.json, not in the target file).
+            SEQ=$(node -e "
+              const payload = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+              console.log(payload.publicationSequence + ':' + payload.version);
+            " "$POINTER")
+            echo "published pointer: $SEQ"
+            echo "prev_sequence=${SEQ%%:*}" >> "$GITHUB_OUTPUT"
+            echo "prev_version=${SEQ##*:}" >> "$GITHUB_OUTPUT"
+          else
+            echo "no published pointer for channel $CHANNEL"
+            echo "prev_sequence=" >> "$GITHUB_OUTPUT"
+            echo "prev_version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve publication inputs
+        id: inputs
+        run: |
+          SEQ="${{ github.event.inputs.publication_sequence }}"
+          if [ "$SEQ" = "auto" ] || [ -z "$SEQ" ]; then
+            SEQ=$(( ${{ steps.prev.outputs.prev_sequence || 0 }} + 1 ))
+          fi
+          PTR="${{ github.event.inputs.channel_version }}"
+          if [ "$PTR" = "auto" ] || [ -z "$PTR" ]; then
+            PTR=$(( ${{ steps.prev.outputs.prev_version || 0 }} + 1 ))
+          fi
+          EXPIRES="${{ github.event.inputs.expires_at }}"
+          if [ "$EXPIRES" = "auto" ] || [ -z "$EXPIRES" ]; then
+            EXPIRES=$(node -p "new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z')")
+            if [ "$MODE" = "publish" ]; then
+              echo "::warning::expires-at was derived from the clock (now + 90d). Re-publishing the same release reproducibly requires passing the SAME explicit expires-at."
+            fi
+          fi
+          echo "publication_sequence=$SEQ" >> "$GITHUB_OUTPUT"
+          echo "channel_version=$PTR" >> "$GITHUB_OUTPUT"
+          echo "expires_at=$EXPIRES" >> "$GITHUB_OUTPUT"
+          echo "publication inputs: sequence=$SEQ pointer=$PTR expires=$EXPIRES"
+
+      - name: Sign and emit release metadata
+        env:
+          PD_RELEASE_SIGNING_KEY: ${{ secrets.PD_RELEASE_SIGNING_KEY }}
+        run: |
+          ARGS=(
+            --archive "$RUNNER_TEMP/release-asset/asset.tar"
+            --product-version "${{ steps.release.outputs.version }}"
+            --source-commit "${{ steps.release.outputs.commit }}"
+            --channel "$CHANNEL"
+            --channel-version "${{ steps.inputs.outputs.channel_version }}"
+            --publication-sequence "${{ steps.inputs.outputs.publication_sequence }}"
+            --expires-at "${{ steps.inputs.outputs.expires_at }}"
+            --min-bootstrap-version 1.0.0
+            --data-schema-forward-readable-from 1.220.0
+            --platform linux
+            --arch x64
+            --node-abi "$(node -p "process.versions.modules")"
+            --output-dir "$RUNNER_TEMP/metadata-repo"
+          )
+          if [ -n "$PD_RELEASE_SIGNING_KEY" ]; then
+            echo "Signing with the configured release signing key."
+          else
+            if [ "$MODE" = "publish" ]; then
+              echo "::error::Publish mode requires the PD_RELEASE_SIGNING_KEY secret (ed25519 private key PEM). Dry-run first; never publish with an ephemeral key."
+              exit 1
+            fi
+            ARGS+=(--ephemeral-key)
+          fi
+          if [ -d "$RUNNER_TEMP/prev-metadata/targets" ]; then
+            ARGS+=(--previous-dir "$RUNNER_TEMP/prev-metadata")
+          fi
+          node packages/create-principles-disciple/scripts/publish-release-metadata.mjs "${ARGS[@]}"
+
+      - name: Upload publication for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata-${{ github.run_number }}
+          path: ${{ runner.temp }}/metadata-repo
+          if-no-files-found: ignore
+
+      - name: Publish to metadata source (gh-pages, atomic push)
+        if: env.MODE == 'publish' && success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages --depth=1
+            git checkout -B gh-pages refs/remotes/origin/gh-pages
+          else
+            # Bootstrap: the worktree still holds the FULL SOURCE CHECKOUT
+            # (node_modules included). Keep .gitignore alive or `git add -A`
+            # would stage the toolchain into the metadata branch.
+            cp .gitignore "$RUNNER_TEMP/gitignore.keep"
+            git checkout --orphan gh-pages
+            git rm -rf --ignore-unmatch . >/dev/null 2>&1 || true
+            cp "$RUNNER_TEMP/gitignore.keep" .gitignore
+          fi
+          # Copy the publication over the previous state. Published releases
+          # are preserved (append-and-advance; the channel pointer decides
+          # what installs see) — stale-release pruning is a separate,
+          # bounded cleanup decision, never an automatic one.
+          cp -a "$RUNNER_TEMP/metadata-repo/." .
+          git add -A
+          RELEASE_ID=$(node -e "
+            const payload = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+            console.log(payload.releaseId.slice(0, 12));
+          " "$RUNNER_TEMP/metadata-repo/targets/channels/$CHANNEL.json")
+          git commit -m "release-metadata: ${RELEASE_ID} (${{ steps.release.outputs.version }}, $CHANNEL)"
+          # One push updates the whole tree atomically; consumers never see a
+          # channel pointer whose artifact is missing.
+          git push origin gh-pages
+          echo "Published to gh-pages. Configure PD_RELEASE_METADATA_URL (or install.json releaseMetadataUrl) to the metadata base URL serving this branch."
