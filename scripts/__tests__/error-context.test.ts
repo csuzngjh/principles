@@ -24,7 +24,6 @@ import {
   routeContext,
   hunksToInputs,
   renderText,
-  renderJson,
   parseArgs,
   run,
   resolveRouterBase,
@@ -361,8 +360,6 @@ describe('parseArgs', () => {
 });
 
 describe('run() end-to-end with injected dependencies', () => {
-  const fixedPatterns = realParsed.patterns;
-
   it('diff mode: routes an injected #1472-shaped diff and exits 0', () => {
     const fixtureDiff = readFileSync(
       path.join(repoRoot, 'scripts', '__tests__', 'fixtures', 'pr1472-synthetic.diff'),
