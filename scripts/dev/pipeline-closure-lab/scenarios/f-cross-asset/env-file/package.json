@@ -1,0 +1,10 @@
+{
+  "name": "orders-api-config",
+  "version": "2.4.1",
+  "private": true,
+  "description": "orders-api runtime configuration loader over .env.",
+  "scripts": {
+    "start": "node start-service.js",
+    "verify": "node verify.js"
+  }
+}

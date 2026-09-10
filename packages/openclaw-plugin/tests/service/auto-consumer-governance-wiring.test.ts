@@ -104,6 +104,66 @@ describe('createEvaluatorRepairDeps', () => {
     expect(meta.repairPayload.repairIteration).toBe(1);
     expect(meta.dependencyTaskIds).toEqual(['scribe-1']);
   });
+
+  // ── PRI-718 (revise ≠ resume): terminal repair rounds are not reusable ──────
+
+  it('seedArtificerRepairTask: in-flight (pending) round → idempotent reuse', async () => {
+    writeConfig();
+    const deps = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
+    const params = {
+      repairPayload: {
+        requiredChanges: ['fix x'], concerns: [], previousScore: 0.4,
+        repairIteration: 1, sourceArtificerArtifactId: 'pi-art-a', sourceEvaluatorTaskId: 'eval-1',
+      },
+      inheritedDependencyTaskIds: ['scribe-1'],
+      inheritedChannel: 'prompt' as const,
+      inheritedTimeoutMs: 300_000,
+      inheritedInputArtifactRefs: [],
+    };
+    const id1 = await deps.seedArtificerRepairTask(params);
+    const id2 = await deps.seedArtificerRepairTask(params);
+    expect(id2).toBe(id1);
+  });
+
+  it('seedArtificerRepairTask: SUCCEEDED round → refuses reuse (no fake new corrective work)', async () => {
+    writeConfig();
+    const deps = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
+    const params = {
+      repairPayload: {
+        requiredChanges: ['fix x'], concerns: [], previousScore: 0.4,
+        repairIteration: 2, sourceArtificerArtifactId: 'pi-art-a', sourceEvaluatorTaskId: 'eval-1',
+      },
+      inheritedDependencyTaskIds: ['scribe-1'],
+      inheritedChannel: 'prompt' as const,
+      inheritedTimeoutMs: 300_000,
+      inheritedInputArtifactRefs: [],
+    };
+    const repairTaskId = await deps.seedArtificerRepairTask(params);
+    await stateManager.updateTask(repairTaskId, { status: 'succeeded' });
+    await expect(deps.seedArtificerRepairTask(params)).rejects.toThrow(/terminal status succeeded/);
+  });
+
+  it('seedArtificerRepairTask: FAILED / NEEDS_HUMAN_REVIEW rounds → refuse reuse too', async () => {
+    writeConfig();
+    const deps = createEvaluatorRepairDeps(workspaceDir, stateManager, logger);
+    const makeParams = (iteration: number) => ({
+      repairPayload: {
+        requiredChanges: ['fix x'], concerns: [], previousScore: 0.4,
+        repairIteration: iteration, sourceArtificerArtifactId: 'pi-art-a', sourceEvaluatorTaskId: 'eval-1',
+      },
+      inheritedDependencyTaskIds: ['scribe-1'],
+      inheritedChannel: 'prompt' as const,
+      inheritedTimeoutMs: 300_000,
+      inheritedInputArtifactRefs: [],
+    });
+    const failedId = await deps.seedArtificerRepairTask(makeParams(3));
+    await stateManager.updateTask(failedId, { status: 'failed' });
+    await expect(deps.seedArtificerRepairTask(makeParams(3))).rejects.toThrow(/terminal status failed/);
+
+    const nhrId = await deps.seedArtificerRepairTask(makeParams(4));
+    await stateManager.updateTask(nhrId, { status: 'needs_human_review' });
+    await expect(deps.seedArtificerRepairTask(makeParams(4))).rejects.toThrow(/terminal status needs_human_review/);
+  });
 });
 
 describe('dispatchRolloutActivation (真实 dispatcher 冒烟)', () => {

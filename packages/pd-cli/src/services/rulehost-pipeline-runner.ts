@@ -40,6 +40,7 @@ import {
   DefaultEvaluatorValidator,
   createPITaskDiagnosticJson,
   parsePITaskMetadata,
+  artificerRepairTaskId,
   runAdversarialLoop,
   evaluateInRefinerSandbox,
   DEFAULT_MAX_ROUNDS,
@@ -50,6 +51,9 @@ import {
   // computeFeatureFlagsFromConfig / isFeatureEnabled live in core).
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
+  // PRI-714: resolve outputLanguage from the same effective config the
+  // runners already receive (EP-07: canonical resolved value, not raw input).
+  resolveOutputLanguage,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -278,6 +282,12 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // createEvaluatorRunnerDeps (rc-9: malformed config → fallback defaults).
     const configLoad = loadPdConfig(opts.workspaceDir);
     const effectiveConfig = configLoad.ok ? configLoad.effective : configLoad.defaults;
+    // PRI-714: resolve outputLanguage once from the effective config so every
+    // stage runner (dreamer/philosopher/scribe/artificer/evaluator) receives
+    // the same language value. Mirrors pain-signal-runtime-factory (EP-07).
+    // Default config also resolves (to zh-CN) — pipeline stages always
+    // declare the owner's language instead of leaving review artifacts English.
+    const {outputLanguage} = resolveOutputLanguage(effectiveConfig.config.principles?.outputLanguage);
     // Allow the caller's adapter to resolve real artifactIds (needed by
     // test-double adapters whose scripted outputs must match store-assigned IDs).
     opts.onStoreReady?.(artifactStore);
@@ -288,7 +298,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       scribe: opts.runtimeAdapter,
       evaluator: opts.runtimeAdapter,
     };
-    const runnerOptsFor = (adapter: PDRuntimeAdapter) => ({ owner, runtimeKind: adapter.kind(), pollIntervalMs, timeoutMs, effectiveConfig });
+    const runnerOptsFor = (adapter: PDRuntimeAdapter) => ({ owner, runtimeKind: adapter.kind(), pollIntervalMs, timeoutMs, effectiveConfig, outputLanguage });
 
     // ── Stage: pain lookup ──
     // Find a dreamer task already seeded for this pain (the pain→dreamer bridge
@@ -671,10 +681,24 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
     },
     seedArtificerRepairTask: async (params: SeedArtificerRepairParams): Promise<string> => {
       // rc-7: each call gets a fresh task ID — never reuse a cached ID.
-      // P0-4: deterministic revision identity + reuse on replay
-      const repairTaskId = `artificer-repair-${params.repairPayload.sourceEvaluatorTaskId}-r${params.repairPayload.repairIteration}`;
+      // P0-4: deterministic revision identity + reuse on replay.
+      // PRI-718: id 约定收敛到 pitask-metadata 的单一 owner。
+      const repairTaskId = artificerRepairTaskId(
+        params.repairPayload.sourceEvaluatorTaskId,
+        params.repairPayload.repairIteration,
+      );
       const existing = await stateManager.getTask(repairTaskId);
-      if (existing) return repairTaskId;
+      if (existing) {
+        // PRI-718 (revise ≠ resume): terminal repair rounds are finished
+        // corrective work — never vehicles for new corrective work. In-flight
+        // rounds are the legitimate replay-reuse population.
+        if (existing.status === 'succeeded' || existing.status === 'failed' || existing.status === 'needs_human_review') {
+          throw new Error(
+            `repair task ${repairTaskId} already reached terminal status ${existing.status}; refusing to reuse it as new corrective work (PRI-718 revise-ne-resume)`,
+          );
+        }
+        return repairTaskId;
+      }
       await stateManager.createTask({
         taskId: repairTaskId,
         // D1 (PRI-509): task kind is 'artificer' — reuses the artificer

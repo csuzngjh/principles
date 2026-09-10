@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import { isPdOwnedShim, checkInstallStatus, parseWmicProcessCsv } from '../src/uninstaller.js';
+import { isPdOwnedShim, checkInstallStatus, parseConsoleProcessCsv } from '../src/uninstaller.js';
 import { getInstalledBinDir, isWindows } from '../src/mvp-config.js';
 
 vi.mock('fs');
@@ -144,37 +144,102 @@ describe('checkInstallStatus', () => {
   });
 });
 
-describe('parseWmicProcessCsv (PRI-696)', () => {
+describe('parseConsoleProcessCsv (PRI-710 — PowerShell Get-CimInstance, supersedes wmic)', () => {
   const consoleEntry = 'C:\\Users\\u\\.pd\\runtime\\console\\dist\\server.js';
 
-  it('extracts the PID of the CSV row that references the console server entry', () => {
+  // Fixture shape captured from a REAL run on a Windows host (2026-09-08,
+  // PRI-710 evidence): header quoted, embedded quotes doubled, backslashes
+  // NOT escaped (wmic escaped them; ConvertTo-Csv does not).
+  const realShapeHeader = '"ProcessId","CommandLine"';
+
+  it('extracts the PID from real-shape ConvertTo-Csv output (unquoted path row)', () => {
     const output = [
-      'Node,CommandLine,ProcessId',
-      `"node.exe","D:\\\\Program Files\\\\nodejs\\\\node.exe" ${consoleEntry} --workspace D:\\\\ws --port 3100 --no-auth,58628`,
+      realShapeHeader,
+      `"42872","node C:\\Users\\u\\.pd\\runtime\\console\\dist\\server.js --port 3100"`,
     ].join('\n');
-    expect(parseWmicProcessCsv(output, consoleEntry)).toEqual([{ pid: 58628 }]);
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([{ pid: 42872 }]);
+  });
+
+  it('parses quoted argv with doubled embedded quotes and a comma inside the CommandLine', () => {
+    const output = [
+      realShapeHeader,
+      // The comma inside --label is the point of this test: splitCsvLine
+      // must NOT split the row there — a wrong split shifts the CommandLine
+      // field and the consoleEntry match must fail (CodeRabbit, PR #1575).
+      `"40480","""D:\\Program Files\\nodejs\\node.exe"" --label ""alpha,beta"" ""${consoleEntry}"" --workspace ""D:\\ws (2)"" --port 3100"`,
+    ].join('\n');
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([{ pid: 40480 }]);
+  });
+
+  it('locates columns by header name (ProcessId/CommandLine reorder-proof)', () => {
+    const output = [
+      '"CommandLine","ProcessId"',
+      `"node ${consoleEntry}",777`,
+    ].join('\n');
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([{ pid: 777 }]);
+  });
+
+  it('refuses to guess columns on an unrecognized header (rc-3 fail closed)', () => {
+    const output = [
+      '"Node","Host","ProcessId"',
+      `"node.exe,HOSTNAME,58628"`,
+    ].join('\n');
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([]);
   });
 
   it('ignores rows that do not reference the console entry', () => {
     const output = [
-      'Node,CommandLine,ProcessId',
-      '"node.exe","some-other-server.js --port 3100",1111',
+      realShapeHeader,
+      '"1111","node some-other-server.js --port 3100"',
     ].join('\n');
-    expect(parseWmicProcessCsv(output, consoleEntry)).toEqual([]);
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([]);
+  });
+
+  it('ignores rows with an empty CommandLine (CIM null renders as empty field)', () => {
+    const output = [
+      realShapeHeader,
+      `"2222",""`,
+    ].join('\n');
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([]);
   });
 
   it('ignores the uninstaller process itself', () => {
     const ownPid = process.pid;
-    const output = `"node.exe","${consoleEntry}",${ownPid}`;
-    expect(parseWmicProcessCsv(output, consoleEntry)).toEqual([]);
+    const output = [
+      realShapeHeader,
+      `"${ownPid}","node ${consoleEntry}"`,
+    ].join('\n');
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([]);
   });
 
-  it('ignores rows whose PID suffix is not numeric', () => {
-    const output = `"node.exe","${consoleEntry}",`;
-    expect(parseWmicProcessCsv(output, consoleEntry)).toEqual([]);
+  it('ignores non-numeric or non-positive PIDs', () => {
+    const output = [
+      realShapeHeader,
+      `"","node ${consoleEntry}"`,
+      `"-5","node ${consoleEntry}"`,
+      `"abc","node ${consoleEntry}"`,
+    ].join('\n');
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([]);
+  });
+
+  it('collapses duplicate PIDs (CIM can surface the same process twice)', () => {
+    const output = [
+      realShapeHeader,
+      `"58628","node ${consoleEntry} --port 3100"`,
+      `"58628","node ${consoleEntry} --port 3100"`,
+    ].join('\n');
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([{ pid: 58628 }]);
+  });
+
+  it('handles CRLF output and a UTF-8 BOM before the header', () => {
+    const output = '\uFEFF' + [
+      realShapeHeader,
+      `"58628","node ${consoleEntry}"`,
+    ].join('\r\n');
+    expect(parseConsoleProcessCsv(output, consoleEntry)).toEqual([{ pid: 58628 }]);
   });
 
   it('handles empty output', () => {
-    expect(parseWmicProcessCsv('', consoleEntry)).toEqual([]);
+    expect(parseConsoleProcessCsv('', consoleEntry)).toEqual([]);
   });
 });

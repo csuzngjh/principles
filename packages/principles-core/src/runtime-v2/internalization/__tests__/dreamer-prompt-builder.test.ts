@@ -82,24 +82,24 @@ describe('DreamerPromptBuilder', () => {
       expect(parsed.taskId).toBe('task-dreamer-001');
     });
 
-    it('dreamerInstruction is present and contains key protocol keywords', () => {
+    it('systemPrompt (PRI-633: ex-dreamerInstruction) is present and contains key protocol keywords', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      expect(result.promptInput.dreamerInstruction).toBeDefined();
-      expect(result.promptInput.dreamerInstruction.length).toBeGreaterThan(100);
-      expect(result.promptInput.dreamerInstruction).toContain('Dreamer');
-      expect(result.promptInput.dreamerInstruction).toContain('candidate');
-      expect(result.promptInput.dreamerInstruction).toContain('badDecision');
-      expect(result.promptInput.dreamerInstruction).toContain('betterDecision');
-      expect(result.promptInput.dreamerInstruction).toContain('confidence');
+      expect(result.systemPrompt).toBeDefined();
+      expect(result.systemPrompt.length).toBeGreaterThan(100);
+      expect(result.systemPrompt).toContain('Dreamer');
+      expect(result.systemPrompt).toContain('candidate');
+      expect(result.systemPrompt).toContain('badDecision');
+      expect(result.systemPrompt).toContain('betterDecision');
+      expect(result.systemPrompt).toContain('confidence');
     });
 
     it('dreamerInstruction contains the output JSON schema format', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.dreamerInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toContain('"valid"');
       expect(instruction).toContain('"taskId"');
       expect(instruction).toContain('"candidates"');
@@ -112,7 +112,7 @@ describe('DreamerPromptBuilder', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.dreamerInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toMatch(/low.*medium.*high|riskLevel.*low.*medium.*high/s);
     });
 
@@ -120,7 +120,7 @@ describe('DreamerPromptBuilder', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.dreamerInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toMatch(/confidence.*number/i);
       expect(instruction).toMatch(/0.*1/);
     });
@@ -129,7 +129,7 @@ describe('DreamerPromptBuilder', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.dreamerInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toMatch(/only.*JSON|JSON.*only|pure JSON/i);
       expect(instruction).toMatch(/no markdown/i);
     });
@@ -138,7 +138,7 @@ describe('DreamerPromptBuilder', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.dreamerInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toContain('CRITICAL');
       expect(instruction).toContain('ONLY valid JSON');
       expect(instruction).toContain('no code fences');
@@ -149,7 +149,7 @@ describe('DreamerPromptBuilder', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.dreamerInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toContain('COMPLETE EXAMPLE OUTPUT');
       expect(instruction).toContain('"valid":true');
       expect(instruction).toContain('"taskId":"task-dreamer-001"');
@@ -163,7 +163,7 @@ describe('DreamerPromptBuilder', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.dreamerInstruction;
+      const instruction = result.systemPrompt;
       const exampleMatch = /\{"valid":true[^}]+generatedAt":"[^"]+"\}/s.exec(instruction);
       expect(exampleMatch).toBeDefined();
       if (exampleMatch) {
@@ -175,7 +175,7 @@ describe('DreamerPromptBuilder', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.dreamerInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toMatch(/Do NOT wrap.*code fence/);
     });
 
@@ -207,7 +207,7 @@ describe('DreamerPromptBuilder', () => {
       expect(parsed.contextRefs).toEqual([]);
     });
 
-    it('message JSON contains all required DreamerPromptInput fields at top level', () => {
+    it('message JSON contains all required DreamerPromptInput fields at top level and no role instruction (PRI-633)', () => {
       const builder = new DreamerPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
@@ -216,7 +216,10 @@ describe('DreamerPromptBuilder', () => {
       expect(parsed).toHaveProperty('contextHash');
       expect(parsed).toHaveProperty('contextRefs');
       expect(parsed).toHaveProperty('predecessorOutput');
-      expect(parsed).toHaveProperty('dreamerInstruction');
+      // PRI-633: the role/protocol instruction left the payload.
+      expect(parsed).not.toHaveProperty('dreamerInstruction');
+      expect(result.message).not.toContain('You are a Dreamer agent');
+      expect(result.systemPrompt).toContain('You are a Dreamer agent');
     });
   });
 });

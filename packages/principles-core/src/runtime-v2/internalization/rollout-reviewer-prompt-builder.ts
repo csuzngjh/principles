@@ -1,8 +1,18 @@
+import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
+
 export interface RolloutReviewerPromptBuilderInput {
   taskId: string;
   contextHash: string;
   sourceEvaluatorArtifactId: string;
   evaluatorArtifact: unknown;
+  /**
+   * Owner's preferred language for review fields (PRI-714). When provided,
+   * the rollout reviewer instruction carries a language directive so summary /
+   * requiredChanges / rolloutRisks / safetyChecks / risks are written in the
+   * owner's language. Undefined = no directive (backward compatible).
+   */
+  outputLanguage?: OutputLanguage;
 }
 
 export interface RolloutReviewerPromptInput {
@@ -10,13 +20,18 @@ export interface RolloutReviewerPromptInput {
   contextHash: string;
   sourceEvaluatorArtifactId: string;
   evaluatorArtifact: unknown;
-  rolloutReviewerInstruction: string;
   promptContractVersion: string;
 }
 
 export interface RolloutReviewerPromptBuildResult {
   readonly message: string;
   readonly promptInput: RolloutReviewerPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `rolloutReviewerInstruction`; now delivered via the
+   * system channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 export const ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION = `You are a Rollout Reviewer agent in a principle internalization pipeline. Your role is to review the Evaluator's assessment and produce a rollout review decision with safety checks and risk analysis.
@@ -60,17 +75,23 @@ export const ROLLOUT_REVIEWER_PROMPT_CONTRACT_VERSION = 'rollout-reviewer-output
 export class RolloutReviewerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(input: RolloutReviewerPromptBuilderInput): RolloutReviewerPromptBuildResult {
+    // PRI-714: language directive for review fields (empty string when
+    // outputLanguage is undefined — instruction stays byte-identical).
+    // 'rollout-review' names the rollout reviewer's own schema (review.*),
+    // not the evaluator's evaluation.*/codeReview.* fields.
+    const languageDirective = buildLanguageDirective(input.outputLanguage, 'rollout-review');
     const promptInput: RolloutReviewerPromptInput = {
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceEvaluatorArtifactId: input.sourceEvaluatorArtifactId,
       evaluatorArtifact: input.evaluatorArtifact,
-      rolloutReviewerInstruction: ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION,
       promptContractVersion: ROLLOUT_REVIEWER_PROMPT_CONTRACT_VERSION,
     };
 
     const message = JSON.stringify(promptInput);
 
-    return { message, promptInput };
+    // PRI-633: the instruction (with PRI-714's language directive) is the
+    // base-layer systemPrompt — it left the payload.
+    return { message, promptInput, systemPrompt: ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION + languageDirective };
   }
 }

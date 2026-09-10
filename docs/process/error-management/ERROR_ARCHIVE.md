@@ -542,3 +542,28 @@ One-line summaries remain in the handbook; the verbatim texts live here.
 
 ---
 
+**[ERR-060]** | Emitted telemetry event not registered in schema — event silently dropped or degraded
+
+- **What happened**: After migrating Scribe/Evaluator/Artificer runners to BasePeerRunner, the runners emit events like `artificer_implementation_plan_generated`, `scribe_principle_draft_generated`, etc. via `this.emitEvent()`. BasePeerRunner prefixes these with the runner name (e.g., `artificer_implementation_plan_generated`). But `telemetry-event.ts` TelemetryEventType union did not include any `artificer_*`, `evaluator_*`, or `scribe_*` event literals. Events not in the schema are silently dropped or degraded by the telemetry pipeline.
+- **Why it's wrong**: The telemetry schema is the contract for what events are valid. If an emitted event is not registered, it's silently lost — no error, no warning, no observability. This is the same class as ERR-024 (mechanism exists but is not wired) and ERR-002 (silent degradation). The runner believes it's emitting telemetry, but the pipeline discards it. Operators cannot observe runner behavior through the telemetry dashboard.
+- **Correct approach**: When adding a new runner that emits events via BasePeerRunner.emitEvent(), register ALL possible event literals (including BasePeerRunner lifecycle events prefixed with the runner name) in the TelemetryEventType union in telemetry-event.ts. Add a test that proves the schema accepts each event type.
+- **How to prevent**: When creating a new BasePeerRunner subclass, the PR checklist must include: (1) list all events the runner can emit, (2) verify each is in TelemetryEventType, (3) add a test proving the schema accepts each event. Review trigger: any PR that adds a new runner or new emitEvent() call must also update telemetry-event.ts.
+- **Source**: PR #808/#809/#810
+- **Date**: 2026-06-03
+- **Recurrence**: Yes - 2026-06-11 PR #902 (PRI-371): `diagnostician_core_grounding_result` telemetry event emitted by DiagnosticianRunner.succeedTask() but not registered in TelemetryEventType union in telemetry-event.ts. Event would be silently dropped and replaced with `degradation_triggered` fallback by StoreEventEmitter. Same class as original: new event literal added to runner but telemetry schema not updated.
+- **Archived**: 2026-09-10 (last activity 2026-06-11, > 90 days; archived to bring the active handbook back under the 300KB limit)
+
+---
+
+**[ERR-064]** | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during edit
+
+- **What happened**: During PRI-337 implementation, the pd pain retry command lost its --baseUrl, --maxRetries, --timeoutMs, and --force options. These options ended up on a bogus top-level pd canary command that incorrectly called handlePainRetry instead of handleRuntimeCanary. Separately, pd pain evidence was hardcoded to read .state/logs/SYSTEM_*.log instead of the actual SystemLogger path <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
+- **Why it's wrong**: CLI commands with lost options silently stop working. Wrong command handlers produce confusing behavior. Wrong log paths return empty results with no error, making operators think the system is broken.
+- **Correct approach**: (1) Every time you add/remove a Commander .option() call, verify ALL options are present by parsing the full command registration. (2) After any index.ts edit that touches .command(), run a parser-level test that confirms each option routes correctly. (3) For log path code, always read the actual SystemLogger source code to verify the format/format/location, never guess.
+- **How to prevent**: (1) Add parser-level tests for EVERY CLI option on every subcommand — these are trivial to write (10 lines each) and catch regression immediately. (2) When editing Commander registration, diff against the handler's actual option usage, not against the previous registration. (3) When reading log files, trace the exact SystemLogger path resolution before writing reader code.
+- **Source**: PRI-337 / PR #852
+- **Date**: 2026-06-08
+- **Recurrence**: First occurrence (similar but distinct from ERR-053 which is about missing registration entirely)
+- **Archived**: 2026-09-10 (last activity 2026-06-08, > 90 days; archived to bring the active handbook back under the 300KB limit)
+
+---

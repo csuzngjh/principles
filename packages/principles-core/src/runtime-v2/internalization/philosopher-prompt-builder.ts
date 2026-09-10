@@ -8,19 +8,24 @@
  *
  * ## Contract
  *
- * buildPrompt() takes PhilosopherPromptBuilderInput and returns a JSON string
- * to be passed as `inputPayload` in StartRunInput.
+ * buildPrompt() takes PhilosopherPromptBuilderInput and returns a build result
+ * whose `message` is the JSON string to be passed as `inputPayload` in
+ * StartRunInput, and whose `systemPrompt` is the base-layer system prompt
+ * (role + protocol) to pass via `StartRunInput.systemPrompt` (PRI-633).
  *
  * ## Constraints
  *
- * - Output is ONLY JSON — no markdown, no file ops, no tool calls
- * - NO extraSystemPrompt field — system prompt is agent profile's responsibility
+ * - Message payload is ONLY task data (JSON) — no markdown, no file ops, no tool calls
+ * - Role/protocol instructions travel as the base systemPrompt layer, NOT in
+ *   the user payload (PRI-633); the profile's configured systemPrompt remains
+ *   the append layer owned by the agent profile (DPB-07, as revised by PRI-633)
  * - buildPrompt() is a pure function — no DB calls, no side effects
  */
 
 import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
 import type { CoreAxiomBlockOptions } from '../core-principles/core-axiom-block.js';
 import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
 
 export interface PhilosopherPromptBuilderInput {
   taskId: string;
@@ -38,12 +43,17 @@ export interface PhilosopherPromptInput {
   contextHash: string;
   dreamerArtifact: unknown;
   sourceDreamerArtifactId: string;
-  philosopherInstruction: string;
 }
 
 export interface PhilosopherPromptBuildResult {
   readonly message: string;
   readonly promptInput: PhilosopherPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `philosopherInstruction`; now delivered via the system
+   * channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 /**
@@ -52,11 +62,20 @@ export interface PhilosopherPromptBuildResult {
  * When `coreGrounding` is true, a CORE AXIOMS section is injected so the
  * Philosopher can check whether the new principle candidate duplicates or
  * contradicts an existing core principle.
+ *
+ * PRI-714 (review fix): when `outputLanguage` is provided, a language
+ * directive is appended so the OUTPUT (not just the axiom block) follows the
+ * owner's language — thesis/principleCandidate.{title,rationale,scope}/risks
+ * are the human-readable fields (confidence stays numeric; lineage IDs stay
+ * untranslated). Undefined = no directive (byte-identical to pre-PRI-714).
  */
 export function buildPhilosopherProtocolInstruction(
   opts: CoreAxiomBlockOptions = {},
 ): string {
   const coreAxiomsBlock = buildCoreAxiomBlock(opts);
+  // PRI-714: output-language directive (empty string when outputLanguage is
+  // undefined — instruction stays byte-identical).
+  const languageDirective = buildLanguageDirective(opts.outputLanguage, 'philosopher');
 
   return `You are a Philosopher agent in a principle internalization pipeline. Your role is to distill a principle candidate from the Dreamer's alternative decision analysis.
 
@@ -92,7 +111,7 @@ CONSTRAINTS:
 - sourceDreamerArtifactId MUST be copied exactly from input.sourceDreamerArtifactId (non-empty string)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
 - If the CORE AXIOMS section is provided, check whether the new principle candidate duplicates or contradicts any existing core axiom. If it does, note this in the risks array
-`;
+${languageDirective}`;
 }
 
 export class PhilosopherPromptBuilder {
@@ -118,11 +137,10 @@ export class PhilosopherPromptBuilder {
       contextHash: input.contextHash,
       dreamerArtifact: input.dreamerArtifact,
       sourceDreamerArtifactId: input.sourceDreamerArtifactId,
-      philosopherInstruction,
     };
 
     const message = JSON.stringify(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: philosopherInstruction };
   }
 }

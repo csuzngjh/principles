@@ -474,6 +474,35 @@ export class InternalizationOrchestrator {
           reason: 'revision_cause_already_materialized',
         };
       }
+      // PRI-718 (superseded-repair downgrade guard): a stale completion
+      // recovery (e.g. reconciliation replaying an OLDER repair's transition)
+      // must not re-point the evaluator's artificer dependency back to a
+      // superseded round — that made the evaluator re-evaluate the same old
+      // artifact forever (EP002-R2 F3). Replacement is allowed only when the
+      // completing repair IS the evaluator's current repair dep, or is a
+      // NEWER round of the same source evaluator.
+      if (srcPi && srcRaw) {
+        for (const depId of srcPi.dependencyTaskIds) {
+          if (depId === taskId) continue;
+          const dep = await this.stateManager.getTask(depId);
+          if (!dep || dep.taskKind !== 'artificer') continue;
+          const depPi = hydratePITaskRecord(dep);
+          if (
+            depPi?.repairPayload
+            && depPi.repairPayload.sourceEvaluatorTaskId === piTask.repairPayload.sourceEvaluatorTaskId
+            && typeof depPi.repairPayload.repairIteration === 'number'
+            && depPi.repairPayload.repairIteration >= piTask.repairPayload.repairIteration
+          ) {
+            return {
+              decision: 'revision_reopen_noop',
+              sourceTaskId: taskId,
+              reopenedTaskId: piTask.repairPayload.sourceEvaluatorTaskId,
+              reason: 'stale_repair_transition_superseded',
+            };
+          }
+          break; // the evaluator's artificer dep is singular (linear chain)
+        }
+      }
       const reopened = await this.reopenTaskForRevision(piTask.repairPayload.sourceEvaluatorTaskId, {
         replaceArtificerDependencyWith: taskId,
         reason: 'artificer_repair_complete',

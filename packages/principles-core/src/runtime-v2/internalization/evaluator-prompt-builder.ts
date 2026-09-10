@@ -1,10 +1,21 @@
 import { serializePromptInput } from './prompt-serializer.js';
+import type { IntentContractV1 } from './intent-contract.js';
+import type { OutputLanguage } from '../language-directive.js';
+import { buildLanguageDirective } from '../language-directive.js';
 
 export interface EvaluatorPromptBuilderInput {
   taskId: string;
   contextHash: string;
   sourceArtificerArtifactId: string;
   artificerArtifact: unknown;
+  /**
+   * Owner's preferred language for review fields (PRI-714). When provided,
+   * the evaluator instruction carries a language directive so summary /
+   * strengths / concerns / requiredChanges / codeReview explanations are
+   * written in the owner's language. Undefined = no directive (backward
+   * compatible).
+   */
+  outputLanguage?: OutputLanguage;
   /**
    * Scribe principle artifact (RuleHost MVP Activation, PRD Decision 12).
    * Present when code review applies (artificer output is V2). Carries the
@@ -23,6 +34,16 @@ export interface EvaluatorPromptBuilderInput {
    * 不得作为 hard blocker。
    */
   hostToolCatalog?: HostToolCatalogFacts;
+  /**
+   * PRI-703 Phase 1 (Owner decision 2026-09-07): the scribe artifact's
+   * structured Owner-intent contract (runtime-validated). When present, it is
+   * the PRIMARY anchor for intentConsistency judging and for scoping which
+   * adversarial failures count against the rule (failures outside the
+   * contract's applicability introduce NEW behavioral requirements — flag as
+   * test-scope concern, not rule defect). Undefined for pre-contract scribe
+   * artifacts (backward compatible).
+   */
+  intentContract?: IntentContractV1;
 }
 
 export interface PriorRequirement {
@@ -107,13 +128,20 @@ export interface EvaluatorPromptInput {
   scribeArtifact?: unknown;
   previousEvaluation?: PreviousEvaluationContext;
   hostToolCatalog?: HostToolCatalogFacts;
-  evaluatorInstruction: string;
+  /** Present only when the scribe artifact carries a validated intent contract (PRI-703 Phase 1). */
+  intentContract?: IntentContractV1;
   promptContractVersion: string;
 }
 
 export interface EvaluatorPromptBuildResult {
   readonly message: string;
   readonly promptInput: EvaluatorPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `evaluatorInstruction`; now delivered via the system
+   * channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 export const EVALUATOR_PROTOCOL_INSTRUCTION = `You are an Evaluator agent in a principle internalization pipeline. Your role is to critically review the Artificer's implementation plan and produce a structured evaluation with a decision, score, and actionable feedback.
@@ -149,7 +177,12 @@ PROTOCOL:
 7. Identify risks associated with this evaluation
 
 CODE REVIEW (Part A — Passive Review): When the artificerArtifact contains an "implementationCode" field (V2 output), you MUST additionally review the generated code across three dimensions and emit a "codeReview" object:
-- intentConsistency: { aligned: boolean, explanation: string } — Does the code logic match the constraint intent described in the scribe principle text? Read the principle text (scribeArtifact.principleDraft or painReasonSummary), then read the code, then judge whether the code precisely implements the described constraint.
+- intentConsistency: { aligned: boolean, explanation: string } — Does the code logic match the constraint intent described in the scribe principle text? Read the principle text (scribeArtifact.principleDraft or painReasonSummary), then read the code, then judge whether the code precisely implements the described constraint. When intentContract is present, judge primarily against it: the rule is intent-aligned iff it serves ownerIntent/targetBehavior and does not implement forbiddenBehavior.
+
+OWNER INTENT CONTRACT (when \`intentContract\` is present — PRI-703):
+- The intentContract is the distilled Owner intent for this principle — treat it as the DEFINITION of correctness, ahead of your own reading of the principle prose.
+- intentConsistency must cite the specific contract field(s) the rule satisfies or violates.
+- SCOPING RULE: an adversarial case or required change that demands behavior NOT derivable from ownerIntent/targetBehavior/forbiddenBehavior is OUTSIDE this principle's contract. Record it as a concern with the phrase "test-scope" and DO NOT count it as a rule defect in requiredChanges — it indicates the test case introduces a new behavioral requirement, which belongs to a future principle revision or contract extension, not to rewriting this rule.
 - scopePrecision: { verdict: "precise" | "too_broad" | "too_narrow", explanation: string } — Are the match conditions over-broad (false positive risk, e.g. using includes() substring matching) or over-narrow (false negative risk, e.g. hardcoded paths)?
 - traceCoverage: { sufficient: boolean, gaps: string[], explanation: string } — Do the goldenTraceCases cover the key scenarios described in the principle (both positive and negative)?
 
@@ -183,11 +216,14 @@ CONSTRAINTS:
 - adversarialCases (when present) MUST be an array of 3-5 objects; omit entirely when passive review fails
 `;
 
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v3';
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v4';
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(input: EvaluatorPromptBuilderInput): EvaluatorPromptBuildResult {
+    // PRI-714: language directive for review fields (empty string when
+    // outputLanguage is undefined — instruction stays byte-identical).
+    const languageDirective = buildLanguageDirective(input.outputLanguage, 'review');
     const promptInput: EvaluatorPromptInput = {
       taskId: input.taskId,
       contextHash: input.contextHash,
@@ -196,12 +232,16 @@ export class EvaluatorPromptBuilder {
       scribeArtifact: input.scribeArtifact,
       previousEvaluation: input.previousEvaluation,
       hostToolCatalog: input.hostToolCatalog,
-      evaluatorInstruction: EVALUATOR_PROTOCOL_INSTRUCTION,
+      // PRI-703 Phase 1: only include intentContract when present (pre-contract
+      // scribe artifacts), so prompts stay backward-compatible.
+      ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),
       promptContractVersion: EVALUATOR_PROMPT_CONTRACT_VERSION,
     };
 
     const message = serializePromptInput(promptInput);
 
-    return { message, promptInput };
+    // PRI-633: the instruction (with PRI-714's language directive) is the
+    // base-layer systemPrompt — it left the payload.
+    return { message, promptInput, systemPrompt: EVALUATOR_PROTOCOL_INSTRUCTION + languageDirective };
   }
 }

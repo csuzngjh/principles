@@ -43,7 +43,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
-| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358 |
+| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358; PR #1574 |
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
@@ -78,6 +78,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-112 | Sentinel value satisfies a downstream structural check while the operator success criterion measures generation, not admission — Owner input silently lost and reported as success | PRI-642 |
 | ERR-113 | Generator reset/write/deploy loops leak stale state when cleanup base, write base, and residue-enumeration base are three different directories | PRI-634-F |
 | ERR-114 | Semantic resolvability used as an existence proof — fallback/generic lookup members pass validators that should only accept authoritative host declarations | PRI-634-F PR #1495 R2 |
+| ERR-122 | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side README/package.json and tutorial-style verifier comments ship to the subject agent's workspace; audit the DEPLOYED FILE LIST as the answer surface, enforced by a deploy-shape assertion + hint scan | PRI-684 PR #1584 |
 
 ---
 
@@ -97,9 +98,9 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-017 | JSON.stringify on unknown values can throw (BigInt, circular) — preview paths crash | PRI-200 |
 | ERR-018 | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors | PRI-200 |
 | ERR-072 | React component duplicates hook state as local state — desync causes silent feature failure | PR-971 |
-| ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded | PR #808/#809/#810 |
+| [archived] ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded (moved to ERROR_ARCHIVE.md) | PR #808/#809/#810 |
 | ERR-063 | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored | PR #844 |
-| ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit | PRI-337 / PR #852 |
+| [archived] ERR-064 | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during Commander .command() edit (moved to ERROR_ARCHIVE.md) | PRI-337 / PR #852 |
 | ERR-065 | SQLite INSERT guesses column names instead of reading schema — trust-boundary recurrence (ERR-001/ERR-005/ERR-013) | PRI-394 / PR #926 |
 | ERR-067 | Orchestrator treats `retried` status as failure — retry chain breaks at SplitDiagnosticianRunner and diagnose CLI | PRI-405 |
 | ERR-069 | Adapter `runHandle` hardcodes `status:'succeeded'` absent from RunHandleSchema (masked by `as`); degradation path trusts validator-rejected candidate — two trust-boundary breaches in ArtificerL2Adapter | PRI-424 |
@@ -108,6 +109,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-106 | Binary ternary collapsed a 4-state review status into approved/pending — rejected/parked principles displayed as "awaiting Owner review" | PR #1377 (pr-review) |
 | ERR-109 | Tri-state fact (boolean \| null) collapsed during a merge: one source's definite `false` resolved another source's unknown into an observed-false | PR #1419 review r4 |
 | ERR-121 | Test fixture declares platform-keyed data with hardcoded values while the code under test selects by the CURRENT runtime platform — green on the author's machine, fails in CI at an earlier, different failure point | PRI-698 / PR #1535 CI |
+| ERR-123 | Refactor relocates content out of a size/validation-bounded artifact; the bound's logic mechanically re-pointed at the new location silently bounds nothing — require a numeric-bound assertion on what the limit names | PRI-633 / PR #1585 review P1 |
 
 ---
 
@@ -334,6 +336,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-191
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — `as Record`/`as T[]` on parsed JSON, YAML, SQLite rows, CLI args, or LLM output bypasses element/type narrowing.
+- PR #1551 round 2 (R4): evidence 元素校验只挂正向分支——负向 outcome 的 [null] 元素穿透解析层并在推导层崩溃。修法：所有 outcome 统一逐元素校验 + 推导层同契约防御（过滤+降级）。
   - 2026-06-25 PRI-466 (PR#1056): `(err as Error).message` on caught `unknown` — replaced with `instanceof Error` guard
   - 2026-06-23 PRI-446 (PR#1028): `input.consecutiveErrors as number` post-`Number.isFinite` — replaced with `typeof` narrowing
   - Earlier recurrences (PR#689-#1027): same `as`-on-untrusted-value pattern across recommendation_kind, language, SQLite rows, YAML, depIds. See git history.
@@ -498,6 +501,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
+- PR #1551 round 2 (R2): fresh 派生的出界处置（selectedEffect）未持久化，resume 从缺失的瞬时变量重新推导 → 同一裁决跨重启产生不同副作用。修法：处置在 intent 落库前派生并随 completion intent 持久化，resume 读 intent 重放效果（rollout reviewer 既有模板）。
 - 2026-08-26 PRI-606: axiom builders tested in isolation but `prompt.ts` injected via `evolutionReducer` (empty on fresh installs); barrel missed re-export — T-01..T-10 never injected. Fixed: registry-direct + barrel + empty-reducer regression test.
   - 2026-08-24 PR #1389 review round 2 (dormant consumer activation — mirror of the PRI-510 flavor): to forward two NEW telemetry events, `createPainSignalBridge` started passing `eventEmitter` into `new PainSignalBridge({...})` — an option the factory had NEVER passed on main, so the bridge's four PRE-EXISTING emission sites (`candidate_admission_decision`, `candidate_dreamer_task_seeded`, `candidate_not_internalizable`, `candidate_dreamer_task_seed_failed`) were dormant in production. The unconditional forwarding wrapper woke all four: routine admission decisions got re-emitted as `degradation_triggered` (semantic mislabeling of the degradation channel), and flag-off behavior changed despite the PR contract "flag off = zero effective surface". Fixed by extracting `mapBridgeTelemetryToStoreEvent`, which forwards ONLY the two persistence events; a negative-control test asserts the four pre-existing event names map to null (dormancy preserved). Rule of thumb: when STARTING to pass a previously-dormant optional dependency/handler into a construction path, grep ALL of the dependency's consumption sites (`this.eventEmitter?.…`), not just the newly added ones — every dormant site inherits the new wiring's channel and semantics. Route each site intentionally or filter to the intended events, and ship a negative-control test proving the unintended sites stay dormant.
   - 2026-08-19 PR #1358 external review round 5 (verdict drift, compressed; full text → ERROR_ARCHIVE.md): crash-recovery re-consulted the LLM instead of the durably persisted `runnerDecision`, overwriting verdicts whose side effects had already materialized; fixed with the atomic `completionIntent` authority protocol + `maybeResumePendingIntent` resume gate. Rule of thumb: every re-entry path must treat a durably recorded decision as the authority — never re-consult a non-deterministic advisor for a decision already recorded but not yet applied; enumerate every branch that persists the decision and every side effect that changes consumable governance state.
@@ -507,9 +511,14 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-08-31 PRI-631 / PR #1462: an optional Evaluator V2 shape bypassed the canonical Artificer validator, so a valid code-bearing artifact could offer acceptance without a passed hard gate. Fixed at the live review builder with a code-bearing/V1 regression.
   - 2026-06-25 PRI-467 (PR#1059, compressed; full text → ERROR_ARCHIVE.md): `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — size guard couldn't strip INTENT by priority. Fixed by adding to `blocks` + Step 1.5 strip
   - 2026-06-19 PRI-408 (PR#972, compressed; full text → ERROR_ARCHIVE.md): `activateArtifact()` accepted `rolloutDecision='approved'` without verifying approval record — require `approvalId` + independent verification
+  - 2026-09-09 PRI-707 / PR #1574 review round 1 (telemetry emission-site flavor, review finding landed OUTSIDE the diff): finish-metadata evidence (`stopReason`/`truncated`/`outputTokens`) was added to the evidencePack and the `output_extraction_failed` telemetry payload, but the sibling terminal event `output_repair_exhausted` kept its old payload — monitoring could not distinguish a token-limit cut from an ordinary schema failure. Fixed by mirroring the three fields into the terminal payload + asserting them in the T8 test. Rule of thumb: when adding evidence fields to a failure payload that is mirrored across MULTIPLE observability surfaces (error details / evidencePack / telemetry events), grep ALL emission sites of the same logical failure and assert the full field set on EACH surface — partial-surface propagation silently blinds exactly the consumers the evidence was added for.
   - Fix: when adding optional deps/fields/handlers to a constructor/service interface, grep ALL construction sites and update each one; add a test exercising the production construction path (not just the helper in isolation).
 
 ---
+  - 2026-09-08 PRI-705 / PR #1551 review round: `partitionV2OutOfScopeFailures` shipped with direct-call unit tests (hand-built `requiresContextVersion: undefined`), but the production resolver `resolveRequiresContextVersion` collapsed "key absent on a PARSED artifact" (deterministically v1 — the classifier's entire target population) into the same `null` as "unresolvable", so the out-of-scope routing could never fire in production. Fixed with a three-state resolver (literal 2 / `undefined` = resolved-v1 / `null` = unresolvable) extracted as a pure function + a WIRING-level regression test that enters through the real artifact `contentJson` shape. Lesson: when a pure classifier sits behind a production resolver, "absent on valid input" and "input unresolvable" are different states — collapsing them creates dead branches direct-call tests cannot catch; always add one test driving the resolver→classifier composition with the production input shape.
+
+---
+
 **[ERR-025]** | Test coverage proves isolated helper behavior, not real production defense
 
 - **What happened**: `broken-artifact-simulation.ts` was added with `decideDownstreamGate()` and 54 tests, but no production code called it. The real `InternalizationChainIntegrityReadModel` and `InternalizationIntegrityRemediation` were completely untested. Tests proved the helper's logic, but the production system had no defense against the scenarios the helper covered.
@@ -627,10 +636,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 113 |
-| Last updated | 2026-09-06 |
+| Total lessons | 115 |
+| Last updated | 2026-09-10 |
 | Top category | Schema & Type |
-| Recurring errors | 59 |
+| Recurring errors | 60 |
 
 ---
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist
@@ -679,16 +688,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-03
 - **Recurrence**: 2026-06-18 PR #971 — the notification-sound branch was based on a stacked history and its PR diff included already-merged RuleHost work plus unrelated website assets. Fixed by rebuilding the branch from current `main` and replaying only the seven notification commits. The review guard was strengthened in practice by comparing both `git log origin/main..source-branch` and `gh pr diff --name-only` before resolving conflicts.
 
----
-**[ERR-060]** | Emitted telemetry event not registered in schema — event silently dropped or degraded
-
-- **What happened**: After migrating Scribe/Evaluator/Artificer runners to BasePeerRunner, the runners emit events like `artificer_implementation_plan_generated`, `scribe_principle_draft_generated`, etc. via `this.emitEvent()`. BasePeerRunner prefixes these with the runner name (e.g., `artificer_implementation_plan_generated`). But `telemetry-event.ts` TelemetryEventType union did not include any `artificer_*`, `evaluator_*`, or `scribe_*` event literals. Events not in the schema are silently dropped or degraded by the telemetry pipeline.
-- **Why it's wrong**: The telemetry schema is the contract for what events are valid. If an emitted event is not registered, it's silently lost — no error, no warning, no observability. This is the same class as ERR-024 (mechanism exists but is not wired) and ERR-002 (silent degradation). The runner believes it's emitting telemetry, but the pipeline discards it. Operators cannot observe runner behavior through the telemetry dashboard.
-- **Correct approach**: When adding a new runner that emits events via BasePeerRunner.emitEvent(), register ALL possible event literals (including BasePeerRunner lifecycle events prefixed with the runner name) in the TelemetryEventType union in telemetry-event.ts. Add a test that proves the schema accepts each event type.
-- **How to prevent**: When creating a new BasePeerRunner subclass, the PR checklist must include: (1) list all events the runner can emit, (2) verify each is in TelemetryEventType, (3) add a test proving the schema accepts each event. Review trigger: any PR that adds a new runner or new emitEvent() call must also update telemetry-event.ts.
-- **Source**: PR #808/#809/#810
-- **Date**: 2026-06-03
-- **Recurrence**: Yes - 2026-06-11 PR #902 (PRI-371): `diagnostician_core_grounding_result` telemetry event emitted by DiagnosticianRunner.succeedTask() but not registered in TelemetryEventType union in telemetry-event.ts. Event would be silently dropped and replaced with `degradation_triggered` fallback by StoreEventEmitter. Same class as original: new event literal added to runner but telemetry schema not updated.
 
 ---
 **[ERR-063]** | Commander `--no-<flag>` option property accessed via incorrect name — flag silently ignored
@@ -702,17 +701,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: Yes.
   - 2026-08-25 Phase 0 update safeguards self-review: the unstamped legacy-installer path staged and inspected a tarball, then returned `installer_bundle_stale` before production mutation. Because that return was inside the outer `try`, it bypassed the `catch` cleanup and left the temporary staging directory behind. Fixed by removing the staging directory before the refusal return and adding a real route test that records the tar extraction directory, asserts the stale result, and proves the directory no longer exists. Lesson: every early refusal after temporary-resource creation must either clean that resource locally or use a `finally`; test the refusal path with an observable resource-lifecycle assertion.
 
----
-**[ERR-064]** | CLI subcommand option regressions — Commander flag → opts mapping lost or misrouted during edit
-
-- **What happened**: During PRI-337 implementation, the pd pain retry command lost its --baseUrl, --maxRetries, --timeoutMs, and --force options. These options ended up on a bogus top-level pd canary command that incorrectly called handlePainRetry instead of handleRuntimeCanary. Separately, pd pain evidence was hardcoded to read .state/logs/SYSTEM_*.log instead of the actual SystemLogger path <workspace>/memory/logs/SYSTEM_YYYY-MM-DD.log.
-- **Why it's wrong**: CLI commands with lost options silently stop working. Wrong command handlers produce confusing behavior. Wrong log paths return empty results with no error, making operators think the system is broken.
-- **Correct approach**: (1) Every time you add/remove a Commander .option() call, verify ALL options are present by parsing the full command registration. (2) After any index.ts edit that touches .command(), run a parser-level test that confirms each option routes correctly. (3) For log path code, always read the actual SystemLogger source code to verify the format/format/location, never guess.
-- **How to prevent**: (1) Add parser-level tests for EVERY CLI option on every subcommand — these are trivial to write (10 lines each) and catch regression immediately. (2) When editing Commander registration, diff against the handler's actual option usage, not against the previous registration. (3) When reading log files, trace the exact SystemLogger path resolution before writing reader code.
-- **Source**: PRI-337 / PR #852
-- **Date**: 2026-06-08
-- **Recurrence**: First occurrence (similar but distinct from ERR-053 which is about missing registration entirely)
-[ERR-064]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-064
 
 ---
 **[ERR-066]** | CLI --json failure path not structured; raw stack trace dumped to stderr on assembler throw
@@ -1009,6 +997,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
 - **Recurrence**: 2026-08-13 PRI-523 C1.1 spec review: the production OpenClaw BDD seeded a Runtime V2 activation only, then asserted its unique text appeared once. That signal could not exercise or prove the legacy/Runtime V2 overlap branch, so the test stayed green while shared exclusion metadata misreported `all_deduped_against_legacy` as `no_validated_activations`. Fixed by seeding the identical ID/text in the real legacy probation reducer and Runtime V2 SQLite, asserting one combined prompt occurrence, absence of a duplicate Runtime V2 directive, and the persisted exact skip reason/next action. 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
+- PR #1551 round 2 (R3/R5): 非唯一代理信号冒充目标判定——lineageResolvable（仅上游 artificer 存在）当"证据来源可达"，applicability 条目数（未去重）当"泛化"，NHR 状态当"Owner 可裁决"。修法：对外断言绑定唯一权威来源（BFS 祖先 taskKind/去重计数/capability 集合），代理信号只作提示。
 
   - 2026-08-28 PRI-614 / PR #1428 review: the gateway recovery test counted a restart but did not prove it happened after the tar step failed, so an early or unrelated restart produced the same signal. Fixed with strict call-order assertions and a negative-control run that fails when the ordering predicate is inverted.
 
@@ -1129,6 +1118,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-08-27 / PR #1421 (PRI-606, self-review during implementation): `validatePdConfig` reconstructed the validated `PdConfig` field-by-field and never extracted the `principles` section — `principles.outputLanguage` (canonical language SSOT since PRI-336) was silently dropped between raw YAML and `effective.config` for every `loadPdConfigForPlugin` consumer. The SSOT only *appeared* to work because pd-cli (`config-reader.ts`) and pd-console (`pd-config-store.ts`) re-read the raw YAML in parallel shadow paths. Fixed by extracting/validating `principles` (strict `outputLanguage` via `isValidOutputLanguage`) into the returned config; regression guard `pd-config-principles.test.ts`; prompt.ts now reads the language through this canonical path.
 
 ---
+  - 2026-09-08 PRI-700 / PR #1551 review round (CodeRabbit P1 + CI failure): `handleValidationError` persisted `output_failure_details`, then wrote `lastValidatorErrors` via a SECOND `updateTask` whose diagnosticJson base was re-parsed from the `ctx.task.diagnosticJson` snapshot taken BEFORE the first write — the second write replaced the whole column and silently erased `output_failure_details`. CI caught it as "updateTask called 2 times, expected 1". Fixed by generalizing `persistOutputFailureDetails` with an `extraTopLevelKeys` param so both keys land in ONE read-modify-write. Broaden — additive is not safe at the WRITE level either: keys appended to the same persisted record within one flow must coalesce into a single read-modify-write; a second RMW built from a pre-first-write in-memory snapshot is a lost update.
+
+---
+
 **[ERR-096]** | Non-interactive mode (`--yes`) hangs on an interactive prompt — handler gated prompting on `jsonMode`/`quiet` instead of the broader `nonInteractive` signal
 
 - **What happened**: In the `create-principles-disciple` installer gateway pre-flight, `install()` showed a 3-way interactive `@inquirer/prompts` `select` (stop / proceed / abort) when the OpenClaw gateway was running. Prompting was gated on `!quiet`, where `quiet` is `install()`'s mode parameter set to `jsonMode` (true only under `--json`). The CLI also exposes `--yes` / `--non-interactive`, which are non-interactive but NOT `--json`. So a `--yes` run with the gateway up had `quiet=false` → `interactive=true` → `install()` invoked `select` and **hung waiting for stdin**, breaking the `--yes` non-interactive contract and any CI/script relying on `--yes`. Caught in adversarial self-review before PR handoff; no `--yes` user was affected.
@@ -1241,6 +1234,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-584
 - **Date**: 2026-08-25
 - **Recurrence**: None
+- PR #1551 round 2 (R1/R5): 实现叙述替代规范语义——注释声称"收窄前提取"而代码在收窄后执行（oracle 判据漏 block-类模板）；实验报告把 recovery-only NHR 写成"Owner 可裁决"。修法：规范语义逐条对照代码位置复核 + 对外结论只用已验证能力事实。
 
 ---
 **[ERR-109]** | Tri-state fact (boolean | null) collapsed during a merge — one source's definite `false` resolved another source's unknown into an observed-false
@@ -1425,4 +1419,31 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-111 (adjacent: test must not assume its host's capabilities — that ERR covers what the machine HAS, this one covers what the fixture DECLARES); ERR-083(f) (dev-machine artifacts masking failures).
 - **Source**: PRI-698 / PR #1535 CI run 34050209739
 - **Date**: 2026-09-06
+- **Recurrence**: None (first recording)
+
+---
+**[ERR-122]** | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side docs/packaging and tutorial-style verifier comments ship to the subject's workspace
+
+- **What happened**: PRI-684 / PR #1584 self-review (2026-09-09). The closure-lab Scenario F deploy shipped the scenario README + root package.json (both describing the trap topology) and verifiers whose comments explained the check dimensions ("fabrication check (turn 2 form)") — the subject could read the answer from its workspace, invalidating generalization rounds.
+- **Why it's wrong**: For benchmark fixtures the measured behavior is valid only if the answer comes from repository evidence, not benchmark hints. The author audited file INTENT ("README is documentation") instead of the DEPLOYED FILE LIST — every byte shipped into the subject's workspace is part of the answer surface regardless of its repo-side role.
+- **Generalized failure mode**: When fixtures/tests deploy a copy the subject works inside, assistants must treat the deployed file list as the answer surface — strip lab-side docs/packaging/oracle explanations and neutralize shipped-file comments to mechanical contract language — otherwise the experiment measures hint recall, not the target behavior.
+- **How to prevent**: For any fixture PR, list the deployed tree and ask of EACH file: "does this tell the subject what the trap or check is?" Enforce via an exact-tree assertion + hint-regex scan over every shipped file (narrow the regex so mechanical identifiers don't false-positive, or the guard gets disabled).
+- **Regression guard**: scenario-f.test.js dimension 7 (deploy tree equals exactly the four family dirs + shared lib) and dimension 6 (hint scan covering assets/examples/consumers/verifiers).
+- **Related ERRs**: ERR-113 (same lab, stale-state leaks), ERR-083 (fixture env assumptions) — different rule: answer-surface audit.
+- **Source**: PRI-684 / PR #1584 review round 1 (self-review)
+- **Date**: 2026-09-10
+- **Recurrence**: None
+
+---
+**[ERR-123]** | Refactor relocates content out of a size/validation-bounded artifact; the bound's logic mechanically re-pointed at the new location silently bounds nothing
+
+- **What happened**: PRI-633 / PR #1585 review P1. The rootcause builder's overflow path (message > `maxMessageChars`) truncated the embedded `diagnosticInstruction`. The same PR moved that instruction out of the payload into a `systemPrompt` field and mechanically re-pointed the truncation at it — the instruction no longer belonged to the bounded artifact, so the over-limit payload passed through unchanged, the added `truncationWarnings` grew it, and the new test asserted only warning emission, passing while the limit enforced nothing.
+- **Why it's wrong**: a bound defined against an artifact enforces nothing once its target is relocated out; side-effect-only tests cannot tell enforcement from pantomime.
+- **Generalized failure mode**: When a refactor relocates content out of an artifact carrying downstream limits, validations, or derived logic, assistants must re-derive every such rule against the artifact it bounds and assert the bound, otherwise the limit silently stops enforcing while looking intact.
+- **Correct approach**: Re-derive the budget against the actual bounded artifact — drop the most compressible remaining payload (conversationWindow entries) until `serialized.length <= maxMessageChars`; leave the relocated channel byte-intact.
+- **How to prevent**: In review of any diff that moves a field out of a serialized/persisted artifact, rg the artifact's limit/validate logic and ask "does the bounded variable still CONTAIN what this rule examines?" — then require a numeric-bound assertion (`bounded.length <= limit`), not just a warning-emission assertion.
+- **Regression guard**: the oversize test's `truncated.message.length <= maxMessageChars` assertion plus payload-instruction absence.
+- **Related ERRs**: EP-08 (bound-to-right-target family; that ERR security-scoped, this one cross-artifact relocation). Numbering note: first assigned as ERR-122, renumbered after a parallel-session ERR-122 (PRI-684, Scenario F answer-surface leak) merged to main first via PR #1587.
+- **Source**: PRI-633 / PR #1585 review P1
+- **Date**: 2026-09-10
 - **Recurrence**: None (first recording)

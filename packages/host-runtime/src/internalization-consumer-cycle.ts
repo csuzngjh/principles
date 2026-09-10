@@ -52,6 +52,9 @@ import {
   SqliteConnection,
   SqliteReconciliationCursorStore,
   SUCCEEDED_TRANSITIONS_SCOPE,
+  // PRI-714: resolve outputLanguage from the same effective config the
+  // runners already receive (EP-07: canonical resolved value, not raw input).
+  resolveOutputLanguage,
   type PDRuntimeAdapter,
   type RuntimeStateManager,
   type WakeOnceResult,
@@ -394,6 +397,8 @@ export async function runInternalizationConsumerCycle(
             baseUrl: runtimeConfigResult.baseUrl,
             workspace: workspaceDir,
             totalBudgetMs: runtimeConfigResult.timeoutMs,
+            // PRI-633: profile systemPrompt rides as the append layer.
+            ...(runtimeConfigResult.systemPrompt ? { systemPrompt: runtimeConfigResult.systemPrompt } : {}),
           },
           {
             artifactReader: {
@@ -421,6 +426,8 @@ export async function runInternalizationConsumerCycle(
           timeoutMs: runtimeConfigResult.timeoutMs,
           baseUrl: runtimeConfigResult.baseUrl,
           workspace: workspaceDir,
+          // PRI-633: profile systemPrompt rides as the append layer.
+          ...(runtimeConfigResult.systemPrompt ? { systemPrompt: runtimeConfigResult.systemPrompt } : {}),
         });
       }
     } else if (runtimeKind === 'openclaw-cli') {
@@ -443,11 +450,16 @@ export async function runInternalizationConsumerCycle(
     // so slow/local models could never finish dreamer/evaluator stages.
     // runtimeConfigResult.timeoutMs is profile-first with a 300s default —
     // behavior only changes for workspaces that declare a larger timeoutMs.
+    // PRI-714: also forward the owner's outputLanguage so every full-chain
+    // stage (dreamer/philosopher/scribe/artificer/evaluator/rollout_reviewer)
+    // emits owner-facing fields in the configured language. Resolved from the
+    // same effective config (EP-07 canonical value).
     const runnerOptions = {
       owner,
       runtimeKind,
       effectiveConfig: configResult.effective,
       timeoutMs: runtimeConfigResult.timeoutMs,
+      outputLanguage: resolveOutputLanguage(configResult.effective.config.principles?.outputLanguage).outputLanguage,
     };
 
     // PRI-634 A3: workspace-scoped telemetry sink for the evaluator runner.

@@ -63,6 +63,17 @@ describe('formatRepairPrompt', () => {
     expect(prompt).toMatch(/corrected.*JSON/i);
   });
 
+  it('PRI-707: truncationNotice block appears when provided and stays absent otherwise', () => {
+    const withNotice = formatRepairPrompt(SAMPLE_INVALID_JSON, SAMPLE_ERRORS, {
+      truncationNotice: 'The previous output was cut off by the token limit (finish_reason=length).',
+    });
+    expect(withNotice).toContain('TRUNCATION NOTICE');
+    expect(withNotice).toContain('finish_reason=length');
+
+    const withoutNotice = formatRepairPrompt(SAMPLE_INVALID_JSON, SAMPLE_ERRORS);
+    expect(withoutNotice).not.toContain('TRUNCATION NOTICE');
+  });
+
   it('truncates raw JSON when exceeding maxRawOutputChars', () => {
     const largeJson = { data: 'x'.repeat(5000) };
     const config: RepairConfig = { maxRawOutputChars: 200 };

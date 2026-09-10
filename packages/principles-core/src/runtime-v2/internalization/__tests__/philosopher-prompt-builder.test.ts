@@ -85,22 +85,22 @@ describe('PhilosopherPromptBuilder', () => {
       expect(parsed.taskId).toBe('task-philosopher-001');
     });
 
-    it('philosopherInstruction is present and contains key protocol keywords', () => {
+    it('systemPrompt (PRI-633: ex-philosopherInstruction) is present and contains key protocol keywords', () => {
       const builder = new PhilosopherPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      expect(result.promptInput.philosopherInstruction).toBeDefined();
-      expect(result.promptInput.philosopherInstruction.length).toBeGreaterThan(100);
-      expect(result.promptInput.philosopherInstruction).toContain('Philosopher');
-      expect(result.promptInput.philosopherInstruction).toContain('principle');
-      expect(result.promptInput.philosopherInstruction).toContain('thesis');
+      expect(result.systemPrompt).toBeDefined();
+      expect(result.systemPrompt.length).toBeGreaterThan(100);
+      expect(result.systemPrompt).toContain('Philosopher');
+      expect(result.systemPrompt).toContain('principle');
+      expect(result.systemPrompt).toContain('thesis');
     });
 
     it('philosopherInstruction contains the output JSON schema format', () => {
       const builder = new PhilosopherPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.philosopherInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toContain('"taskId"');
       expect(instruction).toContain('"sourceDreamerArtifactId"');
       expect(instruction).toContain('"thesis"');
@@ -117,7 +117,7 @@ describe('PhilosopherPromptBuilder', () => {
       const builder = new PhilosopherPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.philosopherInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toMatch(/confidence.*number/i);
       expect(instruction).toMatch(/0.*1/);
     });
@@ -126,7 +126,7 @@ describe('PhilosopherPromptBuilder', () => {
       const builder = new PhilosopherPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.philosopherInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toMatch(/only.*JSON|JSON.*only|pure JSON/i);
       expect(instruction).toMatch(/no markdown/i);
     });
@@ -135,7 +135,7 @@ describe('PhilosopherPromptBuilder', () => {
       const builder = new PhilosopherPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
-      const instruction = result.promptInput.philosopherInstruction;
+      const instruction = result.systemPrompt;
       expect(instruction).toContain('input.sourceDreamerArtifactId');
     });
 
@@ -166,7 +166,7 @@ describe('PhilosopherPromptBuilder', () => {
       expect(() => JSON.parse(result.message)).not.toThrow();
     });
 
-    it('message JSON contains all required PhilosopherPromptInput fields at top level', () => {
+    it('message JSON contains all required PhilosopherPromptInput fields at top level (no role instruction, PRI-633)', () => {
       const builder = new PhilosopherPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
@@ -175,7 +175,8 @@ describe('PhilosopherPromptBuilder', () => {
       expect(parsed).toHaveProperty('contextHash');
       expect(parsed).toHaveProperty('dreamerArtifact');
       expect(parsed).toHaveProperty('sourceDreamerArtifactId');
-      expect(parsed).toHaveProperty('philosopherInstruction');
+      expect(parsed).not.toHaveProperty('philosopherInstruction');
+      expect(result.systemPrompt).toContain('You are a Philosopher agent');
     });
   });
 });

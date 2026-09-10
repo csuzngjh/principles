@@ -1,11 +1,18 @@
 import { validateLlmClassification, type LlmClassificationResult } from './types.js';
 
 /**
+ * PRI-633: base-layer system prompt（角色声明）。原先内嵌在 buildLlmPrompt
+ * 首句;现由调用方经 StartRunInput.systemPrompt 送入 system 通道。
+ */
+export const SIGNAL_CLASSIFIER_SYSTEM_PROMPT = '你是一个用户反馈分类器。';
+
+/**
  * 构造 Stage2 LLM 判断 prompt。纯函数,不含 LLM 调用。
  * 实际 LLM 调用在 plugin 层(adapter.startRun/pollRun/fetchOutput)。
+ * PRI-633: 角色声明移至 SIGNAL_CLASSIFIER_SYSTEM_PROMPT,消息只含任务数据。
  */
 export function buildLlmPrompt(userMessage: string): string {
-  return `你是一个用户反馈分类器。判断下面这条用户消息是否表达对 AI 助手行为的不满或纠正。
+  return `判断下面这条用户消息是否表达对 AI 助手行为的不满或纠正。
 
 只输出 JSON，格式：{"is_feedback": bool, "type": "correction"|"empathy"|"none", "confidence": 0-1, "reason": "一句话理由"}
 

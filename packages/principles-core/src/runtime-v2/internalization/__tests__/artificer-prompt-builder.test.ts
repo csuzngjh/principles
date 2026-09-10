@@ -79,8 +79,10 @@ describe('ArtificerPromptBuilder', () => {
   it('promptContractVersion identifies the executable V2 contract', () => {
     // PRI-484 — bumped v1 → v2 to signal the RuleCode context surface is part
     // of the contract the model must obey; PRI-634 PR-A — bumped v2 → v3 for
-    // the paramsSummary-is-an-object contract + repair replay-evidence block.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v3');
+    // the paramsSummary-is-an-object contract + repair replay-evidence block;
+    // PRI-700 — bumped v3 → v4 for the case-id vocabulary note + prior
+    // output-contract rejection feedback.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v4');
   });
 
   it('instruction requires implementationSummary as a non-empty string', () => {
@@ -89,18 +91,20 @@ describe('ArtificerPromptBuilder', () => {
   });
 
   it('message is valid JSON containing promptInput', () => {
-    const { message } = builder.buildPrompt(input);
+    const { message, systemPrompt } = builder.buildPrompt(input);
     const parsed = JSON.parse(message);
     expect(parsed.taskId).toBe(input.taskId);
     expect(parsed.contextHash).toBe(input.contextHash);
     expect(parsed.sourceScribeArtifactId).toBe(input.sourceScribeArtifactId);
-    expect(parsed.artificerInstruction).toContain(ARTIFICER_PROTOCOL_INSTRUCTION);
+    // PRI-633: the instruction left the payload for the system channel.
+    expect(parsed).not.toHaveProperty('artificerInstruction');
     expect(parsed.promptContractVersion).toBe(ARTIFICER_PROMPT_CONTRACT_VERSION);
+    expect(systemPrompt).toContain(ARTIFICER_PROTOCOL_INSTRUCTION);
   });
 
-  it('artificerInstruction is included in prompt input', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.artificerInstruction).toContain(ARTIFICER_PROTOCOL_INSTRUCTION);
+  it('systemPrompt carries the composed artificer instruction (PRI-633)', () => {
+    const { systemPrompt } = builder.buildPrompt(input);
+    expect(systemPrompt).toContain(ARTIFICER_PROTOCOL_INSTRUCTION);
   });
 });
 
@@ -109,17 +113,17 @@ describe('PRI-484 Artificer prompt context modes', () => {
   // 2026-06-27 RuleCode context vision design §7.3.
 
   it('allows inspecting input.context (v2 surface)', () => {
-    const { promptInput } = new ArtificerPromptBuilder().buildPrompt({ contextMode: 'v1', taskId: 'task', contextHash: 'hash', sourceScribeArtifactId: 'scribe', scribeArtifact: {} });
-    expect(promptInput.artificerInstruction).toMatch(/must not.*input\.context/i);
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({ contextMode: 'v1', taskId: 'task', contextHash: 'hash', sourceScribeArtifactId: 'scribe', scribeArtifact: {} });
+    expect(systemPrompt).toMatch(/must not.*input\.context/i);
   });
 
   it('requires allow when context is missing or unavailable', () => {
     // P2 fix (CodeRabbit PR2 Comment 4): assert against the v2 prompt built by
-    // the prompt builder (promptInput.artificerInstruction), not the bare
-    // ARTIFICER_PROTOCOL_INSTRUCTION constant. The v2 contract is appended via
-    // V2_CONTEXT_INSTRUCTION; asserting on the bare constant would not verify
-    // that the contract actually flows through the builder.
-    const { promptInput } = new ArtificerPromptBuilder().buildPrompt({
+    // the prompt builder (systemPrompt, PRI-633 ex-artificerInstruction), not
+    // the bare ARTIFICER_PROTOCOL_INSTRUCTION constant. The v2 contract is
+    // appended via V2_CONTEXT_INSTRUCTION; asserting on the bare constant
+    // would not verify that the contract actually flows through the builder.
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
       contextMode: 'v2',
       taskId: 'task',
       contextHash: 'hash',
@@ -127,12 +131,12 @@ describe('PRI-484 Artificer prompt context modes', () => {
       scribeArtifact: {},
       behaviorExamplePack: validBehaviorExamplePack,
     });
-    expect(promptInput.artificerInstruction).toContain('unavailable');
-    expect(promptInput.artificerInstruction).toMatch(/MUST.*allow.*matched.*false/i);
+    expect(systemPrompt).toContain('unavailable');
+    expect(systemPrompt).toMatch(/MUST.*allow.*matched.*false/i);
   });
 
   it('requires preferring canonicalKind / facts over raw history.calls', () => {
-    const { promptInput } = new ArtificerPromptBuilder().buildPrompt({
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
       contextMode: 'v2',
       taskId: 'task',
       contextHash: 'hash',
@@ -140,13 +144,13 @@ describe('PRI-484 Artificer prompt context modes', () => {
       scribeArtifact: {},
       behaviorExamplePack: validBehaviorExamplePack,
     });
-    expect(promptInput.artificerInstruction).toContain('facts');
-    expect(promptInput.artificerInstruction).toContain('canonicalKind');
-    expect(promptInput.artificerInstruction).toContain('Prefer');
+    expect(systemPrompt).toContain('facts');
+    expect(systemPrompt).toContain('canonicalKind');
+    expect(systemPrompt).toContain('Prefer');
   });
 
   it('forbids inferring "not done" from an empty calls array', () => {
-    const { promptInput } = new ArtificerPromptBuilder().buildPrompt({
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
       contextMode: 'v2',
       taskId: 'task',
       contextHash: 'hash',
@@ -154,12 +158,12 @@ describe('PRI-484 Artificer prompt context modes', () => {
       scribeArtifact: {},
       behaviorExamplePack: validBehaviorExamplePack,
     });
-    expect(promptInput.artificerInstruction).toContain('not done');
-    expect(promptInput.artificerInstruction).toContain('empty');
+    expect(systemPrompt).toContain('not done');
+    expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → v2 → v3 (PRI-634 PR-A)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v3');
+  it('declares the contract version bump history v1 → v2 → v3 → v4 (PRI-634 PR-A, PRI-700)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v4');
   });
 
   it('still references input.action for v1 compatibility', () => {
@@ -363,8 +367,8 @@ describe('BUG-3 (PRI-442): artificer prompt propose_correction consistency', () 
       sourceScribeArtifactId: 'scribe-bug3',
       scribeArtifact: {},
     });
-    expect(result.promptInput.artificerInstruction).toMatch(/do not.*propose_correction/i);
-    expect(result.promptInput.artificerInstruction).not.toMatch(/negative block\/propose_correction case/);
+    expect(result.systemPrompt).toMatch(/do not.*propose_correction/i);
+    expect(result.systemPrompt).not.toMatch(/negative block\/propose_correction case/);
   });
 
   it('v2 prompt still forbids propose_correction (constraint preserved after move)', () => {
@@ -376,8 +380,8 @@ describe('BUG-3 (PRI-442): artificer prompt propose_correction consistency', () 
       scribeArtifact: {},
       behaviorExamplePack: validBehaviorExamplePack,
     });
-    expect(result.promptInput.artificerInstruction).toMatch(/do not.*propose_correction/i);
-    expect(result.promptInput.artificerInstruction).toMatch(/do not.*requireApproval/i);
-    expect(result.promptInput.artificerInstruction).toMatch(/do not.*auto_correct/i);
+    expect(result.systemPrompt).toMatch(/do not.*propose_correction/i);
+    expect(result.systemPrompt).toMatch(/do not.*requireApproval/i);
+    expect(result.systemPrompt).toMatch(/do not.*auto_correct/i);
   });
 });

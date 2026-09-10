@@ -309,7 +309,19 @@
         "approvalHint": "The deployment approval for this principle is still waiting in the approval queue.",
         "rulecodeHint": "This rule is in shadow activation and needs a decision in activation management.",
         "goApprovalsCta": "Go to deployment approvals",
-        "goActivationCta": "Go to activation management"
+        "goActivationCta": "Go to activation management",
+        "qualityChecklistLabel": "Quality checklist",
+        "qualityCheckStatus": {
+          "passed": "passed",
+          "failed": "failed"
+        },
+        "qualityCheck": {
+          "understandability": "Understandability",
+          "evidence": "Evidence",
+          "actionability": "Actionability",
+          "generalization": "Generalization",
+          "boundary": "Boundary"
+        }
       }
     },
     "pain": {
@@ -1343,8 +1355,8 @@
       "filesUpdated": "Updated {{count}} files",
       "networkErrorHint": "Please check your network connection and try again.",
       "retry": "Retry",
-      "codexWarning": "Codex Host detected. This update only covers the OpenClaw plugin code and does not update the Codex adapter (@principles/codex-adapter). For a full update, run the installer.",
-      "partialUpdateHint": "Plugin code updated. To update the full runtime (including the Codex adapter and dependencies), run: npx create-principles-disciple",
+      "codexWarning": "Codex Host detected. The full update also refreshes the Codex adapter (@principles/codex-adapter) in the runtime layout. To re-register Codex hooks or repair the Codex host install, run the installer.",
+      "partialUpdateHint": "Plugin code updated. If components ever look out of sync, refresh the full runtime with: npx create-principles-disciple",
       "applyFullUpdate": "Full Update",
       "fullUpdating": "Full update in progress…",
       "fullUpdateSuccess": "Full update completed.",

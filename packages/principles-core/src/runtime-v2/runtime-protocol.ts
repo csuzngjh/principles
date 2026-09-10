@@ -149,6 +149,15 @@ export const StartRunInputSchema = Type.Object({
   idempotencyKey: Type.Optional(Type.String()),
   preferredModel: Type.Optional(Type.String()),
   preferredRuntimeProfile: Type.Optional(Type.String()),
+  /**
+   * PRI-633: base-layer system prompt (agent role + protocol instructions)
+   * produced by the run's prompt builder. Adapters own the placement: pi-ai
+   * paths send it as Context/agentContext.systemPrompt (with the profile's
+   * configured systemPrompt appended after it); the OpenClaw CLI adapter folds
+   * it back into the message file so the host's own system prompt is never
+   * touched (DPB-07). Optional — absent means the run carries no base layer.
+   */
+  systemPrompt: Type.Optional(Type.String()),
 });
 export type StartRunInput = Static<typeof StartRunInputSchema>;
 

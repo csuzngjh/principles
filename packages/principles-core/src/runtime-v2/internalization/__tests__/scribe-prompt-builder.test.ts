@@ -43,10 +43,10 @@ describe('ScribePromptBuilder (PRI-109)', () => {
     expect(instruction).toContain('NOT a string');
   });
 
-  it('promptInput includes scribeInstruction', () => {
-    const { promptInput } = builder.buildPrompt(defaultInput);
+  it('systemPrompt carries the scribe instruction (PRI-633)', () => {
+    const { systemPrompt } = builder.buildPrompt(defaultInput);
     const expectedInstruction = buildScribeProtocolInstruction();
-    expect(promptInput.scribeInstruction).toBe(expectedInstruction);
+    expect(systemPrompt).toBe(expectedInstruction);
   });
 
   it('promptInput includes promptContractVersion', () => {

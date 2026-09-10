@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent } from 'fs';
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import fse from 'fs-extra';
@@ -46,7 +46,20 @@ import {
   verifyReleaseAssetManifestAsync,
   verifyReleaseAssetTarget,
 } from './update/release-asset-manifest.js';
-import { appendJournalTransition, type ReleaseMetadataDigestSource, type TransactionState } from './update/transaction-journal.js';
+import {
+  mergeIntoInstallJson,
+  readInstallJsonRecord,
+  resolvePdHomePaths,
+} from './update/install-layout.js';
+import { RELEASE_METADATA_URL_ENV, normalizeReleaseMetadataUrl } from './update/release-metadata-source.js';
+import {
+  appendJournalTransition,
+  readActiveRecord,
+  writeActiveRecord,
+  type ActiveRecord,
+  type ReleaseMetadataDigestSource,
+  type TransactionState,
+} from './update/transaction-journal.js';
 
 /** PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY */
 export const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess' as const;
@@ -198,7 +211,129 @@ function resolveInstallManifestWorkspaces(workspaceDir: string): string[] {
 
 function writeInstallManifest(hosts: ('codex' | 'openclaw')[], workspaces: string[]): void {
   mkdirSync(getPdDir(), { recursive: true });
-  writeFileSync(getInstallManifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts, workspaces }, null, 2) + '\n', 'utf8');
+  // PRI-709 P0-1: merge into the existing record. This file has more than one
+  // writer (the update side owns `channel` / `autoCheck` / `releaseMetadataUrl`);
+  // a wholesale replace silently deleted those fields.
+  const existing = readInstallJsonRecord(getInstallManifestPath());
+  const payload: Record<string, unknown> = {
+    ...(existing ?? {}),
+    layoutVersion: 1,
+    mode: 'canonical',
+    hosts,
+    workspaces,
+  };
+  writeFileSync(getInstallManifestPath(), JSON.stringify(payload, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * PRI-709 P0-2 — active record commit point (ADR-0024 D-2).
+ *
+ * `~/.pd/active.json` is the deployment identity source: it records WHAT is
+ * actually deployed, keyed to the transaction that deployed it. Before PRI-709
+ * the installer never wrote it (the only writer was legacy-migration.ts), so
+ * every real install and every ReleaseManager apply left active.json absent or
+ * stale — the PRI-698 audit finding F-2.
+ *
+ * Identity is taken from the transaction, never recomputed here: the journal
+ * was opened with the payload's own identity (`_release/manifest.json` digest
+ * when the self-contained asset ships one), and active.json must agree with
+ * the journal of the transaction that produced it. A divergent second
+ * computation would break the audit trail.
+ *
+ * Ordering: journal-first. The caller appends `confirmed` and only then calls
+ * this, so a crash between the two is recoverable from the journal (the
+ * reverse order would leave an unjournaled active.json).
+ *
+ * Failure policy — Tier 2: this runs AFTER the backup was discarded, so the
+ * install is already committed and must not be failed here. A write failure is
+ * reported loud (rc-9) and returned to the caller; it never bricks the
+ * installation.
+ */
+export interface ActiveRecordCommitResult {
+  readonly written: boolean;
+  readonly activeRecordPath: string;
+  readonly generation: number;
+  readonly previousReleaseId: string | null;
+  /** Set when the record could not be written or the previous one was unreadable. */
+  readonly reason?: string;
+}
+
+export function commitInstallerActiveRecord(journal: InstallerJournal): ActiveRecordCommitResult {
+  const paths = resolvePdHomePaths(getPdDir());
+
+  let previous: ActiveRecord | null = null;
+  let previousWarning: string | null = null;
+  try {
+    previous = readActiveRecord(paths.activeRecordPath);
+  } catch (error) {
+    // A corrupt previous record must not block committing the new identity —
+    // overwriting it with a valid record is strictly an improvement.
+    previousWarning = error instanceof Error ? error.message : String(error);
+    logger.warn(`active.json was unreadable and is being replaced (${paths.activeRecordPath}): ${previousWarning}`);
+  }
+
+  // Generation continuity: never move backwards. A standalone install already
+  // carries generation 1, but re-installing over an existing deployment must
+  // advance past it — otherwise the deployment identity source would regress.
+  const generation = Math.max(journal.generation, previous === null ? 1 : previous.generation + 1);
+
+  try {
+    writeActiveRecord(paths.activeRecordPath, {
+      generation,
+      releaseId: journal.releaseId,
+      releaseMetadataDigest: journal.releaseMetadataDigest,
+      previousReleaseId: previous?.releaseId ?? null,
+      transactionId: journal.transactionId,
+      productVersion: journal.productVersion,
+    });
+    return {
+      written: true,
+      activeRecordPath: paths.activeRecordPath,
+      generation,
+      previousReleaseId: previous?.releaseId ?? null,
+      ...(previousWarning !== null ? { reason: `previous_record_unreadable: ${previousWarning}` } : {}),
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.error(
+      `active.json could not be written after a committed install (${paths.activeRecordPath}): ${reason}. `
+      + `Deployment identity is out of sync with the transaction ${journal.transactionId}; re-run the installer to repair it.`,
+    );
+    return {
+      written: false,
+      activeRecordPath: paths.activeRecordPath,
+      generation,
+      previousReleaseId: previous?.releaseId ?? null,
+      reason,
+    };
+  }
+}
+
+/**
+ * PRI-709 P0-1 — installer supply path for the release metadata source.
+ *
+ * The installer is the only component that legitimately knows the metadata
+ * repository at install time, so it persists `PD_RELEASE_METADATA_URL` into
+ * `~/.pd/install.json` (the durable `install_config` tier). Without this the
+ * variable had to be exported in every shell that wanted a governed update
+ * check (PRI-698 audit F-4).
+ *
+ * Absent env is a no-op — an install with no metadata source stays
+ * unconfigured rather than persisting a guessed URL. A malformed env value is
+ * reported and skipped: it must never be written into install.json, where the
+ * strict reader would then fail loud and mark the install corrupt.
+ */
+export function persistReleaseMetadataSource(): void {
+  const raw = process.env[RELEASE_METADATA_URL_ENV];
+  if (raw === undefined || raw.trim().length === 0) return;
+  const normalized = normalizeReleaseMetadataUrl(raw);
+  if (normalized === null) {
+    logger.warn(
+      `${RELEASE_METADATA_URL_ENV} is not a valid http(s) URL and was not persisted to install.json: ${JSON.stringify(raw)}. Release metadata source stays unconfigured.`,
+    );
+    return;
+  }
+  mergeIntoInstallJson(getInstallManifestPath(), { releaseMetadataUrl: normalized });
 }
 
 function installBundledLayoutPackage(pluginDir: string): void {
@@ -740,6 +875,32 @@ function cleanupBackup(backupDir: string | null, runtimeBackupDir: string | null
   }
 }
 
+/**
+ * PRI-697 review P1: undo the global `pd` shim side effect when the
+ * install transaction fails. Exactly the files THIS run created are
+ * removed; PD-owned shims that already existed before the run (a
+ * pre-existing install's global command) are left in place — rolling back
+ * to the pre-run state, not to "no PD anywhere". Best-effort with every
+ * residue named (rc-9); never throws.
+ */
+function rollbackGlobalPdShim(record: GlobalPdShimResult): { removed: string[]; failed: string[] } {
+  const removed: string[] = [];
+  const failed: string[] = [];
+  for (const shimPath of record.createdPaths) {
+    if (!existsSync(shimPath)) continue;
+    try {
+      rmSync(shimPath, { force: true });
+      removed.push(shimPath);
+    } catch (e) {
+      failed.push(`${shimPath} (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+  if (failed.length > 0) {
+    logger.warn(`Failed to remove global pd shim files created by this run: ${failed.join(', ')} — remove them manually.`);
+  }
+  return { removed, failed };
+}
+
 // --- OpenClaw gateway lock handling (EPERM prevention) ---------------------
 // The gateway holds file handles on native .node modules inside the plugin ext
 // dir. Renaming that dir for backup fails with EPERM on Windows while the
@@ -1197,8 +1358,70 @@ function getNpmGlobalBinDir(): string | null {
   }
 }
 
-function installGlobalPdShim(): boolean {
-  if (!legacyNpmInstallEnabled()) {
+/** Outcome of one global-shim discovery/install attempt (PRI-697 review P1). */
+export interface GlobalPdShimResult {
+  /** true when PD-owned shim files are in place in the npm global bin dir. */
+  installed: boolean;
+  /** Shim files this run CREATED (absent before) — the rollback set. */
+  createdPaths: string[];
+  /** PD-owned shim files that already existed and were overwritten in place. */
+  replacedPaths: string[];
+  /** Foreign-owned `pd` entries found — never written, never rolled back. */
+  skippedForeignPaths: string[];
+}
+
+/** Fixed filename whitelist for global-shim targets (no caller input). */
+const GLOBAL_PD_SHIM_BASENAMES: readonly string[] = isWindows() ? ['pd.cmd', 'pd.ps1'] : ['pd'];
+
+/** Resolve a whitelisted shim basename under the npm global bin dir. */
+function globalShimPath(globalBin: string, basename: string): string {
+  if (!GLOBAL_PD_SHIM_BASENAMES.includes(basename)) {
+    throw new Error(`Refusing to touch non-whitelisted global shim name: ${basename}`);
+  }
+  const target = path.resolve(globalBin, basename);
+  if (path.dirname(target) !== path.resolve(globalBin)) {
+    throw new Error(`Global shim path escaped the npm global bin dir: ${target}`);
+  }
+  return target;
+}
+
+/**
+ * Global `pd` shim ownership, mirroring the uninstaller's isPdOwnedShim
+ * discipline: a shim whose content points at the PD install dir belongs to
+ * us and may be updated in place; anything else (another tool's `pd`, a
+ * broken/unreadable entry) is foreign — refuse to overwrite it and surface
+ * a warning + next action instead (review P1: the pre-PRI-697 code
+ * writeFileSync'd blindly, but that path was only reachable via the
+ * explicit legacy-recovery env; the npm channel makes it default, so the
+ * write now needs the same ownership discipline the uninstaller already
+ * has).
+ */
+function classifyGlobalPdShim(globalBin: string, installedBinDir: string): { foreignPaths: string[]; existingPdOwned: boolean } {
+  const foreignPaths: string[] = [];
+  let existingPdOwned = false;
+  for (const shim of GLOBAL_PD_SHIM_BASENAMES) {
+    const shimPath = globalShimPath(globalBin, shim);
+    if (!existsSync(shimPath)) continue;
+    let content: string;
+    try {
+      content = readFileSync(shimPath, 'utf-8');
+    } catch {
+      foreignPaths.push(shimPath); // unreadable → do not touch
+      continue;
+    }
+    if (content.includes(installedBinDir)) existingPdOwned = true;
+    else foreignPaths.push(shimPath);
+  }
+  return { foreignPaths, existingPdOwned };
+}
+
+export function installGlobalPdShim(): GlobalPdShimResult | boolean {
+  // Global-shim discovery consults the npm global root, so it belongs to
+  // the npm-distributed payload shape (isNpmDependencyResolutionEnabled
+  // documents "global root discovery" as its concern). Gating on the
+  // legacy env var instead fired this skip — with a self-contained-mode
+  // message — inside standard npm-channel installs (PRI-697).
+  if (!isNpmDependencyResolutionEnabled()) {
     logger.info('Skipping npm global shim discovery for the self-contained release asset.');
     return false;
   }
@@ -1212,36 +1435,87 @@ function installGlobalPdShim(): boolean {
   }
   const globalBin = getNpmGlobalBinDir();
   if (!globalBin) return false;
+  const installedBinDir = getInstalledBinDir();
+
+  // Ownership gate before ANY write: foreign `pd` entries are never
+  // overwritten (uninstaller's isPdOwnedShim discipline, write side).
+  const { foreignPaths, existingPdOwned } = classifyGlobalPdShim(globalBin, installedBinDir);
+  if (foreignPaths.length > 0) {
+    const foreignList = foreignPaths.join(', ');
+    logger.warn(`A non-PD "pd" command already exists in the npm global bin dir (${foreignList}) — not overwriting it.`);
+    logger.warn(`The bundled PD CLI stays available at "${path.join(installedBinDir, isWindows() ? 'pd.cmd' : 'pd')}". Remove the foreign "pd" yourself if you want the global name.`);
+    if (existingPdOwned) {
+      logger.warn('PD-owned shim files in the same dir were left untouched to keep the existing installation consistent.');
+    }
+    return { installed: false, createdPaths: [], replacedPaths: [], skippedForeignPaths: foreignPaths };
+  }
+
+  // Rollback bookkeeping: which shim targets already existed (PD-owned)?
+  // preExisting drives the replaced-list and the partial-failure residue
+  // computation below.
+  const preExisting = new Set<string>(
+    GLOBAL_PD_SHIM_BASENAMES
+      .map((shim) => globalShimPath(globalBin, shim))
+      .filter((shimPath) => existsSync(shimPath)),
+  );
+  const createdPaths: string[] = [];
+  const replacedPaths: string[] = [...preExisting];
 
   try {
     mkdirSync(globalBin, { recursive: true });
-    const installedBinDir = getInstalledBinDir();
 
     if (isWindows()) {
       const pluginCmd = path.join(installedBinDir, 'pd.cmd');
-      writeFileSync(path.join(globalBin, 'pd.cmd'), `@echo off\r\ncall "${pluginCmd.replace(/"/g, '""')}" %*\r\n`, 'utf-8');
+      const globalCmdPath = globalShimPath(globalBin, 'pd.cmd');
+      writeFileSync(globalCmdPath, `@echo off\r\ncall "${pluginCmd.replace(/"/g, '""')}" %*\r\n`, 'utf-8');
       const pluginPs = path.join(installedBinDir, 'pd.ps1');
+      const globalPsPath = globalShimPath(globalBin, 'pd.ps1');
       writeFileSync(
-        path.join(globalBin, 'pd.ps1'),
+        globalPsPath,
         `$shim = "${pluginPs.replace(/`/g, '``').replace(/"/g, '`"')}"\r\n& $shim @args\r\nexit $LASTEXITCODE\r\n`,
         'utf-8',
       );
     } else {
       const pluginSh = path.join(installedBinDir, 'pd');
-      const globalSh = path.join(globalBin, 'pd');
+      const globalSh = globalShimPath(globalBin, 'pd');
       writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginSh.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
       chmodSync(globalSh, 0o755);
     }
-    return true;
+    // PRI-697 review P1: the success path MUST record which targets are new
+    // (created) vs pre-existing PD-owned (replaced) — rollbackGlobalPdShim
+    // removes exactly createdPaths when a LATER install step fails. The
+    // pre-fix success path left createdPaths empty, silently no-op'ing the
+    // rollback while the failure message claimed a clean cleanup.
+    for (const shim of GLOBAL_PD_SHIM_BASENAMES) {
+      const shimPath = globalShimPath(globalBin, shim);
+      if (!preExisting.has(shimPath)) createdPaths.push(shimPath);
+    }
+    return { installed: true, createdPaths, replacedPaths, skippedForeignPaths: [] };
   } catch (e) {
     logger.warn(`Global pd shim installation failed: ${e instanceof Error ? e.message : String(e)}`);
-    return false;
+    // Partial writes may have landed before the failure — hand the raw
+    // targets to the caller as createdPaths so the rollback can remove
+    // exactly this run's residue.
+    const landed = GLOBAL_PD_SHIM_BASENAMES
+      .map((shim) => globalShimPath(globalBin, shim))
+      .filter((shimPath) => existsSync(shimPath) && !preExisting.has(shimPath));
+    return { installed: false, createdPaths: landed, replacedPaths: [], skippedForeignPaths: [] };
   }
 }
 
-function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+export function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+  // The npm upgrade stays gated on the legacy env var (PRI-697 keeps the
+  // behavior): a registry pd-cli version can import exports the bundled
+  // core no longer has, so upgrading is only for the explicit recovery
+  // path where the whole shape is registry-resolved anyway. The skip
+  // message reports the ACTUAL payload mode — it used to claim
+  // "self-contained release asset" even in npm-distributed installs.
   if (!legacyNpmInstallEnabled()) {
-    logger.info('Skipping npm pd-cli upgrade for the self-contained release asset.');
+    if (activePayloadMode === 'npm-distributed') {
+      logger.info('Skipping npm pd-cli upgrade (bundled pd-cli is authoritative; set PD_ALLOW_LEGACY_NPM_INSTALL to enable registry upgrades).');
+    } else {
+      logger.info('Skipping npm pd-cli upgrade for the self-contained release asset.');
+    }
     return;
   }
   // Allow skipping the npm upgrade in smoke tests / offline environments.
@@ -1332,7 +1606,17 @@ function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
   }
 }
 
-function syncPdCli(pluginDir: string): boolean {
+/**
+ * Deploy the bundled pd-cli into the runtime + local bin shims + (npm-
+ * distributed payload only) the global `pd` shim. Returns the global-shim
+ * transaction bookkeeping so install() can roll the global side effect back
+ * on failure (PRI-697 review P1): globalShim is null when no global write
+ * was attempted (skip gates / payload mode), otherwise it records which
+ * shim files this run CREATED (rollback removes them) vs which PD-owned
+ * files it replaced in place (rollback keeps them — a pre-existing PD
+ * install keeps its global command).
+ */
+function syncPdCli(pluginDir: string): { ok: boolean; globalShim: GlobalPdShimResult | null } {
   const pdCliSourceDir = path.join(pluginDir, 'pd-cli');
   const distDir = path.join(pdCliSourceDir, 'dist');
 
@@ -1453,7 +1737,12 @@ function syncPdCli(pluginDir: string): boolean {
     chmodSync(target, 0o755);
   }
 
-  return installGlobalPdShim();
+  // PRI-697 review P1: propagate the structured global-shim outcome so the
+  // install transaction can roll the global side effect back on failure.
+  // Plain false (skip gates: payload mode / smoke env) carries no residue.
+  const shimResult = installGlobalPdShim();
+  if (typeof shimResult === 'boolean') return { ok: shimResult, globalShim: null };
+  return { ok: shimResult.installed, globalShim: shimResult };
 }
 
 function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: string; localError?: string } {
@@ -1667,6 +1956,83 @@ function installBundledCodexAdapter(pluginDir: string): void {
 
   rmSync(codexAdapterDest, { recursive: true, force: true });
   cpSync(codexAdapterSrc, codexAdapterDest, { recursive: true });
+}
+
+/**
+ * PRI-711: materialize node_modules links for the INSTALLED codex-adapter so
+ * its declared `file:../<component>` dependencies resolve under ESM realpath
+ * rules. The adapter's dist imports @principles/host-runtime and
+ * @principles/core, and pd-cli's eager import graph (health-codex) statically
+ * imports the adapter — without these links every pd command dies with
+ * ERR_MODULE_NOT_FOUND at startup (observed 2026-09-09: the 1.231.2 full
+ * update swapped in Slice-D pd-cli while the deployed adapter, laid down by
+ * older installers, had no node_modules at all).
+ *
+ * Data-driven from the deployed adapter manifest: every dependency whose ref
+ * starts with `file:../` names a sibling runtime component directory. An
+ * existing correct link is kept; a stale physical copy (self-contained
+ * payloads ship materialized node_modules) or a wrong-target link is
+ * replaced with the canonical junction/symlink, mirroring syncPdCli.
+ * Idempotent. MUST run after installBundledCodexAdapter AND the
+ * core/host-runtime/install-layout installs — the manifest declares all
+ * three as file:../ siblings, and a missing sibling means a corrupted
+ * payload or a call-order regression, which fails the install loudly.
+ */
+export function ensureCodexAdapterResolution(): void {
+  const codexAdapterDir = getInstalledCodexAdapterDir();
+  const manifestPath = path.join(codexAdapterDir, 'package.json');
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  } catch (error) {
+    throw new Error(
+      `Installed @principles/codex-adapter package.json is missing or malformed (${manifestPath}): ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  if (!isRecord(manifest)) {
+    throw new Error(`Installed @principles/codex-adapter package.json must contain an object (${manifestPath}).`);
+  }
+  if (manifest.dependencies !== undefined && !isRecord(manifest.dependencies)) {
+    throw new Error(`Installed @principles/codex-adapter package.json dependencies must be an object (${manifestPath}).`);
+  }
+  const runtimeDir = getPdRuntimeDir();
+  for (const [name, ref] of Object.entries(manifest.dependencies ?? {})) {
+    if (typeof ref !== 'string' || !ref.startsWith('file:../')) continue;
+    const siblingName = ref.slice('file:../'.length);
+    // rc-1: the manifest is untrusted input — only accept single-path segment
+    // siblings so a crafted ref cannot escape the runtime dir.
+    if (!/^[A-Za-z0-9._-]+$/.test(siblingName) || siblingName === '.' || siblingName === '..') {
+      throw new Error(`Installed @principles/codex-adapter declares an unsupported file dependency ref "${ref}" for ${name}.`);
+    }
+    const siblingDir = path.join(runtimeDir, siblingName);
+    if (!existsSync(siblingDir)) {
+      throw new Error(`@principles/codex-adapter depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
+    }
+    const linkPath = path.join(codexAdapterDir, 'node_modules', name);
+    let stat: Stats | undefined;
+    try {
+      stat = lstatSync(linkPath);
+    } catch {
+      stat = undefined; // ENOENT — create below
+    }
+    if (stat !== undefined) {
+      if (stat.isSymbolicLink()) {
+        try {
+          if (realpathSync(linkPath) === realpathSync(siblingDir)) continue;
+        } catch {
+          // Unreadable link target — fall through to replace.
+        }
+      }
+      rmSync(linkPath, { recursive: stat.isDirectory() && !stat.isSymbolicLink(), force: true });
+    }
+    mkdirSync(path.dirname(linkPath), { recursive: true });
+    if (isWindows()) {
+      symlinkSync(siblingDir, linkPath, 'junction');
+    } else {
+      symlinkSync(path.relative(path.dirname(linkPath), siblingDir), linkPath, 'dir');
+    }
+  }
 }
 
 function ensureCoreDependency(_targetDir: string): void {
@@ -2238,6 +2604,17 @@ function sha256File(filePath: string): string {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
+function readPackageVersion(pkgPath: string): string | null {
+  if (!existsSync(pkgPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: unknown };
+    return typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : null;
+  } catch {
+    // Identity falls back; journaling must not brick install.
+    return null;
+  }
+}
+
 /**
  * Identity of the payload being installed. Prefers the self-contained asset
  * manifest (covers the whole payload); falls back to the bundled pd-cli
@@ -2246,18 +2623,19 @@ function sha256File(filePath: string): string {
  * legacy-migration.ts). The last-resort fallback hashes the literal reason
  * string only to satisfy the journal's 64-hex format requirement; it is not
  * part of any release-metadata identity chain.
+ *
+ * PRI-709 P0-2 (PRI-698 audit F-1): `productVersion` is the PRODUCT version —
+ * the plugin package manifest. It previously read `pd-cli/package.json`, but
+ * the two packages version independently (on the Owner machine: plugin
+ * 1.230.2 vs pd-cli 1.147.5), so every confirmed journal recorded a version
+ * that no runtime state could ever match. That is why active.json could not
+ * serve as the deployment identity source.
  */
 function resolveInstallerPayloadIdentity(pluginDir: string): { productVersion: string; releaseMetadataDigest: string; releaseMetadataDigestSource: ReleaseMetadataDigestSource } {
-  let productVersion = 'unknown';
+  const productVersion = readPackageVersion(path.join(pluginDir, 'package.json'))
+    ?? readPackageVersion(path.join(pluginDir, 'pd-cli', 'package.json'))
+    ?? 'unknown';
   const pdCliPkgPath = path.join(pluginDir, 'pd-cli', 'package.json');
-  if (existsSync(pdCliPkgPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(pdCliPkgPath, 'utf8')) as { version?: unknown };
-      if (typeof parsed.version === 'string' && parsed.version.length > 0) productVersion = parsed.version;
-    } catch {
-      // Identity falls back to 'unknown'; journaling must not brick install.
-    }
-  }
   const assetManifestPath = path.join(pluginDir, '_release', 'manifest.json');
   let releaseMetadataDigest: string;
   let releaseMetadataDigestSource: ReleaseMetadataDigestSource;
@@ -2462,6 +2840,10 @@ export async function install(
   // the backup step). With no pre-existing install (no backup), a failure
   // after this point must clean up instead of claiming "not modified".
   let mutationStarted = false;
+  // PRI-697 review P1: global pd shim side effect, recorded when the
+  // npm-distributed payload wrote PD-owned shims into the npm global bin
+  // dir. Null until syncPdCli runs (or when no global write was attempted).
+  let globalShimRecord: GlobalPdShimResult | null = null;
 
   const killConsoleChild = () => {
     if (consoleProcess) {
@@ -2568,6 +2950,11 @@ export async function install(
     stepIndex++;
 
     installBundledLayoutPackage(pluginDir);
+    // PRI-711: the adapter's own file: deps must resolve or pd-cli's eager
+    // import graph crashes on every command. Runs only once ALL adapter
+    // siblings exist — the manifest declares file:../core, file:../host-runtime
+    // AND file:../install-layout, and install-layout lands just above.
+    ensureCodexAdapterResolution();
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
     installBundledReleaseManagerPackage(pluginDir);
@@ -2589,7 +2976,10 @@ export async function install(
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing pd CLI...');
-    syncPdCli(pluginDir);
+    // PRI-697 review P1: keep the global-shim bookkeeping — a LATER failure
+    // must undo exactly the global side effect this run caused.
+    const pdCliSync = syncPdCli(pluginDir);
+    if (pdCliSync.globalShim !== null) globalShimRecord = pdCliSync.globalShim;
     await installPdCliDependencies();
     stepIndex++;
 
@@ -2759,6 +3149,9 @@ export async function install(
       throw new Error(`Host installation failed: ${hostFailures.join(' | ')}`);
     }
     writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir));
+    // PRI-709 P0-1: persist the metadata source after the manifest write, so
+    // the durable tier cannot be clobbered by the same install.
+    persistReleaseMetadataSource();
     // ADR-0024 D-2: host installers completed and the install manifest is
     // written — the new installation is fully activated (backups not yet
     // discarded, so a crash here still recovers via the backup).
@@ -2767,6 +3160,9 @@ export async function install(
     cleanupBackup(backupDir, runtimeBackupDir);
     // ADR-0024 D-2: backup cleanup is the commit point of the transaction.
     journalInstallerTransitionDegrading(journal, journal.lastState, 'confirmed', 'backup cleaned up; install complete');
+    // PRI-709 P0-2: active.json is the deployment identity source, written
+    // journal-first — after `confirmed`, never before it.
+    commitInstallerActiveRecord(journal);
     if (spinner) {
       spinner.succeed('Install complete!');
     }
@@ -2873,6 +3269,17 @@ export async function install(
     const freshCleanup = !hasBackup && mutationStarted
       ? cleanUnactivatedFreshInstall()
       : undefined;
+    // PRI-697 review P1: the global pd shim is a side effect OUTSIDE the
+    // runtime/extension trees both cleanup paths above address. Whatever
+    // the backup state, files THIS run created in the npm global bin dir
+    // are this run's residue — remove them (rollbackGlobalPdShim keeps
+    // PD-owned shims that pre-dated the run, so a rolled-back upgrade of a
+    // previously-shimmed install keeps its old global command; the shim
+    // content targets the stable installed bin dir, which the restored
+    // backup re-populates).
+    const globalShimRollback = globalShimRecord !== null
+      ? rollbackGlobalPdShim(globalShimRecord)
+      : undefined;
     // R2 (review): after template/config steps have run (console verified →
     // templates copied → config generated), the WORKSPACE also holds this
     // run's files — but the workspace is the operator's own directory and may
@@ -2891,7 +3298,11 @@ export async function install(
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '');
-    const rollbackSuffixFinal = rollbackSuffix + (workspaceTouched && freshCleanup && freshCleanup.failed.length === 0 ? ` ${t('rollback_fresh_workspace_kept')}` : '');
+    const rollbackSuffixFinal = rollbackSuffix
+      + (workspaceTouched && freshCleanup && freshCleanup.failed.length === 0 ? ` ${t('rollback_fresh_workspace_kept')}` : '')
+      + (globalShimRollback !== undefined && globalShimRollback.failed.length > 0
+        ? ` ${t('rollback_global_shim_residue').replace('{files}', globalShimRollback.failed.join(', '))}`
+        : '');
     const rollbackNextAction = !hasBackup
       ? freshCleanup
         ? (freshCleanup.failed.length === 0 ? t('next_fresh_cleaned') : t('next_fresh_clean_failed'))
@@ -2906,7 +3317,7 @@ export async function install(
           .replace('{errorMsg}', errorMsg);
     const rollbackReason = !hasBackup
       ? freshCleanup
-        ? (freshCleanup.failed.length === 0
+        ? (freshCleanup.failed.length === 0 && (globalShimRollback === undefined || globalShimRollback.failed.length === 0)
           ? `install_failed_unactivated_cleaned: ${errorMsg}`
           : `install_failed_unactivated_residue: ${errorMsg}`)
         : (isLockError ? `install_aborted_lock: ${errorMsg}` : `install_failed_before_mutation: ${errorMsg}`)

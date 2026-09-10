@@ -43,6 +43,7 @@ import { PDRuntimeError } from '../error-categories.js';
 import { extractJsonObject } from './json-extractor.js';
 import { safeStringifyPreview } from './output-repair-contract.js';
 import { getPiAiFetchForApi } from './pi-ai-http-transport.js';
+import { mergeSystemPromptLayers } from '../system-prompt-merge.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -93,6 +94,12 @@ export interface L2AgentLoopAdapterConfig {
    * Set to false to fail loud without fallback.
    */
   l2FallbackToL1?: boolean;
+  /**
+   * PRI-633: optional profile-level system prompt (append layer, DPB-07).
+   * Appended AFTER the run's base-layer systemPrompt and the L2 tool protocol
+   * in agentContext.systemPrompt. Omitted when unset.
+   */
+  systemPrompt?: string;
 }
 
 /**
@@ -326,17 +333,27 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
       );
     }
 
-    // Tool usage instruction appended so the model knows the tool protocol.
+    // PRI-633: the tool usage protocol is standing behavior contract, so it
+    // moved from the tail of the user message into the system prompt — the
+    // user message now carries only task data, and the stable system prefix
+    // keeps every loop turn cache-friendly.
     const toolInstruction =
-      '\n\n--- Tool protocol (L2 mode) ---\n' +
+      '--- Tool protocol (L2 mode) ---\n' +
       'You have read-only tools to ground your output:\n' +
       '  - read_principles: read the core axioms (T-01..T-10) + already-internalized principles. Call BEFORE proposing candidates.\n' +
       '  - read_artifact: read a predecessor pipeline artifact by artifactId or sourceTaskId to verify the evidence chain.\n' +
       '  - submit_output: submit your final DreamerOutputV1. You MUST call this exactly once with a complete object; the loop stops after you call it.\n' +
       'Do not emit your final answer as free text — call submit_output.';
 
+    // Layered system prompt (PRI-633): base layer (prompt-builder role +
+    // protocol, via StartRunInput.systemPrompt) → tool protocol → profile
+    // append layer (config). Undefined when every layer is absent.
+    const systemPrompt = mergeSystemPromptLayers(input.systemPrompt, toolInstruction, this.config.systemPrompt);
+    // L1 fallback variant: base + profile append, NO tool protocol (no tools there).
+    const baseSystemPrompt = mergeSystemPromptLayers(input.systemPrompt, this.config.systemPrompt);
+
     const prompts: AgentMessage[] = [
-      { role: 'user', content: messageContent + toolInstruction, timestamp: Date.now() },
+      { role: 'user', content: messageContent, timestamp: Date.now() },
     ];
 
     // Telemetry accumulator shared across all L2 attempts (PRI-420 retry loop).
@@ -385,7 +402,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
 
       const tools = buildDreamerL2Tools(toolContext);
       const agentContext = {
-        systemPrompt: '',
+        systemPrompt: systemPrompt ?? '',
         messages: prompts,
         tools,
       };
@@ -503,8 +520,10 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
       });
 
       // L1 one-shot fallback: same prompt, single completeSimple call, JSON extraction.
+      // PRI-633: the fallback carries the layered base + profile system prompt
+      // (no tool protocol — the L1 path has no tools).
       try {
-        const l1Output = await this.runL1Fallback(messageContent, apiKey);
+        const l1Output = await this.runL1Fallback(messageContent, apiKey, baseSystemPrompt);
         runState.status = 'succeeded';
         runState.endedAt = new Date().toISOString();
         runState.output = { runId, payload: l1Output };
@@ -542,10 +561,17 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
    * (without tool instructions) and extracts JSON from the response. This is the safety net
    * when all L2 attempts fail — it ensures the dreamer still produces output.
    */
-  private async runL1Fallback(messageContent: string, apiKey: string): Promise<unknown> {
+  private async runL1Fallback(
+    messageContent: string,
+    apiKey: string,
+    systemPrompt?: string,
+  ): Promise<unknown> {
     const model = resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl);
     const userMessage = { role: 'user' as const, content: messageContent, timestamp: Date.now() };
-    const context: Context = { messages: [userMessage] };
+    const context: Context = {
+      messages: [userMessage],
+      ...(systemPrompt ? { systemPrompt } : {}),
+    };
     const response = await completeSimple(model, context, { apiKey, signal: AbortSignal.timeout(120_000), fetch: getPiAiFetchForApi(model.api) });
     // Extract the text content from the response and parse JSON.
     let text: string | null = null;

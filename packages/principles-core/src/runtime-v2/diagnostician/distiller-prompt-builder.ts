@@ -81,8 +81,6 @@ export interface DistillerPromptInput {
   rootCauseArtifactId: string;
   /** Stage A root cause output — the structured data to abstract from */
   rootCauseOutput: DiagRootCauseOutputV1;
-  /** Distiller protocol instruction for the LLM */
-  distillerInstruction: string;
 }
 
 /**
@@ -98,6 +96,12 @@ export interface DistillerPromptBuildResult {
   readonly message: string;
   /** The DistillerPromptInput object that was serialized to JSON */
   readonly promptInput: DistillerPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `distillerInstruction`; now delivered via the system
+   * channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 // ── Instruction builder ──────────────────────────────────────────────────────
@@ -237,11 +241,10 @@ export class DistillerPromptBuilder {
     const promptInput: DistillerPromptInput = {
       rootCauseArtifactId: context.rootCauseArtifactId,
       rootCauseOutput: context.rootCauseOutput,
-      distillerInstruction,
     };
 
     const message = JSON.stringify(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: distillerInstruction };
   }
 }

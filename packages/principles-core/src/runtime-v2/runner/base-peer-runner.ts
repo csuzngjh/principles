@@ -197,6 +197,15 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   private readonly contentHashFn?: (input: string) => string;
   private phase: RunnerPhase = RunnerPhase.Idle;
 
+  /**
+   * PRI-700 因子 B: 当前 run() 的 leased attempt 序号（每次 run() 在
+   * buildContext 前刷新）。子类用它区分"同一 attempt 的重复 buildContext"
+   * 与"跨 attempt 重试"——前者不应重复回喂同一 validator 错误，后者允许
+   * 回喂（每次 output-invalid 后 handleValidationError 已用当次新错误
+   * 覆盖 lastValidatorErrors，rc-7）。
+   */
+  protected currentLeasedAttempt: number | undefined;
+
   constructor(
     deps: PeerRunnerDeps,
     options: PeerRunnerOptions,
@@ -366,6 +375,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
       // 3. Build context
       this.phase = RunnerPhase.BuildingContext;
+      this.currentLeasedAttempt = leasedTask.attemptCount;
       const context = await this.buildContext(taskId);
       this.emitEvent('context_built', taskId, { contextHash: context.contextHash });
 
@@ -724,12 +734,25 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       errorCategory: category,
     });
 
-    // PRI-559 P0-2: validator 失败的具体错误列表（字符串数组）持久化到
-    // diagnosticJson，使“哪个字段校验失败”可追溯（此前只进 runs.reason）。
+    // PRI-559 P0-2 + PRI-700 因子 B (Owner 决策 2026-09-07): 单次合并写入。
+    // 两个键（output_failure_details 可追溯性 + lastValidatorErrors 修复回喂）
+    // 必须在同一次 updateTask 中落库——分成两次写时，第二次会以旧快照整体
+    // 覆盖 diagnosticJson，抹掉第一次写入的 output_failure_details（评审
+    // P1 + CI 失败：updateTask 被调 2 次而非 1 次）。lastValidatorErrors
+    // 携带 sourceAttemptCount（= 本 attempt 序号）供读取侧做跨 attempt/跨
+    // 进程新鲜度判定——运行时错误不清除它也不会串 attempt（读取侧只接受
+    // sourceAttemptCount === 本 attempt-1 的记录）。
     await this.persistOutputFailureDetails(ctx.taskId, ctx.task.diagnosticJson, {
       errorCategory: category,
       validatorErrors: [...ctx.errors],
       errorCount: ctx.errors.length,
+    }, {
+      lastValidatorErrors: {
+        recordedAt: new Date().toISOString(),
+        errorCategory: category,
+        errors: [...ctx.errors],
+        sourceAttemptCount: ctx.task.attemptCount,
+      },
     });
 
     return this.retryOrFail({
@@ -927,10 +950,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    *
    * 持久化失败不影响主流程（best-effort，记录事件即可）。
    */
+  // eslint-disable-next-line @typescript-eslint/max-params
   protected async persistOutputFailureDetails(
     taskId: string,
     existingDiagnosticJson: string | null | undefined,
     details: Record<string, unknown>,
+    extraTopLevelKeys?: Record<string, unknown>,
   ): Promise<void> {
     try {
       let parsed: Record<string, unknown> = {};
@@ -945,6 +970,12 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         recordedAt: new Date().toISOString(),
         ...details,
       };
+      // PRI-700 因子 B: additional top-level keys (lastValidatorErrors) must
+      // land in the SAME updateTask — a second write from a stale snapshot
+      // would erase output_failure_details (评审 P1).
+      if (extraTopLevelKeys !== undefined) {
+        Object.assign(parsed, extraTopLevelKeys);
+      }
       await this.stateManager.updateTask(taskId, { diagnosticJson: JSON.stringify(parsed) });
     } catch (err) {
       this.emitEvent('mark_failed_error', taskId, {
@@ -1133,7 +1164,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
    * This method is protected (not private) so the EvaluatorRunner can call it
    * twice (once per stage) from its overridden invokeRuntime.
    */
-  protected async runSingleEvaluation(taskId: string, promptMessage: string): Promise<unknown> {
+  protected async runSingleEvaluation(taskId: string, promptMessage: string, systemPrompt?: string): Promise<unknown> {
     const runtimeKind = this.getRuntimeKind();
     const runHandle = await this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
@@ -1144,6 +1175,8 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         ? 'evaluator-output-v1'
         : `${this.config.expectedTaskKind}-output-v1`,
       timeoutMs: this.resolvedOptions.timeoutMs,
+      // PRI-633: base-layer system prompt (role + protocol) from the prompt builder.
+      systemPrompt,
     });
     this.emitEvent('run_started', taskId, { runtimeKind, stage: 'progressive_evaluation' });
 

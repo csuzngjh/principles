@@ -235,6 +235,12 @@ function createMockDeps(overrides: {
    */
   omitSeeder?: boolean;
   artifactStore?: PIArtifactStore;
+  /**
+   * PRI-718: additional durable task rows served by the mock state manager —
+   * used to stage pre-existing artificer-repair rounds for the durable
+   * iteration probe.
+   */
+  extraTasks?: TaskRecord[];
 }): {
   deps: EvaluatorRunnerDeps;
   stateManager: RuntimeStateManager;
@@ -245,6 +251,7 @@ function createMockDeps(overrides: {
   const evaluatorTask = makeEvaluatorTask();
   const artificerTask = overrides.artificerTask ?? makeArtificerTask();
   const scribeTask = makeScribeTask();
+  const extraTasks = overrides.extraTasks ?? [];
 
   const stateManager = {
     acquireLease: vi.fn().mockResolvedValue(evaluatorTask),
@@ -252,6 +259,8 @@ function createMockDeps(overrides: {
       if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTask);
       if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
       if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
+      const extra = extraTasks.find((t) => t.taskId === id);
+      if (extra) return Promise.resolve(extra);
       return Promise.resolve(null);
     }),
     getRunsByTask: vi.fn().mockResolvedValue([{
@@ -695,5 +704,99 @@ describe('PRI-509: Evaluator→Artificer Repair Loop (Slice 4 + 5)', () => {
       );
       expect(reviewCall).toBeDefined();
     });
+  });
+});
+
+// ── PRI-718: revise ≠ resume — durable iteration budget ──────────────────────
+
+describe('PRI-718: durable repair-iteration budget (revise ne resume)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('stale dep (r1) + durable r2 exists → budget gate fires, no seed, needs_human_review', async () => {
+    // EP002-R2 F3 shape: the evaluator's dep chain was re-pointed at an older
+    // repair round (r1, iteration 1) while a later round (r2) already exists
+    // durably. The iteration budget must reflect the DURABLE max (2), not the
+    // stale dep (1) — otherwise the seed path re-targets the finished r2 and
+    // the evaluator re-evaluates the same artifact forever.
+    const store = new MemoryPIArtifactStore();
+    await seedArtifacts(store);
+    const durableR2 = makeArtificerTask({
+      taskId: `artificer-repair-${EVALUATOR_TASK_ID}-r2`,
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+        repairPayload: {
+          requiredChanges: ['r2 change'],
+          concerns: ['r2 concern'],
+          previousScore: 0.6,
+          repairIteration: 2,
+          sourceArtificerArtifactId: 'pi-art-artificer-previous',
+          sourceEvaluatorTaskId: EVALUATOR_TASK_ID,
+        },
+      }),
+    });
+    const { deps, stateManager, seedArtificerRepairTask } = createMockDeps({
+      artifactStore: store,
+      isRepairLoopEnabled: () => true,
+      artificerTask: makeArtificerTaskWithRepairPayload(1), // stale dep at r1
+      evaluatorOutput: makeNeedsRevisionOutput(),
+      extraTasks: [durableR2],
+    });
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // The budget gate fires on the DURABLE max — no seed attempt at all.
+    expect(seedArtificerRepairTask).not.toBeNull();
+    expect(seedArtificerRepairTask).not.toHaveBeenCalled();
+    expect(stateManager.createTask).not.toHaveBeenCalled();
+    expect(stateManager.updateTask).toHaveBeenCalledWith(
+      EVALUATOR_TASK_ID,
+      expect.objectContaining({ status: 'needs_human_review' }),
+    );
+    expectNhrWriteWithReason(stateManager, 'evaluator_repair_budget_exhausted');
+  });
+
+  it('durable probe is capped and ignores foreign id shapes', async () => {
+    // A task row whose id merely shares the prefix must not be probed as a
+    // repair round of THIS evaluator (the probe uses exact deterministic ids).
+    const store = new MemoryPIArtifactStore();
+    await seedArtifacts(store);
+    const foreign = makeArtificerTask({
+      taskId: 'artificer-repair-evaluator-999-r2',
+    });
+    const { deps, seedArtificerRepairTask } = createMockDeps({
+      artifactStore: store,
+      isRepairLoopEnabled: () => true,
+      artificerTask: makeArtificerTask(), // no repairPayload → dep prior 0
+      evaluatorOutput: makeNeedsRevisionOutput(),
+      extraTasks: [foreign],
+    });
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Foreign rows do not consume the budget: Round 1 seeds normally.
+    expect(seedArtificerRepairTask).not.toBeNull();
+    expect(seedArtificerRepairTask).toHaveBeenCalledTimes(1);
   });
 });

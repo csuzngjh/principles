@@ -33,7 +33,7 @@ describe('RolloutReviewerPromptBuilder', () => {
     expect(result.promptInput.sourceEvaluatorArtifactId).toBe('pi-art-evaluator-001');
   });
 
-  it('promptInput contains rolloutReviewerInstruction', () => {
+  it('systemPrompt carries the rollout reviewer instruction (PRI-633)', () => {
     const result = builder.buildPrompt({
       taskId: 'task-rr-001',
       contextHash: 'ctx-abc123',
@@ -41,7 +41,7 @@ describe('RolloutReviewerPromptBuilder', () => {
       evaluatorArtifact: null,
     });
 
-    expect(result.promptInput.rolloutReviewerInstruction).toBe(ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION);
+    expect(result.systemPrompt).toBe(ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION);
   });
 
   it('promptContractVersion is set correctly', () => {

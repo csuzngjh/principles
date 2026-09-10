@@ -307,7 +307,9 @@ export class RootCausePromptBuilder {
    *
    * Per DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls.
    * Per DPB-05: This method only builds the prompt; it does NOT commit to PD database.
-   * Per DPB-07: NO extraSystemPrompt is added — agent profile is the source of truth.
+   * Per DPB-07 (as revised by PRI-633): the base-layer systemPrompt (role +
+   * protocol) is returned separately; the profile's configured systemPrompt
+   * remains the append layer owned by the agent profile.
    *
    * @see PRI-372
    */
@@ -357,6 +359,8 @@ export class RootCausePromptBuilder {
     // PRI-468: Only include `intentDoc` when intentGrounding is on AND a doc
     // was successfully read. When absent, the prompt is byte-identical to
     // the pre-PRI-468 prompt (EP-03: no silent fallback).
+    // PRI-633: the diagnostic instruction is the base-layer systemPrompt and
+    // no longer rides inside the message payload.
     const promptInput: PromptInput = {
       taskId: payload.taskId,
       contextHash: payload.contextHash,
@@ -364,7 +368,6 @@ export class RootCausePromptBuilder {
       conversationWindow,
       sourceRefs: payload.sourceRefs,
       context: compactContext,
-      diagnosticInstruction,
       ...(truncationWarnings.length > 0 ? { truncationWarnings } : {}),
       ...(intentGrounding && intentDoc ? { intentDoc } : {}),
     };
@@ -372,24 +375,38 @@ export class RootCausePromptBuilder {
     // DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls
     let message = JSON.stringify(promptInput);
 
-    // If message exceeds maxMessageChars, truncate the diagnostic instruction
+    // PRI-633 review fix (P1): the instruction no longer rides in the message,
+    // so the overflow budget must bound the ACTUAL payload. Shrink the most
+    // compressible payload part — drop conversationWindow entries from the
+    // tail (keeping the head, consistent with the maxConversationEntries
+    // slice above) from BOTH the top-level field and the nested context copy
+    // until the serialized message fits. The systemPrompt is an independent
+    // channel and stays byte-intact. If even an empty window cannot fit
+    // (non-window fields alone exceed the limit), ship with an honest
+    // truncation warning instead of failing silently.
     if (message.length > limits.maxMessageChars) {
-      const surplus = message.length - limits.maxMessageChars;
-      const instruction = diagnosticInstruction;
-
-      // Keep at least the first 200 chars of the instruction + a note
-      const keepLength = Math.max(200, instruction.length - surplus - 100);
-      const truncatedInstruction = instruction.slice(0, keepLength) +
-        '\n\n[OUTPUT FORMAT section is REQUIRED; other sections may be summarized if needed]';
-
-      promptInput.diagnosticInstruction = truncatedInstruction;
-      promptInput.truncationWarnings = [
-        ...truncationWarnings,
-        `diagnosticInstruction truncated due to size (${message.length} > ${limits.maxMessageChars})`,
-      ];
-      message = JSON.stringify(promptInput);
+      let entries = [...conversationWindow];
+      let dropped = 0;
+      const serializeWithOverflowWarning = (droppedCount: number): string => {
+        promptInput.conversationWindow = entries;
+        promptInput.context = { ...compactContext, conversationWindow: entries };
+        promptInput.truncationWarnings = [
+          ...truncationWarnings,
+          droppedCount > 0
+            ? `payload truncated due to size (dropped ${droppedCount} conversationWindow entries; limit ${limits.maxMessageChars} chars)`
+            : `payload exceeds maxMessageChars (${message.length} > ${limits.maxMessageChars} chars); no conversationWindow entries left to drop`,
+        ];
+        return JSON.stringify(promptInput);
+      };
+      do {
+        if (entries.length > 0) {
+          entries = entries.slice(0, -1);
+          dropped += 1;
+        }
+        message = serializeWithOverflowWarning(dropped);
+      } while (entries.length > 0 && message.length > limits.maxMessageChars);
     }
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: diagnosticInstruction };
   }
 }

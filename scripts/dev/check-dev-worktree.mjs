@@ -19,13 +19,19 @@
 //                      than the one checked out (branch switched under a
 //                      live writer — the PRI-663 contamination signature)
 //
+// Non-blocking WARNINGS (reported, never gate the commit):
+//   worktree-unreadable — a SIBLING registered worktree's directory exists
+//                      but cannot be probed right now; a concurrent
+//                      `git worktree prune` in this window could silently
+//                      drop its admin metadata (the PRI-710 incident).
+//
 // Usage:
 //   node scripts/dev/check-dev-worktree.mjs [--json]
 // Exit codes: 0 = safe, 1 = violation(s).
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { getGitContext } from './lib/git.mjs';
+import { getGitContext, listWorktrees, runGit, sameGitPath } from './lib/git.mjs';
 import { evaluateLeaseForGuard } from './lib/workspace-lease.mjs';
 
 const PROTECTED_BRANCHES = new Set(['main', 'master']);
@@ -110,10 +116,38 @@ async function collectViolations() {
   const lease = evaluateLeaseForGuard(leaseRoot, ctx.branch);
   violations.push(...lease.violations);
 
-  return { violations, ctx, lease: lease.summary };
+  // PRI-712: non-blocking warnings — SIBLING worktree damage must not gate
+  // this checkout's commit, but silent metadata loss (the PRI-710 incident:
+  // a concurrent prune dropped a locked worktree's admin entry while it held
+  // uncommitted work) must become visible FAST instead of surfacing days
+  // later as an unrecoverable surprise.
+  const warnings = [];
+  try {
+    const worktrees = await listWorktrees(ctx.cwd);
+    for (const wt of worktrees) {
+      if (wt.bare) continue;
+      if (sameGitPath(wt.path, ctx.toplevel || ctx.cwd, ctx.cwd)) continue; // self — proven working
+      if (!fs.existsSync(wt.path)) continue; // missing dir is prune's legitimate job
+      const probe = await runGit(['status', '--porcelain'], { cwd: wt.path, allowFailure: true });
+      if (probe === null) {
+        warnings.push({
+          rule: 'worktree-unreadable',
+          message: 'Registered worktree is currently unreadable: ' + wt.path,
+          nextAction:
+            'A concurrent `git worktree prune` could drop its admin metadata while it is in this state (Windows lock race). ' +
+            'If you own it: finish/commit or close the holder process, then re-run the guard. If not: notify its owner.',
+        });
+      }
+    }
+  } catch {
+    // Worktree listing failed — this checkout's own rules above already
+    // cover the dangerous cases for the committing checkout.
+  }
+
+  return { violations, warnings, ctx, lease: lease.summary };
 }
 
-function reportHuman(violations, ctx, lease) {
+function reportHuman(violations, warnings, ctx, lease) {
   if (violations.length === 0) {
     let leaseNote = '';
     if (lease && lease.state === 'active') {
@@ -122,23 +156,28 @@ function reportHuman(violations, ctx, lease) {
       leaseNote = ' (stale write lease ignored)';
     }
     console.log('[worktree-guard] ok: branch ' + ctx.branch + ' in task worktree ' + ctx.cwd + leaseNote);
-    return;
+  } else {
+    console.error('[worktree-guard] FAIL — this checkout is not a safe write target:');
+    for (const v of violations) {
+      console.error('  ' + v.rule + ': ' + v.message);
+      console.error('    next: ' + v.nextAction);
+    }
+    process.exitCode = 1;
   }
-  console.error('[worktree-guard] FAIL — this checkout is not a safe write target:');
-  for (const v of violations) {
-    console.error('  ' + v.rule + ': ' + v.message);
-    console.error('    next: ' + v.nextAction);
+  for (const w of warnings) {
+    console.warn('[worktree-guard] warning: ' + w.rule + ' — ' + w.message);
+    console.warn('  next: ' + w.nextAction);
   }
-  process.exitCode = 1;
 }
 
-function reportJson(violations, ctx, lease) {
+function reportJson(violations, warnings, ctx, lease) {
   const payload = {
     ok: violations.length === 0,
     worktree: ctx ? ctx.cwd : process.cwd(),
     branch: ctx ? ctx.branch : null,
     isPrimary: ctx ? ctx.isPrimary : null,
     lease: lease ?? null,
+    warnings,
     violations,
   };
   console.log(JSON.stringify(payload, null, 2));
@@ -147,9 +186,9 @@ function reportJson(violations, ctx, lease) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  const { violations, ctx, lease } = await collectViolations();
-  if (args.json) reportJson(violations, ctx, lease);
-  else reportHuman(violations, ctx, lease);
+  const { violations, warnings, ctx, lease } = await collectViolations();
+  if (args.json) reportJson(violations, warnings, ctx, lease);
+  else reportHuman(violations, warnings, ctx, lease);
 }
 
 const isMain = process.argv[1] && process.argv[1].endsWith('check-dev-worktree.mjs');
