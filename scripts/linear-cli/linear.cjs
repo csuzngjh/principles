@@ -616,7 +616,7 @@ function createCli(deps = {}) {
         start: 'linear.cjs start PRI-123 [--comment-file plan.md]',
         handoff: 'linear.cjs handoff PRI-123 --pr <url> [--summary-file summary.md] [--repo owner/name] [--allow-unlinked]',
         reconcile: 'linear.cjs reconcile [--issue PRI-123] [--limit 25] [--apply]',
-        audit: 'linear.cjs audit [--limit 50]',
+        audit: 'linear.cjs audit [--limit 25]',
         search: 'linear.cjs search "diagnostician" --limit 20',
         issue: 'linear.cjs issue PRI-123 [--comments]',
         list: 'linear.cjs list --state Todo --limit 20 [--label x] [--assignee me]',
