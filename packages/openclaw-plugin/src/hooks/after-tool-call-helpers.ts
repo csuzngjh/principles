@@ -547,7 +547,7 @@ export function evaluatePainAdmissionForToolCall(
 /**
  * Emit pain signal after admission.
  *
- * Records to trajectory, event log, evolution logger, principle value tracker,
+ * Records to trajectory, event log, principle value tracker,
  * and emits the pain_detected event.
  *
  * Only called when the admission decision is 'admitted'.
