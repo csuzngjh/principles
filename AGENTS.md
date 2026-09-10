@@ -822,6 +822,32 @@ Never manufacture relevance to satisfy a process quota.
 
 Read detailed handbook entries only when selected by the index or needed for investigation.
 
+## Two-Pass Error Context Routing
+
+Every active EP card carries `error-pattern-routing` metadata in the Pattern Index (the single pattern SSoT). The deterministic router surfaces likely-relevant patterns from it:
+
+```bash
+npm run error:context -- --paths <expected-files> --signals <concepts>   # Pass 1: plan mode
+npm run error:context                                                    # Pass 2: diff mode (default --base origin/main)
+npm run error:context -- --json                                          # machine-readable
+```
+
+**Pass 1 — before implementation** (after Survey):
+
+1. read `ERROR_PATTERN_INDEX.md`;
+2. run `error:context` plan mode on the expected modification area;
+3. select the relevant EPs (router output + semantic judgment);
+4. convert each hit's Required Evidence into the Verification Plan.
+
+**Pass 2 — before handoff / PR** (after the real diff exists):
+
+1. rerun `error:context` in diff mode;
+2. reconcile newly triggered patterns — a new HIGH hit must be handled or explicitly excluded with reason;
+3. fill the PR's Error Experience / Task Risk Contract;
+4. run adversarial self-review.
+
+The router supplements human/agent semantic selection; it does not replace `ERROR_PATTERN_INDEX.md`. A no-match output still requires manual Pattern Index review. Reviewers of substantial PRs should rerun the same router and compare its output against the PR's Task Risk Contract — an unexplained HIGH divergence is a review finding, not automatic blame.
+
 ## Recording Errors
 
 Every real review finding must be classified.
@@ -844,6 +870,8 @@ Do not create long-term institutional-memory entries for:
 When several review comments share one root cause:
 
 > record one root-cause lesson / recurrence.
+
+Every recurrence recorded from 2026-09-10 (v2 effective date) must carry a `recurrence-meta` structured block adjacent to its narrative (date / pattern / invariant / severity / escaped / caughtBy / guard — see `record-error` skill). Historical recurrences stay as-is. `npm run error:hotspots` aggregates this metadata: the same pattern + invariant recurring ≥2 times in 90 days with no mechanized guard requires an explicit Enforcement Decision (blocking guard / advisory guard / semantic verification obligation / not-mechanizable + recorded reason). A recurrence is a signal to decide enforcement, never automatic license to expand the current PR with a scanner.
 
 If the handbook is changed, run its current validation command.
 
