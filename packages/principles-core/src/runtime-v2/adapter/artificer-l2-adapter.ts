@@ -58,6 +58,7 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { safeStringifyPreview, truncatePreview } from './output-repair-contract.js';
 import { resolveL2Model, pdStreamSimple } from './l2-agent-loop-adapter.js';
+import { mergeSystemPromptLayers } from '../system-prompt-merge.js';
 import {
   buildArtificerL2Tools,
   ARTIFICER_L2_TOOL_WHITELIST,
@@ -86,6 +87,12 @@ export interface ArtificerL2AdapterConfig {
   readonly maxTokens?: number;
   /** Optional event emitter; defaults to the shared singleton. */
   readonly eventEmitter?: StoreEventEmitter;
+  /**
+   * PRI-633: optional profile-level system prompt (append layer, DPB-07).
+   * Appended AFTER the run's base-layer systemPrompt and the Artificer L2
+   * tool protocol in agentContext.systemPrompt. Omitted when unset.
+   */
+  readonly systemPrompt?: string;
 }
 
 interface ArtificerL2RunState {
@@ -215,8 +222,11 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       );
     }
 
+    // PRI-633: the tool usage protocol is standing behavior contract, so it
+    // moved from the tail of the user message into the system prompt — the
+    // user message now carries only task data.
     const toolInstruction =
-      '\n\n--- Tool protocol (Artificer L2 mode, PRI-439) ---\n' +
+      '--- Tool protocol (Artificer L2 mode, PRI-439) ---\n' +
       'You have 4 tools to write and verify RuleCode:\n' +
       '  - read_rulecode_spec: read the RuleCode dialect spec (canonical form, forbidden patterns, return shape). Call FIRST.\n' +
       '  - validate_rulecode: statically validate a code string (forbidden patterns + return shape). Call after drafting code.\n' +
@@ -224,8 +234,17 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       '  - submit_rulecode: submit your final ArtificerRuleOutput. You MUST call this exactly once with a complete object; the loop stops after you call it.\n' +
       'Do not emit your final answer as free text — call submit_rulecode.';
 
+    // Layered system prompt (PRI-633): base layer (prompt-builder role +
+    // protocol, via StartRunInput.systemPrompt) → tool protocol → profile
+    // append layer (config). Undefined when every layer is absent.
+    const systemPrompt = mergeSystemPromptLayers(
+      input.systemPrompt,
+      toolInstruction,
+      this.config.systemPrompt,
+    );
+
     const prompts: AgentMessage[] = [
-      { role: 'user', content: messageContent + toolInstruction, timestamp: Date.now() },
+      { role: 'user', content: messageContent, timestamp: Date.now() },
     ];
 
     // Fresh capture + turn counter per run (EP-05 loop-state freshness).
@@ -253,7 +272,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     const tools = buildArtificerL2Tools(toolContext);
     const agentContext = {
-      systemPrompt: '',
+      systemPrompt: systemPrompt ?? '',
       messages: prompts,
       tools,
     };

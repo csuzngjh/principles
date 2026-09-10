@@ -397,6 +397,8 @@ export async function runInternalizationConsumerCycle(
             baseUrl: runtimeConfigResult.baseUrl,
             workspace: workspaceDir,
             totalBudgetMs: runtimeConfigResult.timeoutMs,
+            // PRI-633: profile systemPrompt rides as the append layer.
+            ...(runtimeConfigResult.systemPrompt ? { systemPrompt: runtimeConfigResult.systemPrompt } : {}),
           },
           {
             artifactReader: {
@@ -424,6 +426,8 @@ export async function runInternalizationConsumerCycle(
           timeoutMs: runtimeConfigResult.timeoutMs,
           baseUrl: runtimeConfigResult.baseUrl,
           workspace: workspaceDir,
+          // PRI-633: profile systemPrompt rides as the append layer.
+          ...(runtimeConfigResult.systemPrompt ? { systemPrompt: runtimeConfigResult.systemPrompt } : {}),
         });
       }
     } else if (runtimeKind === 'openclaw-cli') {

@@ -35,51 +35,52 @@ const BASE_INPUT = {
 describe('ScribePromptBuilder — outputLanguage (PRI-336)', () => {
   it('includes Chinese language directive when outputLanguage is zh-CN', () => {
     const builder = new ScribePromptBuilder();
-    const { message } = builder.buildPrompt({ ...BASE_INPUT, outputLanguage: 'zh-CN' });
-    const parsed = parsePromptJson(message);
+    const { message, systemPrompt } = builder.buildPrompt({ ...BASE_INPUT, outputLanguage: 'zh-CN' });
 
-    expect(parsed.scribeInstruction).toContain('Simplified Chinese');
-    expect(parsed.scribeInstruction).toContain('简体中文');
-    expect(parsed.scribeInstruction).toContain('LANGUAGE DIRECTIVE');
+    expect(systemPrompt).toContain('Simplified Chinese');
+    expect(systemPrompt).toContain('简体中文');
+    expect(systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    // PRI-633: the instruction (with its language directive) left the payload.
+    expect(message).not.toContain('LANGUAGE DIRECTIVE');
   });
 
   it('includes English language directive when outputLanguage is en', () => {
     const builder = new ScribePromptBuilder();
-    const { message } = builder.buildPrompt({ ...BASE_INPUT, outputLanguage: 'en' });
-    const parsed = parsePromptJson(message);
+    const { message, systemPrompt } = builder.buildPrompt({ ...BASE_INPUT, outputLanguage: 'en' });
 
-    expect(parsed.scribeInstruction).toContain('English');
-    expect(parsed.scribeInstruction).toContain('PRI-336');
+    expect(systemPrompt).toContain('English');
+    expect(systemPrompt).toContain('PRI-336');
+    expect(message).not.toContain('PRI-336');
   });
 
   it('does NOT include language directive when outputLanguage is undefined', () => {
     const builder = new ScribePromptBuilder();
-    const { message } = builder.buildPrompt(BASE_INPUT);
-    const parsed = parsePromptJson(message);
+    const { message, systemPrompt } = builder.buildPrompt(BASE_INPUT);
 
-    // scribeInstruction should be the base instruction without language directive
+    // PRI-633: the instruction should be the base instruction without language directive
     const baseInstruction = buildScribeProtocolInstruction();
-    expect(parsed.scribeInstruction).toBe(baseInstruction);
-    expect(parsed.scribeInstruction).not.toContain('LANGUAGE DIRECTIVE');
-    expect(parsed.scribeInstruction).not.toContain('PRI-336');
+    expect(systemPrompt).toBe(baseInstruction);
+    expect(systemPrompt).not.toContain('LANGUAGE DIRECTIVE');
+    expect(systemPrompt).not.toContain('PRI-336');
+    expect(message).not.toContain('LANGUAGE DIRECTIVE');
   });
 
   it('includes technical identifiers not translated instruction', () => {
     const builder = new ScribePromptBuilder();
-    const { message } = builder.buildPrompt({ ...BASE_INPUT, outputLanguage: 'zh-CN' });
-    const parsed = parsePromptJson(message);
+    const { message, systemPrompt } = builder.buildPrompt({ ...BASE_INPUT, outputLanguage: 'zh-CN' });
 
-    expect(parsed.scribeInstruction).toContain('taskId');
-    expect(parsed.scribeInstruction).toContain('sourcePainId');
-    expect(parsed.scribeInstruction).toContain('MUST NOT be translated');
+    expect(systemPrompt).toContain('taskId');
+    expect(systemPrompt).toContain('sourcePainId');
+    expect(systemPrompt).toContain('MUST NOT be translated');
+    expect(message).not.toContain('MUST NOT be translated');
   });
 
   it('includes lineage fields not translated instruction', () => {
     const builder = new ScribePromptBuilder();
-    const { message } = builder.buildPrompt({ ...BASE_INPUT, outputLanguage: 'en' });
-    const parsed = parsePromptJson(message);
+    const { message, systemPrompt } = builder.buildPrompt({ ...BASE_INPUT, outputLanguage: 'en' });
 
-    expect(parsed.scribeInstruction).toContain('Lineage and evidence fields MUST NOT be translated');
+    expect(systemPrompt).toContain('Lineage and evidence fields MUST NOT be translated');
+    expect(message).not.toContain('Lineage and evidence fields MUST NOT be translated');
   });
 
   it('preserves all other prompt fields when outputLanguage is provided', () => {

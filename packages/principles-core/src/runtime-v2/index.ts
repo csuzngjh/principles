@@ -2142,6 +2142,7 @@ export type {
 export {
   scanKeywords,
   buildLlmPrompt,
+  SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
   parseLlmClassification,
   resolveLlmClassificationPayload,
   SignalClassificationOutputV1Schema,

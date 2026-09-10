@@ -54,6 +54,12 @@ export interface CorrectionObserverOptions {
 }
 
 export class CorrectionObserver {
+  /**
+   * PRI-633: base-layer system prompt (role declaration). Previously the
+   * first line of buildPrompt's message; now delivered via the system channel.
+   */
+  static readonly SYSTEM_PROMPT = 'You are a correction keyword optimizer.';
+
   private readonly runtimeAdapter: PDRuntimeAdapter;
   private readonly timeoutMs: number;
   private readonly agentId: string;
@@ -66,6 +72,8 @@ export class CorrectionObserver {
 
   /**
    * Replicates prompt construction from correctionObserverWorkflowSpec
+   * (PRI-633: the role declaration moved to SYSTEM_PROMPT / the system channel;
+   * this message carries only task data and protocol rules).
    */
   static buildPrompt(payload: CorrectionObserverPayload): string {
     const { keywordStoreSummary, recentMessages, trajectoryHistory } = payload;
@@ -85,8 +93,6 @@ export class CorrectionObserver {
       : '  (none)';
 
     return [
-      'You are a correction keyword optimizer.',
-      '',
       '## TASK',
       'Analyze the current correction keyword store and recent user messages.',
       'Recommend ADD/UPDATE/REMOVE actions to improve correction cue accuracy.',
@@ -130,6 +136,7 @@ export class CorrectionObserver {
       contextItems: [],
       outputSchemaRef: 'correction-observer-output-v1',
       timeoutMs: this.timeoutMs,
+      systemPrompt: CorrectionObserver.SYSTEM_PROMPT,
     });
 
     // Poll until terminal

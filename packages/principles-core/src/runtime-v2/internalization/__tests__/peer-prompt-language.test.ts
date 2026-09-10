@@ -12,6 +12,10 @@
  * - undefined: instruction is byte-identical to the base protocol (backward
  *   compatible — the pre-PRI-714 tests assert this identity too)
  * - technical identifiers / JSON keys stay untranslated (directive content)
+ *
+ * PRI-633: the instruction (role + protocol + directive) travels on the
+ * builder result's `systemPrompt` channel — assertions target it, and the
+ * serialized payload must NOT contain the instruction.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -43,13 +47,13 @@ describe('EvaluatorPromptBuilder — outputLanguage (PRI-714)', () => {
   };
 
   it('includes Chinese language directive naming review fields when zh-CN', () => {
-    const { promptInput } = builder.buildPrompt({ ...input, outputLanguage: 'zh-CN' });
-    expect(promptInput.evaluatorInstruction).toContain('LANGUAGE DIRECTIVE');
-    expect(promptInput.evaluatorInstruction).toContain('Simplified Chinese');
+    const { message, systemPrompt } = builder.buildPrompt({ ...input, outputLanguage: 'zh-CN' });
+    expect(systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(systemPrompt).toContain('Simplified Chinese');
     // review-subject field list present as EXPLICIT NESTED PATHS (PRI-714
     // review fix: the previously shared flat list missed two free-text fields
     // and left `explanation` ambiguous across three codeReview sub-objects).
-    expect(promptInput.evaluatorInstruction).toContain(
+    expect(systemPrompt).toContain(
       '(evaluation.summary, evaluation.strengths, evaluation.concerns, evaluation.requiredChanges, '
       + 'codeReview.intentConsistency.explanation, codeReview.scopePrecision.explanation, '
       + 'codeReview.traceCoverage.explanation, codeReview.traceCoverage.gaps, '
@@ -58,28 +62,30 @@ describe('EvaluatorPromptBuilder — outputLanguage (PRI-714)', () => {
     // …not the principle-subject list (the base instruction mentions
     // antiPatterns for code review, so assert the directive's own field list
     // string rather than global absence).
-    expect(promptInput.evaluatorInstruction).not.toContain('(title, statement, rationale, applicability, antiPatterns, description)');
+    expect(systemPrompt).not.toContain('(title, statement, rationale, applicability, antiPatterns, description)');
     // PRI-630 guard: the requirementLedger statement echo rule is part of the
     // directive so the language instruction cannot override the convergence
     // contract (statement must be a verbatim echo, never translated).
-    expect(promptInput.evaluatorInstruction).toContain('requirementLedger[].statement MUST be copied verbatim');
+    expect(systemPrompt).toContain('requirementLedger[].statement MUST be copied verbatim');
+    // PRI-633: the instruction left the payload for the system channel.
+    expect(message).not.toContain('LANGUAGE DIRECTIVE');
   });
 
   it('includes English language directive when en', () => {
-    const { promptInput } = builder.buildPrompt({ ...input, outputLanguage: 'en' });
-    expect(promptInput.evaluatorInstruction).toContain('English');
-    expect(promptInput.evaluatorInstruction).toContain('MUST NOT be translated');
+    const { systemPrompt } = builder.buildPrompt({ ...input, outputLanguage: 'en' });
+    expect(systemPrompt).toContain('English');
+    expect(systemPrompt).toContain('MUST NOT be translated');
   });
 
   it('instruction is byte-identical to base protocol when outputLanguage is undefined', () => {
-    const { promptInput } = builder.buildPrompt(input);
-    expect(promptInput.evaluatorInstruction).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
+    const { systemPrompt } = builder.buildPrompt(input);
+    expect(systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
   });
 
   it('directive keeps technical identifiers and JSON keys untranslated', () => {
-    const { promptInput } = builder.buildPrompt({ ...input, outputLanguage: 'zh-CN' });
-    expect(promptInput.evaluatorInstruction).toContain('JSON field names (keys) MUST remain in English');
-    expect(promptInput.evaluatorInstruction).toContain('Lineage and evidence fields MUST NOT be translated');
+    const { systemPrompt } = builder.buildPrompt({ ...input, outputLanguage: 'zh-CN' });
+    expect(systemPrompt).toContain('JSON field names (keys) MUST remain in English');
+    expect(systemPrompt).toContain('Lineage and evidence fields MUST NOT be translated');
   });
 });
 
@@ -95,37 +101,39 @@ describe('DreamerPromptBuilder — outputLanguage (PRI-714 review fix)', () => {
 
   it('appends the dreamer-subject directive to the REAL generated prompt message when zh-CN', () => {
     // The real message the runner hands to adapter.startRun — not a helper.
-    const { message, promptInput } = new DreamerPromptBuilder().buildPrompt({ ...input, outputLanguage: 'zh-CN' });
-    expect(promptInput.dreamerInstruction).toContain('LANGUAGE DIRECTIVE');
-    expect(promptInput.dreamerInstruction).toContain('Simplified Chinese');
+    const { message, systemPrompt } = new DreamerPromptBuilder().buildPrompt({ ...input, outputLanguage: 'zh-CN' });
+    expect(systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(systemPrompt).toContain('Simplified Chinese');
     // Field list matches the actual DreamerCandidate schema (riskLevel is an
     // enum — absent from the translatable list).
-    expect(promptInput.dreamerInstruction).toContain('(candidates[].badDecision, candidates[].betterDecision, candidates[].rationale, candidates[].strategicPerspective)');
-    // The directive survives JSON serialization into the actual message.
+    expect(systemPrompt).toContain('(candidates[].badDecision, candidates[].betterDecision, candidates[].rationale, candidates[].strategicPerspective)');
+    // PRI-633: the directive does NOT survive into the serialized payload —
+    // it lives on the system channel now.
     const parsed = parsePromptJson(message);
-    expect(parsed.dreamerInstruction).toBe(promptInput.dreamerInstruction);
+    expect(parsed).not.toHaveProperty('dreamerInstruction');
+    expect(message).not.toContain('LANGUAGE DIRECTIVE');
   });
 
   it('directive works with coreGrounding ON (axiom block + directive coexist)', () => {
-    const { promptInput } = new DreamerPromptBuilder({ coreGrounding: true }).buildPrompt({ ...input, outputLanguage: 'zh-CN' });
-    expect(promptInput.dreamerInstruction).toContain('CORE AXIOMS:');
-    expect(promptInput.dreamerInstruction).toContain('LANGUAGE DIRECTIVE');
+    const { systemPrompt } = new DreamerPromptBuilder({ coreGrounding: true }).buildPrompt({ ...input, outputLanguage: 'zh-CN' });
+    expect(systemPrompt).toContain('CORE AXIOMS:');
+    expect(systemPrompt).toContain('LANGUAGE DIRECTIVE');
   });
 
   it('directive also works with coreGrounding OFF (review bug: only the axiom block used the language)', () => {
-    const { promptInput } = new DreamerPromptBuilder({ coreGrounding: false }).buildPrompt({ ...input, outputLanguage: 'en' });
-    expect(promptInput.dreamerInstruction).not.toContain('CORE AXIOMS:');
-    expect(promptInput.dreamerInstruction).toContain('LANGUAGE DIRECTIVE');
-    expect(promptInput.dreamerInstruction).toContain('English');
+    const { systemPrompt } = new DreamerPromptBuilder({ coreGrounding: false }).buildPrompt({ ...input, outputLanguage: 'en' });
+    expect(systemPrompt).not.toContain('CORE AXIOMS:');
+    expect(systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(systemPrompt).toContain('English');
   });
 
   it('instruction is byte-identical to the base protocol when outputLanguage is undefined', () => {
     const withLang = new DreamerPromptBuilder().buildPrompt({ ...input, outputLanguage: undefined });
     const base = buildDreamerProtocolInstruction({ coreGrounding: false });
-    expect(withLang.promptInput.dreamerInstruction).toBe(base);
+    expect(withLang.systemPrompt).toBe(base);
     // And the class-level constructor default behaves identically.
     const implicit = new DreamerPromptBuilder().buildPrompt(input);
-    expect(implicit.promptInput.dreamerInstruction).toBe(base);
+    expect(implicit.systemPrompt).toBe(base);
   });
 });
 
@@ -140,30 +148,32 @@ describe('PhilosopherPromptBuilder — outputLanguage (PRI-714 review fix)', () 
   };
 
   it('appends the philosopher-subject directive to the REAL generated prompt message when zh-CN', () => {
-    const { message, promptInput } = new PhilosopherPromptBuilder().buildPrompt({ ...input, outputLanguage: 'zh-CN' });
-    expect(promptInput.philosopherInstruction).toContain('LANGUAGE DIRECTIVE');
-    expect(promptInput.philosopherInstruction).toContain('Simplified Chinese');
+    const { message, systemPrompt } = new PhilosopherPromptBuilder().buildPrompt({ ...input, outputLanguage: 'zh-CN' });
+    expect(systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(systemPrompt).toContain('Simplified Chinese');
     // Field list matches the actual PhilosopherOutputV1 schema (confidence is
     // numeric — absent from the translatable list).
-    expect(promptInput.philosopherInstruction).toContain('(thesis, principleCandidate.title, principleCandidate.rationale, principleCandidate.scope, risks[])');
+    expect(systemPrompt).toContain('(thesis, principleCandidate.title, principleCandidate.rationale, principleCandidate.scope, risks[])');
+    // PRI-633: the instruction left the payload for the system channel.
     const parsed = parsePromptJson(message);
-    expect(parsed.philosopherInstruction).toBe(promptInput.philosopherInstruction);
+    expect(parsed).not.toHaveProperty('philosopherInstruction');
+    expect(message).not.toContain('LANGUAGE DIRECTIVE');
   });
 
   it('directive works with coreGrounding ON and OFF', () => {
     const on = new PhilosopherPromptBuilder({ coreGrounding: true }).buildPrompt({ ...input, outputLanguage: 'zh-CN' });
-    expect(on.promptInput.philosopherInstruction).toContain('CORE AXIOMS:');
-    expect(on.promptInput.philosopherInstruction).toContain('LANGUAGE DIRECTIVE');
+    expect(on.systemPrompt).toContain('CORE AXIOMS:');
+    expect(on.systemPrompt).toContain('LANGUAGE DIRECTIVE');
     const off = new PhilosopherPromptBuilder({ coreGrounding: false }).buildPrompt({ ...input, outputLanguage: 'en' });
-    expect(off.promptInput.philosopherInstruction).not.toContain('CORE AXIOMS:');
-    expect(off.promptInput.philosopherInstruction).toContain('LANGUAGE DIRECTIVE');
-    expect(off.promptInput.philosopherInstruction).toContain('English');
+    expect(off.systemPrompt).not.toContain('CORE AXIOMS:');
+    expect(off.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(off.systemPrompt).toContain('English');
   });
 
   it('instruction is byte-identical to the base protocol when outputLanguage is undefined', () => {
     const withLang = new PhilosopherPromptBuilder().buildPrompt({ ...input, outputLanguage: undefined });
     const base = buildPhilosopherProtocolInstruction({ coreGrounding: false });
-    expect(withLang.promptInput.philosopherInstruction).toBe(base);
+    expect(withLang.systemPrompt).toBe(base);
   });
 });
 
@@ -180,27 +190,28 @@ describe('RolloutReviewerPromptBuilder — outputLanguage (PRI-714)', () => {
 
   it('includes Chinese language directive naming review fields when zh-CN', () => {
     const result = builder.buildPrompt({ ...input, outputLanguage: 'zh-CN' });
-    expect(result.promptInput.rolloutReviewerInstruction).toContain('LANGUAGE DIRECTIVE');
-    expect(result.promptInput.rolloutReviewerInstruction).toContain('Simplified Chinese');
+    expect(result.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(result.systemPrompt).toContain('Simplified Chinese');
     // PRI-714 review fix: the rollout reviewer names its OWN schema fields
     // (review.*) — not the evaluator's evaluation.*/codeReview.* paths.
-    expect(result.promptInput.rolloutReviewerInstruction).toContain('(review.summary, review.requiredChanges, review.rolloutRisks, review.safetyChecks, risks)');
-    expect(result.promptInput.rolloutReviewerInstruction).not.toContain('codeReview.traceCoverage');
-    expect(result.promptInput.rolloutReviewerInstruction).not.toContain('requirementLedger');
+    expect(result.systemPrompt).toContain('(review.summary, review.requiredChanges, review.rolloutRisks, review.safetyChecks, risks)');
+    expect(result.systemPrompt).not.toContain('codeReview.traceCoverage');
+    expect(result.systemPrompt).not.toContain('requirementLedger');
   });
 
   it('includes English language directive when en', () => {
     const result = builder.buildPrompt({ ...input, outputLanguage: 'en' });
-    expect(result.promptInput.rolloutReviewerInstruction).toContain('English');
-    expect(result.promptInput.rolloutReviewerInstruction).toContain('MUST NOT be translated');
+    expect(result.systemPrompt).toContain('English');
+    expect(result.systemPrompt).toContain('MUST NOT be translated');
   });
 
   it('instruction is byte-identical to base protocol when outputLanguage is undefined', () => {
     const result = builder.buildPrompt(input);
-    expect(result.promptInput.rolloutReviewerInstruction).toBe(ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION);
+    expect(result.systemPrompt).toBe(ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION);
     expect(result.message).toBeDefined();
+    // PRI-633: the instruction left the payload for the system channel.
     const parsed = parsePromptJson(result.message);
-    expect(parsed.rolloutReviewerInstruction).toBe(ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION);
+    expect(parsed).not.toHaveProperty('rolloutReviewerInstruction');
   });
 });
 
@@ -218,11 +229,11 @@ describe('ArtificerPromptBuilder — outputLanguage (PRI-714)', () => {
 
   it('includes Chinese language directive naming implementation fields when zh-CN', () => {
     const result = builder.buildPrompt({ ...input, outputLanguage: 'zh-CN' });
-    expect(result.promptInput.artificerInstruction).toContain('LANGUAGE DIRECTIVE');
-    expect(result.promptInput.artificerInstruction).toContain('Simplified Chinese');
+    expect(result.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(result.systemPrompt).toContain('Simplified Chinese');
     // implementation-subject field list
-    expect(result.promptInput.artificerInstruction).toContain('implementationSummary');
-    expect(result.promptInput.artificerInstruction).not.toContain('requiredChanges');
+    expect(result.systemPrompt).toContain('implementationSummary');
+    expect(result.systemPrompt).not.toContain('requiredChanges');
   });
 
   it('directive appears after the context-mode block in v2 mode too', () => {
@@ -243,8 +254,8 @@ describe('ArtificerPromptBuilder — outputLanguage (PRI-714)', () => {
       },
       outputLanguage: 'zh-CN',
     });
-    expect(result.promptInput.artificerInstruction).toContain('CONTEXT MODE: v2');
-    expect(result.promptInput.artificerInstruction).toContain('LANGUAGE DIRECTIVE');
+    expect(result.systemPrompt).toContain('CONTEXT MODE: v2');
+    expect(result.systemPrompt).toContain('LANGUAGE DIRECTIVE');
   });
 
   it('instruction is byte-identical to base protocol + v1 context block when outputLanguage is undefined', () => {
@@ -253,7 +264,7 @@ describe('ArtificerPromptBuilder — outputLanguage (PRI-714)', () => {
       + '\nCONTEXT MODE: v1\n- You MUST NOT read input.context.\n'
       + '- You MUST NOT output requiresContextVersion or case-level ruleContext.\n'
       + '- Generate an action-only rule from the Scribe principle.\n';
-    expect(result.promptInput.artificerInstruction).toBe(base);
+    expect(result.systemPrompt).toBe(base);
   });
 });
 

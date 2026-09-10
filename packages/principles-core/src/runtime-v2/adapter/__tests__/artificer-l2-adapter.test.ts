@@ -133,6 +133,7 @@ function makeAdapter(overrides: {
   totalBudgetMs?: number;
   maxTokens?: number;
   gateDeps?: RefinerRuleHostGateDeps;
+  systemPrompt?: string;
 } = {}): ArtificerL2Adapter {
   return new ArtificerL2Adapter({
     provider: 'test-provider',
@@ -144,6 +145,7 @@ function makeAdapter(overrides: {
     maxTurns: overrides.maxTurns,
     totalBudgetMs: overrides.totalBudgetMs ?? 60_000,
     maxTokens: overrides.maxTokens,
+    systemPrompt: overrides.systemPrompt,
   });
 }
 
@@ -427,5 +429,32 @@ describe('PRI-439 ArtificerL2Adapter — input serialization', () => {
     // startRun still throws because no output is captured, but it should NOT throw
     // a serialization error.
     await expect(adapter.startRun(makeStartRun({ inputPayload: circular }))).rejects.toThrow(/without a submit_rulecode call/);
+  });
+});
+
+// ── PRI-633 — layered systemPrompt placement ─────────────────────────────────
+
+describe('PRI-633 — layered systemPrompt placement', () => {
+  it('agentContext.systemPrompt = base → tool protocol → profile append; user message carries only task data', async () => {
+    let captured: { systemPrompt?: string; messages: { role: string; content: unknown }[]; tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] } | undefined;
+    hoisted.impl = async (_p: unknown, context: unknown) => {
+      captured = context as { systemPrompt?: string; messages: { role: string; content: unknown }[]; tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] };
+      const submit = captured.tools?.find((t) => t.name === 'submit_rulecode');
+      if (submit) await submit.execute('call-1', makeRuleOutput());
+      return [];
+    };
+    const adapter = makeAdapter({ systemPrompt: 'PROFILE APPEND LAYER' });
+    await adapter.startRun(makeStartRun({ systemPrompt: 'BASE ROLE LAYER' }));
+
+    const sp = captured?.systemPrompt ?? '';
+    expect(sp).toContain('BASE ROLE LAYER');
+    expect(sp).toContain('--- Tool protocol (Artificer L2 mode, PRI-439) ---');
+    expect(sp).toContain('PROFILE APPEND LAYER');
+    expect(sp.indexOf('BASE ROLE LAYER')).toBeLessThan(sp.indexOf('--- Tool protocol'));
+    expect(sp.indexOf('--- Tool protocol')).toBeLessThan(sp.indexOf('PROFILE APPEND LAYER'));
+    // The user message no longer carries the tool protocol (PRI-633).
+    const first = captured?.messages[0];
+    expect(first?.role).toBe('user');
+    expect(first?.content).toBe('initial prompt');
   });
 });

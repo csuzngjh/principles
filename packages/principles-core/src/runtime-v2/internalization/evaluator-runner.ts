@@ -552,8 +552,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // ── Two-stage progressive evaluation ──
     // Stage 1: summary-level evaluation (same prompt as single-stage, but
     // uses EVALUATOR_STAGE1_MANIFEST for focused context).
-    const { message: stage1Message } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
-    const stage1Output = await this.runSingleEvaluation(taskId, stage1Message);
+    const { message: stage1Message, systemPrompt: stage1SystemPrompt } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
+    const stage1Output = await this.runSingleEvaluation(taskId, stage1Message, stage1SystemPrompt);
 
     // 9.4c (design §6.5.4): Stage 1 output contract violation check.
     // Detect malformed Stage 1 output shapes that Phase 0 testing identified:
@@ -592,7 +592,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // Stage 2 triggered: independent re-evaluation with tier2 context.
     // rc-7 / ERR-015 / ERR-018 / ERR-019: Stage 2 does NOT receive Stage 1
     // output, concerns, or the FlaggedDecision. It is a fully independent call.
-    const { message: stage2Message, stage2Evidence } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE2_MANIFEST);
+    const { message: stage2Message, systemPrompt: stage2SystemPrompt, stage2Evidence } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE2_MANIFEST);
     if (stage2Evidence.state === 'required_unavailable') {
       // Review round (information floor): Stage 2 is the deep-evidence stage;
       // its REQUIRED evidence is unavailable, so there is NO safe fallback
@@ -613,7 +613,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         `evaluator stage2: required tier2 evidence unavailable (${stage2Evidence.unresolvedRequired.join(', ')}) — refusing to issue a deep-evidence verdict without it.`,
       );
     }
-    const stage2Output = await this.runSingleEvaluation(taskId, stage2Message);
+    const stage2Output = await this.runSingleEvaluation(taskId, stage2Message, stage2SystemPrompt);
 
     this.progressiveFinalOutput = stage2Output;
     this.progressiveRunActive = true;
@@ -778,7 +778,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     taskId: string,
     context: EvaluatorContext,
     manifest: typeof EVALUATOR_STAGE1_MANIFEST,
-  ): Promise<{ readonly message: string; readonly stage2Evidence: EvaluatorStage2Evidence }> {
+  ): Promise<{ readonly message: string; readonly systemPrompt: string; readonly stage2Evidence: EvaluatorStage2Evidence }> {
     let parsedArtificerArtifact: unknown = null;
     if (context.artificerArtifact) {
       try { parsedArtificerArtifact = JSON.parse(context.artificerArtifact); } catch { parsedArtificerArtifact = context.artificerArtifact; }
@@ -828,7 +828,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
     const builder = new EvaluatorPromptBuilder();
-    const { message } = builder.buildPrompt({
+    const { message, systemPrompt } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       artificerArtifact: parsedArtificerArtifact,
@@ -845,12 +845,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // undefined → prompt unchanged (backward compatible).
       intentContract: extractIntentContract(parsedScribeArtifact) ?? undefined,
     });
-    return { message, stage2Evidence: resolutionOutcome };
+    return { message, systemPrompt, stage2Evidence: resolutionOutcome };
   }
 
   /** Original single-stage invokeRuntime (flag-off path). */
   private async invokeRuntimeSingleStage(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
-    const { message } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
+    const { message, systemPrompt } = await this.buildEvaluatorPrompt(taskId, context, EVALUATOR_STAGE1_MANIFEST);
     return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
@@ -858,6 +858,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       contextItems: [],
       outputSchemaRef: 'evaluator-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

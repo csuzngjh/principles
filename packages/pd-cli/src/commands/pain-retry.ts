@@ -519,6 +519,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         maxTokens,
         timeoutMs: effectiveTimeoutMs,
         workspace: workspaceDir,
+        // PRI-633: profile systemPrompt rides as the append layer (config-only;
+        // no CLI flag — same sourcing as the other profile fields' fallback).
+        ...(policyConfig?.systemPrompt ? { systemPrompt: policyConfig.systemPrompt } : {}),
       });
     } else {
       return refuseExit(opts, {

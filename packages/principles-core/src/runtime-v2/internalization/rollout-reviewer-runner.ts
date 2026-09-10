@@ -443,7 +443,7 @@ export class RolloutReviewerRunner {
     }
 
     const builder = new RolloutReviewerPromptBuilder();
-    const { message } = builder.buildPrompt({
+    const { message, systemPrompt } = builder.buildPrompt({
       taskId: params.taskId,
       contextHash: params.contextHash,
       evaluatorArtifact: parsedEvaluatorArtifact,
@@ -459,6 +459,7 @@ export class RolloutReviewerRunner {
       contextItems: [],
       outputSchemaRef: 'rollout-reviewer-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     };
 
     return this.runtimeAdapter.startRun(startInput);

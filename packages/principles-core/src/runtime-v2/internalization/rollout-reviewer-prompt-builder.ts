@@ -20,13 +20,18 @@ export interface RolloutReviewerPromptInput {
   contextHash: string;
   sourceEvaluatorArtifactId: string;
   evaluatorArtifact: unknown;
-  rolloutReviewerInstruction: string;
   promptContractVersion: string;
 }
 
 export interface RolloutReviewerPromptBuildResult {
   readonly message: string;
   readonly promptInput: RolloutReviewerPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `rolloutReviewerInstruction`; now delivered via the
+   * system channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 export const ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION = `You are a Rollout Reviewer agent in a principle internalization pipeline. Your role is to review the Evaluator's assessment and produce a rollout review decision with safety checks and risk analysis.
@@ -80,12 +85,13 @@ export class RolloutReviewerPromptBuilder {
       contextHash: input.contextHash,
       sourceEvaluatorArtifactId: input.sourceEvaluatorArtifactId,
       evaluatorArtifact: input.evaluatorArtifact,
-      rolloutReviewerInstruction: ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION + languageDirective,
       promptContractVersion: ROLLOUT_REVIEWER_PROMPT_CONTRACT_VERSION,
     };
 
     const message = JSON.stringify(promptInput);
 
-    return { message, promptInput };
+    // PRI-633: the instruction (with PRI-714's language directive) is the
+    // base-layer systemPrompt — it left the payload.
+    return { message, promptInput, systemPrompt: ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION + languageDirective };
   }
 }

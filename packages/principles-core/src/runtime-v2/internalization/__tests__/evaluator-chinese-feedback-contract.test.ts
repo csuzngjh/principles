@@ -153,10 +153,16 @@ function evaluatorOutput(
 }
 
 /** Scripted LLM adapter that records every prompt it receives. */
-function scriptedAdapter(payload: unknown, prompts: string[], runId: string): PDRuntimeAdapter {
+function scriptedAdapter(
+  payload: unknown,
+  runId: string,
+  record: { payloads: string[]; systemPrompts?: string[] },
+): PDRuntimeAdapter {
   return {
-    startRun: async (req: { inputPayload: unknown }) => {
-      prompts.push(String(req.inputPayload));
+    startRun: async (req: { inputPayload: unknown; systemPrompt?: string }) => {
+      record.payloads.push(String(req.inputPayload));
+      // PRI-633: the role/protocol instruction travels on the system channel.
+      record.systemPrompts?.push(String(req.systemPrompt));
       return { runId, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
     },
     pollRun: async () => ({ status: 'succeeded', runId }),
@@ -214,7 +220,7 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     const artificer1 = new ArtificerRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(artificerOutput(BAD_RULE_CODE, SCRIBE_ART, ART1_ID), [], 'run-art-1'),
+        runtimeAdapter: scriptedAdapter(artificerOutput(BAD_RULE_CODE, SCRIBE_ART, ART1_ID), 'run-art-1', { payloads: [] }),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultArtificerValidator(),
@@ -226,10 +232,11 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     // ── Round 1: evaluator needs_revision with CHINESE feedback ──
     await mkTask({ id: EVAL1_ID, kind: 'evaluator', deps: [ART1_ID] });
     const eval1Prompts: string[] = [];
+    const eval1SystemPrompts: string[] = [];
     const evaluator1 = new EvaluatorRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, 'pi-art-artificer-lang-1-run-1', 'needs_revision'), eval1Prompts, 'run-eval-1'),
+        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, 'pi-art-artificer-lang-1-run-1', 'needs_revision'), 'run-eval-1', { payloads: eval1Prompts, systemPrompts: eval1SystemPrompts }),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultEvaluatorValidator(),
@@ -251,16 +258,18 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     const eval1Result = await evaluator1.run(EVAL1_ID);
     expect(eval1Result.status).toBe('succeeded');
 
-    // (1) The zh-CN language directive is on the round-1 evaluator prompt,
-    //     with the review subject's nested field list and the PRI-630 ledger
-    //     echo guard.
+    // (1) The zh-CN language directive is on the round-1 evaluator SYSTEM
+    //     prompt (PRI-633: instruction left the payload), with the review
+    //     subject's nested field list and the PRI-630 ledger echo guard.
     expect(eval1Prompts).toHaveLength(1);
-    const eval1Prompt = eval1Prompts[0] ?? '';
-    expect(eval1Prompt).toContain('LANGUAGE DIRECTIVE');
-    expect(eval1Prompt).toContain('Simplified Chinese');
-    expect(eval1Prompt).toContain('codeReview.traceCoverage.gaps');
-    expect(eval1Prompt).toContain('adversarialCases[].rationale');
-    expect(eval1Prompt).toContain('requirementLedger[].statement MUST be copied verbatim');
+    expect(eval1SystemPrompts).toHaveLength(1);
+    const eval1SystemPrompt = eval1SystemPrompts[0] ?? '';
+    expect(eval1SystemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(eval1SystemPrompt).toContain('Simplified Chinese');
+    expect(eval1SystemPrompt).toContain('codeReview.traceCoverage.gaps');
+    expect(eval1SystemPrompt).toContain('adversarialCases[].rationale');
+    expect(eval1SystemPrompt).toContain('requirementLedger[].statement MUST be copied verbatim');
+    expect(eval1Prompts[0]).not.toContain('LANGUAGE DIRECTIVE');
 
     // (2) The repair task was seeded and carries the Chinese feedback.
     const repairTask = await stateManager.getTask(REPAIR_ID);
@@ -271,7 +280,7 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     const artificerRepair = new ArtificerRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(artificerOutput(GOOD_RULE_CODE, SCRIBE_ART, REPAIR_ID), repairPrompts, 'run-repair-1'),
+        runtimeAdapter: scriptedAdapter(artificerOutput(GOOD_RULE_CODE, SCRIBE_ART, REPAIR_ID), 'run-repair-1', { payloads: repairPrompts }),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultArtificerValidator(),
@@ -296,7 +305,7 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     const evaluator2 = new EvaluatorRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL2_ID, repairArtifact.artifactId, 'approved'), eval2Prompts, 'run-eval-2'),
+        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL2_ID, repairArtifact.artifactId, 'approved'), 'run-eval-2', { payloads: eval2Prompts }),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultEvaluatorValidator(),

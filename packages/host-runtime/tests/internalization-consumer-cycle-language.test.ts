@@ -94,11 +94,14 @@ async function seedDreamerTask(workspaceDir: string): Promise<string> {
 
 /**
  * LLM-boundary double: record every startRun inputPayload (the actual prompt
- * message), then satisfy the dreamer stage with a schema-valid DreamerOutput
- * so the real validator + artifact store complete the run.
+ * message) and its systemPrompt (PRI-633: the role/protocol instruction +
+ * language directive travel on the system channel), then satisfy the dreamer
+ * stage with a schema-valid DreamerOutput so the real validator + artifact
+ * store complete the run.
  */
-function spyDreamerBoundary(): string[] {
+function spyDreamerBoundary(): { messages: string[]; systemPrompts: string[] } {
   const messages: string[] = [];
+  const systemPrompts: string[] = [];
   const caps = {
     supportsStructuredJsonOutput: false,
     supportsToolUse: false,
@@ -112,6 +115,7 @@ function spyDreamerBoundary(): string[] {
   };
   vi.spyOn(PiAiRuntimeAdapter.prototype, 'startRun').mockImplementation(async function (this: unknown, input: StartRunInput) {
     messages.push(typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload));
+    systemPrompts.push(String(input.systemPrompt));
     return { runId: `run-${input.taskRef.taskId}`, runtimeKind: 'pi-ai', startedAt: new Date().toISOString() };
   });
   vi.spyOn(PiAiRuntimeAdapter.prototype, 'pollRun').mockImplementation(async (runId: string) => ({
@@ -149,7 +153,7 @@ function spyDreamerBoundary(): string[] {
   vi.spyOn(PiAiRuntimeAdapter.prototype, 'healthCheck').mockImplementation(async () => ({
     healthy: true, degraded: false, warnings: [], lastCheckedAt: new Date().toISOString(),
   }));
-  return messages;
+  return { messages, systemPrompts };
 }
 
 const logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
@@ -187,7 +191,7 @@ describe('runInternalizationConsumerCycle — outputLanguage reaches adapter.sta
   it('explicit principles.outputLanguage=en overrides the zh-CN default on the startRun message', async () => {
     const workspace = makeWorkspace('en');
     await seedDreamerTask(workspace);
-    const messages = spyDreamerBoundary();
+    const { messages, systemPrompts } = spyDreamerBoundary();
 
     const outcome = await runInternalizationConsumerCycle(workspace, {
       owner: 'test', logLabel: 'Test', logger, emitEvent: () => undefined,
@@ -197,16 +201,19 @@ describe('runInternalizationConsumerCycle — outputLanguage reaches adapter.sta
     expect(outcome.taskKind).toBe('dreamer');
     expect(messages).toHaveLength(1);
     const message = messages[0] ?? '';
-    expect(message).toContain('LANGUAGE DIRECTIVE');
-    expect(message).toContain('English');
-    expect(message).toContain('(candidates[].badDecision, candidates[].betterDecision, candidates[].rationale, candidates[].strategicPerspective)');
-    expect(message).not.toContain('Simplified Chinese');
+    const systemPrompt = systemPrompts[0] ?? '';
+    expect(systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(systemPrompt).toContain('English');
+    expect(systemPrompt).toContain('(candidates[].badDecision, candidates[].betterDecision, candidates[].rationale, candidates[].strategicPerspective)');
+    expect(systemPrompt).not.toContain('Simplified Chinese');
+    // PRI-633: the directive does not ride in the payload.
+    expect(message).not.toContain('LANGUAGE DIRECTIVE');
   }, 60_000);
 
   it('a config without principles.outputLanguage resolves the zh-CN default on the startRun message', async () => {
     const workspace = makeWorkspace();
     await seedDreamerTask(workspace);
-    const messages = spyDreamerBoundary();
+    const { messages, systemPrompts } = spyDreamerBoundary();
 
     const outcome = await runInternalizationConsumerCycle(workspace, {
       owner: 'test', logLabel: 'Test', logger, emitEvent: () => undefined,
@@ -215,9 +222,9 @@ describe('runInternalizationConsumerCycle — outputLanguage reaches adapter.sta
     expect(outcome.ran).toBe(true);
     expect(outcome.taskKind).toBe('dreamer');
     expect(messages).toHaveLength(1);
-    const message = messages[0] ?? '';
-    expect(message).toContain('LANGUAGE DIRECTIVE');
-    expect(message).toContain('Simplified Chinese');
-    expect(message).toContain('简体中文');
+    const systemPrompt = systemPrompts[0] ?? '';
+    expect(systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(systemPrompt).toContain('Simplified Chinese');
+    expect(systemPrompt).toContain('简体中文');
   }, 60_000);
 });

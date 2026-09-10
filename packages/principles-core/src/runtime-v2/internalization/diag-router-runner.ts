@@ -239,7 +239,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
 
   async invokeRuntime(taskId: string, context: DiagRouterContext): Promise<RunHandle> {
     const builder = new RouterPromptBuilder();
-    const { message } = builder.buildPrompt(
+    const { message, systemPrompt } = builder.buildPrompt(
       {
         rootCauseArtifactId: context.rootCauseArtifactId,
         rootCauseOutput: context.rootCauseOutput,
@@ -258,6 +258,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       contextItems: [],
       outputSchemaRef: 'diagnostician-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

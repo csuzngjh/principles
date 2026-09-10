@@ -874,7 +874,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     const intentContract = extractIntentContract(fullScribeArtifact);
 
     const builder = new ArtificerPromptBuilder();
-    const { message } = builder.buildPrompt({
+    const { message, systemPrompt } = builder.buildPrompt({
       contextMode: this.contextMode,
       behaviorExamplePack: this.behaviorExamplePack,
       taskId,
@@ -920,6 +920,7 @@ ${context.revisionFeedback}
       contextItems: [],
       outputSchemaRef: 'artificer-rule-output-v2',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

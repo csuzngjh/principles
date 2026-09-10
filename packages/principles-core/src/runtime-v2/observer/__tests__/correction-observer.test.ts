@@ -19,9 +19,10 @@ describe('CorrectionObserver', () => {
     ],
   };
 
-  it('correctly builds prompt', () => {
+  it('correctly builds prompt (role declaration moved to SYSTEM_PROMPT, PRI-633)', () => {
     const prompt = CorrectionObserver.buildPrompt(mockPayload);
-    expect(prompt).toContain('You are a correction keyword optimizer.');
+    expect(prompt).not.toContain('You are a correction keyword optimizer.');
+    expect(CorrectionObserver.SYSTEM_PROMPT).toBe('You are a correction keyword optimizer.');
     expect(prompt).toContain('wrong');
     expect(prompt).toContain('error');
   });

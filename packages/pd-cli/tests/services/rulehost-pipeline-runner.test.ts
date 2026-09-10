@@ -649,7 +649,8 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
 //
 // The PR's original fault class was "the parameter exists but is not wired".
 // These regressions drive the REAL pipeline and assert the LANGUAGE DIRECTIVE
-// on the actual inputPayload handed to adapter.startRun:
+// on the actual systemPrompt handed to adapter.startRun (PRI-633: the
+// instruction left the payload for the system channel):
 //   - explicit `principles.outputLanguage: 'en'` in the workspace config
 //     overrides the zh-CN default;
 //   - no config → the zh-CN default applies.
@@ -692,12 +693,17 @@ function writeLanguageConfig(dir: string, outputLanguage?: 'en'): void {
   fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), JSON.stringify(config));
 }
 
-function collectStartRunPayloads(adapter: ScriptedAdapter): string[] {
-  const payloads: string[] = [];
+function collectStartRunInputs(adapter: ScriptedAdapter): Array<{ taskId: string; outputSchemaRef?: string; payload: string; systemPrompt?: string }> {
+  const inputs: Array<{ taskId: string; outputSchemaRef?: string; payload: string; systemPrompt?: string }> = [];
   for (const input of adapter.startRunInputs.values()) {
-    if (typeof input.inputPayload === 'string') payloads.push(input.inputPayload);
+    inputs.push({
+      taskId: input.taskRef.taskId,
+      outputSchemaRef: input.outputSchemaRef,
+      payload: typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload),
+      systemPrompt: input.systemPrompt,
+    });
   }
-  return payloads;
+  return inputs;
 }
 
 describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messages (PRI-714 review fix)', () => {
@@ -723,30 +729,33 @@ describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messag
     });
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
 
-    const payloads = collectStartRunPayloads(adapter);
-    // Dreamer: dreamer-subject field list, English directive on the wire.
-    const dreamerMsg = payloads.find((p) => p.includes('dreamerInstruction') && p.includes('dreamer-lang-en-001'));
-    expect(dreamerMsg).toBeDefined();
-    expect(dreamerMsg).toContain('LANGUAGE DIRECTIVE');
-    expect(dreamerMsg).toContain('English');
-    expect(dreamerMsg).toContain('(candidates[].badDecision, candidates[].betterDecision, candidates[].rationale, candidates[].strategicPerspective)');
+    const inputs = collectStartRunInputs(adapter);
+    // Dreamer: dreamer-subject field list, English directive on the system channel.
+    const dreamer = inputs.find((i) => i.taskId.startsWith('dreamer'));
+    expect(dreamer).toBeDefined();
+    expect(dreamer?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(dreamer?.systemPrompt).toContain('English');
+    expect(dreamer?.systemPrompt).toContain('(candidates[].badDecision, candidates[].betterDecision, candidates[].rationale, candidates[].strategicPerspective)');
+    expect(dreamer?.payload).toContain('dreamer-lang-en-001');
+    expect(dreamer?.payload).not.toContain('LANGUAGE DIRECTIVE');
     // Philosopher: philosopher-subject field list, English directive.
-    const philosopherMsg = payloads.find((p) => p.includes('philosopherInstruction'));
-    expect(philosopherMsg).toBeDefined();
-    expect(philosopherMsg).toContain('LANGUAGE DIRECTIVE');
-    expect(philosopherMsg).toContain('English');
-    expect(philosopherMsg).toContain('(thesis, principleCandidate.title, principleCandidate.rationale, principleCandidate.scope, risks[])');
+    const philosopher = inputs.find((i) => i.taskId.includes('philosopher'));
+    expect(philosopher).toBeDefined();
+    expect(philosopher?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(philosopher?.systemPrompt).toContain('English');
+    expect(philosopher?.systemPrompt).toContain('(thesis, principleCandidate.title, principleCandidate.rationale, principleCandidate.scope, risks[])');
     // Evaluator: review-subject explicit nested paths + PRI-630 ledger echo rule.
-    const evaluatorMsg = payloads.find((p) => p.includes('evaluatorInstruction'));
-    expect(evaluatorMsg).toBeDefined();
-    expect(evaluatorMsg).toContain('LANGUAGE DIRECTIVE');
-    expect(evaluatorMsg).toContain('English');
-    expect(evaluatorMsg).toContain('codeReview.traceCoverage.gaps');
-    expect(evaluatorMsg).toContain('adversarialCases[].rationale');
-    expect(evaluatorMsg).toContain('requirementLedger[].statement MUST be copied verbatim');
+    const evaluator = inputs.find((i) => i.outputSchemaRef === 'evaluator-output-v1');
+    expect(evaluator).toBeDefined();
+    expect(evaluator?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(evaluator?.systemPrompt).toContain('English');
+    expect(evaluator?.systemPrompt).toContain('codeReview.traceCoverage.gaps');
+    expect(evaluator?.systemPrompt).toContain('adversarialCases[].rationale');
+    expect(evaluator?.systemPrompt).toContain('requirementLedger[].statement MUST be copied verbatim');
     // The explicit en must have fully replaced the zh-CN default everywhere.
-    for (const p of payloads) {
-      expect(p, 'Simplified Chinese leaked into an en-configured pipeline').not.toContain('Simplified Chinese');
+    for (const i of inputs) {
+      expect(i.systemPrompt ?? '', 'Simplified Chinese leaked into an en-configured pipeline').not.toContain('Simplified Chinese');
+      expect(i.payload, 'Simplified Chinese leaked into an en-configured pipeline').not.toContain('Simplified Chinese');
     }
   }, 60_000);
 
@@ -766,9 +775,11 @@ describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messag
     });
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
 
-    const dreamerMsg = collectStartRunPayloads(adapter).find((p) => p.includes('dreamer-lang-zh-001'));
-    expect(dreamerMsg).toBeDefined();
-    expect(dreamerMsg).toContain('LANGUAGE DIRECTIVE');
-    expect(dreamerMsg).toContain('Simplified Chinese');
+    const inputs = collectStartRunInputs(adapter);
+    const dreamer = inputs.find((i) => i.taskId.startsWith('dreamer'));
+    expect(dreamer).toBeDefined();
+    expect(dreamer?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
+    expect(dreamer?.systemPrompt).toContain('Simplified Chinese');
+    expect(dreamer?.payload).toContain('dreamer-lang-zh-001');
   }, 60_000);
 });

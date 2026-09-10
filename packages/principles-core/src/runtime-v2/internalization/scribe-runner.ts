@@ -217,7 +217,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     }
 
     const builder = new ScribePromptBuilder({ coreGrounding, outputLanguage: this.resolvedOptions.outputLanguage });
-    const { message } = builder.buildPrompt({
+    const { message, systemPrompt } = builder.buildPrompt({
       taskId,
       contextHash: context.contextHash,
       philosopherArtifact: parsedPhilosopherArtifact,
@@ -240,6 +240,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       contextItems: [],
       outputSchemaRef: 'scribe-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+      systemPrompt,
     });
   }
 

@@ -8,13 +8,17 @@
  *
  * ## Contract
  *
- * buildPrompt() takes DreamerPromptBuilderInput and returns a JSON string
- * to be passed as `inputPayload` in StartRunInput.
+ * buildPrompt() takes DreamerPromptBuilderInput and returns a build result
+ * whose `message` is the JSON string to be passed as `inputPayload` in
+ * StartRunInput, and whose `systemPrompt` is the base-layer system prompt
+ * (role + protocol) to pass via `StartRunInput.systemPrompt` (PRI-633).
  *
  * ## Constraints
  *
- * - Output is ONLY JSON — no markdown, no file ops, no tool calls
- * - NO extraSystemPrompt field — system prompt is agent profile's responsibility
+ * - Message payload is ONLY task data (JSON) — no markdown, no file ops, no tool calls
+ * - Role/protocol instructions travel as the base systemPrompt layer, NOT in
+ *   the user payload (PRI-633); the profile's configured systemPrompt remains
+ *   the append layer owned by the agent profile (DPB-07, as revised by PRI-633)
  * - buildPrompt() is a pure function — no DB calls, no side effects
  */
 
@@ -39,12 +43,17 @@ export interface DreamerPromptInput {
   contextHash: string;
   contextRefs: readonly string[];
   predecessorOutput: unknown;
-  dreamerInstruction: string;
 }
 
 export interface DreamerPromptBuildResult {
   readonly message: string;
   readonly promptInput: DreamerPromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `dreamerInstruction`; now delivered via the system
+   * channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 /**
@@ -121,11 +130,10 @@ export class DreamerPromptBuilder {
       contextHash: input.contextHash,
       contextRefs: input.contextRefs,
       predecessorOutput: input.predecessorOutput,
-      dreamerInstruction,
     };
 
     const message = JSON.stringify(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: dreamerInstruction };
   }
 }

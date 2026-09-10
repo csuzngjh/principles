@@ -19,13 +19,18 @@ export interface ScribePromptInput {
   contextHash: string;
   sourcePhilosopherArtifactId: string;
   philosopherArtifact: unknown;
-  scribeInstruction: string;
   promptContractVersion: string;
 }
 
 export interface ScribePromptBuildResult {
   readonly message: string;
   readonly promptInput: ScribePromptInput;
+  /**
+   * PRI-633: base-layer system prompt (role + protocol). Previously embedded
+   * in the payload as `scribeInstruction`; now delivered via the system
+   * channel by the runtime adapter.
+   */
+  readonly systemPrompt: string;
 }
 
 /**
@@ -139,12 +144,11 @@ export class ScribePromptBuilder {
       contextHash: input.contextHash,
       sourcePhilosopherArtifactId: input.sourcePhilosopherArtifactId,
       philosopherArtifact: input.philosopherArtifact,
-      scribeInstruction,
       promptContractVersion: SCRIBE_PROMPT_CONTRACT_VERSION,
     };
 
     const message = JSON.stringify(promptInput);
 
-    return { message, promptInput };
+    return { message, promptInput, systemPrompt: scribeInstruction };
   }
 }

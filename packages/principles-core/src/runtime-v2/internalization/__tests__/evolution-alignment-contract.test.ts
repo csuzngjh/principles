@@ -74,7 +74,7 @@ describe('1. Intent Consistency — contract flows scribe → prompt → rule ar
 
   it('the artificer prompt carries the exact contract the scribe produced (byte-identical intent anchor)', () => {
     const builder = new ArtificerPromptBuilder();
-    const { promptInput } = builder.buildPrompt({
+    const { promptInput, systemPrompt } = builder.buildPrompt({
       contextMode: 'v1',
       taskId: 'artificer-1',
       contextHash: 'hash-1',
@@ -87,8 +87,8 @@ describe('1. Intent Consistency — contract flows scribe → prompt → rule ar
     expect(message).toContain('avoid the agent guessing configuration contracts');
     // The intent anchor block must instruct contract precedence over repair
     // instructions — the alignment rule itself is part of the contract.
-    expect(promptInput.artificerInstruction).toContain('OWNER INTENT CONTRACT');
-    expect(promptInput.artificerInstruction).toContain('intentContract wins');
+    expect(systemPrompt).toContain('OWNER INTENT CONTRACT');
+    expect(systemPrompt).toContain('intentContract wins');
   });
 
   it('pre-contract scribe artifacts produce prompts WITHOUT the contract key (backward compatible)', () => {
@@ -303,7 +303,7 @@ describe('2. Failure Attribution — where/why/what-next classification', () => 
 describe('3. Repair feedback circuit — PRI-700 factors B + C', () => {
   it('priorValidatorErrors reaches the serialized artificer prompt (the dead loop is broken)', () => {
     const builder = new ArtificerPromptBuilder();
-    const { promptInput, message } = builder.buildPrompt({
+    const { promptInput, message, systemPrompt } = builder.buildPrompt({
       contextMode: 'v1',
       taskId: 'artificer-repair-r1',
       contextHash: 'hash-r1',
@@ -326,12 +326,12 @@ describe('3. Repair feedback circuit — PRI-700 factors B + C', () => {
     // The verbatim rejection reasons are IN the prompt the repair LLM sees —
     // attempt N+1 is no longer a zero-information retry.
     expect(message).toContain('expectedDecision \'propose_correction\' is forbidden');
-    expect(promptInput.artificerInstruction).toContain('PRIOR OUTPUT-CONTRACT REJECTIONS');
+    expect(systemPrompt).toContain('PRIOR OUTPUT-CONTRACT REJECTIONS');
   });
 
   it('the case-id vocabulary note is part of the prompt contract (factor C)', () => {
     const builder = new ArtificerPromptBuilder();
-    const { promptInput } = builder.buildPrompt({
+    const { systemPrompt } = builder.buildPrompt({
       contextMode: 'v1',
       taskId: 'artificer-repair-r1',
       contextHash: 'hash-r1',
@@ -339,9 +339,9 @@ describe('3. Repair feedback circuit — PRI-700 factors B + C', () => {
       scribeArtifact: scribeOutputWithContract(),
       repairFeedback: 'Required changes:\n1. allow the evidence-availability boundary cases (v2-unavailable, v2-truncated, v2-alias)',
     });
-    expect(promptInput.artificerInstruction).toContain('ADVERSARIAL CASE VOCABULARY NOTE');
-    expect(promptInput.artificerInstruction).toContain('v2-*');
-    expect(promptInput.artificerInstruction).toContain('NEVER respond to a case id by declaring');
+    expect(systemPrompt).toContain('ADVERSARIAL CASE VOCABULARY NOTE');
+    expect(systemPrompt).toContain('v2-*');
+    expect(systemPrompt).toContain('NEVER respond to a case id by declaring');
   });
 
   it('parseLastValidatorErrors guards the trust boundary (malformed data → null, never a crash)', () => {
