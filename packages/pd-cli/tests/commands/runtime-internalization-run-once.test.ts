@@ -86,6 +86,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   ArtificerRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
+  buildArtificerHostSemanticContext: (registry) => ({ hostKinds: [], tools: registry.hostMappings() }),
   EvaluatorRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
@@ -197,6 +198,10 @@ const { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mock
   const mockCreateEvaluatorRuntimeContext = vi.fn().mockReturnValue({
     ok: true,
     gateDeps: { evaluateInSandbox: vi.fn() },
+    // PRI-741: the context resolution also carries the single registry
+    // snapshot the parity projection derives from.
+    registry: { resolve: vi.fn(), hostMappings: vi.fn().mockReturnValue([{ rawToolName: 'write', canonicalKind: 'write' }]) },
+    hostKinds: ['openclaw'],
   });
   const mockCreateRolloutGovernanceDeps = vi.fn().mockReturnValue({
     dispatchActivation: vi.fn(),
@@ -204,7 +209,9 @@ const { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mock
   });
   const mockResolveWorkspaceHostToolSemantics = vi.fn().mockReturnValue({
     ok: true,
-    registry: { resolve: vi.fn() },
+    // PRI-741: the projection reads the host layer via hostMappings() — the
+    // mock registry carries it like a real buildToolSemanticRegistry product.
+    registry: { resolve: vi.fn(), hostMappings: vi.fn().mockReturnValue([{ rawToolName: 'write', canonicalKind: 'write' }]) },
     hostKinds: ['openclaw'],
   });
   return { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mockResolveWorkspaceHostToolSemantics };

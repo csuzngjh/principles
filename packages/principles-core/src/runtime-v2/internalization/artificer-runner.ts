@@ -40,7 +40,11 @@ import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../erro
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
 import { extractIntentContract } from './intent-contract.js';
-import { ArtificerPromptBuilder, type ArtificerDreamerContext } from './artificer-prompt-builder.js';
+import { ArtificerPromptBuilder, type ArtificerDreamerContext, type ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
+
+// PRI-741: the host semantic projection DTO travels with the runner options,
+// so it is re-exported alongside them (barrel exports it from this module).
+export type { ArtificerHostSemanticContext };
 import { ARTIFICER_MANIFEST, ARTIFICER_REPAIR_MANIFEST } from './context-manifests.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import type { PIArtifactStore } from './pi-artifact.js';
@@ -571,12 +575,20 @@ function validateContextModeOutput(
 export interface ArtificerRunnerOptions extends PeerRunnerOptions {
   /** Effective PD config for feature flag resolution (ADR-0019). */
   readonly effectiveConfig?: EffectivePdConfig;
+  /**
+   * PRI-741: optional host semantic projection (real host tool names + kinds
+   * from the ToolSemanticRegistry host layer). Forwarded to the prompt builder
+   * so generation anchors on canonicalKind + host-dispatchable tool names.
+   * Undefined = prompt unchanged (backward compatible).
+   */
+  readonly hostSemanticContext?: ArtificerHostSemanticContext;
 }
 
 export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerRuleOutput> {
   private readonly validator: ArtificerValidator;
   private readonly contextMode: 'v1' | 'v2';
   private readonly behaviorExamplePack: BehaviorExamplePack | undefined;
+  private readonly hostSemanticContext: ArtificerHostSemanticContext | undefined;
 
   constructor(deps: ArtificerRunnerDeps, options: ArtificerRunnerOptions) {
     super(deps, options, {
@@ -591,6 +603,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     this.validator = deps.validator;
     this.contextMode = deps.contextMode ?? 'v1';
     this.behaviorExamplePack = deps.behaviorExamplePack;
+    this.hostSemanticContext = options.hostSemanticContext;
   }
 
   /**
@@ -898,6 +911,10 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // generation anchors to the explicit intent. extract returns null for
       // pre-contract artifacts → undefined keeps the prompt unchanged.
       intentContract: intentContract ?? undefined,
+      // PRI-741: forward the host semantic projection so generation matches by
+      // canonicalKind and host-dispatchable tool names (undefined = prompt
+      // unchanged when no host declaration is available).
+      hostSemanticContext: this.hostSemanticContext,
       // PRI-714: language directive for implementationSummary/risks
       // (undefined = no directive; never touches implementationCode or
       // goldenTraceCases params).

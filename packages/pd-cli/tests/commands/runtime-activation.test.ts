@@ -2035,7 +2035,7 @@ describe('handleRuntimeActivationDispatch — PRI-634-F R2 host provenance refus
   });
 
   it('code_tool_hook dispatch threads the resolved registry into RuleHostWriter and gateDeps', async () => {
-    const registry = { version: 1, hasHostLayer: true, resolve: () => 'write', lookup: () => null, hasHostTool: () => true };
+    const registry = { version: 1, hasHostLayer: true, resolve: () => 'write', lookup: () => null, hasHostTool: () => true, hostMappings: () => [{ rawToolName: 'write', canonicalKind: 'write' as const }] };
     vi.mocked(resolveWorkspaceToolSemantics).mockReturnValueOnce({ ok: true, registry, hostKind: 'openclaw' });
     await handleRuntimeActivationDispatch({
       workspace: WS,

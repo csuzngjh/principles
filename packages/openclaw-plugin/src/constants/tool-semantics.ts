@@ -38,14 +38,14 @@ function toMappings(names: readonly string[], canonicalKind: CanonicalKind): Too
   return names.map((rawToolName) => ({ rawToolName, canonicalKind }));
 }
 
-// Gate-reachable write family: LOW_RISK_WRITE_TOOL_NAMES + the high-risk
-// write names (WRITE_TOOLS in ./tools.js = low-risk + delete_file/move_file).
-const HIGH_RISK_WRITE_TOOL_NAMES: readonly string[] = ['delete_file', 'move_file'];
-
+// PRI-741: every entry below must be a name the OpenClaw hook really
+// dispatches (host layer = dispatchability evidence for `hasHostTool`).
+// Generic LLM vocabulary names (write_file, bash, delete_file, ...) were
+// removed from constants/tools.ts — declaring them here let rules reference
+// tools that can never fire.
 export const OPENCLAW_TOOL_SEMANTIC_MAPPINGS: readonly ToolSemanticMappingV1[] = Object.freeze([
-  ...toMappings(BASH_TOOL_NAMES, 'execute'),          // bash, run_shell_command, exec, execute, shell, cmd
-  ...toMappings(LOW_RISK_WRITE_TOOL_NAMES, 'write'),  // write, write_file, edit, edit_file, replace, apply_patch, insert, patch
-  ...toMappings(HIGH_RISK_WRITE_TOOL_NAMES, 'write'), // delete_file, move_file
+  ...toMappings(BASH_TOOL_NAMES, 'execute'),          // exec
+  ...toMappings(LOW_RISK_WRITE_TOOL_NAMES, 'write'),  // write, edit, apply_patch
   ...toMappings(AGENT_TOOL_NAMES, 'agent'),           // sessions_spawn
 ]);
 

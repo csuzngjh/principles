@@ -48,6 +48,7 @@ import {
   type OwnerOverrideResumePlan,
 } from './owner-review.js';
 import { EvaluatorPromptBuilder, deriveRequirementLedger, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
+import type { ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
 import { reconcileLineageEcho, type InternalizationChannel, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
@@ -72,6 +73,16 @@ import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
 // alias/path/combination) to defend against false-positive blocks.
 import { generateV2ContextAdversarialCases } from './v2-adversarial-cases.js';
 import { canonicalizeToolKind } from './rule-context-v2.js';
+import type { ToolSemanticMappingV1 } from './tool-semantic-registry.js';
+
+/** PRI-741: length of the shared case-insensitive prefix of two tool names. */
+function commonPrefixLength(a: string, b: string): number {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  let i = 0;
+  while (i < x.length && i < y.length && x[i] === y[i]) i += 1;
+  return i;
+}
 
 // ── Evaluator-specific context ────────────────────────────────────────────────
 
@@ -288,6 +299,13 @@ export interface EvaluatorRunnerOptions extends PeerRunnerOptions {
    */
   readonly hostToolCatalog?: HostToolCatalogFacts;
   /**
+   * PRI-741: host semantic projection (real host tool names + kinds from the
+   * SAME registry provenance as gateDeps). Used ONLY to generate the
+   * host-name parity replay case — the prompt itself is unchanged. Undefined =
+   * no host-alias case is generated (observable skip event).
+   */
+  readonly hostSemanticContext?: ArtificerHostSemanticContext;
+  /**
    * PR B (ADR-0019 pattern, mirrors ArtificerRunner): effective config for
    * feature flag resolution. Without it the evaluator's flag helpers
    * (progressive_evaluator / context_manifest_budget) always saw undefined and
@@ -414,6 +432,8 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   private readonly repairTaskSeeder: ((params: SeedArtificerRepairParams) => Promise<string>) | null;
   /** PRI-630: runtime-authoritative tool facts; null = catalog unavailable (degraded rule in prompt) */
   private readonly hostToolCatalog: HostToolCatalogFacts | null;
+  /** PRI-741: host semantic projection for the host-name parity replay case; null = skipped. */
+  private readonly hostSemanticContext: ArtificerHostSemanticContext | null;
   /**
    * PRI-714: owner's preferred language for review fields, forwarded into
    * the evaluator prompt (language directive on summary/concerns/…).
@@ -436,6 +456,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     this.repairLoopEnabledResolver = deps.isRepairLoopEnabled ?? null;
     this.repairTaskSeeder = deps.seedArtificerRepairTask ?? null;
     this.hostToolCatalog = options.hostToolCatalog ?? null;
+    this.hostSemanticContext = options.hostSemanticContext ?? null;
     this.outputLanguage = options.outputLanguage;
   }
 
@@ -2527,7 +2548,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // set below then relies entirely on the auto-generated v2 cases.
     const llmCases = isEvaluatorOutputV2(output) ? (output.adversarialCases ?? []) : [];
     const v2Cases = this.generateV2CasesFromArtificer(affectedTools, positiveCases, taskId, runId);
-    const mergedAdversarialCases: readonly AdversarialCase[] = [...v2Cases, ...llmCases];
+    // PRI-741: host-name parity case — the rule must reach the same decision
+    // under the REAL host tool name as under the author's vocabulary.
+    const hostAliasCase = this.generateHostAliasCase(goldenTraceCases, taskId, runId);
+    const mergedAdversarialCases: readonly AdversarialCase[] = [
+      ...v2Cases,
+      ...(hostAliasCase !== null ? [hostAliasCase] : []),
+      ...llmCases,
+    ];
 
     // (4) No adversarial cases (neither v2-generated nor LLM-supplied) →
     // nothing to replay. codeReview may still be present (passive review only).
@@ -2750,6 +2778,84 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const buildResult = buildGoldenTraceFromArtificer({ cases: rawCases });
     if (!buildResult.ok) return [];
     return buildResult.trace.cases.filter((c) => c.kind === 'positive');
+  }
+
+  /**
+   * PRI-741: host-name parity case. The author's golden trace uses their own
+   * tool-name vocabulary (often generic LLM baseline names); the rule must
+   * reach the SAME decision when the real host dispatches one of ITS names
+   * with the same canonicalKind. The base case is the first NEGATIVE (block)
+   * case — a rule matching by author tool-NAME equality silently never fires
+   * under the host's real name, which shows up exactly as a missed block;
+   * an allow-expectation variant would pass trivially. The host name comes
+   * from the host semantic projection (options.hostSemanticContext — the same
+   * registry provenance as gateDeps); the author kind comes from the core
+   * baseline canonicalizer, so no second semantic truth is introduced.
+   *
+   * Returns null when no variant applies. All skips EXCEPT one are observable
+   * (skip event with structured reason + nextAction, rc-9): a host projection
+   * that is absent/empty, golden cases that are missing or structurally
+   * invalid, a base case without a usable tool name, and no host tool sharing
+   * the author's kind all emit `host_alias_case_skipped`. When the author's
+   * name is ALREADY host-real the variant is redundant (the replay already
+   * exercises the host surface), so that path returns null silently.
+   */
+  private generateHostAliasCase(
+    rawGoldenCases: unknown,
+    taskId: string,
+    runId: string,
+  ): AdversarialCase | null {
+    const hostContext = this.hostSemanticContext;
+    const skip = (reason: string, nextAction: string): null => {
+      this.emitEvent('host_alias_case_skipped', taskId, { runId, reason, nextAction });
+      return null;
+    };
+    if (hostContext === null || hostContext.tools.length === 0) {
+      return skip('no_host_semantic_context', 'wire_host_semantic_context_from_the_workspace_host_declaration');
+    }
+    if (!Array.isArray(rawGoldenCases) || rawGoldenCases.length === 0) {
+      return skip('no_validated_golden_case', 'verify_artificer_emitted_structurally_valid_golden_trace_cases');
+    }
+    const build = buildGoldenTraceFromArtificer({ cases: rawGoldenCases });
+    if (!build.ok || build.trace.cases.length === 0) {
+      return skip('no_validated_golden_case', 'verify_artificer_emitted_structurally_valid_golden_trace_cases');
+    }
+    const { cases } = build.trace;
+    const base = cases.find((c) => c.kind === 'negative' && c.expectedDecision === 'block') ?? cases[0];
+    if (!base || typeof base.toolName !== 'string' || base.toolName.trim() === '') {
+      return skip('no_base_case_tool_name', 'verify_artificer_emitted_at_least_one_golden_trace_case');
+    }
+    const authorNameIsHostReal = hostContext.tools.some((tool) => tool.rawToolName === base.toolName);
+    if (authorNameIsHostReal) {
+      // Normal outcome for post-v5 artifacts (the prompt requires host-real
+      // case names) — emitted so operators can distinguish "parity already
+      // covered" from a silent skip.
+      return skip('author_name_already_host_real', 'none — the replay already exercises the host dispatch surface');
+    }
+    const authorKind = canonicalizeToolKind(base.toolName);
+    // Among same-kind host tools, prefer the name most similar to the
+    // author's (longest common prefix): edit_file → edit, write_file → write.
+    // A rule may legitimately discriminate tools within a kind, so the first
+    // same-kind mapping is not always a faithful substitute.
+    const sameKind = hostContext.tools.filter((tool) => tool.canonicalKind === authorKind && tool.rawToolName !== base.toolName);
+    let hostCandidate: ToolSemanticMappingV1 | undefined;
+    for (const tool of sameKind) {
+      if (hostCandidate === undefined || commonPrefixLength(tool.rawToolName, base.toolName) > commonPrefixLength(hostCandidate.rawToolName, base.toolName)) {
+        hostCandidate = tool;
+      }
+    }
+    if (hostCandidate === undefined) {
+      return skip(`no_host_tool_with_kind:${authorKind}`, 'verify_the_host_declaration_covers_the_kind_the_rule_targets');
+    }
+    return {
+      caseId: 'v2-host-alias',
+      attackType: 'boundary',
+      toolName: hostCandidate.rawToolName,
+      params: base.params,
+      expectedDecision: base.expectedDecision,
+      rationale: `PRI-741 host-name parity: the same action dispatched under the real host tool name '${hostCandidate.rawToolName}' (${hostCandidate.canonicalKind}) must reach the same decision ('${base.expectedDecision}') as under the author's vocabulary '${base.toolName}' — match by canonicalKind, not by author tool-name equality.`,
+      ...(base.ruleContext !== undefined ? { ruleContext: base.ruleContext } : {}),
+    };
   }
 
   /**

@@ -265,6 +265,7 @@ export type {
   ArtificerRunnerOptions,
   ResolvedArtificerRunnerOptions,
   ArtificerRunnerDeps,
+  ArtificerHostSemanticContext,
 } from './artificer-runner.js';
 
 export {
@@ -272,6 +273,9 @@ export {
   resolveArtificerRunnerOptions,
   DEFAULT_ARTIFICER_RUNNER_OPTIONS,
 } from './artificer-runner.js';
+
+// PRI-741: host semantic projection DTO builder (sanitized for prompt use).
+export { buildArtificerHostSemanticContext } from './artificer-prompt-builder.js';
 
 // ── Evaluator Runner (PRI-EVAL) — MVP-Quiet: de-surfaced from internal barrel (PRI-458) ──
 // Types/classes remain in evaluator-output.ts, evaluator-runner.ts, and evaluator-prompt-builder.ts.

@@ -123,7 +123,7 @@ var meta = { name: 'perf-budget', version: '1', ruleId: '${RULE_ID}', coversCond
     implementationCode: implCode,
     goldenTrace: { traceId: 'trace-perf', cases: [], createdAt: now, version: 1 },
     ruleHostGateDecision: 'accepted_shadow',
-    affectedTools: ['write_file'],
+    affectedTools: ['write'],
     painReasonSummary: 'perf budget test',
   };
   db.prepare(`
@@ -181,7 +181,7 @@ describe('PRI-494 — Full-hook perf budget with ERR-088 execution proof', () =>
     connection.close();
 
     const event = {
-      toolName: 'write_file',
+      toolName: 'write',
       params: { file_path: '/etc/passwd', content: 'x' },
     };
     const hookContext = {

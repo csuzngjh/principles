@@ -81,7 +81,7 @@ function evaluate(input, helpers) {
   if (!input.context || input.context.history.status === 'unavailable') {
     return { decision: 'allow', matched: false, reason: 'R_RBW_001: context unavailable, fail-soft' };
   }
-  if (input.action.toolName === 'write_file' && input.context.facts.priorReadOfTarget === 'no') {
+  if (input.action.toolName === 'write' && input.context.facts.priorReadOfTarget === 'no') {
     return { decision: 'block', matched: true, reason: 'R_RBW_001: read before write required' };
   }
   return { decision: 'allow', matched: false, reason: 'R_RBW_001: ok' };
@@ -134,7 +134,7 @@ function insertV2RuleArtifact(ruleCode: string = V2_RULE_CODE): void {
       version: 1,
     },
     ruleHostGateDecision: 'accepted_shadow',
-    affectedTools: ['write_file'],
+    affectedTools: ['write'],
     painReasonSummary: 'Dogfood: read before write',
     requiresContextVersion: 2,
   });
@@ -217,14 +217,14 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
     // 4. Record some NON-read tool call (so history is non-empty but target not read)
     wctx.trajectory.recordToolCall({
       sessionId: SESSION_ID,
-      toolName: 'write_file',
+      toolName: 'write',
       outcome: 'success',
       paramsJson: { file_path: 'src/other.ts', content: 'other' },
     });
 
     // 5. Call handleBeforeToolCall with write_file to a DIFFERENT unread path
     const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write_file',
+      toolName: 'write',
       params: { file_path: 'src/auth.ts', content: 'modified' },
     };
     const warn = vi.fn();
@@ -273,7 +273,7 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
 
     // 2. Call handleBeforeToolCall with write_file to the SAME path
     const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write_file',
+      toolName: 'write',
       params: { file_path: 'src/auth.ts', content: 'modified' },
     };
     const warn = vi.fn();
@@ -309,14 +309,14 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
     // 4. Record a non-read tool call
     wctx.trajectory.recordToolCall({
       sessionId: SESSION_ID,
-      toolName: 'write_file',
+      toolName: 'write',
       outcome: 'success',
       paramsJson: { file_path: 'src/other.ts', content: 'other' },
     });
 
     // 5. Call handleBeforeToolCall with write_file to unread path
     const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write_file',
+      toolName: 'write',
       params: { file_path: 'src/auth.ts', content: 'modified' },
     };
     const warn = vi.fn();

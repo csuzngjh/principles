@@ -93,7 +93,7 @@ describe('Gate Rule Host Only Pipeline', () => {
       });
 
       const event = {
-        toolName: 'bash',
+        toolName: 'exec',
         params: { command: 'git push --force' },
       };
 
@@ -175,7 +175,7 @@ describe('Gate Rule Host Only Pipeline', () => {
       });
 
       handleBeforeToolCall(
-        { toolName: 'bash', params: { command: 'ls -la' } } as any,
+        { toolName: 'exec', params: { command: 'ls -la' } } as any,
         { workspaceDir, sessionId } as any,
       );
 
@@ -190,7 +190,7 @@ describe('Gate Rule Host Only Pipeline', () => {
       });
 
       const event = {
-        toolName: 'bash',
+        toolName: 'exec',
         params: { command: 'ls -la' },
       };
 
@@ -210,7 +210,7 @@ describe('Gate Rule Host Only Pipeline', () => {
       });
 
       const event = {
-        toolName: 'bash',
+        toolName: 'exec',
         params: { command: 'rm -rf node_modules' },
       };
 

@@ -1,10 +1,15 @@
 /**
- * OpenClaw Tool Semantic Declaration tests — PRI-634-F Phase 1
+ * OpenClaw Tool Semantic Declaration tests — PRI-634-F Phase 1, corrected in
+ * PRI-741.
  *
- * Pins the host-layer closure of the vocabulary drift documented in
- * docs/pri-634-f-baseline-report.md §2: shell/cmd/insert/patch/delete_file/
- * move_file are real OpenClaw gate tools that previously degraded to
- * canonicalKind 'other' while the gate classified them as bash/write.
+ * The original header pinned the belief that shell/cmd/insert/patch/
+ * delete_file/move_file are real OpenClaw gate tools (pri-634-f-baseline-report
+ * §2). The 2026-09-11 OpenClaw source ground truth overturns that: the file
+ * mutation family is exactly write/edit/apply_patch (tool-mutation-names.ts),
+ * the shell tool is `exec` (bash etc. are config aliases that never reach the
+ * hook payload), and no delete_file/move_file tools exist. Declaring those
+ * phantom names in the HOST layer made `hasHostTool` pass for rules that can
+ * never fire — the exact silent-no-trigger failure class PRI-741 removes.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -12,20 +17,18 @@ import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../../
 import { BASH_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, AGENT_TOOL_NAMES } from '../../src/constants/tools.js';
 
 describe('OPENCLAW_TOOL_SEMANTICS — host declaration', () => {
-  it('resolves every bash alias the gate dispatches (shell/cmd included)', () => {
+  it('resolves the real shell tool (exec) the gate dispatches', () => {
     for (const toolName of BASH_TOOL_NAMES) {
-      expect(OPENCLAW_TOOL_SEMANTICS.resolve(toolName), `bash alias '${toolName}'`).toBe('execute');
+      expect(OPENCLAW_TOOL_SEMANTICS.resolve(toolName), `shell tool '${toolName}'`).toBe('execute');
     }
-    expect(OPENCLAW_TOOL_SEMANTICS.resolve('shell')).toBe('execute');
-    expect(OPENCLAW_TOOL_SEMANTICS.resolve('cmd')).toBe('execute');
+    expect(BASH_TOOL_NAMES).toEqual(['exec']);
   });
 
-  it('resolves every write-family tool the gate dispatches', () => {
+  it('resolves the real write family (write/edit/apply_patch) the gate dispatches', () => {
     for (const toolName of LOW_RISK_WRITE_TOOL_NAMES) {
       expect(OPENCLAW_TOOL_SEMANTICS.resolve(toolName), `write tool '${toolName}'`).toBe('write');
     }
-    expect(OPENCLAW_TOOL_SEMANTICS.resolve('delete_file')).toBe('write');
-    expect(OPENCLAW_TOOL_SEMANTICS.resolve('move_file')).toBe('write');
+    expect([...LOW_RISK_WRITE_TOOL_NAMES].sort()).toEqual(['apply_patch', 'edit', 'write']);
   });
 
   it('resolves agent tools', () => {
@@ -34,24 +37,28 @@ describe('OPENCLAW_TOOL_SEMANTICS — host declaration', () => {
     }
   });
 
-  it('R2: semantic classification still resolves generic/read names via the baseline, but hasHostTool denies them', () => {
+  it('PRI-741: phantom names are gone from the host layer — semantic classification survives via the baseline, dispatchability is denied', () => {
     // Semantic resolvability (classification) and host dispatchability
-    // (existence) are SEPARATE axes (review P1): execute_command/read_file
-    // classify fine — and rules declared against them must still be REJECTED
-    // because OpenClaw never dispatches/routes them to the gate.
+    // (existence) are SEPARATE axes (review P1): write_file/bash/delete_file
+    // classify fine via the core baseline — and rules declared against them
+    // must be REJECTED at activation because OpenClaw never dispatches them.
+    for (const phantom of ['write_file', 'edit_file', 'replace', 'insert', 'patch', 'bash', 'shell', 'cmd', 'delete_file', 'move_file']) {
+      expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool(phantom), `phantom '${phantom}'`).toBe(false);
+    }
+    expect(OPENCLAW_TOOL_SEMANTICS.resolve('write_file')).toBe('write');
+    expect(OPENCLAW_TOOL_SEMANTICS.resolve('bash')).toBe('execute');
     expect(OPENCLAW_TOOL_SEMANTICS.resolve('execute_command')).toBe('execute');
     expect(OPENCLAW_TOOL_SEMANTICS.resolve('read_file')).toBe('read');
-    expect(OPENCLAW_TOOL_SEMANTICS.resolve('exec')).toBe('execute');
     expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('execute_command')).toBe(false);
     expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('read_file')).toBe(false);
     expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('grep')).toBe(false);
   });
 
-  it('R2: every gate-routed tool family is host-declared (a rule on them can really fire)', () => {
-    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('shell')).toBe(true);
-    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('cmd')).toBe(true);
-    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('write_file')).toBe(true);
-    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('delete_file')).toBe(true);
+  it('every gate-routed tool family is host-declared (a rule on them can really fire)', () => {
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('exec')).toBe(true);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('write')).toBe(true);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('edit')).toBe(true);
+    expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('apply_patch')).toBe(true);
     expect(OPENCLAW_TOOL_SEMANTICS.hasHostTool('sessions_spawn')).toBe(true);
     expect(OPENCLAW_TOOL_SEMANTICS.hasHostLayer).toBe(true);
   });
@@ -70,5 +77,14 @@ describe('OPENCLAW_TOOL_SEMANTICS — host declaration', () => {
     for (const toolName of [...BASH_TOOL_NAMES, ...LOW_RISK_WRITE_TOOL_NAMES, ...AGENT_TOOL_NAMES]) {
       expect(declared.has(toolName), `'${toolName}' in constants/tools.ts is missing a semantic mapping`).toBe(true);
     }
+  });
+
+  it('PRI-741: hostMappings() projects exactly the real host dispatch surface', () => {
+    const byName = new Map(OPENCLAW_TOOL_SEMANTICS.hostMappings().map((m) => [m.rawToolName, m.canonicalKind]));
+    expect([...byName.keys()].sort()).toEqual(['apply_patch', 'edit', 'exec', 'sessions_spawn', 'write']);
+    expect(byName.get('write')).toBe('write');
+    expect(byName.get('exec')).toBe('execute');
+    expect(byName.get('sessions_spawn')).toBe('agent');
+    expect(byName.has('write_file')).toBe(false);
   });
 });

@@ -92,7 +92,7 @@ function insertRuleArtifact(artifactId: string, ruleId: string, implementationCo
     `task-${artifactId}`,
     `principle-${ruleId}`,
     ruleId,
-    JSON.stringify({ ruleId, implementationCode, affectedTools: ['write_file'], ruleHostGateDecision: 'accepted_shadow' }),
+    JSON.stringify({ ruleId, implementationCode, affectedTools: ['write'], ruleHostGateDecision: 'accepted_shadow' }),
     now,
     now,
   );
@@ -172,7 +172,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-a')).toBeUndefined();
+    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-a')).toBeUndefined();
   });
 
   it('Test A2: the RuleHost report carries a structured skipped activation', async () => {
@@ -185,7 +185,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
       logger: { warn: () => undefined },
     }).getRuleHost({ warn: () => undefined } as never);
     const report = ruleHost.evaluateDetailed({
-      action: { toolName: 'write_file', normalizedPath: '/etc/passwd', paramsSummary: { path: '/etc/passwd' } },
+      action: { toolName: 'write', normalizedPath: '/etc/passwd', paramsSummary: { path: '/etc/passwd' } },
       workspace: { isRiskPath: false },
       session: { sessionId: 'sess-a2', currentGfi: 0 },
       evolution: { epTier: 1 },
@@ -212,7 +212,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     expect(before?.blockedAttempts).toBe(0);
     expect(before?.currentGfi).toBe(0);
 
-    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-b-gfi')).toBeUndefined();
+    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-b-gfi')).toBeUndefined();
 
     const after = getSession('sess-b-gfi');
     expect(after?.blockedAttempts).toBe(0);
@@ -226,7 +226,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-c')).toBeUndefined();
+    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-c')).toBeUndefined();
 
     // The pain pipeline is only reachable through recordGateBlockAndReturn,
     // which is never called: no gate_block event, and no pain_detected ever
@@ -247,7 +247,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-d')).toBeUndefined();
+    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-d')).toBeUndefined();
 
     // No rule_enforced event (the Principle never ran) — the audit trail is
     // preserved via rulehost_evaluated + rulehost_skipped instead.
@@ -267,7 +267,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    expect(runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-e')).toBeUndefined();
+    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-e')).toBeUndefined();
     const skipped = bufferedEvents().find((event) => event.type === 'rulehost_skipped');
     expect(skipped).toBeDefined();
     expect(JSON.stringify(skipped)).toContain('legacy_rule_contract_dependency');
@@ -284,7 +284,7 @@ describe('non-regression: normal RuleHost block behavior is unchanged', () => {
     insertRuleArtifact(NORMAL_ARTIFACT_ID, NORMAL_RULE_ID, NORMAL_BLOCK_CODE);
     await insertLiveActivation(NORMAL_ACTIVATION_ID, NORMAL_ARTIFACT_ID, NORMAL_RULE_ID);
 
-    const result = runGate('write_file', { file_path: '/etc/passwd', content: 'x' }, 'sess-normal') as PluginHookBeforeToolCallResult;
+    const result = runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-normal') as PluginHookBeforeToolCallResult;
 
     expect(result.block).toBe(true);
     expect(result.blockReason).toContain('NORMAL_PRINCIPLE_BLOCK');
