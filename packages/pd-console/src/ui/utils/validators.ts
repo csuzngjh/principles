@@ -911,6 +911,92 @@ export interface GovernanceQueueData {
   generatedAt?: string;
 }
 
+// ── Failed task detail (GET /api/v1/failed-tasks/:id) ───────────────────────
+// PRI-747 F22 / PRI-749: the server endpoint (task + run history) has existed
+// since the failed-task observability spec; this validator + the api.ts
+// wrapper connect the UI to it. Server contract: { task: TaskRecord, runs:
+// RunRecord[], lastError, pendingAgentDraft } — pendingAgentDraft is always
+// null today (not wired server-side) and is intentionally not projected.
+
+/** One execution attempt of a failed task (RunRecord projection). */
+export interface FailedTaskDetailRun {
+  runId: string;
+  attemptNumber: number;
+  executionStatus: string;
+  startedAt: string;
+  endedAt: string | null;
+  reason: string | null;
+  errorCategory: string | null;
+}
+
+/** Validated shape of GET /api/v1/failed-tasks/:id. */
+export interface FailedTaskDetailData {
+  taskId: string;
+  taskKind: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string | null;
+  attemptCount: number;
+  maxAttempts: number;
+  lastError: string | null;
+  runs: FailedTaskDetailRun[];
+}
+
+function validateFailedTaskDetailRun(v: unknown): FailedTaskDetailRun | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'runId') || !isString(v.runId)) return null;
+  if (!Object.hasOwn(v, 'attemptNumber') || !isNumber(v.attemptNumber)) return null;
+  if (!Object.hasOwn(v, 'executionStatus') || !isString(v.executionStatus)) return null;
+  if (!Object.hasOwn(v, 'startedAt') || !isString(v.startedAt)) return null;
+  const endedAt = readNullableString(v, 'endedAt');
+  if (!endedAt.valid) return null;
+  const reason = readNullableString(v, 'reason');
+  if (!reason.valid) return null;
+  const errorCategory = readNullableString(v, 'errorCategory');
+  if (!errorCategory.valid) return null;
+  return {
+    runId: v.runId,
+    attemptNumber: v.attemptNumber,
+    executionStatus: v.executionStatus,
+    startedAt: v.startedAt,
+    endedAt: endedAt.value,
+    reason: reason.value,
+    errorCategory: errorCategory.value,
+  };
+}
+
+export function validateFailedTaskDetail(v: unknown): FailedTaskDetailData | null {
+  if (!isObject(v)) return null;
+  if (!Object.hasOwn(v, 'task') || !isObject(v.task)) return null;
+  if (!Object.hasOwn(v, 'runs') || !Array.isArray(v.runs)) return null;
+  const t = v.task;
+  if (!Object.hasOwn(t, 'taskId') || !isString(t.taskId)) return null;
+  if (!Object.hasOwn(t, 'taskKind') || !isString(t.taskKind)) return null;
+  if (!Object.hasOwn(t, 'status') || !isString(t.status)) return null;
+  if (!Object.hasOwn(t, 'createdAt') || !isString(t.createdAt)) return null;
+  const updatedAt = readNullableString(t, 'updatedAt');
+  if (!updatedAt.valid) return null;
+  if (!Object.hasOwn(t, 'attemptCount') || !isNumber(t.attemptCount)) return null;
+  if (!Object.hasOwn(t, 'maxAttempts') || !isNumber(t.maxAttempts)) return null;
+  const taskLastError = readNullableString(t, 'lastError');
+  if (!taskLastError.valid) return null;
+  const topLastError = readNullableString(v, 'lastError');
+  if (!topLastError.valid) return null;
+  const runs = validateArray(v.runs, validateFailedTaskDetailRun);
+  if (runs === null) return null;
+  return {
+    taskId: t.taskId,
+    taskKind: t.taskKind,
+    status: t.status,
+    createdAt: t.createdAt,
+    updatedAt: updatedAt.value,
+    attemptCount: t.attemptCount,
+    maxAttempts: t.maxAttempts,
+    lastError: topLastError.value ?? taskLastError.value,
+    runs,
+  };
+}
+
 // ── Recovery result (Governance Recovery Actions v1) ─────────────────────────
 
 export interface RecoveryResultData {
