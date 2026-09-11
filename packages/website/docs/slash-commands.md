@@ -23,7 +23,6 @@ All commands start with `/pd-` (short aliases start with `/pd` + a single letter
 | [`/pd-help`](#pd-help) | `/pdh` | Setup | List commands in-session |
 | [`/pd-status`](#pd-status) | — | Monitoring | View GFI friction index and mental mode |
 | [`/pd-pain`](#pd-pain) | — | Monitoring | Manually report a pain signal |
-| [`/pd-evolution-status`](#pd-evolution-status) | — | Monitoring | View principle evolution loop status |
 | [`/pd-context`](#pd-context) | — | Config | Control context injection (Thinking OS / project focus) |
 | [`/pd-focus`](#pd-focus) | — | Config | Manage CURRENT_FOCUS.md (compress/rollback) |
 | [`/pd-rollback`](#pd-rollback) | — | Rollback | Rollback a misjudged empathy event penalty |
@@ -245,31 +244,6 @@ be gated by the admission threshold until evidence exists.
 
 ---
 
-### `/pd-evolution-status`
-
-View the full state of the principle evolution loop: control plane (GFI/gate), evolution plane (queue/tasks), principle stats, workflow funnel.
-
-**Usage**
-
-```
-/pd-evolution-status
-```
-
-**Output Contents**
-
-- **Control Plane**: Current GFI, GFI sources, recent gate blocks/bypasses
-- **Evolution**: Evolution queue status (pending/in_progress/completed), current evolution task
-- **Principles**: Principle stats (candidate/probation/active/archived counts)
-- **Workflow Funnel**: Pass rates at each workflow stage
-
-**When to Use**
-
-- When you want to know how many principle candidates are waiting for review
-- When you want to confirm that evolution tasks are progressing normally
-- When troubleshooting "why isn't my principle being activated"
-
----
-
 ## Configuration Commands
 
 ### `/pd-context`
@@ -420,7 +394,7 @@ Rollback a principle and add its pattern to the blacklist (preventing it from be
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `principle-id` | Yes | Principle ID (e.g., `P_001`, from `/pd-evolution-status` or `PRINCIPLES.md`) |
+| `principle-id` | Yes | Principle ID (e.g., `P_001`, from `PRINCIPLES.md`) |
 | `reason` | No | Reason for rollback (default: "manual rollback") |
 
 **Examples**
@@ -534,7 +508,7 @@ Rejecting a sample isn't just "not approved" — it triggers a `correction_rejec
 ```
 1. /pd-pain Agent edited without reading the file first, overwrote my code
 2. /pd-status        # Check if GFI rose
-3. (Wait for PD background diagnosis, or use /pd-evolution-status to view queue)
+3. (Wait for PD background diagnosis)
 ```
 
 ### Workflow 3: Agent is Over-fatigued
@@ -569,9 +543,8 @@ PD misjudged a "user frustration" and GFI rose incorrectly:
 ### Workflow 6: Principle Governance
 
 ```
-1. /pd-evolution-status           # See what candidate principles exist
-2. (Review principle candidates in the console)
-3. /pd-principle-rollback P_003   # Rollback an inappropriate activated principle
+1. (Review principle candidates in the console)
+2. /pd-principle-rollback P_003   # Rollback an inappropriate activated principle
 ```
 
 ---
@@ -600,7 +573,6 @@ Edit your workspace's `.pd/config.yaml` and set `language: zh`. Or set it in the
 
 ### How do I view all activated principles?
 
-- Run `/pd-evolution-status` for stats
 - Read `~/.openclaw/workspace/.principles/PRINCIPLES.md` directly
 
 ---

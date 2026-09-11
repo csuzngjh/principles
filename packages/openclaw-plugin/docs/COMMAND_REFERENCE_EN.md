@@ -8,28 +8,8 @@
 
 | Command | Purpose |
 |---|---|
-| `/pd-evolution-status` | View EP tier, GFI, pain flag, and gate events |
 | `/pd-status empathy` | Inspect empathy/frustration event statistics |
 | `/pd-rollback last` | Roll back the latest empathy penalty |
-
----
-
-## `/pd-evolution-status`
-
-### What it shows
-
-- `EP Tier`: Current evolution tier (Seed → Sprout → Sapling → Tree → Forest)
-- `Session GFI`: Current session GFI and peak
-- `GFI Sources`: Currently attributable friction sources
-- `Pain Flag`: Whether a pain flag is active
-- `Gate Events`: Recent block / bypass counts
-- `Queue / Directive`: Evolution queue and directive state
-
-### Important notes
-
-- This is the main operator entry point into the control plane.
-- It reads canonical `.state` and tries to merge live session state and buffered events when available.
-- When data is incomplete, it surfaces `partial` or warnings instead of silently printing `0`.
 
 ---
 

@@ -45,21 +45,6 @@ Use this when the empathy system penalized the wrong thing.
 
 This affects empathy-related GFI only. It does not erase the whole session state.
 
-### `/pd-evolution-status`
-
-Use this as the main operator dashboard for the new internalization pipeline.
-
-It shows:
-
-- current and peak session GFI
-- recent pain signals
-- recent gate blocks and bypasses
-- evolution queue state
-- principle counts
-- internalization route recommendations such as `prompt`, `code_tool_hook` (RuleHost), or `defer_archive`
-
-Read this command first if you are unsure whether the system is blocked by fatigue, pain, or code-implementation policy.
-
 ## Code Implementation Workflow
 
 This workflow is for operators reviewing code implementations generated or maintained by the system.
@@ -149,10 +134,9 @@ Archiving is stronger than disabling. It is intended for old or obsolete impleme
 
 When the system has produced a new code candidate, use this order:
 
-1. `/pd-evolution-status`
-2. `/pd-promote-impl list`
-3. `/pd-promote-impl show <implId>`
-4. `/pd-promote-impl <implId>`
+1. `/pd-promote-impl list`
+2. `/pd-promote-impl show <implId>`
+3. `/pd-promote-impl <implId>`
 
 If the promoted implementation regresses:
 
@@ -162,7 +146,7 @@ If the promoted implementation regresses:
 
 ## How To Read Internalization Routes
 
-`/pd-evolution-status` may show route recommendations like:
+Internalization route recommendations look like:
 
 - `prompt`
 - `code_tool_hook` (RuleHost)
@@ -215,7 +199,6 @@ Use:
 
 ```text
 /pd-status
-/pd-evolution-status
 ```
 
 That is enough for most day-to-day use.
@@ -251,5 +234,4 @@ For normal use, remember only this:
 
 1. use `/pd-status` when the assistant is stuck
 2. use `/pd-rollback last` when empathy penalized the wrong thing
-3. use `/pd-evolution-status` to inspect the new internalization pipeline
-4. use `/pd-promote-impl ...` and related implementation commands only when you are operating candidate code implementations
+3. use `/pd-promote-impl ...` and related implementation commands only when you are operating candidate code implementations
