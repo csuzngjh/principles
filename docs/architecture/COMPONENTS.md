@@ -212,7 +212,6 @@ PD 系统有 5 类组件：
 | `PiAiRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/pi-ai-runtime-adapter.ts` | ✅ |
 | `TestDoubleRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/test-double-runtime-adapter.ts` | ✅ |
 | `PrincipleTreeLedgerAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/principle-tree-ledger-adapter.ts` | ✅ |
-| `RuntimeSelector` | 🔵 Service | core | `runtime-v2/runtime-selector.ts` | ✅ |
 | `ClaudeCodeRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/claude-code-runtime-adapter.ts` | ❌ 待建（ADR-0008）|
 | `CodexCliRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/codex-cli-runtime-adapter.ts` | ❌ 待建（ADR-0008）|
 | `GeminiCliRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/gemini-cli-runtime-adapter.ts` | ❌ 待建（ADR-0008）|
@@ -408,7 +407,7 @@ PD 系统有 5 类组件：
 | `/pd-init` | `commands/strategy.ts` | ✅ |
 | `/pd-bootstrap` | `commands/capabilities.ts` | ✅ |
 | `/pd-research` | `commands/capabilities.ts` | ✅ |
-| `/pd-status` / `/pd-evolution-status` | `commands/evolution-status.ts` | ✅ |
+| `/pd-status` | `commands/pain.ts` | ✅ |
 | `/pd-reflect` | `commands/pd-reflect.ts` | ✅ |
 | `/pd-promote-impl` / `/pd-disable-impl` / `/pd-archive-impl` / `/pd-rollback-impl` | `commands/promote-impl.ts` 等 | ✅ |
 | `/pd-principle-rollback` | `commands/principle-rollback.ts` | ✅ |

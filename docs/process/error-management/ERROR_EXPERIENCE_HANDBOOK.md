@@ -79,6 +79,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-113 | Generator reset/write/deploy loops leak stale state when cleanup base, write base, and residue-enumeration base are three different directories | PRI-634-F |
 | ERR-114 | Semantic resolvability used as an existence proof — fallback/generic lookup members pass validators that should only accept authoritative host declarations | PRI-634-F PR #1495 R2 |
 | ERR-122 | Benchmark fixture deploys leak the answer through files outside the intended task surface — lab-side README/package.json and tutorial-style verifier comments ship to the subject agent's workspace; audit the DEPLOYED FILE LIST as the answer surface, enforced by a deploy-shape assertion + hint scan | PRI-684 PR #1584 |
+| ERR-124 | Test mutates a process-global singleton without try/finally restore — sibling tests run under hijacked state | PRI-723 / PR #1596 review |
 
 ---
 
@@ -142,7 +143,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-055 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
 | ERR-079 | Concurrency-primitive hardening gaps (age-based lock eviction, busy-spin retry) silently re-open the data-loss class the primitive was added to prevent | PRI-459 / PR #1045 |
 | ERR-080 | Control (size bound / path check) applied to the RAW input form instead of the CANONICAL/transformed form — bound is bypassable (escaped output exceeds budget; path traversal evades a /prefix match) | PRI-467 / PR #1059, PR #1302 |
-| ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
+| ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059; PRI-727 / PR #1604 |
 | ERR-089 | Fix addresses primary failure path but leaves sibling failure branches (catch/!ok/throw) with stale state, wrong command path, or CLI contract violation | PR #1124 |
 | ERR-093 | New log sink emits full external identifier despite an established minimization convention | PRI-516 / PR #1230 |
 | ERR-103 | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior | RuleCode Owner Live Decision SPEC |
@@ -174,6 +175,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-119 | Route/identity matcher extracted from legacy prefix code keeps the prefix form — adjacent-but-different routes inherit the exemption | PRI-643 / PR #1530 review |
 | ERR-120 | ReDoS fix removes ONE backtracking factor, keeps the unbounded quantifier — alert stays open; "alert auto-closes post-merge" asserted but never verified as acceptance evidence | PRI-627 / PR #1529 closeout + PR #1532 |
 | ERR-111 | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them | PRI-581 |
+| ERR-125 | New/refactored files under an eslint-ignored surface (create-principles-disciple `scripts/*.mjs`) ship dead code and lint-class defects because local lint never scans them — CodeQL on the PR is the only net; self-check unused symbols or extend lint coverage before handoff | PRI-727 / PR #1604 review (CodeQL) |
 
 ---
 
@@ -491,6 +493,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Recurrence**: 2026-06-27 PR #1079 — `migrate-illegal-expected-decision.ts` docstring claimed "默认 dry-run" but `parseArgs()` defaulted to write mode (no `--write` flag required). Operator running the script with no flags would mutate the DB. Fixed by flipping to `--write` opt-in.
   - 2026-08-21 RuleCode Owner promotion self-review (no Linear issue): the shared decision service initially had no explicit dry-run result, and the first real readiness wiring opened `RuntimeStateManager` in writable mode even though no promotion commit was intended. Future completion of all readiness checks could therefore have made `--dry-run` ambiguous, while initialization itself could migrate schema or create WAL state. Fixed by adding a first-class `would_promote` service result that never calls the atomic commit port and by constructing the manager with `readonly: true` for dry-run; production CLI tests assert the real constructor option and zero legacy mutation. Lesson: dry-run safety must cover both business mutation and connection/bootstrap side effects.
 
+  - 2026-09-10 PRI-729 / PR #1601 (CodeRabbit, CHANGES_REQUESTED): three comments still said the two update-authority flags "default off" while `feature-flag-contract.ts` graduated BOTH to `enabled: true` on 2026-09-07, and an absent `.pd/config.yaml` value resolves to the registry default. A reader trusting the comments concludes an unconfigured install never reaches the ReleaseManager — the exact routing question the PR documented; PRI-698 had flagged the same drift one document over. Lesson: the default lives in `feature-flag-contract.ts` while the prose lives anywhere — grep the registry before writing any `default <value>` claim.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-10",
+    "pattern": "EP-04",
+    "invariant": "comment-claims-flag-default-that-registry-contradicts",
+    "severity": "P2",
+    "escaped": "verify-merge",
+    "caughtBy": "pr-review",
+    "guard": "none"
+  }
+  -->
+
 ---
 **[ERR-024]** | Security validator exists but is not wired into enforcement path — defense is illusory
 
@@ -501,9 +516,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
-- PR #1551 round 2 (R2): fresh 派生的出界处置（selectedEffect）未持久化，resume 从缺失的瞬时变量重新推导 → 同一裁决跨重启产生不同副作用。修法：处置在 intent 落库前派生并随 completion intent 持久化，resume 读 intent 重放效果（rollout reviewer 既有模板）。
-- 2026-08-26 PRI-606: axiom builders tested in isolation but `prompt.ts` injected via `evolutionReducer` (empty on fresh installs); barrel missed re-export — T-01..T-10 never injected. Fixed: registry-direct + barrel + empty-reducer regression test.
-  - 2026-08-24 PR #1389 review round 2 (dormant consumer activation — mirror of the PRI-510 flavor): to forward two NEW telemetry events, `createPainSignalBridge` started passing `eventEmitter` into `new PainSignalBridge({...})` — an option the factory had NEVER passed on main, so the bridge's four PRE-EXISTING emission sites (`candidate_admission_decision`, `candidate_dreamer_task_seeded`, `candidate_not_internalizable`, `candidate_dreamer_task_seed_failed`) were dormant in production. The unconditional forwarding wrapper woke all four: routine admission decisions got re-emitted as `degradation_triggered` (semantic mislabeling of the degradation channel), and flag-off behavior changed despite the PR contract "flag off = zero effective surface". Fixed by extracting `mapBridgeTelemetryToStoreEvent`, which forwards ONLY the two persistence events; a negative-control test asserts the four pre-existing event names map to null (dormancy preserved). Rule of thumb: when STARTING to pass a previously-dormant optional dependency/handler into a construction path, grep ALL of the dependency's consumption sites (`this.eventEmitter?.…`), not just the newly added ones — every dormant site inherits the new wiring's channel and semantics. Route each site intentionally or filter to the intended events, and ship a negative-control test proving the unintended sites stay dormant.
+- PR #1551 R2 (compressed; full text → ERROR_ARCHIVE.md): fresh 派生的出界处置未随 completion intent 持久化，resume 重推导致跨重启裁决漂移 — 处置在落库前派生并持久化，resume 重放效果。
+- 2026-08-26 PRI-606 (compressed; full text → ERROR_ARCHIVE.md): axiom builders tested in isolation but never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
+  - 2026-08-24 PR #1389 (compressed; full text → ERROR_ARCHIVE.md): dormant-consumer activation — forwarding two NEW telemetry events via a previously-unpassed optional dep woke four pre-existing dormant emission sites under the wrong channel; forward only intended events + negative-control test asserting dormant sites stay null. Grep ALL consumption sites when starting to pass a dormant dep.
   - 2026-08-19 PR #1358 external review round 5 (verdict drift, compressed; full text → ERROR_ARCHIVE.md): crash-recovery re-consulted the LLM instead of the durably persisted `runnerDecision`, overwriting verdicts whose side effects had already materialized; fixed with the atomic `completionIntent` authority protocol + `maybeResumePendingIntent` resume gate. Rule of thumb: every re-entry path must treat a durably recorded decision as the authority — never re-consult a non-deterministic advisor for a decision already recorded but not yet applied; enumerate every branch that persists the decision and every side effect that changes consumable governance state.
   - 2026-08-19 PR #1358 final-review blocker (compressed; full text → ERROR_ARCHIVE.md): succeeded-transition reconciliation was gated on a resource constructed after an early return, so the idle path never ran the budget; construct the budget's dependency before all early returns.
   - 2026-07-04 PRI-510 (PR#1188, compressed; full text → ERROR_ARCHIVE.md): EvaluatorRunnerDeps optional deps passed at only 2 of the construction sites — repair loop was dead code at runtime; centralize dep construction in one helper.
@@ -636,10 +651,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 115 |
-| Last updated | 2026-09-10 |
+| Total lessons | 117 |
+| Last updated | 2026-09-11 |
 | Top category | Schema & Type |
-| Recurring errors | 60 |
+| Recurring errors | 62 |
 
 ---
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist
@@ -921,6 +936,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-25
 - **Recurrence**: None
   - 2026-08-31 PRI-631 / PR #1462: Owner resolution checked a digest before a task-only CAS, allowing evidence rows to change in the final gap. Fixed with one SQLite mutation conditioned on each reviewed artifact's id, source, lineage and content; barrier regression proves no write.
+  - 2026-09-11 PRI-727 / PR #1604 (CodeQL): exists-then-read flavor — a release publish script gated five file reads behind `existsSync`/`statSync` pre-checks; a swap between check and read is acted on with stale assumptions (CodeQL flagged 2 of 5). Fixed by reading first and classifying the error (`ENOENT` = absent, else fail loud) at ALL five sites — fix the family, not the line.
 
 ---
 **[ERR-082]** | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped
@@ -952,20 +968,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
   - 2026-09-04 PRI-672 / PR #1511 (build-scope recurrence): pd-console gained a deep import of `create-principles-disciple/dist/update/release-manager-authority.js`, but the root `build` script never built the installer package — clean CI failed with TS2307 in the pd-console build, quick-check release producers, and the component smoke tests, while local runs were masked by the prebuilt dist (same class as the 2026-08-26 PRI-595~603 build-order recurrence; the variant here is build SCOPE — the package was absent from the shared chain entirely, not ordered late). Fixed by adding `create-principles-disciple` to the root build script and verifying with a clean-CI simulation: remove the dist, run the root build, typecheck pd-console green. Prevention rule: a new cross-package import of another package's `dist` (runtime or type-level) must add that package to the root build chain (or the consuming job's build steps) in the SAME PR.
-  - 2026-08-26 PRI-595~603 / PR #1419 (build-order + test-env recurrence): host-runtime gained a new runtime dep on `@principles/install-layout` but the root build chain and several CI jobs still built host-runtime before install-layout — clean CI checkouts failed with TS2307 while local runs were masked by leftover `dist` (same class as the 2026-08-24 PRI-583 recurrence). Separately, the new pd-cli telemetry test isolated the machine-scope consent store with `USERPROFILE` only, a no-op on Linux CI (`os.homedir()` reads `HOME`) — passed on Windows, failed on Linux (same class as the 2026-08-15 PRI-526 recurrence). Fixed by dependency-first build ordering in every CI chain and setting both `HOME` and `USERPROFILE` in the test.
-  - 2026-08-24 PRI-583 / PR #1406 (install-layout/delivery flavor): a new shared `@principles/install-layout` contract was wired into selected source consumers but not the clean-CI build order, npm publication workflow, Console updater, host-set manifest merge, or host-scoped uninstall lifecycle. Local residual `dist` files masked missing dependency builds. Fixed by auditing every producer/consumer/delivery/cleanup path, adding dependency-first CI/publish wiring, and exercising clean packaged installation plus host-union/uninstall regressions. Related published-artifact aspect: ERR-040.
-  - 2026-08-27 PRI-612 / PR #1426 (vi.mock factory variant): a new barrel export (`PD_TASK_STATUSES` on `@principles/core/runtime-v2`) was consumed by an existing pd-cli command whose test file replaces the WHOLE barrel with a bare `vi.mock` factory — the factory lacked the new export, vitest's strict mock threw "No export is defined on the mock", and 19 tests failed on CI. The local pre-push run missed it because a neighboring (wrong) test directory was executed instead of the exact mocking test path. Fixed by spreading `importOriginal` in the factory (pure constants stay authentic, only stateful classes mocked). Prevention trigger (g): when adding ANY new export to a barrel that production importers consume, grep `vi.mock('<barrel>'` across all packages and either add the export to each factory or convert the factory to `importOriginal` spread — and run the mocking tests by their exact path, not a directory neighbor.
-  - 2026-08-21 RuleCode Owner Live Decision full-suite review (no Linear issue): the new `rulecode-safety-circuit.ts` correctly belonged to the OpenClaw plugin I/O boundary, but the implementation updated neither duplicated plugin-core anti-growth allowlist. Core and plugin full suites failed even though targeted safety tests passed. Fixed by classifying the file in both architecture guards with the same I/O rationale. Prevention: every new plugin-core file must update and run both `principles-core` architecture regression and `openclaw-plugin` anti-growth tests.
-  - 2026-08-26 PRI-595~603 / PR #1419 (build-order + test-env recurrence): host-runtime gained a new runtime dep on `@principles/install-layout` but the root build chain and several CI jobs still built host-runtime before install-layout — clean CI checkouts failed with TS2307 while local runs were masked by leftover `dist` (same class as the 2026-08-24 PRI-583 recurrence). Separately, the new pd-cli telemetry test isolated the machine-scope consent store with `USERPROFILE` only, a no-op on Linux CI (`os.homedir()` reads `HOME`) — passed on Windows, failed on Linux (same class as the 2026-08-15 PRI-526 recurrence). Fixed by dependency-first build ordering in every CI chain and setting both `HOME` and `USERPROFILE` in the test.
-  - 2026-08-24 PRI-583 / PR #1406 (install-layout/delivery flavor): a new shared `@principles/install-layout` contract was wired into selected source consumers but not the clean-CI build order, npm publication workflow, Console updater, host-set manifest merge, or host-scoped uninstall lifecycle. Local residual `dist` files masked missing dependency builds. Fixed by auditing every producer/consumer/delivery/cleanup path, adding dependency-first CI/publish wiring, and exercising clean packaged installation plus host-union/uninstall regressions. Related published-artifact aspect: ERR-040.
-  - 2026-08-21 RuleCode Owner Live Decision full-suite review (no Linear issue): the new `rulecode-safety-circuit.ts` correctly belonged to the OpenClaw plugin I/O boundary, but the implementation updated neither duplicated plugin-core anti-growth allowlist. Core and plugin full suites failed even though targeted safety tests passed. Fixed by classifying the file in both architecture guards with the same I/O rationale. Prevention: every new plugin-core file must update and run both `principles-core` architecture regression and `openclaw-plugin` anti-growth tests.
-  - 2026-08-21×3 RuleCode Owner Live Decision reviews: architecture-guard classification missed for new plugin-core file; empty optional note string broke the shared SQLite read contract; structured identity narrowed to enums. Each fixed with contract round-trip/anti-growth regressions.
-  - 2026-08-15 PRI-526: test-file env fixture refactor missed an in-process sibling reading real HOME; fix sets HOME/USERPROFILE in-test and verifies under clean condition.
+  - 2026-09-03 / adhoc-20260904-runtime-update-guards (dev-machine test isolation leak -> real runtime corruption): after a canonical reinstall created ~/.pd/runtime on the dev machine, the pd-console update route tests' legacy fixtures resolved the REAL canonical install (os.homedir() was not yet pinned; OPENCLAW_HOME injection alone cannot override canonical resolution), so a mocked /apply-full "tarball" stub (fake version 2.0.0, no package name) was copied into the real runtime, corrupting console/dist/server.js, plugin/package.json (false "already latest", blocked future updates), core/plugin entry files, and core/pd-cli package identity. Fixes: (1) pin os.homedir() to the fixture in all update-route suites (931739a1); (2) production now refuses staged packages that do not self-identify as principles-disciple with valid semver BEFORE any copy (staged_package_invalid, /apply + /apply-full); (3) fixture-isolation sentinel test (resolved currentVersion must equal the fixture's, never a real machine install) plus identity-refusal negative tests. Prevention: any test suite that can mutate installed trees must fail loud when its environment-isolation pins stop working; update routes must validate the staged package identity before the first production write.
   - 2026-08-31 PRI-631 / PR #1462: a Console E2E inherited local Owner identity but clean CI had none. Fixed by explicit Playwright server identity vars and a clean-env rerun.
+  - 2026-08-27 PRI-612 / PR #1426: vi.mock factory variant — a new barrel export was missing from a bare vi.mock factory; fixed by importOriginal spread and running the mocking tests by exact path, not a directory neighbor.
+  - 2026-08-26 PRI-595~603 / PR #1419: build-order + test-env recurrence — dependency-first CI build ordering for a new install-layout dep; set both HOME and USERPROFILE in env-sensitive tests.
+  - 2026-08-24 PRI-583 / PR #1406: install-layout/delivery flavor — producer/consumer/delivery/cleanup paths audited and wired; clean packaged installation regression. (Related published-artifact aspect: ERR-040.)
+  - 2026-08-21×2 RuleCode Owner Live Decision full-suite reviews: a new plugin-core file updated neither duplicated anti-growth allowlist — classified in both architecture guards with the same I/O rationale.
+  - 2026-08-21×3 RuleCode Owner Live Decision reviews: architecture-guard classification missed for new plugin-core file; empty optional note string broke the shared SQLite read contract; structured identity narrowed to enums. Each fixed with contract round-trip/anti-growth regressions.
   - 2026-08-18 PR #1358: environment-sensitive assertion expected one specific error subclass; fix = skipIf on missing precondition or accept failure-class family.
+  - 2026-08-15 PRI-526: test-file env fixture refactor missed an in-process sibling reading real HOME; fix sets HOME/USERPROFILE in-test and verifies under clean condition.
   - 2026-08-13 PRI-523×5: shared kernel wiring omitted host-owned exclusion/enrichment and changed sync→async convention; fixes return host-neutral metadata + preserve exact reasons; audit covers sync/async semantics too.
   - 2026-07-01~04 PR #1137/#1162/#1182/#1183: status enum, default profile name, package rename, and homedir-based path defaults each missed same/cross-package validators and tests pinned to old values.
-  - 2026-09-03 / adhoc-20260904-runtime-update-guards (dev-machine test isolation leak -> real runtime corruption): after a canonical reinstall created ~/.pd/runtime on the dev machine, the pd-console update route tests' legacy fixtures resolved the REAL canonical install (os.homedir() was not yet pinned; OPENCLAW_HOME injection alone cannot override canonical resolution), so a mocked /apply-full "tarball" stub (fake version 2.0.0, no package name) was copied into the real runtime, corrupting console/dist/server.js, plugin/package.json (false "already latest", blocked future updates), core/plugin entry files, and core/pd-cli package identity. Fixes: (1) pin os.homedir() to the fixture in all update-route suites (931739a1); (2) production now refuses staged packages that do not self-identify as principles-disciple with valid semver BEFORE any copy (staged_package_invalid, /apply + /apply-full); (3) fixture-isolation sentinel test (resolved currentVersion must equal the fixture's, never a real machine install) plus identity-refusal negative tests. Prevention: any test suite that can mutate installed trees must fail loud when its environment-isolation pins stop working; update routes must validate the staged package identity before the first production write.
 
 ---
 **[ERR-084]** | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA
@@ -996,14 +1009,35 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
-- **Recurrence**: 2026-08-13 PRI-523 C1.1 spec review: the production OpenClaw BDD seeded a Runtime V2 activation only, then asserted its unique text appeared once. That signal could not exercise or prove the legacy/Runtime V2 overlap branch, so the test stayed green while shared exclusion metadata misreported `all_deduped_against_legacy` as `no_validated_activations`. Fixed by seeding the identical ID/text in the real legacy probation reducer and Runtime V2 SQLite, asserting one combined prompt occurrence, absence of a duplicate Runtime V2 directive, and the persisted exact skip reason/next action. 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
+- **Recurrence**: (older inline recurrences compressed; full text → ERROR_ARCHIVE.md) 2026-08-13 PRI-523 C1.1: production-BDD seeded only a Runtime V2 activation then asserted its unique text — could not prove the legacy/Runtime V2 overlap branch; seed both paths, assert per-path unique signals. 2026-07-22 PRI-520 / PR #1249: a fail-loud contract test must assert BOTH the surfaced error text AND the preserved original outcome. 2026-07-15 PRI-516: fixture override destructured but never applied while tests mutated the real mock — remove dead overrides. 2026-07-04 PR #1182: non-unique UPDATE-by-painId + pagination-past-end false-empty — latest-row subquery + total-based emptiness. (2026-06-30/07-01/07-02/07-03 compressions unchanged.)
 - PR #1551 round 2 (R3/R5): 非唯一代理信号冒充目标判定——lineageResolvable（仅上游 artificer 存在）当"证据来源可达"，applicability 条目数（未去重）当"泛化"，NHR 状态当"Owner 可裁决"。修法：对外断言绑定唯一权威来源（BFS 祖先 taskKind/去重计数/capability 集合），代理信号只作提示。
-
-  - 2026-08-28 PRI-614 / PR #1428 review: the gateway recovery test counted a restart but did not prove it happened after the tar step failed, so an early or unrelated restart produced the same signal. Fixed with strict call-order assertions and a negative-control run that fails when the ordering predicate is inverted.
-
-  - 2026-08-20 PRI-553: governance BDD treated non-empty body text as proof the SPA was ready. That signal was true before the initial `#/focus` redirect settled, so the delayed redirect could overwrite detail navigation; fixed by waiting for the canonical focus URL and then asserting the detail URL.
-
-  - 2026-09-04 PRI-665 misdiagnosis (diagnosis-side sibling of the non-unique-signal class): the 1.229.0 upgrade crash was attributed to a "host-runtime barrel missing 8 exports" based on three checks — rg symbol search, tarball regex, and an import-scanner using string `includes()`. All three are text-level symbol matching and share ONE blind spot: none can see `export *` re-export chains, so the published barrel (19 `export *` lines, all 8 symbols verified loadable via real Node import) was misdiagnosed as broken. The real cause: stale physical `@principles/*` dependency copies in the runtime `node_modules` shadowing the canonical packages (Node resolves the NEAREST node_modules first). Lesson: root-cause claims about module interfaces require a REAL Node import as evidence, must first establish which physical copy the runtime actually resolves, and must treat multiple checks sharing the same mechanism as ONE data point, not independent corroboration.
+  - 2026-09-11 PRI-626 / PR #1608 review (two P1s, one root cause — self-authored verification whose failure paths were never executed): (1) the journey harness's no-approval guard compared `=== undefined` while the sentinel was initialized `null`, so the real needs_revision path threw an uncaught TypeError instead of the fail-loud JSON line — caught by the harness's own first live run; (2) the installed-gate zero-write probe wrapped a 0-byte fake trajectory.db in `catch { n = 0 }` and asserted hook exit-0 only, though the hook is fail-open. Fixed by: executing the failure branch once (bite-verify), the unique `reason=feature_disabled` structured marker + flag-ON negative control, a schema-initialized DB with a fail-loud probe. The bite-verify-every-contract-test must-check applies to guards and failure branches the author adds, not only to delivery contract tests.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-11",
+    "pattern": "EP-09",
+    "invariant": "self-authored-verification-failure-paths-unexecuted",
+    "severity": "P1",
+    "escaped": "pr-handoff",
+    "caughtBy": "pr-review",
+    "guard": "none (error:hotspots tracking; enforcement decision pending)"
+  }
+  -->
+  - 2026-09-01 PRI-631 (retrospective, EP-02 sibling): Companion token-persistence tests asserted source-code substrings instead of executing the wiring; packaging/main-process regressions left all four green; sandbox preload never proven executable in real Electron config. (Full text → ERROR_ARCHIVE.md.)
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-01",
+    "pattern": "EP-09",
+    "invariant": "test-asserts-source-substring-not-wiring",
+    "severity": "P2",
+    "escaped": "verify-merge",
+    "caughtBy": "owner",
+    "guard": "none"
+  }
+  -->
+  - 2026-08-28 PRI-614: gateway recovery test counted a restart without proving it followed the tar failure; fixed with strict call-order assertions + inverted-order negative control.
+  - 2026-08-20 PRI-553: governance BDD treated non-empty body text as SPA-ready before the `#/focus` redirect settled; fixed by waiting for the canonical focus URL.
+  - 2026-09-04 PRI-665 (diagnosis-side sibling): "barrel missing 8 exports" misdiagnosis from three text-level symbol checks sharing one blind spot (`export *` chains); real cause was stale physical dependency copies shadowing canonical packages. Root-cause claims about module interfaces require a REAL Node import; checks sharing one mechanism are ONE data point. (Full text → ERROR_ARCHIVE.md.)
 
 ---
 **[ERR-089]** | Fix addresses primary failure path but leaves sibling failure branches with stale state, wrong command path, or CLI contract violation
@@ -1178,6 +1212,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-08-17
 - **Recurrence**: Yes
   - 2026-08-28 PRI-615 / PR #1432 (self-review round 1): a new fail-loud guard branch (`max_attempts` validation in `sqlite-task-store.rowToFailedTaskSummary`) shipped with only the happy path covered — the throw block's 2 lines were flagged by the codecov patch comment (the gate itself passed at 91.67%, but the uncovered-branch pattern recurred). Unlike the original incident the branch is NOT contract-impossible (a corrupted DB column reaches it), so the fix was the "add a test per branch" arm of the rule: a corrupt-row regression that writes `max_attempts = 0` below the `TaskRecordSchema` bound via a bound `UPDATE` and asserts `listFailedTasks` throws. Lesson flavor: fail-loud validation guards are legitimate branches, but each one must ship with a corrupt-input regression in the same PR — "the sibling guard was also uncovered" is the file's existing convention, not a license.
+
+  - 2026-09-10 PRI-729 / PR #1601 (codecov/patch comment): `logMutationRouting()` assembled each line from `resolveAuthority(kind)` — documented to THROW when a kind has no registered authority — inside a `try/catch` whose catch arm emitted an `UNRESOLVED — …` line. `routes/update.ts` registers legacy for all four kinds at module load, so that arm is unreachable and codecov flagged exactly that one line (96.67%, advisory gate still passed). Fixed per THIS entry's prescription: the line is now built branch-free from `describeGovernance()` (reports `active: 'none'` instead of throwing) via `[label, reason ?? ''].filter(part => part.length > 0).join(': ')`. Lesson: when a helper offers both a throwing resolver and a total snapshot, observability code should take the total one — the defensive catch is the tell that the wrong accessor was chosen.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-10",
+    "pattern": "EP-09",
+    "invariant": "defensive-alternate-for-contract-impossible-state",
+    "severity": "P2",
+    "escaped": "verify-merge",
+    "caughtBy": "pr-review",
+    "guard": "codecov/patch"
+  }
+  -->
 
 ---
 **[ERR-105]** | Hardcoded light-mode hex colors bypass theme tokens on a dual-theme UI — timeline dots near-invisible in dark mode
@@ -1447,3 +1494,29 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-633 / PR #1585 review P1
 - **Date**: 2026-09-10
 - **Recurrence**: None (first recording)
+
+---
+**[ERR-124]** | Test mutates a process-global singleton (platform/env/prototype) without restoring it — sibling tests in the same worker run under hijacked state
+
+- **What happened**: PR #1596 review (CodeRabbit): a new unit test flipped `process.platform` and never restored it — a mid-test failure leaks the platform into sibling tests.
+- **Why it's wrong**: the mutation changes the ENVIRONMENT later tests run in — order-dependent leaks surface as inexplicable sibling failures.
+- **Generalized failure mode**: When a test mutates a process-global singleton (`process.platform`/`process.env`/prototype patches/module-level caches), assistants must save the original and restore it in `finally` (or afterEach), otherwise the mutation leaks into sibling tests in the same process.
+- **How to prevent**: For any diff with `setPlatform|Object.defineProperty(process, |process.env.X =` in a test file, ask "where is the restore?" — accept only `try/finally` or an `afterEach`/beforeEach that re-pins the value.
+- **Regression guard**: the try/finally itself; running the FULL test file catches residual-order failures.
+- **Related ERRs**: ERR-121 (adjacent: fixture vs global mutation).
+- **Source**: PRI-723 / PR #1596 review
+- **Date**: 2026-09-10
+- **Recurrence**: None
+
+---
+**[ERR-125]** | New/refactored files under an eslint-ignored surface ship dead code — local lint never scans them, so the PR-time CodeQL net is the only detector
+
+- **What happened**: PRI-727 PR #1604 review (CodeQL): a new `create-principles-disciple` publish script (`scripts/publish-release-metadata.mjs`) carried an unused import and an unused helper left over from mid-development refactoring. Local `npm run lint` passed because the package's eslint config ignores `scripts/*.mjs`; the defects surfaced only as CodeQL alerts failing the PR's code-scanning check.
+- **Why it's wrong**: "lint passed" is treated as "no hygiene defects", but that guarantee only holds for paths lint actually scans — a file outside the lint surface silently downgrades every lint-class check to "not verified".
+- **Generalized failure mode**: When writing or refactoring a file, assistants must confirm the file is inside the active guard surface (lint scope, typecheck scope, test globs) before treating those guards as evidence, otherwise lint-class defects escape to review/CI.
+- **How to prevent**: Before handoff on a new script/config path, check the lint ignore globs for the path; if ignored, run the closest covered check directly (e.g. `npx eslint --no-ignore <file>`) and state in the PR which guards do NOT cover the file. Durable fix (follow-up): include the installer package's `scripts/*.mjs` in the lint surface.
+- **Regression guard**: `npx eslint --no-ignore packages/create-principles-disciple/scripts/publish-release-metadata.mjs` catches unused symbols on this file class today.
+- **Related ERRs**: EP-09 (verification reality gap — claimed evidence not actually exercised); ERR-078 (self-reported verification without checking reality).
+- **Source**: PRI-727 / PR #1604 review (CodeQL)
+- **Date**: 2026-09-11
+- **Recurrence**: None

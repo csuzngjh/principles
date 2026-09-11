@@ -1609,7 +1609,6 @@
           "pdPain": "Report pain from OpenClaw session",
           "pdHelp": "Show all commands and usage guide",
           "pdContext": "Control context injection",
-          "pdEvolutionStatus": "Show evolution loop status",
           "pdFocus": "Manage CURRENT_FOCUS.md"
         },
         "nextButton": "Next",

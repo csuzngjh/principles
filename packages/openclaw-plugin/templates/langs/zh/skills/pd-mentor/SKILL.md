@@ -28,7 +28,6 @@ disable-model-invocation: true
 | `/pd-init` | 初始化战略 | 新项目启动 |
 | `/pd-bootstrap` | 环境工具扫描与升级 | 装备升级 |
 | `/pd-research` | 发起工具升级研究 | 深度调研 |
-| `/pd-evolution-status` | 查看EP等级与安全状态 | 状态查询 |
 | `/pd-status` | 查看系统状态（GFI和痛苦词典） | 健康检查 |
 | `/pd-help` | 获取交互式命令引导 | 本技能 |
 
@@ -55,7 +54,6 @@ disable-model-invocation: true
 
 **推荐流程**:
 1. `/pd-status` - 检查系统状态（GFI 和痛苦词典）
-2. `/pd-evolution-status` - 查看 EP 等级和进化状态
 
 **话术**: "问题就是进化的燃料。让我帮你系统化地诊断和修复。"
 
@@ -66,8 +64,7 @@ disable-model-invocation: true
 **触发条件**: 用户明确要求 Principles Disciple 的进度或健康回顾（提及 PD、EP、GFI、系统状态）
 
 **推荐流程**:
-1. `/pd-evolution-status` - 查看当前信任积分
-2. `/pd-status` - 查看 GFI 和痛苦词典状态
+1. `/pd-status` - 查看 GFI 和痛苦词典状态
 
 **话术**: "让我帮你回顾一下系统状态。"
 
@@ -78,7 +75,7 @@ disable-model-invocation: true
 **触发条件**: 用户询问 Principles Disciple 的权限、拦截或安全等级
 
 **推荐流程**:
-1. `/pd-evolution-status` - 查看信任积分和安全等级
+1. `/pd-status` - 查看系统状态
 2. 解释当前等级的能力边界
 
 **话术**: "信任是挣来的，不是给的。让我帮你了解当前的安全等级。"

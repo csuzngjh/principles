@@ -28,7 +28,6 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 | `/pd-init` | Initialize strategy | New project startup |
 | `/pd-bootstrap` | Environment tool scan and upgrade | Tool upgrade |
 | `/pd-research` | Initiate tool upgrade research | Deep research |
-| `/pd-evolution-status` | View trust score and security stage | Permission check |
 | `/pd-status` | View system status (GFI and Pain Dictionary) | Health check |
 | `/pd-help` | Get interactive command guidance | This skill |
 
@@ -55,7 +54,6 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 **Recommended Flow**:
 1. `/pd-status` - Check system status (GFI and Pain Dictionary)
-2. `/pd-evolution-status` - View EP tier and evolution status
 
 **Script**: "Problems are the fuel of evolution. Let me help you diagnose and fix systematically."
 
@@ -66,8 +64,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 **Trigger**: The user explicitly asks for a Principles Disciple progress or health review (mentioning PD, EP, GFI, or system status)
 
 **Recommended Flow**:
-1. `/pd-evolution-status` - View current trust score
-2. `/pd-status` - Check GFI and Pain Dictionary status
+1. `/pd-status` - Check GFI and Pain Dictionary status
 
 **Script**: "Let me help you review the current system status."
 
@@ -78,7 +75,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 **Trigger**: The user asks about Principles Disciple permissions, blocks, or security stages
 
 **Recommended Flow**:
-1. `/pd-evolution-status` - View trust score and security stage
+1. `/pd-status` - Check system status
 2. Explain current stage's capability boundaries
 
 **Script**: "Trust is earned, not given. Let me help you understand your current security level."

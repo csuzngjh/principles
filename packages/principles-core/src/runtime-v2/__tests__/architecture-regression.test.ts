@@ -115,7 +115,6 @@ const REQUIRED_SOURCE_FILES = [
   // Phase 2 migration: types directory
   'types/queue-types.ts',
   'types/hygiene-types.ts',
-  'types/runtime-summary-types.ts',
   'types/event-types.ts',
   'types/event-payload.ts',
   'types/pain-signal.ts',
@@ -2713,13 +2712,12 @@ describe('Phase 2.2 correction types migration', () => {
   });
 });
 
-// ── Phase 2 Migration: Types Directory (queue, hygiene, runtime-summary, events) ──
+// ── Phase 2 Migration: Types Directory (queue, hygiene, events) ──
 
 describe('Phase 2.4 types directory migration', () => {
   const CORE_TYPE_FILES = [
     'types/queue-types.ts',
     'types/hygiene-types.ts',
-    'types/runtime-summary-types.ts',
     'types/event-types.ts',
     'types/event-payload.ts',
   ];
@@ -2752,15 +2750,6 @@ describe('Phase 2.4 types directory migration', () => {
     expect(src).toContain('HygieneStats');
     expect(src).toContain('createEmptyHygieneStats');
     expect(src).toContain("from './types/hygiene-types.js'");
-  });
-
-  it('core barrel exports RuntimeTruth, TrendMetrics', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('RuntimeTruth');
-    expect(src).toContain('TrendMetrics');
-    expect(src).toContain("from './types/runtime-summary-types.js'");
   });
 
   it('core barrel exports EventType, EventLogEntry, EventEvolutionStats', async () => {
@@ -2796,15 +2785,6 @@ describe('Phase 2.4 types directory migration', () => {
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(
       __dirname, '../../../../openclaw-plugin/src/types/hygiene-types.ts'
-    ), 'utf-8');
-    expect(src).toContain("@principles/core/runtime-v2");
-  });
-
-  it('plugin types/runtime-summary.ts re-exports from core', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/types/runtime-summary.ts'
     ), 'utf-8');
     expect(src).toContain("@principles/core/runtime-v2");
   });

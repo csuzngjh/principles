@@ -329,4 +329,93 @@ describe('Update History API route', () => {
       expect(parsed[1].fromVersion).toBe('1.1.0');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // PRI-702 (ADR-0024 D-7): one canonical writer, authority as an audit
+  // attribute, backward compatibility for records written before this field
+  // existed.
+  // -------------------------------------------------------------------------
+  describe('authority (PRI-702)', () => {
+    it('defaults to the legacy console updater and persists it explicitly', () => {
+      appendUpdateHistory(tempDir, { fromVersion: '1.0.0', toVersion: '1.1.0', success: true, kind: 'update' });
+
+      const parsed = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
+      expect(parsed[0]?.authority).toBe('legacy-console-updater');
+    });
+
+    it('persists the authority that actually served the mutation', () => {
+      appendUpdateHistory(tempDir, {
+        fromVersion: '1.0.0',
+        toVersion: '1.1.0',
+        success: true,
+        kind: 'update',
+        authority: 'release-manager',
+        transactionId: 'update-1-abcdef01',
+      });
+
+      const parsed = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
+      expect(parsed[0]).toMatchObject({ authority: 'release-manager', transactionId: 'update-1-abcdef01' });
+    });
+
+    it('backward compatible: pre-PRI-702 records without authority still read and are not rewritten', async () => {
+      // A record written before the authority field existed — no authority,
+      // no kind (the reader infers 'unknown'), extra unknown field present.
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
+        { id: 'old-1', timestamp: '2026-01-01T00:00:00.000Z', fromVersion: '1.0.0', toVersion: '1.1.0', success: true, futureField: 'ignored' },
+      ]), 'utf8');
+
+      const res = createMockResponse();
+      await handleUpdateHistoryRoute(createMockRequest('GET', '/api/update/history'), res, tempDir, '');
+      const { statusCode, body } = parseBody(res);
+      expect(statusCode).toBe(200);
+      const data = (body as { success: boolean; data: Record<string, unknown>[] }).data;
+      expect(data).toHaveLength(1);
+      expect(data[0]?.fromVersion).toBe('1.0.0');
+      expect(data[0]?.kind).toBe('unknown');
+      expect(data[0]?.authority).toBeUndefined();
+
+      // Appending a new entry must not fabricate an authority for the old one.
+      appendUpdateHistory(tempDir, { fromVersion: '1.1.0', toVersion: '1.2.0', success: true, kind: 'update' });
+      const after = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
+      expect(after).toHaveLength(2);
+      expect(after[0]?.authority).toBeUndefined();
+      expect(after[1]?.authority).toBe('legacy-console-updater');
+    });
+
+    it('keeps the authority of an existing RM record across a later legacy append', () => {
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
+        {
+          id: 'rm-1',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          fromVersion: '1.0.0',
+          toVersion: '1.1.0',
+          success: true,
+          kind: 'update',
+          authority: 'release-manager',
+          transactionId: 'update-1-abcdef01',
+        },
+      ]), 'utf8');
+
+      appendUpdateHistory(tempDir, { fromVersion: '1.1.0', toVersion: '1.2.0', success: false, kind: 'failure' });
+
+      const after = JSON.parse(fs.readFileSync(path.join(pdDir, 'update-history.json'), 'utf8')) as Record<string, unknown>[];
+      expect(after[0]?.authority).toBe('release-manager');
+      expect(after[0]?.transactionId).toBe('update-1-abcdef01');
+      expect(after[1]?.authority).toBe('legacy-console-updater');
+    });
+
+    it('drops an authority outside the closed vocabulary instead of failing the entry', async () => {
+      fs.writeFileSync(path.join(pdDir, 'update-history.json'), JSON.stringify([
+        { id: 'x-1', timestamp: '2026-01-01T00:00:00.000Z', fromVersion: '1.0.0', toVersion: '1.1.0', success: true, kind: 'update', authority: 'mystery-updater' },
+      ]), 'utf8');
+
+      const res = createMockResponse();
+      await handleUpdateHistoryRoute(createMockRequest('GET', '/api/update/history'), res, tempDir, '');
+      const { statusCode, body } = parseBody(res);
+      expect(statusCode).toBe(200);
+      const data = (body as { success: boolean; data: Record<string, unknown>[] }).data;
+      expect(data).toHaveLength(1);
+      expect(data[0]?.authority).toBeUndefined();
+    });
+  });
 });

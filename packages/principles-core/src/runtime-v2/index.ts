@@ -9,7 +9,6 @@
  *   error-categories → PDErrorCategory, PDRuntimeError
  *   agent-spec      → AgentSpec, well-known agent IDs
  *   runtime-protocol → PDRuntimeAdapter, RuntimeKind, run lifecycle types
- *   runtime-selector → RuntimeSelector interface
  *   task-status     → PDTaskStatus, TaskRecord, DiagnosticianTaskRecord
  *   context-payload → ContextPayload, history/trajectory types
  *   diagnostician-output → DiagnosticianOutputV1
@@ -95,7 +94,6 @@ export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetry
 export { SchemaVersionRefSchema, RuntimeV2SchemaVersionSchema } from './schema-version.js';
 export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';
 export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema, PD_TASK_STATUSES, isPDTaskStatus } from './task-status.js';
-export { RuntimeSelectionCriteriaSchema } from './runtime-selector.js';
 // Context payload schemas (Phase 2)
 export { HistoryQueryEntrySchema, TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema, HistoryQueryResultSchema, DiagnosisTargetSchema, ContextPayloadSchema, DiagnosticianContextPayloadSchema, ToolCallEntrySchema, PainContextSchema, FullTracePayloadSchema, FullTracePayloadV2Schema, TraceSourceRefSchema, TraceTimelineEntrySchema, TraceEventKindSchema, SourceRefKindSchema, validateFullTracePayload, sanitizeFullTracePayload, buildFullTraceTimeline, buildSourceRefs, checkFullTracePayloadSchema, TRACE_EVENT_KINDS, SOURCE_REF_KINDS } from './context-payload.js';
 // Trace refiner (PRI-191)
@@ -113,8 +111,6 @@ export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, Reco
 export { PRINCIPLE_STATUSES, PrincipleStatusSchema, PrinciplePrioritySchema, PrincipleScopeSchema, PrincipleEvaluabilitySchema, RuleStatusSchema, RuleTypeSchema, ImplementationLifecycleStateSchema, ImplementationTypeSchema, SampleClassificationSchema, PrincipleSchema, RuleSchema, ImplementationSchema, PrincipleDependencySchema, PrincipleValueMetricsSchema, PrincipleEventTypeSchema, PrincipleLifecycleEventSchema, PrincipleTreeStoreSchema, EvidenceChainStateSchema, EvidenceChainRecordSchema, EvidenceChainResponseSchema } from './types/index.js';
 // Hygiene types schemas
 export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-types.js';
-// Runtime summary types schemas
-export { RuntimeTruthSchema, AnalyticsTruthSchema, TrendMetricsSchema } from './types/runtime-summary-types.js';
 // Event types schemas
 export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, GovernanceActionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimeV2PromptActivationsInjectedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, TrajectoryObservabilityFailureEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
 // Event payload discriminated union schemas
@@ -157,13 +153,6 @@ export type {
   RuntimeArtifactRef,
   PDRuntimeAdapter,
 } from './runtime-protocol.js';
-
-// Runtime selector
-export type {
-  RuntimeSelector,
-  RuntimeSelectionCriteria,
-  RuntimeSelectionResult,
-} from './runtime-selector.js';
 
 // Task status and records
 export type {
@@ -1746,12 +1735,6 @@ export type {
 export {
   createEmptyHygieneStats,
 } from './types/hygiene-types.js';
-
-export type {
-  RuntimeTruth,
-  AnalyticsTruth,
-  TrendMetrics,
-} from './types/runtime-summary-types.js';
 
 export type {
   EventType,

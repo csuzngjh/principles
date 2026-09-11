@@ -151,7 +151,6 @@ runtime-v2/
 ├── pain-signal-observability.ts     ← Service
 ├── pain-chain-read-model.ts         ← ReadModel
 ├── pain-to-principle-service.ts     ← Service
-├── runtime-selector.ts              ← Service
 ├── pruning-read-model.ts            ← ReadModel
 ├── pruning-mask.ts                  ← Util
 ├── pruning-review-log.ts            ← Store

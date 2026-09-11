@@ -86,12 +86,11 @@ describe('ReleaseManager authority readiness', () => {
     // release_manager_write_authority flag. The plugin-diff `apply` mechanism
     // and the Phase 2 `rollback` stay structurally not-ready.
     expect(ready.kinds['apply-full']).toEqual({ ready: true, reasons: [] });
-    for (const kind of ['apply', 'rollback'] as const) {
-      expect(ready.kinds[kind]).toEqual({
-        ready: false,
-        reasons: ['rollback_not_available'],
-      });
-    }
+    // The two structural gaps are independent, and the reasons say so
+    // (PRI-729): the plugin-diff `apply` is not a ReleaseManager mechanism at
+    // all, while `rollback` waits on the Phase 2 same-version restore.
+    expect(ready.kinds.apply).toEqual({ ready: false, reasons: ['plugin_diff_not_supported'] });
+    expect(ready.kinds.rollback).toEqual({ ready: false, reasons: ['rollback_not_available'] });
   });
 
   it('maps a corrupt active record to install_state_corrupt instead of guessing', () => {

@@ -122,11 +122,6 @@ export {
   DiagnosticianTaskRecordSchema,
 } from './runtime-v2/index.js';
 
-// Runtime selector schemas
-export {
-  RuntimeSelectionCriteriaSchema,
-} from './runtime-v2/index.js';
-
 // Context payload schemas (Phase 2)
 export {
   HistoryQueryEntrySchema,
@@ -169,9 +164,6 @@ export type {
   StructuredRunOutput,
   RuntimeArtifactRef,
   PDRuntimeAdapter,
-  RuntimeSelector,
-  RuntimeSelectionCriteria,
-  RuntimeSelectionResult,
   PDTaskStatus,
   TaskRecord,
   DiagnosticianTaskRecord,

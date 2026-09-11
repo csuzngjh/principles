@@ -148,7 +148,6 @@ Every significant agent decision — approvals, blocks, corrections, pain events
 Repeated failures can become candidate principles or rule implementations through a replay-based review workflow. Operators can inspect, promote, disable, archive, or roll back these implementations with commands such as:
 
 ```text
-/pd-evolution-status
 /pd-promote-impl list
 /pd-promote-impl show <id>
 /pd-promote-impl <id>

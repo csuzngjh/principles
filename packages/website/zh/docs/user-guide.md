@@ -124,7 +124,6 @@ PD 通过斜杠命令与 OpenClaw 集成。所有命令以 `/pd-` 开头(短别�
 | `/pd-init` | `/pdi` | 初始化工作区 |
 | `/pd-status` | — | 查看 GFI 疲劳指数和系统健康度 |
 | `/pd-pain` | — | 从当前会话报告痛觉信号 |
-| `/pd-evolution-status` | — | 查看原则演化状态 |
 | `/pd-rollback` | — | 回滚误判的情绪事件惩罚 |
 | `/pd-principle-rollback` | — | 回滚原则并加黑名单 |
 | `/pd-context` | — | 控制上下文注入(思维模型/项目焦点) |
