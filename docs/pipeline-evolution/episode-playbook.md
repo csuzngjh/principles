@@ -129,3 +129,16 @@ evolution-dataset/episode-<NNN>/
 3. R3 只跑 treatment 一条 prompt 链（baseline 已有效）：核心指标 **B4: 3→0** 且 negative control（合法端口修改）不被阻塞。
 4. LLM 选型：artificer 档若跑 code 链建议 flatkey-ds 充值后启用（EP001/R2 实证更稳）或 bai+32k；prompt 链全 bai 可行。
 5. 注意 PRI-717/718/719 未修：跑 code 链前先看 §上文三个对应陷阱行；prompt 链不触达这些路径。
+
+## Episode 002-R3 实测修订（2026-09-11，报告 `reports/episode-002-r3-report.md`）
+
+- 条目 5 已过时：PRI-717/718/719 已随 #1591/#1592/#1593 进入 main（775ffb536 基线实测生效——per-stage
+  profile 日志、修复轮语义、无 tier2 断链）。本表三行陷阱对 ≥775ffb536 的基线不再适用。
+- 条目 1 不阻塞 code 链：RuleCode 断点在确定性门的模板断言耦合（G1/G2），与 PRI-720 的 prompt 链
+  分岗正交；R3 证据反而强化其立单理由。
+- 新陷阱行：pi-ai `thinkingFormat=zai` 对 always-thinking 模型默认发 `thinking:{type:"disabled"}`
+  （400 code 1210）；`PdLocalRuntimeProfile` 无 reasoning 通道。绕行：model id 大写变体
+  （GLM-5.3-Flash）避开 catalog 精确匹配 → custom model 不发 thinking 参数（依赖 zai 端 id 归一化，
+  非契约，待 G4 修复）。
+- 新陷阱行：deepseek 路由三连（flatkey/官方/bai-ds）余额断供时，code 链 artificer 档实测
+  bai+32k（大 payload 流挂起 ~1/3 成功率）与 zai（同上绕行）均可用；timeoutMs 1500000 起步。
