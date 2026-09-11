@@ -84,7 +84,7 @@ vi.mock('../src/core/workspace-context.js', () => ({
   },
 }));
 vi.mock('../src/service/correction-observer-service.js', () => ({ CorrectionObserverService: { start: vi.fn() } }));
-vi.mock('../src/service/internalization-auto-consumer-service.js', () => ({ InternalizationAutoConsumerService: { start: vi.fn() } }));
+vi.mock('../src/service/internalization-auto-consumer-service.js', () => ({ InternalizationAutoConsumerService: { start: vi.fn() }, persistOpenClawToolDeclaration: vi.fn() }));
 
 const { default: plugin } = await import('../src/index.js');
 

@@ -59,14 +59,22 @@ export function persistOpenClawToolDeclaration(
   workspaceDir: string,
   logger: { warn: (msg: string) => void },
 ): void {
-  const declared = saveHostToolDeclaration(workspaceDir, {
-    version: 1,
-    hostKind: 'openclaw',
-    mappings: OPENCLAW_TOOL_SEMANTIC_MAPPINGS,
-    declaredAt: new Date().toISOString(),
-  });
-  if (!declared.ok) {
-    logger.warn(`[PD:AutoConsumer] Failed to persist OpenClaw tool declaration: ${declared.reason} — pd-cli reliability validation will not find it (rc-9)`);
+  // Containment (PRI-595 pattern): declaration persistence is an optimization
+  // on top of gateway startup — an fs-level throw here must never break
+  // plugin registration itself.
+  try {
+    const declared = saveHostToolDeclaration(workspaceDir, {
+      version: 1,
+      hostKind: 'openclaw',
+      mappings: OPENCLAW_TOOL_SEMANTIC_MAPPINGS,
+      declaredAt: new Date().toISOString(),
+    });
+    if (!declared.ok) {
+      logger.warn(`[PD:AutoConsumer] Failed to persist OpenClaw tool declaration: ${declared.reason} — pd-cli reliability validation will not find it (rc-9)`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(`[PD:AutoConsumer] Failed to persist OpenClaw tool declaration: ${message} — pd-cli reliability validation will not find it (rc-9)`);
   }
 }
 
