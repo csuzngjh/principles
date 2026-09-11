@@ -20,8 +20,7 @@ import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clea
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
-import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
+import { createTraceId } from '../core/evolution-logger.js';
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed, resetSharedCooldownForTest } from './trigger-cooldown-tracker.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';
@@ -233,12 +232,6 @@ export function handleFrictionTrackingForFailure(
   const deltaF = (config.get('scores.tool_failure_friction') as number) || 30;
   const updatedState = trackFriction(sessionId, deltaF, observation.errorHash, workspaceDir, { source: outcome.failureSource });
 
-  recordEvolutionFailure(workspaceDir, event.toolName, {
-    filePath: observation.relPath,
-    reason: observation.isRisk ? 'risky' : 'tool',
-    sessionId,
-  });
-
   // Record tool call failure event
   wctx.eventLog.recordToolCall(sessionId, {
     toolName: event.toolName,
@@ -301,11 +294,6 @@ export function handleFrictionTrackingForSuccess(
       amount: dispatchErrorGfi * 0.5,
     });
   }
-
-  recordEvolutionSuccess(workspaceDir, event.toolName, {
-    sessionId,
-    reason: 'tool_success',
-  });
 
   if (options.recordTrajectory !== false) wctx.trajectory?.recordToolCall?.({
     sessionId,
@@ -547,7 +535,7 @@ export function evaluatePainAdmissionForToolCall(
 /**
  * Emit pain signal after admission.
  *
- * Records to trajectory, event log, evolution logger, principle value tracker,
+ * Records to trajectory, event log, principle value tracker,
  * and emits the pain_detected event.
  *
  * Only called when the admission decision is 'admitted'.
@@ -630,17 +618,6 @@ export function emitPainIfAdmitted(
     source: failureSource,
     reason: `Tool ${event.toolName} failed on ${observation.relPath}`,
     isRisky: observation.isRisk,
-  });
-
-  const evoLogger = getEvolutionLogger(workspaceDir, wctx.trajectory);
-  evoLogger.logPainDetected({
-    traceId: observation.traceId,
-    source: failureSource,
-    reason: `Tool ${event.toolName} failed on ${observation.relPath}`,
-    score: observation.painScore,
-    toolName: event.toolName,
-    filePath: observation.relPath,
-    sessionId,
   });
 
   // Create painId inline (matches original createPainId)
