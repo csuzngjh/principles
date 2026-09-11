@@ -12,12 +12,11 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { persistGateBlock, recordGateBlockAndReturn } from './gate-block-helper.js';
 import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
-import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
+import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, EvolutionTier } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
 import { getSession, trackReceiptAutoCorrect } from '../core/session-tracker.js';
-import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
@@ -82,7 +81,7 @@ export function handleBeforeToolCall(
         currentGfi: _getCurrentGfi(ctx.sessionId),
       },
       evolution: {
-        epTier: _getEpTier(wctx.workspaceDir),
+        epTier: _getEpTier(),
       },
       derived: {
         estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params ?? {} }),
@@ -444,13 +443,12 @@ function _getCurrentGfi(sessionId?: string): number {
   }
 }
 
-function _getEpTier(workspaceDir: string): number {
-  try {
-    const engine = getEvolutionEngine(workspaceDir);
-    return engine.getTier() as number;
-  } catch {
-    return 0;
-  }
+// epTier source retired with the legacy evolution engine (PRI-731/734): the
+// engine scorecard never persisted in any deployment, so the observed value was
+// always the initial tier. The RuleHost input contract field stays because
+// generated rule code reads it via getEpTier().
+function _getEpTier(): number {
+  return EvolutionTier.Seed;
 }
 
 function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' | 'dangerous' | 'unknown' {
@@ -474,7 +472,7 @@ export function buildOpenClawRuleInputEnrichment(
 ) {
   return {
     currentGfi: _getCurrentGfi(sessionId),
-    epTier: _getEpTier(workspaceDir),
+    epTier: _getEpTier(),
     bashRisk: _getBashRisk(event),
   };
 }

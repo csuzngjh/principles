@@ -22,7 +22,7 @@ import type { SessionState } from '../core/session-tracker.js';
 import { computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
+import { createTraceId } from '../core/evolution-logger.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
@@ -487,7 +487,6 @@ export function handleSharedPainEvidenceResult(
   const traceId = metadataString(metadata, 'eventId') ?? createTraceId();
   const reason = `Tool ${event.toolName} failed on ${relativePath}`;
   wctx.eventLog.recordPainSignal(sessionId, { score, source: failureSource, reason, isRisky: metadata.isRisky === true });
-  getEvolutionLogger(ctx.workspaceDir, wctx.trajectory).logPainDetected({ traceId, source: failureSource, reason, score, toolName: event.toolName, filePath: relativePath, sessionId });
   const rawEvidence = metadata.evidence;
   const evidence = Array.isArray(rawEvidence)
     ? rawEvidence.filter((entry): entry is { sourceRef: string; note: string } => typeof entry === 'object' && entry !== null && !Array.isArray(entry)
@@ -555,17 +554,6 @@ function handleManualPain(
     text: reason,
     canonicalPainId: painId,
     hostKind: 'openclaw',
-  });
-
-  // Log to EvolutionLogger
-  const evoLogger = getEvolutionLogger(workspaceDir, wctx.trajectory);
-  evoLogger.logPainDetected({
-    traceId,
-    source: 'manual',
-    reason: `User intervention: ${reason}`,
-    score: 100,
-    toolName: event.toolName,
-    sessionId,
   });
 
   // PRI-651-B1: Unconditional Gate B — TriggerController is the only

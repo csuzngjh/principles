@@ -567,3 +567,14 @@ One-line summaries remain in the handbook; the verbatim texts live here.
 - **Archived**: 2026-09-10 (last activity 2026-06-08, > 90 days; archived to bring the active handbook back under the 300KB limit)
 
 ---
+
+---
+## ERR-024 archived recurrence full texts (compressed in handbook 2026-09-11, PRI-727 size-gate)
+
+- PR #1551 round 2 (R2): fresh 派生的出界处置（selectedEffect）未持久化，resume 从缺失的瞬时变量重新推导 → 同一裁决跨重启产生不同副作用。修法：处置在 intent 落库前派生并随 completion intent 持久化，resume 读 intent 重放效果（rollout reviewer 既有模板）。
+- 2026-08-26 PRI-606: axiom builders tested in isolation but `prompt.ts` injected via `evolutionReducer` (empty on fresh installs); barrel missed re-export — T-01..T-10 never injected. Fixed: registry-direct + barrel + empty-reducer regression test.
+- 2026-08-24 PR #1389 review round 2 (dormant consumer activation — mirror of the PRI-510 flavor): to forward two NEW telemetry events, `createPainSignalBridge` started passing `eventEmitter` into `new PainSignalBridge({...})` — an option the factory had NEVER passed on main, so the bridge's four PRE-EXISTING emission sites (`candidate_admission_decision`, `candidate_dreamer_task_seeded`, `candidate_not_internalizable`, `candidate_dreamer_task_seed_failed`) were dormant in production. The unconditional forwarding wrapper woke all four: routine admission decisions got re-emitted as `degradation_triggered` (semantic mislabeling of the degradation channel), and flag-off behavior changed despite the PR contract "flag off = zero effective surface". Fixed by extracting `mapBridgeTelemetryToStoreEvent`, which forwards ONLY the two persistence events; a negative-control test asserts the four pre-existing event names map to null (dormancy preserved). Rule of thumb: when STARTING to pass a previously-dormant optional dependency/handler into a construction path, grep ALL of the dependency's consumption sites (`this.eventEmitter?.…`), not just the newly added ones — every dormant site inherits the new wiring's channel and semantics. Route each site intentionally or filter to the intended events, and ship a negative-control test proving the unintended sites stay dormant.
+
+## ERR-088 archived recurrence full text (compressed in handbook 2026-09-11, PRI-727 size-gate)
+
+- - PR #1551 round 2 (R3/R5): 非唯一代理信号冒充目标判定——lineageResolvable（仅上游 artificer 存在）当"证据来源可达"，applicability 条目数（未去重）当"泛化"，NHR 状态当"Owner 可裁决"。修法：对外断言绑定唯一权威来源（BFS 祖先 taskKind/去重计数/capability 集合），代理信号只作提示。
