@@ -86,6 +86,33 @@ describe('pd pain record --session (real Commander + real trajectory.db)', () =>
     expect(result.stdout).toContain('--session');
   }, 15_000);
 
+  it('PRI-743: --help registers --host with the openclaw|codex contract', async () => {
+    const result = await runBuiltCli(['pain', 'record', '--help']);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--host <kind>');
+    // Commander wraps help text; normalize whitespace before asserting content.
+    const normalized = result.stdout.replace(/\s+/g, ' ');
+    expect(normalized).toContain('openclaw | codex');
+    expect(normalized).toContain('codex refuses');
+  }, 15_000);
+
+  it('PRI-743: an invalid --host value exits non-zero with a single structured JSON object', async () => {
+    const result = await runBuiltCli([
+      'pain', 'record',
+      '--reason', 'parser test pain',
+      '--host', 'claude',
+      '--workspace', tmpDir,
+      '--json',
+    ]);
+
+    expect(result.status).not.toBe(0);
+    const trimmed = result.stdout.trim();
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    expect(parsed.status).toBe('failed');
+    expect(parsed.reason).toBe('invalid_host_kind');
+    expect(typeof parsed.nextAction).toBe('string');
+  }, 15_000);
+
   it('fails with a single JSON object and reason session_not_found for a nonexistent session (SPEC 12.1.4)', async () => {
     const result = await runBuiltCli([
       'pain', 'record',
