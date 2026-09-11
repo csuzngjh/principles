@@ -162,7 +162,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-074 | Inner try/catch creates exit tunnel — early returns bypass outer catch cleanup, leaking resources | PR #977 |
 | ERR-075 | Hardcoded aria-label bypasses i18n — screen readers read in wrong language for non-English UI | PR #979 |
 | ERR-078 | PR body self-report labels CI failure "pre-existing on main" without verifying against main — reviewer inherits false regression classification | PRI-454 / PR #1043 |
-| ERR-083 | Changing a shared contract (store guard, type union, service method, default config value, package identity, shared test fixture/env assumption, barrel export) without auditing all same-package AND cross-package consumers (callers, validators, tests, mocks, CI workflows) — downstream packages / sibling tests break | PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182; PR #1183; PRI-526 / PR #1319; PR #1358; PRI-612 / PR #1426 |
+| ERR-083 | Changing a shared contract (store guard, type union, service method, default config value, package identity, shared test fixture/env assumption, barrel export, baseline inventory list) without auditing all same-package AND cross-package consumers (callers, validators, tests, mocks, CI workflows, sibling count guards) — downstream packages / sibling tests break | PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182; PR #1183; PRI-526 / PR #1319; PR #1358; PRI-612 / PR #1426; PRI-737 / PR #1613 |
 | ERR-084 | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA | PR #1068 |
 | ERR-090 | Package.json entry point (main/exports) changed without verifying the referenced file exists in ALL build paths (tsc vs esbuild) — CI fails on paths that don't generate the new entry | PRI-501 / PR #1162 |
 | ERR-091 | CI checkout lacks `lfs: true` when tests read LFS-tracked binary assets — assertion fails on 132-byte pointer files | PR #1159 |
@@ -654,7 +654,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 117 |
 | Last updated | 2026-09-11 |
 | Top category | Schema & Type |
-| Recurring errors | 62 |
+| Recurring errors | 63 |
 
 ---
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist
@@ -967,6 +967,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
+  - 2026-09-11 PRI-737 / PR #1613 (baseline inventory removal): removed two retired files from the plugin-core anti-growth allowlist in principles-core's architecture-regression.test.ts but missed the sibling self-consistency guard `expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98)` in the SAME file → CI "Test principles-core" red; local gates passed because verify:merge does not run the owning package's vitest suite. Fixed 98→96 with a dated comment. Prevention: when editing an inventory/allowlist list, grep the same file for derived count assertions (`\.size).toBe(` / `toHaveLength`) and update them in the same commit; run the owning package's tests — the merge gate builds/typechecks but does not run every package's suite.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-11",
+    "pattern": "EP-02",
+    "invariant": "baseline-inventory-edit-updates-sibling-count-guard",
+    "severity": "P1",
+    "escaped": "verify-merge",
+    "caughtBy": "ci",
+    "guard": "none"
+  }
+  -->
   - 2026-09-04 PRI-672 / PR #1511 (build-scope recurrence): pd-console gained a deep import of `create-principles-disciple/dist/update/release-manager-authority.js`, but the root `build` script never built the installer package — clean CI failed with TS2307 in the pd-console build, quick-check release producers, and the component smoke tests, while local runs were masked by the prebuilt dist (same class as the 2026-08-26 PRI-595~603 build-order recurrence; the variant here is build SCOPE — the package was absent from the shared chain entirely, not ordered late). Fixed by adding `create-principles-disciple` to the root build script and verifying with a clean-CI simulation: remove the dist, run the root build, typecheck pd-console green. Prevention rule: a new cross-package import of another package's `dist` (runtime or type-level) must add that package to the root build chain (or the consuming job's build steps) in the SAME PR.
   - 2026-09-03 / adhoc-20260904-runtime-update-guards (dev-machine test isolation leak -> real runtime corruption): after a canonical reinstall created ~/.pd/runtime on the dev machine, the pd-console update route tests' legacy fixtures resolved the REAL canonical install (os.homedir() was not yet pinned; OPENCLAW_HOME injection alone cannot override canonical resolution), so a mocked /apply-full "tarball" stub (fake version 2.0.0, no package name) was copied into the real runtime, corrupting console/dist/server.js, plugin/package.json (false "already latest", blocked future updates), core/plugin entry files, and core/pd-cli package identity. Fixes: (1) pin os.homedir() to the fixture in all update-route suites (931739a1); (2) production now refuses staged packages that do not self-identify as principles-disciple with valid semver BEFORE any copy (staged_package_invalid, /apply + /apply-full); (3) fixture-isolation sentinel test (resolved currentVersion must equal the fixture's, never a real machine install) plus identity-refusal negative tests. Prevention: any test suite that can mutate installed trees must fail loud when its environment-isolation pins stop working; update routes must validate the staged package identity before the first production write.
   - 2026-08-31 PRI-631 / PR #1462: a Console E2E inherited local Owner identity but clean CI had none. Fixed by explicit Playwright server identity vars and a clean-env rerun.
