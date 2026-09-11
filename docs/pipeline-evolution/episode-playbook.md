@@ -142,3 +142,5 @@ evolution-dataset/episode-<NNN>/
   非契约，待 G4 修复）。
 - 新陷阱行：deepseek 路由三连（flatkey/官方/bai-ds）余额断供时，code 链 artificer 档实测
   bai+32k（大 payload 流挂起 ~1/3 成功率）与 zai（同上绕行）均可用；timeoutMs 1500000 起步。
+- **zai 免费时段限制（Owner 2026-09-11）**：zai glm-5.3-flash 仅 23:00–09:00 免费可用；
+  其他时段优先其他模型（bai-glm-5.3-flash 等）， lab 重启前先核对时段再选 runtimeProfile。
