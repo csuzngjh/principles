@@ -414,24 +414,63 @@ describe('pd pain record', () => {
 
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { hostAttribution?: string; warnings?: string[] };
     expect(jsonOutput.hostAttribution).toBe('openclaw');
-    expect((jsonOutput.warnings ?? []).some((w) => w.includes("defaulted to 'openclaw'"))).toBe(false);
+    expect((jsonOutput.warnings ?? []).some((w) => w.includes('host kind not specified, defaulting to openclaw'))).toBe(false);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('PRI-743: --host codex refuses loudly — the CLI cannot verify Codex lineage (rc-6)', async () => {
+  it('PRI-743: --host codex records host_kind=codex with the caller-supplied Codex lineage', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
 
-    await handlePainRecord({ reason: 'codex mistake', session: 'sess-codex', host: 'codex', json: true });
+    await handlePainRecord({
+      reason: 'codex mistake',
+      session: 'codex-root-sess',
+      host: 'codex',
+      rolloutId: 'rollout-abc',
+      hostTurnId: 'turn-7',
+      json: true,
+    });
+
+    expect(lastRecordPainInput).toBeTruthy();
+    expect(lastRecordPainInput!.hostKind).toBe('codex');
+    expect(lastRecordPainInput!.sessionId).toBe('codex-root-sess');
+    expect(lastRecordPainInput!.provenance).toBe('host_context_bound');
+    expect(lastRecordPainInput!.recordObservability).toBe(true);
+    // The CLI must NOT read the OpenClaw trajectory for a Codex attribution.
+    expect(acquireTrajectoryEvidenceFromDb).not.toHaveBeenCalled();
+    // Codex lineage is retained unflattened in the versioned payload (SPEC §8.1);
+    // the derived key mirrors the ingestion rule (codex|<rollout>|<turn>|user).
+    expect(lastRecordPainInput!.painIngress.correlation).toEqual({
+      status: 'bound',
+      hostKind: 'codex',
+      rootSessionId: 'codex-root-sess',
+      rolloutIdentity: 'rollout-abc',
+      logicalObservationKey: 'codex|rollout-abc|turn-7|user',
+      hostTurnId: 'turn-7',
+    });
+    // The degraded-but-honest path still submits (no fabricated evidence).
+    expect(lastRecordPainInput!.evidence).toEqual([]);
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRI-743: --host codex without the Codex lineage fails loudly before any mutation', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'codex mistake', host: 'codex', json: true });
 
     // cli-1: exactly one JSON object on stdout
     expect(logSpy).toHaveBeenCalledTimes(1);
-    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { status: string; reason: string; nextAction: string };
-    expect(jsonOutput).toMatchObject({ status: 'failed', reason: 'codex_lineage_unverifiable_by_cli' });
-    expect(jsonOutput.nextAction).toContain('Codex ingestion');
-    // cli-2/cli-5: refused before any evidence acquisition or service mutation
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { status: string; reason: string; nextAction: string; message: string };
+    expect(jsonOutput).toMatchObject({ status: 'failed', reason: 'codex_lineage_required' });
+    expect(jsonOutput.message).toContain('--rollout-id');
+    expect(jsonOutput.nextAction).toContain('--host-turn-id');
+    // cli-2/cli-5: stopped before any evidence acquisition or service mutation
     expect(lastRecordPainInput).toBeNull();
     expect(acquireTrajectoryEvidenceFromDb).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
@@ -440,7 +479,27 @@ describe('pd pain record', () => {
     exitSpy.mockRestore();
   });
 
-  it('PRI-743: omitting --host keeps the openclaw default but discloses the assumption (rc-9)', async () => {
+  it('PRI-743: --host codex with PARTIAL lineage still fails loudly (only the missing flag is reported)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'codex mistake', session: 'codex-root', host: 'codex', rolloutId: 'rollout-abc', json: true });
+
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { status: string; reason: string; message: string };
+    expect(jsonOutput).toMatchObject({ status: 'failed', reason: 'codex_lineage_required' });
+    expect(jsonOutput.message).toContain('--host-turn-id');
+    expect(jsonOutput.message).not.toContain('--rollout-id');
+    expect(lastRecordPainInput).toBeNull();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // Task test #3/#4: legacy call compatibility — the pre-PRI-743 invocation
+  // (`--reason … --session …`, no --host) keeps host_kind=openclaw and only
+  // gains the disclosure wording.
+  it('PRI-743: legacy call omitting --host keeps the openclaw default but discloses it (rc-9)', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
 
@@ -450,7 +509,7 @@ describe('pd pain record', () => {
     expect(lastRecordPainInput!.hostKind).toBe('openclaw');
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { hostAttribution?: string; warnings?: string[] };
     expect(jsonOutput.hostAttribution).toBe('openclaw');
-    expect((jsonOutput.warnings ?? []).some((w) => w.includes("defaulted to 'openclaw'") && w.includes('--host codex'))).toBe(true);
+    expect((jsonOutput.warnings ?? []).some((w) => w.includes('host kind not specified, defaulting to openclaw') && w.includes('--host codex'))).toBe(true);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

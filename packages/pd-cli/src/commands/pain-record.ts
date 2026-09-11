@@ -11,16 +11,20 @@
  * workspace's trajectory.db, and collect raw evidence entries.
  *
  * Usage:
- *   pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--host openclaw|codex] [--json]
+ *   pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--host openclaw|codex] [--rollout-id <id> --host-turn-id <id>] [--json]
  *
  * PRI-743: `--host` makes host attribution explicit instead of assumed.
  * `--host openclaw` records the default attribution without the disclosure
- * warning; `--host codex` refuses loudly — the CLI can verify OpenClaw
- * trajectory sessions but can never verify a Codex lineage tuple
- * (rolloutIdentity / logicalObservationKey, rc-6), so codex pains must come
- * from the Codex ingestion path, never from the CLI. The correlation schema
- * itself is NOT changed — PainIngressCorrelationV1 bound branches only admit
- * openclaw/codex.
+ * warning. `--host codex` requires the caller to supply the REAL Codex
+ * lineage — `--rollout-id` / `--host-turn-id`, with `--session` as the Codex
+ * root session — because the shared ingress evaluator only writes
+ * `host_kind=codex` for a bound correlation carrying the complete lineage
+ * tuple (rc-6). The CLI never synthesises that tuple: an unverifiable Codex
+ * attribution would be a PRI-642 recurrence in another shape (Evidence Over
+ * Assumption). `--logical-key` overrides the derived observation key; a key
+ * that does not embed the given rollout identity is refused by the evaluator
+ * (lineage_mismatch). The correlation schema itself is NOT changed —
+ * PainIngressCorrelationV1 bound branches only admit openclaw/codex.
  */
 import {
   PainToPrincipleService,
@@ -31,7 +35,7 @@ import {
   isBuiltinPiAiProvider,
   evaluatePainIngress,
 } from '@principles/core/runtime-v2';
-import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry } from '@principles/core/runtime-v2';
+import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { acquireTrajectoryEvidenceFromDb } from './build-trajectory-evidence.js';
@@ -46,6 +50,12 @@ interface RecordOptions {
   wait?: boolean;
   /** PRI-743: explicit host attribution for a bound --session pain. */
   host?: string;
+  /** PRI-743 follow-up: Codex rollout identity — required by --host codex. */
+  rolloutId?: string;
+  /** PRI-743 follow-up: Codex turn id — required by --host codex. */
+  hostTurnId?: string;
+  /** PRI-743 follow-up: Codex logical observation key override for --host codex. */
+  logicalKey?: string;
 }
 
 function emitSessionBindingFailure(
@@ -107,6 +117,36 @@ function resolveIngressDecision(
     score,
   };
 
+  // PRI-743 follow-up: an explicit Codex attribution. The lineage ids are the
+  // caller's (presence validated in handlePainRecord); the logical observation
+  // key is derived with the SAME rule the Codex ingestion path uses
+  // (codex-adapter admission.ts buildLiveCorrectionCandidate →
+  // `codex|<rolloutIdentity>|<turnId>|user`) unless --logical-key overrides it.
+  // The CLI cannot read the Codex trajectory (that is the ingestion path's
+  // job), so the evidence class is honestly 'unavailable': the shared
+  // evaluator takes its bound+unavailable 'degrade' branch and submits the
+  // pain with real lineage and empty evidence rather than fabricating either.
+  if (opts.host === 'codex') {
+    const rolloutIdentity = opts.rolloutId as string;
+    const hostTurnId = opts.hostTurnId as string;
+    const rootSessionId = opts.session as string;
+    const correlation: PainCorrelation = {
+      status: 'bound',
+      hostKind: 'codex',
+      rootSessionId,
+      rolloutIdentity,
+      logicalObservationKey: opts.logicalKey ?? `codex|${rolloutIdentity}|${hostTurnId}|user`,
+      hostTurnId,
+    };
+    const decision = evaluatePainIngress({
+      ...base,
+      origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
+      correlation,
+      evidence: { status: 'unavailable', reason: 'trajectory_unavailable' },
+    });
+    return { decision, acquisitionDetail: null, acquisitionReason: null };
+  }
+
   if (!opts.session) {
     // No --session: external unbound Owner report (matrix row 6). Allowed
     // by SPEC §7.4 with a disclosure warning; never claims host binding.
@@ -149,8 +189,8 @@ function resolveIngressDecision(
     // PRI-743: host attribution is explicit when --host openclaw is given;
     // absent --host keeps the pre-PRI-743 'openclaw' default (validated and
     // disclosed by handlePainRecord — rc-9). --host codex never reaches this
-    // point: it is refused before any mutation (no verifiable lineage), so
-    // the bound correlation below is always the openclaw shape.
+    // point — it returns from its own branch above and must not read the
+    // OpenClaw trajectory — so the bound correlation here is the openclaw shape.
     const hostKind = 'openclaw' as const;
     const decision = evaluatePainIngress({
       ...base,
@@ -192,30 +232,40 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     return; // guard: test stubs of process.exit continue execution (cli-2-exit-stops)
   }
 
-  // PRI-743: a CLI-claimed codex attribution would be a PRI-642 recurrence in
-  // another shape — the shared ingress evaluator requires the rollout lineage
-  // tuple (rc-6) that only the Codex ingestion path can produce, and the CLI
-  // owns no Codex identity. Refuse before any mutation instead of faking it.
+  // PRI-743 follow-up: --host codex must carry the REAL Codex lineage. The
+  // shared ingress evaluator only attributes `host_kind=codex` to a bound
+  // correlation holding the complete tuple (rootSessionId / rolloutIdentity /
+  // logicalObservationKey / hostTurnId — rc-6); the CLI never synthesises that
+  // tuple, because an unverifiable Codex attribution would itself be the
+  // misattribution PRI-743 exists to remove. Missing lineage fails loud before
+  // any mutation (cli-5/cli-6) — the caller owns those ids.
   if (opts.host === 'codex') {
-    const message = 'the CLI cannot verify Codex lineage (rolloutIdentity / logicalObservationKey) — codex pains are produced by the Codex ingestion path, not by pd pain record';
-    if (opts.json) {
-      console.log(JSON.stringify({
-        status: 'failed',
-        reason: 'codex_lineage_unverifiable_by_cli',
-        message,
-        nextAction: 'Record Codex pains through the Codex ingestion path (pd codex setup enables it), or use --host openclaw for OpenClaw-attributed sessions.',
-      }, null, 2));
-    } else {
-      console.error(`Error: ${message}`);
-      console.error('Next action: record Codex pains through the Codex ingestion path (pd codex setup enables it), or use --host openclaw for OpenClaw-attributed sessions.');
+    const missing: string[] = [];
+    if (!opts.session) missing.push('--session <codex root session id>');
+    if (!opts.rolloutId) missing.push('--rollout-id <codex rollout identity>');
+    if (!opts.hostTurnId) missing.push('--host-turn-id <codex turn id>');
+    if (missing.length > 0) {
+      const message = `--host codex requires the real Codex lineage — missing ${missing.join(', ')}`;
+      const nextAction = 'Pass --session <root session id> --rollout-id <rollout identity> --host-turn-id <turn id> so the pain carries verifiable Codex lineage, or use --host openclaw for OpenClaw-attributed sessions.';
+      if (opts.json) {
+        console.log(JSON.stringify({
+          status: 'failed',
+          reason: 'codex_lineage_required',
+          message,
+          nextAction,
+        }, null, 2));
+      } else {
+        console.error(`Error: ${message}`);
+        console.error(`Next action: ${nextAction}`);
+      }
+      process.exit(1);
+      return; // guard: test stubs of process.exit continue execution (cli-2-exit-stops)
     }
-    process.exit(1);
-    return; // guard: test stubs of process.exit continue execution (cli-2-exit-stops)
   }
 
   if (!opts.reason) {
     console.error('Error: --reason <text> is required');
-    console.error('Usage: pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--host openclaw|codex] [--json]');
+    console.error('Usage: pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--host openclaw|codex] [--rollout-id <id> --host-turn-id <id>] [--json]');
     process.exit(1);
     return;
   }
@@ -422,8 +472,11 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   // PRI-743: the pre-existing 'openclaw' default is an assumption, not
   // evidence — disclose it whenever it actually applies (rc-9), so host
   // attribution can never silently distort PRI-743-style host comparisons.
+  // Unbound reports (no --session) keep host_kind NULL: they carry no host
+  // trace at all, so labelling them 'openclaw' would be a fresh misattribution
+  // rather than a compatibility default.
   const hostDefaultWarning = binding.sessionId !== undefined && opts.host === undefined
-    ? `host attribution defaulted to 'openclaw' (--host not given); pass --host codex to attribute this pain to the Codex host.`
+    ? 'host kind not specified, defaulting to openclaw; pass --host codex with --rollout-id/--host-turn-id to attribute this pain to the Codex host.'
     : null;
   if (hostDefaultWarning !== null) cliWarnings.push(hostDefaultWarning);
 

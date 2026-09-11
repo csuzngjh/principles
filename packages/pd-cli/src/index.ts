@@ -123,7 +123,10 @@ painCmd
   .option('-S, --source <text>', 'Source of the pain signal', 'manual')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--session <id>', 'Session ID to bind (validated against this workspace\'s trajectory.db; without it the record is unbound: no trajectory evidence, candidates likely gated by the admission threshold)')
-  .option('--host <kind>', 'PRI-743: explicit host attribution (openclaw | codex). openclaw = default attribution without the disclosure warning; codex refuses — the CLI cannot verify Codex lineage.', undefined)
+  .option('--host <kind>', 'PRI-743: explicit host attribution (openclaw | codex). openclaw = default attribution without the disclosure warning; codex requires the real Codex lineage (--rollout-id, --host-turn-id, and --session as the root session).', undefined)
+  .option('--rollout-id <id>', 'PRI-743: Codex rollout identity — required by --host codex', undefined)
+  .option('--host-turn-id <id>', 'PRI-743: Codex turn id — required by --host codex', undefined)
+  .option('--logical-key <key>', 'PRI-743: Codex logical observation key override for --host codex (default: codex|<rollout-id>|<host-turn-id>|user)', undefined)
   .option('--wait', 'Wait for diagnosis to complete (sync mode, overrides async flag)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
