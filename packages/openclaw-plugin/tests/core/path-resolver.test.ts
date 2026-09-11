@@ -20,11 +20,18 @@ describe('PathResolver', () => {
         const { PathResolver } = await import('../../src/core/path-resolver.js');
         const resolver = new PathResolver({ workspaceDir: '/test/workspace' });
 
-        const requiredKeys = ['PROFILE', 'AGENT_SCORECARD', 'PAIN_FLAG', 'EVOLUTION_QUEUE', 'THINKING_OS'];
+        const requiredKeys = ['PROFILE', 'AGENT_SCORECARD', 'PAIN_FLAG', 'THINKING_OS'];
 
         for (const key of requiredKeys) {
             expect(() => resolver.resolve(key)).not.toThrow();
         }
+    });
+
+    it('no longer resolves retired evolution worker keys (2026-09-11 PRI-737 retirement)', async () => {
+        const { PathResolver } = await import('../../src/core/path-resolver.js');
+        const resolver = new PathResolver({ workspaceDir: '/test/workspace' });
+        expect(() => resolver.resolve('EVOLUTION_QUEUE' as never)).toThrow();
+        expect(() => resolver.resolve('EVOLUTION_WORKER' as never)).toThrow();
     });
 
     it('no longer resolves the retired THINKING_OS_USAGE key (2026-08-19 retirement)', async () => {
@@ -59,5 +66,4 @@ it('should resolve extension anchors and worker path', async () => {
     expect(resolver.resolve('EXTENSION_ROOT')).toBe('/tmp/ext-root');
     expect(resolver.resolve('EXTENSION_SRC')).toBe('/tmp/ext-root/src');
     expect(resolver.resolve('EXTENSION_DIST')).toBe('/tmp/ext-root/dist');
-    expect(resolver.resolve('EVOLUTION_WORKER')).toMatch(/\/tmp\/ext-root\/(src|dist)\/service\/evolution-worker\.(ts|js)$/);
 });

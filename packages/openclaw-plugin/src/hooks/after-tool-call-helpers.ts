@@ -20,7 +20,7 @@ import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clea
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { createTraceId } from '../core/evolution-logger.js';
+import { createTraceId } from '../utils/trace-id.js';
 import type { PluginHookAfterToolCallEvent } from '../openclaw-sdk.js';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed, resetSharedCooldownForTest } from './trigger-cooldown-tracker.js';
 import { sanitizeForEvidence, sanitizeToolParamsForEvidence } from './message-sanitize.js';

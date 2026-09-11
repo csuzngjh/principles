@@ -11,7 +11,16 @@
  * workspace's trajectory.db, and collect raw evidence entries.
  *
  * Usage:
- *   pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--json]
+ *   pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--host openclaw|codex] [--json]
+ *
+ * PRI-743: `--host` makes host attribution explicit instead of assumed.
+ * `--host openclaw` records the default attribution without the disclosure
+ * warning; `--host codex` refuses loudly — the CLI can verify OpenClaw
+ * trajectory sessions but can never verify a Codex lineage tuple
+ * (rolloutIdentity / logicalObservationKey, rc-6), so codex pains must come
+ * from the Codex ingestion path, never from the CLI. The correlation schema
+ * itself is NOT changed — PainIngressCorrelationV1 bound branches only admit
+ * openclaw/codex.
  */
 import {
   PainToPrincipleService,
@@ -35,6 +44,8 @@ interface RecordOptions {
   json?: boolean;
   session?: string;
   wait?: boolean;
+  /** PRI-743: explicit host attribution for a bound --session pain. */
+  host?: string;
 }
 
 function emitSessionBindingFailure(
@@ -135,10 +146,16 @@ function resolveIngressDecision(
 
   // Available evidence: a real session with real entries — submit, bound.
   if (acquisition.status === 'available') {
+    // PRI-743: host attribution is explicit when --host openclaw is given;
+    // absent --host keeps the pre-PRI-743 'openclaw' default (validated and
+    // disclosed by handlePainRecord — rc-9). --host codex never reaches this
+    // point: it is refused before any mutation (no verifiable lineage), so
+    // the bound correlation below is always the openclaw shape.
+    const hostKind = 'openclaw' as const;
     const decision = evaluatePainIngress({
       ...base,
       origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
-      correlation: { status: 'bound', hostKind: 'openclaw', sessionId: opts.session },
+      correlation: { status: 'bound', hostKind, sessionId: opts.session },
       evidence: { status: 'available', entries: acquisition.entries.map(toIngressEntry) as [IngressEvidenceEntry, ...IngressEvidenceEntry[]] },
     });
     return { decision, acquisitionDetail: null, acquisitionReason: null };
@@ -157,9 +174,48 @@ function resolveIngressDecision(
 }
 
 export async function handlePainRecord(opts: RecordOptions): Promise<void> {
+  // PRI-743: fail loud on an unknown --host before any mutation (cli-5/cli-6).
+  if (opts.host !== undefined && opts.host !== 'openclaw' && opts.host !== 'codex') {
+    const message = `invalid --host: expected openclaw | codex, got ${opts.host}`;
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        reason: 'invalid_host_kind',
+        message,
+        nextAction: 'Pass --host openclaw or --host codex, or omit --host (defaults to openclaw).',
+      }, null, 2));
+    } else {
+      console.error(`Error: ${message}`);
+      console.error('Next action: pass --host openclaw or --host codex, or omit --host (defaults to openclaw).');
+    }
+    process.exit(1);
+    return; // guard: test stubs of process.exit continue execution (cli-2-exit-stops)
+  }
+
+  // PRI-743: a CLI-claimed codex attribution would be a PRI-642 recurrence in
+  // another shape — the shared ingress evaluator requires the rollout lineage
+  // tuple (rc-6) that only the Codex ingestion path can produce, and the CLI
+  // owns no Codex identity. Refuse before any mutation instead of faking it.
+  if (opts.host === 'codex') {
+    const message = 'the CLI cannot verify Codex lineage (rolloutIdentity / logicalObservationKey) — codex pains are produced by the Codex ingestion path, not by pd pain record';
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        reason: 'codex_lineage_unverifiable_by_cli',
+        message,
+        nextAction: 'Record Codex pains through the Codex ingestion path (pd codex setup enables it), or use --host openclaw for OpenClaw-attributed sessions.',
+      }, null, 2));
+    } else {
+      console.error(`Error: ${message}`);
+      console.error('Next action: record Codex pains through the Codex ingestion path (pd codex setup enables it), or use --host openclaw for OpenClaw-attributed sessions.');
+    }
+    process.exit(1);
+    return; // guard: test stubs of process.exit continue execution (cli-2-exit-stops)
+  }
+
   if (!opts.reason) {
     console.error('Error: --reason <text> is required');
-    console.error('Usage: pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--json]');
+    console.error('Usage: pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--session <id>] [--host openclaw|codex] [--json]');
     process.exit(1);
     return;
   }
@@ -363,8 +419,21 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       : [];
   const cliWarnings = [...decisionWarnings, gatedWarning].filter((w): w is string => w !== null && w !== undefined);
 
+  // PRI-743: the pre-existing 'openclaw' default is an assumption, not
+  // evidence — disclose it whenever it actually applies (rc-9), so host
+  // attribution can never silently distort PRI-743-style host comparisons.
+  const hostDefaultWarning = binding.sessionId !== undefined && opts.host === undefined
+    ? `host attribution defaulted to 'openclaw' (--host not given); pass --host codex to attribute this pain to the Codex host.`
+    : null;
+  if (hostDefaultWarning !== null) cliWarnings.push(hostDefaultWarning);
+
   if (opts.json) {
     const out: Record<string, unknown> = { ...result };
+    // PRI-743: surface the effective host attribution explicitly in --json
+    // (machine consumers doing host comparisons must not re-derive it).
+    if (binding.sessionId !== undefined) {
+      out.hostAttribution = binding.hostKind;
+    }
     // Ensure nextAction is present for actionable states
     if (out.status === 'submitted') {
       if (!out.nextAction) {
@@ -412,7 +481,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       console.log(`   Source: ${opts.source ?? 'manual'}`);
       console.log(`   Workspace: ${workspaceDir}`);
       if (binding.sessionId) {
-        console.log(`   Session: ${binding.sessionId} (bound, ${binding.evidence.length} evidence entries)`);
+        console.log(`   Session: ${binding.sessionId} (bound, host=${binding.hostKind}, ${binding.evidence.length} evidence entries)`);
       } else {
         console.log('   Session: unbound (Owner report; no trajectory evidence)');
       }

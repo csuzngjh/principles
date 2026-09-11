@@ -22,15 +22,8 @@ import * as ioUtils from '../../src/utils/io.js';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
-vi.mock('../../src/core/evolution-engine.js', () => ({
-  recordEvolutionSuccess: vi.fn(),
-  recordEvolutionFailure: vi.fn(),
-}));
-vi.mock('../../src/core/evolution-logger.js', () => ({
+vi.mock('../../src/utils/trace-id.js', () => ({
   createTraceId: vi.fn(() => 'trace-123'),
-  getEvolutionLogger: vi.fn(() => ({
-    logPainDetected: vi.fn(),
-  })),
 }));
 
 const mockEmitSync = vi.fn();

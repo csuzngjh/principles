@@ -50,6 +50,5 @@
 
 1. `user_empathy` / `system_infer` 是否稳定进入 `events.jsonl`
 2. rollback 是否只影响 empathy slice
-3. `evolution_queue.json`、`evolution_directive.json` 与 status 是否一致
-4. summary 是否仍然需要 `partial` 警告才能解释当前状态
-5. EP 积累是否正常驱动等级提升
+3. summary 是否仍然需要 `partial` 警告才能解释当前状态
+4. EP 积累是否正常驱动等级提升

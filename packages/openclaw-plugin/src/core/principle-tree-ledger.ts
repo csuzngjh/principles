@@ -8,7 +8,7 @@
  *
  *   1. Lost updates — core wrote the file UNLOCKED, the plugin wrote it WITH
  *      a lock, and neither knew the other's lock. Concurrent writers (e.g.
- *      evolution-worker async + a pd-cli command) could silently drop edits.
+ *      async plugin writers + a pd-cli command) could silently drop edits.
  *   2. Silent field loss — the two codecs parsed the same bytes at different
  *      strictness; a field one side persisted could be dropped on the next
  *      load by the other.

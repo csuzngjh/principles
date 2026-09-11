@@ -134,32 +134,9 @@ function main() {
   }
 
   // ═══════════════════════════════════════════════
-  // SECTION 3: Dedup Logic
+  // SECTION 3: Dedup Logic — removed (PRI-737): the legacy evolution worker
+  // queue/dedup chain this section verified was retired.
   // ═══════════════════════════════════════════════
-  console.log('\n── 3. Dedup Logic (Phase 3c) ──');
-
-  const workerSource = join(__dirname, '..', 'src', 'service', 'evolution-worker.ts');
-  if (existsSync(workerSource)) {
-    const workerContent = readFileSync(workerSource, 'utf-8');
-
-    // 3.1 Helper functions exist
-    assert(workerContent.includes('hasRecentSimilarReflection'), 'hasRecentSimilarReflection helper extracted');
-    assert(workerContent.includes('buildPainSourceKey'), 'buildPainSourceKey helper extracted');
-    assert(workerContent.includes('shouldSkipForDedup'), 'shouldSkipForDedup helper extracted');
-
-    // 3.2 Dedup window is configured
-    assert(workerContent.includes('4 * 60 * 60 * 1000') || workerContent.includes('DEDUP_WINDOW_MS'), '4-hour dedup window configured');
-
-    // 3.3 No-pain-context bypass
-    const bypassCheck = workerContent.includes('!painSourceKey') || workerContent.includes('painSourceKey === null') || 
-                        workerContent.includes('painSourceKey) return false') || workerContent.includes('if (!painSourceKey) return false');
-    assert(bypassCheck, 'no_pain_context bypasses dedup', 'bypass pattern not found');
-
-    // 3.4 Only completed tasks are checked (not failed)
-    assert(workerContent.includes("status !== 'completed'") || workerContent.includes("status === 'completed'"), 'Only completed tasks matched for dedup');
-  } else {
-    fail('Dedup logic check', 'evolution-worker.ts not found');
-  }
 
   // ═══════════════════════════════════════════════
   // SECTION 4: Correction Rejected Pain Event

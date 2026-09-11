@@ -134,9 +134,9 @@ describe('/pd-help command', () => {
     expect(result.text).toContain('Principles Disciple 命令大全');
     expect(result.text).toContain('🚀 快速开始');
     expect(result.text).toContain('🔧 实现生命周期（半废弃）');
-    // All previously-missing commands must appear (PRI-736: /pd-evolution-status removed)
+    // All previously-missing commands must appear (PRI-736: /pd-evolution-status removed,
+    // PRI-737: /pd-workflow-debug removed)
     expect(result.text).toContain('/pd-pain');
-    expect(result.text).toContain('/pd-workflow-debug');
     expect(result.text).toContain('/pd-promote-impl');
     expect(result.text).toContain('/pd-disable-impl');
     expect(result.text).toContain('/pd-archive-impl');
@@ -154,30 +154,6 @@ describe('/pd-help command', () => {
     expect(result.text).toContain('Principles Disciple Command Reference');
     expect(result.text).toContain('🚀 Quick Start');
     expect(result.text).toContain('🔧 Implementation Lifecycle (Semi-deprecated)');
-  });
-});
-
-describe('/pd-workflow-debug command', () => {
-  it('invokes handler through plugin registration and returns a result', () => {
-    const { registeredCommands, api } = createMockApi();
-    plugin.register(api);
-
-    const pdWorkflowDebug = registeredCommands.find((c) => c.name === 'pd-workflow-debug');
-    expect(pdWorkflowDebug).toBeDefined();
-
-    const ctx: PluginCommandContext = {
-      sessionId: '',
-      sessionKey: 'sk-debug',
-      workspaceDir: '/mock/workspace',
-      config: { language: 'en' },
-    };
-
-    // The handler calls resolveCommandWorkspaceDir then handleWorkflowDebugCommand.
-    // Even if the underlying function throws (mock workspace has no .principles/),
-    // the catch block returns a text string — either way line 818 is covered.
-    const result = pdWorkflowDebug!.handler(ctx);
-    expect(result).toBeDefined();
-    expect(typeof result.text).toBe('string');
   });
 });
 

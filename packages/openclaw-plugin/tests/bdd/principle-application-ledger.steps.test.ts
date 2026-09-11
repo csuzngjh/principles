@@ -29,9 +29,6 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   trackReceiptAutoCorrect: vi.fn(),
   setInjectedPrincipleIds: vi.fn(),
 }));
-vi.mock('../../src/core/evolution-engine.js', () => ({
-  getEvolutionEngine: vi.fn(() => ({ getTier: vi.fn().mockReturnValue(3), getPoints: vi.fn().mockReturnValue(200) })),
-}));
 const mockEventLogInstance = {
   recordRuleHostEvaluated: vi.fn(),
   recordRuleEnforced: vi.fn(),

@@ -123,6 +123,7 @@ painCmd
   .option('-S, --source <text>', 'Source of the pain signal', 'manual')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--session <id>', 'Session ID to bind (validated against this workspace\'s trajectory.db; without it the record is unbound: no trajectory evidence, candidates likely gated by the admission threshold)')
+  .option('--host <kind>', 'PRI-743: explicit host attribution (openclaw | codex). openclaw = default attribution without the disclosure warning; codex refuses — the CLI cannot verify Codex lineage.', undefined)
   .option('--wait', 'Wait for diagnosis to complete (sync mode, overrides async flag)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
@@ -374,7 +375,7 @@ runtimeCmd
 // when `pd runtime init` is actually invoked.
 runtimeCmd
   .command('init')
-  .description('Initialize all PD SQLite databases (state.db, trajectory.db, subagent_workflows.db)')
+  .description('Initialize all PD SQLite databases (state.db, trajectory.db)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--dry-run', 'Show what would be initialized without writing (default)')
   .option('--confirm', 'Actually initialize the databases (required to write)')

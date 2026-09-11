@@ -39,7 +39,7 @@ import { createHash } from 'node:crypto';
 import { emitPainDetectedEvent } from '../hooks/pain.js';
 import { trackFriction } from './session-tracker.js';
 import { SystemLogger } from './system-logger.js';
-import { createTraceId } from './evolution-logger.js';
+import { createTraceId } from '../utils/trace-id.js';
 import { resolveObserverConfig } from './pd-config-loader.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
 import type { WorkspaceContext } from './workspace-context.js';

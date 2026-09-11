@@ -18,7 +18,6 @@ import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
 // Previously these were module-level `let` variables, so the first workspace
 // to call log() would pin the log file path for ALL subsequent workspaces in
 // the same process — causing cross-workspace log leakage (ERR-092).
-// Pattern follows evolution-engine.ts:551-577 (Map + path.resolve + dispose).
 const cachedLogFiles = new Map<string, string>();
 const cachedLogDates = new Map<string, string>();
 
@@ -150,7 +149,6 @@ export const SystemLogger = {
 /**
  * PRI-504: dispose the SystemLogger cache for a single workspace.
  * Useful for tests and for workspace teardown in multi-workspace processes.
- * Pattern follows evolution-engine.ts:564-570 (disposeEvolutionEngine).
  */
 export function disposeSystemLogger(workspaceDir: string): void {
     const resolved = path.resolve(workspaceDir);
@@ -161,8 +159,7 @@ export function disposeSystemLogger(workspaceDir: string): void {
 
 /**
  * PRI-504: dispose ALL SystemLogger caches. Call this in test afterEach
- * hooks to prevent state leakage between tests. Pattern follows
- * evolution-engine.ts:572-577 (disposeAllEvolutionEngines).
+ * hooks to prevent state leakage between tests.
  */
 export function disposeAllSystemLoggers(): void {
     cachedLogFiles.clear();

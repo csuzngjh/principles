@@ -44,8 +44,6 @@ export const PD_FILES = {
     MODELS_DIR: PD_DIRS.MODELS,
 
     STATE_DIR: PD_DIRS.STATE,
-    EVOLUTION_QUEUE: posixJoin(PD_DIRS.STATE, 'evolution_queue.json'),
-    EVOLUTION_DIRECTIVE: posixJoin(PD_DIRS.STATE, 'evolution_directive.json'),
     WORKBOARD: posixJoin(PD_DIRS.STATE, 'WORKBOARD.json'),
     AGENT_SCORECARD: posixJoin(PD_DIRS.STATE, 'AGENT_SCORECARD.json'),
     PAIN_FLAG: posixJoin(PD_DIRS.STATE, '.pain_flag'),

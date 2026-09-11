@@ -1,9 +1,11 @@
 /**
  * pd runtime init — Initialize all PD SQLite databases for a workspace.
  *
- * Creates state.db, trajectory.db, and subagent_workflows.db with full schema
+ * Creates state.db and trajectory.db with full schema
  * (tables + indexes + views + migrations). Idempotent: safe to run on existing
  * workspaces (all CREATE statements use IF NOT EXISTS).
+ * (subagent_workflows.db initialization removed in PRI-737 with the legacy
+ * evolution worker chain — the workflow store had no remaining producers.)
  *
  * Output contract (cli-1 strict-json, cli-4 dry-run/confirm mutex, cli-6 nextAction):
  * - Default mode is --dry-run (no writes); use --confirm to actually initialize.
@@ -22,7 +24,7 @@ import * as fs from 'fs';
 import * as yaml from 'js-yaml';
 import { SqliteConnection, SchemaConformanceReadModel } from '@principles/core/runtime-v2';
 import { getDefaultPdConfig, validatePdConfig } from '@principles/core/runtime-v2';
-import { initTrajectorySchema, initWorkflowSchema } from 'principles-disciple';
+import { initTrajectorySchema } from 'principles-disciple';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';
 
@@ -82,7 +84,6 @@ export interface RuntimeInitOutput {
 const DB_NAMES = {
   state: 'state.db',
   trajectory: 'trajectory.db',
-  workflow: 'subagent_workflows.db',
 } as const;
 
 // ── Config file generation ─────────────────────────────────────────────────────
@@ -290,48 +291,9 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
     }
   }
 
-  // 3. subagent_workflows.db (via initWorkflowSchema)
-  if (!confirm) {
-    databases.push({
-      name: DB_NAMES.workflow,
-      path: path.join(resolvedWorkspace, '.state', 'subagent_workflows.db'),
-      tables: ['schema_version', 'subagent_workflows', 'subagent_workflow_events'],
-      status: 'skipped',
-      warnings: [],
-    });
-  } else {
-    try {
-      const result = initWorkflowSchema(resolvedWorkspace);
-      if (result.warnings.length > 0) {
-        warnings.push(...result.warnings.map((w: string) => `${DB_NAMES.workflow}: ${w}`));
-      }
-      databases.push({
-        name: DB_NAMES.workflow,
-        path: path.join(resolvedWorkspace, '.state', 'subagent_workflows.db'),
-        tables: result.tables,
-        status: 'initialized',
-        warnings: result.warnings,
-      });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      databases.push({
-        name: DB_NAMES.workflow,
-        path: path.join(resolvedWorkspace, '.state', 'subagent_workflows.db'),
-        tables: [],
-        status: 'failed',
-        warnings: [reason],
-      });
-      return {
-        ok: false,
-        mode: 'confirm',
-        workspace: resolvedWorkspace,
-        databases,
-        warnings,
-        reason: `subagent_workflows.db initialization failed: ${reason}`,
-        nextAction: 'Check workspace directory permissions and disk space, then retry.',
-      };
-    }
-  }
+  // 3. subagent_workflows.db — no longer initialized (PRI-737): the legacy
+  // workflow store had zero producers and the worker chain is retired.
+  // Existing legacy databases in old workspaces are left untouched.
 
   // Verify state.db schema conformance after initialization (confirm mode only)
   if (confirm) {

@@ -6,8 +6,6 @@
  */
 
 import { EventLogService } from '../src/core/event-log.js';
-import { disposeAllEvolutionLoggers } from '../src/core/evolution-logger.js';
-import { disposeAllEvolutionEngines } from '../src/core/evolution-engine.js';
 import { WorkspaceContext } from '../src/core/workspace-context.js';
 import { TrajectoryRegistry } from '../src/core/trajectory.js';
 
@@ -18,12 +16,6 @@ export default function globalSetup() {
   return function globalTeardown() {
     // Close all EventLog instances (clears timers)
     EventLogService.disposeAll();
-
-    // Close all EvolutionLogger instances
-    disposeAllEvolutionLoggers();
-
-    // Close all EvolutionEngine instances
-    disposeAllEvolutionEngines();
 
     // Clear WorkspaceContext cache (closes TrajectoryDatabase instances)
     WorkspaceContext.clearCache();
