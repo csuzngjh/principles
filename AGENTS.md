@@ -99,6 +99,29 @@ Do not begin by designing a new subsystem.
 
 Begin by discovering what already exists.
 
+### P2.1 — Architecture Reality Audit
+
+P2's failure mode in SPEC work: assuming
+
+> problem observed → missing capability → create new abstraction
+
+when the reality is often:
+
+> existing capability → disconnected information flow.
+
+Before implementing a medium or large SPEC, run a Reality Audit. Do not assume a capability is missing. Check:
+
+1. existing capability;
+2. existing data / contracts;
+3. resolver / factory;
+4. producer;
+5. consumer;
+6. missing vs disconnected.
+
+Prefer **Connection Before Creation**: if an existing capability exists but is not connected, fix the connection before introducing new abstractions.
+
+Reference (do not copy into repository docs): Linear document "PD Architecture Reality Audit Practice v1.0".
+
 ---
 
 ## P3 — Minimal Change Surface
