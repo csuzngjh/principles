@@ -144,6 +144,8 @@ describe('fetchFailedTaskDetail (PRI-747 F22)', () => {
 
     const [calledPath] = mockFetch.mock.calls[0];
     expect(calledPath).toBe('/api/v1/failed-tasks/task%2Fwith%20spaces');
+    // Round trip: the server route decodes the segment before the store
+    // lookup (failed-tasks.test.ts pins the server half of this contract).
   });
 
   it('surfaces a 404 (task recovered / changed state) with the server reason', async () => {
@@ -207,6 +209,36 @@ describe('validateFailedTaskDetail (server contract, rc-1/rc-2/rc-4/rc-5)', () =
     expect(validateFailedTaskDetail(payload)).toBeNull();
   });
 
+  it('rejects a payload whose run names a DIFFERENT task (rc-6 lineage)', () => {
+    const payload = serverDetailPayload();
+    const runs = payload['runs'] as Record<string, unknown>[];
+    // A mixed response would display another task's failure reason under
+    // this task — the validator must reject the whole detail.
+    (runs[1] as Record<string, unknown>)['taskId'] = 'some-other-task';
+    expect(validateFailedTaskDetail(payload)).toBeNull();
+  });
+
+  it('rejects a run element without a taskId (rc-6 lineage)', () => {
+    const payload = serverDetailPayload();
+    const runs = payload['runs'] as Record<string, unknown>[];
+    delete (runs[0] as Record<string, unknown>)['taskId'];
+    expect(validateFailedTaskDetail(payload)).toBeNull();
+  });
+
+  it('rejects a task record without updatedAt (required server field, rc-3)', () => {
+    const payload = serverDetailPayload();
+    const task = payload['task'] as Record<string, unknown>;
+    delete task['updatedAt'];
+    expect(validateFailedTaskDetail(payload)).toBeNull();
+  });
+
+  it('rejects a null updatedAt (required server field, rc-3)', () => {
+    const payload = serverDetailPayload();
+    const task = payload['task'] as Record<string, unknown>;
+    task['updatedAt'] = null;
+    expect(validateFailedTaskDetail(payload)).toBeNull();
+  });
+
   it('rejects a non-object payload', () => {
     expect(validateFailedTaskDetail(null)).toBeNull();
     expect(validateFailedTaskDetail('task-detail-1')).toBeNull();
@@ -238,6 +270,16 @@ describe('FailedTasksPage detail wiring (PRI-747 F22)', () => {
     expect(pageSource).toContain('pages.failedTasks.runsTitle');
     expect(pageSource).toContain('pages.failedTasks.runReason');
     expect(pageSource).toContain('run.reason');
+  });
+
+  it('Given FailedTasksPage, When parsed, Then it uses the defensive single-owner date formatter', () => {
+    // utils/format.js (non-defensive: Intl.format threw RangeError on invalid
+    // dates mid-render) was retired into format-date.ts, which returns the
+    // raw string for invalid input — the page must not regress to it.
+    expect(pageSource).toContain('utils/format-date.js');
+    // Match the import statement only — the migration comment may mention the
+    // retired module by name.
+    expect(pageSource).not.toMatch(/from ["'][^"']*utils\/format\.js["']/);
   });
 
   it('Given api.ts, When parsed, Then fetchFailedTaskDetail is exported with its validator (EP-02)', () => {

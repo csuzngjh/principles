@@ -49,9 +49,25 @@ import {
   AlertDialogCancel,
 } from "../../components/ui/alert-dialog.js";
 import { ShinyText } from "../../components/ui/shiny-text.js";
-import { formatDate } from "../../utils/format.js";
+import { formatDate } from "../../utils/format-date.js";
+import i18n from "../../i18n/index.js";
 import { recoverFailedTask, fetchConfigSummary, fetchFailedTaskDetail, request } from "../../api.js";
 import type { FailedTaskDetailData } from "../../utils/validators.js";
+
+// Same component set the former utils/format.js rendered, now served by the
+// defensive single-owner formatter: an invalid date string returns the raw
+// input instead of Intl throwing RangeError mid-render (review round of
+// PRI-747 F22 — utils/format.js was retired with this migration).
+const DATETIME_FORMAT_OPTS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+};
+function formatDateTime(iso: string): string {
+  return formatDate(iso, i18n.language, DATETIME_FORMAT_OPTS);
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -521,15 +537,10 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
   // request's result may become current state).
   const detailRequestIdRef = useRef(0);
 
-  const toggleDetail = useCallback(async (taskId: string) => {
-    if (expandedId === taskId) {
-      detailRequestIdRef.current += 1;
-      setExpandedId(null);
-      setDetail({ status: "idle" });
-      return;
-    }
+  // Fetch (or refetch) one task's detail; a stale response from a superseded
+  // request is dropped (rc-7: only the newest request's result may land).
+  const requestDetail = useCallback(async (taskId: string) => {
     const requestId = ++detailRequestIdRef.current;
-    setExpandedId(taskId);
     setDetail({ status: "loading", taskId });
     // Lazy fetch on expand: the list view stays cheap; the run history is
     // only loaded when the Owner actually asks for this task's detail.
@@ -542,22 +553,19 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
       // task recovered/changed state after the list was loaded).
       setDetail({ status: "error", taskId, message: result.error, nextAction: result.nextAction });
     }
-  }, [expandedId]);
-
-  const retryDetail = useCallback((taskId: string) => {
-    // Re-run the fetch path without toggling state first
-    void (async () => {
-      const requestId = ++detailRequestIdRef.current;
-      setDetail({ status: "loading", taskId });
-      const result = await fetchFailedTaskDetail(taskId);
-      if (requestId !== detailRequestIdRef.current) return;
-      if (result.success) {
-        setDetail({ status: "loaded", taskId, data: result.data });
-      } else {
-        setDetail({ status: "error", taskId, message: result.error, nextAction: result.nextAction });
-      }
-    })();
   }, []);
+
+  const toggleDetail = useCallback((taskId: string) => {
+    if (expandedId === taskId) {
+      // Invalidate any in-flight response, then collapse.
+      detailRequestIdRef.current += 1;
+      setExpandedId(null);
+      setDetail({ status: "idle" });
+      return;
+    }
+    setExpandedId(taskId);
+    void requestDetail(taskId);
+  }, [expandedId, requestDetail]);
 
   return (
     <div className="space-y-2">
@@ -584,7 +592,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
                 variant="quiet"
                 size="icon"
                 className="h-6 w-6 shrink-0 text-[12px]"
-                onClick={() => void toggleDetail(task.taskId)}
+                onClick={() => toggleDetail(task.taskId)}
                 aria-label={t("pages.failedTasks.detailToggle")}
                 aria-expanded={isExpanded}
                 data-testid={`detail-toggle-${task.taskId}`}
@@ -603,7 +611,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
               </span>
               <span className="font-mono text-ink-2 text-center">{task.attemptCount}</span>
               <span className="font-mono text-ink-3 text-[12px]">
-                {task.lastAttemptAt ? formatDate(task.lastAttemptAt) : "—"}
+                {task.lastAttemptAt ? formatDateTime(task.lastAttemptAt) : "—"}
               </span>
               {task.ownerDecisionRequired === true ? (
                 <span className="whitespace-nowrap text-[12px]">
@@ -636,7 +644,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
                 <TaskDetailPanel
                   state={detail.status === "idle" ? { status: "loading", taskId: task.taskId } : detail}
                   taskId={task.taskId}
-                  onRetry={retryDetail}
+                  onRetry={requestDetail}
                   t={t}
                 />
               </div>
@@ -712,11 +720,11 @@ function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
         <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.status")}</span>
         <span className="text-ink-2">{data.status}</span>
         <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.createdAt")}</span>
-        <span className="text-ink-3">{formatDate(data.createdAt)}</span>
+        <span className="text-ink-3">{formatDateTime(data.createdAt)}</span>
         {data.updatedAt && (
           <>
             <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.updatedAt")}</span>
-            <span className="text-ink-3">{formatDate(data.updatedAt)}</span>
+            <span className="text-ink-3">{formatDateTime(data.updatedAt)}</span>
           </>
         )}
         <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.attempts")}</span>
@@ -747,11 +755,11 @@ function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
               <div
                 key={run.runId}
                 className="grid grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)] gap-3 py-1 text-[12px] border-b border-line/30 last:border-b-0"
-                title={`${t("pages.failedTasks.runEnded")}: ${run.endedAt ? formatDate(run.endedAt) : "—"}${run.errorCategory ? ` · ${t("pages.failedTasks.runErrorCategory")}: ${run.errorCategory}` : ""}`}
+                title={`${t("pages.failedTasks.runEnded")}: ${run.endedAt ? formatDateTime(run.endedAt) : "—"}${run.errorCategory ? ` · ${t("pages.failedTasks.runErrorCategory")}: ${run.errorCategory}` : ""}`}
               >
                 <span className="font-mono text-ink-2">#{run.attemptNumber}</span>
                 <span className="font-mono text-ink-3">{run.executionStatus}</span>
-                <span className="font-mono text-ink-3">{formatDate(run.startedAt)}</span>
+                <span className="font-mono text-ink-3">{formatDateTime(run.startedAt)}</span>
                 <span className="text-ink-3 break-words" title={run.reason ?? undefined}>
                   {run.reason ?? (run.errorCategory ?? "—")}
                 </span>

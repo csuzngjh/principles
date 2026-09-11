@@ -921,6 +921,8 @@ export interface GovernanceQueueData {
 /** One execution attempt of a failed task (RunRecord projection). */
 export interface FailedTaskDetailRun {
   runId: string;
+  /** Owning task id — validated to equal the detail's taskId (rc-6 lineage). */
+  taskId: string;
   attemptNumber: number;
   executionStatus: string;
   startedAt: string;
@@ -935,7 +937,7 @@ export interface FailedTaskDetailData {
   taskKind: string;
   status: string;
   createdAt: string;
-  updatedAt: string | null;
+  updatedAt: string;
   attemptCount: number;
   maxAttempts: number;
   lastError: string | null;
@@ -945,6 +947,9 @@ export interface FailedTaskDetailData {
 function validateFailedTaskDetailRun(v: unknown): FailedTaskDetailRun | null {
   if (!isObject(v)) return null;
   if (!Object.hasOwn(v, 'runId') || !isString(v.runId)) return null;
+  // Required by the RunRecord contract and by the lineage check in
+  // validateFailedTaskDetail (rc-6): a run must name the task it belongs to.
+  if (!Object.hasOwn(v, 'taskId') || !isString(v.taskId)) return null;
   if (!Object.hasOwn(v, 'attemptNumber') || !isNumber(v.attemptNumber)) return null;
   if (!Object.hasOwn(v, 'executionStatus') || !isString(v.executionStatus)) return null;
   if (!Object.hasOwn(v, 'startedAt') || !isString(v.startedAt)) return null;
@@ -956,6 +961,7 @@ function validateFailedTaskDetailRun(v: unknown): FailedTaskDetailRun | null {
   if (!errorCategory.valid) return null;
   return {
     runId: v.runId,
+    taskId: v.taskId,
     attemptNumber: v.attemptNumber,
     executionStatus: v.executionStatus,
     startedAt: v.startedAt,
@@ -974,8 +980,10 @@ export function validateFailedTaskDetail(v: unknown): FailedTaskDetailData | nul
   if (!Object.hasOwn(t, 'taskKind') || !isString(t.taskKind)) return null;
   if (!Object.hasOwn(t, 'status') || !isString(t.status)) return null;
   if (!Object.hasOwn(t, 'createdAt') || !isString(t.createdAt)) return null;
-  const updatedAt = readNullableString(t, 'updatedAt');
-  if (!updatedAt.valid) return null;
+  // updatedAt is required on the server's TaskRecord (typebox: no .optional())
+  // — required here too, so contract drift reaches the validation-error state
+  // instead of a silently partial record (rc-3).
+  if (!Object.hasOwn(t, 'updatedAt') || !isString(t.updatedAt)) return null;
   if (!Object.hasOwn(t, 'attemptCount') || !isNumber(t.attemptCount)) return null;
   if (!Object.hasOwn(t, 'maxAttempts') || !isNumber(t.maxAttempts)) return null;
   const taskLastError = readNullableString(t, 'lastError');
@@ -984,12 +992,17 @@ export function validateFailedTaskDetail(v: unknown): FailedTaskDetailData | nul
   if (!topLastError.valid) return null;
   const runs = validateArray(v.runs, validateFailedTaskDetailRun);
   if (runs === null) return null;
+  // rc-6-lineage-consistency: every run must belong to THIS task — a detail
+  // response mixing another task's runs would display foreign failure reasons.
+  for (const run of runs) {
+    if (run.taskId !== t.taskId) return null;
+  }
   return {
     taskId: t.taskId,
     taskKind: t.taskKind,
     status: t.status,
     createdAt: t.createdAt,
-    updatedAt: updatedAt.value,
+    updatedAt: t.updatedAt,
     attemptCount: t.attemptCount,
     maxAttempts: t.maxAttempts,
     lastError: topLastError.value ?? taskLastError.value,
