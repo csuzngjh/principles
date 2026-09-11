@@ -83,7 +83,6 @@ vi.mock('../src/core/workspace-context.js', () => ({
     fromHookContext: vi.fn(() => ({ eventLog: { recordHookExecution: vi.fn() } })),
   },
 }));
-vi.mock('../src/service/evolution-worker.js', () => ({ EvolutionWorkerService: { start: vi.fn() } }));
 vi.mock('../src/service/correction-observer-service.js', () => ({ CorrectionObserverService: { start: vi.fn() } }));
 vi.mock('../src/service/internalization-auto-consumer-service.js', () => ({ InternalizationAutoConsumerService: { start: vi.fn() } }));
 

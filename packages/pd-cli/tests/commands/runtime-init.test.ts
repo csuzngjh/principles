@@ -2,8 +2,8 @@
  * runtime-init tests — pd runtime init command (unit tests with mocked DB layer).
  *
  * Covers:
- *   - INIT-01: --dry-run (default) reports 3 DBs as 'skipped', no real writes
- *   - INIT-02: --confirm calls all 3 init functions, output shows 'initialized'
+ *   - INIT-01: --dry-run (default) reports 2 DBs as 'skipped', no real writes
+ *   - INIT-02: --confirm calls all init functions, output shows 'initialized'
  *   - INIT-03: --json outputs single parseable JSON object (cli-1)
  *   - INIT-04: --dry-run + --confirm mutually exclusive (cli-4)
  *   - INIT-05: --confirm failure sets exitCode=1 with reason + nextAction (cli-6)
@@ -24,7 +24,6 @@ import * as fs from 'node:fs';
 const mockState = vi.hoisted(() => {
   return {
     initTrajectorySchema: vi.fn(),
-    initWorkflowSchema: vi.fn(),
     sqliteConnectionCtor: vi.fn(),
     sqliteConnectionGetDb: vi.fn(),
     sqliteConnectionGetWarnings: vi.fn(),
@@ -37,7 +36,6 @@ const mockState = vi.hoisted(() => {
 
 vi.mock('principles-disciple', () => ({
   initTrajectorySchema: mockState.initTrajectorySchema,
-  initWorkflowSchema: mockState.initWorkflowSchema,
 }));
 
 vi.mock('@principles/core/runtime-v2', async () => {
@@ -87,12 +85,6 @@ function setupDefaultConfirmMocks(): void {
     warnings: [],
   });
 
-  // initWorkflowSchema mock
-  mockState.initWorkflowSchema.mockReturnValue({
-    tables: ['schema_version', 'subagent_workflows', 'subagent_workflow_events'],
-    warnings: [],
-  });
-
   // SchemaConformanceReadModel mock
   mockState.schemaConformanceCtor.mockImplementation(function () {
     return {
@@ -113,19 +105,18 @@ describe('pd runtime init', () => {
   // ── INIT-01: dry-run (default) ─────────────────────────────────────────────
 
   describe('INIT-01: dry-run (default)', () => {
-    it('reports 3 DBs as skipped without calling init functions', () => {
+    it('reports 2 DBs as skipped without calling init functions', () => {
       const tmp = mkTmpDir();
       try {
         const output = buildRuntimeInitOutput(tmp, false);
         expect(output.ok).toBe(true);
         expect(output.mode).toBe('dry-run');
-        expect(output.databases).toHaveLength(3);
+        expect(output.databases).toHaveLength(2);
         for (const db of output.databases) {
           expect(db.status).toBe('skipped');
         }
         // No init functions should be called in dry-run mode
         expect(mockState.initTrajectorySchema).not.toHaveBeenCalled();
-        expect(mockState.initWorkflowSchema).not.toHaveBeenCalled();
         expect(mockState.sqliteConnectionCtor).not.toHaveBeenCalled();
       } finally { rmTmpDir(tmp); }
     });
@@ -136,12 +127,10 @@ describe('pd runtime init', () => {
         const output = buildRuntimeInitOutput(tmp, false);
         const stateDb = output.databases.find(d => d.name === 'state.db');
         const trajDb = output.databases.find(d => d.name === 'trajectory.db');
-        const wfDb = output.databases.find(d => d.name === 'subagent_workflows.db');
         expect(stateDb?.tables).toContain('tasks');
         expect(stateDb?.tables).toContain('runs');
         expect(trajDb?.tables).toContain('pain_events');
         expect(trajDb?.tables).toContain('sessions');
-        expect(wfDb?.tables).toContain('subagent_workflows');
       } finally { rmTmpDir(tmp); }
     });
   });
@@ -149,20 +138,19 @@ describe('pd runtime init', () => {
   // ── INIT-02: --confirm ─────────────────────────────────────────────────────
 
   describe('INIT-02: --confirm', () => {
-    it('calls all 3 init functions and reports initialized status', () => {
+    it('calls all init functions and reports initialized status', () => {
       const tmp = mkTmpDir();
       try {
         const output = buildRuntimeInitOutput(tmp, true);
         expect(output.ok).toBe(true);
         expect(output.mode).toBe('confirm');
-        expect(output.databases).toHaveLength(3);
+        expect(output.databases).toHaveLength(2);
         for (const db of output.databases) {
           expect(db.status).toBe('initialized');
         }
         expect(mockState.sqliteConnectionCtor).toHaveBeenCalledTimes(1);
         expect(mockState.sqliteConnectionGetDb).toHaveBeenCalledTimes(1);
         expect(mockState.initTrajectorySchema).toHaveBeenCalledWith(tmp);
-        expect(mockState.initWorkflowSchema).toHaveBeenCalledWith(tmp);
       } finally { rmTmpDir(tmp); }
     });
 
@@ -256,7 +244,6 @@ describe('pd runtime init', () => {
     it('does not call any init functions on flag conflict', async () => {
       await handleRuntimeInit({ dryRun: true, confirm: true, json: true });
       expect(mockState.initTrajectorySchema).not.toHaveBeenCalled();
-      expect(mockState.initWorkflowSchema).not.toHaveBeenCalled();
       expect(mockState.sqliteConnectionCtor).not.toHaveBeenCalled();
     });
   });
@@ -302,19 +289,6 @@ describe('pd runtime init', () => {
         expect(output.ok).toBe(false);
         expect(output.reason).toContain('trajectory.db');
         expect(output.reason).toContain('permission denied');
-      } finally { rmTmpDir(tmp); }
-    });
-
-    it('sets exitCode=1 and includes reason when subagent_workflows.db fails', () => {
-      const tmp = mkTmpDir();
-      try {
-        mockState.initWorkflowSchema.mockImplementation(() => {
-          throw new Error('locked');
-        });
-        const output = buildRuntimeInitOutput(tmp, true);
-        expect(output.ok).toBe(false);
-        expect(output.reason).toContain('subagent_workflows.db');
-        expect(output.reason).toContain('locked');
       } finally { rmTmpDir(tmp); }
     });
 

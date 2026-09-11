@@ -17,15 +17,8 @@ vi.mock('../../src/core/pd-config-loader.js', () => ({
   loadPdConfigForPlugin: vi.fn(() => ({ ok: true, source: 'mock', effective: {}, errors: [] })),
   loadFeatureFlagFromConfig: vi.fn(() => ({ enabled: false, source: 'mock' })),
 }));
-vi.mock('../../src/core/evolution-engine.js', () => ({
-  recordEvolutionSuccess: vi.fn(),
-  recordEvolutionFailure: vi.fn(),
-}));
-vi.mock('../../src/core/evolution-logger.js', () => ({
+vi.mock('../../src/utils/trace-id.js', () => ({
   createTraceId: vi.fn(() => 'trace-123'),
-  getEvolutionLogger: vi.fn(() => ({
-    logPainDetected: vi.fn(),
-  })),
 }));
 
 const mockEmitSync = vi.fn();

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CorrectionObserverResult } from '../../src/service/subagent-workflow/correction-observer-types.js';
+import type { CorrectionObserverResult } from '@principles/core/runtime-v2';
 
 // Shared mock objects so tests can mutate them after vi.mock runs
 const mockLearner = { add: vi.fn(), updateWeight: vi.fn(), remove: vi.fn(), getStore: vi.fn(() => ({ keywords: [] })) };

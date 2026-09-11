@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime-v2';
 import { DEFAULT_FEATURE_FLAGS, computeEffectiveFlags } from '@principles/core/runtime-v2';
 
+// Renamed from evolution-worker.correction-observer.test.ts in PRI-737: the
+// file only ever asserted correction_observer / evolution_worker flag and
+// surface-registry governance (no worker code), so it outlives the worker.
 describe('Correction Observer Ownership — Feature Flag & Surface Registry Consistency (PRI-293, ERR-027)', () => {
   it('correction_observer feature flag is registered as quiet with enabled:false (MVP-Quiet, disableable runtime kill switch)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'correction_observer');
@@ -34,14 +37,14 @@ describe('Correction Observer Ownership — Feature Flag & Surface Registry Cons
     expect(surface!.enabledByDefault).toBe(true);
   });
 
-  it('evolution_worker feature flag remains quiet with enabled:false', () => {
+  it('evolution_worker feature flag remains quiet with enabled:false (flag retirement deferred, PRI-737)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'evolution_worker');
     expect(flag).toBeDefined();
     expect(flag!.category).toBe('quiet');
     expect(flag!.enabled).toBe(false);
   });
 
-  it('service:evolution-worker surface remains quiet with enabledByDefault:false', () => {
+  it('service:evolution-worker surface remains quiet with enabledByDefault:false (flag retirement deferred, PRI-737)', () => {
     const surface = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker');
     expect(surface).toBeDefined();
     expect(surface!.category).toBe('quiet');

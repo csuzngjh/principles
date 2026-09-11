@@ -7,8 +7,7 @@
 | Task | File | Notes |
 |------|------|-------|
 | Trust permissions | `trust-engine.ts` | 4-stage model, score floor=30, cold-start grace |
-| Evolution points | `evolution-engine.ts` | 5-tier EP system (Seed→Forest), double-reward after recovery |
-| Principle lifecycle | `evolution-reducer.ts` | Event sourcing → `evolution.jsonl` stream |
+| Principle lifecycle | `evolution-reducer.ts` | Event sourcing → `evolution.jsonl` stream (legacy evolution-engine.ts retired in PRI-737) |
 | Pain scoring | `pain.ts` | Tool failures + gate blocks → pain score |
 | Config management | `config.ts`, `config-service.ts` | PainConfig, dot-notation `get()`, singleton factory |
 | Trajectory analytics | `trajectory.ts` | SQLite (better-sqlite3), sessions/turns/tool_calls |

@@ -51,7 +51,6 @@ Before entering new capability phases, check daily:
 1. EP tier and queue are functioning correctly
 2. `user_empathy` and `system_infer` appear in `events.jsonl`
 3. rollback affects only the empathy slice
-4. `evolution_queue.json`, `evolution_directive.json`, and status stay aligned
-5. summary warnings still accurately explain partial data quality
+4. summary warnings still accurately explain partial data quality
 
 (End of file - total 84 lines)

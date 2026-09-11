@@ -53,7 +53,7 @@ describe('PainConfig', () => {
         const config = new PainConfig(stateDir);
         // Using defaults
         config.load();
-        expect(config.get('intervals.worker_poll_ms')).toBe(15 * 60 * 1000);
+        expect(config.get('severity_thresholds.high')).toBe(70);
     });
 
     it('should skip undefined values during merge', () => {
@@ -72,10 +72,10 @@ describe('PainConfig', () => {
         expect(config.get('thresholds.pain_trigger')).toBe(40); // Default remains
     });
 
-    it('should validate and correct out-of-range values', () => {
+    it('tolerates retired interval keys from pre-PRI-737 config files without effect', () => {
         const mockConfig = {
             intervals: {
-                worker_poll_ms: 500 // Too fast, should be corrected
+                worker_poll_ms: 500 // retired key: merged into settings but has no consumer
             }
         };
 
@@ -85,6 +85,8 @@ describe('PainConfig', () => {
         const config = new PainConfig(stateDir);
         config.load();
 
-        expect(config.get('intervals.worker_poll_ms')).toBe(15 * 60 * 1000); // Reset to default
+        // Not normalized/reset anymore — the whole intervals block retired with
+        // the worker; unknown keys are simply carried through as inert data.
+        expect(config.get('intervals.worker_poll_ms')).toBe(500);
     });
 });

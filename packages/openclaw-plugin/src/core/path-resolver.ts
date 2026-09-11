@@ -296,9 +296,6 @@ export class PathResolver {
         const memory = workspacePath.join(workspace, 'memory');
         const extensionSrc = extensionPath.join(extensionRoot, 'src');
         const extensionDist = extensionPath.join(extensionRoot, 'dist');
-        const evolutionWorker = fs.existsSync(extensionSrc)
-            ? extensionPath.join(extensionSrc, 'service', 'evolution-worker.ts')
-            : extensionPath.join(extensionDist, 'service', 'evolution-worker.js');
 
         const pathMap: Record<string, string> = {
             'PROFILE': workspacePath.join(workspace, '.principles', 'PROFILE.json'),
@@ -308,8 +305,6 @@ export class PathResolver {
             'MODELS_DIR': workspacePath.join(workspace, '.principles', 'models'),
             'AGENT_SCORECARD': workspacePath.join(state, 'AGENT_SCORECARD.json'),
             'PAIN_FLAG': workspacePath.join(state, '.pain_flag'),
-            'EVOLUTION_QUEUE': workspacePath.join(state, 'evolution_queue.json'),
-            'EVOLUTION_DIRECTIVE': workspacePath.join(state, 'evolution_directive.json'),
             'WORKBOARD': workspacePath.join(state, 'WORKBOARD.json'),
             'SYSTEM_CAPABILITIES': workspacePath.join(state, 'SYSTEM_CAPABILITIES.json'),
             'PAIN_SETTINGS': workspacePath.join(state, 'pain_settings.json'),
@@ -319,7 +314,6 @@ export class PathResolver {
             'EXTENSION_ROOT': extensionRoot,
             'EXTENSION_SRC': extensionSrc,
             'EXTENSION_DIST': extensionDist,
-            'EVOLUTION_WORKER': evolutionWorker,
             'LOGS': workspacePath.join(memory, 'logs'),
             'SYSTEM_LOG': workspacePath.join(memory, 'logs', 'SYSTEM.log'),
             'REFLECTION_LOG': workspacePath.join(memory, 'reflection-log.md'),

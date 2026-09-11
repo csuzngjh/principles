@@ -282,8 +282,9 @@ describe('handleErrorsList — handler behavior', () => {
     expect(parsed.workerErrors).toEqual([]);
     expect(parsed.total).toBe(0);
     expect(parsed.nextAction).toBe('No errors found. PD pipeline is healthy.');
-    // worker-status.json missing → workerStatusMissing=true
-    expect(parsed.workerStatusMissing).toBe(true);
+    // worker-status.json missing → expected steady state since PRI-737
+    // (the writer retired); no workerStatusMissing flag is emitted.
+    expect(parsed.workerStatusMissing).toBeUndefined();
     expect(parsed.workerStatusPath).toContain('worker-status.json');
     // cli-2-exit-stops: success path does NOT set exitCode to failure (1).
     // We assert "not 1" rather than "toBe(0)" because vitest may reset
@@ -657,14 +658,14 @@ describe('handleErrorsList — handler behavior', () => {
     expect(text).toContain('total:       2');
   });
 
-  it('text output: worker-status.json missing is reported in workerStatus line', async () => {
+  it('text output: worker-status.json missing is not reported (expected steady state since PRI-737)', async () => {
     setStateDbExists();
     mockListFailedTasks.mockResolvedValue([]);
 
     await handleErrorsList({ workspace: WS, json: false });
 
     const text = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
-    expect(text).toContain('workerStatus: (missing');
+    expect(text).not.toContain('workerStatus:');
   });
 
   it('connection.close() called on success path (resource cleanup)', async () => {

@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // vi.hoisted ensures these are available to vi.mock factories at hoist time
-const { mockEvaluate, mockEventLog, mockEvolution } = vi.hoisted(() => {
+const { mockEvaluate, mockEventLog } = vi.hoisted(() => {
   const mockEvaluate = vi.fn().mockReturnValue(undefined);
   const mockEventLog = {
     recordRuleHostEvaluated: vi.fn(),
@@ -25,11 +25,7 @@ const { mockEvaluate, mockEventLog, mockEvolution } = vi.hoisted(() => {
     recordGateBlock: vi.fn(),
     recordSession: vi.fn(),
   };
-  const mockEvolution = {
-    getTier: vi.fn().mockReturnValue(3),
-    getPoints: vi.fn().mockReturnValue(200),
-  };
-  return { mockEvaluate, mockEventLog, mockEvolution };
+  return { mockEvaluate, mockEventLog };
 });
 
 vi.mock('../../src/core/session-tracker.js', () => ({
@@ -37,10 +33,6 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   trackBlock: vi.fn(),
   trackReceiptAutoCorrect: vi.fn(),
   setInjectedPrincipleIds: vi.fn(),
-}));
-
-vi.mock('../../src/core/evolution-engine.js', () => ({
-  getEvolutionEngine: vi.fn(() => mockEvolution),
 }));
 
 vi.mock('../../src/core/event-log.js', () => ({

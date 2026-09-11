@@ -49,10 +49,6 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   trackBlock: vi.fn(),
 }));
 
-vi.mock('../../src/core/evolution-engine.js', () => ({
-  getEvolutionEngine: vi.fn(() => ({ getTier: () => 3, getPoints: () => 200 })),
-}));
-
 vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: { get: vi.fn(() => ({})) },
 }));

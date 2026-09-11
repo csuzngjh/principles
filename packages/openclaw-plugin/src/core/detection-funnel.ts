@@ -11,7 +11,7 @@
  *   - shouldIgnorePainProtocolText (the protocol-token gate)
  *
  * It re-exports DetectionFunnel (same class name + constructor signature) and
- * DetectionResult so DetectionService, llm.ts, and evolution-worker keep working
+ * DetectionResult so DetectionService and llm.ts keep working
  * unchanged.
  *
  * ERR checklist:

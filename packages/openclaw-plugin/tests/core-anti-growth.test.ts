@@ -101,8 +101,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'signal-collector-host.ts',
     'session-tracker.ts',
     'principle-tree-ledger.ts',
-    'evolution-logger.ts',
-    'evolution-engine.ts',
+    // evolution-logger.ts / evolution-engine.ts removed (PRI-737 legacy
+    // evolution worker retirement; trace-id util moved to src/utils/trace-id.ts).
     'runtime-v2-prompt-activation-reader.ts',
     'workspace-guidance-migrator.ts',
     'pd-config-loader.ts',

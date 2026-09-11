@@ -40,8 +40,6 @@ import { handleRollbackImplCommand } from './commands/rollback-impl.js';
 import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js';
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
-import { handleWorkflowDebugCommand } from './commands/workflow-debug.js';
-import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { CorrectionObserverService } from './service/correction-observer-service.js';
 import { InternalizationAutoConsumerService } from './service/internalization-auto-consumer-service.js';
 import { TrajectoryService } from './service/trajectory-service.js';
@@ -56,7 +54,7 @@ import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime-v2';
 import { createOpenClawHostRuntime } from './host-runtime/openclaw-host-runtime.js';
 
-// Track started workspaces — one-time init + evolution worker per workspace
+// Track started workspaces — one-time init per workspace
 const startedWorkspaces = new Set<string>();
 
 // PRI-343: Module-level auto-fix for allowConversationAccess.
@@ -90,34 +88,6 @@ function loadFeatureFlagFromWorkspace(
   logger?: { warn?: (msg: string) => void; info?: (msg: string) => void },
 ): { enabled: boolean; source: string } {
   return loadFeatureFlagFromConfig(workspaceDir, flagId, logger);
-}
-
-// ── Evolution Worker Startup Gate (shared between index.ts and tests) ───────
-// Determines whether the legacy evolution worker should start and produces
-// structured observability when disabled (ERR-002).
-
-export interface EvolutionWorkerGateResult {
-  shouldStart: boolean;
-  flagSource: string;
-  disabledInfo: string | null;
-}
-
-export function shouldStartEvolutionWorker(
-  workspaceDir: string,
-  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
-): EvolutionWorkerGateResult {
-  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
-  if (flag.enabled) {
-    return { shouldStart: true, flagSource: flag.source, disabledInfo: null };
-  }
-  const disabledInfo = JSON.stringify({
-    reason: 'mvp_quiet_per_adr0014',
-    nextAction: 'set features.evolution_worker.enabled=true in .pd/config.yaml to enable',
-    featureFlag: 'evolution_worker',
-    boundedContext: 'legacy_evolution_worker',
-    flagSource: flag.source,
-  });
-  return { shouldStart: false, flagSource: flag.source, disabledInfo };
 }
 
 export interface CorrectionObserverGateResult {
@@ -354,26 +324,10 @@ const plugin = {
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
 
-            // ── Start EvolutionWorker for THIS workspace ──
-            // Gated behind evolution_worker feature flag (MVP-Quiet, default OFF per ADR-0014).
-            const gate = shouldStartEvolutionWorker(workspaceDir, api.logger);
-            if (gate.shouldStart) {
-              EvolutionWorkerService.api = api;
-              EvolutionWorkerService.start({
-                config: api.config,
-                workspaceDir,
-                stateDir: path.join(workspaceDir, '.state'),
-                logger: api.logger,
-              });
-              api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir} (flag source: ${gate.flagSource})`);
-            } else {
-              // Structured observability per ERR-002: no silent skip
-              api.logger.info(`[PD] EvolutionWorker NOT started for workspace: ${workspaceDir}. ${gate.disabledInfo}`);
-              SystemLogger.log(workspaceDir, 'EVOLUTION_WORKER_DISABLED', gate.disabledInfo ?? '');
-            }
-
             // ── Start CorrectionObserver for THIS workspace ──
             // MVP-Core per ADR-0014 amendment, independently owned (PRI-293).
+            // (Legacy EvolutionWorker startup removed in PRI-737; its
+            // `evolution_worker` flag entry retires under a separate change.)
             const corrGate = shouldStartCorrectionObserver(workspaceDir, api.logger);
             if (corrGate.shouldStart) {
               CorrectionObserverService.start({
@@ -671,10 +625,9 @@ const plugin = {
     );
 
     // ── Service Registration (surface-guarded) ──
-    // PRI-294: EvolutionWorker service registration removed — it starts via
-    // before_prompt_build hook gate, not via api.registerService. The surface
-    // guard already prevents registration when disabled (enabledByDefault=false).
-    // Dead pre-assignment of EvolutionWorkerService.api removed.
+    // Legacy EvolutionWorker service registration removed (PRI-294 started it
+    // via the before_prompt_build hook gate; the whole worker chain retired in
+    // PRI-737).
     try {
       const guardedCorrectionObserver = guardService('service:correction-observer', CorrectionObserverService, api.logger);
       if (guardedCorrectionObserver) api.registerService(guardedCorrectionObserver);
@@ -732,7 +685,6 @@ const plugin = {
 |--------|--------|------|
 |  | \`/pd-status\` | 查看系统状态（GFI、Pain 词典） |
 |  | \`/pd-pain\` | 从 OpenClaw 会话报告 pain |
-|  | \`/pd-workflow-debug\` | 调试 workflow 状态与事件 [workflowId] |
 
 ## ⚙️ 配置与上下文
 | 命令 | 用途 |
@@ -785,7 +737,6 @@ const plugin = {
 |-------|------|---------|
 |  | \`/pd-status\` | View system status (GFI, Pain dictionary) |
 |  | \`/pd-pain\` | Report pain from OpenClaw session |
-|  | \`/pd-workflow-debug\` | Debug workflow state and events [workflowId] |
 
 ## ⚙️ Configuration & Context
 | Command | Purpose |
@@ -957,22 +908,6 @@ const plugin = {
       }
     });
 
-    api.registerCommand({
-      name: "pd-workflow-debug",
-      description: getCommandDescription('pd-workflow-debug', language),
-      acceptsArgs: true,
-      handler: (ctx) => {
-        try {
-          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleWorkflowDebugCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /pd-workflow-debug failed: ${String(err)}`);
-          return { text: `Workflow debug command failed: ${String(err)}` };
-        }
-      }
-    });
-
     // ── Implementation Lifecycle Commands (Phase 13) ──
     api.registerCommand({
       name: "pd-promote-impl",
@@ -1045,13 +980,12 @@ const plugin = {
 // consolidated in PRI-459). The plugin-local duplicate was removed; re-export the core
 // symbol so any external consumer importing from the plugin still resolves it.
 export { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
-/* istanbul ignore next — test exports for evolution worker gate */
+/* istanbul ignore next — test exports */
 export { loadFeatureFlagFromWorkspace, isRecord };
 
 // Schema initialization exports for `pd runtime init` (unified DB init).
 // These functions open the DB in write mode, apply the full schema, and close the DB.
 // They do NOT run runtime side-effects (importLegacyArtifacts, pruneUnreferencedBlobs).
 export { initTrajectorySchema } from './core/trajectory.js';
-export { initWorkflowSchema } from './service/subagent-workflow/workflow-store.js';
 
 export default plugin;

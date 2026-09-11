@@ -1994,7 +1994,8 @@ describe('validateConfigYamlFull catches incomplete config', () => {
 // Root cause: bundle-plugin.mjs only rewrote @principles/core, not principles-disciple.
 // installer.ts syncPdCli() only created @principles/core symlink, not principles-disciple.
 // Result: `pd runtime init` crashed with ERR_MODULE_NOT_FOUND because runtime-init.ts
-// statically imports initTrajectorySchema/initWorkflowSchema from principles-disciple.
+// statically imports initTrajectorySchema (and, at the time, initWorkflowSchema)
+// from principles-disciple.
 
 describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mjs (Bug-B-002)', () => {
   const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
@@ -2118,18 +2119,17 @@ describe('PRI-442 P0: runtime-init.ts import resolves via symlink (Bug-B-001)', 
 
   it('runtime-init.ts imports from principles-disciple (the plugin package)', () => {
     // This import is the crash point — it must resolve via the symlink created by syncPdCli
+    // (initWorkflowSchema dropped in PRI-737 with the legacy workflow store)
     const content = fs.readFileSync(runtimeInitPath, 'utf-8');
     expect(content).toContain("from 'principles-disciple'");
     expect(content).toContain('initTrajectorySchema');
-    expect(content).toContain('initWorkflowSchema');
   });
 
-  it('principles-disciple (openclaw-plugin) exports initTrajectorySchema and initWorkflowSchema', () => {
-    // The plugin's index.ts must export these functions so the import resolves
+  it('principles-disciple (openclaw-plugin) exports initTrajectorySchema', () => {
+    // The plugin's index.ts must export this function so the import resolves
     const pluginIndexPath = path.join(rootDir, 'packages', 'openclaw-plugin', 'src', 'index.ts');
     const content = fs.readFileSync(pluginIndexPath, 'utf-8');
     expect(content).toContain('export { initTrajectorySchema }');
-    expect(content).toContain('export { initWorkflowSchema }');
   });
 });
 

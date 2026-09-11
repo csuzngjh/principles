@@ -24,11 +24,6 @@
     "medium": 40,
     "low": 20
   },
-  "intervals": {
-    "worker_poll_ms": 900000,
-    "initial_delay_ms": 5000,
-    "task_timeout_ms": 3600000
-  },
   "trust": {
     "stages": {
       "stage_1_observer": 30,

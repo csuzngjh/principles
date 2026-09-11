@@ -375,7 +375,7 @@ runtimeCmd
 // when `pd runtime init` is actually invoked.
 runtimeCmd
   .command('init')
-  .description('Initialize all PD SQLite databases (state.db, trajectory.db, subagent_workflows.db)')
+  .description('Initialize all PD SQLite databases (state.db, trajectory.db)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--dry-run', 'Show what would be initialized without writing (default)')
   .option('--confirm', 'Actually initialize the databases (required to write)')

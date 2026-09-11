@@ -598,84 +598,18 @@ interface InferredBreakpoint {
 
 function inferBreakpoints(report: HealthReport): InferredBreakpoint[] {
   const breakpoints: InferredBreakpoint[] = [];
-  const pain = report.stages.pain_signal as any;
-  const queue = report.stages.evolution_queue as any;
-  const diag = report.stages.diagnostician as any;
   const principles = report.stages.principles as any;
   const stream = principles?.evolution_stream;
-  const evoState = report.stages.evolution_state as any;
 
-  const painFlagExists = pain?.pain_flag?.exists;
-  const painFlagScore = pain?.pain_flag?.score;
-  const painFlagTime = pain?.pain_flag?.time;
-  const queueExists = queue?.exists;
-  const pendingCount = queue?.status_counts?.pending ?? 0;
-  const completedCount = queue?.status_counts?.completed ?? 0;
-  const inProgressCount = queue?.status_counts?.in_progress ?? 0;
-  const staleCount = queue?.stale_tasks?.length ?? 0;
-  const heartbeatHasTask = diag?.heartbeat?.contains_evolution_task;
-  const completionMarkers24h = diag?.completion_markers?.count_24h ?? 0;
   const streamExists = stream?.exists;
   const streamEvents7d = stream?.events_7d ?? 0;
-  const principleCount = principles?.principles_md?.principle_count ?? 0;
-  const candidateCount = principles?.pain_candidates?.count ?? 0;
-  const dictRuleCount = principles?.pain_dictionary?.rule_count ?? 0;
-  const scorecardExists = evoState?.evolution_scorecard?.exists;
 
-  // R1: Pain flag exists but no queue items enqueued after it
-  // Code path: checkPainFlag() reads .pain_flag → creates queue item
-  // If pain_flag has score >= 30 and status != 'queued', but queue is empty
-  // → Worker not polling or not running
-  if (painFlagExists && painFlagScore >= 30) {
-    const flagStatus = pain?.pain_flag?.status;
-    if (flagStatus !== 'queued' && (!queueExists || pendingCount === 0)) {
-      breakpoints.push({
-        confidence: 'medium',
-        stage: 'worker_polling',
-        evidence: `Pain flag exists (score=${painFlagScore}, status=${flagStatus || 'none'}) but queue has no pending tasks`,
-        suggestion: 'Evolution Worker may not be running. Check if plugin is loaded. Default poll interval is 15min (intervals.worker_poll_ms).',
-      });
-    }
-  }
-
-  // R2: Queue has completed tasks but no principles in stream or PRINCIPLES.md
-  // Code path: processEvolutionQueue → writes HEARTBEAT → subagent creates marker → 
-  //   processEvolutionQueue detects marker → marks completed
-  // But principle creation requires subagent to call createPrincipleFromDiagnosis()
-  // If completed > 0 but principles = 0 → diagnosis ran but principle not written
-  if (completedCount > 0 && principleCount === 0 && (!streamExists || streamEvents7d === 0)) {
-    breakpoints.push({
-      confidence: 'high',
-      stage: 'principle_creation',
-      evidence: `${completedCount} completed queue tasks but 0 principles in PRINCIPLES.md and 0 stream events in 7d`,
-      suggestion: 'Diagnostician completed but did not create principles. Check if subagent output format matches createPrincipleFromDiagnosis() expectations. HEARTBEAT.md instructs subagent to write PRINCIPLES.md and create marker file.',
-    });
-  }
-
-  // R3: Queue has pending items + pain_flag exists but nothing in_progress
-  // Code path: processEvolutionQueue picks highest-score pending task → writes HEARTBEAT → marks in_progress
-  // If pending > 0 but in_progress = 0 → Worker hasn't picked up the task yet
-  if (pendingCount > 0 && inProgressCount === 0 && painFlagExists) {
-    breakpoints.push({
-      confidence: 'medium',
-      stage: 'task_dispatch',
-      evidence: `${pendingCount} pending queue tasks, 0 in_progress, pain_flag exists`,
-      suggestion: 'Worker may be running but has not yet processed the queue (poll interval: 15min). Or Worker crashed after writing queue but before marking in_progress.',
-    });
-  }
-
-  // R4: HEARTBEAT has task but no completion marker and task is old
-  // Code path: Worker writes HEARTBEAT.md → heartbeat hook triggers subagent_spawn →
-  //   subagent runs diagnostician protocol → creates .evolution_complete_{id} marker
-  // If HEARTBEAT has task but no completion → subagent didn't complete
-  if (heartbeatHasTask && completionMarkers24h === 0 && staleCount > 0) {
-    breakpoints.push({
-      confidence: 'high',
-      stage: 'diagnostician_execution',
-      evidence: `HEARTBEAT.md contains evolution task but no completion markers in 24h and ${staleCount} stale tasks`,
-      suggestion: 'Subagent (diagnostician) was spawned but did not complete. Possible causes: 1) subagent_ended hook not firing, 2) subagent timeout, 3) HEARTBEAT hook not triggering subagent spawn. Check OpenClaw Gateway logs for subagent spawn events.',
-    });
-  }
+  // PRI-737: the legacy evolution worker chain (queue polling, HEARTBEAT
+  // dispatch, pain candidates promotion, EvolutionEngine scorecard, end-to-end
+  // queue health) is retired. Former rules R1-R4/R6-R8 diagnosed that chain and
+  // would emit permanent false "start the deleted worker" advice against the
+  // intentionally preserved legacy artifacts. Only the reducer-stream check
+  // (R5) still diagnoses live behavior.
 
   // R5: Stream has candidate_created events but no active principles
   // Code path: EvolutionReducer.createPrincipleFromDiagnosis() → emits candidate_created →
@@ -692,47 +626,6 @@ function inferBreakpoints(report: HealthReport): InferredBreakpoint[] {
         suggestion: 'Principles created but auto-promotion failed. Check EvolutionReducer.promote() — requires principle to exist in memory map. Possible cause: stream replay lost in-memory state, or principle was deprecated (conflict_detected or probation_expired).',
       });
     }
-  }
-
-  // R6: Pain candidates exist but none promoted to dictionary rules
-  // Code path: trackPainCandidate() → pain_candidates.json → processPromotion() when count >= threshold (default 3)
-  // If candidates > 0 but dict rules not growing → promotion not running or threshold not met
-  if (candidateCount > 0 && dictRuleCount > 0) {
-    const pendingCandidates = Object.values(principles?.pain_candidates?.candidates || {})
-      .filter((c: any) => c.status === 'pending' && c.count >= 3).length;
-    if (pendingCandidates > 0) {
-      breakpoints.push({
-        confidence: 'medium',
-        stage: 'candidate_promotion',
-        evidence: `${pendingCandidates} pain candidates meet promotion threshold (count>=3) but not yet promoted to dictionary rules`,
-        suggestion: 'processPromotion() runs on Worker cycle. May not have executed yet, or extractCommonSubstring() failed to find common phrases in candidate samples.',
-      });
-    }
-  }
-
-  // R7: Pain exists + queue completed + principles exist but scorecard missing
-  // Code path: recordEvolutionSuccess/Failure() writes to evolution-scorecard.json
-  // If principles exist but no scorecard → EvolutionEngine not initialized or workspace using old version
-  if (principleCount > 0 && !scorecardExists) {
-    breakpoints.push({
-      confidence: 'low',
-      stage: 'scorecard_tracking',
-      evidence: `${principleCount} principles in PRINCIPLES.md but no evolution-scorecard.json`,
-      suggestion: 'EvolutionEngine (V2 scoring) may not be initialized for this workspace. Scorecard is created on first tool call. Check if EvolutionWorkerService.start() was called.',
-    });
-  }
-
-  // R8: End-to-end chain health
-  // If pain exists AND queue exists AND completed > 0 AND principles > 0 → chain is working
-  if (painFlagExists && queueExists && completedCount > 0 && principleCount > 0) {
-    // Chain is functional — no breakpoint
-  } else if (painFlagExists && queueExists && completedCount === 0 && principleCount === 0) {
-    breakpoints.push({
-      confidence: 'high',
-      stage: 'end_to_end_chain',
-      evidence: `Pain detected and queued (${pendingCount} pending) but 0 completed tasks and 0 principles — entire chain stalled`,
-      suggestion: 'The full Pain→Principle chain is not producing output. Most likely break point: Evolution Worker not running, or HEARTBEAT hook not triggering subagent spawn.',
-    });
   }
 
   return breakpoints;
@@ -815,26 +708,10 @@ function detectAnomalies(report: HealthReport): Array<{ severity: 'warning' | 'c
     });
   }
 
-  // 9. Stale active workflows
-  const workflows = report.stages.workflows as Record<string, any>;
-  if (workflows?.exists && workflows.db_accessible) {
-    const staleActive = workflows.stale_active || [];
-    if (staleActive.length > 0) {
-      for (const wf of staleActive) {
-        anomalies.push({
-          severity: 'warning',
-          message: `Stale active workflow: ${wf.id} (${wf.type}, ${wf.age_min}min old)`,
-        });
-      }
-    }
-    const uncleared = workflows.uncleared_terminal ?? 0;
-    if (uncleared > 0) {
-      anomalies.push({
-        severity: 'warning',
-        message: `${uncleared} terminal/expired workflows without cleanup`,
-      });
-    }
-  }
+  // 9. Stale active workflows — retired as an anomaly source (PRI-737): the
+  // workflow store had zero producers and the worker sweep/watchdog chain is
+  // gone, so legacy rows can never be cleaned by design. The workflow stats
+  // remain in the report body as read-only data.
 
   // 10. PD cron job failures
   const pdTasks = report.stages.pd_tasks as Record<string, any>;

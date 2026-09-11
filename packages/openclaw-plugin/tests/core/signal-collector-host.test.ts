@@ -13,9 +13,8 @@ vi.mock('../../src/core/session-tracker.js', () => ({
 vi.mock('../../src/core/system-logger.js', () => ({
   SystemLogger: { log: vi.fn() },
 }));
-vi.mock('../../src/core/evolution-logger.js', () => ({
+vi.mock('../../src/utils/trace-id.js', () => ({
   createTraceId: vi.fn(() => 'trace-mock'),
-  getEvolutionLogger: vi.fn(() => ({ logPainDetected: vi.fn() })),
 }));
 
 import { SignalCollectorHost } from '../../src/core/signal-collector-host.js';

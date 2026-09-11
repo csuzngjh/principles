@@ -2,11 +2,12 @@
  * Regression tests for bug fixes in v1.9.1
  *
  * Validates fixes for:
- * - #208/#209: isExpectedSubagentError expanded + terminal_error classification
  * - #212: evaluability defaults to weak_heuristic, principles are evaluable
  * - #213: fire-and-forget Promise has .catch()
  * - #214: sleep_reflection timeout expires nocturnal workflow
  * - #207/#210: stateDir properly passed through WorkspaceContext
+ * (#208/#209 isExpectedSubagentError coverage removed in PRI-737 with the
+ * retired subagent workflow chain)
  */
 
 import * as fs from 'fs';
@@ -19,7 +20,6 @@ import {
   transitionInternalizationStatus,
   getPrincipleState,
 } from '../../src/core/principle-training-state.js';
-import { isExpectedSubagentError } from '../../src/service/subagent-workflow/subagent-error-utils.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { safeRmDir } from '../test-utils.js';
 
@@ -35,38 +35,6 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     safeRmDir(dir);
   }
-});
-
-// ── #208/#209: isExpectedSubagentError covers daemon-mode errors ──
-
-describe('#208/#209: isExpectedSubagentError daemon-mode coverage', () => {
-  it('matches original gateway request errors', () => {
-    expect(isExpectedSubagentError('Plugin runtime subagent methods are only available during a gateway request')).toBe(true);
-    expect(isExpectedSubagentError('cannot start workflow for boot session')).toBe(true);
-    expect(isExpectedSubagentError('subagent runtime unavailable')).toBe(true);
-  });
-
-  it('matches NocturnalWorkflowManager specific error', () => {
-    expect(isExpectedSubagentError('NocturnalWorkflowManager: subagent runtime unavailable')).toBe(true);
-  });
-
-  it('matches daemon-mode connection errors', () => {
-    expect(isExpectedSubagentError('subagent is not available')).toBe(true);
-    expect(isExpectedSubagentError('gateway is not running')).toBe(true);
-    expect(isExpectedSubagentError('process isolation error: ECONNREFUSED')).toBe(true);
-    // #3 review fix: connection errors now require 'subagent' in message to reduce false positives
-    expect(isExpectedSubagentError('subagent connection refused')).toBe(true);
-    expect(isExpectedSubagentError('subagent connection reset by peer')).toBe(true);
-  });
-
-  it('does not match unrelated errors', () => {
-    expect(isExpectedSubagentError('file not found')).toBe(false);
-    expect(isExpectedSubagentError('syntax error in config')).toBe(false);
-    expect(isExpectedSubagentError('network timeout to external API')).toBe(false);
-    // #3 review fix: generic connection errors without 'subagent' should NOT match
-    expect(isExpectedSubagentError('connection refused')).toBe(false);
-    expect(isExpectedSubagentError('connection reset by peer')).toBe(false);
-  });
 });
 
 // ── #212: evaluability defaults to weak_heuristic ──

@@ -129,7 +129,7 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
 
     // PRI-655: the chain dies silently if a single cycle rejects — scheduleNext
     // would never run again (the startup .catch below only guards round one).
-    // Mirror correction-observer/evolution-worker: catch inside the cycle, log
+    // Mirror correction-observer: catch inside the cycle, log
     // on both channels (rc-9), and let reschedule run on BOTH paths.
     async function runCycle(): Promise<void> {
       if (state.stopped) return;

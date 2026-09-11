@@ -19,7 +19,6 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
             { legacy: path.join(legacyDocsDir, 'PRINCIPLES.md'), newKey: 'PRINCIPLES' },
             { legacy: path.join(legacyDocsDir, 'THINKING_OS.md'), newKey: 'THINKING_OS' },
             { legacy: path.join(legacyDocsDir, 'DECISION_POLICY.json'), newKey: 'DECISION_POLICY' },
-            { legacy: path.join(legacyDocsDir, 'evolution_queue.json'), newKey: 'EVOLUTION_QUEUE' },
             { legacy: path.join(legacyDocsDir, '.pain_flag'), newKey: 'PAIN_FLAG' },
             { legacy: path.join(legacyDocsDir, 'SYSTEM_CAPABILITIES.json'), newKey: 'SYSTEM_CAPABILITIES' },
             { legacy: path.join(legacyDocsDir, 'SYSTEM.log'), newKey: 'SYSTEM_LOG' },
@@ -31,7 +30,6 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
             { legacy: path.join(legacyStateDir, 'pain_settings.json'), newKey: 'PAIN_SETTINGS' },
             // THINKING_OS_USAGE migration removed (2026-08-19): usage tracking retired; the legacy file is inert.
             { legacy: path.join(legacyStateDir, 'pain_candidates.json'), newKey: 'PAIN_CANDIDATES' },
-            { legacy: path.join(legacyStateDir, 'evolution_directive.json'), newKey: 'EVOLUTION_DIRECTIVE' },
             { legacy: path.join(legacyStateDir, 'sessions'), newKey: 'SESSION_DIR' },
             { legacy: path.join(legacyStateDir, 'logs', 'events.jsonl'), newKey: 'SYSTEM_LOG' }, // Backup plan for logs
         ];
