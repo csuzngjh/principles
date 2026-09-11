@@ -363,8 +363,8 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // still resolve. No parsing/serialization/mutation logic may live here — enforced by
   // tests/ledger-schema-diff.test.ts.
   'principle-tree-ledger.ts',
-  'evolution-logger.ts',
-  'evolution-engine.ts',
+  // evolution-logger.ts / evolution-engine.ts removed (PRI-737 legacy
+  // evolution worker retirement).
 
   // ── Runtime V2 ──────────────────────────────────────────────────────────
   'runtime-v2-prompt-activation-reader.ts',

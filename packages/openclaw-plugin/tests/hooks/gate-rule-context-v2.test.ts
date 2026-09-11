@@ -29,20 +29,11 @@ type GateCtx = Parameters<typeof handleBeforeToolCall>[1];
 const workspaceDir = '/mock/workspace';
 const sessionId = 'test-session-ctx-v2';
 
-const mockEvolution = {
-  getTier: vi.fn().mockReturnValue(3),
-  getPoints: vi.fn().mockReturnValue(200),
-};
-
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn(() => ({ currentGfi: 0 })),
   trackBlock: vi.fn(),
   trackReceiptAutoCorrect: vi.fn(),
   setInjectedPrincipleIds: vi.fn(),
-}));
-
-vi.mock('../../src/core/evolution-engine.js', () => ({
-  getEvolutionEngine: vi.fn(() => mockEvolution),
 }));
 
 const mockEventLogInstance = {

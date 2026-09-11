@@ -57,9 +57,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Normalized worker-status.json error entry. WorkerStatusErrorEntry in
- * evolution-worker.ts is `{ at, kind, principleId, error }`; legacy entries
- * are bare strings. We normalize both shapes to a structured form for output.
+ * Normalized worker-status.json error entry (legacy evolution worker,
+ * retired in PRI-737). Structured entries are `{ at, kind, principleId, error }`;
+ * legacy entries are bare strings. We normalize both shapes to a structured
+ * form for output. The writer is gone, so this section reports
+ * workerStatusMissing on any workspace that never ran the legacy worker.
  */
 interface WorkerErrorEntry {
   at: string | null;

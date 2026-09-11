@@ -141,7 +141,7 @@ export const DEFAULT_SETTINGS: PainSettings = {
     intervals: {
         worker_poll_ms: 15 * 60 * 1000,
         initial_delay_ms: 5000,
-        task_timeout_ms: 60 * 60 * 1000  // 1 hour, matching evolution-worker.ts default
+        task_timeout_ms: 60 * 60 * 1000  // 1 hour
     },
     empathy_engine: {
         enabled: true,

@@ -73,10 +73,6 @@ const EXPECTED_TRAJECTORY_TABLES = [
   'exports_audit', 'evolution_tasks', 'evolution_events',
 ];
 
-const EXPECTED_WORKFLOW_TABLES = [
-  'schema_version', 'subagent_workflows', 'subagent_workflow_events',
-];
-
 const EXPECTED_TRAJECTORY_INDEXES = [
   'idx_assistant_turns_session_id',
   'idx_assistant_turns_created_at',
@@ -110,11 +106,11 @@ describe('pd runtime init — empty workspace integration', () => {
   // ── EMPTY-01: initialize empty workspace ───────────────────────────────────
 
   describe('EMPTY-01: initialize empty workspace', () => {
-    it('returns ok=true with 3 initialized databases', () => {
+    it('returns ok=true with 2 initialized databases', () => {
       const output = buildRuntimeInitOutput(tmpDir, true);
       expect(output.ok).toBe(true);
       expect(output.mode).toBe('confirm');
-      expect(output.databases).toHaveLength(3);
+      expect(output.databases).toHaveLength(2);
       for (const db of output.databases) {
         expect(db.status).toBe('initialized');
       }
@@ -150,14 +146,10 @@ describe('pd runtime init — empty workspace integration', () => {
       }
     });
 
-    it('creates subagent_workflows.db with all expected tables', () => {
+    it('no longer creates subagent_workflows.db (legacy workflow store retired in PRI-737)', () => {
       buildRuntimeInitOutput(tmpDir, true);
       const wfDbPath = path.join(tmpDir, '.state', 'subagent_workflows.db');
-      expect(fs.existsSync(wfDbPath)).toBe(true);
-      const tables = getTableNames(wfDbPath);
-      for (const expected of EXPECTED_WORKFLOW_TABLES) {
-        expect(tables).toContain(expected);
-      }
+      expect(fs.existsSync(wfDbPath)).toBe(false);
     });
 
     it('pain_events table has canonical_pain_id and runtime_task_id columns', () => {
@@ -229,7 +221,7 @@ describe('pd runtime init — empty workspace integration', () => {
       // Second initialization (should be idempotent)
       const output2 = buildRuntimeInitOutput(tmpDir, true);
       expect(output2.ok).toBe(true);
-      expect(output2.databases).toHaveLength(3);
+      expect(output2.databases).toHaveLength(2);
       for (const db of output2.databases) {
         expect(db.status).toBe('initialized');
       }

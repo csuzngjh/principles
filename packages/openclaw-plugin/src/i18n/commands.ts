@@ -65,10 +65,6 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '从 OpenClaw 会话报告 pain（context-bound provenance）',
     en: 'Report pain from OpenClaw session (context-bound provenance)'
   },
-  'pd-workflow-debug': {
-    zh: '调试 workflow 状态与事件 [workflowId]',
-    en: 'Debug workflow state and events [workflowId]'
-  },
   'pd-promote-impl': {
     zh: '提升候选实现到 active [list|show <id>|<id>]（半废弃）',
     en: 'Promote candidate implementation to active [list|show <id>|<id>] (semi-deprecated)'

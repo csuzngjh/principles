@@ -2,8 +2,8 @@
  * Keyword Optimization Service
  *
  * Applies LLM optimization results (ADD/UPDATE/REMOVE mutations) to the
- * correction keyword store. Called by evolution-worker.ts after the
- * keyword_optimization workflow completes.
+ * correction keyword store. Invoked by the correction observer service
+ * when optimization results are available.
  */
 
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';

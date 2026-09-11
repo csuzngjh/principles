@@ -131,7 +131,6 @@ All commands support **short aliases** for easier input:
 | `/pd-principle-rollback` | Roll back a principle and blacklist its pattern |
 | `/pd-rollback` | Roll back an empathy event penalty (`<event-id>\|last`) |
 | `/pd-export` | Export data [analytics\|corrections --redacted] |
-| `/pd-workflow-debug` | Debug workflow state and events |
 
 Advanced implementation lifecycle commands (`/pd-promote-impl`,
 `/pd-disable-impl`, `/pd-archive-impl`, `/pd-rollback-impl`) are semi-deprecated

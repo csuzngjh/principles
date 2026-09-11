@@ -465,10 +465,8 @@ describe('PRI-451 Wave 1: dead pain-diagnostic-track symbols removed', () => {
   const TRAJECTORY = 'packages/openclaw-plugin/src/core/trajectory.ts';
   const EVENT_LOG = 'packages/openclaw-plugin/src/core/event-log.ts';
 
-  it('processDetectionQueue is removed from evolution-worker', () => {
-    const src = read(EVOLUTION_WORKER);
-    // Match a call or definition, not the retirement comment.
-    expect(src).not.toMatch(/\bprocessDetectionQueue\s*\(/);
+  it('evolution-worker.ts itself is retired (PRI-737) so processDetectionQueue cannot return', () => {
+    expect(fs.existsSync(path.resolve(EVOLUTION_WORKER))).toBe(false);
   });
 
   it('searchPainEvents is removed from trajectory', () => {

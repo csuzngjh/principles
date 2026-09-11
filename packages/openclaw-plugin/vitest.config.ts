@@ -22,12 +22,10 @@ import { defineConfig } from 'vitest/config';
 export const integrationTests = [
   // Core DB tests
   'tests/core/control-ui-db.test.ts',
-  'tests/core/evolution-logger.test.ts',
   'tests/core/replay-engine.test.ts',
   'tests/core/trajectory.test.ts',
   'tests/core/workspace-context.test.ts',
   // Service tests with DB dependencies
-  'tests/service/evolution-worker.timeout.test.ts',
   'tests/service/keyword-optimization-service.test.ts',
   // Hook tests with DB dependencies
   'tests/hooks/gate-rule-host-pipeline.test.ts',

@@ -34,17 +34,6 @@ export const ONE_DAY_MS = HOURS_PER_DAY * ONE_HOUR_MS;
 /** One week in milliseconds */
 export const ONE_WEEK_MS = DAYS_PER_WEEK * ONE_DAY_MS;
 
-// ── Workflow TTL & Timeouts ────────────────────────────────────────────────────
-
-/** Default TTL for helper workflows (5 minutes) */
-export const WORKFLOW_TTL_MS = 5 * ONE_MINUTE_MS;
-
-/** Default workflow timeout (15 minutes) */
-export const WORKFLOW_TIMEOUT_MS = 15 * ONE_MINUTE_MS;
-
-/** Default workflow sweep interval (30 minutes) */
-export const WORKFLOW_SWEEP_MS = 30 * ONE_MINUTE_MS;
-
 // ── Trajectory Gate Block Retry Settings ──────────────────────────────────────
 
 /**
@@ -70,14 +59,6 @@ export const GFI_LARGE_CHANGE_LINES = 50;
 
 /** Agent spawn GFI threshold (critically high = no spawn) */
 export const AGENT_SPAWN_GFI_THRESHOLD = 90;
-
-// ── Evolution Worker Settings ───────────────────────────────────────────────────
-
-/** Evolution worker polling interval (15 minutes) */
-export const EVOLUTION_WORKER_POLL_INTERVAL_MS = 15 * ONE_MINUTE_MS;
-
-/** Evolution queue batch size */
-export const EVOLUTION_QUEUE_BATCH_SIZE = 10;
 
 // ── Session Tracker Settings ───────────────────────────────────────────────────
 

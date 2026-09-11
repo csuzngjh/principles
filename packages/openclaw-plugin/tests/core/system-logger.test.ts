@@ -2,9 +2,7 @@
  * PRI-504 regression tests: SystemLogger must key its cache by workspaceDir
  * to prevent cross-workspace log leakage in multi-workspace processes.
  *
- * Reference pattern: evolution-logger.test.ts uses `disposeAllEvolutionLoggers()`
- * in afterEach to clear caches between tests. We mirror that here with
- * `disposeAllSystemLoggers()`.
+ * Uses `disposeAllSystemLoggers()` in afterEach to clear caches between tests.
  *
  * ERR-092: Module-level cache leaks across workspace instances when not keyed
  * by workspaceDir.

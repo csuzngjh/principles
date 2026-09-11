@@ -443,7 +443,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         SystemLogger.log(this.workspaceDir, 'LEDGER_PRINCIPLE_ADDED', `Principle ${principleId} added to ledger tree`);
 
         // Sync compile: attempt to compile immediately unless evaluability is manual_only.
-        // Failures are not fatal — heartbeat backfill will retry automatically.
+        // Failures are not fatal — compilation is single-attempt here since the
+        // legacy worker heartbeat backfill (the former retry owner) retired in PRI-737.
         if (evaluability !== 'manual_only' && this.stateDir) {
           const trajectory = TrajectoryRegistry.get(this.workspaceDir);
           const compiler = new PrincipleCompiler(this.stateDir, trajectory);
@@ -454,8 +455,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
               updatePrinciple(this.stateDir, principleId, { compilationRetryCount: undefined });
               SystemLogger.log(this.workspaceDir, 'COMPILE_SUCCESS', `Principle ${principleId} compiled successfully`);
             } else {
-              // Compile returned failure — queue for backfill retry (count=0 means "queued", Phase 2 will pick it up).
-              // This gives exactly 5 total attempts before exhaustion (backfill: 0-4, sync: 0-4).
+              // Compile returned failure — record count=0 for observability
+              // (the retry loop that consumed this counter retired in PRI-737).
               updateRetryCount(this.stateDir, this.workspaceDir, principleId, 0);
               SystemLogger.log(
                 this.workspaceDir, 'COMPILE_FAILED',
@@ -463,7 +464,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
               );
             }
           } catch (compileErr) {
-            // Unexpected error during compilation — queue for backfill retry
+            // Unexpected error during compilation — record count=0 for observability
             updateRetryCount(this.stateDir, this.workspaceDir, principleId, 0);
             SystemLogger.log(
               this.workspaceDir, 'COMPILE_FAILED',
