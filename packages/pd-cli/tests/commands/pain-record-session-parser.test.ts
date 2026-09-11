@@ -93,7 +93,31 @@ describe('pd pain record --session (real Commander + real trajectory.db)', () =>
     // Commander wraps help text; normalize whitespace before asserting content.
     const normalized = result.stdout.replace(/\s+/g, ' ');
     expect(normalized).toContain('openclaw | codex');
-    expect(normalized).toContain('codex refuses');
+    expect(normalized).toContain('codex requires the real Codex lineage');
+  }, 15_000);
+
+  it('PRI-743: --help registers the Codex lineage flags used by --host codex', async () => {
+    const result = await runBuiltCli(['pain', 'record', '--help']);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--rollout-id <id>');
+    expect(result.stdout).toContain('--host-turn-id <id>');
+    expect(result.stdout).toContain('--logical-key <key>');
+  }, 15_000);
+
+  it('PRI-743: --host codex without lineage exits non-zero with codex_lineage_required', async () => {
+    const result = await runBuiltCli([
+      'pain', 'record',
+      '--reason', 'parser test pain',
+      '--host', 'codex',
+      '--workspace', tmpDir,
+      '--json',
+    ]);
+
+    expect(result.status).not.toBe(0);
+    const parsed = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+    expect(parsed.status).toBe('failed');
+    expect(parsed.reason).toBe('codex_lineage_required');
+    expect(typeof parsed.nextAction).toBe('string');
   }, 15_000);
 
   it('PRI-743: an invalid --host value exits non-zero with a single structured JSON object', async () => {
