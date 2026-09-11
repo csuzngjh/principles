@@ -204,7 +204,9 @@ const { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mock
   });
   const mockResolveWorkspaceHostToolSemantics = vi.fn().mockReturnValue({
     ok: true,
-    registry: { resolve: vi.fn() },
+    // PRI-741: the projection reads the host layer via hostMappings() — the
+    // mock registry carries it like a real buildToolSemanticRegistry product.
+    registry: { resolve: vi.fn(), hostMappings: vi.fn().mockReturnValue([{ rawToolName: 'write', canonicalKind: 'write' }]) },
     hostKinds: ['openclaw'],
   });
   return { mockCreateEvaluatorRuntimeContext, mockCreateRolloutGovernanceDeps, mockResolveWorkspaceHostToolSemantics };

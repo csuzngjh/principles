@@ -81,8 +81,58 @@ describe('ArtificerPromptBuilder', () => {
     // of the contract the model must obey; PRI-634 PR-A — bumped v2 → v3 for
     // the paramsSummary-is-an-object contract + repair replay-evidence block;
     // PRI-700 — bumped v3 → v4 for the case-id vocabulary note + prior
-    // output-contract rejection feedback.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v4');
+    // output-contract rejection feedback; PRI-741 — bumped v4 → v5 for the
+    // canonicalKind-first matching contract + HOST SEMANTIC CONTEXT block.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v5');
+  });
+
+  // ── PRI-741: canonicalKind-first contract + host semantic projection ──
+
+  it('PRI-741: instruction carries the canonicalKind-first matching contract and no longer teaches the phantom write_file', () => {
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('input.action.canonicalKind');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('"read" | "search" | "write" | "execute" | "agent" | "other"');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('CANONICALKIND-FIRST MATCHING (PRI-741)');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('generic LLM vocabulary names (write_file, edit_file, bash, run_shell_command, delete_file, ...) are NOT real host tools');
+    // The OUTPUT FORMAT example must not demonstrate the phantom vocabulary.
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toContain('"toolName":"write_file"');
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toContain('"affectedTools": ["write_file"]');
+  });
+
+  it('PRI-741: v1 prompt without hostSemanticContext stays backward compatible (no host block, no field)', () => {
+    const { message, systemPrompt } = builder.buildPrompt(input);
+    expect(systemPrompt).not.toContain('HOST SEMANTIC CONTEXT (authoritative');
+    const parsed = JSON.parse(message) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty('hostSemanticContext');
+  });
+
+  it('PRI-741: v1 prompt with hostSemanticContext renders the HOST SEMANTIC CONTEXT block from the projection', () => {
+    const { message, systemPrompt, promptInput } = builder.buildPrompt({
+      ...input,
+      hostSemanticContext: {
+        hostKinds: ['openclaw'],
+        tools: [
+          { rawToolName: 'write', canonicalKind: 'write' },
+          { rawToolName: 'edit', canonicalKind: 'write' },
+          { rawToolName: 'exec', canonicalKind: 'execute' },
+        ],
+      },
+    });
+    expect(systemPrompt).toContain('HOST SEMANTIC CONTEXT');
+    expect(systemPrompt).toContain('Target host(s): openclaw');
+    expect(systemPrompt).toContain('write→write');
+    expect(systemPrompt).toContain('exec→execute');
+    expect(systemPrompt).toContain('MUST be one of the real host tool names');
+    // DTO travels in the payload for machine readability (evaluator precedent).
+    expect(promptInput.hostSemanticContext).toEqual({
+      hostKinds: ['openclaw'],
+      tools: [
+        { rawToolName: 'write', canonicalKind: 'write' },
+        { rawToolName: 'edit', canonicalKind: 'write' },
+        { rawToolName: 'exec', canonicalKind: 'execute' },
+      ],
+    });
+    const parsed = JSON.parse(message) as { hostSemanticContext?: unknown };
+    expect(parsed.hostSemanticContext).toBeDefined();
   });
 
   it('instruction requires implementationSummary as a non-empty string', () => {
@@ -162,8 +212,8 @@ describe('PRI-484 Artificer prompt context modes', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → v2 → v3 → v4 (PRI-634 PR-A, PRI-700)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v4');
+  it('declares the contract version bump history v1 → v2 → v3 → v4 → v5 (PRI-634 PR-A, PRI-700, PRI-741)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v5');
   });
 
   it('still references input.action for v1 compatibility', () => {

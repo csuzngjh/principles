@@ -265,6 +265,7 @@ export type {
   ArtificerRunnerOptions,
   ResolvedArtificerRunnerOptions,
   ArtificerRunnerDeps,
+  ArtificerHostSemanticContext,
 } from './artificer-runner.js';
 
 export {

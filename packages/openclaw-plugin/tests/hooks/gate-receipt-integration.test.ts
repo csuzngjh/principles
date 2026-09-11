@@ -128,7 +128,7 @@ describe('PRI-530/PRI-531 gate-hook integration (real handleBeforeToolCall path)
     });
 
     const result = handleBeforeToolCall(
-      { toolName: 'bash', params: { command: 'rm -rf build/' } },
+      { toolName: 'exec', params: { command: 'rm -rf build/' } },
       { workspaceDir, sessionId: 'sess-integ', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
     ) as PluginHookBeforeToolCallResult;
 
@@ -160,7 +160,7 @@ describe('PRI-530/PRI-531 gate-hook integration (real handleBeforeToolCall path)
     });
 
     const result = handleBeforeToolCall(
-      { toolName: 'bash', params: { command: 'rm -rf build/' } },
+      { toolName: 'exec', params: { command: 'rm -rf build/' } },
       { workspaceDir, sessionId: 'sess-integ', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
     ) as PluginHookBeforeToolCallResult;
 
@@ -183,7 +183,7 @@ describe('PRI-530/PRI-531 gate-hook integration (real handleBeforeToolCall path)
 
     const warn = vi.fn();
     const result = handleBeforeToolCall(
-      { toolName: 'bash', params: { command: 'rm -rf build/' } },
+      { toolName: 'exec', params: { command: 'rm -rf build/' } },
       { workspaceDir, sessionId: 'sess-integ', logger: { warn, error: vi.fn(), info: vi.fn() } },
     ) as PluginHookBeforeToolCallResult;
 

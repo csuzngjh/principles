@@ -145,3 +145,35 @@ describe('validateToolSemanticMappings — untrusted declaration validation', ()
     expect(built.errors.length).toBeGreaterThan(0);
   });
 });
+
+describe('ToolSemanticRegistry.hostMappings — PRI-741 read-only host projection', () => {
+  it('projects exactly the host layer declarations (baseline names excluded)', () => {
+    const built = buildToolSemanticRegistry([
+      { rawToolName: 'write', canonicalKind: 'write' },
+      { rawToolName: 'exec', canonicalKind: 'execute' },
+    ]);
+    if (!built.ok) throw new Error('registry failed to build');
+    const host = built.registry.hostMappings();
+    expect(host.map((m) => m.rawToolName).sort()).toEqual(['exec', 'write']);
+    // baseline-only names (write_file, grep) must NOT appear in the host
+    // projection — semantic resolvability is not dispatchability.
+    expect(host.some((m) => m.rawToolName === 'write_file')).toBe(false);
+    expect(built.registry.lookup('write_file')).toBe('write');
+    expect(built.registry.hasHostTool('write_file')).toBe(false);
+  });
+
+  it('returns an empty projection for a baseline-only registry', () => {
+    const registry = baselineRegistry();
+    expect(registry.hasHostLayer).toBe(false);
+    expect(registry.hostMappings()).toEqual([]);
+  });
+
+  it('the projection is a stable snapshot — mutating the input array afterwards does not drift', () => {
+    const declarations: ToolSemanticMappingV1[] = [{ rawToolName: 'write', canonicalKind: 'write' }];
+    const built = buildToolSemanticRegistry(declarations);
+    if (!built.ok) throw new Error('registry failed to build');
+    declarations.push({ rawToolName: 'late', canonicalKind: 'read' });
+    expect(built.registry.hostMappings().map((m) => m.rawToolName)).toEqual(['write']);
+    expect(built.registry.hasHostTool('late')).toBe(false);
+  });
+});

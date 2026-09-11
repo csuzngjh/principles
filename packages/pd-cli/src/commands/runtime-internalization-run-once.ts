@@ -17,7 +17,7 @@ import {
   DefaultRolloutReviewerValidator,
   TestDoubleRuntimeAdapter,
 } from '@principles/core/runtime-v2';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage } from '@principles/core/runtime-v2';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext } from '@principles/core/runtime-v2';
 import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
@@ -463,6 +463,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   // BEFORE leasing any task (cli-5: no mutation on refusal) with the same
   // structured semantics as runtime-activation's code_tool_hook refusal.
   let evaluatorGateDeps: RefinerRuleHostGateDeps | undefined;
+  let evaluatorHostSemanticContext: ArtificerHostSemanticContext | undefined;
   if (runnerKind === 'evaluator') {
     const evaluatorContext = createEvaluatorRuntimeContext({ workspaceDir });
     if (!evaluatorContext.ok) {
@@ -482,6 +483,16 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       return;
     }
     evaluatorGateDeps = evaluatorContext.gateDeps;
+    // PRI-741: host-name parity replay case from the SAME durable declaration
+    // the gateDeps above resolve. Unresolvable provenance cannot happen here
+    // (the context resolution above already refused), so this only re-reads
+    // the same workspace files; failure degrades observably like artificer.
+    const hostSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
+    if (hostSemantics.ok) {
+      evaluatorHostSemanticContext = { hostKinds: hostSemantics.hostKinds, tools: hostSemantics.registry.hostMappings() };
+    } else {
+      console.error(`[PD:run-once] evaluator replay without host semantic projection: ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
+    }
   }
 
   const stateManager = new RuntimeStateManager({ workspaceDir });
@@ -593,9 +604,27 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'artificer') {
           const validator = new DefaultArtificerValidator();
+          // PRI-741: artificer generation anchors on the workspace host
+          // declaration (same durable provenance the evaluator gate uses).
+          // Unresolvable provenance degrades OBSERVABLY (rc-9/EP-03) to a
+          // prompt without the host block — never a silent wrong-host guess.
+          const hostSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
+          if (!hostSemantics.ok) {
+            console.error(`[PD:run-once] artificer prompt without host tool semantics: ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
+          }
           const runner = new ArtificerRunner(
             { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore, contentHashFn },
-            { owner: OWNER, runtimeKind: runtimeAdapter.kind(), pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs, effectiveConfig, outputLanguage },
+            {
+              owner: OWNER,
+              runtimeKind: runtimeAdapter.kind(),
+              pollIntervalMs: 100,
+              timeoutMs: effectiveTimeoutMs,
+              effectiveConfig,
+              outputLanguage,
+              ...(hostSemantics.ok
+                ? { hostSemanticContext: { hostKinds: hostSemantics.hostKinds, tools: hostSemantics.registry.hostMappings() } }
+                : {}),
+            },
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'evaluator') {
@@ -629,6 +658,9 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
               timeoutMs: effectiveTimeoutMs,
               effectiveConfig,
               gateDeps: evaluatorGateDeps,
+              // PRI-741: host-name parity replay case (same provenance as
+              // gateDeps; undefined = observable skip event in the runner).
+              ...(evaluatorHostSemanticContext !== undefined ? { hostSemanticContext: evaluatorHostSemanticContext } : {}),
               outputLanguage,
             },
           );

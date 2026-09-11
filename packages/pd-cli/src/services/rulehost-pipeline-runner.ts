@@ -72,7 +72,7 @@ import type {
 } from '@principles/core/runtime-v2';
 import { createHash } from 'node:crypto';
 import { loadPdConfig } from './pd-config-loader.js';
-import { createEvaluatorRuntimeContext } from '@principles/host-runtime';
+import { createEvaluatorRuntimeContext, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
 import { compileDemoRule } from './demo-rule-compiler.js';
 
@@ -411,12 +411,25 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       onProgress('adversarial_loop', 'failed', refusalReason);
       return rejectedResult(opts.painId, stages, `evaluator_runtime_context_unresolvable: ${evaluatorContext.reason} (nextAction: ${evaluatorContext.nextAction})`);
     }
+    // PRI-741: artificer generation anchors on the same durable workspace
+    // host declaration the evaluator gate above resolves (PRI-661 pattern).
+    // Unresolvable provenance degrades OBSERVABLY (rc-9/EP-03) to a prompt
+    // without the host block — never a silent wrong-host guess.
+    const artificerHostSemantics = resolveWorkspaceHostToolSemantics(opts.workspaceDir);
+    if (!artificerHostSemantics.ok) {
+      console.error(`[PD:rulehost-pipeline] artificer prompt without host tool semantics: ${artificerHostSemantics.reason} — ${artificerHostSemantics.nextAction}`);
+    }
     const artificerRunner = new ArtificerRunner(
       {
         stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore,
         contextMode: opts.contextMode ?? 'v1', behaviorExamplePack: opts.behaviorExamplePack, contentHashFn,
       },
-      runnerOptsFor(capability.artificerAdapter),
+      {
+        ...runnerOptsFor(capability.artificerAdapter),
+        ...(artificerHostSemantics.ok
+          ? { hostSemanticContext: { hostKinds: artificerHostSemantics.hostKinds, tools: artificerHostSemantics.registry.hostMappings() } }
+          : {}),
+      },
     );
     // PRI-510 (DEFECT-004): construct EvaluatorRunnerDeps via the centralized
     // helper so the repair-loop wiring (isRepairLoopEnabled + seeder) is
@@ -435,7 +448,15 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       // from durable provenance) — replaces the previous sandbox-only gate
       // deps so generation-time replay verdicts match the activation gate on
       // the same workspace. Options argument (2nd), never deps (1st).
-      { ...runnerOptsFor(agentAdapters.evaluator), gateDeps: evaluatorContext.gateDeps },
+      {
+        ...runnerOptsFor(agentAdapters.evaluator),
+        gateDeps: evaluatorContext.gateDeps,
+        // PRI-741: host-name parity replay case from the SAME durable
+        // declaration provenance as the gateDeps above.
+        ...(artificerHostSemantics.ok
+          ? { hostSemanticContext: { hostKinds: artificerHostSemantics.hostKinds, tools: artificerHostSemantics.registry.hostMappings() } }
+          : {}),
+      },
     );
 
     const loopResult = await runAdversarialLoop({

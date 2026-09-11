@@ -131,24 +131,26 @@ describe('assembleHistoryFromRows (PRI-482 Phase 3)', () => {
     expect(kinds).toEqual(['read', 'search', 'write', 'execute', 'agent', 'other']);
   });
 
-  it('PRI-634-F: OpenClaw host-layer tool names resolve through the registry (vocabulary drift regression)', () => {
-    // Baseline defect: shell/cmd are BASH_TOOL_NAMES the gate dispatches, but
-    // baseline-only canonicalizeToolKind mapped them to 'other' — a v2 rule
-    // matching canonicalKind==='execute' never fired for them in production
-    // facts. Same for delete_file/insert/patch on the write axis.
+  it('PRI-741: real OpenClaw host tool names resolve through the registry; phantom names stay baseline-classified', () => {
+    // PRI-741 correction: the earlier version of this regression test pinned
+    // shell/cmd/delete_file/insert/patch as "host-layer names the gate
+    // dispatches". The 2026-09-11 OpenClaw source ground truth overturns that
+    // belief — the real dispatch surface is write/edit/apply_patch/exec — so
+    // the host layer declares only those. Generic vocabulary (write_file)
+    // still classifies via the core baseline for history facts.
     const rows: RuleHostContextRow[] = [
-      makeRow({ id: 1, toolName: 'shell', outcome: 'success', paramsJson: '{"command":"ls"}' }),
-      makeRow({ id: 2, toolName: 'cmd', outcome: 'success', paramsJson: '{"command":"dir"}' }),
-      makeRow({ id: 3, toolName: 'delete_file', outcome: 'success', paramsJson: '{"file_path":"src/a.ts"}' }),
-      makeRow({ id: 4, toolName: 'insert', outcome: 'success', paramsJson: '{"file_path":"src/b.ts"}' }),
-      makeRow({ id: 5, toolName: 'patch', outcome: 'success', paramsJson: '{"file_path":"src/c.ts"}' }),
+      makeRow({ id: 1, toolName: 'exec', outcome: 'success', paramsJson: '{"command":"ls"}' }),
+      makeRow({ id: 2, toolName: 'write', outcome: 'success', paramsJson: '{"path":"src/a.ts"}' }),
+      makeRow({ id: 3, toolName: 'edit', outcome: 'success', paramsJson: '{"path":"src/b.ts"}' }),
+      makeRow({ id: 4, toolName: 'apply_patch', outcome: 'success', paramsJson: '{"input":"*** Begin Patch"}' }),
+      makeRow({ id: 5, toolName: 'write_file', outcome: 'success', paramsJson: '{"path":"src/c.ts"}' }),
     ];
 
     const history = assembleHistoryFromRows(rows, false, PROJECT_DIR);
     expect(history.status).toBe('available');
 
     const kinds = history.calls.map((c) => (c as RuleToolCallRecord).canonicalKind);
-    expect(kinds).toEqual(['execute', 'execute', 'write', 'write', 'write']);
+    expect(kinds).toEqual(['execute', 'write', 'write', 'write', 'write']);
   });
 
   it('truncated flag propagated to history window', () => {

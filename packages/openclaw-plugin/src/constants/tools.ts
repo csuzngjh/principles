@@ -9,19 +9,28 @@ export const READ_ONLY_TOOL_NAMES = [
   'pd-status', 'report',
 ] as const;
 
+/**
+ * PRI-741 declaration correction: this list is the OpenClaw HOST layer of the
+ * tool semantic registry, so it may only contain names the OpenClaw hook
+ * actually dispatches (evidence: OpenClaw tool-mutation-names.ts — the file
+ * mutation family is exactly write/edit/apply_patch). Generic LLM vocabulary
+ * names (write_file/edit_file/replace/insert/patch) are NOT OpenClaw tools;
+ * declaring them made `hasHostTool` pass for rules that can never fire.
+ */
 export const LOW_RISK_WRITE_TOOL_NAMES = [
-  'write', 'write_file',
-  'edit', 'edit_file', 'replace', 'apply_patch', 'insert', 'patch',
+  'write', 'edit', 'apply_patch',
 ] as const;
 
-// BASH aliases must be defined before HIGH_RISK_TOOL_NAMES
+// OpenClaw's shell tool is `exec` (hook-face canonical id); `bash`,
+// `run_shell_command`, `execute`, `shell`, `cmd` are config-level aliases
+// that normalize to exec and never reach the hook payload.
 export const BASH_TOOL_NAMES = [
-  'bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd',
+  'exec',
 ] as const;
 
+// OpenClaw has no dedicated delete/move file tools — destructive file
+// operations arrive as exec (shell) commands.
 export const HIGH_RISK_TOOL_NAMES = [
-  'delete_file', 'move_file',
-  // Include all BASH aliases for consistent high-risk classification
   ...BASH_TOOL_NAMES,
 ] as const;
 
@@ -35,7 +44,6 @@ export const CONTENT_LIMITED_TOOL_NAMES = [
 
 export const CONSTRUCTIVE_TOOL_NAMES = [
   ...LOW_RISK_WRITE_TOOL_NAMES,
-  'delete_file', 'move_file',
   // Include all BASH aliases for consistent constructive classification
   ...BASH_TOOL_NAMES,
   ...AGENT_TOOL_NAMES,
@@ -55,7 +63,5 @@ export const CONSTRUCTIVE_TOOLS = new Set<string>(CONSTRUCTIVE_TOOL_NAMES);
 export const EXPLORATORY_TOOLS = new Set<string>(EXPLORATORY_TOOL_NAMES);
 export const WRITE_TOOLS = new Set<string>([
   ...LOW_RISK_WRITE_TOOL_NAMES,
-  'delete_file',
-  'move_file',
 ]);
 

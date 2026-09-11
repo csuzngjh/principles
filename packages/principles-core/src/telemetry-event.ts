@@ -294,6 +294,10 @@ export const TelemetryEventType = Type.Union([
   //   merge, sandbox threw) with a structured reason.
   Type.Literal('evaluator_adversarial_replay'),
   Type.Literal('evaluator_adversarial_replay_skipped'),
+  // PRI-741: emitted when the host-name parity replay case is intentionally
+  // not generated (no host semantic projection, author name already host-real,
+  // no host tool with the author's canonical kind) with a structured reason.
+  Type.Literal('evaluator_host_alias_case_skipped'),
   // PRI-634 R4: needs_revision diagnostic replay outcome (evidence only — the
   // verdict is never overridden). diagnostic_passed = the deterministic gate
   // passed despite needs_revision; diagnostic_failed = the replay ran but did

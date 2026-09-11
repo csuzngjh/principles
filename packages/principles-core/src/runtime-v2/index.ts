@@ -1054,6 +1054,7 @@ export type {
   ArtificerRunnerOptions,
   ResolvedArtificerRunnerOptions,
   ArtificerRunnerDeps,
+  ArtificerHostSemanticContext,
 } from './internalization/artificer-runner.js';
 
 export {

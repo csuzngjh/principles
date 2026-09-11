@@ -273,6 +273,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     logger,
     emitEvent,
     toolSemantics: CODEX_TOOL_SEMANTICS,
+    // PRI-741: artificer generation gets the Codex host projection
+    // (Bash/apply_patch — evidence-bound, intentionally sparse).
+    hostKinds: ['codex'],
     // No hostToolCatalog: PD has not declared a Codex tool catalog; a wrong
     // (OpenClaw) catalog would be worse than none (PRI-630 follow-up).
   });

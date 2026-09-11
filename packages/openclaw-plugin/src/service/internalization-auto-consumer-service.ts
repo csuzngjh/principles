@@ -61,6 +61,8 @@ export async function runConsumerCycle(
     // PRI-634-F: OpenClaw tool semantics (derived from constants/tools.ts) —
     // the activation gate replays with production-identical tool resolution.
     toolSemantics: OPENCLAW_TOOL_SEMANTICS,
+    // PRI-741: artificer generation gets the same host projection.
+    hostKinds: ['openclaw'],
   });
 }
 
