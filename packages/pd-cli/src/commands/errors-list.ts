@@ -21,8 +21,9 @@
  *   - rc-2-no-as-bypass: no `as` casts; runtime validation via typeof / Array.isArray.
  *   - rc-4-validate-array-elements: errors array elements are validated element-wise.
  *   - rc-5-object-hasown-not-in: Object.hasOwn used for untrusted object key checks.
- *   - rc-9-no-silent-fallback: missing worker-status.json → workerErrors=[] with
- *     a `workerStatusMissing` note; parse failures surface a `workerStatusWarning`.
+ *   - rc-9-no-silent-fallback: missing worker-status.json → workerErrors=[]
+ *     silently (expected steady state — the writer retired in PRI-737);
+ *     parse failures surface a `workerStatusWarning`.
  */
 import * as path from 'path';
 import * as fs from 'fs';
@@ -77,7 +78,6 @@ interface ErrorsListResult {
   workerErrors: WorkerErrorEntry[];
   total: number;
   workerStatusPath: string;
-  workerStatusMissing?: boolean;
   workerStatusWarning?: string;
   nextAction?: string;
 }
@@ -217,9 +217,7 @@ function formatTextOutput(result: ErrorsListResult, workspaceDir: string): strin
   lines.push(`  workspace:   ${workspaceDir}`);
   lines.push(`  total:       ${result.total}  (tasks: ${result.tasks.length}, workerErrors: ${result.workerErrors.length})`);
   lines.push('');
-  if (result.workerStatusMissing) {
-    lines.push(`  workerStatus: (missing — ${result.workerStatusPath} not found)`);
-  } else if (result.workerStatusWarning) {
+  if (result.workerStatusWarning) {
     lines.push(`  workerStatus: WARNING — ${result.workerStatusWarning}`);
   }
   if (result.tasks.length > 0) {
@@ -357,7 +355,11 @@ export async function handleErrorsList(opts: ErrorsListOptions): Promise<void> {
       limit,
     });
 
-    const { entries: workerErrors, missing, warning } = readWorkerStatusErrors(stateDir);
+    // PRI-737: the worker-status.json writer (legacy evolution worker) is
+    // retired, so a missing file is the expected steady state — only genuine
+    // parse/read failures surface as workerStatusWarning. The
+    // workerStatusMissing flag is no longer set.
+    const { entries: workerErrors, warning } = readWorkerStatusErrors(stateDir);
 
     const total = tasks.length + workerErrors.length;
     const result: ErrorsListResult = {
@@ -366,9 +368,6 @@ export async function handleErrorsList(opts: ErrorsListOptions): Promise<void> {
       total,
       workerStatusPath: path.join(stateDir, 'worker-status.json'),
     };
-    if (missing) {
-      result.workerStatusMissing = true;
-    }
     if (warning) {
       result.workerStatusWarning = warning;
     }

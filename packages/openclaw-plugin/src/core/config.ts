@@ -63,11 +63,6 @@ export interface PainSettings {
         medium: number;
         low: number;
     };
-    intervals: {
-        worker_poll_ms: number;
-        initial_delay_ms: number;
-        task_timeout_ms: number;
-    };
     empathy_engine?: {
         enabled?: boolean;
         dedupe_window_ms?: number;
@@ -137,11 +132,6 @@ export const DEFAULT_SETTINGS: PainSettings = {
         high: 70,
         medium: 40,
         low: 20
-    },
-    intervals: {
-        worker_poll_ms: 15 * 60 * 1000,
-        initial_delay_ms: 5000,
-        task_timeout_ms: 60 * 60 * 1000  // 1 hour
     },
     empathy_engine: {
         enabled: true,
@@ -213,7 +203,6 @@ export class PainConfig {
             try {
                 const loaded = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
                 this.settings = this.deepMerge(DEFAULT_SETTINGS, loaded);
-                this.validate(this.settings);
             } catch {
                 console.error('[PD] Failed to parse pain_settings.json, using defaults.');
             }
@@ -257,16 +246,6 @@ export class PainConfig {
             });
         }
         return output;
-    }
-
-    /**
-     * Basic validation for critical settings
-     */
-     
-     
-    private validate(settings: PainSettings): void {
-        // Ensure intervals are positive
-        if (settings.intervals.worker_poll_ms < 1000) settings.intervals.worker_poll_ms = 15 * 60 * 1000;
     }
 
     /**

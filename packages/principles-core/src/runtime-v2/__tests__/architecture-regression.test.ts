@@ -480,7 +480,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // projection + auto-consumer governance dispatcher/repair wiring (I/O boundary).
     // RuleCode Owner Live Decision: Added rulecode-safety-circuit.ts (96 → 97)
     // as the plugin I/O shell for scope reads and durable safety isolation.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
+    // PRI-737: Removed evolution-logger.ts + evolution-engine.ts (98 → 96) —
+    // legacy evolution worker retirement (trace-id util moved to src/utils/).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
   });
 });
 

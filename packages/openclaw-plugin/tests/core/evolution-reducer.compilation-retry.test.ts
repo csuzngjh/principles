@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
-import { loadLedger } from '../../src/core/principle-tree-ledger.js';
+import { loadLedger, updatePrinciple } from '../../src/core/principle-tree-ledger.js';
 import { safeRmDir } from '../test-utils.js';
 
 const tempDirs: string[] = [];
@@ -34,156 +34,96 @@ afterEach(() => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// createPrincipleFromDiagnosis — compilationRetryCount initialization
-// ---------------------------------------------------------------------------
+function createPrinciple(reducer: EvolutionReducerImpl, evaluability?: string, suffix = ''): string {
+  const id = reducer.createPrincipleFromDiagnosis({
+    painId: `pain-${evaluability ?? 'default'}-${Date.now()}${suffix}`,
+    painType: 'tool_failure',
+    triggerPattern: 'some pattern',
+    action: 'some action',
+    source: 'test-compilation-retry',
+    ...(evaluability ? { evaluability } : {}),
+  });
+  expect(id).not.toBeNull();
+  return id as string;
+}
 
-describe('createPrincipleFromDiagnosis — compilationRetryCount initialization', () => {
-  it('sets compilationRetryCount=0 when evaluability is weak_heuristic (queued for compilation)', () => {
+// ---------------------------------------------------------------------------
+// createPrincipleFromDiagnosis — compilationRetryCount retired (PRI-737)
+// The counter had zero readers after the worker heartbeat backfill retired;
+// the reducer no longer persists any retry state (single-attempt compile,
+// COMPILE_FAILED log is the only record).
+// ---------------------------------------------------------------------------
+describe('createPrincipleFromDiagnosis — compilationRetryCount retired (PRI-737)', () => {
+  it('does not persist compilationRetryCount when evaluability is weak_heuristic', () => {
     const workspace = makeTempDir();
     const stateDir = makeStateDir(workspace);
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace, stateDir });
 
-    const id = reducer.createPrincipleFromDiagnosis({
-      painId: `pain-weak-heuristic-${Date.now()}`,
-      painType: 'tool_failure',
-      triggerPattern: 'bash rm fails',
-      action: 'verify file exists before rm',
-      source: 'test-compilation-retry',
-      evaluability: 'weak_heuristic',
-    });
-
-    expect(id).not.toBeNull();
+    const id = createPrinciple(reducer, 'weak_heuristic', '-wh');
     const ledger = loadLedger(stateDir);
-    const principle = ledger.tree.principles[id as string];
+    const principle = ledger.tree.principles[id];
     expect(principle).toBeDefined();
-    // Compilation queued: count >= 0 means queued
-    expect(typeof principle?.compilationRetryCount).toBe('number');
-    expect(principle?.compilationRetryCount).toBeGreaterThanOrEqual(0);
+    // No retry-state is written anymore (counter retired in PRI-737)
+    expect(principle?.compilationRetryCount).toBeUndefined();
   });
 
-  it('sets compilationRetryCount=0 when evaluability is deterministic', () => {
+  it('does not persist compilationRetryCount when evaluability is deterministic', () => {
     const workspace = makeTempDir();
     const stateDir = makeStateDir(workspace);
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace, stateDir });
 
-    const id = reducer.createPrincipleFromDiagnosis({
-      painId: `pain-deterministic-${Date.now()}`,
-      painType: 'tool_failure',
-      triggerPattern: 'edit without read',
-      action: 'always read before edit',
-      source: 'test-compilation-retry',
-      evaluability: 'deterministic',
-    });
-
-    expect(id).not.toBeNull();
+    const id = createPrinciple(reducer, 'deterministic', '-det');
     const ledger = loadLedger(stateDir);
-    const principle = ledger.tree.principles[id as string];
+    const principle = ledger.tree.principles[id];
     expect(principle).toBeDefined();
-    expect(typeof principle?.compilationRetryCount).toBe('number');
-    expect(principle?.compilationRetryCount).toBeGreaterThanOrEqual(0);
+    expect(principle?.compilationRetryCount).toBeUndefined();
   });
 
-  it('does NOT set compilationRetryCount when evaluability is manual_only', () => {
+  it('does not persist compilationRetryCount when evaluability is manual_only', () => {
     const workspace = makeTempDir();
     const stateDir = makeStateDir(workspace);
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace, stateDir });
 
-    const id = reducer.createPrincipleFromDiagnosis({
-      painId: `pain-manual-only-${Date.now()}`,
-      painType: 'tool_failure',
-      triggerPattern: 'generic pain',
-      action: 'be more careful',
-      source: 'test-compilation-retry',
-      evaluability: 'manual_only',
-    });
-
-    expect(id).not.toBeNull();
+    const id = createPrinciple(reducer, 'manual_only', '-mo');
     const ledger = loadLedger(stateDir);
-    const principle = ledger.tree.principles[id as string];
+    const principle = ledger.tree.principles[id];
     expect(principle).toBeDefined();
-    // manual_only principles should NOT be queued for compilation
     expect(principle?.compilationRetryCount).toBeUndefined();
     expect(principle?.evaluability).toBe('manual_only');
   });
 
-  it('defaults to weak_heuristic and queues for compilation when no evaluability provided', () => {
+  it('does not persist compilationRetryCount when no evaluability provided (default)', () => {
     const workspace = makeTempDir();
     const stateDir = makeStateDir(workspace);
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace, stateDir });
 
-    const id = reducer.createPrincipleFromDiagnosis({
-      painId: `pain-default-${Date.now()}`,
-      painType: 'tool_failure',
-      triggerPattern: 'some pattern',
-      action: 'some action',
-      source: 'test-compilation-retry',
-    });
-
-    expect(id).not.toBeNull();
+    const id = createPrinciple(reducer, undefined, '-default');
     const ledger = loadLedger(stateDir);
-    const principle = ledger.tree.principles[id as string];
+    const principle = ledger.tree.principles[id];
     expect(principle).toBeDefined();
-    // default evaluability is weak_heuristic, which should queue for compilation
-    expect(typeof principle?.compilationRetryCount).toBe('number');
-    expect(principle?.compilationRetryCount).toBeGreaterThanOrEqual(0);
+    expect(principle?.compilationRetryCount).toBeUndefined();
+    expect(principle?.evaluability).toBe('weak_heuristic');
   });
 });
 
 // ---------------------------------------------------------------------------
-// createPrincipleFromDiagnosis — compilationRetryCount increments on compile failure
+// Principle schema — legacy compilationRetryCount values remain readable
+// (old workspaces may carry the field; it must not break ledger load/write)
 // ---------------------------------------------------------------------------
 
-describe('createPrincipleFromDiagnosis — compilationRetryCount increments on failure', () => {
-  it('increments to 1 when compilation fails (no trajectory data)', () => {
+describe('Principle schema — legacy compilationRetryCount values remain readable', () => {
+  it('a legacy compilationRetryCount value survives a ledger round-trip', () => {
     const workspace = makeTempDir();
     const stateDir = makeStateDir(workspace);
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace, stateDir });
 
-    const id = reducer.createPrincipleFromDiagnosis({
-      painId: `pain-fail-${Date.now()}`,
-      painType: 'tool_failure',
-      triggerPattern: 'unknown tool',
-      action: 'do nothing',
-      source: 'test-compilation-retry',
-      evaluability: 'weak_heuristic',
-    });
+    const id = createPrinciple(reducer, 'weak_heuristic', '-legacy');
 
-    expect(id).not.toBeNull();
+    // Simulate legacy data written by the pre-PRI-737 worker chain.
+    updatePrinciple(stateDir, id, { compilationRetryCount: 3 });
     const ledger = loadLedger(stateDir);
-    const principle = ledger.tree.principles[id as string];
+    const principle = ledger.tree.principles[id];
     expect(principle).toBeDefined();
-    // Compilation was attempted and failed (no trajectory data) → count should be 0
-    // (sync failure sets count=0 so Phase 2 gets exactly 5 total attempts)
-    expect(principle?.compilationRetryCount).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Principle schema — compilationRetryCount field exists and persists
-// ---------------------------------------------------------------------------
-
-describe('Principle schema — compilationRetryCount field persists', () => {
-  it('compilationRetryCount is stored and retrieved correctly', () => {
-    const workspace = makeTempDir();
-    const stateDir = makeStateDir(workspace);
-    const reducer = new EvolutionReducerImpl({ workspaceDir: workspace, stateDir });
-
-    const id = reducer.createPrincipleFromDiagnosis({
-      painId: `pain-schema-${Date.now()}`,
-      painType: 'tool_failure',
-      triggerPattern: 'test pattern',
-      action: 'test action',
-      source: 'test-compilation-retry',
-      evaluability: 'weak_heuristic',
-    });
-
-    expect(id).not.toBeNull();
-    // Reload ledger to verify persistence
-    const ledger = loadLedger(stateDir);
-    const principle = ledger.tree.principles[id as string];
-    expect(principle).toBeDefined();
-    expect(typeof principle?.compilationRetryCount).toBe('number');
-    expect(principle?.compilationRetryCount).toBeGreaterThanOrEqual(0);
+    expect(principle?.compilationRetryCount).toBe(3);
   });
 });
