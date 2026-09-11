@@ -3,7 +3,7 @@ import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { LastValidatorErrors } from './pitask-metadata.js';
 import type { IntentContractV1 } from './intent-contract.js';
-import type { ToolSemanticMappingV1 } from './tool-semantic-registry.js';
+import type { ToolSemanticMappingV1, ToolSemanticRegistry } from './tool-semantic-registry.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
@@ -305,6 +305,33 @@ ${hostLine}- Real host tools (rawToolName → canonicalKind): ${toolList}
 - affectedTools and EVERY goldenTraceCases toolName MUST be one of the real host tool names listed above (activation is machine-validated against this exact list).
 - This list is the declared dispatch surface; it is NOT the host's full toolset (read-only tools are not gated and are absent here).
 `;
+}
+
+/**
+ * PRI-741 (review round): build the host semantic projection DTO from a
+ * registry snapshot, sanitized for system-prompt interpolation. The
+ * declaration JSON validator accepts any non-empty rawToolName — including
+ * control characters — and this DTO travels into the system prompt, so names
+ * are restricted to identifier-shaped strings (no whitespace/newlines) and
+ * the projection is bounded (rc-8: bounded output at an LLM trust boundary).
+ * Declaration files are host-managed, but prompt content deserves defense in
+ * depth regardless of who wrote the file.
+ */
+const HOST_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const HOST_KIND_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const MAX_PROJECTED_HOST_TOOLS = 64;
+
+export function buildArtificerHostSemanticContext(
+  registry: ToolSemanticRegistry,
+  hostKinds: readonly string[] = [],
+): ArtificerHostSemanticContext {
+  return {
+    hostKinds: hostKinds.filter((kind) => HOST_KIND_PATTERN.test(kind)),
+    tools: registry
+      .hostMappings()
+      .filter((mapping) => HOST_NAME_PATTERN.test(mapping.rawToolName))
+      .slice(0, MAX_PROJECTED_HOST_TOOLS),
+  };
 }
 
 export class ArtificerPromptBuilder {

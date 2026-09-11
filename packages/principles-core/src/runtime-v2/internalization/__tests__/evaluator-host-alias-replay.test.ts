@@ -219,8 +219,9 @@ describe('PRI-741 host-name parity replay', () => {
 
     expect(variant).not.toBeNull();
     expect(variant?.caseId).toBe('v2-host-alias');
-    // host REAL name, same canonicalKind as the author's edit_file vocabulary
-    expect(variant?.toolName).toBe('write');
+    // host REAL name, same canonicalKind as the author's edit_file vocabulary,
+    // and the closest name match (edit_file → edit, not write — PRI-741 review)
+    expect(variant?.toolName).toBe('edit');
     expect(variant?.params).toEqual({ path: '/system/secret' });
     expect(variant?.expectedDecision).toBe('block');
     expect(variant?.rationale).toContain('PRI-741 host-name parity');
@@ -278,7 +279,7 @@ describe('PRI-741 host-name parity replay', () => {
     expect(JSON.stringify(skip?.payload)).toContain('no_validated_golden_case');
   });
 
-  it('an author name that is already host-real skips SILENTLY (variant would be redundant)', async () => {
+  it('an author name that is already host-real skips observably (parity already covered)', async () => {
     const store = await seedLineage(artificerContent(KIND_MATCHING_BODY));
     const generate = hostAliasMethod(makeRunner(store, { hostSemanticContext: HOST_SEMANTIC_CONTEXT }));
     const hostRealCases = [
@@ -286,7 +287,9 @@ describe('PRI-741 host-name parity replay', () => {
       { caseId: 'c-pos', kind: 'positive', toolName: 'write', params: { path: '/workspace/notes' }, expectedDecision: 'allow' },
     ];
     expect(generate(hostRealCases, EVAL_ID, 'run-host-alias')).toBeNull();
-    expect(emitted.some((e) => e.eventType === 'evaluator_host_alias_case_skipped')).toBe(false);
+    const skip = emitted.find((e) => e.eventType === 'evaluator_host_alias_case_skipped');
+    expect(skip).toBeDefined();
+    expect(JSON.stringify(skip?.payload)).toContain('author_name_already_host_real');
   });
 
   it('a base case whose kind no host tool covers skips observably (no_host_tool_with_kind)', async () => {

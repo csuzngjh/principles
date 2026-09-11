@@ -54,6 +54,7 @@ import {
   // PRI-714: resolve outputLanguage from the same effective config the
   // runners already receive (EP-07: canonical resolved value, not raw input).
   resolveOutputLanguage,
+  buildArtificerHostSemanticContext,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -72,7 +73,7 @@ import type {
 } from '@principles/core/runtime-v2';
 import { createHash } from 'node:crypto';
 import { loadPdConfig } from './pd-config-loader.js';
-import { createEvaluatorRuntimeContext, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
+import { createEvaluatorRuntimeContext } from '@principles/host-runtime';
 /* eslint-disable @typescript-eslint/no-use-before-define -- helpers declared after main, matching codebase convention */
 import { compileDemoRule } from './demo-rule-compiler.js';
 
@@ -411,14 +412,12 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       onProgress('adversarial_loop', 'failed', refusalReason);
       return rejectedResult(opts.painId, stages, `evaluator_runtime_context_unresolvable: ${evaluatorContext.reason} (nextAction: ${evaluatorContext.nextAction})`);
     }
-    // PRI-741: artificer generation anchors on the same durable workspace
-    // host declaration the evaluator gate above resolves (PRI-661 pattern).
-    // Unresolvable provenance degrades OBSERVABLY (rc-9/EP-03) to a prompt
-    // without the host block — never a silent wrong-host guess.
-    const artificerHostSemantics = resolveWorkspaceHostToolSemantics(opts.workspaceDir);
-    if (!artificerHostSemantics.ok) {
-      console.error(`[PD:rulehost-pipeline] artificer prompt without host tool semantics: ${artificerHostSemantics.reason} — ${artificerHostSemantics.nextAction}`);
-    }
+    // PRI-741: artificer generation + evaluator parity BOTH anchor on the ONE
+    // registry snapshot evaluatorContext resolved above (review round: a
+    // second independent resolveWorkspaceHostToolSemantics read could observe
+    // a different declaration snapshot than the replay gate). Unresolvable
+    // provenance already failed loud at the evaluatorContext refusal above.
+    const hostSemanticContext = buildArtificerHostSemanticContext(evaluatorContext.registry, evaluatorContext.hostKinds ?? []);
     const artificerRunner = new ArtificerRunner(
       {
         stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore,
@@ -426,9 +425,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       },
       {
         ...runnerOptsFor(capability.artificerAdapter),
-        ...(artificerHostSemantics.ok
-          ? { hostSemanticContext: { hostKinds: artificerHostSemantics.hostKinds, tools: artificerHostSemantics.registry.hostMappings() } }
-          : {}),
+        hostSemanticContext,
       },
     );
     // PRI-510 (DEFECT-004): construct EvaluatorRunnerDeps via the centralized
@@ -451,11 +448,9 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       {
         ...runnerOptsFor(agentAdapters.evaluator),
         gateDeps: evaluatorContext.gateDeps,
-        // PRI-741: host-name parity replay case from the SAME durable
-        // declaration provenance as the gateDeps above.
-        ...(artificerHostSemantics.ok
-          ? { hostSemanticContext: { hostKinds: artificerHostSemantics.hostKinds, tools: artificerHostSemantics.registry.hostMappings() } }
-          : {}),
+        // PRI-741: host-name parity replay case from the SAME registry
+        // snapshot as the gateDeps above (single resolution).
+        hostSemanticContext,
       },
     );
 

@@ -28,6 +28,7 @@ import {
   PhilosopherRunner,
   ScribeRunner,
   ArtificerRunner,
+  buildArtificerHostSemanticContext,
   EvaluatorRunner,
   RolloutReviewerRunner,
   DefaultDreamerValidator,
@@ -252,9 +253,9 @@ export async function runInternalizationConsumerCycle(
   // PRI-741: artificer host semantic projection — built once from the SAME
   // registry the activation gate/replay use (ports.toolSemantics), so the
   // generation prompt teaches exactly the host dispatch surface that
-  // validateRuleReliability will later enforce.
+  // validateRuleReliability will later enforce. Sanitized for prompt use.
   const artificerHostSemanticContext = toolSemantics !== undefined
-    ? { hostKinds: ports.hostKinds ?? [], tools: toolSemantics.hostMappings() }
+    ? buildArtificerHostSemanticContext(toolSemantics, ports.hostKinds ?? [])
     : undefined;
   const envGetter = ports.envGetter ?? ((name: string) => process.env[name]);
   let orchestrator: InternalizationOrchestrator | null = null;

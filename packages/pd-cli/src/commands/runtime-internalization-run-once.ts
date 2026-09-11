@@ -18,7 +18,7 @@ import {
   TestDoubleRuntimeAdapter,
 } from '@principles/core/runtime-v2';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext } from '@principles/core/runtime-v2';
-import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError } from '@principles/core/runtime-v2';
+import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError, buildArtificerHostSemanticContext } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
@@ -483,16 +483,11 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       return;
     }
     evaluatorGateDeps = evaluatorContext.gateDeps;
-    // PRI-741: host-name parity replay case from the SAME durable declaration
-    // the gateDeps above resolve. Unresolvable provenance cannot happen here
-    // (the context resolution above already refused), so this only re-reads
-    // the same workspace files; failure degrades observably like artificer.
-    const hostSemantics = resolveWorkspaceHostToolSemantics(workspaceDir);
-    if (hostSemantics.ok) {
-      evaluatorHostSemanticContext = { hostKinds: hostSemantics.hostKinds, tools: hostSemantics.registry.hostMappings() };
-    } else {
-      console.error(`[PD:run-once] evaluator replay without host semantic projection: ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
-    }
+    // PRI-741 (review round): the projection derives from the SAME registry
+    // snapshot the gateDeps were built from — never a second independent read
+    // of the durable declaration (snapshot divergence would let the sandbox
+    // and the parity case disagree on canonical kinds).
+    evaluatorHostSemanticContext = buildArtificerHostSemanticContext(evaluatorContext.registry, evaluatorContext.hostKinds ?? []);
   }
 
   const stateManager = new RuntimeStateManager({ workspaceDir });
@@ -622,7 +617,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
               effectiveConfig,
               outputLanguage,
               ...(hostSemantics.ok
-                ? { hostSemanticContext: { hostKinds: hostSemantics.hostKinds, tools: hostSemantics.registry.hostMappings() } }
+                ? { hostSemanticContext: buildArtificerHostSemanticContext(hostSemantics.registry, hostSemantics.hostKinds) }
                 : {}),
             },
           );

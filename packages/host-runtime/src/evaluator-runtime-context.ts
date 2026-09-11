@@ -52,7 +52,20 @@ export interface EvaluatorRuntimeContextInput {
 }
 
 export type EvaluatorRuntimeContextResolution =
-  | { readonly ok: true; readonly gateDeps: RefinerRuleHostGateDeps }
+  | {
+      readonly ok: true;
+      readonly gateDeps: RefinerRuleHostGateDeps;
+      /**
+       * PRI-741: the registry snapshot the gateDeps were built from. Callers
+       * that need the host tool list (e.g. the host-alias parity projection)
+       * MUST derive it from HERE — a second independent
+       * `resolveWorkspaceHostToolSemantics` read could observe a different
+       * declaration snapshot than the replay gate.
+       */
+      readonly registry: ToolSemanticRegistry;
+      /** Host kind label(s) when known; the host-threaded path has none. */
+      readonly hostKinds?: readonly string[];
+    }
   | { readonly ok: false; readonly reason: string; readonly nextAction: string };
 
 /**
@@ -68,6 +81,7 @@ export function createEvaluatorRuntimeContext(input: EvaluatorRuntimeContextInpu
   if (input.toolSemantics) {
     return {
       ok: true,
+      registry: input.toolSemantics,
       gateDeps: createProductionGateDeps({ projectDir: input.workspaceDir, toolSemantics: input.toolSemantics }),
     };
   }
@@ -77,6 +91,8 @@ export function createEvaluatorRuntimeContext(input: EvaluatorRuntimeContextInpu
   }
   return {
     ok: true,
+    registry: resolved.registry,
+    hostKinds: resolved.hostKinds,
     gateDeps: createProductionGateDeps({ projectDir: input.workspaceDir, toolSemantics: resolved.registry }),
   };
 }

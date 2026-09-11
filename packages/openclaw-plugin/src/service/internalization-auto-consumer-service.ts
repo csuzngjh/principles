@@ -45,6 +45,31 @@ function formatRunOnceCommand(workspaceDir: string): string {
   return `pd runtime internalization run-once --workspace "${workspaceDir}" --runner dreamer --runtime config --json`;
 }
 
+/**
+ * PRI-741 (review round): persist the OpenClaw tool declaration as workspace
+ * provenance — host-neutral consumers (pd-cli activation / run-once) load it
+ * to run reliability validation with the SAME registry instead of guessing
+ * the host. The declaration derives from this package's constants (single
+ * source) and is a FACT about the host: it is refreshed on EVERY gateway
+ * start, independent of the internalization consumer flag, so a flag-off
+ * workspace never keeps a stale declaration whose phantom names defeat the
+ * activation gate's hasHostTool check.
+ */
+export function persistOpenClawToolDeclaration(
+  workspaceDir: string,
+  logger: { warn: (msg: string) => void },
+): void {
+  const declared = saveHostToolDeclaration(workspaceDir, {
+    version: 1,
+    hostKind: 'openclaw',
+    mappings: OPENCLAW_TOOL_SEMANTIC_MAPPINGS,
+    declaredAt: new Date().toISOString(),
+  });
+  if (!declared.ok) {
+    logger.warn(`[PD:AutoConsumer] Failed to persist OpenClaw tool declaration: ${declared.reason} — pd-cli reliability validation will not find it (rc-9)`);
+  }
+}
+
 export async function runConsumerCycle(
   workspaceDir: string,
   logger: PluginLogger,
@@ -81,6 +106,14 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     const workspaceDir: string = maybeWorkspaceDir;
     const state = getWorkspaceState(workspaceDir);
 
+    // PRI-741 (review round): the tool declaration is a FACT about the host
+    // (derived from code constants), NOT consumer behavior — it must persist
+    // even when the auto-consumer flag is off, otherwise flag-off workspaces
+    // keep a stale `.pd/host-tool-semantics/openclaw.json` whose phantom names
+    // keep the activation gate's hasHostTool check defeated. Idempotent:
+    // a full rewrite of the same content on every gateway start.
+    persistOpenClawToolDeclaration(workspaceDir, logger);
+
     if (!state.stopped && state.timeoutId !== null) {
       logger.info(`[PD:AutoConsumer] Already started for workspace: ${workspaceDir}`);
       return;
@@ -105,21 +138,6 @@ export const InternalizationAutoConsumerService: InternalizationAutoConsumerServ
     }
 
     state.stopped = false;
-
-    // PRI-634-F R2: persist the OpenClaw tool declaration as workspace
-    // provenance — host-neutral consumers (pd-cli activation) load it to run
-    // reliability validation with the SAME registry instead of guessing the
-    // host. The declaration derives from this package's constants (single
-    // source); each gateway start refreshes it.
-    const declared = saveHostToolDeclaration(workspaceDir, {
-      version: 1,
-      hostKind: 'openclaw',
-      mappings: OPENCLAW_TOOL_SEMANTIC_MAPPINGS,
-      declaredAt: new Date().toISOString(),
-    });
-    if (!declared.ok) {
-      logger.warn(`[PD:AutoConsumer] Failed to persist OpenClaw tool declaration: ${declared.reason} — pd-cli reliability validation will not find it (rc-9)`);
-    }
 
     const interval = INTERNALIZATION_AUTO_CONSUMER_INTERVAL_MS;
 

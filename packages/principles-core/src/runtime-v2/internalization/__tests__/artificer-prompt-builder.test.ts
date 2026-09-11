@@ -3,7 +3,9 @@ import {
   ArtificerPromptBuilder,
   ARTIFICER_PROTOCOL_INSTRUCTION,
   ARTIFICER_PROMPT_CONTRACT_VERSION,
+  buildArtificerHostSemanticContext,
 } from '../artificer-prompt-builder.js';
+import { buildToolSemanticRegistry } from '../tool-semantic-registry.js';
 import type { BehaviorExamplePack } from '../behavior-example-pack.js';
 
 // P2 fix (CodeRabbit PR2 Comment 4): a minimal valid BehaviorExamplePack used
@@ -133,6 +135,30 @@ describe('ArtificerPromptBuilder', () => {
     });
     const parsed = JSON.parse(message) as { hostSemanticContext?: unknown };
     expect(parsed.hostSemanticContext).toBeDefined();
+  });
+
+  // ── PRI-741 review round: projection sanitization (llm trust boundary) ──
+
+  it('PRI-741 review: buildArtificerHostSemanticContext filters control-char names and bounds the list', () => {
+    const built = buildToolSemanticRegistry([
+      { rawToolName: 'write', canonicalKind: 'write' },
+      { rawToolName: 'evil\ninjected instructions', canonicalKind: 'write' },
+      { rawToolName: 'tab\tname', canonicalKind: 'execute' },
+      { rawToolName: `${'x'.repeat(200)}`, canonicalKind: 'execute' },
+    ]);
+    if (!built.ok) throw new Error('registry failed to build');
+    const dto = buildArtificerHostSemanticContext(built.registry, ['openclaw', 'bad kind!']);
+    expect(dto.tools.map((t) => t.rawToolName)).toEqual(['write']);
+    expect(dto.hostKinds).toEqual(['openclaw']);
+  });
+
+  it('PRI-741 review: buildArtificerHostSemanticContext caps the projected list at 64 entries', () => {
+    const mappings = Array.from({ length: 70 }, (_, i) => ({ rawToolName: `tool_${i}`, canonicalKind: 'other' as const }));
+    const built = buildToolSemanticRegistry(mappings);
+    if (!built.ok) throw new Error('registry failed to build');
+    const dto = buildArtificerHostSemanticContext(built.registry, []);
+    expect(dto.tools.length).toBe(64);
+    expect(dto.hostKinds).toEqual([]);
   });
 
   it('instruction requires implementationSummary as a non-empty string', () => {

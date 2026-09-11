@@ -1063,6 +1063,9 @@ export {
   DEFAULT_ARTIFICER_RUNNER_OPTIONS,
 } from './internalization/artificer-runner.js';
 
+// PRI-741: host semantic projection DTO builder (sanitized for prompt use).
+export { buildArtificerHostSemanticContext } from './internalization/artificer-prompt-builder.js';
+
 // ── Evaluator Runner (PRI-EVAL) ────────────────────────────────────────────────
 
 export type {

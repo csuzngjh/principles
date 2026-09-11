@@ -41,8 +41,7 @@ function caseSlice(source: string, caseName: string): string {
 describe('PRI-741 host semantic projection wiring guard', () => {
   it('Guard A1: shared cycle builds the projection from ports.toolSemantics (one provenance)', () => {
     const src = readSrc(CYCLE_SRC);
-    expect(src).toContain('toolSemantics.hostMappings()');
-    expect(src).toContain('ports.hostKinds');
+    expect(src).toContain('buildArtificerHostSemanticContext(toolSemantics, ports.hostKinds ?? [])');
   });
 
   it('Guard A2: shared cycle threads hostSemanticContext into the artificer prompt', () => {
@@ -61,7 +60,7 @@ describe('PRI-741 host semantic projection wiring guard', () => {
     const src = readSrc(RUN_ONCE_SRC);
     expect(src).toContain('artificer prompt without host tool semantics');
     expect(src).toContain('resolveWorkspaceHostToolSemantics(workspaceDir)');
-    expect(src).toContain('hostSemantics.registry.hostMappings()');
+    expect(src).toContain('buildArtificerHostSemanticContext(hostSemantics.registry, hostSemantics.hostKinds)');
   });
 
   it('Guard C: both host shells pass their hostKinds label', () => {
@@ -71,7 +70,7 @@ describe('PRI-741 host semantic projection wiring guard', () => {
 
   it('Guard D: pipeline threads the projection into artificer and evaluator', () => {
     const src = readSrc(PIPELINE_RUNNER_SRC);
-    expect(src).toContain('hostSemanticContext: { hostKinds: artificerHostSemantics.hostKinds, tools: artificerHostSemantics.registry.hostMappings() }');
-    expect(src).toContain('artificer prompt without host tool semantics');
+    expect(src).toContain('const hostSemanticContext = buildArtificerHostSemanticContext(evaluatorContext.registry, evaluatorContext.hostKinds ?? [])');
+    expect(src).toContain('hostSemanticContext,');
   });
 });

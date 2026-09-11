@@ -73,6 +73,16 @@ import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
 // alias/path/combination) to defend against false-positive blocks.
 import { generateV2ContextAdversarialCases } from './v2-adversarial-cases.js';
 import { canonicalizeToolKind } from './rule-context-v2.js';
+import type { ToolSemanticMappingV1 } from './tool-semantic-registry.js';
+
+/** PRI-741: length of the shared case-insensitive prefix of two tool names. */
+function commonPrefixLength(a: string, b: string): number {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  let i = 0;
+  while (i < x.length && i < y.length && x[i] === y[i]) i += 1;
+  return i;
+}
 
 // ── Evaluator-specific context ────────────────────────────────────────────────
 
@@ -2816,9 +2826,24 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return skip('no_base_case_tool_name', 'verify_artificer_emitted_at_least_one_golden_trace_case');
     }
     const authorNameIsHostReal = hostContext.tools.some((tool) => tool.rawToolName === base.toolName);
-    if (authorNameIsHostReal) return null;
+    if (authorNameIsHostReal) {
+      // Normal outcome for post-v5 artifacts (the prompt requires host-real
+      // case names) — emitted so operators can distinguish "parity already
+      // covered" from a silent skip.
+      return skip('author_name_already_host_real', 'none — the replay already exercises the host dispatch surface');
+    }
     const authorKind = canonicalizeToolKind(base.toolName);
-    const hostCandidate = hostContext.tools.find((tool) => tool.canonicalKind === authorKind && tool.rawToolName !== base.toolName);
+    // Among same-kind host tools, prefer the name most similar to the
+    // author's (longest common prefix): edit_file → edit, write_file → write.
+    // A rule may legitimately discriminate tools within a kind, so the first
+    // same-kind mapping is not always a faithful substitute.
+    const sameKind = hostContext.tools.filter((tool) => tool.canonicalKind === authorKind && tool.rawToolName !== base.toolName);
+    let hostCandidate: ToolSemanticMappingV1 | undefined;
+    for (const tool of sameKind) {
+      if (hostCandidate === undefined || commonPrefixLength(tool.rawToolName, base.toolName) > commonPrefixLength(hostCandidate.rawToolName, base.toolName)) {
+        hostCandidate = tool;
+      }
+    }
     if (hostCandidate === undefined) {
       return skip(`no_host_tool_with_kind:${authorKind}`, 'verify_the_host_declaration_covers_the_kind_the_rule_targets');
     }
