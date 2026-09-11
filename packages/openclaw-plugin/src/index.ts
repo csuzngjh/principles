@@ -37,7 +37,6 @@ import { handlePromoteImplCommand } from './commands/promote-impl.js';
 import { handleDisableImplCommand } from './commands/disable-impl.js';
 import { handleArchiveImplCommand } from './commands/archive-impl.js';
 import { handleRollbackImplCommand } from './commands/rollback-impl.js';
-import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js';
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
@@ -733,7 +732,6 @@ const plugin = {
 |--------|--------|------|
 |  | \`/pd-status\` | 查看系统状态（GFI、Pain 词典） |
 |  | \`/pd-pain\` | 从 OpenClaw 会话报告 pain |
-|  | \`/pd-evolution-status\` | 查看 evolution 闭环状态（candidate/probation/active） |
 |  | \`/pd-workflow-debug\` | 调试 workflow 状态与事件 [workflowId] |
 
 ## ⚙️ 配置与上下文
@@ -787,7 +785,6 @@ const plugin = {
 |-------|------|---------|
 |  | \`/pd-status\` | View system status (GFI, Pain dictionary) |
 |  | \`/pd-pain\` | Report pain from OpenClaw session |
-|  | \`/pd-evolution-status\` | Show evolution loop status (candidate/probation/active) |
 |  | \`/pd-workflow-debug\` | Debug workflow state and events [workflowId] |
 
 ## ⚙️ Configuration & Context
@@ -894,21 +891,6 @@ const plugin = {
       }
     });
 
-
-    api.registerCommand({
-      name: "pd-evolution-status",
-      description: getCommandDescription('pd-evolution-status', language),
-      handler: (ctx) => {
-        try {
-          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleEvolutionStatusCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /pd-evolution-status failed: ${String(err)}`);
-          return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
-        }
-      }
-    });
 
     api.registerCommand({
       name: "pd-principle-rollback",

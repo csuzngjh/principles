@@ -22,29 +22,8 @@ An evolutionary agent framework built around pain signals, guarded execution, an
 
 | Command | Description |
 |---|---|
-| `/pd-evolution-status` | Show the current control-plane and evolution summary |
 | `/pd-rollback` | Roll back the latest or specified empathy penalty |
 | `/pd-help` | Show help |
-
-## `/pd-evolution-status` Example
-
-```text
-Evolution Status
-================
-
-Control Plane
-- EP Tier: Sapling (200 points)
-- Session GFI: current 18, peak 25 (partial)
-- GFI Sources: user_empathy(18)
-- Pain Flag: inactive
-- Last Pain Signal: user_empathy - buffered empathy event
-- Gate Events: blocks 1, bypasses 0 (authoritative)
-
-Evolution
-- Queue: pending 1, in_progress 0, completed 0 (authoritative)
-- Directive: present, active yes, age 5m
-- Directive Task: fix something important
-```
 
 ## Important Behavior Notes
 

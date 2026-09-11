@@ -123,7 +123,6 @@ Here's a quick overview of the most-used commands:
 | `/pd-init` | `/pdi` | Initialize workspace |
 | `/pd-status` | — | View GFI friction index and system health |
 | `/pd-pain` | — | Report a pain signal from the current session |
-| `/pd-evolution-status` | — | View principle evolution state |
 | `/pd-rollback` | — | Rollback a misjudged empathy event penalty |
 | `/pd-principle-rollback` | — | Rollback a principle and blacklist it |
 | `/pd-context` | — | Control context injection (Thinking OS / project focus) |
