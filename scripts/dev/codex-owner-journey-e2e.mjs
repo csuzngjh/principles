@@ -420,8 +420,8 @@ if (SKIP_LLM) {
   stage('S6-diagnosis', 'passed', { firstCycleDiagnostician: firstCycle.diag?.status, evidenceLinkedCandidates: candidates, pipelineTasks: lastSnapshot.tasks });
 
   // ── S7 owner decision: approve the pending approval via the CLI ────────────
-  if (approval === undefined) {
-    fail('S7-owner-decision', `pipeline quiesced after ${MAX_PIPELINE_CYCLES} cycles without a pending approval (needs_revision loops or needs_human_review are Owner-decision exits)`, 'Inspect tasks/pi_artifacts for the terminal state; rerun with more --max-pipeline-cycles if revision rounds are still eligible.');
+  if (approval === null) {
+    fail('S7-owner-decision', `pipeline did not reach a pending approval within ${MAX_PIPELINE_CYCLES} worker cycles (revision loops / needs_human_review are the designed Owner-decision exits)`, 'Inspect tasks/pi_artifacts for the terminal state; rerun with more --max-pipeline-cycles if revision rounds are still eligible.');
   }
   const approveResult = spawnSync(process.execPath, [pdCliEntry, 'activation', 'approve', '-a', approval.approval_id, '--workspace', workspace, '--json'], {
     encoding: 'utf8',
