@@ -105,6 +105,39 @@ describe('listPains (PRI-640 host filter)', () => {
     expect(result.pains[0]?.host).toBe('unknown');
   });
 
+  it('PRI-743: byHost reports the full-table distribution independent of --host/--limit', async () => {
+    const { db } = makeWorkspace();
+    seedPain(db, { id: 1, source: 'user_correction', canonical: 'pain_oc_1', host: 'openclaw', created: '2026-09-01T10:00:00.000Z' });
+    seedPain(db, { id: 2, source: 'user_correction', canonical: 'pain_oc_2', host: 'openclaw', created: '2026-09-01T10:05:00.000Z' });
+    seedPain(db, { id: 3, source: 'tool_failure', canonical: 'pain_cx_1', host: 'codex', created: '2026-09-01T11:00:00.000Z' });
+    seedPain(db, { id: 4, source: 'manual', canonical: 'pain_null_1', host: null, created: '2026-09-01T12:00:00.000Z' });
+    seedPain(db, { id: 5, source: 'manual', canonical: 'pain_null_2', host: null, created: '2026-09-01T12:05:00.000Z' });
+    const dbPath = dbPathOf(db);
+    db.close();
+
+    // --limit narrows the row list but must NOT narrow the distribution.
+    const limited = await listPains(dbPath, { limit: 2 });
+    expect(limited.count).toBe(2);
+    expect(limited.byHost).toEqual({ openclaw: 2, codex: 1, unknown: 2 });
+
+    // --host narrows the row list but must NOT narrow the distribution.
+    const filtered = await listPains(dbPath, { limit: 10, host: 'codex' });
+    expect(filtered.count).toBe(1);
+    expect(filtered.byHost).toEqual({ openclaw: 2, codex: 1, unknown: 2 });
+  });
+
+  it('PRI-743: byHost is null (never guessed) on a pre-PRI-640 database', async () => {
+    const { db } = makePre640Workspace();
+    db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at)
+      VALUES ('s1', 'tool_failure', 70, 'r', 'moderate', 'system_infer', NULL, NULL, 'pain_legacy', NULL, '2026-08-01T00:00:00.000Z')`).run();
+    const dbPath = dbPathOf(db);
+    db.close();
+
+    const result = await listPains(dbPath, { limit: 10 });
+    expect(result.byHost).toBeNull();
+    expect(result.warnings).toContain('host_kind_column_missing');
+  });
+
   it('degrades observably on a pre-PRI-640 database without the host_kind column (rc-9)', async () => {
     const { db } = makePre640Workspace();
     db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, created_at)
@@ -152,11 +185,12 @@ describe('handlePainList (CLI contract)', () => {
     await handlePainList({ json: true });
     expect(exitSpy).not.toHaveBeenCalled();
     const raw = logSpy.mock.calls.map((args) => String(args[0])).join('\n');
-    const parsed = JSON.parse(raw) as { count: number; pains: { host: string; painId: string }[]; hostFilter: unknown; warnings: string[] };
+    const parsed = JSON.parse(raw) as { count: number; pains: { host: string; painId: string }[]; hostFilter: unknown; warnings: string[]; byHost: { openclaw: number; codex: number; unknown: number } | null };
     expect(parsed.count).toBe(2);
     expect(parsed.pains.map((p) => `${p.painId}:${p.host}`).sort()).toEqual(['pain_cli_cx:codex', 'pain_cli_oc:openclaw']);
     expect(parsed.hostFilter).toBeNull();
     expect(parsed.warnings).toEqual([]);
+    expect(parsed.byHost).toEqual({ openclaw: 1, codex: 1, unknown: 0 });
   });
 
   it('--host filter is reflected in the JSON result', async () => {

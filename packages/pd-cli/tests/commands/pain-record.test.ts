@@ -399,6 +399,83 @@ describe('pd pain record', () => {
     exitSpy.mockRestore();
   });
 
+  // ── PRI-743: explicit --host attribution ──────────────────────────────────
+
+  it('PRI-743: --host openclaw records without the default-assumption disclosure', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'explicit openclaw', session: 'sess-oc', host: 'openclaw', json: true });
+
+    expect(lastRecordPainInput).toBeTruthy();
+    expect(lastRecordPainInput!.sessionId).toBe('sess-oc');
+    expect(lastRecordPainInput!.hostKind).toBe('openclaw');
+    expect(lastRecordPainInput!.provenance).toBe('host_context_bound');
+
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { hostAttribution?: string; warnings?: string[] };
+    expect(jsonOutput.hostAttribution).toBe('openclaw');
+    expect((jsonOutput.warnings ?? []).some((w) => w.includes("defaulted to 'openclaw'"))).toBe(false);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRI-743: --host codex refuses loudly — the CLI cannot verify Codex lineage (rc-6)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'codex mistake', session: 'sess-codex', host: 'codex', json: true });
+
+    // cli-1: exactly one JSON object on stdout
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { status: string; reason: string; nextAction: string };
+    expect(jsonOutput).toMatchObject({ status: 'failed', reason: 'codex_lineage_unverifiable_by_cli' });
+    expect(jsonOutput.nextAction).toContain('Codex ingestion');
+    // cli-2/cli-5: refused before any evidence acquisition or service mutation
+    expect(lastRecordPainInput).toBeNull();
+    expect(acquireTrajectoryEvidenceFromDb).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRI-743: omitting --host keeps the openclaw default but discloses the assumption (rc-9)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'legacy path', session: 'sess-123', json: true });
+
+    expect(lastRecordPainInput).toBeTruthy();
+    expect(lastRecordPainInput!.hostKind).toBe('openclaw');
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { hostAttribution?: string; warnings?: string[] };
+    expect(jsonOutput.hostAttribution).toBe('openclaw');
+    expect((jsonOutput.warnings ?? []).some((w) => w.includes("defaulted to 'openclaw'") && w.includes('--host codex'))).toBe(true);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRI-743: an invalid --host value fails loudly before any mutation (cli-5/cli-6)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'typo host', session: 'sess-123', host: 'claude', json: true });
+
+    // cli-1: exactly one JSON object on stdout
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]) as { status: string; reason: string; nextAction: string };
+    expect(jsonOutput).toMatchObject({ status: 'failed', reason: 'invalid_host_kind' });
+    expect(jsonOutput.nextAction).toContain('--host codex');
+    // cli-2/cli-5: execution stopped before any evidence acquisition or service mutation
+    expect(lastRecordPainInput).toBeNull();
+    expect(acquireTrajectoryEvidenceFromDb).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
   // 用例 C2 (PRI-642 rewrite): without session, no sentinel session, no
   // placeholder evidence — an honest unbound Owner report (SPEC §7.4).
   it('C2: submits an honest unbound report when no --session provided', async () => {
