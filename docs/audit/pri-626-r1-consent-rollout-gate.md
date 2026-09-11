@@ -11,11 +11,13 @@
 **R1 = GO** for opt-in rollout. All four R1 behaviors were proven on the
 **installed setup path** (real installed binaries, isolated sandbox workspaces,
 never test doubles), by executable scenarios, with byte-level checks against
-the G2A frozen decision package. The installed real-session E2E journey
-(`scripts/dev/codex-owner-journey-e2e.mjs`, live-LLM mode) additionally proved
-the full governance chain correction → pain → diagnosis → candidates →
-internalization pipeline on the same installed binaries (see §5 for the
-journey outcome and its Owner-decision exit).
+the G2A frozen decision package. The installed-binary real-LLM journey
+(`scripts/dev/codex-owner-journey-e2e.mjs`, live-LLM mode) additionally drove
+the chain correction → pain → diagnosis → candidates on the same installed
+binaries and pushed the internalization pipeline to its designed
+**Owner-decision exit** (see §5 for the exact terminal state — approval /
+later-activation evidence is recorded when a run converges, and the probe
+runs documented here ended at the reviewer's `needs_revision`).
 
 ## 1. Executable scenarios (what ran)
 
@@ -87,9 +89,18 @@ Run: `node scripts/dev/codex-r1-installed-gate.mjs --evidence-out r1-evidence.js
 - macOS/Linux on-device probe fixtures remain required before those platforms are release-supported for ingestion (G1 §10 follow-up).
 - Default-on remains blocked: it requires this R1 GO **plus** one opt-in dogfood release with no privacy/lineage P1 **plus** an explicit Owner decision (SPEC §17). This evidence does not decide default-on; it unblocks the opt-in dogfood step.
 
-## 5. Installed real-session E2E journey (live LLM, installed binaries)
+## 5. Installed-binary real-LLM journey (fixture transcript delivery, live LLM)
 
-The owner-journey harness now wires the live-LLM stages (this PR):
+Naming note: the journey delivers the checked-in G1 transcript **fixture**
+through the real installed pd-hook executable and drives every governance
+stage with **real LLM calls** — it is NOT a live Codex CLI session (the
+harness refuses to mislabel fixture delivery as a live session;
+`--live-codex` stays unwired until the host path is exercised). The SPEC's
+"real Codex E2E" completion contract therefore remains a separate,
+explicitly-gated item; the evidence below claims the installed-binary,
+real-LLM journey only.
+
+The owner-journey harness wires the live-LLM stages (this PR):
 
 - **S6 diagnosis** — the production Companion cycle (`pd codex worker --once`) executes the real Diagnostician and the bounded downstream consumer (intake → dreamer → philosopher → scribe → artificer → evaluator → rollout review) against an explicit pi-ai profile; the harness drives bounded cycles and fails loud on degraded modes.
 - **S7 owner decision** — the pending approval is approved through `pd activation approve` (the same ApprovalQueue authority as the Console).
@@ -104,7 +115,7 @@ proven by the evolution lab; the same run path the harness encodes):
 - Production worker cycles executed the real split-Diagnostician (router/root-cause/distiller, real LLM) → **3 evidence-linked principle candidates** (§18-13 satisfied: titles derived from the actual correction "修改前先调查已有实现").
 - Downstream pipeline with real LLMs, multiple complete stage passes: dreamer ×3 succeeded, philosopher ×3 succeeded, scribe 2/5 succeeded, artificer succeeded (initial + one revision) → **evaluator succeeded ×2 → rollout reviewer succeeded ×2**. The reviewer returned substantive `needs_revision` decisions (confidence 0.85) whose required-changes list names real defects in the generated rule code — e.g. credential-validation fail-open on placeholder values, `WRITE_CMD_PATTERN` misjudging read-only commands (`grep`/`find`) as writes, missing `/dev/null` redirect-target parsing — i.e. the adversarial rollout gate **correctly refuses flawed artifacts** (the governance gate working as designed; the modeled pain itself was "调查后再改").
 - Terminal state of this probe: revision budget exhausted (scribe/artificer `output_invalid`, the PRI-707-documented truncation/parse class) with the artifact held in reviewer `needs_revision` — the designed **Owner-decision exit** (SPEC §13; PRI-630 precedent), not a consent-path defect. Operational note: revision-budget resets between rounds were applied as direct task requeues, equivalent to the documented retry CLIs; every executed stage was a real runner invocation through the installed CLI.
-- **Consequence for §18-14:** the harness S7 (approval via `pd activation approve`) and S9 (later prompt delivery with the active activation) stages are wired and re-runnable, but a green S7/S9 was not yet observed because the reviewer correctly declined the generated artifacts. Per PRI-626's scope this does not affect R1: R1 gates the **consent UX**, and the opt-in dogfood release is precisely the next step where pipeline-quality convergence (PRI-630/PRI-707 follow-up family) is iterated under Owner governance.
+- **Consequence for §18-14:** the harness S7 (approval via `pd activation approve`) and S9 (later prompt delivery with the active activation) stages are wired and re-runnable. Two formal live harness runs against the installed binaries both **passed S6** (first-cycle real diagnosis, 2 evidence-linked candidates, full downstream through evaluator/rollout-reviewer) and ended at S7's structured no-approval failure after the bounded cycle budget — the fail-loud path itself was thereby exercised (run 1 exposed a guard bug, fixed in this PR; run 2 recorded the structured failure). A green S7/S9 remains rerun-able when the reviewer accepts a generated artifact; per PRI-626's scope this does not affect R1: R1 gates the **consent UX**, and the opt-in dogfood release is precisely the next step where pipeline-quality convergence (PRI-630/PRI-707 follow-up family) is iterated under Owner governance.
 
 ## 6. What R1 does NOT claim
 

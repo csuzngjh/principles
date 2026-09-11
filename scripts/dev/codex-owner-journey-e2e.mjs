@@ -142,9 +142,21 @@ cpSync(path.join(ROOT, 'packages', 'codex-adapter', 'tests', 'fixtures', 'g1-con
 
 // Workspace config: production defaults (validates clean) rendered as
 // multi-line YAML — the consent editor edits the `features:` block by line.
+// Installed-mode consistency (P2 review): when --pd-cli selects an installed
+// runtime, the config rendering and the S5 recovery import resolve from THAT
+// installation (same layout as the binaries under test) — a mixed-version
+// journey would not be reliable installed-runtime evidence.
 const rootRequire = createRequire(path.join(ROOT, 'package.json'));
 const yaml = rootRequire('js-yaml');
-const { getDefaultPdConfig } = await import(pathToFileURL(path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2', 'index.js')));
+const runtimeRoot = PD_CLI_OVERRIDE !== undefined ? path.resolve(pdCliEntry, '..', '..', '..') : ROOT;
+const coreDistEntry = PD_CLI_OVERRIDE !== undefined ? path.join(runtimeRoot, 'core', 'dist', 'runtime-v2', 'index.js') : path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2', 'index.js');
+const hostRuntimeDistEntry = PD_CLI_OVERRIDE !== undefined ? path.join(runtimeRoot, 'host-runtime', 'dist', 'index.js') : path.join(ROOT, 'packages', 'host-runtime', 'dist', 'index.js');
+for (const entry of [coreDistEntry, hostRuntimeDistEntry]) {
+  if (!existsSync(entry)) {
+    fail('S0-prerequisites', `installed runtime artifact missing: ${entry}`, 'The selected installation must contain core and host-runtime dists (layout: <runtime-root>/{core,host-runtime,pd-cli,codex-adapter}).');
+  }
+}
+const { getDefaultPdConfig } = await import(pathToFileURL(coreDistEntry));
 const CORE = getDefaultPdConfig();
 const configObject = {
   ...CORE,
@@ -237,7 +249,7 @@ if (!presented) {
 const consentAccept = spawnSync(process.execPath, [pdCliEntry, 'codex', 'setup', '--workspace', workspace, '--accept', '--json'], { encoding: 'utf8', env: { ...process.env, PD_WORKSPACE_DIR: workspace } });
 let acceptReport;
 try {
-  acceptReport = JSON.parse((consentAccept.stdout.trim().split('\n').findLast((line) => line.startsWith('{'))) ?? '{}');
+  acceptReport = parseCliJson(consentAccept.stdout ?? '');
 } catch {
   acceptReport = {};
 }
@@ -344,6 +356,25 @@ stage('S5-recovery', 'passed', { firstPass: reconcileFirst, secondPass: reconcil
 // bounded downstream consumer cycle (intake → dreamer → … → evaluator →
 // rollout review → approval queue). Driving it through `pd codex worker
 // --once` exercises exactly what an installed deployment runs.
+
+// P1 review fix: some pd-cli commands emit PRETTY-PRINTED JSON (activation
+// approve/list use JSON.stringify(result, null, 2)), so last-line scanning
+// grabs a `}` and silently yields {}. Parse the complete stdout first; the
+// line scan is only a fallback for banner-prefixed output.
+function parseCliJson(stdout) {
+  const text = stdout.trim();
+  if (text === '') return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    const line = text.split('\n').findLast((row) => row.startsWith('{'));
+    try {
+      return JSON.parse(line ?? '{}');
+    } catch {
+      return {};
+    }
+  }
+}
 function runWorkerOnce() {
   const result = spawnSync(process.execPath, [pdCliEntry, 'codex', 'worker', '--workspace', workspace, '--once', '--json'], {
     encoding: 'utf8',
@@ -351,14 +382,7 @@ function runWorkerOnce() {
     windowsHide: true,
     env: { ...process.env, CODEX_HOME: codexHome, PD_WORKSPACE_DIR: workspace },
   });
-  const line = (result.stdout.trim().split('\n').findLast((row) => row.startsWith('{'))) ?? '{}';
-  let report;
-  try {
-    report = JSON.parse(line);
-  } catch {
-    report = {};
-  }
-  return { status: result.status, report, stderr: result.stderr ?? '' };
+  return { status: result.status, report: parseCliJson(result.stdout ?? ''), stderr: result.stderr ?? '' };
 }
 function stateDbQuery(fnBody) {
   return execFileSync(process.execPath, ['-e', `
@@ -429,9 +453,7 @@ if (SKIP_LLM) {
     windowsHide: true,
     env: { ...process.env, CODEX_HOME: codexHome, PD_WORKSPACE_DIR: workspace },
   });
-  const approveLine = (approveResult.stdout.trim().split('\n').findLast((row) => row.startsWith('{'))) ?? '{}';
-  let approveReport;
-  try { approveReport = JSON.parse(approveLine); } catch { approveReport = {}; }
+  const approveReport = parseCliJson(approveResult.stdout ?? '');
   if (approveResult.status !== 0 || approveReport.ok !== true) {
     fail('S7-owner-decision', `activation approve failed: ${approveResult.stdout.slice(0, 200)} ${approveResult.stderr.slice(0, 200)}`, 'Inspect pd activation approve output.');
   }
@@ -441,28 +463,83 @@ if (SKIP_LLM) {
   `);
   stage('S7-owner-decision', 'passed', { approvalId: approval.approval_id, channel: approval.channel, activations: JSON.parse(activations.trim().split('\n').at(-1)).slice(0, 2) });
 
-  // ── S9 (§18-14) later behavior: the approval affects a later Codex prompt ──
+  // ── S9 (§18-14) later behavior: the approval affects a later Codex turn ────
+  // Channel-aware behavioral assertion: a prompt-channel activation must show
+  // up in the NEXT prompt's injected context (additionalContext carries the
+  // approved principle text); a code_tool_hook activation must be active on
+  // its channel and the RuleHost tool-delivery path must answer in schema
+  // (the deny-on-match semantics are rule-content dependent and covered by
+  // the admission/evaluator gates). Either way, exit-0 alone is NOT accepted.
   const activationList = spawnSync(process.execPath, [pdCliEntry, 'activation', 'list', '--workspace', workspace, '--json'], {
     encoding: 'utf8', timeout: 60_000, windowsHide: true,
     env: { ...process.env, CODEX_HOME: codexHome, PD_WORKSPACE_DIR: workspace },
   });
-  let activationReport;
-  try { activationReport = JSON.parse((activationList.stdout.trim().split('\n').findLast((row) => row.startsWith('{') || row.startsWith('['))) ?? '[]'); } catch { activationReport = []; }
-  const activeOnChannel = (Array.isArray(activationReport) ? activationReport : activationReport.activations ?? [])
-    .find((row) => row.status === 'active' || row.active === true);
+  const activationReport = parseCliJson(activationList.stdout ?? '');
+  const activationRows = Array.isArray(activationReport) ? activationReport : activationReport.activations ?? [];
+  const activeOnChannel = activationRows.find((row) => row.status === 'active' || row.active === true);
   if (activeOnChannel === undefined) {
     fail('S9-later-behavior', `no active activation after approval: ${activationList.stdout.slice(0, 240)}`, 'Inspect pd activation list.');
   }
-  const laterPrompt = runHook(payload('UserPromptSubmit', { prompt: '后续行为验证：请继续遵守已激活的原则' }));
-  if (laterPrompt.status !== 0) {
-    fail('S9-later-behavior', `later prompt delivery failed after activation: ${laterPrompt.stderr.slice(0, 240)}`, 'The prompt path must keep working with the activated principle in the injection set.');
+  if (activeOnChannel.channel === 'prompt') {
+    // Prompt channel: the NEXT prompt delivery must carry the approved
+    // principle in its injected context — resolve the principle text from the
+    // approved artifact's lineage and assert a distinctive fragment appears.
+    const principleText = stateDbQuery(`
+    const approved = db.prepare('SELECT artifact_id, requested_at FROM approvals WHERE approval_id = ?').get(${JSON.stringify(approval.approval_id)});
+    if (!approved) { console.log('null'); } else {
+      // The artifact under approval sits on a linear chain; the principle
+      // draft text lives in the newest pre-approval artifact that carries one.
+      const row = db.prepare(` + "`" + `
+        SELECT content_json FROM pi_artifacts
+        WHERE content_json LIKE '%principleDraft%'
+          AND created_at <= COALESCE(?, '9999-12-31')
+        ORDER BY created_at DESC LIMIT 1
+      ` + "`" + `).get(approved.requested_at);
+      if (!row) { console.log('null'); } else {
+        const draft = JSON.parse(row.content_json)?.principleDraft ?? null;
+        console.log(JSON.stringify(draft && typeof draft.statement === 'string' && draft.statement.length > 20
+          ? { title: draft.title, fragment: draft.statement.slice(0, 24) }
+          : null));
+      }
+    }
+    `);
+    const draft = JSON.parse(principleText.trim().split('\n').at(-1));
+    if (draft === null) {
+      fail('S9-later-behavior', 'could not resolve the approved principle text from the artifact lineage', 'The approval must reference an artifact chain containing a principleDraft.');
+    }
+    const laterPrompt = runHook(payload('UserPromptSubmit', { prompt: '后续行为验证：请继续遵守已激活的原则' }));
+    if (laterPrompt.status !== 0) {
+      fail('S9-later-behavior', `later prompt delivery failed after activation: ${laterPrompt.stderr.slice(0, 240)}`, 'The prompt path must keep working with the activated principle in the injection set.');
+    }
+    const laterAnswer = parseCliJson(laterPrompt.stdout ?? '');
+    const additionalContext = laterAnswer?.hookSpecificOutput?.additionalContext ?? '';
+    if (typeof additionalContext !== 'string' || additionalContext.length === 0) {
+      fail('S9-later-behavior', `the later prompt answer carries no injected context: stdout=${JSON.stringify(laterPrompt.stdout.slice(0, 200))}`, '§18-14 requires the approved activation to affect a later Codex prompt.');
+    }
+    if (!additionalContext.includes(draft.fragment) && !(draft.title && additionalContext.includes(draft.title))) {
+      fail('S9-later-behavior', `the injected context does not contain the approved principle (fragment=${JSON.stringify(draft.fragment)})`, 'The approved prompt-channel activation must be visible in later prompt injection.');
+    }
+    stage('S9-later-behavior', 'passed', { channel: 'prompt', principleTitle: draft.title, injectedContextChars: additionalContext.length });
+  } else {
+    // Tool channel (code_tool_hook): the activation must be active on its
+    // channel and the RuleHost tool-delivery path must answer in the exact
+    // schema after activation (deny-on-match semantics are rule-content
+    // dependent; admission/evaluator gates own that content).
+    const laterTool = runHook(payload('PreToolUse', { tool_name: 'shell', tool_use_id: 'probe-tool-use-1', tool_input: { command: 'echo probe' } }));
+    if (laterTool.status !== 0) {
+      fail('S9-later-behavior', `later tool delivery failed after activation: ${laterTool.stderr.slice(0, 240)}`, 'The RuleHost tool path must keep answering after activation.');
+    }
+    const toolAnswer = parseCliJson(laterTool.stdout ?? '');
+    if (toolAnswer?.hookSpecificOutput?.hookEventName === undefined) {
+      fail('S9-later-behavior', `tool delivery did not answer in the exact Codex schema: stdout=${JSON.stringify(laterTool.stdout.slice(0, 200))}`, 'The RuleHost gate must answer in schema after activation.');
+    }
+    stage('S9-later-behavior', 'passed', { channel: 'code_tool_hook', activation: activeOnChannel, toolSchemaAnswer: toolAnswer.hookSpecificOutput?.hookEventName });
   }
-  stage('S9-later-behavior', 'passed', { activeActivation: activeOnChannel, laterPromptHookExit: 0 });
 }
 
 // ── S8 reversibility (always executable) ────────────────────────────────────
 const decline = spawnSync(process.execPath, [pdCliEntry, 'codex', 'setup', '--workspace', workspace, '--decline', '--json'], { encoding: 'utf8', env: { ...process.env, PD_WORKSPACE_DIR: workspace } });
-const declineReport = JSON.parse((decline.stdout.trim().split('\n').findLast((line) => line.startsWith('{'))) ?? '{}');
+const declineReport = parseCliJson(decline.stdout ?? '');
 if (declineReport.status !== 'ok' || declineReport.decision !== 'revoked' || declineReport.ingestionFlag?.enabled !== false) {
   fail('S8-reversibility', `decline did not disable: ${decline.stdout.slice(0, 200)}`, 'Inspect the decline path.');
 }

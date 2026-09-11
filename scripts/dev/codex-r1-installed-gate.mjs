@@ -103,7 +103,18 @@ function makeWorkspace(name, { enableIngestion = false } = {}) {
     },
   };
   writeFileSync(path.join(ws, '.pd', 'config.yaml'), yaml.dump(config, { indent: 2, lineWidth: 200, noRefs: true }));
-  writeFileSync(path.join(ws, '.state', 'trajectory.db'), '');
+  // A REAL trajectory.db with the governance schema: the G3 zero-write
+  // assertion must be able to DETECT a write, so a masked empty-file DB is
+  // not enough. Schema bootstrap is test infrastructure; the dist it loads
+  // follows the selected installation (installed-mode consistency).
+  const runtimeRoot = PD_CLI.startsWith(sandbox) ? ROOT : path.resolve(PD_CLI, '..', '..', '..');
+  const hostRuntimeDist = path.join(runtimeRoot, 'host-runtime', 'dist', 'index.js');
+  const schemaAuthority = existsSync(hostRuntimeDist) ? hostRuntimeDist : path.join(ROOT, 'packages', 'host-runtime', 'dist', 'index.js');
+  const Database = require('better-sqlite3');
+  const { ensureGovernanceSchema } = require(schemaAuthority);
+  const db = new Database(path.join(ws, '.state', 'trajectory.db'));
+  ensureGovernanceSchema(db);
+  db.close();
   return ws;
 }
 
@@ -217,45 +228,68 @@ const catchUp = runCliJson(['codex', 'ingest', 'catch-up', '--workspace', wsB, '
 if (catchUp.json.status !== 'skipped' || catchUp.json.reason !== 'feature_disabled') {
   fail('G2-decline', `catch-up after decline expected skipped/feature_disabled: ${catchUp.stdout.slice(0, 240)}`, 'Inspect pd codex ingest catch-up.');
 }
+// Positive installed-hook governance evidence (R1-2 is not just "config
+// unchanged"): the prompt dispatch path must still answer in the exact Codex
+// schema after the decline — existing prompt governance keeps working.
+const promptAfterDecline = runHook(wsB, payload(wsB, 'UserPromptSubmit', { prompt: 'governance unchanged probe' }));
+if (promptAfterDecline.status !== 0) {
+  fail('G2-decline', `prompt hook exited ${promptAfterDecline.status} after decline: ${promptAfterDecline.stderr.slice(0, 240)}`, 'Existing prompt governance must keep working with ingestion off.');
+}
+let promptSchema;
+try { promptSchema = JSON.parse(promptAfterDecline.stdout.trim()); } catch { promptSchema = null; }
+if (promptSchema?.hookSpecificOutput?.hookEventName !== 'UserPromptSubmit') {
+  fail('G2-decline', `prompt hook did not answer in the exact Codex schema after decline: ${promptAfterDecline.stdout.slice(0, 200)}`, 'The prompt dispatch path must remain schema-correct after decline.');
+}
 gate('G2-decline', 'passed', {
   decision: 'revoked',
   flagOff: true,
   configDiffLines: changed.map((delta) => `${delta.before} -> ${delta.after}`),
   existingGovernanceUntouched: true,
+  promptGovernanceSchemaAnswer: true,
   catchUpAfterDecline: 'skipped/feature_disabled',
 });
 
 // ── G3 (R1-3): declining means the transcript is never opened ────────────────
-// Prove "never opens" (not "reads then discards"): remove the transcript
-// entirely, then deliver hook events. A flag-off hook must exit cleanly and
-// write zero observations without the transcript even existing.
-cpSync(path.join(ROOT, 'packages', 'codex-adapter', 'tests', 'fixtures', 'g1-contract', 'transcripts', 'normal-tool-final-turn.jsonl'), payload(wsB, 'Stop').transcript_path);
-rmSync(payload(wsB, 'Stop').transcript_path);
+// The observable that discriminates "never opens" from "reads then discards":
+// the flag-off hook answers with the unique `reason=feature_disabled`
+// structured marker and a clean `{}` stdout WITHOUT the transcript existing.
+// The negative control (flag ON, same missing transcript) proves the marker
+// discriminates: the flag-on ingestion path degrades with a DIFFERENT reason.
+// Observation counting runs against a real, schema-initialized trajectory.db
+// and fails loudly on any DB error (no masked zero).
+const transcriptPathG3 = payload(wsB, 'Stop').transcript_path;
+cpSync(path.join(ROOT, 'packages', 'codex-adapter', 'tests', 'fixtures', 'g1-contract', 'transcripts', 'normal-tool-final-turn.jsonl'), transcriptPathG3);
+rmSync(transcriptPathG3);
 const stopAfterDecline = runHook(wsB, payload(wsB, 'Stop', { stop_hook_active: false, last_assistant_message: 'FIXTURE-A-DONE' }));
 if (stopAfterDecline.status !== 0) {
   fail('G3-no-read', `hook exited ${stopAfterDecline.status} after decline with no transcript: ${stopAfterDecline.stderr.slice(0, 240)}`, 'Flag-off must be a clean structured skip.');
 }
-const promptAfterDecline = runHook(wsB, payload(wsB, 'UserPromptSubmit', { prompt: 'ordinary prompt' }));
-if (promptAfterDecline.status !== 0) {
-  fail('G3-no-read', `prompt hook exited ${promptAfterDecline.status} after decline: ${promptAfterDecline.stderr.slice(0, 240)}`, 'Prompt delivery must keep working unchanged with ingestion off.');
+if (!stopAfterDecline.stderr.includes('reason=feature_disabled') || stopAfterDecline.stdout.trim() !== '{}') {
+  fail('G3-no-read', `flag-off hook did not produce the unique feature_disabled structured skip: stdout=${JSON.stringify(stopAfterDecline.stdout.slice(0, 120))} stderr=${JSON.stringify(stopAfterDecline.stderr.slice(0, 200))}`, 'The flag-off path must skip before any transcript access.');
+}
+// Negative control: with ingestion ENABLED (wsA) and the same missing
+// transcript, the hook must NOT answer with the flag-disabled marker — the
+// marker would be meaningless if the flag-on path produced it too.
+const negControl = runHook(wsA, payload(wsA, 'Stop', { stop_hook_active: false, last_assistant_message: 'FIXTURE-A-DONE' }));
+if (negControl.stderr.includes('reason=feature_disabled')) {
+  fail('G3-no-read', 'negative control failed: the flag-ON path also reported feature_disabled', 'The feature_disabled marker must be unique to the flag-off skip.');
 }
 const obsCount = spawnSync(process.execPath, ['-e', `
   const Database = require(${JSON.stringify(path.join(ROOT, 'node_modules', 'better-sqlite3'))});
-  let n = -1;
-  try {
-    const db = new Database(${JSON.stringify(path.join(wsB, '.state', 'trajectory.db'))}, { readonly: true });
-    n = db.prepare('SELECT COUNT(*) AS n FROM governance_observations').get().n;
-    db.close();
-  } catch { n = 0; }
+  const db = new Database(${JSON.stringify(path.join(wsB, '.state', 'trajectory.db'))}, { readonly: true });
+  const n = db.prepare('SELECT COUNT(*) AS n FROM governance_observations').get().n;
   console.log(String(n));
 `], { encoding: 'utf8' });
+if (obsCount.status !== 0) {
+  fail('G3-no-read', `observation probe failed (no masked zero): ${String(obsCount.stderr ?? '').slice(0, 240)}`, 'The trajectory.db must be queryable — a probe error is a gate failure.');
+}
 if (Number(obsCount.stdout.trim().split('\n').at(-1)) !== 0) {
   fail('G3-no-read', `observations written after decline: ${obsCount.stdout}`, 'Flag-off must write zero observations.');
 }
 gate('G3-no-read', 'passed', {
   transcriptRemovedBeforeHook: true,
-  stopHookExit: 0,
-  promptHookExit: 0,
+  flagOffMarker: 'reason=feature_disabled',
+  negativeControl: 'flag-ON path does not report feature_disabled',
   observationsWritten: 0,
 });
 
@@ -268,9 +302,11 @@ if (reInit.status !== 0) {
 if (JSON.stringify(readConsentRecord(wsB)) !== recordBeforeInit) {
   fail('G4-upgrade', 'the declined consent record was mutated by the upgrade-time initializer', 'Consent records are Owner decisions — upgrade must preserve them.');
 }
-const afterInitConfig = readConfigLines(wsB).join('\n');
-if (!/codex_conversation_ingestion:[\s\S]*?enabled: false/.test(afterInitConfig) || /codex_conversation_ingestion:[\s\S]{0,80}enabled: true/.test(afterInitConfig)) {
-  fail('G4-upgrade', 'ingestion flag is not off after re-init over a declined workspace', 'Upgrade must never enable ingestion.');
+// Parsed-YAML assertions (not regex over rendered text): the flag state after
+// re-init must be read through the actual config semantics.
+const afterInitConfig = yaml.load(readFileSync(path.join(wsB, '.pd', 'config.yaml'), 'utf8'));
+if (afterInitConfig?.features?.codex_conversation_ingestion?.enabled !== false) {
+  fail('G4-upgrade', `ingestion flag is not off after re-init over a declined workspace: ${JSON.stringify(afterInitConfig?.features?.codex_conversation_ingestion)}`, 'Upgrade must never enable ingestion.');
 }
 // Fresh-workspace facet: initializing a brand-new workspace (the upgrade
 // destination shape) must not create consent or enable ingestion implicitly.
@@ -282,8 +318,8 @@ if (freshInit.status !== 0) {
 if (readConsentRecord(wsC) !== null) {
   fail('G4-upgrade', 'a consent record appeared without any Owner decision', 'Upgrade must never bypass consent implicitly.');
 }
-const freshConfig = readConfigLines(wsC).join('\n');
-if (/codex_conversation_ingestion:[\s\S]{0,80}enabled: true/.test(freshConfig)) {
+const freshConfig = yaml.load(readFileSync(path.join(wsC, '.pd', 'config.yaml'), 'utf8'));
+if (freshConfig?.features?.codex_conversation_ingestion?.enabled === true) {
   fail('G4-upgrade', 'fresh workspace config enables ingestion by default', 'Default must stay off.');
 }
 const version = runCli(['--version'], wsB);
