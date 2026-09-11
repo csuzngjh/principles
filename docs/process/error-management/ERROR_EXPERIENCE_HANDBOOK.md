@@ -968,6 +968,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
   - 2026-09-11 PRI-737 / PR #1613 (baseline inventory removal): removed two retired files from the plugin-core anti-growth allowlist in principles-core's architecture-regression.test.ts but missed the sibling self-consistency guard `expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98)` in the SAME file → CI "Test principles-core" red; local gates passed because verify:merge does not run the owning package's vitest suite. Fixed 98→96 with a dated comment. Prevention: when editing an inventory/allowlist list, grep the same file for derived count assertions (`\.size).toBe(` / `toHaveLength`) and update them in the same commit; run the owning package's tests — the merge gate builds/typechecks but does not run every package's suite.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-11",
+    "pattern": "EP-02",
+    "invariant": "baseline-inventory-edit-updates-sibling-count-guard",
+    "severity": "P1",
+    "escaped": "verify-merge",
+    "caughtBy": "ci",
+    "guard": "none"
+  }
+  -->
   - 2026-09-04 PRI-672 / PR #1511 (build-scope recurrence): pd-console gained a deep import of `create-principles-disciple/dist/update/release-manager-authority.js`, but the root `build` script never built the installer package — clean CI failed with TS2307 in the pd-console build, quick-check release producers, and the component smoke tests, while local runs were masked by the prebuilt dist (same class as the 2026-08-26 PRI-595~603 build-order recurrence; the variant here is build SCOPE — the package was absent from the shared chain entirely, not ordered late). Fixed by adding `create-principles-disciple` to the root build script and verifying with a clean-CI simulation: remove the dist, run the root build, typecheck pd-console green. Prevention rule: a new cross-package import of another package's `dist` (runtime or type-level) must add that package to the root build chain (or the consuming job's build steps) in the SAME PR.
   - 2026-09-03 / adhoc-20260904-runtime-update-guards (dev-machine test isolation leak -> real runtime corruption): after a canonical reinstall created ~/.pd/runtime on the dev machine, the pd-console update route tests' legacy fixtures resolved the REAL canonical install (os.homedir() was not yet pinned; OPENCLAW_HOME injection alone cannot override canonical resolution), so a mocked /apply-full "tarball" stub (fake version 2.0.0, no package name) was copied into the real runtime, corrupting console/dist/server.js, plugin/package.json (false "already latest", blocked future updates), core/plugin entry files, and core/pd-cli package identity. Fixes: (1) pin os.homedir() to the fixture in all update-route suites (931739a1); (2) production now refuses staged packages that do not self-identify as principles-disciple with valid semver BEFORE any copy (staged_package_invalid, /apply + /apply-full); (3) fixture-isolation sentinel test (resolved currentVersion must equal the fixture's, never a real machine install) plus identity-refusal negative tests. Prevention: any test suite that can mutate installed trees must fail loud when its environment-isolation pins stop working; update routes must validate the staged package identity before the first production write.
   - 2026-08-31 PRI-631 / PR #1462: a Console E2E inherited local Owner identity but clean CI had none. Fixed by explicit Playwright server identity vars and a clean-env rerun.
