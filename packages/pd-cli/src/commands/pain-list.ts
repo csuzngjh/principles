@@ -3,6 +3,8 @@
  *
  * Read-only: lists canonical pain_events rows from trajectory.db with their
  * host attribution. `--host` filters by openclaw / codex / unknown.
+ * PRI-743: the result (human and --json) also carries `byHost`, the
+ * full-table host distribution independent of --host/--limit.
  *
  * Usage:
  *   pd pain list [--workspace <path>] [--limit N] [--host openclaw|codex|unknown] [--json]
@@ -43,6 +45,14 @@ export interface PainListResult {
   pains: PainListEntry[];
   workspace: string;
   hostFilter: PainListHostFilter | null;
+  /**
+   * PRI-743: full-table host distribution (independent of --limit and --host
+   * filtering) so operator tooling can group by host without an external
+   * script. `null` only on a pre-PRI-640 database without the host_kind
+   * column — the distribution is unprovable there, never guessed (rc-3/rc-9;
+   * see the accompanying host_kind_column_missing warning).
+   */
+  byHost: { openclaw: number; codex: number; unknown: number } | null;
   warnings: string[];
 }
 
@@ -91,6 +101,27 @@ export async function listPains(dbPath: string, options: { limit?: number; host?
       warnings.push('host_kind_column_missing');
     }
 
+    // PRI-743: full-table distribution, deliberately NOT narrowed by the
+    // --host filter or --limit below — the operator question this answers is
+    // "how do pains split across hosts in this workspace", which a filtered
+    // count cannot answer. Non-openclaw/codex values (incl. NULL) count as
+    // unknown, mirroring toPainEntry's read-side normalization.
+    const byHost: PainListResult['byHost'] = hasHostKindColumn
+      ? { openclaw: 0, codex: 0, unknown: 0 }
+      : null;
+    if (byHost) {
+      const distRows: unknown[] = db
+        .prepare("SELECT COALESCE(host_kind, 'unknown') AS host_bucket, COUNT(*) AS n FROM pain_events GROUP BY host_kind")
+        .all();
+      for (const row of distRows) {
+        const bucket = ownField(row, 'host_bucket');
+        const n = ownField(row, 'n');
+        if ((bucket === 'openclaw' || bucket === 'codex' || bucket === 'unknown') && typeof n === 'number') {
+          byHost[bucket] += n;
+        }
+      }
+    }
+
     const params: (string | number)[] = [];
     let query = 'SELECT id, source, score, severity, created_at, canonical_pain_id, runtime_task_id';
     query += hasHostKindColumn ? ', host_kind' : ", NULL AS host_kind";
@@ -99,7 +130,7 @@ export async function listPains(dbPath: string, options: { limit?: number; host?
       query += hasHostKindColumn ? ' AND host_kind IS NULL' : '';
     } else if (options.host === 'openclaw' || options.host === 'codex') {
       if (!hasHostKindColumn) {
-        return { count: 0, pains: [], workspace: path.dirname(path.dirname(dbPath)), hostFilter: options.host, warnings };
+        return { count: 0, pains: [], workspace: path.dirname(path.dirname(dbPath)), hostFilter: options.host, byHost, warnings };
       }
       query += ' AND host_kind = ?';
       params.push(options.host);
@@ -122,6 +153,7 @@ export async function listPains(dbPath: string, options: { limit?: number; host?
       pains,
       workspace: path.dirname(path.dirname(dbPath)),
       hostFilter: options.host ?? null,
+      byHost,
       warnings,
     };
   } finally {
@@ -132,6 +164,10 @@ export async function listPains(dbPath: string, options: { limit?: number; host?
 function printHuman(result: PainListResult): void {
   const filterNote = result.hostFilter ? ` (host: ${result.hostFilter})` : '';
   console.log(`Pain events — ${result.count} shown${filterNote}`);
+  if (result.byHost) {
+    const { openclaw, codex, unknown } = result.byHost;
+    console.log(`By host: openclaw=${openclaw} codex=${codex} unknown=${unknown}`);
+  }
   console.log('─'.repeat(96));
   for (const pain of result.pains) {
     const painId = pain.painId.length > 40 ? `${pain.painId.slice(0, 37)}...` : pain.painId;
