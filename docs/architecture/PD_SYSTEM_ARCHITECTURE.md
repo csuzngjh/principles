@@ -259,7 +259,6 @@ packages/openclaw-plugin/src/
 │   └── gate-block-helper.ts
 ├── service/                         ← 长生命周期服务
 │   ├── idle-trigger.ts              ← legacy retirement target；不新增宿主调度适配
-│   ├── evolution-worker.ts          ← legacy cutover/delete target
 │   ├── trajectory-service.ts
 │   ├── monitoring-query-service.ts
 │   ├── workflow-watchdog.ts
