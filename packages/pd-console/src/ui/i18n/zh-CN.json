@@ -1609,7 +1609,6 @@
           "pdPain": "从 OpenClaw 会话报告 pain",
           "pdHelp": "显示所有命令和使用指南",
           "pdContext": "控制上下文注入",
-          "pdEvolutionStatus": "查看 evolution 闭环状态",
           "pdFocus": "管理 CURRENT_FOCUS.md"
         },
         "nextButton": "下一步",

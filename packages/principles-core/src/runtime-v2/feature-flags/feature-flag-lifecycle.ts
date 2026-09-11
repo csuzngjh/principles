@@ -95,7 +95,7 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   },
   gfi: {
     decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/commands/evolution-status*', 'host-runtime/src/production-pain-evidence*'],
+    consumers: ['host-runtime/src/production-pain-evidence*'],
     evidence: 'Global Friction Index session scoring surfaced in console/plugin (38 src references)',
     decided: '2026-08-27',
     graduationCriteria: 'GFI validated as an Owner-facing signal worth default-on surfacing',

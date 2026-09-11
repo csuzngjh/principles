@@ -98,19 +98,6 @@ export {
   createEmptyHygieneStats,
 } from './hygiene-types.js';
 
-// Runtime summary types (migrated from openclaw-plugin)
-export type {
-  RuntimeTruth,
-  AnalyticsTruth,
-  TrendMetrics,
-} from './runtime-summary-types.js';
-
-export {
-  RuntimeTruthSchema,
-  AnalyticsTruthSchema,
-  TrendMetricsSchema,
-} from './runtime-summary-types.js';
-
 // Event types (migrated from openclaw-plugin)
 export type {
   EventType,

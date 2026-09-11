@@ -1,7 +1,7 @@
 # Principles Disciple Command Reference
 
 > 当前版本重点：EP (Evolution Points) 系统已接替 trust score 成为唯一门控机制。  
-> `rollback` 只回滚 `user_empathy` slice，`/pd-evolution-status` 读的是运行时 summary。
+> `rollback` 只回滚 `user_empathy` slice。
 
 ---
 
@@ -9,29 +9,9 @@
 
 | 命令 | 用途 | 当前口径 |
 |---|---|---|
-| `/pd-evolution-status` | 查看控制面与进化面的当前状态 | 读取 `RuntimeSummaryService` 的 canonical state |
 | `/pd-status empathy` | 查看情绪/共情事件统计 | 用于观察 `user_empathy` 与 `system_infer` 事件是否稳定落日志 |
 | `/pd-rollback last` | 回滚最近一次情绪惩罚 | 只回滚 `user_empathy` 对应的 GFI slice |
 | `/pd-help` | 显示帮助 | |
-
----
-
-## `/pd-evolution-status`
-
-### 它现在显示什么
-
-- `EP Tier`: 当前 EP 等级 (Seed → Sprout → Sapling → Tree → Forest)
-- `Session GFI`: 当前会话 GFI 与峰值
-- `GFI Sources`: 当前 summary 能解释出来的 friction 来源
-- `Pain Flag`: pain flag 是否激活
-- `Gate Events`: 最近的 block / bypass
-- `Queue / Directive`: evolution queue 与 directive 的当前状态
-
-### 重要说明
-
-- 这是当前控制面的权威读模型入口。
-- 它优先读取 canonical `.state`，并尽量合并 live session / buffered events。
-- 如果数据不完整，会显示 `partial` 或 warning，而不是静默显示 `0`。
 
 ---
 

@@ -134,8 +134,7 @@ describe('/pd-help command', () => {
     expect(result.text).toContain('Principles Disciple 命令大全');
     expect(result.text).toContain('🚀 快速开始');
     expect(result.text).toContain('🔧 实现生命周期（半废弃）');
-    // All 7 previously-missing commands must appear
-    expect(result.text).toContain('/pd-evolution-status');
+    // All previously-missing commands must appear (PRI-736: /pd-evolution-status removed)
     expect(result.text).toContain('/pd-pain');
     expect(result.text).toContain('/pd-workflow-debug');
     expect(result.text).toContain('/pd-promote-impl');

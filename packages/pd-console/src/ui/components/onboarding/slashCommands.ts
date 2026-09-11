@@ -25,6 +25,5 @@ export const ONBOARDING_SLASH_COMMANDS: SlashCommand[] = [
   { name: '/pd-pain', descriptionKey: 'pages.welcome.step3.commandDescriptions.pdPain' },
   { name: '/pd-help', alias: '/pdh', descriptionKey: 'pages.welcome.step3.commandDescriptions.pdHelp' },
   { name: '/pd-context', descriptionKey: 'pages.welcome.step3.commandDescriptions.pdContext' },
-  { name: '/pd-evolution-status', descriptionKey: 'pages.welcome.step3.commandDescriptions.pdEvolutionStatus' },
   { name: '/pd-focus', descriptionKey: 'pages.welcome.step3.commandDescriptions.pdFocus' },
 ];

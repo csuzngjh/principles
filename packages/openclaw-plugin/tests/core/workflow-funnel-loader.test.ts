@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { WorkflowFunnelLoader, type WorkflowStage } from '../../src/core/workflow-funnel-loader.js';
-import { RuntimeSummaryService } from '../../src/service/runtime-summary-service.js';
 
 describe('WorkflowFunnelLoader', () => {
   let tempDir: string;
@@ -17,12 +16,11 @@ describe('WorkflowFunnelLoader', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // ERR-01: YAML parse warnings surface in RuntimeSummaryService.metadata.warnings
-  // RuntimeSummaryService.getSummary() propagates loaderWarnings → metadata.warnings
-  // per D-08 contract (YAML parse failures surface in warnings, not console).
+  // ERR-01: YAML parse failures surface via loader.getWarnings()
+  // (D-08 contract: parse failures surface as warnings, not console output)
   // ─────────────────────────────────────────────────────────────────────────────
-  describe('ERR-01: YAML parse warnings surface in metadata.warnings', () => {
-    it('should surface YAML parse warnings via RuntimeSummaryService.getSummary', () => {
+  describe('ERR-01: YAML parse warnings surface via getWarnings', () => {
+    it('should surface YAML parse warnings from a malformed file', () => {
       // Create a malformed YAML file (tab instead of spaces causes parse warning in js-yaml)
       const yamlPath = path.join(tempDir, 'workflows.yaml');
       fs.writeFileSync(yamlPath, `
@@ -39,16 +37,10 @@ funnels:
 
       const loader = new WorkflowFunnelLoader(tempDir);
 
-      // Get funnels and warnings from loader
-      const funnels = loader.getAllFunnels();
+      // ERR-01: malformed YAML produces non-empty loader warnings
       const loaderWarnings = loader.getWarnings();
-
-      // ERR-01: getSummary with loaderWarnings propagates YAML parse failures to metadata.warnings
-      const summary = RuntimeSummaryService.getSummary(tempDir, { loaderWarnings });
-      expect(summary.metadata.warnings).toBeDefined();
-      expect(Array.isArray(summary.metadata.warnings)).toBe(true);
-      // loaderWarnings is non-empty when YAML is malformed — assert warnings array grew
-      expect(summary.metadata.warnings.length).toBeGreaterThan(0);
+      expect(Array.isArray(loaderWarnings)).toBe(true);
+      expect(loaderWarnings.length).toBeGreaterThan(0);
     });
 
     it('should NOT surface warnings when YAML is valid', () => {
@@ -65,53 +57,16 @@ funnels:
 `, 'utf-8');
 
       const loader = new WorkflowFunnelLoader(tempDir);
-      const summary = RuntimeSummaryService.getSummary(tempDir);
 
       // With valid YAML, no config warnings should be present
-      const configWarnings = summary.metadata.warnings.filter(
-        (w: string) => w.toLowerCase().includes('yaml') || w.toLowerCase().includes('workflow') || w.toLowerCase().includes('config')
-      );
-      expect(configWarnings).toHaveLength(0);
+      expect(loader.getWarnings()).toHaveLength(0);
     });
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // ERR-02: degraded state on missing/malformed YAML
+  // ERR-02: loader behavior on missing/malformed YAML
   // ─────────────────────────────────────────────────────────────────────────────
-  describe('ERR-02: degraded state on missing/malformed YAML', () => {
-    it('should set dataQuality to partial when workflows.yaml is missing', () => {
-      // Ensure no workflows.yaml exists
-      const loader = new WorkflowFunnelLoader(tempDir);
-      const funnels = loader.getAllFunnels();
-
-      const summary = RuntimeSummaryService.getSummary(tempDir);
-
-      // ERR-02: degraded state on missing YAML
-      expect(summary.gfi.dataQuality).toBe('partial');
-      expect(summary.metadata.warnings).toBeDefined();
-      // Note: RuntimeSummaryService does not currently emit a specific warning for
-      // missing workflows.yaml — the degraded dataQuality is the primary signal.
-      // A future iteration may add a specific "missing workflows.yaml" warning.
-    });
-
-    it('should set dataQuality to partial when workflows.yaml is malformed', () => {
-      // Create a file that is valid YAML but wrong schema (missing required fields)
-      const yamlPath = path.join(tempDir, 'workflows.yaml');
-      fs.writeFileSync(yamlPath, `
-version: "1.0"
-funnels:
-  - workflowId: 123
-`, 'utf-8');
-
-      const loader = new WorkflowFunnelLoader(tempDir);
-      const funnels = loader.getAllFunnels();
-
-      const summary = RuntimeSummaryService.getSummary(tempDir);
-
-      // Schema-invalid YAML: should degrade gracefully
-      expect(summary.gfi.dataQuality).toBe('partial');
-    });
-
+  describe('ERR-02: loader behavior on missing/malformed YAML', () => {
     it('should preserve empty funnels on missing file', () => {
       const loader = new WorkflowFunnelLoader(tempDir);
       const funnels = loader.getAllFunnels();
@@ -579,59 +534,6 @@ funnels: []
 
       loader.watch(); // should be no-op
       expect((loader as any).watchHandle).toBeUndefined();
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // TEST-02: RuntimeSummaryService degraded state and warnings when funnels absent
-  // Complements ERR-02: ERR-02 tests loader-internal state, TEST-02 tests
-  // RuntimeSummaryService output signals (gfi.dataQuality + metadata.warnings)
-  // ─────────────────────────────────────────────────────────────────────────────
-  describe('TEST-02: RuntimeSummaryService degraded state when workflows.yaml missing', () => {
-    it('getSummary sets gfi.dataQuality to partial when workflows.yaml is absent', () => {
-      const loader = new WorkflowFunnelLoader(tempDir); // no workflows.yaml
-      const funnels = loader.getAllFunnels();
-      expect(funnels.size).toBe(0);
-
-      const summary = RuntimeSummaryService.getSummary(tempDir);
-
-      // TEST-02: degraded state signal when workflows.yaml is absent
-      expect(summary.gfi.dataQuality).toBe('partial'); // hardcoded in current impl
-    });
-
-    it('getSummary includes metadata.warnings when workflows.yaml is absent', () => {
-      const loader = new WorkflowFunnelLoader(tempDir);
-      const funnels = loader.getAllFunnels();
-
-      const summary = RuntimeSummaryService.getSummary(tempDir);
-
-      // TEST-02: warnings array must be present (even if empty in some configs)
-      expect(summary.metadata.warnings).toBeDefined();
-      expect(Array.isArray(summary.metadata.warnings)).toBe(true);
-    });
-
-    it('gfi.dataQuality is partial even when valid funnels are loaded', () => {
-      // The current RuntimeSummaryService hardcodes dataQuality = 'partial'
-      const yamlPath = path.join(tempDir, 'workflows.yaml');
-      fs.writeFileSync(yamlPath, `
-version: "1.0"
-funnels:
-  - workflowId: "valid-funnel"
-    stages:
-      - name: "s1"
-        eventType: "e1"
-        eventCategory: "completed"
-        statsField: "evolution.e1"
-`, 'utf-8');
-
-      const loader = new WorkflowFunnelLoader(tempDir);
-      const funnels = loader.getAllFunnels();
-      expect(funnels.size).toBe(1);
-
-      const summary = RuntimeSummaryService.getSummary(tempDir);
-
-      // gfi.dataQuality is hardcoded to 'partial' in current implementation
-      expect(summary.gfi.dataQuality).toBe('partial');
     });
   });
 

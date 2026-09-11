@@ -407,7 +407,7 @@ PD 系统有 5 类组件：
 | `/pd-init` | `commands/strategy.ts` | ✅ |
 | `/pd-bootstrap` | `commands/capabilities.ts` | ✅ |
 | `/pd-research` | `commands/capabilities.ts` | ✅ |
-| `/pd-status` / `/pd-evolution-status` | `commands/evolution-status.ts` | ✅ |
+| `/pd-status` | `commands/pain.ts` | ✅ |
 | `/pd-reflect` | `commands/pd-reflect.ts` | ✅ |
 | `/pd-promote-impl` / `/pd-disable-impl` / `/pd-archive-impl` / `/pd-rollback-impl` | `commands/promote-impl.ts` 等 | ✅ |
 | `/pd-principle-rollback` | `commands/principle-rollback.ts` | ✅ |

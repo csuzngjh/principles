@@ -13,11 +13,17 @@
  *      Stop-hook delivery of the G1 fixture transcript
  *   S4 ingestion: the built pd-hook executable projects the transcript
  *   S5 recovery: reconciliation advances the admitted pain → Diagnostician task
- *   S6 diagnosis: the runtime Diagnostician executes (requires a configured
- *      LLM runtime; with --skip-llm this stage is SKIPPED and the journey
- *      reports manual_action_required for the remaining steps — never a fake pass)
- *   S7 owner decision: candidate approval via the CLI
+ *   S6 diagnosis: the production worker cycle (`pd codex worker --once`)
+ *      executes the real Diagnostician and the bounded downstream consumer
+ *      (intake → dreamer → philosopher → scribe → artificer → evaluator →
+ *      rollout review) until an approval appears — requires an explicit LLM
+ *      profile (--llm-provider/--llm-model/--llm-api-key-env/--llm-base-url);
+ *      with --skip-llm this stage is SKIPPED and the journey reports the
+ *      remaining stages as skipped — never a fake pass
+ *   S7 owner decision: candidate approval via `pd activation approve`
  *   S8 reversibility: consent decline → flag off → catch-up performs zero reads
+ *   S9 later behavior (§18-14): the approved activation is active and a later
+ *      prompt delivery works through the injection path
  *
  * Every stage prints one JSON evidence line; failures fail loud with
  * reason + nextAction. Exit 0 only if every executed stage passed AND any
@@ -26,6 +32,10 @@
  * Usage:
  *   node scripts/dev/codex-owner-journey-e2e.mjs [--repo-root <dir>] [--skip-llm]
  *        [--live-codex] [--evidence-out <file>]
+ *        [--pd-cli <path>] [--pd-hook <path>]      — run against installed binaries
+ *        [--llm-provider <p>] [--llm-model <m>] [--llm-api-key-env <env>]
+ *        [--llm-base-url <url>] [--llm-max-tokens <n>] [--llm-timeout-ms <ms>]
+ *        [--max-pipeline-cycles <n>]
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -45,10 +55,41 @@ const ROOT = path.resolve(opt('--repo-root') ?? DEFAULT_ROOT);
 const SKIP_LLM = args.includes('--skip-llm');
 const LIVE_CODEX = args.includes('--live-codex');
 const EVIDENCE_OUT = opt('--evidence-out');
+// R1 (PRI-626): binary overrides let the journey run against the INSTALLED
+// runtime (~/.pd/runtime) instead of repo dist — the "installed real-session"
+// evidence path. Defaults keep the historical repo-dist behavior.
+const PD_CLI_OVERRIDE = opt('--pd-cli');
+const PD_HOOK_OVERRIDE = opt('--pd-hook');
+// Live-LLM mode (default; --skip-llm restores the historical skip): an
+// explicit pi-ai profile the sandbox workspace binds every internal agent to.
+const LLM_PROVIDER = opt('--llm-provider');
+const LLM_MODEL = opt('--llm-model');
+const LLM_API_KEY_ENV = opt('--llm-api-key-env');
+const LLM_BASE_URL = opt('--llm-base-url');
+const LLM_MAX_TOKENS = Number(opt('--llm-max-tokens') ?? '16000');
+const LLM_TIMEOUT_MS = Number(opt('--llm-timeout-ms') ?? '600000');
+// Bounded downstream drive: at most N worker cycles chasing the approval.
+const MAX_PIPELINE_CYCLES = Number(opt('--max-pipeline-cycles') ?? '20');
 
 if (LIVE_CODEX) {
   process.stderr.write('--live-codex is not wired in this harness yet: refusing to mislabel fixture delivery as a live session.\n');
   process.exit(2);
+}
+
+if (!SKIP_LLM) {
+  const missing = [
+    ['--llm-provider', LLM_PROVIDER], ['--llm-model', LLM_MODEL],
+    ['--llm-api-key-env', LLM_API_KEY_ENV], ['--llm-base-url', LLM_BASE_URL],
+  ].filter(([, value]) => value === undefined).map(([name]) => name);
+  if (missing.length > 0) {
+    process.stderr.write(`live-LLM mode requires an explicit pi-ai profile; missing: ${missing.join(', ')}\n`);
+    process.stderr.write('(use --skip-llm for the historical fixture-only journey)\n');
+    process.exit(2);
+  }
+  if (!Number.isInteger(LLM_MAX_TOKENS) || LLM_MAX_TOKENS < 1024 || !Number.isInteger(LLM_TIMEOUT_MS) || LLM_TIMEOUT_MS < 10_000) {
+    process.stderr.write('--llm-max-tokens must be an integer >= 1024 and --llm-timeout-ms >= 10000 (rc-3: no silent defaults).\n');
+    process.exit(2);
+  }
 }
 
 const evidence = [];
@@ -75,13 +116,13 @@ function pkgVersion(name) {
 }
 
 const adapterRoot = path.join(ROOT, 'packages', 'codex-adapter');
-const hookEntry = path.join(adapterRoot, 'dist', 'pd-hook.js');
+const hookEntry = PD_HOOK_OVERRIDE !== undefined ? path.resolve(PD_HOOK_OVERRIDE) : path.join(adapterRoot, 'dist', 'pd-hook.js');
 if (!existsSync(hookEntry)) {
   fail('S0-prerequisites', `built pd-hook not found at ${hookEntry}`, 'Run: cd packages/codex-adapter && npm run build');
 }
-const pdCliEntry = path.join(ROOT, 'packages', 'pd-cli', 'dist', 'index.js');
+const pdCliEntry = PD_CLI_OVERRIDE !== undefined ? path.resolve(PD_CLI_OVERRIDE) : path.join(ROOT, 'packages', 'pd-cli', 'dist', 'index.js');
 if (!existsSync(pdCliEntry)) {
-  fail('S0-prerequisites', `built pd-cli not found at ${pdCliEntry}`, 'Run: cd packages/pd-cli && npm run build');
+  fail('S0-prerequisites', `pd-cli entry not found at ${pdCliEntry}`, 'Pass --pd-cli or build packages/pd-cli.');
 }
 
 // ── S1 sandbox ───────────────────────────────────────────────────────────────
@@ -101,9 +142,21 @@ cpSync(path.join(ROOT, 'packages', 'codex-adapter', 'tests', 'fixtures', 'g1-con
 
 // Workspace config: production defaults (validates clean) rendered as
 // multi-line YAML — the consent editor edits the `features:` block by line.
+// Installed-mode consistency (P2 review): when --pd-cli selects an installed
+// runtime, the config rendering and the S5 recovery import resolve from THAT
+// installation (same layout as the binaries under test) — a mixed-version
+// journey would not be reliable installed-runtime evidence.
 const rootRequire = createRequire(path.join(ROOT, 'package.json'));
 const yaml = rootRequire('js-yaml');
-const { getDefaultPdConfig } = await import(pathToFileURL(path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2', 'index.js')));
+const runtimeRoot = PD_CLI_OVERRIDE !== undefined ? path.resolve(pdCliEntry, '..', '..', '..') : ROOT;
+const coreDistEntry = PD_CLI_OVERRIDE !== undefined ? path.join(runtimeRoot, 'core', 'dist', 'runtime-v2', 'index.js') : path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2', 'index.js');
+const hostRuntimeDistEntry = PD_CLI_OVERRIDE !== undefined ? path.join(runtimeRoot, 'host-runtime', 'dist', 'index.js') : path.join(ROOT, 'packages', 'host-runtime', 'dist', 'index.js');
+for (const entry of [coreDistEntry, hostRuntimeDistEntry]) {
+  if (!existsSync(entry)) {
+    fail('S0-prerequisites', `installed runtime artifact missing: ${entry}`, 'The selected installation must contain core and host-runtime dists (layout: <runtime-root>/{core,host-runtime,pd-cli,codex-adapter}).');
+  }
+}
+const { getDefaultPdConfig } = await import(pathToFileURL(coreDistEntry));
 const CORE = getDefaultPdConfig();
 const configObject = {
   ...CORE,
@@ -115,6 +168,35 @@ const configObject = {
     internalization_auto_consumer: { ...CORE.features.internalization_auto_consumer, enabled: true },
   },
 };
+if (!SKIP_LLM) {
+  // Live-LLM mode: every internal agent executes on ONE explicit pi-ai
+  // profile rendered into the sandbox config (the production per-agent
+  // resolution path, PRI-719 — no test-double adapter anywhere in the loop).
+  configObject.runtimeProfiles = {
+    ...CORE.runtimeProfiles,
+    'e2e.llm': {
+      type: 'pi-ai',
+      provider: LLM_PROVIDER,
+      model: LLM_MODEL,
+      apiKeyEnv: LLM_API_KEY_ENV,
+      baseUrl: LLM_BASE_URL,
+      timeoutMs: LLM_TIMEOUT_MS,
+      maxTokens: LLM_MAX_TOKENS,
+    },
+  };
+  configObject.internalAgents = {
+    ...CORE.internalAgents,
+    defaultRuntime: 'e2e.llm',
+    agents: Object.fromEntries(Object.entries(CORE.internalAgents.agents).map(([name, binding]) => [
+      name,
+      // The governance pipeline agents must all run; periphery observers keep
+      // their default enabled flag.
+      ['diagnostician', 'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rolloutReviewer'].includes(name)
+        ? { ...binding, enabled: true, runtimeProfile: 'e2e.llm' }
+        : binding,
+    ])),
+  };
+}
 writeFileSync(path.join(workspace, '.pd', 'config.yaml'), yaml.dump(configObject, { indent: 2, lineWidth: 200, noRefs: true }));
 const BASELINE_DDL = [
   'CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
@@ -167,7 +249,7 @@ if (!presented) {
 const consentAccept = spawnSync(process.execPath, [pdCliEntry, 'codex', 'setup', '--workspace', workspace, '--accept', '--json'], { encoding: 'utf8', env: { ...process.env, PD_WORKSPACE_DIR: workspace } });
 let acceptReport;
 try {
-  acceptReport = JSON.parse((consentAccept.stdout.trim().split('\n').findLast((line) => line.startsWith('{'))) ?? '{}');
+  acceptReport = parseCliJson(consentAccept.stdout ?? '');
 } catch {
   acceptReport = {};
 }
@@ -268,20 +350,196 @@ if (JSON.parse(taskCount.trim()).n !== 1) {
 }
 stage('S5-recovery', 'passed', { firstPass: reconcileFirst, secondPass: reconcileSecond, diagnosticianTasks: 1 });
 
-// ── S6 diagnosis (real LLM) ──────────────────────────────────────────────────
+// ── S6 diagnosis + downstream (real LLM via the production worker cycle) ────
+// The Codex Companion worker cycle IS the production execution authority
+// (SPEC §13): catch-up → reconciliation → one Diagnostician execution → one
+// bounded downstream consumer cycle (intake → dreamer → … → evaluator →
+// rollout review → approval queue). Driving it through `pd codex worker
+// --once` exercises exactly what an installed deployment runs.
+
+// P1 review fix: some pd-cli commands emit PRETTY-PRINTED JSON (activation
+// approve/list use JSON.stringify(result, null, 2)), so last-line scanning
+// grabs a `}` and silently yields {}. Parse the complete stdout first; the
+// line scan is only a fallback for banner-prefixed output.
+function parseCliJson(stdout) {
+  const text = stdout.trim();
+  if (text === '') return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    const line = text.split('\n').findLast((row) => row.startsWith('{'));
+    try {
+      return JSON.parse(line ?? '{}');
+    } catch {
+      return {};
+    }
+  }
+}
+function runWorkerOnce() {
+  const result = spawnSync(process.execPath, [pdCliEntry, 'codex', 'worker', '--workspace', workspace, '--once', '--json'], {
+    encoding: 'utf8',
+    timeout: LLM_TIMEOUT_MS + 60_000,
+    windowsHide: true,
+    env: { ...process.env, CODEX_HOME: codexHome, PD_WORKSPACE_DIR: workspace },
+  });
+  return { status: result.status, report: parseCliJson(result.stdout ?? ''), stderr: result.stderr ?? '' };
+}
+function stateDbQuery(fnBody) {
+  return execFileSync(process.execPath, ['-e', `
+  const Database = require(${JSON.stringify(path.join(ROOT, 'node_modules', 'better-sqlite3'))});
+  const db = new Database(${JSON.stringify(path.join(workspace, '.pd', 'state.db'))}, { readonly: true });
+  ${fnBody}
+  db.close();
+`], { encoding: 'utf8' });
+}
+function pipelineSnapshot() {
+  const out = stateDbQuery(`
+  const tasks = db.prepare("SELECT task_kind, status, COUNT(*) n FROM tasks GROUP BY task_kind, status").all();
+  const candidates = db.prepare('SELECT COUNT(*) n FROM principle_candidates').get().n;
+  const approvals = db.prepare('SELECT approval_id, status, channel FROM approvals ORDER BY rowid DESC LIMIT 5').all();
+  console.log(JSON.stringify({ tasks, candidates, approvals }));
+  `);
+  return JSON.parse(out.trim().split('\n').at(-1));
+}
+
 if (SKIP_LLM) {
   stage('S6-diagnosis', 'skipped', {
     reason: '--skip-llm: the Diagnostician needs a configured LLM runtime',
-    nextAction: 'the remaining stages need the candidate produced by diagnosis; run without --skip-llm on a device with a configured runtime',
+    nextAction: 'the remaining stages need the candidate produced by diagnosis; run live mode with an explicit --llm-* profile',
   });
   stage('S7-owner-decision', 'skipped', { reason: 'depends on S6' });
+  stage('S9-later-behavior', 'skipped', { reason: 'depends on S7' });
 } else {
-  fail('S6-diagnosis', 'live-LLM mode is not wired in this harness yet', 'Use --skip-llm (default covers it) or extend the harness with the runtime profile.');
+  let firstCycle = null;
+  let approval = null;
+  let candidates = 0;
+  let lastSnapshot = null;
+  for (let cycle = 1; cycle <= MAX_PIPELINE_CYCLES; cycle += 1) {
+    const run = runWorkerOnce();
+    if (run.status !== 0 || run.report.mode === undefined) {
+      fail('S6-diagnosis', `worker cycle ${cycle} exited ${run.status}: ${run.stderr.slice(0, 240)}`, 'Inspect pd codex worker output.');
+    }
+    if (run.report.mode === 'degraded') {
+      fail('S6-diagnosis', `worker cycle ${cycle} degraded: ${run.report.reason ?? 'unknown'}`, 'Inspect the workspace .pd/config.yaml runtime profile and the per-step report.');
+    }
+    const diag = run.report.report?.diagnostician;
+    lastSnapshot = pipelineSnapshot();
+    candidates = lastSnapshot.candidates;
+    if (cycle === 1) firstCycle = { diag, candidates };
+    if (diag?.status === 'failed' && diag.errorCategory !== 'lease_conflict') {
+      fail('S6-diagnosis', `diagnostician failed on cycle ${cycle}: ${diag.message ?? 'unknown'}`, 'Inspect the diagnostician task runs table.');
+    }
+    const pendingApproval = lastSnapshot.approvals.find((row) => row.status === 'pending');
+    if (pendingApproval !== undefined) { approval = pendingApproval; break; }
+    const pendingWork = lastSnapshot.tasks.filter((row) => row.status === 'pending' || row.status === 'retry_wait' || row.status === 'leased');
+    if (pendingWork.length === 0) break; // pipeline quiesced without an approval
+  }
+
+  if (firstCycle === null || (candidates < 1)) {
+    fail('S6-diagnosis', `no evidence-linked candidate was produced (candidates=${candidates})`, '§18-13 requires an evidence-linked candidate or an explicit needs_evidence outcome.');
+  }
+  if (firstCycle.diag === null || firstCycle.diag === undefined) {
+    fail('S6-diagnosis', 'the first worker cycle did not execute the Diagnostician', 'The admitted pain must reach a diagnosis task in cycle 1.');
+  }
+  stage('S6-diagnosis', 'passed', { firstCycleDiagnostician: firstCycle.diag?.status, evidenceLinkedCandidates: candidates, pipelineTasks: lastSnapshot.tasks });
+
+  // ── S7 owner decision: approve the pending approval via the CLI ────────────
+  if (approval === null) {
+    fail('S7-owner-decision', `pipeline did not reach a pending approval within ${MAX_PIPELINE_CYCLES} worker cycles (revision loops / needs_human_review are the designed Owner-decision exits)`, 'Inspect tasks/pi_artifacts for the terminal state; rerun with more --max-pipeline-cycles if revision rounds are still eligible.');
+  }
+  const approveResult = spawnSync(process.execPath, [pdCliEntry, 'activation', 'approve', '-a', approval.approval_id, '--workspace', workspace, '--json'], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    windowsHide: true,
+    env: { ...process.env, CODEX_HOME: codexHome, PD_WORKSPACE_DIR: workspace },
+  });
+  const approveReport = parseCliJson(approveResult.stdout ?? '');
+  if (approveResult.status !== 0 || approveReport.ok !== true) {
+    fail('S7-owner-decision', `activation approve failed: ${approveResult.stdout.slice(0, 200)} ${approveResult.stderr.slice(0, 200)}`, 'Inspect pd activation approve output.');
+  }
+  const activations = stateDbQuery(`
+  const rows = db.prepare('SELECT * FROM activations ORDER BY rowid DESC LIMIT 3').all();
+  console.log(JSON.stringify(rows));
+  `);
+  stage('S7-owner-decision', 'passed', { approvalId: approval.approval_id, channel: approval.channel, activations: JSON.parse(activations.trim().split('\n').at(-1)).slice(0, 2) });
+
+  // ── S9 (§18-14) later behavior: the approval affects a later Codex turn ────
+  // Channel-aware behavioral assertion: a prompt-channel activation must show
+  // up in the NEXT prompt's injected context (additionalContext carries the
+  // approved principle text); a code_tool_hook activation must be active on
+  // its channel and the RuleHost tool-delivery path must answer in schema
+  // (the deny-on-match semantics are rule-content dependent and covered by
+  // the admission/evaluator gates). Either way, exit-0 alone is NOT accepted.
+  const activationList = spawnSync(process.execPath, [pdCliEntry, 'activation', 'list', '--workspace', workspace, '--json'], {
+    encoding: 'utf8', timeout: 60_000, windowsHide: true,
+    env: { ...process.env, CODEX_HOME: codexHome, PD_WORKSPACE_DIR: workspace },
+  });
+  const activationReport = parseCliJson(activationList.stdout ?? '');
+  const activationRows = Array.isArray(activationReport) ? activationReport : activationReport.activations ?? [];
+  const activeOnChannel = activationRows.find((row) => row.status === 'active' || row.active === true);
+  if (activeOnChannel === undefined) {
+    fail('S9-later-behavior', `no active activation after approval: ${activationList.stdout.slice(0, 240)}`, 'Inspect pd activation list.');
+  }
+  if (activeOnChannel.channel === 'prompt') {
+    // Prompt channel: the NEXT prompt delivery must carry the approved
+    // principle in its injected context — resolve the principle text from the
+    // approved artifact's lineage and assert a distinctive fragment appears.
+    const principleText = stateDbQuery(`
+    const approved = db.prepare('SELECT artifact_id, requested_at FROM approvals WHERE approval_id = ?').get(${JSON.stringify(approval.approval_id)});
+    if (!approved) { console.log('null'); } else {
+      // The artifact under approval sits on a linear chain; the principle
+      // draft text lives in the newest pre-approval artifact that carries one.
+      const row = db.prepare(` + "`" + `
+        SELECT content_json FROM pi_artifacts
+        WHERE content_json LIKE '%principleDraft%'
+          AND created_at <= COALESCE(?, '9999-12-31')
+        ORDER BY created_at DESC LIMIT 1
+      ` + "`" + `).get(approved.requested_at);
+      if (!row) { console.log('null'); } else {
+        const draft = JSON.parse(row.content_json)?.principleDraft ?? null;
+        console.log(JSON.stringify(draft && typeof draft.statement === 'string' && draft.statement.length > 20
+          ? { title: draft.title, fragment: draft.statement.slice(0, 24) }
+          : null));
+      }
+    }
+    `);
+    const draft = JSON.parse(principleText.trim().split('\n').at(-1));
+    if (draft === null) {
+      fail('S9-later-behavior', 'could not resolve the approved principle text from the artifact lineage', 'The approval must reference an artifact chain containing a principleDraft.');
+    }
+    const laterPrompt = runHook(payload('UserPromptSubmit', { prompt: '后续行为验证：请继续遵守已激活的原则' }));
+    if (laterPrompt.status !== 0) {
+      fail('S9-later-behavior', `later prompt delivery failed after activation: ${laterPrompt.stderr.slice(0, 240)}`, 'The prompt path must keep working with the activated principle in the injection set.');
+    }
+    const laterAnswer = parseCliJson(laterPrompt.stdout ?? '');
+    const additionalContext = laterAnswer?.hookSpecificOutput?.additionalContext ?? '';
+    if (typeof additionalContext !== 'string' || additionalContext.length === 0) {
+      fail('S9-later-behavior', `the later prompt answer carries no injected context: stdout=${JSON.stringify(laterPrompt.stdout.slice(0, 200))}`, '§18-14 requires the approved activation to affect a later Codex prompt.');
+    }
+    if (!additionalContext.includes(draft.fragment) && !(draft.title && additionalContext.includes(draft.title))) {
+      fail('S9-later-behavior', `the injected context does not contain the approved principle (fragment=${JSON.stringify(draft.fragment)})`, 'The approved prompt-channel activation must be visible in later prompt injection.');
+    }
+    stage('S9-later-behavior', 'passed', { channel: 'prompt', principleTitle: draft.title, injectedContextChars: additionalContext.length });
+  } else {
+    // Tool channel (code_tool_hook): the activation must be active on its
+    // channel and the RuleHost tool-delivery path must answer in the exact
+    // schema after activation (deny-on-match semantics are rule-content
+    // dependent; admission/evaluator gates own that content).
+    const laterTool = runHook(payload('PreToolUse', { tool_name: 'shell', tool_use_id: 'probe-tool-use-1', tool_input: { command: 'echo probe' } }));
+    if (laterTool.status !== 0) {
+      fail('S9-later-behavior', `later tool delivery failed after activation: ${laterTool.stderr.slice(0, 240)}`, 'The RuleHost tool path must keep answering after activation.');
+    }
+    const toolAnswer = parseCliJson(laterTool.stdout ?? '');
+    if (toolAnswer?.hookSpecificOutput?.hookEventName === undefined) {
+      fail('S9-later-behavior', `tool delivery did not answer in the exact Codex schema: stdout=${JSON.stringify(laterTool.stdout.slice(0, 200))}`, 'The RuleHost gate must answer in schema after activation.');
+    }
+    stage('S9-later-behavior', 'passed', { channel: 'code_tool_hook', activation: activeOnChannel, toolSchemaAnswer: toolAnswer.hookSpecificOutput?.hookEventName });
+  }
 }
 
 // ── S8 reversibility (always executable) ────────────────────────────────────
 const decline = spawnSync(process.execPath, [pdCliEntry, 'codex', 'setup', '--workspace', workspace, '--decline', '--json'], { encoding: 'utf8', env: { ...process.env, PD_WORKSPACE_DIR: workspace } });
-const declineReport = JSON.parse((decline.stdout.trim().split('\n').findLast((line) => line.startsWith('{'))) ?? '{}');
+const declineReport = parseCliJson(decline.stdout ?? '');
 if (declineReport.status !== 'ok' || declineReport.decision !== 'revoked' || declineReport.ingestionFlag?.enabled !== false) {
   fail('S8-reversibility', `decline did not disable: ${decline.stdout.slice(0, 200)}`, 'Inspect the decline path.');
 }
@@ -308,6 +566,7 @@ stage('S8-reversibility', 'passed', { declined: true, flagOff: true, transcriptR
 
 stage('journey', 'completed', {
   versions: { codexAdapter: pkgVersion('@principles/codex-adapter'), hostRuntime: pkgVersion('@principles/host-runtime') },
+  binaries: { pdCli: pdCliEntry, pdHook: hookEntry },
   sandbox,
 });
 if (EVIDENCE_OUT !== undefined) writeFileSync(EVIDENCE_OUT, `${evidence.map((entry) => JSON.stringify(entry)).join('\n')}\n`);

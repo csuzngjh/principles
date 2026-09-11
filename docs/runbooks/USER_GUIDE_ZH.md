@@ -45,21 +45,6 @@
 
 它只影响 empathy 相关的 GFI，不会把整段会话状态全部清空。
 
-### `/pd-evolution-status`
-
-这是当前原则内化系统最重要的观察命令。
-
-它会显示：
-
-- 当前和峰值 GFI
-- 最近 pain 信号
-- 最近 gate block / bypass
-- evolution 队列状态
-- 原则数量统计
-- 当前的内化路线建议，例如 `prompt`、`code_tool_hook` (RuleHost)、`defer_archive`
-
-如果你不确定现在是被疲劳状态卡住、被 pain 卡住，还是被 code implementation 策略卡住，先看这个命令。
-
 ## 代码实现运维流程
 
 这部分是给需要操作 code implementation 的人看的，不是每次都要用。
@@ -151,10 +136,9 @@ archive 比 disable 更彻底，适合做永久清理。
 
 当系统出现新的 code candidate 时，推荐按这个顺序操作：
 
-1. `/pd-evolution-status`
-2. `/pd-promote-impl list`
-3. `/pd-promote-impl show <implId>`
-4. `/pd-promote-impl <implId>`
+1. `/pd-promote-impl list`
+2. `/pd-promote-impl show <implId>`
+3. `/pd-promote-impl <implId>`
 
 如果 promote 后发现它有回归：
 
@@ -164,7 +148,7 @@ archive 比 disable 更彻底，适合做永久清理。
 
 ## 如何理解内化路线建议
 
-`/pd-evolution-status` 可能会显示：
+内化路线建议长这样：
 
 - `prompt`
 - `code_tool_hook` (RuleHost)
@@ -217,7 +201,6 @@ Legacy replay 生成路径已在 PRI-230 退役，当前没有 CLI 入口可以�
 
 ```text
 /pd-status
-/pd-evolution-status
 ```
 
 这对大多数日常使用已经够了。
@@ -247,9 +230,8 @@ pd console open --workspace "<path>"
 - 看 correction samples
 - 看 principle / implementation 的整体活动情况
 
-## 最后只记住这四件事
+## 最后只记住这三件事
 
 1. AI 卡住了，用 `/pd-status`
 2. empathy 误判了，用 `/pd-rollback last`
-3. 想看原则内化系统状态，用 `/pd-evolution-status`
-4. 只有在你要操作 code implementation 时，才去用 `/pd-promote-impl`、`/pd-disable-impl`、`/pd-rollback-impl`、`/pd-archive-impl`
+3. 只有在你要操作 code implementation 时，才去用 `/pd-promote-impl`、`/pd-disable-impl`、`/pd-rollback-impl`、`/pd-archive-impl`

@@ -23,7 +23,6 @@ PD 通过 OpenClaw 斜杠命令与你交互。本文档列出所有可用的命�
 | [`/pd-help`](#pd-help) | `/pdh` | 设置 | 在会话中查看命令列表 |
 | [`/pd-status`](#pd-status) | — | 监控 | 查看 GFI 疲劳指数和心智模式 |
 | [`/pd-pain`](#pd-pain) | — | 监控 | 手动报告一个痛觉信号 |
-| [`/pd-evolution-status`](#pd-evolution-status) | — | 监控 | 查看原则演化闭环状态 |
 | [`/pd-context`](#pd-context) | — | 配置 | 控制上下文注入(思维模型/项目焦点) |
 | [`/pd-focus`](#pd-focus) | — | 配置 | 管理 CURRENT_FOCUS.md(压缩/回滚) |
 | [`/pd-rollback`](#pd-rollback) | — | 回滚 | 回滚一次误判的情绪事件惩罚 |
@@ -242,31 +241,6 @@ GFI(Global Friction Index)是当前会话的"疲劳指数"。Agent 每次犯错�
 
 ---
 
-### `/pd-evolution-status`
-
-查看原则演化闭环的完整状态:控制面(GFI/门禁)、演化面(队列/任务)、原则统计、工作流漏斗。
-
-**用法**
-
-```
-/pd-evolution-status
-```
-
-**输出内容**
-
-- **Control Plane**:当前 GFI、GFI 来源、最近门禁拦截/绕过次数
-- **Evolution**:演化队列状态(pending/in_progress/completed)、当前演化任务
-- **Principles**:原则统计(candidate/probation/active/archived 数量)
-- **Workflow Funnel**:工作流各阶段通过率
-
-**什么时候用**
-
-- 想知道有多少原则候选在排队等审核
-- 想确认演化任务是否在正常推进
-- 排查"为什么原则没被激活"时
-
----
-
 ## 配置类命令
 
 ### `/pd-context`
@@ -417,7 +391,7 @@ PD 的核心承诺是"可回滚"。以下命令让你撤销 PD 的决策。
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `principle-id` | 是 | 原则 ID(如 `P_001`,从 `/pd-evolution-status` 或 `PRINCIPLES.md` 获取) |
+| `principle-id` | 是 | 原则 ID(如 `P_001`,从 `PRINCIPLES.md` 获取) |
 | `reason` | 否 | 回滚原因(默认 "manual rollback") |
 
 **示例**
@@ -531,7 +505,7 @@ PD 的核心承诺是"可回滚"。以下命令让你撤销 PD 的决策。
 ```
 1. /pd-pain Agent 没有先读文件就编辑,覆盖了我的代码
 2. /pd-status        # 查看 GFI 是否上升
-3. (等待 PD 后台诊断,或用 /pd-evolution-status 查看队列)
+3. (等待 PD 后台诊断)
 ```
 
 ### 工作流 3:Agent 疲劳过度
@@ -566,9 +540,8 @@ PD 误判了一次"用户不满",GFI 错误上升:
 ### 工作流 6:原则治理
 
 ```
-1. /pd-evolution-status           # 查看有哪些候选原则
-2. (在控制台审核原则候选)
-3. /pd-principle-rollback P_003   # 回滚不合适的已激活原则
+1. (在控制台审核原则候选)
+2. /pd-principle-rollback P_003   # 回滚不合适的已激活原则
 ```
 
 ---
@@ -597,7 +570,6 @@ PD 误判了一次"用户不满",GFI 错误上升:
 
 ### 如何查看所有已激活的原则?
 
-- 运行 `/pd-evolution-status` 查看统计
 - 直接阅读 `~/.openclaw/workspace/.principles/PRINCIPLES.md`
 
 ---

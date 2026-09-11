@@ -128,7 +128,6 @@ All commands support **short aliases** for easier input:
 | `/pd-samples` | List or review correction samples (`review approve\|reject <sample-id> [note]`) |
 | `/pd-context` | Control context injection [status\|thinking\|reflection\|focus\|preset] |
 | `/pd-focus` | Manage CURRENT_FOCUS.md [status\|history\|compress\|rollback] |
-| `/pd-evolution-status` | Show evolution loop status (candidate/probation/active) |
 | `/pd-principle-rollback` | Roll back a principle and blacklist its pattern |
 | `/pd-rollback` | Roll back an empathy event penalty (`<event-id>\|last`) |
 | `/pd-export` | Export data [analytics\|corrections --redacted] |
@@ -156,7 +155,7 @@ The plugin accepts the following configuration options:
 - **Reflection** — generating principle proposals from evidence; output is
   always owner-reviewed.
 - **Evolution loop** — the candidate → probation → active lifecycle of
-  behavioral implementations (see `/pd-evolution-status`).
+  behavioral implementations.
 - **RuleHost / `code_tool_hook`** — hook-based enforcement channel for
   approved principles.
 - **Context injection** — feeding approved principles into the agent's
