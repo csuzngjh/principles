@@ -36,11 +36,9 @@ import type { PluginLogger } from '../../src/openclaw-sdk.js';
 import { persistGateBlock, recordGateBlockAndReturn } from '../../src/hooks/gate-block-helper.js';
 import { accountSharedDeny, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import { trackBlock } from '../../src/core/session-tracker.js';
-import { RuntimeSummaryService } from '../../src/service/runtime-summary-service.js';
 
 // Session tracker is partially mocked so the gfi_track_failed degradation
-// branch is reachable; everything else (listSessions for RuntimeSummaryService)
-// stays real.
+// branch is reachable; everything else (session listing) stays real.
 vi.mock(import('../../src/core/session-tracker.js'), async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -168,12 +166,6 @@ describe('PRI-569 gate-block trajectory persistence', () => {
     const types = typesOf(readJsonlEvents(dir));
     expect(types).toContain('rulehost_blocked');
     expect(types).toContain('gate_block');
-
-    // PRI-569 round-3 review: close the loop to the USER-VISIBLE metric —
-    // RuntimeSummaryService.recentBlocks counts gate_block events exactly
-    // like the runtime summary surface does.
-    const summary = RuntimeSummaryService.getSummary(dir);
-    expect(summary.gate.recentBlocks).toBe(1);
   });
 
   it('T11: unresolved-path deny still counts — null file_path in trajectory, placeholder in EventLog', () => {

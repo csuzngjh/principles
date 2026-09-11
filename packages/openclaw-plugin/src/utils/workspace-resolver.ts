@@ -104,7 +104,7 @@ export function resolveCommandWorkspaceDir(
  * the wrong workspace.
  *
  * @param ctx - Plugin command context (has workspaceDir + config properties)
- * @param source - Source label for error messages (e.g. 'evolution-status', 'pain')
+ * @param source - Source label for error messages (e.g. 'pain', 'pd-status')
  * @param logger - Optional logger for divergence warnings (the plugin API logger)
  */
 export function resolvePluginCommandWorkspaceDir(

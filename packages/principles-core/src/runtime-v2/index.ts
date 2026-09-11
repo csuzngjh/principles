@@ -111,8 +111,6 @@ export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, Reco
 export { PRINCIPLE_STATUSES, PrincipleStatusSchema, PrinciplePrioritySchema, PrincipleScopeSchema, PrincipleEvaluabilitySchema, RuleStatusSchema, RuleTypeSchema, ImplementationLifecycleStateSchema, ImplementationTypeSchema, SampleClassificationSchema, PrincipleSchema, RuleSchema, ImplementationSchema, PrincipleDependencySchema, PrincipleValueMetricsSchema, PrincipleEventTypeSchema, PrincipleLifecycleEventSchema, PrincipleTreeStoreSchema, EvidenceChainStateSchema, EvidenceChainRecordSchema, EvidenceChainResponseSchema } from './types/index.js';
 // Hygiene types schemas
 export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-types.js';
-// Runtime summary types schemas
-export { RuntimeTruthSchema, AnalyticsTruthSchema, TrendMetricsSchema } from './types/runtime-summary-types.js';
 // Event types schemas
 export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, GovernanceActionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimeV2PromptActivationsInjectedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, TrajectoryObservabilityFailureEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
 // Event payload discriminated union schemas
@@ -1737,12 +1735,6 @@ export type {
 export {
   createEmptyHygieneStats,
 } from './types/hygiene-types.js';
-
-export type {
-  RuntimeTruth,
-  AnalyticsTruth,
-  TrendMetrics,
-} from './types/runtime-summary-types.js';
 
 export type {
   EventType,

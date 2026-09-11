@@ -154,7 +154,6 @@ OpenClaw 使用统一的状态目录 `~/.openclaw/`:
 操作者可以通过以下命令查看、晋升、禁用、归档或回滚这些实现：
 
 ```text
-/pd-evolution-status
 /pd-promote-impl list
 /pd-promote-impl show <id>
 /pd-promote-impl <id>

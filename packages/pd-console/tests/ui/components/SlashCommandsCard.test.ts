@@ -62,11 +62,11 @@ describe('SlashCommandsCard: empty list fallback (rc-9)', () => {
 });
 
 describe('slashCommands.ts: command metadata module', () => {
-  it('exports ONBOARDING_SLASH_COMMANDS array with 7 commands', () => {
+  it('exports ONBOARDING_SLASH_COMMANDS array with 6 commands', () => {
     expect(COMMANDS_MODULE_SOURCE).toContain('ONBOARDING_SLASH_COMMANDS');
-    // Count the 7 array entries (each has descriptionKey: 'pages.welcome...')
+    // Count the array entries (each has descriptionKey: 'pages.welcome...')
     const matches = COMMANDS_MODULE_SOURCE.match(/descriptionKey: 'pages\.welcome/g) ?? [];
-    expect(matches.length).toBe(7);
+    expect(matches.length).toBe(6);
   });
 
   it('each command has name and descriptionKey (no description field)', () => {
@@ -80,7 +80,6 @@ describe('slashCommands.ts: command metadata module', () => {
     expect(COMMANDS_MODULE_SOURCE).toContain('pages.welcome.step3.commandDescriptions.pdPain');
     expect(COMMANDS_MODULE_SOURCE).toContain('pages.welcome.step3.commandDescriptions.pdHelp');
     expect(COMMANDS_MODULE_SOURCE).toContain('pages.welcome.step3.commandDescriptions.pdContext');
-    expect(COMMANDS_MODULE_SOURCE).toContain('pages.welcome.step3.commandDescriptions.pdEvolutionStatus');
     expect(COMMANDS_MODULE_SOURCE).toContain('pages.welcome.step3.commandDescriptions.pdFocus');
   });
 });
@@ -97,13 +96,13 @@ describe('SlashCommandsCard: i18n keys exist', () => {
     expect(zh.emptyListFallback).toBeDefined();
   });
 
-  it('Given commandDescriptions in i18n, When checked, Then all 7 command descriptions exist as strings', () => {
+  it('Given commandDescriptions in i18n, When checked, Then all 6 command descriptions exist as strings', () => {
     const enStep3 = getNestedRecord(parseJsonRecord(readSrc('i18n/en.json')), ['pages', 'welcome', 'step3']);
     const zhStep3 = getNestedRecord(parseJsonRecord(readSrc('i18n/zh-CN.json')), ['pages', 'welcome', 'step3']);
     const enCmds = getNestedRecord(enStep3, ['commandDescriptions']);
     const zhCmds = getNestedRecord(zhStep3, ['commandDescriptions']);
 
-    const expectedKeys = ['pdInit', 'pdStatus', 'pdPain', 'pdHelp', 'pdContext', 'pdEvolutionStatus', 'pdFocus'];
+    const expectedKeys = ['pdInit', 'pdStatus', 'pdPain', 'pdHelp', 'pdContext', 'pdFocus'];
     for (const key of expectedKeys) {
       expect(typeof enCmds[key]).toBe('string');
       expect(typeof zhCmds[key]).toBe('string');
