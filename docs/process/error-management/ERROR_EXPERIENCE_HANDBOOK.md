@@ -143,7 +143,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-055 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
 | ERR-079 | Concurrency-primitive hardening gaps (age-based lock eviction, busy-spin retry) silently re-open the data-loss class the primitive was added to prevent | PRI-459 / PR #1045 |
 | ERR-080 | Control (size bound / path check) applied to the RAW input form instead of the CANONICAL/transformed form — bound is bypassable (escaped output exceeds budget; path traversal evades a /prefix match) | PRI-467 / PR #1059, PR #1302 |
-| ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059 |
+| ERR-081 | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check | PRI-467 / PR #1059; PRI-727 / PR #1604 |
 | ERR-089 | Fix addresses primary failure path but leaves sibling failure branches (catch/!ok/throw) with stale state, wrong command path, or CLI contract violation | PR #1124 |
 | ERR-093 | New log sink emits full external identifier despite an established minimization convention | PRI-516 / PR #1230 |
 | ERR-103 | Empty or malformed declared enforcement scope is accepted and can degrade into match-all behavior | RuleCode Owner Live Decision SPEC |
@@ -175,6 +175,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-119 | Route/identity matcher extracted from legacy prefix code keeps the prefix form — adjacent-but-different routes inherit the exemption | PRI-643 / PR #1530 review |
 | ERR-120 | ReDoS fix removes ONE backtracking factor, keeps the unbounded quantifier — alert stays open; "alert auto-closes post-merge" asserted but never verified as acceptance evidence | PRI-627 / PR #1529 closeout + PR #1532 |
 | ERR-111 | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them | PRI-581 |
+| ERR-125 | New/refactored files under an eslint-ignored surface (create-principles-disciple `scripts/*.mjs`) ship dead code and lint-class defects because local lint never scans them — CodeQL on the PR is the only net; self-check unused symbols or extend lint coverage before handoff | PRI-727 / PR #1604 review (CodeQL) |
 
 ---
 
@@ -515,9 +516,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
-- PR #1551 round 2 (R2): fresh 派生的出界处置（selectedEffect）未持久化，resume 从缺失的瞬时变量重新推导 → 同一裁决跨重启产生不同副作用。修法：处置在 intent 落库前派生并随 completion intent 持久化，resume 读 intent 重放效果（rollout reviewer 既有模板）。
-- 2026-08-26 PRI-606: axiom builders tested in isolation but `prompt.ts` injected via `evolutionReducer` (empty on fresh installs); barrel missed re-export — T-01..T-10 never injected. Fixed: registry-direct + barrel + empty-reducer regression test.
-  - 2026-08-24 PR #1389 review round 2 (dormant consumer activation — mirror of the PRI-510 flavor): to forward two NEW telemetry events, `createPainSignalBridge` started passing `eventEmitter` into `new PainSignalBridge({...})` — an option the factory had NEVER passed on main, so the bridge's four PRE-EXISTING emission sites (`candidate_admission_decision`, `candidate_dreamer_task_seeded`, `candidate_not_internalizable`, `candidate_dreamer_task_seed_failed`) were dormant in production. The unconditional forwarding wrapper woke all four: routine admission decisions got re-emitted as `degradation_triggered` (semantic mislabeling of the degradation channel), and flag-off behavior changed despite the PR contract "flag off = zero effective surface". Fixed by extracting `mapBridgeTelemetryToStoreEvent`, which forwards ONLY the two persistence events; a negative-control test asserts the four pre-existing event names map to null (dormancy preserved). Rule of thumb: when STARTING to pass a previously-dormant optional dependency/handler into a construction path, grep ALL of the dependency's consumption sites (`this.eventEmitter?.…`), not just the newly added ones — every dormant site inherits the new wiring's channel and semantics. Route each site intentionally or filter to the intended events, and ship a negative-control test proving the unintended sites stay dormant.
+- PR #1551 R2 (compressed; full text → ERROR_ARCHIVE.md): fresh 派生的出界处置未随 completion intent 持久化，resume 重推导致跨重启裁决漂移 — 处置在落库前派生并持久化，resume 重放效果。
+- 2026-08-26 PRI-606 (compressed; full text → ERROR_ARCHIVE.md): axiom builders tested in isolation but never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
+  - 2026-08-24 PR #1389 (compressed; full text → ERROR_ARCHIVE.md): dormant-consumer activation — forwarding two NEW telemetry events via a previously-unpassed optional dep woke four pre-existing dormant emission sites under the wrong channel; forward only intended events + negative-control test asserting dormant sites stay null. Grep ALL consumption sites when starting to pass a dormant dep.
   - 2026-08-19 PR #1358 external review round 5 (verdict drift, compressed; full text → ERROR_ARCHIVE.md): crash-recovery re-consulted the LLM instead of the durably persisted `runnerDecision`, overwriting verdicts whose side effects had already materialized; fixed with the atomic `completionIntent` authority protocol + `maybeResumePendingIntent` resume gate. Rule of thumb: every re-entry path must treat a durably recorded decision as the authority — never re-consult a non-deterministic advisor for a decision already recorded but not yet applied; enumerate every branch that persists the decision and every side effect that changes consumable governance state.
   - 2026-08-19 PR #1358 final-review blocker (compressed; full text → ERROR_ARCHIVE.md): succeeded-transition reconciliation was gated on a resource constructed after an early return, so the idle path never ran the budget; construct the budget's dependency before all early returns.
   - 2026-07-04 PRI-510 (PR#1188, compressed; full text → ERROR_ARCHIVE.md): EvaluatorRunnerDeps optional deps passed at only 2 of the construction sites — repair loop was dead code at runtime; centralize dep construction in one helper.
@@ -650,10 +651,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 116 |
-| Last updated | 2026-09-10 |
+| Total lessons | 117 |
+| Last updated | 2026-09-11 |
 | Top category | Schema & Type |
-| Recurring errors | 60 |
+| Recurring errors | 61 |
 
 ---
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist
@@ -935,6 +936,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-25
 - **Recurrence**: None
   - 2026-08-31 PRI-631 / PR #1462: Owner resolution checked a digest before a task-only CAS, allowing evidence rows to change in the final gap. Fixed with one SQLite mutation conditioned on each reviewed artifact's id, source, lineage and content; barrier regression proves no write.
+  - 2026-09-11 PRI-727 / PR #1604 (CodeQL): exists-then-read flavor — a release publish script gated five file reads behind `existsSync`/`statSync` pre-checks; a swap between check and read is acted on with stale assumptions (CodeQL flagged 2 of 5). Fixed by reading first and classifying the error (`ENOENT` = absent, else fail loud) at ALL five sites — fix the family, not the line.
 
 ---
 **[ERR-082]** | `Object.hasOwn` key-presence check bypassed by present-but-undefined value — wrong branch executes, hallucinated field passes through unstripped
@@ -1007,7 +1009,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-025 (test proves isolated helper, not real production defense — same EP-09 group), ERR-077 (characterization tests don't verify parameter parity — same EP-09 group), ERR-009/ERR-010 (production-code sibling: falsy values silently passing validation).
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
-- **Recurrence**: 2026-08-13 PRI-523 C1.1 spec review: the production OpenClaw BDD seeded a Runtime V2 activation only, then asserted its unique text appeared once. That signal could not exercise or prove the legacy/Runtime V2 overlap branch, so the test stayed green while shared exclusion metadata misreported `all_deduped_against_legacy` as `no_validated_activations`. Fixed by seeding the identical ID/text in the real legacy probation reducer and Runtime V2 SQLite, asserting one combined prompt occurrence, absence of a duplicate Runtime V2 directive, and the persisted exact skip reason/next action. 2026-07-22 PRI-520 / PR #1249 (CodeRabbit review): `SplitDiagnosticianRunner` terminal-state persistence tests asserted only generic substrings (`failed to persist parent task failure`, `Root-cause output was invalid`) without asserting the injected persistence error text (`database write failed`) or the preserved original stage category (`Original stage outcome: output_invalid`). A refactor that dropped the persist error message or the preserved stage outcome would still pass. Fixed by adding assertions for the injected error text and the preserved category string. Lesson: when a fail-loud fix contract is "surface error X AND preserve original outcome Y", the regression test must assert BOTH the surfaced error and the preserved outcome — asserting only the banner substring lets a future refactor silently drop the detail that made the fix meaningful. 2026-07-15 PRI-516 / PR #1230: `makeCtx({ sessionGfi })` accepted and destructured an override it never applied, while tests separately mutated the actual session mock through `setSessionGfi`; fixed by removing the dead override. 2026-07-04 PR #1182: (1) `sqlite-dead-letter-store.markRetried` UPDATE-by-painId is non-unique with single-row seed — fixed via latest-row subquery + multi-row seed; (2) `failed-tasks` `tasks.length===0` signal also produced when paginated past end — fixed via `total===0` + past-end case. (Earlier compressed: 2026-06-30 PR #1131 BDD non-unique stdout/activation/seed signals; 2026-07-01 PR #1146 onboarding source-string tests passed while Windows path broken; 2026-07-02 codex/website-homepage-redesign OG image dimension contract only checked non-empty; 2026-07-03 PR #1170 SEC-BASE-5 `expect(true).toBe(true)` tautology after flag check.)
+- **Recurrence**: (older inline recurrences compressed; full text → ERROR_ARCHIVE.md) 2026-08-13 PRI-523 C1.1: production-BDD seeded only a Runtime V2 activation then asserted its unique text — could not prove the legacy/Runtime V2 overlap branch; seed both paths, assert per-path unique signals. 2026-07-22 PRI-520 / PR #1249: a fail-loud contract test must assert BOTH the surfaced error text AND the preserved original outcome. 2026-07-15 PRI-516: fixture override destructured but never applied while tests mutated the real mock — remove dead overrides. 2026-07-04 PR #1182: non-unique UPDATE-by-painId + pagination-past-end false-empty — latest-row subquery + total-based emptiness. (2026-06-30/07-01/07-02/07-03 compressions unchanged.)
 - PR #1551 round 2 (R3/R5): 非唯一代理信号冒充目标判定——lineageResolvable（仅上游 artificer 存在）当"证据来源可达"，applicability 条目数（未去重）当"泛化"，NHR 状态当"Owner 可裁决"。修法：对外断言绑定唯一权威来源（BFS 祖先 taskKind/去重计数/capability 集合），代理信号只作提示。
 - 2026-09-01 PR #1472 (PRI-631, retrospective — the SPEC's motivating incident): the Companion token-persistence tests asserted source-code substrings (`expect(source).toContain('safeStorage.encryptString')`, `'persisted: boolean'`, `path.join(__dirname, '..', 'preload.cjs')`) instead of executing the wiring — a packaging change that dropped or renamed the preload artifact, or a main-process regression that never invoked `configureConsoleToken`, would leave all four assertions green. The sandbox `preload` was also never proven executable in the real Electron configuration (EP-02 sibling). This class is why `error:context` now routes EP-09/EP-02/EP-03 for Companion main/preload/safeStorage diffs at PR time.
   <!-- recurrence-meta
@@ -1495,4 +1497,17 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-121 (adjacent: fixture vs global mutation).
 - **Source**: PRI-723 / PR #1596 review
 - **Date**: 2026-09-10
+- **Recurrence**: None
+
+---
+**[ERR-125]** | New/refactored files under an eslint-ignored surface ship dead code — local lint never scans them, so the PR-time CodeQL net is the only detector
+
+- **What happened**: PRI-727 PR #1604 review (CodeQL): a new `create-principles-disciple` publish script (`scripts/publish-release-metadata.mjs`) carried an unused import and an unused helper left over from mid-development refactoring. Local `npm run lint` passed because the package's eslint config ignores `scripts/*.mjs`; the defects surfaced only as CodeQL alerts failing the PR's code-scanning check.
+- **Why it's wrong**: "lint passed" is treated as "no hygiene defects", but that guarantee only holds for paths lint actually scans — a file outside the lint surface silently downgrades every lint-class check to "not verified".
+- **Generalized failure mode**: When writing or refactoring a file, assistants must confirm the file is inside the active guard surface (lint scope, typecheck scope, test globs) before treating those guards as evidence, otherwise lint-class defects escape to review/CI.
+- **How to prevent**: Before handoff on a new script/config path, check the lint ignore globs for the path; if ignored, run the closest covered check directly (e.g. `npx eslint --no-ignore <file>`) and state in the PR which guards do NOT cover the file. Durable fix (follow-up): include the installer package's `scripts/*.mjs` in the lint surface.
+- **Regression guard**: `npx eslint --no-ignore packages/create-principles-disciple/scripts/publish-release-metadata.mjs` catches unused symbols on this file class today.
+- **Related ERRs**: EP-09 (verification reality gap — claimed evidence not actually exercised); ERR-078 (self-reported verification without checking reality).
+- **Source**: PRI-727 / PR #1604 review (CodeQL)
+- **Date**: 2026-09-11
 - **Recurrence**: None
