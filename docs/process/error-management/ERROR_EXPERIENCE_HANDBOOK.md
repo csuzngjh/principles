@@ -654,7 +654,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 117 |
 | Last updated | 2026-09-11 |
 | Top category | Schema & Type |
-| Recurring errors | 61 |
+| Recurring errors | 62 |
 
 ---
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist
@@ -1011,24 +1011,11 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-29
 - **Recurrence**: (older inline recurrences compressed; full text → ERROR_ARCHIVE.md) 2026-08-13 PRI-523 C1.1: production-BDD seeded only a Runtime V2 activation then asserted its unique text — could not prove the legacy/Runtime V2 overlap branch; seed both paths, assert per-path unique signals. 2026-07-22 PRI-520 / PR #1249: a fail-loud contract test must assert BOTH the surfaced error text AND the preserved original outcome. 2026-07-15 PRI-516: fixture override destructured but never applied while tests mutated the real mock — remove dead overrides. 2026-07-04 PR #1182: non-unique UPDATE-by-painId + pagination-past-end false-empty — latest-row subquery + total-based emptiness. (2026-06-30/07-01/07-02/07-03 compressions unchanged.)
 - PR #1551 round 2 (R3/R5): 非唯一代理信号冒充目标判定——lineageResolvable（仅上游 artificer 存在）当"证据来源可达"，applicability 条目数（未去重）当"泛化"，NHR 状态当"Owner 可裁决"。修法：对外断言绑定唯一权威来源（BFS 祖先 taskKind/去重计数/capability 集合），代理信号只作提示。
-- 2026-09-01 PR #1472 (PRI-631, retrospective — the SPEC's motivating incident): the Companion token-persistence tests asserted source-code substrings (`expect(source).toContain('safeStorage.encryptString')`, `'persisted: boolean'`, `path.join(__dirname, '..', 'preload.cjs')`) instead of executing the wiring — a packaging change that dropped or renamed the preload artifact, or a main-process regression that never invoked `configureConsoleToken`, would leave all four assertions green. The sandbox `preload` was also never proven executable in the real Electron configuration (EP-02 sibling). This class is why `error:context` now routes EP-09/EP-02/EP-03 for Companion main/preload/safeStorage diffs at PR time.
-  <!-- recurrence-meta
-  {
-    "date": "2026-09-01",
-    "pattern": "EP-09",
-    "invariant": "test-asserts-source-substring-not-wiring",
-    "severity": "P2",
-    "escaped": "verify-merge",
-    "caughtBy": "owner",
-    "guard": "none"
-  }
-  -->
-
-  - 2026-08-28 PRI-614 / PR #1428 review: the gateway recovery test counted a restart but did not prove it happened after the tar step failed, so an early or unrelated restart produced the same signal. Fixed with strict call-order assertions and a negative-control run that fails when the ordering predicate is inverted.
-
-  - 2026-08-20 PRI-553: governance BDD treated non-empty body text as proof the SPA was ready. That signal was true before the initial `#/focus` redirect settled, so the delayed redirect could overwrite detail navigation; fixed by waiting for the canonical focus URL and then asserting the detail URL.
-
-  - 2026-09-04 PRI-665 misdiagnosis (diagnosis-side sibling of the non-unique-signal class): the 1.229.0 upgrade crash was attributed to a "host-runtime barrel missing 8 exports" based on three checks — rg symbol search, tarball regex, and an import-scanner using string `includes()`. All three are text-level symbol matching and share ONE blind spot: none can see `export *` re-export chains, so the published barrel (19 `export *` lines, all 8 symbols verified loadable via real Node import) was misdiagnosed as broken. The real cause: stale physical `@principles/*` dependency copies in the runtime `node_modules` shadowing the canonical packages (Node resolves the NEAREST node_modules first). Lesson: root-cause claims about module interfaces require a REAL Node import as evidence, must first establish which physical copy the runtime actually resolves, and must treat multiple checks sharing the same mechanism as ONE data point, not independent corroboration.
+  - 2026-09-11 PRI-626 / PR #1608 review (two P1s, one root cause — self-authored verification whose failure paths were never executed): (1) the journey harness's no-approval guard compared `=== undefined` while the sentinel was initialized `null`, so the real needs_revision path threw an uncaught TypeError instead of the fail-loud JSON line — caught by the harness's own first live run; (2) the installed-gate zero-write probe wrapped a 0-byte fake trajectory.db in `catch { n = 0 }` and asserted hook exit-0 only, though the hook is fail-open. Fixed by: executing the failure branch once (bite-verify), the unique `reason=feature_disabled` structured marker + flag-ON negative control, a schema-initialized DB with a fail-loud probe. The bite-verify-every-contract-test must-check applies to guards and failure branches the author adds, not only to delivery contract tests.
+  - 2026-09-01 PRI-631 (retrospective, EP-02 sibling): Companion token-persistence tests asserted source-code substrings instead of executing the wiring; packaging/main-process regressions left all four green; sandbox preload never proven executable in real Electron config. (Full text → ERROR_ARCHIVE.md.)
+  - 2026-08-28 PRI-614: gateway recovery test counted a restart without proving it followed the tar failure; fixed with strict call-order assertions + inverted-order negative control.
+  - 2026-08-20 PRI-553: governance BDD treated non-empty body text as SPA-ready before the `#/focus` redirect settled; fixed by waiting for the canonical focus URL.
+  - 2026-09-04 PRI-665 (diagnosis-side sibling): "barrel missing 8 exports" misdiagnosis from three text-level symbol checks sharing one blind spot (`export *` chains); real cause was stale physical dependency copies shadowing canonical packages. Root-cause claims about module interfaces require a REAL Node import; checks sharing one mechanism are ONE data point. (Full text → ERROR_ARCHIVE.md.)
 
 ---
 **[ERR-089]** | Fix addresses primary failure path but leaves sibling failure branches with stale state, wrong command path, or CLI contract violation
