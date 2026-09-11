@@ -297,12 +297,11 @@ export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v5'
  * toolset (read-only tools are never routed to the gate).
  */
 function buildHostSemanticContextBlock(context: ArtificerHostSemanticContext): string {
-  const hostKinds = context.hostKinds.join(', ');
   const toolList = context.tools.map((tool) => `${tool.rawToolName}→${tool.canonicalKind}`).join('; ');
+  const hostLine = context.hostKinds.length > 0 ? `- Target host(s): ${context.hostKinds.join(', ')}\n` : '';
   return `
 HOST SEMANTIC CONTEXT (authoritative — overrides your prior tool-name knowledge):
-- Target host(s): ${hostKinds}
-- Real host tools (rawToolName → canonicalKind): ${toolList}
+${hostLine}- Real host tools (rawToolName → canonicalKind): ${toolList}
 - affectedTools and EVERY goldenTraceCases toolName MUST be one of the real host tool names listed above (activation is machine-validated against this exact list).
 - This list is the declared dispatch surface; it is NOT the host's full toolset (read-only tools are not gated and are absent here).
 `;

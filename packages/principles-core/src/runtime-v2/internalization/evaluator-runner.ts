@@ -2782,9 +2782,13 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
    * registry provenance as gateDeps); the author kind comes from the core
    * baseline canonicalizer, so no second semantic truth is introduced.
    *
-   * Returns null (with an observable skip event) when no host projection is
-   * available, the author's name is already host-real (the replay already
-   * exercises the host surface), or no host tool shares the author's kind.
+   * Returns null when no variant applies. All skips EXCEPT one are observable
+   * (skip event with structured reason + nextAction, rc-9): a host projection
+   * that is absent/empty, golden cases that are missing or structurally
+   * invalid, a base case without a usable tool name, and no host tool sharing
+   * the author's kind all emit `host_alias_case_skipped`. When the author's
+   * name is ALREADY host-real the variant is redundant (the replay already
+   * exercises the host surface), so that path returns null silently.
    */
   private generateHostAliasCase(
     rawGoldenCases: unknown,
@@ -2792,52 +2796,31 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     runId: string,
   ): AdversarialCase | null {
     const hostContext = this.hostSemanticContext;
-    if (hostContext === null || hostContext.tools.length === 0) {
-      this.emitEvent('host_alias_case_skipped', taskId, {
-        runId,
-        reason: 'no_host_semantic_context',
-        nextAction: 'wire_host_semantic_context_from_the_workspace_host_declaration',
-      });
+    const skip = (reason: string, nextAction: string): null => {
+      this.emitEvent('host_alias_case_skipped', taskId, { runId, reason, nextAction });
       return null;
+    };
+    if (hostContext === null || hostContext.tools.length === 0) {
+      return skip('no_host_semantic_context', 'wire_host_semantic_context_from_the_workspace_host_declaration');
     }
     if (!Array.isArray(rawGoldenCases) || rawGoldenCases.length === 0) {
-      this.emitEvent('host_alias_case_skipped', taskId, {
-        runId,
-        reason: 'no_validated_golden_case',
-        nextAction: 'verify_artificer_emitted_structurally_valid_golden_trace_cases',
-      });
-      return null;
+      return skip('no_validated_golden_case', 'verify_artificer_emitted_structurally_valid_golden_trace_cases');
     }
     const build = buildGoldenTraceFromArtificer({ cases: rawGoldenCases });
     if (!build.ok || build.trace.cases.length === 0) {
-      this.emitEvent('host_alias_case_skipped', taskId, {
-        runId,
-        reason: 'no_validated_golden_case',
-        nextAction: 'verify_artificer_emitted_structurally_valid_golden_trace_cases',
-      });
-      return null;
+      return skip('no_validated_golden_case', 'verify_artificer_emitted_structurally_valid_golden_trace_cases');
     }
     const { cases } = build.trace;
     const base = cases.find((c) => c.kind === 'negative' && c.expectedDecision === 'block') ?? cases[0];
     if (!base || typeof base.toolName !== 'string' || base.toolName.trim() === '') {
-      this.emitEvent('host_alias_case_skipped', taskId, {
-        runId,
-        reason: 'no_base_case_tool_name',
-        nextAction: 'verify_artificer_emitted_at_least_one_golden_trace_case',
-      });
-      return null;
+      return skip('no_base_case_tool_name', 'verify_artificer_emitted_at_least_one_golden_trace_case');
     }
     const authorNameIsHostReal = hostContext.tools.some((tool) => tool.rawToolName === base.toolName);
     if (authorNameIsHostReal) return null;
     const authorKind = canonicalizeToolKind(base.toolName);
     const hostCandidate = hostContext.tools.find((tool) => tool.canonicalKind === authorKind && tool.rawToolName !== base.toolName);
     if (hostCandidate === undefined) {
-      this.emitEvent('host_alias_case_skipped', taskId, {
-        runId,
-        reason: `no_host_tool_with_kind:${authorKind}`,
-        nextAction: 'verify_the_host_declaration_covers_the_kind_the_rule_targets',
-      });
-      return null;
+      return skip(`no_host_tool_with_kind:${authorKind}`, 'verify_the_host_declaration_covers_the_kind_the_rule_targets');
     }
     return {
       caseId: 'v2-host-alias',

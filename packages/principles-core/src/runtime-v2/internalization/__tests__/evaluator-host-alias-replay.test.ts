@@ -249,4 +249,58 @@ describe('PRI-741 host-name parity replay', () => {
     expect(skip).toBeDefined();
     expect(JSON.stringify(skip?.payload)).toContain('no_host_semantic_context');
   });
+
+  // ── PRI-741 review round: skip-branch coverage (codecov patch gate) ──
+
+  it('non-array / empty golden cases skip observably with no_validated_golden_case', async () => {
+    const store = await seedLineage(artificerContent(KIND_MATCHING_BODY));
+    const generate = hostAliasMethod(makeRunner(store, { hostSemanticContext: HOST_SEMANTIC_CONTEXT }));
+    for (const bad of ['nope', [], 42]) {
+      emitted.length = 0;
+      expect(generate(bad, EVAL_ID, 'run-host-alias')).toBeNull();
+      const skip = emitted.find((e) => e.eventType === 'evaluator_host_alias_case_skipped');
+      expect(skip, `input ${JSON.stringify(bad)}`).toBeDefined();
+      expect(JSON.stringify(skip?.payload)).toContain('no_validated_golden_case');
+    }
+  });
+
+  it('structurally invalid golden cases fail the builder and skip observably', async () => {
+    const store = await seedLineage(artificerContent(KIND_MATCHING_BODY));
+    const generate = hostAliasMethod(makeRunner(store, { hostSemanticContext: HOST_SEMANTIC_CONTEXT }));
+    // Valid-looking array, but the case violates the golden-trace schema
+    // (negative case expecting allow → builder rejects).
+    const invalid = [
+      { caseId: 'bad', kind: 'negative', toolName: 'edit_file', params: { path: '/x' }, expectedDecision: 'allow' },
+    ];
+    expect(generate(invalid, EVAL_ID, 'run-host-alias')).toBeNull();
+    const skip = emitted.find((e) => e.eventType === 'evaluator_host_alias_case_skipped');
+    expect(skip).toBeDefined();
+    expect(JSON.stringify(skip?.payload)).toContain('no_validated_golden_case');
+  });
+
+  it('an author name that is already host-real skips SILENTLY (variant would be redundant)', async () => {
+    const store = await seedLineage(artificerContent(KIND_MATCHING_BODY));
+    const generate = hostAliasMethod(makeRunner(store, { hostSemanticContext: HOST_SEMANTIC_CONTEXT }));
+    const hostRealCases = [
+      { caseId: 'c-neg', kind: 'negative', toolName: 'write', params: { path: '/system/secret' }, expectedDecision: 'block' },
+      { caseId: 'c-pos', kind: 'positive', toolName: 'write', params: { path: '/workspace/notes' }, expectedDecision: 'allow' },
+    ];
+    expect(generate(hostRealCases, EVAL_ID, 'run-host-alias')).toBeNull();
+    expect(emitted.some((e) => e.eventType === 'evaluator_host_alias_case_skipped')).toBe(false);
+  });
+
+  it('a base case whose kind no host tool covers skips observably (no_host_tool_with_kind)', async () => {
+    const store = await seedLineage(artificerContent(KIND_MATCHING_BODY));
+    const generate = hostAliasMethod(makeRunner(store, { hostSemanticContext: HOST_SEMANTIC_CONTEXT }));
+    // 'ask_user' canonicalizes to 'other'; the host projection declares no
+    // 'other' tool, so no host-real substitute exists for the author's kind.
+    const otherKindCases = [
+      { caseId: 'c-neg', kind: 'negative', toolName: 'ask_user', params: { path: '/system/secret' }, expectedDecision: 'block' },
+      { caseId: 'c-pos', kind: 'positive', toolName: 'edit_file', params: { path: '/workspace/notes' }, expectedDecision: 'allow' },
+    ];
+    expect(generate(otherKindCases, EVAL_ID, 'run-host-alias')).toBeNull();
+    const skip = emitted.find((e) => e.eventType === 'evaluator_host_alias_case_skipped');
+    expect(skip).toBeDefined();
+    expect(JSON.stringify(skip?.payload)).toContain('no_host_tool_with_kind:other');
+  });
 });
