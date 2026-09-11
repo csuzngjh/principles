@@ -144,7 +144,13 @@ export function buildToolSemanticRegistry(
       record[mapping.rawToolName] = mapping.canonicalKind;
       hostNames.add(mapping.rawToolName);
     }
-    declaredHostMappings = Object.freeze([...hostMappings]);
+    // Deep-freeze per mapping (CodeRabbit review): a caller mutating its
+    // original objects after build must not drift the hostMappings()
+    // projection away from resolve()/hasHostTool(), which read the merged
+    // record captured above.
+    declaredHostMappings = Object.freeze(
+      hostMappings.map((mapping) => Object.freeze({ rawToolName: mapping.rawToolName, canonicalKind: mapping.canonicalKind })),
+    );
     merged = Object.freeze(record);
   }
 

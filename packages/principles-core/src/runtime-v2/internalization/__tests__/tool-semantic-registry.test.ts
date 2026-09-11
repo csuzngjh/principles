@@ -176,4 +176,16 @@ describe('ToolSemanticRegistry.hostMappings — PRI-741 read-only host projectio
     expect(built.registry.hostMappings().map((m) => m.rawToolName)).toEqual(['write']);
     expect(built.registry.hasHostTool('late')).toBe(false);
   });
+
+  it('the projection is deep-frozen — mutating a source mapping object does not drift kind semantics (CodeRabbit)', () => {
+    const declarations: ToolSemanticMappingV1[] = [{ rawToolName: 'write', canonicalKind: 'write' }];
+    const built = buildToolSemanticRegistry(declarations);
+    if (!built.ok) throw new Error('registry failed to build');
+    // Caller mutates the ORIGINAL mapping object after construction.
+    (declarations[0] as { canonicalKind: string }).canonicalKind = 'read';
+    expect(built.registry.hostMappings()[0]?.canonicalKind).toBe('write');
+    expect(built.registry.resolve('write')).toBe('write');
+    // And the projected mapping objects are frozen themselves.
+    expect(Object.isFrozen(built.registry.hostMappings()[0])).toBe(true);
+  });
 });
