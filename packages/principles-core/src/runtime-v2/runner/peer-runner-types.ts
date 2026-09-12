@@ -39,10 +39,9 @@ export interface PeerRunnerOptions {
   readonly outputLanguage?: OutputLanguage;
   /**
    * Whether to inject CORE_PRINCIPLES into the prompt (default: true).
-   * NOT currently flag-controlled: the `internalization_core_grounding`
-   * flag has no executable readers (disconnected control, PRI-752) —
-   * grounding is unconditional via this runner-option default. Rewire vs
-   * retire of the flag is a pending Owner decision.
+   * Grounding is unconditional runner behavior — the former
+   * `internalization_core_grounding` flag was retired in PRI-751 (it never
+   * had a production reader).
    */
   readonly coreGrounding?: boolean;
 }
