@@ -30,3 +30,24 @@ branch:
             type: textarea
             required: false
             default: 对当前分支做一次全仓架构健康检查，按 .cnb/agents/pd-auditor.md 的五个维度输出发现。
+
+      # PRI-768：开发任务入口——Owner 主动下达低风险开发任务给 PD Developer。
+      #   产物 = 特性分支 + PR（落在 CNB 镜像仓库），交 Owner 评审；
+      #   合并权在 Owner（章程 D4），Agent 无 merge/release/main 直推能力。
+      - name: PD Developer 任务
+        description: 下达一个低风险开发任务（限 .cnb/、docs/、scripts/，产出 PR 交 Owner 评审）
+        event: web_trigger_dev
+        groupName: PD Cloud Worker
+
+        permissions:
+          roles:
+            - owner
+            - master
+
+        inputs:
+          userPrompt:
+            name: 开发任务描述
+            description: 必填。说明任务目标、允许范围与验收标准（npc:go 对空 userPrompt 硬校验失败，实测）。
+            type: textarea
+            required: true
+            default: 更新 .cnb/agents/ 与 docs/runbooks/ 中与 PD Developer 相关的文档，保持二者一致；只改这两个目录，产出 PR。
