@@ -147,6 +147,17 @@ export function shouldRedirectToLoginOnUnauthorized(currentHash: string): boolea
 }
 
 /**
+ * Staleness guard for 401 responses (PR #1635 review race fix): a 401 may
+ * arrive AFTER the login form's restore flow set a newer token while this
+ * request was in flight. The stale response must neither erase the newer
+ * token nor trigger the login redirect. Pure on the two token snapshots, so
+ * the policy is unit-testable without a browser.
+ */
+export function shouldInvalidateSessionTokenOn401(requestToken: string | null, storedTokenNow: string | null): boolean {
+  return storedTokenNow === requestToken;
+}
+
+/**
  * Send an authenticated request to the Console API.
  *
  * Two overloads:
@@ -195,11 +206,17 @@ async function request<T = unknown>(
         // Any 401 invalidates the session: clear the token even when none was
         // attached (page loaded before the server switched to token mode —
         // PRI-643) and route to login so a token can be entered.
-        clearToken();
-        // eslint-disable-next-line no-undef
-        if (shouldRedirectToLoginOnUnauthorized(window.location.hash)) {
+        // Staleness guard (PR #1635 review): the login form's restore flow may
+        // have set a NEWER token while this request was in flight — a late 401
+        // from the earlier tokenless probe must not erase it and bounce the
+        // just-restored session back to login.
+        if (shouldInvalidateSessionTokenOn401(token, getToken())) {
+          clearToken();
           // eslint-disable-next-line no-undef
-          window.location.hash = "#/login?session_expired=true";
+          if (shouldRedirectToLoginOnUnauthorized(window.location.hash)) {
+            // eslint-disable-next-line no-undef
+            window.location.hash = "#/login?session_expired=true";
+          }
         }
       }
       let errorMessage = `HTTP ${response.status}`;

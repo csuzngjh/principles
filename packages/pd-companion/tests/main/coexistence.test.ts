@@ -73,6 +73,29 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
     expect(tsconfig).toContain('src/**/*.cts');
   });
 
+  // Owner auth-experience simplification: the login form auto-restores the
+  // stored credential, so the main process must expose a read endpoint that
+  // is origin-guarded (fail closed for anything but the ACTIVE console
+  // origin — exact port match, PR #1635 review) and a clear endpoint that
+  // completes the credential lifecycle and refuses inherited env tokens.
+  it('Console auth: token read endpoint is registered and exact-origin-guarded', () => {
+    const source = src();
+    expect(source).toContain("'pd-companion:get-console-token'");
+    expect(source).toContain('isSameConsoleOrigin');
+    expect(source).toContain('event.senderFrame?.url');
+  });
+
+  it('Console auth: token clear endpoint carries the same origin guard and refuses inherited env tokens', () => {
+    const source = src();
+    expect(source).toContain("'pd-companion:clear-console-token'");
+    expect(source).toContain('clearConsoleToken(event.sender.id, event.senderFrame?.url ??');
+    expect(source).toContain("reason: 'inherited_env_token'");
+    expect(source).toContain("reason: 'state_save_failed'");
+    expect(source).toContain('delete state.encryptedConsoleToken');
+    expect(source).toContain('delete process.env.PD_CONSOLE_TOKEN');
+    expect(source).toContain('restartFromTray()');
+  });
+
   it('Workspace workers: whenReady 启动 supervision，manifest 驱动 sync', () => {
     const source = src();
     expect(source).toContain('startWorkspaceWorkerSupervision()');

@@ -253,6 +253,47 @@ curl -L --fail \
   "${CNB_API_ENDPOINT}/${CNB_REPO_SLUG}/-/commit-assets/download/${CNB_COMMIT}/cloud-audit-report.md"
 ```
 
+### 4.2 每周治理循环（PRI-766）
+
+CNB Cloud Auditor 的每周运行不是"又一个定时任务"，而是一条**证据链**：
+定时触发 → 上下文准备（元数据 + 漂移检测）→ D1–D5 审计 → 报告落盘 → **人工/AI 发布到 Linear**。
+契约的单一事实源是章程 `.cnb/agents/pd-auditor.md`（§6 v2 输出契约）。
+
+**每周期自动发生（CNB 侧，零密钥）**：
+
+1. `"crontab: 0 2 * * 1"`（周一 02:00，Asia/Shanghai）触发 T2 双流水线（§3）；
+2. "审计上下文准备"阶段写入 `cloud-audit-context.md`：实际审计 commit、触发事件、
+   章程版本，并用 GitHub 匿名 API 比对镜像漂移——
+   漂移时生成 `Warning: Audit source differs from GitHub main`（API 不可达则如实留痕）；
+3. 叙事审计产出 `cloud-audit-report.md`（v2 格式：Metadata / Summary / Findings 含
+   Severity·Category·Evidence·Impact·Recommendation·Confidence / Integrity Check），
+   Agent 已按章程 §6.2 做计数自检、§6.3 做证据质量门；
+4. 两份报告挂到对应 commit 的附件（ttl 30 天）。
+
+**每周期人工/AI 完成（证据发布，不可自动化省略）**：
+
+1. 从构建日志或 commit 附件取出 `cloud-audit-report.md` 全文；
+2. 在 Linear 周审计工单发**中文证据评论**，必须包含：
+   `Pipeline sn + buildLogUrl`（Agent 无法得知自己的 sn，由发布者补记）、
+   报告的 Metadata 与 Summary 计数、每条 Finding 一行（含 Confidence）、
+   Integrity Check 结果、以及 **Drift Warning（若存在——漂移周的结论按局限对待）**；
+3. 审计发现**只记录、不顺手修**：P0/P1 由 Owner 决定是否立单；AI 不得把审计发现
+   自动转化为代码 PR（审计证据是观察结果，不是施工指令）；
+4. **禁止把周报写进 main 的产品文档**——证据进 Linear / 附件，不污染仓库
+   （`docs/audit/` 仅收审计基础设施文档，不收周期性审计结果）。
+
+**漂移升级路径**：Drift Warning 仅在**审计对象为 main** 时出现（分支审计给的是中性
+INFO 说明——分支与 main 有差异属预期）。若周报带该 Warning，先按 §2 方案A 手动同步
+镜像，同步后用 T3b（`api_trigger_audit`，branch=main）复审一次，再发布证据——
+带漂移警告的报告不得作为治理决策依据，只作记录。
+
+**验证点**（本循环 v1 于 2026-09-12 经两次真实模拟验证，见 Linear PRI-766）：
+触发 ✓ / 上下文与漂移检测（含分支语义区分）✓ / v2 报告与完整性自检 ✓（模拟运行中
+Agent 的 Summary 首次计数错误被 §6.2 自检当场抓住并修正）/ 附件与日志证据 ✓ /
+Linear 记录 ✓。
+已知边界：上下文脚本内联于 `.cnb.yml`，`verify:merge` 与 `test:scripts` 均覆盖不到
+（后续工单建议：抽为 `scripts/cnb-audit-context.mjs` 并补三分支测试）。
+
 ---
 
 ## 5. 已知限制（会出现在每份报告中）
