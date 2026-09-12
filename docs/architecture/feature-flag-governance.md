@@ -123,7 +123,7 @@ Owner-facing 控制面的已知例外**，sparse 语义由各自显式建模：
 | unknown flag 告警 | computeEffectiveFlags / computeFeatureFlagsFromConfig | config.yaml 写错 flag id 时 warn |
 | gone flag 复活拒绝 | computeEffectiveFlags gone 分支 | 退役 flag 无法被配置复活 |
 | core flag 应急关闭可观测 | computeEffectiveFlags core 分支 warning | 显式 disable 记录在 warnings |
-| registry↔surface registry 对账 | evolution-worker-slimming.test.ts (PRI-294) | evolution_worker/empathy_observer/gone 组 |
+| registry↔surface registry 对账 | correction-observer-registry.test.ts (PRI-294 起源，PRI-737 更名) + mvp-surface-registry-guard.test.ts | correction_observer/empathy_observer/gone 组（evolution_worker 已墓碑化） |
 | **registry↔installer 模板对账** | installer-config-parity.test.ts | 0 default-equivalent bootstrap entries；任何 bootstrap override 必须注册于 registry 且异于 registry default（无 allowlist） |
 | 默认值毕业状态锁定 | feature-flag-contract.test.ts PRI-571 块 + PRI-621 块 | 5 个毕业 flag 默认开+quiet+可关 |
 
