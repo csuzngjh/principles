@@ -65,13 +65,26 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 需 Owner 择一：①把评分写入纳入 flag 门控（推荐，恢复 quiet 语义）；②确认评分常开后删除 flag。
 → 已建 follow-up 工单记录。
 
-### 3.2 `empathy_observer` — 注册表/agent binding 双轨
+### 3.2 `empathy_observer` — 断线控制（PRI-752 复核修正）
 
-flag（quiet/off，gate 服务启动）与 `internalAgents.empathyObserver.enabled:false`
-（gate runner 绑定）是两层不同的开关：前者控制信号服务，后者控制内部 agent 运行。
-职责不同但命名易混淆。signal_collector 重构后 empathy 检测已迁移至 signal-collector-host
-（empathy_observer 在 prompt.ts 的旧消费点已废弃）。处置：维持现状 + 本文档澄清；
-如 Owner 同意可在后续 MVP-Gone 清理波次中评估合并。
+**本节 2026-09-12 前的描述有误**（曾声称 flag "gate 服务启动"）——PRI-752 逐项复核后的现实：
+
+- **flag 本体零可执行读者**：全仓没有任何运行时代码读取该 flag 做路由/门控；
+  改变 flag 值不产生任何行为差异。
+- **EmpathyObserver 类存在但零生产实例化**：`principles-core/runtime-v2/observer/empathy-observer.ts`
+  （含 schema 注册与公开导出）只有自测试调用；历史 census 所列
+  "openclaw-plugin observer wiring" 不存在（prompt-helpers 中的 empathy 引用是
+  #189 递归防护，非观测器接线）。
+- **Console 成本提示条**（EmpathyObserverCostHint）挂在
+  `internalAgents.empathyObserver` 行上（显示层），不消费本 flag。
+- **empathy 关键词检测**（prompt-builder/empathy-keyword-matching）无条件运行，
+  与本 flag 无关。
+- **live（2026-09-12）**：flag=on 且 `internalAgents.empathyObserver=on`——
+  Owner 意图存在，行为缺席（安慰剂开关，PRI-749 G-5 定性成立）。
+
+处置：**待 Owner 二选一**——(a) 立项实现观测器接线（让开关有真实行为）；
+(b) 退役 flag + EmpathyObserver 类 + Console 展示面。维持现状（看起来开着
+但什么都不做）是最差选项，不建议保留。
 
 ### 3.3 installer 默认值快照 — 已按 PRI-645 收敛为 sparse shell
 
@@ -125,7 +138,7 @@ Owner-facing 控制面的已知例外**，sparse 语义由各自显式建模：
 | unknown flag 告警 | computeEffectiveFlags / computeFeatureFlagsFromConfig | config.yaml 写错 flag id 时 warn |
 | gone flag 复活拒绝 | computeEffectiveFlags gone 分支 | 退役 flag 无法被配置复活 |
 | core flag 应急关闭可观测 | computeEffectiveFlags core 分支 warning | 显式 disable 记录在 warnings |
-| registry↔surface registry 对账 | evolution-worker-slimming.test.ts (PRI-294) | evolution_worker/empathy_observer/gone 组 |
+| registry↔surface registry 对账 | correction-observer-registry.test.ts（原 evolution-worker-slimming.test.ts，PRI-737 更名） | correction_observer 组 + evolution_worker 墓碑断言（PRI-752：flag=gone、registry 条目不存在） |
 | **registry↔installer 模板对账** | installer-config-parity.test.ts | 0 default-equivalent bootstrap entries；任何 bootstrap override 必须注册于 registry 且异于 registry default（无 allowlist） |
 | 默认值毕业状态锁定 | feature-flag-contract.test.ts PRI-571 块 + PRI-621 块 | 5 个毕业 flag 默认开+quiet+可关 |
 

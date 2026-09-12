@@ -112,7 +112,7 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     evidence: 'Flag has zero executable readers — no runtime effect. Live (2026-09-12): flag=on AND internalAgents.empathyObserver=on — Owner intent present, behavior absent (PRI-749 G-5 placebo finding; prior census entry overstated wiring)',
     decided: '2026-09-12',
     graduationCriteria: 'Requires implementing the observer wiring first — dogfood evidence impossible while zero production callers exist',
-    retirementCriteria: 'Owner decision: implement the observer (SPEC) or retire flag + class + console surface. Governance doc §3.2 already holds this at 维持现状待 Owner 决策',
+    retirementCriteria: 'Owner decision: implement the observer (SPEC) or retire flag + class + console surface. Governance doc §3.2 records the corrected disconnected-control reality and recommends against keeping the placebo state',
   },
   painEvidenceAdmission: {
     decision: 'KEEP_QUIET',
