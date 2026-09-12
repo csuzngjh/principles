@@ -335,6 +335,37 @@ describe('handleFailedTasksRoute', () => {
       expect(body.message).toContain('nonexistent');
     });
 
+    it('decodes percent-encoded task ids before the store lookup (client round trip)', async () => {
+      // The UI client sends encodeURIComponent(taskId); the store lookup must
+      // compare the RAW id, not the encoded segment (review round of
+      // PRI-747 F22 — previously 'task%2Fwith%20space' 404'd server-side).
+      const getDetail = vi.fn().mockResolvedValue(null);
+      const store = createMockStore({ getFailedTaskDetail: getDetail });
+
+      const req = createMockRequest('GET', '/api/v1/failed-tasks/task%2Fwith%20space');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task%2Fwith%20space', sqliteTaskStore: store });
+
+      expect(getDetail).toHaveBeenCalledWith('task/with space');
+      // Mock store returns null → still 404, but for the DECODED id.
+      expect(res.statusCode).toBe(404);
+      expect(errorEnvelope(res).message).toContain('task/with space');
+    });
+
+    it('returns 400 invalid_encoding for a malformed percent-encoded id', async () => {
+      const store = createMockStore();
+      const getDetailSpy = vi.spyOn(store, 'getFailedTaskDetail');
+
+      const req = createMockRequest('GET', '/api/v1/failed-tasks/%ZZ');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/%ZZ', sqliteTaskStore: store });
+
+      expect(res.statusCode).toBe(400);
+      expect(errorEnvelope(res).error).toBe('invalid_encoding');
+      // Fail before any store access.
+      expect(getDetailSpy).not.toHaveBeenCalled();
+    });
+
     it('returns 500 when detail store throws', async () => {
       const store = createMockStore({
         getFailedTaskDetail: vi.fn().mockRejectedValue(new Error('connection lost')),
@@ -563,6 +594,38 @@ describe('handleFailedTasksRoute', () => {
       expect(res.statusCode).toBe(404);
       const body = errorEnvelope(res);
       expect(body.error).toBe('task_not_found');
+    });
+
+    it('decodes percent-encoded task ids before recovery dispatch (same decode as the detail branch)', async () => {
+      await seedTask({ taskId: 'task/with space', status: 'failed', attemptCount: 1, maxAttempts: 3 });
+
+      const req = createMockPostRequest('/api/v1/failed-tasks/task%2Fwith%20space/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/task%2Fwith%20space/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ taskId: string; result: string }>(res);
+      expect(data.taskId).toBe('task/with space');
+      expect(data.result).toBe('recovered');
+      const row = await stateManager.getTask('task/with space');
+      expect(row?.status).toBe('pending');
+    });
+
+    it('returns 400 invalid_encoding for a malformed percent-encoded recover id', async () => {
+      const req = createMockPostRequest('/api/v1/failed-tasks/%ZZ/recover', '{}');
+      const res = createMockResponse();
+      await handleFailedTasksRoute(req, res, {
+        workspaceDir,
+        subPath: '/%ZZ/recover',
+        featureFlags: RECOVERY_FLAGS,
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(errorEnvelope(res).error).toBe('invalid_encoding');
     });
 
     it('409 task_not_recoverable for a leased (in-flight) task, row untouched', async () => {
