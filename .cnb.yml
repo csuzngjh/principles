@@ -265,10 +265,10 @@ main:
         - name: 准备交付分支
           script: |
             set -eu
-            # 环境变量在场性诊断（只报名，不报值）：imports 注入失败的最早信号
-            for v in GITHUB_SYNC_TOKEN GITHUB_SYNC_USERNAME; do
-              if [ -n "${!v:-}" ]; then echo "[bridge] env $v: present"; else echo "[bridge] env $v: MISSING（检查 pd-secrets@main/cnb-github-bridge.yml 的 key 名与 allow_* 声明）"; fi
-            done
+            # 环境变量在场性诊断（只报名，不报值）：imports 注入失败的最早信号。
+            # 注意：stage shell 是 POSIX sh（dash），不能用 ${!v} 间接展开（第二跑实证 Bad substitution）。
+            if [ -n "${GITHUB_SYNC_TOKEN:-}" ]; then echo "[bridge] env GITHUB_SYNC_TOKEN: present"; else echo "[bridge] env GITHUB_SYNC_TOKEN: MISSING（检查 pd-secrets@main/cnb-github-bridge.yml 的 key 名与 allow_* 声明）"; fi
+            if [ -n "${GITHUB_SYNC_USERNAME:-}" ]; then echo "[bridge] env GITHUB_SYNC_USERNAME: present"; else echo "[bridge] env GITHUB_SYNC_USERNAME: MISSING"; fi
             BRANCH="sync/cnb-delivery/${CNB_COMMIT_SHORT}"
             git branch "$BRANCH" HEAD
             echo "[bridge] 本地分支已建：$BRANCH @ $(git rev-parse HEAD)"
