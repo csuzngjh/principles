@@ -85,12 +85,13 @@ describe('recordPainSignalObservability', () => {
         reason: 'manual pain diagnosis',
       });
 
-      // ensureTrajectorySchema now creates ALL trajectory tables (including
-      // evolution_tasks) for schema consistency. The legacy evolution_tasks queue
-      // is "disabled" in the sense that no rows are written to it — not that the
-      // table doesn't exist.
-      const evolutionTaskRows = db.prepare('SELECT COUNT(*) as count FROM evolution_tasks').get() as { count: number };
-      expect(evolutionTaskRows.count).toBe(0);
+      // PRI-770: the mirrored evolution_tasks/evolution_events tables are no
+      // longer created by ensureTrajectorySchema — their writer path was
+      // retired with the evolution worker (PRI-737).
+      const legacyTables = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('evolution_tasks','evolution_events')"
+      ).all();
+      expect(legacyTables).toHaveLength(0);
     } finally {
       db.close();
     }

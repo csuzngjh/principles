@@ -76,19 +76,6 @@ describe('trajectory writer→reader path alignment (PRI-753)', () => {
         toolName: 'edit_file',
         outcome: 'success',
       });
-
-      db.recordEvolutionTask({
-        taskId: 'task-roundtrip-001',
-        traceId: 'trace-roundtrip-001',
-        source: 'pain_signal',
-        reason: 'High pain detected',
-        score: 90,
-        status: 'pending',
-        // V2 fields: the core reader unions must accept every value the
-        // writer can produce (PRI-753 review).
-        taskKind: 'pain_diagnosis',
-        priority: 'medium',
-      });
     });
 
     const samples = listCorrectionSamples(workspaceDir);
@@ -100,6 +87,34 @@ describe('trajectory writer→reader path alignment (PRI-753)', () => {
     expect(reviewed.reviewStatus).toBe('approved');
     expect(listCorrectionSamples(workspaceDir, 'approved')).toHaveLength(1);
     expect(listCorrectionSamples(workspaceDir, 'pending')).toHaveLength(0);
+
+    // PRI-770: fresh workspaces no longer create the evolution tables — the
+    // core readers degrade to empty results instead of throwing.
+    expect(listEvolutionTasks(workspaceDir)).toEqual([]);
+    expect(getEvolutionTask(workspaceDir, 'task-roundtrip-001')).toBeNull();
+
+    // Historical workspaces keep their tables and rows. Simulate one by
+    // creating the legacy table directly (single-line DDL mirrors
+    // trajectory.test.ts fixtures), then verify the core readers still serve
+    // it — the write path itself was retired with the evolution worker.
+    const raw = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      raw.exec(`CREATE TABLE evolution_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT UNIQUE NOT NULL, trace_id TEXT NOT NULL, source TEXT NOT NULL, reason TEXT, score INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', enqueued_at TEXT, started_at TEXT, completed_at TEXT, resolution TEXT, task_kind TEXT, priority TEXT, retry_count INTEGER, max_retries INTEGER, last_error TEXT, result_ref TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+      raw.prepare(`INSERT INTO evolution_tasks (task_id, trace_id, source, reason, score, status, created_at, updated_at, task_kind, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        'task-roundtrip-001',
+        'trace-roundtrip-001',
+        'pain_signal',
+        'High pain detected',
+        90,
+        'pending',
+        '2026-09-12T00:00:00.000Z',
+        '2026-09-12T00:00:00.000Z',
+        'pain_diagnosis',
+        'medium',
+      );
+    } finally {
+      raw.close();
+    }
 
     const tasks = listEvolutionTasks(workspaceDir);
     expect(tasks).toHaveLength(1);

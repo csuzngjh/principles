@@ -543,7 +543,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
-  - 2026-09-12 PRI-752 / PR #1621+#1623 review, 7 findings one root cause (caught pre-merge): retirement declared complete without enumerating readers of the changed surface — config merge functions let a stored legacy `category: quiet` override the new `gone` tombstone in `pd runtime features`/effective config; a docs "run all tests" loop still invoked a deleted scenario; an Active architecture tree still inventoried deleted CLI files; a census count drifted; and a read-only CLI whose retention an audit had explicitly deferred to a separate Owner decision was deleted ahead of it (restored). Rule: a write-side change (registry value, deletion, rename) does not propagate itself — grep ALL read/display sites of the changed field plus every doc/test/inventory reference before claiming "synced/retired"; audit-deferred surfaces stay out of delete scope until the decision lands. (Census count-drift facet = second instance of baseline-inventory-edit-updates-sibling-count-guard, 2026-09-11; the read-enumeration rule generalizes it.)
+  - 2026-09-13 PRI-770 / PR #1645 CodeRabbit review round 1: deleting the evolution_tasks V2 column migration with its zero-call writers ignored a THIRD data state the migration protected — a pre-V2 historical table missing the six nullable columns makes readers' SELECT throw "no such column". Rule: when deleting a migration/backfill/compat layer, enumerate the HISTORICAL STATES it normalized (not just the call graph) and fixture-test the OLDEST supported state — the layer's existence signals data it keeps readable.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-13",
+    "pattern": "EP-02",
+    "invariant": "deleted-compat-layer-preserves-protected-historical-states",
+    "severity": "P1",
+    "escaped": "none",
+    "caughtBy": "pr-review",
+    "guard": "pre-V2 fixture regression test"
+  }
+  -->
+  - 2026-09-12 PRI-752 / PR #1621+#1623 review, 7 findings, one root cause (pre-merge): retirement declared complete without enumerating readers of the changed surface — config merge let a stored legacy `category: quiet` override the new `gone` tombstone; a docs "run all tests" loop still invoked a deleted scenario; an architecture tree still inventoried deleted CLI files; a census count drifted; and a read-only CLI whose retention an audit deferred to Owner decision was deleted ahead of it (restored). Rule: a write-side change (registry value, deletion, rename) does not propagate itself — grep ALL read/display sites of the changed field plus every doc/test/inventory reference before claiming "synced/retired"; audit-deferred surfaces stay out of delete scope until the decision lands.
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
@@ -556,7 +568,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   }
   -->
   - 2026-09-09 PR #1574 review: finish metadata added to evidencePack + `output_extraction_failed` but sibling terminal `output_repair_exhausted` kept the old payload — grep ALL emission sites of a mirrored failure payload and assert the full field set on EACH surface.
-  - 2026-09-12 PRI-755 / PR #1638 review, 5 findings one root cause (caught pre-merge): a NEW validation+warn mechanism inside an existing helper was verified only by direct-helper tests — production registration never passed the logger (every rc-9 warn was an optional-chain no-op), the fallback consumer keyed the session differently than the producer tracked, the producer skipped empty rounds so validation consumed a stale set, warns fired on healthy no-marker traffic, and untrusted marker ids went unescaped into logs. Rule: a NEW auxiliary mechanism in an existing pipeline must be evidence-verified on its OWN integration surfaces — production registration passes every dep it consumes; producer write cadence covers every cycle INCLUDING empty; producer/consumer resolve the identity identically; degradation signals fire only on actual degraded events; untrusted values are single-line-escaped before log interpolation — one wiring-level test each through the production call shape.
+  - 2026-09-12 PRI-755 / PR #1638 review, 5 findings, one root cause (pre-merge): a NEW validation+warn mechanism in an existing helper was verified only by direct-helper tests — production registration never passed the logger (rc-9 warns were no-ops), consumer/producer keyed sessions differently, empty rounds fed validation a stale set, warns fired on healthy traffic, untrusted ids unescaped into logs. Rule: a NEW auxiliary mechanism in an existing pipeline is evidence-verified on its OWN integration surfaces — every consumed dep actually passed; write cadence covers empty cycles; producer/consumer identity resolves identically; degradation fires only on degraded events; untrusted values escaped before log interpolation — one wiring-level test each through the production call shape.
   - 2026-08-31 PRI-631 / PR #1462: optional Evaluator V2 shape bypassed the canonical Artificer validator — route every accepted shape through the hard gate + shape regression.
   - 2026-08-26 PRI-606: axiom builders tested in isolation, never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
   - 2026-09-08 PR #1551 R2: fresh-derived disposition not persisted with completion intent; resume re-derived and drifted — persist the disposition before effects; resume replays it.
@@ -567,7 +579,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   - 2026-06-19 PRI-408 / PR#972: `activateArtifact()` accepted `rolloutDecision='approved'` without verifying the approval record — require `approvalId` + independent verification.
 
 ---
-  - 2026-09-08 PRI-705 / PR #1551 review round: `partitionV2OutOfScopeFailures` shipped with direct-call unit tests (hand-built `requiresContextVersion: undefined`), but the production resolver `resolveRequiresContextVersion` collapsed "key absent on a PARSED artifact" (deterministically v1 — the classifier's entire target population) into the same `null` as "unresolvable", so the out-of-scope routing could never fire in production. Fixed with a three-state resolver (literal 2 / `undefined` = resolved-v1 / `null` = unresolvable) extracted as a pure function + a WIRING-level regression test that enters through the real artifact `contentJson` shape. Lesson: when a pure classifier sits behind a production resolver, "absent on valid input" and "input unresolvable" are different states — collapsing them creates dead branches direct-call tests cannot catch; always add one test driving the resolver→classifier composition with the production input shape.
+  - 2026-09-08 PRI-705 / PR #1551 review round: `partitionV2OutOfScopeFailures` had direct-call tests (hand-built `requiresContextVersion: undefined`), but the production resolver `resolveRequiresContextVersion` collapsed "key absent on a PARSED artifact" (deterministically v1 — the classifier's entire target population) into the same `null` as "unresolvable", so out-of-scope routing could never fire in production. Three-state resolver + WIRING-level regression through the real `contentJson` shape. Lesson: "absent on valid input" and "input unresolvable" are different states — collapsing them creates dead branches direct-call tests cannot catch; add one resolver→classifier composition test with the production input shape.
 
 ---
 
@@ -724,9 +736,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 120 |
-| Last updated | 2026-09-12 |
+| Last updated | 2026-09-13 |
 | Top category | Schema & Type |
-| Recurring errors | 63 |
+| Recurring errors | 64 |
 
 ---
 **[ERR-040]** | Published artifact missing components that source-tree tests assume exist

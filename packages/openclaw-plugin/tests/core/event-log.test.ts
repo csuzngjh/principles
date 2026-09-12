@@ -174,29 +174,9 @@ describe('EventLog', () => {
   });
 
   describe('Evolution and rule stats', () => {
-    it('should count evolution_task enqueued events', () => {
-      eventLog.recordEvolutionTask({ taskId: 't1', taskType: 'pain_diagnosis', reason: 'test' });
-      eventLog.recordEvolutionTask({ taskId: 't2', taskType: 'pain_diagnosis', reason: 'test' });
-
-      const today = new Date().toISOString().slice(0, 10);
-      const stats = eventLog.getDailyStats(today);
-
-      expect(stats.evolution.tasksEnqueued).toBe(2);
-      expect(stats.evolution.tasksCompleted).toBe(0);
-    });
-
-    it('should count evolution_task completed events', () => {
-      // First enqueue
-      eventLog.recordEvolutionTask({ taskId: 't1', taskType: 'pain_diagnosis', reason: 'test' });
-      // Then complete
-      eventLog.recordEvolutionTaskCompleted({ taskId: 't1', taskType: 'pain_diagnosis', reason: 'test' });
-
-      const today = new Date().toISOString().slice(0, 10);
-      const stats = eventLog.getDailyStats(today);
-
-      expect(stats.evolution.tasksEnqueued).toBe(1);
-      expect(stats.evolution.tasksCompleted).toBe(1);
-    });
+    // evolution_task enqueue/complete stats tests removed (PRI-770):
+    // recordEvolutionTask / recordEvolutionTaskCompleted wrappers deleted with
+    // the retired evolution worker queue.
 
     // rule_match stats test removed (PRI-451 Wave 1): recordRuleMatch is dead
     // code, deleted alongside this test. rulesMatched counter goes in Wave 1.5.

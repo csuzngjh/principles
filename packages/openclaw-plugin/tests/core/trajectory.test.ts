@@ -682,6 +682,52 @@ describe('TrajectoryDatabase', () => {
       expect(calls[0].resultPreview).toBe('migrated preview');
       db.dispose();
     });
+
+    it('backfills V2 columns on a pre-V2 evolution_tasks table so historical rows stay readable (PRI-770)', () => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+
+      // Simulate a historical workspace whose evolution_tasks predates the V2
+      // schema (no task_kind/priority/retry_count/max_retries/last_error/result_ref).
+      const Database = require('better-sqlite3');
+      const stateDir = path.join(workspaceDir, '.state');
+      fs.mkdirSync(stateDir, { recursive: true });
+      fs.mkdirSync(path.join(stateDir, 'blobs'), { recursive: true });
+      fs.mkdirSync(path.join(stateDir, 'exports'), { recursive: true });
+      const rawDb = new Database(path.join(stateDir, 'trajectory.db'));
+      rawDb.exec('CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (1);');
+      rawDb.exec(`CREATE TABLE evolution_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT UNIQUE NOT NULL, trace_id TEXT NOT NULL, source TEXT NOT NULL, reason TEXT, score INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', enqueued_at TEXT, started_at TEXT, completed_at TEXT, resolution TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+      rawDb.prepare(`INSERT INTO evolution_tasks (task_id, trace_id, source, reason, score, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        'task-legacy-001',
+        'trace-legacy-001',
+        'pain_signal',
+        'legacy pain',
+        42,
+        'completed',
+        '2026-06-01T00:00:00.000Z',
+        '2026-06-01T00:00:00.000Z',
+      );
+      rawDb.close();
+
+      // Opening the database must backfill the nullable V2 columns (table
+      // exists → migrate columns; fresh workspaces still get no table), so
+      // the reader SELECT serves the historical row instead of throwing.
+      const db = new TrajectoryDatabase({ workspaceDir });
+      const tasks = db.listEvolutionTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].taskId).toBe('task-legacy-001');
+      expect(tasks[0].score).toBe(42);
+      expect(tasks[0].status).toBe('completed');
+      expect(tasks[0].taskKind).toBeNull();
+      expect(tasks[0].retryCount).toBeNull();
+
+      // The historical table survives with the V2 columns backfilled.
+      const rawCheck = new Database(path.join(stateDir, 'trajectory.db'));
+      const colNames = (rawCheck.prepare('PRAGMA table_info(evolution_tasks)').all() as { name: string }[]).map((c) => c.name);
+      rawCheck.close();
+      expect(colNames).toContain('task_kind');
+      expect(colNames).toContain('result_ref');
+      db.dispose();
+    });
   });
 
   // ── PRI-482 Phase 3: getRuleHostContextRows ──────────────────────────────

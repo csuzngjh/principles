@@ -20,10 +20,9 @@ import {
 
 export { TrajectoryDbUnavailableError } from './trajectory-store.js';
 
-// Must mirror the writer contract in openclaw-plugin trajectory-types.ts
-// (TrajectoryDatabase.recordEvolutionTask): these are passthrough casts of
-// writer-produced values, so a stale union types values the writer can emit
-// but TypeScript claims are impossible.
+// Historical value unions for the evolution_tasks table (PRI-770: the writer
+// TrajectoryDatabase.recordEvolutionTask was retired with the evolution
+// worker; these types now describe rows in historical workspaces only).
 export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval' | 'keyword_optimization';
 export type TaskPriority = 'high' | 'medium' | 'low';
 
@@ -65,6 +64,24 @@ export interface EvolutionTaskFilters {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * PRI-770: fresh workspaces no longer create the evolution tables (their
+ * writer path was retired with the evolution worker in PRI-737), while
+ * historical workspaces keep theirs. A missing table degrades to "no
+ * historical rows" (empty results) instead of a query failure — an expected,
+ * observable state for new workspaces, distinct from the fail-loud
+ * "database missing" contract of {@link TrajectoryDbUnavailableError}.
+ */
+function evolutionTableMissing(
+  db: ReturnType<typeof openTrajectoryDbReadonly>,
+  table: 'evolution_tasks' | 'evolution_events',
+): boolean {
+  const row = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
+  ).get(table) as { name?: unknown } | undefined;
+  return !row || typeof row.name !== 'string';
+}
+
 // ---------------------------------------------------------------------------
 // Core functions
 // ---------------------------------------------------------------------------
@@ -75,7 +92,8 @@ export interface EvolutionTaskFilters {
  * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)
  * @param filters - Optional filters (status, dateFrom, dateTo, limit, offset)
  * @returns Array of EvolutionTaskRecord; empty array means the database
- *          exists and has no matching rows
+ *          exists and has no matching rows, OR the evolution tables are
+ *          absent (fresh workspace created after PRI-770)
  * @throws TrajectoryDbUnavailableError if the database does not exist or
  *         cannot be opened — never silently treated as "no tasks"
  */
@@ -87,6 +105,7 @@ export function listEvolutionTasks(
   const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   try {
+    if (evolutionTableMissing(db, 'evolution_tasks')) return [];
     const conditions: string[] = [];
     const values: unknown[] = [];
 
@@ -151,7 +170,8 @@ export function listEvolutionTasks(
  * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)
  * @param idOrTaskId - Numeric id or string taskId
  * @returns EvolutionTaskRecord, or null when the database exists and the task
- *          is not found
+ *          is not found, or when the evolution tables are absent (fresh
+ *          workspace created after PRI-770)
  * @throws TrajectoryDbUnavailableError if the database does not exist or
  *         cannot be opened — never silently treated as "not found"
  */
@@ -163,6 +183,7 @@ export function getEvolutionTask(
   const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   try {
+    if (evolutionTableMissing(db, 'evolution_tasks')) return null;
     const isNumeric = typeof idOrTaskId === 'number';
     const whereClause = isNumeric ? 'WHERE id = ?' : 'WHERE task_id = ?';
     const param = isNumeric ? idOrTaskId : String(idOrTaskId);

@@ -94,7 +94,6 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/pi-artifact-store.ts',
   // PRI-115
   'golden-trace-replay-validator.ts',
-  'golden-trace-replay-adapter.ts',
   // PRI-172
   'internalization/refiner-sandbox-wrapper.ts',
   // PRI-173
@@ -106,14 +105,13 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/v2-adversarial-cases.ts',
   'internalization/artificer-prompt-builder.ts',
   'adversarial-loop.ts',
-  // Phase 2 migration: evolution types
+  // Phase 2 migration: evolution types (PRI-770 narrowed: dead Points/Tier
+  // surface and the evolution/index.ts barrel removed; live loop types stay)
   'evolution/evolution-types.ts',
-  'evolution/index.ts',
   // Phase 2 migration: correction types
   'correction/correction-types.ts',
   'correction/index.ts',
-  // Phase 2 migration: types directory
-  'types/queue-types.ts',
+  // Phase 2 migration: types directory (PRI-770: dead queue-types.ts removed)
   'types/hygiene-types.ts',
   'types/event-types.ts',
   'types/event-payload.ts',
@@ -144,12 +142,9 @@ const REQUIRED_SOURCE_FILES = [
   'store/trajectory/sqlite-source-trace-locator.ts',
   // PRI-190
   'full-trace-contract.ts',
-  // PRI-191
-  'trace-refiner.ts',
-  // PRI-192
-  'trace-refiner-agent.ts',
-  // PRI-193
-  'golden-trace-candidate-builder.ts',
+  // PRI-191/192/193 modules removed (PRI-770): trace-refiner(.agent) and
+  // golden-trace-candidate-builder had zero production consumers; the replay
+  // validator above stays (principle-compiler consumes it).
   // PRI-149 Tier 2
   'recovery-sweep-service.ts',
   // PRI-146
@@ -535,12 +530,7 @@ const REQUIRED_TEST_FILES = [
   '../activation/__tests__/sqlite-approval-store.test.ts',
   // PRI-190
   'full-trace-contract.test.ts',
-  // PRI-191
-  'trace-refiner.test.ts',
-  // PRI-192
-  'trace-refiner-agent.test.ts',
-  // PRI-193
-  'golden-trace-candidate-builder.test.ts',
+  // PRI-191/192/193 test files removed with their modules (PRI-770)
   // PRI-173
   '../internalization/__tests__/refiner-rulehost-gate.test.ts',
   // PRI-146
@@ -2605,7 +2595,6 @@ describe('PRI-117 Nocturnal god-class freeze', () => {
 describe('Phase 2.1 evolution types migration', () => {
   const CORE_FILES = [
     'evolution/evolution-types.ts',
-    'evolution/index.ts',
   ];
 
   for (const file of CORE_FILES) {
@@ -2619,15 +2608,14 @@ describe('Phase 2.1 evolution types migration', () => {
     });
   }
 
-  it('core barrel exports EvolutionTier, TIER_DEFINITIONS, getTierDefinition, getTierByPoints', async () => {
+  it('core barrel does NOT export the retired Evolution Points/Tier surface (PRI-770)', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('EvolutionTier');
-    expect(src).toContain('TIER_DEFINITIONS');
-    expect(src).toContain('getTierDefinition');
-    expect(src).toContain('getTierByPoints');
-    expect(src).toContain("from './evolution/evolution-types.js'");
+    expect(src).not.toContain('EvolutionTier');
+    expect(src).not.toContain('TIER_DEFINITIONS');
+    expect(src).not.toContain('getTierDefinition');
+    expect(src).not.toContain('getTierByPoints');
   });
 
   it('core barrel exports EvolutionPrinciple, EvolutionPrincipleStatus, EvolutionPainDetectedData', async () => {
@@ -2646,21 +2634,11 @@ describe('Phase 2.1 evolution types migration', () => {
       __dirname, '../../../../openclaw-plugin/src/core/evolution-types.ts'
     ), 'utf-8');
     expect(src).toContain("from '@principles/core/runtime-v2'");
-    expect(src).toContain('EvolutionTier');
+    expect(src).not.toContain('EvolutionTier');
     expect(src).toContain('EvolutionPrinciple');
     expect(src).toContain('type Principle = EvolutionPrinciple');
     expect(src).toContain('type PrincipleStatus = EvolutionPrincipleStatus');
     expect(src).toContain('type PainDetectedData = EvolutionPainDetectedData');
-  });
-
-  it('plugin evolution-types.ts does NOT define EvolutionTier or TIER_DEFINITIONS locally', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/evolution-types.ts'
-    ), 'utf-8');
-    expect(src).not.toMatch(/^export enum EvolutionTier/m);
-    expect(src).not.toMatch(/^export const TIER_DEFINITIONS/m);
   });
 });
 
@@ -2718,7 +2696,6 @@ describe('Phase 2.2 correction types migration', () => {
 
 describe('Phase 2.4 types directory migration', () => {
   const CORE_TYPE_FILES = [
-    'types/queue-types.ts',
     'types/hygiene-types.ts',
     'types/event-types.ts',
     'types/event-payload.ts',
@@ -2735,14 +2712,13 @@ describe('Phase 2.4 types directory migration', () => {
     });
   }
 
-  it('core barrel exports QueueItemId, WorkflowId, SessionKey brand types', async () => {
+  it('core barrel does NOT export the retired queue brand types (PRI-770)', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('QueueItemId');
-    expect(src).toContain('WorkflowId');
-    expect(src).toContain('SessionKey');
-    expect(src).toContain("from './types/queue-types.js'");
+    expect(src).not.toContain('QueueItemId');
+    expect(src).not.toContain('WorkflowId');
+    expect(src).not.toContain("from './types/queue-types.js'");
   });
 
   it('core barrel exports HygieneStats, createEmptyHygieneStats', async () => {
@@ -2771,15 +2747,6 @@ describe('Phase 2.4 types directory migration', () => {
     expect(src).toContain('DiscriminatedEventLogEntry');
     expect(src).toContain('isToolCallEventEntry');
     expect(src).toContain("from './types/event-payload.js'");
-  });
-
-  it('plugin types/queue.ts re-exports from core', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/types/queue.ts'
-    ), 'utf-8');
-    expect(src).toContain("@principles/core/runtime-v2");
   });
 
   it('plugin types/hygiene-types.ts re-exports from core', async () => {
@@ -3160,104 +3127,8 @@ describe('PRI-190 FullTrace quality contract boundary', () => {
   });
 });
 
-describe('PRI-191 TraceRefiner read model boundary', () => {
-  it('trace-refiner.ts has zero infrastructure imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner.ts'), 'utf-8');
-    expect(src).not.toContain('node:fs');
-    expect(src).not.toContain('node:path');
-    expect(src).not.toContain('node:process');
-    expect(src).not.toContain('openclaw-plugin');
-  });
-
-  it('trace-refiner.ts has no LLM or network imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner.ts'), 'utf-8');
-    expect(src).not.toContain('node:http');
-    expect(src).not.toContain('node:https');
-    expect(src).not.toContain('node:net');
-    expect(src).not.toContain('fetch(');
-    expect(src).not.toContain('openai');
-    expect(src).not.toContain('anthropic');
-  });
-
-  it('core barrel exports refineFullTrace and RefinedTracePayload', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('refineFullTrace');
-    expect(src).toContain('RefinedTracePayload');
-    expect(src).toContain('RefinedTraceEvent');
-    expect(src).toContain('TraceRefinerOptions');
-    expect(src).toContain('REFINED_EVENT_KINDS');
-    expect(src).toContain('SEVERITY_LEVELS');
-  });
-
-  it('trace-refiner.ts imports only from full-trace-contract', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner.ts'), 'utf-8');
-    const importLines = src.split('\n').filter((line) => line.trim().startsWith('import'));
-    for (const line of importLines) {
-      expect(line).toContain('full-trace-contract');
-    }
-  });
-});
-
-describe('PRI-192 TraceRefinerAgent shadow contract boundary', () => {
-  it('trace-refiner-agent.ts has zero infrastructure imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner-agent.ts'), 'utf-8');
-    expect(src).not.toContain('node:fs');
-    expect(src).not.toContain('node:path');
-    expect(src).not.toContain('node:process');
-    expect(src).not.toContain('openclaw-plugin');
-  });
-
-  it('trace-refiner-agent.ts has no LLM or network imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner-agent.ts'), 'utf-8');
-    expect(src).not.toContain('node:http');
-    expect(src).not.toContain('node:https');
-    expect(src).not.toContain('node:net');
-    expect(src).not.toContain('fetch(');
-    expect(src).not.toContain('openai');
-    expect(src).not.toContain('anthropic');
-  });
-
-  it('core barrel exports TraceRefinerAgent types and functions', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('createTraceRefinerAgentInput');
-    expect(src).toContain('validateTraceRefinerAgentOutput');
-    expect(src).toContain('applyTraceRefinerAgentShadowResult');
-    expect(src).toContain('TraceRefinerAgentInput');
-    expect(src).toContain('TraceRefinerAgentOutput');
-    expect(src).toContain('TraceRefinerAgentObjective');
-    expect(src).toContain('TraceRefinerAgentMode');
-    expect(src).toContain('TraceRefinerEvidenceClaim');
-    expect(src).toContain('TraceRefinerRejectedEvidence');
-    expect(src).toContain('TraceRefinerAgentStatus');
-  });
-
-  it('trace-refiner-agent.ts imports only from full-trace-contract and trace-refiner', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner-agent.ts'), 'utf-8');
-    const importLines = src.split('\n').filter((line) => line.trim().startsWith('import'));
-    const allowedModules = ["'./full-trace-contract", "'./trace-refiner"];
-    for (const line of importLines) {
-      expect(
-        allowedModules.some((mod) => line.includes(mod))
-      ).toBe(true);
-    }
-  });
-});
+// PRI-191 TraceRefiner / PRI-192 TraceRefinerAgent boundary describes removed
+// (PRI-770): both modules had zero production consumers and were deleted.
 
 // ── PRI-215: Synthetic baseline architecture boundary ──────────────────────
 //

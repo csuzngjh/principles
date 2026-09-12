@@ -597,36 +597,6 @@ validate_custom() {
             return 0
             ;;
 
-        evolution_queue_verification)
-            local min_entries=$(echo "$params" | jq -r '.min_entries // 1')
-            local expected_status=$(echo "$params" | jq -r '.expected_status // "any"')
-            local queue_path="$WORKSPACE_DIR/.state/evolution_queue.json"
-
-            if [ ! -f "$queue_path" ]; then
-                log_error "Evolution queue not found"
-                return 1
-            fi
-
-            local queue_count=$(cat "$queue_path" | jq '. | length')
-
-            if [ "$queue_count" -lt "$min_entries" ]; then
-                log_error "Queue too short: expected ≥$min_entries, got $queue_count"
-                return 1
-            fi
-
-            if [ "$expected_status" != "any" ]; then
-                local match=$(cat "$queue_path" | jq "[.[] | select(.status == \"$expected_status\")] | length")
-                if [ "$match" -eq 0 ]; then
-                    log_error "No entries with status: $expected_status"
-                    return 1
-                fi
-            fi
-
-            log_success "✓ Evolution queue verified"
-            log_info "  Entries: $queue_count"
-            return 0
-            ;;
-
         evolution_priority_verification)
             local directive_path="$WORKSPACE_DIR/.state/evolution_directive.json"
 

@@ -253,7 +253,7 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
       tables: ['schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
         'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
         'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
-        'exports_audit', 'evolution_tasks', 'evolution_events'],
+        'exports_audit'],
       status: 'skipped',
       warnings: [],
     });
