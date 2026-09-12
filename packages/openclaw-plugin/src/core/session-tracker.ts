@@ -431,9 +431,16 @@ export function setInjectedProbationIds(sessionId: string, ids: string[], worksp
     return state;
 }
 
-/** PRI-534: record the principle ids injected into this session's prompt context. */
+/**
+ * PRI-534: record the principle ids injected into this session's prompt context.
+ * PRI-755 (review fix): call this on EVERY prompt build with the CURRENT set —
+ * including an empty one. An empty array is a known-empty round and overwrites
+ * a stale non-empty set from an earlier turn; the self-report capture validates
+ * against this set, so keeping a stale set would re-admit markers for
+ * principles no longer injected.
+ */
 export function setInjectedPrincipleIds(sessionId: string | undefined, ids: readonly string[], workspaceDir?: string): void {
-    if (!sessionId || ids.length === 0) return;
+    if (!sessionId) return;
     const state = getOrCreateSession(sessionId, workspaceDir);
     state.injectedPrincipleIds = [...ids];
     touchActivity(state, 'control');
@@ -452,6 +459,18 @@ export function trackReceiptAutoCorrect(sessionId: string | undefined, workspace
 export function getInjectedProbationIds(sessionId: string, workspaceDir?: string): string[] {
     const state = getOrCreateSession(sessionId, workspaceDir);
     return [...(state.injectedProbationIds || [])];
+}
+
+/**
+ * PRI-755: read-only view of the principle ids injected into this session's
+ * prompt context. Tri-state: an array (possibly empty) means the injection set
+ * is KNOWN; undefined means UNKNOWN (session never built a prompt in this
+ * process, tracker restarted, or session expired). Receipt capture may only
+ * treat verified membership as evidence — unknown must not imply empty.
+ */
+export function getInjectedPrincipleIds(sessionId: string): readonly string[] | undefined {
+    const state = getSession(sessionId);
+    return state?.injectedPrincipleIds ? [...state.injectedPrincipleIds] : undefined;
 }
 
 export function clearInjectedProbationIds(sessionId: string, workspaceDir?: string): SessionState {

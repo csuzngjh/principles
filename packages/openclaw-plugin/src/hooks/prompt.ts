@@ -679,8 +679,12 @@ export async function handleBeforePromptBuild(
 
     // PRI-534: track injected principle ids for the /pd-context session
     // receipt (independent of the ledger flag — the injection itself happened).
+    // PRI-755 (review fix): record the CURRENT set on EVERY build, empty
+    // included — the self-report capture validates against this set, so a
+    // stale non-empty set from an earlier turn would re-admit markers for
+    // principles no longer injected this turn.
     try {
-      if (runtimeV2PrincipleIds.size > 0 && sessionId) {
+      if (sessionId) {
         setInjectedPrincipleIds(sessionId, [...runtimeV2PrincipleIds], workspaceDir);
       }
     } catch (sessionErr) {
