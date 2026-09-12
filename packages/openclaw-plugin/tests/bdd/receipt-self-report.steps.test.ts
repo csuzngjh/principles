@@ -18,6 +18,7 @@ import {
   recordSelfReportFromText,
   clearPrincipleApplicationLedgerCache,
 } from '../../src/core/principle-application-ledger.js';
+import { setInjectedPrincipleIds, clearSession } from '../../src/core/session-tracker.js';
 import { createStepRegistry, defineFeature } from '../../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../../principles-core/tests/bdd/support/repo-root.js';
 
@@ -26,10 +27,18 @@ const registry = createStepRegistry();
 let workspaceDir = '';
 let readerConn: SqliteConnection | undefined;
 let rendered = '';
+let captureWarnings: string[] = [];
 
 const PRINCIPLES = [
   { principleId: 'princ-A', text: '修改前先调查相关上下文', artifactId: 'art-A', activationId: 'act-A' },
 ];
+
+/** Every session id seeded or captured against in this feature — cleared in afterEach. */
+const TRACKED_SESSIONS = ['sess-sr', 'sess-dup', 'sess-bad', 'sess-off', 'sess-fresh'];
+
+function captureLogger(): { warn?: (m: string) => void } {
+  return { warn: (m: string) => captureWarnings.push(m) };
+}
 
 function writeConfig(enabled: boolean): void {
   const cfg = getDefaultPdConfig() as unknown as {
@@ -52,6 +61,12 @@ let selfReportEnabled = false;
 registry.given(/principle_receipt_self_report (已|未)启用/, (_m: string, state: string) => {
   selfReportEnabled = state === '已';
   writeConfig(selfReportEnabled);
+});
+
+registry.given(/会话 (sess-[\w-]+) 已注入原则 (princ-[\w-]+)/, (_m: string, sessionId: string, principleId: string) => {
+  // PRI-755: what production prompt.ts:684 does per prompt build — track the
+  // injected v2 principle ids the capture side validates against.
+  setInjectedPrincipleIds(sessionId, [principleId], workspaceDir);
 });
 
 registry.when(/渲染原则指令块/, () => {
@@ -93,8 +108,37 @@ registry.when(/assistant 回复包含「📌 应用了你的原则「princ-A」�
     workspaceDir,
     '我先查了相关模块的调用方。\n📌 应用了你的原则「princ-A」：先读文档再动手',
     'sess-sr',
+    captureLogger(),
   );
   expect(written).toBe(1);
+});
+
+registry.when(/assistant 回复包含「📌 应用了你的原则「princ-B」：自称用了别的原则」（会话 sess-sr）/, () => {
+  // PRI-755: princ-B was never injected into sess-sr — unverified claim.
+  const written = recordSelfReportFromText(
+    workspaceDir,
+    '📌 应用了你的原则「princ-B」：自称用了别的原则',
+    'sess-sr',
+    captureLogger(),
+  );
+  expect(written).toBe(0);
+});
+
+registry.when(/assistant 回复包含「📌 应用了你的原则「princ-A」：先读文档再动手」（会话 sess-fresh）/, () => {
+  // PRI-755: sess-fresh never went through prompt-build tracking in this
+  // process — membership cannot be proven, so nothing is recorded.
+  const written = recordSelfReportFromText(
+    workspaceDir,
+    '📌 应用了你的原则「princ-A」：先读文档再动手',
+    'sess-fresh',
+    captureLogger(),
+  );
+  expect(written).toBe(0);
+});
+
+registry.then(/捕获侧发出未验证告警/, () => {
+  expect(captureWarnings.length).toBeGreaterThan(0);
+  expect(captureWarnings.some((m) => m.includes('PRI-755'))).toBe(true);
 });
 
 registry.when(/assistant 回复包含「📌 应用了你的原则「princ-A」：先读文档再动手」（会话 sess-off）/, () => {
@@ -149,12 +193,14 @@ beforeEach(() => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-selfreport-bdd-'));
   readerConn = new SqliteConnection({ workspaceDir, readonly: true });
   rendered = '';
+  captureWarnings = [];
 });
 
 afterEach(() => {
   readerConn?.close();
   readerConn = undefined;
   clearPrincipleApplicationLedgerCache();
+  for (const sessionId of TRACKED_SESSIONS) clearSession(sessionId);
   fs.rmSync(workspaceDir, { recursive: true, force: true });
 });
 

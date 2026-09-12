@@ -11,6 +11,8 @@ import {
     resetFriction,
     initPersistence,
     trackBlock,
+    setInjectedPrincipleIds,
+    getInjectedPrincipleIds,
 } from '../../src/core/session-tracker.js';
 
 describe('Session Tracker', () => {
@@ -188,4 +190,19 @@ describe('Session Tracker', () => {
     // recordThinkingCheckpoint/hasRecentThinking tests were removed together
     // with the API — the retired recentThinking rule input had no remaining
     // consumer after rule-real-diagnosis-first v2 migration.
+
+    it('getInjectedPrincipleIds returns the tracked set and undefined for unknown sessions (PRI-755)', () => {
+        // Unknown session: read-only getter must not create state and must not
+        // imply an empty set — undefined means "cannot prove membership".
+        expect(getSession('sess-pri755')).toBeUndefined();
+        expect(getInjectedPrincipleIds('sess-pri755')).toBeUndefined();
+
+        setInjectedPrincipleIds('sess-pri755', ['T-01', 'T-02']);
+        const ids = getInjectedPrincipleIds('sess-pri755');
+        expect(ids).toEqual(['T-01', 'T-02']);
+
+        // Returned array is a copy — mutating it must not corrupt tracker state.
+        (ids as string[]).push('T-99');
+        expect(getInjectedPrincipleIds('sess-pri755')).toEqual(['T-01', 'T-02']);
+    });
 });

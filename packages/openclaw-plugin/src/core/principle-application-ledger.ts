@@ -16,6 +16,7 @@ import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS } from '@principles/cor
 import Database from 'better-sqlite3';
 import * as nodePath from 'node:path';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
+import { getInjectedPrincipleIds } from './session-tracker.js';
 
 export type PrincipleApplicationLevel = 'effect' | 'presence';
 export type PrincipleApplicationKind =
@@ -222,10 +223,31 @@ export function recordSelfReportFromText(
   if (typeof text !== 'string' || text.length === 0) return 0;
   if (!isSelfReportEnabled(workspaceDir, logger)) return 0;
 
+  // PRI-755: a self-report row is evidence only if the reported id was actually
+  // injected into this session's prompt context (tracked per turn by
+  // session-tracker at prompt build, PRI-534). An untracked session cannot
+  // prove membership — markers are skipped with a structured warn (rc-9),
+  // never written on faith. This bounds the ledger to verified claims: a
+  // hallucinated, echoed, or legacy-block principle id never becomes history.
+  const injectedIds = sessionId ? getInjectedPrincipleIds(sessionId) : undefined;
+  if (!injectedIds) {
+    logger?.warn?.(
+      `[PD:ReceiptLedger] self_report capture skipped: no tracked injection set for session ${sessionId ?? '(none)'} — marker not verifiable (PRI-755)`,
+    );
+    return 0;
+  }
+  const injected = new Set(injectedIds);
+
   let written = 0;
   for (const match of text.matchAll(SELF_REPORT_MARKER)) {
     const principleId = (match[1] ?? '').trim();
     if (principleId.length === 0) continue;
+    if (!injected.has(principleId)) {
+      logger?.warn?.(
+        `[PD:ReceiptLedger] self_report skipped: principle ${principleId} was not injected into session ${sessionId} — unverified claim not recorded (PRI-755)`,
+      );
+      continue;
+    }
     const digest = (match[2] ?? '').trim().slice(0, 200);
     try {
       const db = getConnection(workspaceDir).getDb();

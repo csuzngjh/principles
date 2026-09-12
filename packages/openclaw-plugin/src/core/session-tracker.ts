@@ -454,6 +454,18 @@ export function getInjectedProbationIds(sessionId: string, workspaceDir?: string
     return [...(state.injectedProbationIds || [])];
 }
 
+/**
+ * PRI-755: read-only view of the principle ids injected into this session's
+ * prompt context. Tri-state: an array (possibly empty) means the injection set
+ * is KNOWN; undefined means UNKNOWN (session never built a prompt in this
+ * process, tracker restarted, or session expired). Receipt capture may only
+ * treat verified membership as evidence — unknown must not imply empty.
+ */
+export function getInjectedPrincipleIds(sessionId: string): readonly string[] | undefined {
+    const state = getSession(sessionId);
+    return state?.injectedPrincipleIds ? [...state.injectedPrincipleIds] : undefined;
+}
+
 export function clearInjectedProbationIds(sessionId: string, workspaceDir?: string): SessionState {
     return setInjectedProbationIds(sessionId, [], workspaceDir);
 }
