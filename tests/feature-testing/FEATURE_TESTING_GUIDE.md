@@ -25,9 +25,6 @@
 # 测试Gatekeeper
 ./tests/feature-testing/framework/feature-test-runner.sh gatekeeper
 
-# 测试Evolution Worker
-./tests/feature-testing/framework/feature-test-runner.sh evolution-worker
-
 # 测试Thinking OS
 ./tests/feature-testing/framework/feature-test-runner.sh thinking-os
 ```
@@ -408,8 +405,9 @@ cat ~/clawd/memory/.state/logs/events.jsonl | tail -10
 |------|----------|----------|
 | **Trust System** | `trust-system.json` | 信任分数计算、阶段转换、奖惩机制 |
 | **Gatekeeper** | `gatekeeper.json` | 阶段限制、行数限制、权限控制 |
-| **Evolution Worker** | `evolution-worker.json` | 痛苦信号检测、队列、调度 |
 | **Thinking OS** | `thinking-os.json` | 元认知层注入、使用跟踪、模型遵循 |
+
+（Evolution Worker 场景已随 worker 退役删除——PRI-737/PRI-752。）
 
 ### 待添加的场景
 

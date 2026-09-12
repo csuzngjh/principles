@@ -89,15 +89,6 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     description: 'Fallback trajectory collection (SQLite) when llm_output is blocked by missing allowConversationAccess (PRI-346)',
   },
   {
-    id: 'service:evolution-worker',
-    kind: 'service',
-    category: 'quiet',
-    enabledByDefault: false,
-    since: '2026-06-01',
-    description: 'Background evolution worker for pain processing (MVP-Quiet per PRI-288/ADR-0014)',
-    disabledReason: 'MVP-Quiet: evolution worker gated behind evolution_worker feature flag (PRI-288); default off per ADR-0014 §2.5',
-  },
-  {
     id: 'service:correction-observer',
     kind: 'service',
     category: 'core',
@@ -137,15 +128,6 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: true,
     since: '2026-05-24',
     description: 'Workspace migration + template setup on first prompt',
-  },
-  {
-    id: 'startup:evolution-worker',
-    kind: 'startup',
-    category: 'quiet',
-    enabledByDefault: false,
-    since: '2026-06-01',
-    description: 'Evolution worker start on first prompt per workspace (MVP-Quiet per PRI-288/ADR-0014)',
-    disabledReason: 'MVP-Quiet: evolution worker startup gated behind evolution_worker feature flag (PRI-288); default off per ADR-0014 §2.5',
   },
   {
     id: 'startup:correction-observer',
