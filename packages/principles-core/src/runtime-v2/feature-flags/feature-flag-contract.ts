@@ -238,7 +238,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'release_manager_write_authority', category: 'quiet', enabled: true, since: '2026-09-06', description: 'PRI-698 Phase 1 — ReleaseManager.apply() serves Console /apply-full (installer + journal deployment); graduated default-on 2026-09-07 (Owner decision) with pre-transaction legacy fallback; flag-off = legacy console updater with explicit release_manager_write_disabled fallback reason' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
   { id: 'evolution_worker', category: 'quiet', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5)' },
-  { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },
+  // `empathy_observer` (2026-06-02) was retired in PRI-751: zero executable
+  // readers. The signal-collector refactor moved empathy detection to
+  // signal-collector-host (unconditional keyword path) and the observer
+  // service never materialized; the Console Control Center manages the
+  // `internalAgents.empathyObserver` agent binding instead (feature-flag-
+  // governance.md §3.2). The '共情观察器' label in pd-console enum-labels is
+  // retained — it doubles as the agent display name for the cost hint.
   // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
   // is now the primary admission gate. Roll back = set painEvidenceAdmissionDefault to false.
   { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate.' },

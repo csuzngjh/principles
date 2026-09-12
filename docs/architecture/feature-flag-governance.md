@@ -43,7 +43,7 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 | **principle_governance_projection_v2** | **ON（毕业）** | pd-console server/routes/principles.ts governance 端点 | ✅ 已毕业 |
 | **artificer_output_retry** | **ON（毕业）** | principles-core artificer-runner.ts permanentErrorCategories（PRI-621，2026-08-29 毕业：与其他 peer runner 的 output_invalid 重试语义对齐） | ✅ 已毕业 |
 | principle_receipt_self_report | OFF | prompt 注入 📝 行 + llm_output/before_message_write 捕获（PRI-532）；installer 与 registry 均保持关闭 | ✅ 实验性，保持默认关 |
-| correction_observer / signal_collector / l2_dreamer / intent_engineering / rulecode_context_v2 / artifact_summary_redundancy / context_manifest_budget / progressive_evaluator / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi / evolution_worker / empathy_observer | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
+| correction_observer / signal_collector / l2_dreamer / intent_engineering / rulecode_context_v2 / artifact_summary_redundancy / context_manifest_budget / progressive_evaluator / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi / evolution_worker | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
 | nocturnal / idle_trigger | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝） | ✅ 正常退役 |
 
 ## 3. 重点案例（本任务结论）
@@ -63,13 +63,15 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 需 Owner 择一：①把评分写入纳入 flag 门控（推荐，恢复 quiet 语义）；②确认评分常开后删除 flag。
 → 已建 follow-up 工单记录。
 
-### 3.2 `empathy_observer` — 注册表/agent binding 双轨
+### 3.2 `empathy_observer` — 注册表/agent binding 双轨（已收敛，PRI-751）
 
-flag（quiet/off，gate 服务启动）与 `internalAgents.empathyObserver.enabled:false`
-（gate runner 绑定）是两层不同的开关：前者控制信号服务，后者控制内部 agent 运行。
-职责不同但命名易混淆。signal_collector 重构后 empathy 检测已迁移至 signal-collector-host
-（empathy_observer 在 prompt.ts 的旧消费点已废弃）。处置：维持现状 + 本文档澄清；
-如 Owner 同意可在后续 MVP-Gone 清理波次中评估合并。
+flag（quiet/off）与 `internalAgents.empathyObserver.enabled`（内部 agent 绑定）原是两层
+开关。signal_collector 重构后 empathy 检测已迁移至 signal-collector-host（flag 在
+prompt.ts 的旧消费点已废弃），观察器服务从未落地——flag 实为零消费者。
+处置已执行（PRI-751）：flag 注册项与 census 条目删除；`internalAgents.empathyObserver`
+agent 绑定不受影响（Control Center 的共情成本提示按 agent 绑定渲染）；pd-console 的
+'共情观察器' 标签保留（兼作 agent 显示名）。存量的 `features.empathy_observer` 配置键
+此后走 unknown-flag 告警。
 
 ### 3.3 installer 默认值快照 — 已按 PRI-645 收敛为 sparse shell
 

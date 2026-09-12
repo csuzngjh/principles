@@ -48,7 +48,7 @@ function makeValidConfigWithObserverEnabled(): string {
       code_tool_hook: { category: 'core', enabled: true },
       defer_archive: { category: 'core', enabled: true },
       correction_observer: { category: 'quiet', enabled: true },
-      empathy_observer: { category: 'quiet', enabled: false },
+      gfi: { category: 'quiet', enabled: false },
     },
     runtimeProfiles: {
       'openclaw.default': { type: 'openclaw', source: 'default' },
@@ -80,7 +80,7 @@ function makeValidConfigWithObserverDisabled(): string {
       code_tool_hook: { category: 'core', enabled: true },
       defer_archive: { category: 'core', enabled: true },
       correction_observer: { category: 'quiet', enabled: false },
-      empathy_observer: { category: 'quiet', enabled: false },
+      gfi: { category: 'quiet', enabled: false },
     },
     runtimeProfiles: {
       'openclaw.default': { type: 'openclaw', source: 'default' },
@@ -158,7 +158,7 @@ describe('Observer needs_setup', () => {
         code_tool_hook: { category: 'core', enabled: true },
         defer_archive: { category: 'core', enabled: true },
         correction_observer: { category: 'quiet', enabled: true },
-        empathy_observer: { category: 'quiet', enabled: false },
+        gfi: { category: 'quiet', enabled: false },
       },
       runtimeProfiles: {
         'openclaw.default': { type: 'openclaw', source: 'default' },
@@ -219,7 +219,7 @@ describe('Observer ready', () => {
         code_tool_hook: { category: 'core', enabled: true },
         defer_archive: { category: 'core', enabled: true },
         correction_observer: { category: 'quiet', enabled: true },
-        empathy_observer: { category: 'quiet', enabled: false },
+        gfi: { category: 'quiet', enabled: false },
       },
       runtimeProfiles: {
         'openclaw.default': { type: 'openclaw', source: 'default' },
@@ -405,7 +405,7 @@ describe('Feature flag vs agent enabled mismatch', () => {
         code_tool_hook: { category: 'core', enabled: true },
         defer_archive: { category: 'core', enabled: true },
         correction_observer: { category: 'quiet', enabled: true },  // feature flag ON
-        empathy_observer: { category: 'quiet', enabled: false },
+        gfi: { category: 'quiet', enabled: false },
       },
       runtimeProfiles: {
         'openclaw.default': { type: 'openclaw', source: 'default' },

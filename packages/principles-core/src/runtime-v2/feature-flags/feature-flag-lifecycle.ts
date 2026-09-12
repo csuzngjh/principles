@@ -109,14 +109,6 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'None — will not graduate',
     retirementCriteria: 'Quarantine validated stable → delete worker + flag (MVP-Gone) once 6-month no-activation window closes (2026-12-01)',
   },
-  empathy_observer: {
-    decision: 'KEEP_QUIET',
-    consumers: ['pd-console/src/ui/pages/control-center/EmpathyObserver*', 'openclaw-plugin observer wiring'],
-    evidence: 'Empathy observer service for sentiment checking (since 2026-06-02); default-off',
-    decided: '2026-08-27',
-    graduationCriteria: 'Dogfood evidence that sentiment checking changes owner-visible behavior positively',
-    retirementCriteria: 'No dogfood activation for 6 months (2026-12-02) or signal_collector merge removes the standalone observer',
-  },
   painEvidenceAdmission: {
     decision: 'KEEP_QUIET',
     consumers: ['openclaw-plugin/src/hooks/pain.ts', 'openclaw-plugin/src/hooks/llm.ts', 'openclaw-plugin/src/hooks/gate-block-helper.ts'],
