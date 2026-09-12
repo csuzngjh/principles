@@ -73,7 +73,7 @@ describe('evolution-store', () => {
       '2026-06-01T00:02:00.000Z',
       '2026-06-01T00:05:00.000Z',
       'resolved',
-      'debugging',
+      'pain_diagnosis',
       'high',
       0,
       3,
@@ -101,7 +101,7 @@ describe('evolution-store', () => {
       null,
       null,
       null,
-      'coding',
+      'keyword_optimization',
       'low',
       1,
       5,
@@ -129,8 +129,8 @@ describe('evolution-store', () => {
       '2026-06-03T00:02:00.000Z',
       '2026-06-03T00:03:00.000Z',
       'failed',
-      'reasoning',
-      'critical',
+      'sleep_reflection',
+      'medium',
       2,
       2,
       'max retries exceeded',
@@ -278,7 +278,7 @@ describe('evolution-store', () => {
       expect(task.startedAt).toBe('2026-06-01T00:02:00.000Z');
       expect(task.completedAt).toBe('2026-06-01T00:05:00.000Z');
       expect(task.resolution).toBe('resolved');
-      expect(task.taskKind).toBe('debugging');
+      expect(task.taskKind).toBe('pain_diagnosis');
       expect(task.priority).toBe('high');
       expect(task.retryCount).toBe(0);
       expect(task.maxRetries).toBe(3);
@@ -315,13 +315,13 @@ describe('evolution-store', () => {
       expect(dates).toEqual([...dates].sort((a, b) => (a < b ? 1 : -1)));
     });
 
-    it('throws when table does not exist in DB', () => {
+    it('throws TrajectoryDbUnavailableError when table does not exist in DB', () => {
       const dbPath = join(stateDir, 'trajectory.db');
       const db = new Database(dbPath);
       db.exec('CREATE TABLE some_other_table (id INTEGER PRIMARY KEY)');
       db.close();
 
-      expect(() => listEvolutionTasks(tmpDir)).toThrow(/no such table/);
+      expect(() => listEvolutionTasks(tmpDir)).toThrow(TrajectoryDbUnavailableError);
     });
   });
 
@@ -380,20 +380,20 @@ describe('evolution-store', () => {
       expect(task.reason).toBe('User reported issue');
       expect(task.score).toBe(0);
       expect(task.status).toBe('failed');
-      expect(task.taskKind).toBe('reasoning');
-      expect(task.priority).toBe('critical');
+      expect(task.taskKind).toBe('sleep_reflection');
+      expect(task.priority).toBe('medium');
       expect(task.retryCount).toBe(2);
       expect(task.maxRetries).toBe(2);
       expect(task.lastError).toBe('max retries exceeded');
     });
 
-    it('throws when table does not exist in DB', () => {
+    it('throws TrajectoryDbUnavailableError when table does not exist in DB', () => {
       const dbPath = join(stateDir, 'trajectory.db');
       const db = new Database(dbPath);
       db.exec('CREATE TABLE some_other_table (id INTEGER PRIMARY KEY)');
       db.close();
 
-      expect(() => getEvolutionTask(tmpDir, 'task-001')).toThrow(/no such table/);
+      expect(() => getEvolutionTask(tmpDir, 'task-001')).toThrow(TrajectoryDbUnavailableError);
     });
 
     it('handles empty string taskId', () => {

@@ -12,16 +12,24 @@
  * import { listEvolutionTasks, getEvolutionTask } from '@principles/core/evolution-store';
  */
 
-import { openTrajectoryDbReadonly } from './trajectory-store.js';
+import {
+  openTrajectoryDbReadonly,
+  resolveTrajectoryDbPath,
+  rethrowAsQueryFailed,
+} from './trajectory-store.js';
 
 export { TrajectoryDbUnavailableError } from './trajectory-store.js';
+
+// Must mirror the writer contract in openclaw-plugin trajectory-types.ts
+// (TrajectoryDatabase.recordEvolutionTask): these are passthrough casts of
+// writer-produced values, so a stale union types values the writer can emit
+// but TypeScript claims are impossible.
+export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval' | 'keyword_optimization';
+export type TaskPriority = 'high' | 'medium' | 'low';
 
 // ---------------------------------------------------------------------------
 // Types (copied from trajectory-types.ts — do NOT import from openclaw-plugin)
 // ---------------------------------------------------------------------------
-
-export type TaskKind = 'coding' | 'debugging' | 'reasoning' | 'creative';
-export type TaskPriority = 'low' | 'normal' | 'high' | 'critical';
 
 export interface EvolutionTaskRecord {
   id: number;
@@ -76,6 +84,7 @@ export function listEvolutionTasks(
   filters: EvolutionTaskFilters = {},
 ): EvolutionTaskRecord[] {
   const db = openTrajectoryDbReadonly(workspaceDir);
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   try {
     const conditions: string[] = [];
@@ -129,6 +138,8 @@ export function listEvolutionTasks(
       lastError: row.last_error ? String(row.last_error) : null,
       resultRef: row.result_ref ? String(row.result_ref) : null,
     }));
+  } catch (err: unknown) {
+    rethrowAsQueryFailed(dbPath, err);
   } finally {
     db.close();
   }
@@ -149,6 +160,7 @@ export function getEvolutionTask(
   idOrTaskId: string | number,
 ): EvolutionTaskRecord | null {
   const db = openTrajectoryDbReadonly(workspaceDir);
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   try {
     const isNumeric = typeof idOrTaskId === 'number';
@@ -188,6 +200,8 @@ export function getEvolutionTask(
       lastError: row.last_error ? String(row.last_error) : null,
       resultRef: row.result_ref ? String(row.result_ref) : null,
     };
+  } catch (err: unknown) {
+    rethrowAsQueryFailed(dbPath, err);
   } finally {
     db.close();
   }

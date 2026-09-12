@@ -187,13 +187,13 @@ describe('trajectory-store', () => {
       expect(typeof sample?.updatedAt).toBe('string');
     });
 
-    it('throws when the database file has no expected schema', () => {
+    it('throws TrajectoryDbUnavailableError when the database file has no expected schema', () => {
       const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       const db = new Database(dbPath);
       db.close();
 
-      expect(() => listCorrectionSamples(tmpDir)).toThrow(/no such table/);
+      expect(() => listCorrectionSamples(tmpDir)).toThrow(TrajectoryDbUnavailableError);
     });
 
     it('orders by created_at DESC', () => {

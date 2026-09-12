@@ -111,6 +111,20 @@ export function openTrajectoryDbReadonly(workspaceDir: string): Database.Databas
   }
 }
 
+/**
+ * Translate unexpected query/DDL failures into the same typed unavailability
+ * the CLI layer knows how to present (PRI-753 review: malformed or
+ * schema-less databases must not escape as raw stack traces). The underlying
+ * SQLite message is preserved in the reason. Domain errors (sample not
+ * found) and existing unavailability errors pass through unchanged.
+ */
+export function rethrowAsQueryFailed(dbPath: string, err: unknown): never {
+  if (err instanceof TrajectoryDbUnavailableError) throw err;
+  if (err instanceof Error && err.message.startsWith('Sample not found')) throw err;
+  const msg = err instanceof Error ? err.message : String(err);
+  throw new TrajectoryDbUnavailableError(dbPath, `query failed: ${msg}`);
+}
+
 // ---------------------------------------------------------------------------
 // Core functions
 // ---------------------------------------------------------------------------
@@ -130,6 +144,7 @@ export function listCorrectionSamples(
   status: CorrectionSampleReviewStatus = 'pending',
 ): CorrectionSampleRecord[] {
   const db = openTrajectoryDbReadonly(workspaceDir);
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   try {
     const rows = db.prepare(`
@@ -155,8 +170,63 @@ export function listCorrectionSamples(
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     }));
+  } catch (err: unknown) {
+    rethrowAsQueryFailed(dbPath, err);
   } finally {
     db.close();
+  }
+}
+
+/**
+ * Mirror of openclaw-plugin TrajectoryDatabase.recordCorrectionRejectedPain:
+ * the two review surfaces (pd-cli and /pd-samples) must produce the same
+ * correction_rejected pain event, otherwise Owner rejections recorded via the
+ * CLI silently drop out of the pain pipeline. host_kind stays 'openclaw'
+ * because correction samples are only mined from OpenClaw sessions.
+ * Non-fatal: failures warn and leave the review result intact.
+ */
+function recordCorrectionRejectedPain(
+  db: Database.Database,
+  record: {
+    sessionId: string;
+    qualityScore: number;
+    diffExcerpt: string;
+    principleIdsJson: string;
+    createdAt: string;
+  },
+): void {
+  try {
+    const painScore = Math.max(0, Math.min(100, Math.round(Number(record.qualityScore) || 0)));
+    const reason = `Correction rejected (quality ${record.qualityScore.toFixed(2)}). Principles: ${record.principleIdsJson}${record.diffExcerpt ? ` — ${record.diffExcerpt.slice(0, 120)}` : ''}`;
+    const severity = painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild';
+
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO sessions (session_id, started_at, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
+      `).run(record.sessionId, record.createdAt, record.createdAt);
+
+      db.prepare(`
+        INSERT INTO pain_events (
+          session_id, source, score, reason, severity, origin, confidence, text, created_at, host_kind
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        record.sessionId,
+        'correction_rejected',
+        painScore,
+        reason,
+        severity,
+        'system_infer',
+        1,
+        record.diffExcerpt || null,
+        record.createdAt,
+        'openclaw',
+      );
+    })();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[PD:TrajectoryStore] Failed to record correction_rejected pain event: ${msg}`);
   }
 }
 
@@ -168,8 +238,8 @@ export function listCorrectionSamples(
  * @param note - Optional review note
  * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)
  * @returns The updated CorrectionSampleRecord
- * @throws TrajectoryDbUnavailableError if the database does not exist or
- *         cannot be opened
+ * @throws TrajectoryDbUnavailableError if the database does not exist,
+ *         cannot be opened, or the schema/query fails
  * @throws Error if the sample is not found
  */
 // eslint-disable-next-line @typescript-eslint/max-params
@@ -194,22 +264,33 @@ export function reviewCorrectionSample(
   }
 
   const updatedAt = nowIso();
+  let updated = false;
 
   try {
-    const updateResult = db.prepare(`
-      UPDATE correction_samples
-      SET review_status = ?, updated_at = ?
-      WHERE sample_id = ?
-    `).run(decision, updatedAt, sampleId);
+    // Status change and audit row commit together: a failure in either rolls
+    // back both, so an Owner decision never lands without its audit record.
+    db.transaction(() => {
+      const updateResult = db.prepare(`
+        UPDATE correction_samples
+        SET review_status = ?, updated_at = ?
+        WHERE sample_id = ?
+      `).run(decision, updatedAt, sampleId);
 
-    if (updateResult.changes === 0) {
+      if (updateResult.changes === 0) {
+        return;
+      }
+
+      db.prepare(`
+        INSERT INTO sample_reviews (sample_id, review_status, note, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(sampleId, decision, note ?? null, updatedAt);
+
+      updated = true;
+    })();
+
+    if (!updated) {
       throw new Error(`Sample not found: ${sampleId}`);
     }
-
-    db.prepare(`
-      INSERT INTO sample_reviews (sample_id, review_status, note, created_at)
-      VALUES (?, ?, ?, ?)
-    `).run(sampleId, decision, note ?? null, updatedAt);
 
     const record = db.prepare(`
       SELECT sample_id, session_id, bad_assistant_turn_id, user_correction_turn_id,
@@ -221,6 +302,20 @@ export function reviewCorrectionSample(
 
     if (!record) {
       throw new Error(`Sample not found after update: ${sampleId}`);
+    }
+
+    // Rejection parity with the plugin writer (openclaw-plugin
+    // TrajectoryDatabase.recordCorrectionRejectedPain): a rejected correction
+    // feeds the pain pipeline as source 'correction_rejected'. Non-fatal by
+    // contract — the review result must survive a pain-write failure.
+    if (decision === 'rejected') {
+      recordCorrectionRejectedPain(db, {
+        sessionId: String(record.session_id),
+        qualityScore: Number(record.quality_score),
+        diffExcerpt: String(record.diff_excerpt ?? ''),
+        principleIdsJson: String(record.principle_ids_json ?? '[]'),
+        createdAt: String(record.created_at),
+      });
     }
 
     return {
@@ -237,6 +332,8 @@ export function reviewCorrectionSample(
       createdAt: String(record.created_at),
       updatedAt: String(record.updated_at),
     };
+  } catch (err: unknown) {
+    rethrowAsQueryFailed(dbPath, err);
   } finally {
     db.close();
   }

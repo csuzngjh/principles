@@ -18,6 +18,7 @@ vi.mock('better-sqlite3', () => {
       }
       this.prepare = mockPrepare;
       this.close = mockClose;
+      this.transaction = (fn: () => void) => fn;
     }),
   };
 });
@@ -47,9 +48,9 @@ describe('listCorrectionSamples', () => {
     expect(() => listCorrectionSamples('/fake/workspace', 'approved')).toThrow(TrajectoryDbUnavailableError);
   });
 
-  it('propagates query errors (e.g. table missing)', () => {
+  it('translates query errors into TrajectoryDbUnavailableError (table missing)', () => {
     mockPrepare.mockReturnValue({ all: () => { throw new Error('SQLITE_ERROR: no such table: correction_samples'); } });
-    expect(() => listCorrectionSamples('/fake/workspace')).toThrow(/no such table/);
+    expect(() => listCorrectionSamples('/fake/workspace')).toThrow(TrajectoryDbUnavailableError);
     expect(mockClose).toHaveBeenCalled();
   });
 

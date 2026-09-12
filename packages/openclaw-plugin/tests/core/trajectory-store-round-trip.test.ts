@@ -19,6 +19,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import Database from 'better-sqlite3';
 
 import { TrajectoryDatabase, TrajectoryRegistry } from '../../src/core/trajectory.js';
 import {
@@ -83,6 +84,10 @@ describe('trajectory writer→reader path alignment (PRI-753)', () => {
         reason: 'High pain detected',
         score: 90,
         status: 'pending',
+        // V2 fields: the core reader unions must accept every value the
+        // writer can produce (PRI-753 review).
+        taskKind: 'pain_diagnosis',
+        priority: 'medium',
       });
     });
 
@@ -101,10 +106,61 @@ describe('trajectory writer→reader path alignment (PRI-753)', () => {
     expect(tasks[0]?.taskId).toBe('task-roundtrip-001');
     expect(tasks[0]?.traceId).toBe('trace-roundtrip-001');
     expect(tasks[0]?.score).toBe(90);
+    expect(tasks[0]?.taskKind).toBe('pain_diagnosis');
+    expect(tasks[0]?.priority).toBe('medium');
 
     const task = getEvolutionTask(workspaceDir, 'task-roundtrip-001');
     expect(task).not.toBeNull();
     expect(task?.source).toBe('pain_signal');
+    expect(task?.taskKind).toBe('pain_diagnosis');
+    expect(task?.priority).toBe('medium');
+  });
+
+  it('rejecting a sample through the core store records the correction_rejected pain event', () => {
+    const workspaceDir = makeWorkspace();
+    const sessionId = 'session-reject';
+
+    TrajectoryRegistry.use(workspaceDir, (db: TrajectoryDatabase) => {
+      const assistantTurnId = db.recordAssistantTurn({
+        sessionId,
+        runId: 'run-reject',
+        provider: 'test-provider',
+        model: 'test-model',
+        rawText: 'assistant output that needs correction',
+        sanitizedText: 'assistant output that needs correction',
+        usageJson: {},
+        empathySignalJson: {},
+      });
+
+      db.recordUserTurn({
+        sessionId,
+        turnIndex: 1,
+        rawText: 'this is wrong, fix it',
+        correctionDetected: true,
+        correctionCue: 'this is wrong',
+        referencesAssistantTurnId: assistantTurnId,
+      });
+
+      db.recordToolCall({ sessionId, toolName: 'edit_file', outcome: 'success' });
+    });
+
+    const [sample] = listCorrectionSamples(workspaceDir);
+    expect(sample).toBeDefined();
+
+    const rejected = reviewCorrectionSample(sample!.sampleId, 'rejected', 'bad fix', workspaceDir);
+    expect(rejected.reviewStatus).toBe('rejected');
+
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const pain = db
+        .prepare("SELECT source, session_id, host_kind FROM pain_events WHERE source = 'correction_rejected'")
+        .all() as Array<{ source: string; session_id: string; host_kind: string | null }>;
+      expect(pain).toHaveLength(1);
+      expect(pain[0]?.session_id).toBe(sessionId);
+      expect(pain[0]?.host_kind).toBe('openclaw');
+    } finally {
+      db.close();
+    }
   });
 
   it('core readers fail loud when no workspace database exists (missing ≠ empty)', () => {
