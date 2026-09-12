@@ -43,7 +43,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
-| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358; PR #1574 |
+| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358; PR #1574; PRI-752 |
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
@@ -516,18 +516,27 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
-- PR #1551 R2 (compressed; full text → ERROR_ARCHIVE.md): fresh 派生的出界处置未随 completion intent 持久化，resume 重推导致跨重启裁决漂移 — 处置在落库前派生并持久化，resume 重放效果。
-- 2026-08-26 PRI-606 (compressed; full text → ERROR_ARCHIVE.md): axiom builders tested in isolation but never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
-  - 2026-08-24 PR #1389 (compressed; full text → ERROR_ARCHIVE.md): dormant-consumer activation — forwarding two NEW telemetry events via a previously-unpassed optional dep woke four pre-existing dormant emission sites under the wrong channel; forward only intended events + negative-control test asserting dormant sites stay null. Grep ALL consumption sites when starting to pass a dormant dep.
-  - 2026-08-19 PR #1358 external review round 5 (verdict drift, compressed; full text → ERROR_ARCHIVE.md): crash-recovery re-consulted the LLM instead of the durably persisted `runnerDecision`, overwriting verdicts whose side effects had already materialized; fixed with the atomic `completionIntent` authority protocol + `maybeResumePendingIntent` resume gate. Rule of thumb: every re-entry path must treat a durably recorded decision as the authority — never re-consult a non-deterministic advisor for a decision already recorded but not yet applied; enumerate every branch that persists the decision and every side effect that changes consumable governance state.
-  - 2026-08-19 PR #1358 final-review blocker (compressed; full text → ERROR_ARCHIVE.md): succeeded-transition reconciliation was gated on a resource constructed after an early return, so the idle path never ran the budget; construct the budget's dependency before all early returns.
-  - 2026-07-04 PRI-510 (PR#1188, compressed; full text → ERROR_ARCHIVE.md): EvaluatorRunnerDeps optional deps passed at only 2 of the construction sites — repair loop was dead code at runtime; centralize dep construction in one helper.
-- 2026-08-20 PR #1358 authority-reset: retry edge predated the completionIntent authority protocol and silently resumed the OLD verdict; fixed as ONE atomic authority-reset patch; enumerate every decision RESET/re-entry path, and merge multi-write Owner mutations into one store patch. (full text archived)
-  - 2026-08-31 PRI-631 / PR #1462: an optional Evaluator V2 shape bypassed the canonical Artificer validator, so a valid code-bearing artifact could offer acceptance without a passed hard gate. Fixed at the live review builder with a code-bearing/V1 regression.
-  - 2026-06-25 PRI-467 (PR#1059, compressed; full text → ERROR_ARCHIVE.md): `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — size guard couldn't strip INTENT by priority. Fixed by adding to `blocks` + Step 1.5 strip
-  - 2026-06-19 PRI-408 (PR#972, compressed; full text → ERROR_ARCHIVE.md): `activateArtifact()` accepted `rolloutDecision='approved'` without verifying approval record — require `approvalId` + independent verification
-  - 2026-09-09 PRI-707 / PR #1574 review round 1 (telemetry emission-site flavor, review finding landed OUTSIDE the diff): finish-metadata evidence (`stopReason`/`truncated`/`outputTokens`) was added to the evidencePack and the `output_extraction_failed` telemetry payload, but the sibling terminal event `output_repair_exhausted` kept its old payload — monitoring could not distinguish a token-limit cut from an ordinary schema failure. Fixed by mirroring the three fields into the terminal payload + asserting them in the T8 test. Rule of thumb: when adding evidence fields to a failure payload that is mirrored across MULTIPLE observability surfaces (error details / evidencePack / telemetry events), grep ALL emission sites of the same logical failure and assert the full field set on EACH surface — partial-surface propagation silently blinds exactly the consumers the evidence was added for.
-  - Fix: when adding optional deps/fields/handlers to a constructor/service interface, grep ALL construction sites and update each one; add a test exercising the production construction path (not just the helper in isolation).
+  - 2026-09-12 PRI-752 / PR #1621+#1623 review, 7 findings one root cause (caught pre-merge): retirement declared complete without enumerating readers of the changed surface — config merge functions let a stored legacy `category: quiet` override the new `gone` tombstone in `pd runtime features`/effective config; a docs "run all tests" loop still invoked a deleted scenario; an Active architecture tree still inventoried deleted CLI files; a census count drifted; and a read-only CLI whose retention an audit had explicitly deferred to a separate Owner decision was deleted ahead of it (restored). Rule: a write-side change (registry value, deletion, rename) does not propagate itself — grep ALL read/display sites of the changed field plus every doc/test/inventory reference before claiming "synced/retired"; audit-deferred surfaces stay out of delete scope until the decision lands.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-12",
+    "pattern": "EP-02",
+    "invariant": "changed-surface-readers-enumerated-before-complete-claim",
+    "severity": "P2",
+    "escaped": "none",
+    "caughtBy": "pr-review",
+    "guard": "none"
+  }
+  -->
+  - 2026-09-09 PR #1574 review: finish metadata added to evidencePack + `output_extraction_failed` but sibling terminal `output_repair_exhausted` kept the old payload — grep ALL emission sites of a mirrored failure payload and assert the full field set on EACH surface.
+  - 2026-08-31 PRI-631 / PR #1462: optional Evaluator V2 shape bypassed the canonical Artificer validator — route every accepted shape through the hard gate + shape regression.
+  - 2026-08-26 PRI-606: axiom builders tested in isolation, never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
+  - 2026-08-25 PR #1551 R2: fresh-derived disposition not persisted with completion intent; resume re-derived and drifted — persist the disposition before effects; resume replays it.
+  - 2026-08-24 PR #1389: forwarding two NEW telemetry events via a previously-unpassed optional dep woke four dormant emission sites under the wrong channel — grep ALL consumption sites when activating a dormant dep + negative-control test.
+  - 2026-08-20 PR #1358 (three rounds): per-cycle budget gated on a resource constructed after an early return; crash-recovery re-consulted the LLM over the durably persisted `runnerDecision`; retry edge reset the authority — construct budget deps before all early returns; every re-entry path consumes the durably recorded decision as authority; enumerate every decision reset path and merge multi-write Owner mutations into one patch.
+  - 2026-07-04 PRI-510 / PR#1188: optional deps passed at only 2 of N construction sites (repair loop dead at runtime) — centralize dep construction in one helper.
+  - 2026-06-25 PRI-467 / PR#1059: `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — priority strip could not remove INTENT.
+  - 2026-06-19 PRI-408 / PR#972: `activateArtifact()` accepted `rolloutDecision='approved'` without verifying the approval record — require `approvalId` + independent verification.
 
 ---
   - 2026-09-08 PRI-705 / PR #1551 review round: `partitionV2OutOfScopeFailures` shipped with direct-call unit tests (hand-built `requiresContextVersion: undefined`), but the production resolver `resolveRequiresContextVersion` collapsed "key absent on a PARSED artifact" (deterministically v1 — the classifier's entire target population) into the same `null` as "unresolvable", so the out-of-scope routing could never fire in production. Fixed with a three-state resolver (literal 2 / `undefined` = resolved-v1 / `null` = unresolvable) extracted as a pure function + a WIRING-level regression test that enters through the real artifact `contentJson` shape. Lesson: when a pure classifier sits behind a production resolver, "absent on valid input" and "input unresolvable" are different states — collapsing them creates dead branches direct-call tests cannot catch; always add one test driving the resolver→classifier composition with the production input shape.
@@ -652,7 +661,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Metric | Value |
 |--------|-------|
 | Total lessons | 117 |
-| Last updated | 2026-09-11 |
+| Last updated | 2026-09-12 |
 | Top category | Schema & Type |
 | Recurring errors | 63 |
 
