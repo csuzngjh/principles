@@ -2,31 +2,51 @@
  * Pure-logic tests for the console-token IPC origin guard + status shaping.
  *
  * The read endpoint hands the long-lived Bearer token to the renderer; these
- * tests lock the fail-closed rules: only plain-http loopback origins are
- * served, everything else (data: pages, https, remote hosts, garbage) is
- * denied, and the status shaper never reports a credential for empty input.
+ * tests lock the fail-closed rules: only the EXACT origin of the console the
+ * supervisor currently serves may read it (a page from another loopback port
+ * still carries the preload bridge but is denied — PR #1635 review), and the
+ * status shaper never reports a credential for empty input.
  */
 import { describe, it, expect } from 'vitest';
-import { isLocalConsoleOrigin, buildConsoleTokenStatus } from '../../src/lib/console-origin.js';
+import { consoleOriginOf, isSameConsoleOrigin, buildConsoleTokenStatus } from '../../src/lib/console-origin.js';
 
-describe('isLocalConsoleOrigin', () => {
-  it('accepts the console server loopback origins', () => {
-    expect(isLocalConsoleOrigin('http://127.0.0.1:41231/')).toBe(true);
-    expect(isLocalConsoleOrigin('http://127.0.0.1:41231/#/login')).toBe(true);
-    expect(isLocalConsoleOrigin('http://localhost:41231/#/login')).toBe(true);
+describe('consoleOriginOf', () => {
+  it('extracts the origin of the console server loopback URLs', () => {
+    expect(consoleOriginOf('http://127.0.0.1:41231/')).toBe('http://127.0.0.1:41231');
+    expect(consoleOriginOf('http://127.0.0.1:41231/#/login')).toBe('http://127.0.0.1:41231');
+    expect(consoleOriginOf('http://localhost:41231/#/login')).toBe('http://localhost:41231');
   });
 
   it('denies non-loopback or non-http origins', () => {
-    expect(isLocalConsoleOrigin('https://127.0.0.1:41231/')).toBe(false);
-    expect(isLocalConsoleOrigin('http://example.com/')).toBe(false);
-    expect(isLocalConsoleOrigin('http://192.168.1.4:41231/')).toBe(false);
+    expect(consoleOriginOf('https://127.0.0.1:41231/')).toBeNull();
+    expect(consoleOriginOf('http://example.com/')).toBeNull();
+    expect(consoleOriginOf('http://192.168.1.4:41231/')).toBeNull();
   });
 
   it('denies degraded data: pages and unparsable URLs (fail closed)', () => {
-    expect(isLocalConsoleOrigin('data:text/html;charset=utf-8,hello')).toBe(false);
-    expect(isLocalConsoleOrigin('about:blank')).toBe(false);
-    expect(isLocalConsoleOrigin('')).toBe(false);
-    expect(isLocalConsoleOrigin('not a url')).toBe(false);
+    expect(consoleOriginOf('data:text/html;charset=utf-8,hello')).toBeNull();
+    expect(consoleOriginOf('about:blank')).toBeNull();
+    expect(consoleOriginOf('')).toBeNull();
+    expect(consoleOriginOf('not a url')).toBeNull();
+  });
+});
+
+describe('isSameConsoleOrigin (exact-origin guard)', () => {
+  it('accepts the sender page of the active console (same port)', () => {
+    expect(isSameConsoleOrigin('http://127.0.0.1:41231/#/login', 'http://127.0.0.1:41231/#/focus')).toBe(true);
+    expect(isSameConsoleOrigin('http://localhost:41231/', 'http://localhost:41231/#/login')).toBe(true);
+  });
+
+  it('rejects a different loopback port — cross-port page cannot read the token', () => {
+    expect(isSameConsoleOrigin('http://127.0.0.1:5173/', 'http://127.0.0.1:41231/')).toBe(false);
+    expect(isSameConsoleOrigin('http://localhost:3000/#/login', 'http://127.0.0.1:41231/')).toBe(false);
+  });
+
+  it('fails closed when the supervisor has no active URL or either side is not a local origin', () => {
+    expect(isSameConsoleOrigin('http://127.0.0.1:41231/', undefined)).toBe(false);
+    expect(isSameConsoleOrigin('http://127.0.0.1:41231/', '')).toBe(false);
+    expect(isSameConsoleOrigin('data:text/html,degraded', 'http://127.0.0.1:41231/')).toBe(false);
+    expect(isSameConsoleOrigin('http://127.0.0.1:41231/', 'data:text/html,degraded')).toBe(false);
   });
 });
 

@@ -17,19 +17,33 @@ export interface ConsoleTokenStatus {
 }
 
 /**
- * True when the URL is a plain-http loopback origin (the console server binds
- * 127.0.0.1). Anything else — https, remote host, file:, data: (opaque
- * origin) — is rejected.
+ * The exact origin (protocol://host:port) of a plain-http loopback URL, or
+ * null when it is not one (https, remote host, file:, data: opaque origin,
+ * unparsable). A string-compare key for exact-origin checks.
  */
-export function isLocalConsoleOrigin(rawUrl: string): boolean {
+export function consoleOriginOf(rawUrl: string): string | null {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
   } catch {
-    return false;
+    return null;
   }
-  if (parsed.protocol !== 'http:') return false;
-  return parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost';
+  if (parsed.protocol !== 'http:') return null;
+  if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') return null;
+  return parsed.origin;
+}
+
+/**
+ * True when the sender URL belongs to the SAME origin the supervisor serves —
+ * not merely any loopback service. A page loaded from a different loopback
+ * port (a second dev server, a redirect) must not reach the credential even
+ * though it still carries the preload bridge.
+ */
+export function isSameConsoleOrigin(senderUrl: string, activeUrl: string | undefined): boolean {
+  if (activeUrl === undefined || activeUrl.length === 0) return false;
+  const activeOrigin = consoleOriginOf(activeUrl);
+  if (activeOrigin === null) return false;
+  return consoleOriginOf(senderUrl) === activeOrigin;
 }
 
 /**

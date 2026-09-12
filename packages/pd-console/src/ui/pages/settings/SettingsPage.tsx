@@ -322,19 +322,29 @@ export function SettingsPage() {
     try {
       const result = await companion.clearConsoleToken();
       if (!result.cleared) {
-        toast.error(t("pages.settings.tokenClearFailed"));
-        if (result.nextAction) toast.info(result.nextAction);
+        // inherited_env_token: the token comes from the OS environment and
+        // would return on the next launch — refuse the fake-durable clear and
+        // tell the Owner where the real authority lives (rc-9).
+        if (result.reason === "inherited_env_token") {
+          toast.info(t("pages.settings.tokenInheritedEnv"));
+        } else {
+          toast.error(t("pages.settings.tokenClearFailed"));
+        }
+        if (result.nextAction) toast.info(result.nextAction, { duration: 8000 });
         return;
       }
       clearToken();
       setTokenInput("");
       if (result.reason === "external_console_attached") {
-        toast.info(t("pages.settings.tokenExternalAttached"));
+        // Clear-specific message: the credential IS cleared on this side;
+        // the external server still enforces its own copy.
+        toast.info(t("pages.settings.tokenClearedExternalAttached"));
       } else if (result.restartRequested) {
         toast.success(t("pages.settings.tokenClearedRestarting"));
       } else {
         toast.success(t("pages.settings.tokenCleared"));
       }
+      if (result.nextAction) toast.info(result.nextAction, { duration: 8000 });
     } catch {
       toast.error(t("pages.settings.tokenClearFailed"));
     }
