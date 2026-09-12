@@ -83,11 +83,17 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
         features[flagId] = { ...defaultEntry };
         continue;
       }
-      // Gone flags can never be re-enabled
-      if (defaultEntry.category === 'gone' && userEntry.enabled) {
+      // Gone flags are terminal (PRI-752): never re-enable, and the registry's
+      // tombstone category wins over any stored category — legacy workspaces
+      // may still carry the pre-retirement quiet shape, which must normalize
+      // to the registry's gone entry instead of echoing `quiet` in the
+      // effective config.
+      if (defaultEntry.category === 'gone') {
         features[flagId] = { ...defaultEntry };
-        warnings.push(`feature '${flagId}': gone flag cannot be re-enabled`);
-        featuresChangedFromDefault.push(flagId);
+        if (userEntry.enabled) {
+          warnings.push(`feature '${flagId}': gone flag cannot be re-enabled`);
+          featuresChangedFromDefault.push(flagId);
+        }
         continue;
       }
       // PRI-435: Core flags default ON and cannot be disabled by omission.

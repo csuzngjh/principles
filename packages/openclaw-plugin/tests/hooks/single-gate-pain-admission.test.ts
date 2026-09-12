@@ -129,6 +129,81 @@ describe('Single-Gate Pain Admission — PRI-363', () => {
   });
 
   /**
+   * PRI-747 F32: pain admission derives its write-tool scope from the ONE
+   * vocabulary owner (constants/tools.ts WRITE_TOOLS), not a local shadow.
+   * Post-PRI-741 the OpenClaw hook face is exactly write/edit/apply_patch;
+   * generic LLM vocabulary names (write_file/edit_file/replace) are never
+   * dispatched by the hook, so their failures must be rejected at the name
+   * gate exactly like any other non-write tool.
+   */
+  describe('Admission scope derives from constants/tools.ts (PRI-747 F32)', () => {
+    it.each(['write_file', 'edit_file', 'replace'])(
+      'rejects phantom LLM-vocabulary write name "%s"',
+      (toolName) => {
+        const event = createMockEvent(toolName, new Error('EACCES: permission denied'), {
+          file_path: '/tmp/test.md',
+          content: 'test',
+        });
+        const observation = createMockObservation(80, false, 'abc123');
+        const outcome = createMockOutcome(true, 'tool_failure');
+        const sessionState = { currentGfi: 30, consecutiveErrors: 2 };
+        const config = createMockConfig(() => undefined);
+
+        const decision = evaluatePainAdmissionForToolCall(
+          event,
+          observation,
+          outcome,
+          sessionState,
+          sessionState,
+          'session-f32-phantom',
+          '/tmp/workspace',
+          config,
+        );
+
+        expect(decision.admitted).toBe(false);
+        expect(decision.stage).toBe('not_applicable');
+        expect(decision.reason).toBe('not_a_write_tool_failure');
+        // rc-9: declining a real failure must stay observable
+        expect(SystemLogger.log).toHaveBeenCalledWith(
+          '/tmp/workspace',
+          'PAIN_ADMISSION_SKIPPED',
+          expect.any(String),
+        );
+      },
+    );
+
+    it('passes every authoritative write tool (write/edit/apply_patch) through the name gate', () => {
+      for (const toolName of ['write', 'edit', 'apply_patch']) {
+        vi.mocked(SystemLogger.log).mockClear();
+        const event = createMockEvent(toolName, new Error('EACCES: permission denied'), {
+          file_path: '/tmp/test.md',
+          content: 'test',
+        });
+        const observation = createMockObservation(80, false, 'abc123');
+        const outcome = createMockOutcome(true, 'tool_failure');
+        const sessionState = { currentGfi: 30, consecutiveErrors: 2 };
+        const config = createMockConfig(() => undefined);
+
+        const decision = evaluatePainAdmissionForToolCall(
+          event,
+          observation,
+          outcome,
+          sessionState,
+          sessionState,
+          'session-f32-authoritative',
+          '/tmp/workspace',
+          config,
+        );
+
+        // Passed the name gate: the decision moved past not_applicable into
+        // the triage/trigger stages (here trigger_rejected — infra noise).
+        expect(decision.stage).not.toBe('not_applicable');
+        expect(decision.reason).not.toBe('not_a_write_tool_failure');
+      }
+    });
+  });
+
+  /**
    * PRI-442 A-09: rc-9-no-silent-fallback compliance.
    *
    * When a non-WRITE_TOOL failure is rejected at the tool-name gate, the

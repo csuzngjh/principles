@@ -4,19 +4,32 @@
  * Extracts listEvolutionTasks and getEvolutionTask from TrajectoryDatabase
  * as pure functions that can be used without openclaw-plugin dependency.
  *
+ * Reads the canonical workspace trajectory database
+ * (`{workspaceDir}/.state/trajectory.db`) written by openclaw-plugin
+ * TrajectoryDatabase — see trajectory-db.ts for the shared path contract.
+ *
  * @example
  * import { listEvolutionTasks, getEvolutionTask } from '@principles/core/evolution-store';
  */
 
-import Database from 'better-sqlite3';
-import { join } from 'path';
+import {
+  openTrajectoryDbReadonly,
+  resolveTrajectoryDbPath,
+  rethrowAsQueryFailed,
+} from './trajectory-store.js';
+
+export { TrajectoryDbUnavailableError } from './trajectory-store.js';
+
+// Must mirror the writer contract in openclaw-plugin trajectory-types.ts
+// (TrajectoryDatabase.recordEvolutionTask): these are passthrough casts of
+// writer-produced values, so a stale union types values the writer can emit
+// but TypeScript claims are impossible.
+export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval' | 'keyword_optimization';
+export type TaskPriority = 'high' | 'medium' | 'low';
 
 // ---------------------------------------------------------------------------
 // Types (copied from trajectory-types.ts — do NOT import from openclaw-plugin)
 // ---------------------------------------------------------------------------
-
-export type TaskKind = 'coding' | 'debugging' | 'reasoning' | 'creative';
-export type TaskPriority = 'low' | 'normal' | 'high' | 'critical';
 
 export interface EvolutionTaskRecord {
   id: number;
@@ -52,10 +65,6 @@ export interface EvolutionTaskFilters {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getDbPath(workspaceDir: string): string {
-  return join(workspaceDir, '.state', '.trajectory.db');
-}
-
 // ---------------------------------------------------------------------------
 // Core functions
 // ---------------------------------------------------------------------------
@@ -63,24 +72,19 @@ function getDbPath(workspaceDir: string): string {
 /**
  * List evolution tasks with optional filtering.
  *
- * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/.trajectory.db)
+ * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)
  * @param filters - Optional filters (status, dateFrom, dateTo, limit, offset)
- * @returns Array of EvolutionTaskRecord, or empty array if DB does not exist
+ * @returns Array of EvolutionTaskRecord; empty array means the database
+ *          exists and has no matching rows
+ * @throws TrajectoryDbUnavailableError if the database does not exist or
+ *         cannot be opened — never silently treated as "no tasks"
  */
 export function listEvolutionTasks(
   workspaceDir: string,
   filters: EvolutionTaskFilters = {},
 ): EvolutionTaskRecord[] {
-  const dbPath = getDbPath(workspaceDir);
-
-   
-  let db: Database.Database;
-  try {
-    db = new Database(dbPath, { readonly: true });
-  } catch {
-    // Graceful fallback: DB does not exist yet
-    return [];
-  }
+  const db = openTrajectoryDbReadonly(workspaceDir);
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   try {
     const conditions: string[] = [];
@@ -134,6 +138,8 @@ export function listEvolutionTasks(
       lastError: row.last_error ? String(row.last_error) : null,
       resultRef: row.result_ref ? String(row.result_ref) : null,
     }));
+  } catch (err: unknown) {
+    rethrowAsQueryFailed(dbPath, err);
   } finally {
     db.close();
   }
@@ -142,24 +148,19 @@ export function listEvolutionTasks(
 /**
  * Get a single evolution task by numeric id or string taskId.
  *
- * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/.trajectory.db)
+ * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)
  * @param idOrTaskId - Numeric id or string taskId
- * @returns EvolutionTaskRecord or null if not found
+ * @returns EvolutionTaskRecord, or null when the database exists and the task
+ *          is not found
+ * @throws TrajectoryDbUnavailableError if the database does not exist or
+ *         cannot be opened — never silently treated as "not found"
  */
 export function getEvolutionTask(
   workspaceDir: string,
   idOrTaskId: string | number,
 ): EvolutionTaskRecord | null {
-  const dbPath = getDbPath(workspaceDir);
-
-   
-  let db: Database.Database;
-  try {
-    db = new Database(dbPath, { readonly: true });
-  } catch {
-    // Graceful fallback: DB does not exist yet
-    return null;
-  }
+  const db = openTrajectoryDbReadonly(workspaceDir);
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
   try {
     const isNumeric = typeof idOrTaskId === 'number';
@@ -199,6 +200,8 @@ export function getEvolutionTask(
       lastError: row.last_error ? String(row.last_error) : null,
       resultRef: row.result_ref ? String(row.result_ref) : null,
     };
+  } catch (err: unknown) {
+    rethrowAsQueryFailed(dbPath, err);
   } finally {
     db.close();
   }
