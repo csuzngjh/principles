@@ -1,0 +1,32 @@
+# Principles Disciple — CNB 手动触发按钮
+#
+# 作用：在「代码 → 分支详情页」显示自定义按钮，点击后触发 `.cnb.yml` 中
+#       名为 `web_trigger_audit` 的流水线（T3 按需审计）。
+#
+# 依据：docs.cnb.cool/zh/build/web-trigger.html
+#   注意 1：本文件不支持 include / imports 语法。
+#   注意 2：仅有仓库写权限的用户可点击自定义按钮。
+#   注意 3：`event` 必须与 .cnb.yml 中的事件键名完全一致。
+
+branch:
+  # 不写 reg ⇒ 在所有分支详情页显示
+  - buttons:
+      - name: PD 云端审查
+        description: 触发 PD Auditor 对当前分支做一次只读架构审查
+        event: web_trigger_audit
+        groupName: PD Cloud Worker
+
+        # 权限：只读审查，开放到 developer 即可（角色非向上包含，需逐一列出）
+        permissions:
+          roles:
+            - owner
+            - master
+            - developer
+
+        inputs:
+          userPrompt:
+            name: 审查要求
+            description: 可留空。留空则执行默认的全仓架构健康检查。
+            type: textarea
+            required: false
+            default: 对当前分支做一次全仓架构健康检查，按 .cnb/agents/pd-auditor.md 的五个维度输出发现。
