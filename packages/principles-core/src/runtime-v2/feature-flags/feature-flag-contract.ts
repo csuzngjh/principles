@@ -20,10 +20,7 @@ const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 //
 // Alias keys MUST NOT appear in DEFAULT_FEATURE_FLAGS — an alias is not a
 // capability. Adding an entry here requires the canonical ID to be registered.
-export const FEATURE_FLAG_ALIASES: Readonly<Record<string, string>> = {
-  pain_evidence_admission: 'painEvidenceAdmission',
-  pain_evidence_admission_default: 'painEvidenceAdmissionDefault',
-};
+export const FEATURE_FLAG_ALIASES: Readonly<Record<string, string>> = {};
 
 export interface FeatureFlagOverrideNormalization {
   /** User override map re-keyed onto canonical IDs. */
@@ -252,18 +249,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // rejected observably; the '共情观察器' label in pd-console enum-labels
   // doubles as the agent display name for the cost hint.
   { id: 'empathy_observer', category: 'gone', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking — retired (PRI-751, reality re-verified PRI-752): detection moved to signal-collector-host; gone tombstone' },
-  // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
-  // is now the primary admission gate.
-  // PRI-752 reality check: NO code reads this flag for routing — Gate B is
-  // unconditional and no flag-off rollback path exists (PRI-749 G-1 finding).
-  { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate. PRI-752: no executable consumers — flag value has no runtime effect; disposition pending Owner decision.' },
-  // PRI-404/PRI-609: the snake_case IDs `pain_evidence_admission` and
-  // `pain_evidence_admission_default` are no longer registered as independent
-  // capabilities — see FEATURE_FLAG_ALIASES above.
-  // PRI-454 historical intent: global kill switch for the Gate B migration.
-  // PRI-752 reality check: the documented OFF→Gate A re-activation routing was
-  // never implemented — Gate B is unconditional (PRI-749 G-1 finding).
-  { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: historical kill switch for the Gate B migration. PRI-752: the documented flag-off Gate A rollback does not exist as code — flag value has no runtime effect; disposition pending Owner decision.' },
+  // PRI-763: painEvidenceAdmission / painEvidenceAdmissionDefault retired —
+  // pain admission is unconditional Gate B (TriggerController); PRI-752/762
+  // confirmed zero executable consumers; stale config keys now warn unknown.
+
   { id: 'diagnostician_async_cli', category: 'quiet', enabled: false, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background. Default: false until orchestrator exists.' },
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
   // internalization_core_grounding retired in PRI-751 (reality re-verified by

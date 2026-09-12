@@ -84,7 +84,7 @@
 ## Feature Flag 验证
 
 - [x] `pd runtime features --json` 中 MVP-Core flag 默认开（prompt / code_tool_hook / defer_archive）
-  - All MVP-Core flags enabled: prompt=true, code_tool_hook=true, defer_archive=true, pain_evidence_admission=true, code_rule_capability=true.
+  - All MVP-Core flags enabled: prompt=true, code_tool_hook=true, defer_archive=true, code_rule_capability=true. (pain_evidence_admission retired in PRI-763; no longer part of the flag surface.)
 - [x] 所有 MVP-Gone flag 不可重新开启（nocturnal / idle_trigger / model_training / trainer）
   - Code in feature-flag-contract.ts line 178-184: gone flags cannot be re-enabled. All 4 gone flags default false.
 - [x] 每个 MVP-Core flag 的 `enabled: false` 关闭路径已验证零副作用

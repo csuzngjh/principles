@@ -38,7 +38,7 @@ Full per-flag evidence (consumers, rationale, criteria) lives in `QUIET_FLAG_LIF
 
 | Decision | Flags | Count |
 |---|---|---|
-| KEEP_QUIET | correction_observer, signal_collector, internalization_auto_consumer, story_a_approval_completion, feedback_channel, gfi, painEvidenceAdmission, painEvidenceAdmissionDefault, diagnostician_async_cli, diagnostician_core_grounding, diagnostician_split_pipeline, l2_dreamer, intent_engineering, rulecode_context_v2, failed_tasks_observability, evaluator_artificer_repair_loop, artifact_summary_redundancy, context_manifest_budget, progressive_evaluator, abstraction_layer_v1, principle_receipt_self_report, failed_task_recovery_console, pain_diagnosis_persistence, governance_experience_v1, anonymous_product_telemetry | 25 |
+| KEEP_QUIET | correction_observer, signal_collector, internalization_auto_consumer, story_a_approval_completion, feedback_channel, gfi, diagnostician_async_cli, diagnostician_core_grounding, diagnostician_split_pipeline, l2_dreamer, intent_engineering, rulecode_context_v2, failed_tasks_observability, evaluator_artificer_repair_loop, artifact_summary_redundancy, context_manifest_budget, progressive_evaluator, abstraction_layer_v1, principle_receipt_self_report, failed_task_recovery_console, pain_diagnosis_persistence, governance_experience_v1, anonymous_product_telemetry | 23 |
 | GRADUATE (executed) | diagnostician_llm_degradation, principle_receipt_block_copy, principle_receipt_ledger, principle_governance_projection_v2 — all via PRI-571 (2026-08-24); artificer_output_retry via PRI-621 (2026-08-29, live evidence: dreamer self-healed the same error category while artificer dead-ended 5/6 chains); all stay category=quiet so config rollback remains available | 5 |
 | RETIRE | `evolution_worker` — retired 2026-09-12 (PRI-752); worker deleted in PRI-737, flag flipped quiet→gone, lifecycle entry removed (gone = terminal). `empathy_observer` — retired 2026-09-12 (#1625, MVP-Gone wave; zero executable readers, see governance §3.2) | 3 (completed) |
 | STAGED | release_manager_shadow — zero current consumer by design; wiring arrives with PRI-614 Gate B (update convergence roadmap). NOT dead code. | 1 |
@@ -46,7 +46,7 @@ Full per-flag evidence (consumers, rationale, criteria) lives in `QUIET_FLAG_LIF
 **Feature purgatory check:** `zero consumer + no roadmap + no retirement decision = 0` ✅ (the one zero-consumer flag, `release_manager_shadow`, has an explicit staged roadmap owner: PRI-614).
 
 Notable consumer-evidence anchors (abbreviated; full paths in the TS registry):
-- `painEvidenceAdmission`(+Default): **zero executable consumers** (PRI-752 re-verification 2026-09-12 — pain.ts / llm.ts / gate-block-helper.ts have no references; prior "production readers" claim was stale). Gate B is unconditional; the documented flag-off rollback does not exist as code. Disposition (a/b/c) awaits Owner decision (PRI-749 G-1 / PRI-752).
+- `painEvidenceAdmission`(+Default): **retired 2026-09-12 (PRI-763)** — flags + aliases removed from registry; zero executable consumers (pain.ts / llm.ts / gate-block-helper.ts never read them); admission is unconditional Gate B (TriggerController).
 - `anonymous_product_telemetry`: host-runtime product-telemetry service + pd-cli telemetry command (PR #1419).
 - `governance_experience_v1`: pd-console governance experience route + Focus page (PR #1409).
 - `release_manager_shadow`: consumers = none (staged; ReleaseManager shadow implementation lives in create-principles-disciple/src/update/, wiring = PRI-614).

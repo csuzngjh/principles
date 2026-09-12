@@ -3,7 +3,6 @@ import {
   validateFeatureFlagRaw,
   computeEffectiveFlags,
   DEFAULT_FEATURE_FLAGS,
-  FEATURE_FLAG_ALIASES,
   type FeatureFlagCategory,
   VALID_CATEGORIES,
 } from '../feature-flag-contract.js';
@@ -241,9 +240,6 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'story_a_approval_completion') continue;
       // P0-D (2026-08-18): repair loop promoted to default-on (INV-02 liveness)
       if (flag.id === 'evaluator_artificer_repair_loop') continue;
-      // PRI-454: painEvidenceAdmission + painEvidenceAdmissionDefault flipped to default-on
-      if (flag.id === 'painEvidenceAdmission') continue;
-      if (flag.id === 'painEvidenceAdmissionDefault') continue;
       // Task 7: failed_tasks_observability defaults on (quiet flag, default-on)
       if (flag.id === 'failed_tasks_observability') continue;
       // Governance Recovery v1 (2026-08-24 owner decision): default-on
@@ -451,75 +447,6 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     }
   });
 
-  it('PEAT-B1: painEvidenceAdmission is registered as quiet, default-on (PRI-454 flip)', () => {
-    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'painEvidenceAdmission');
-    expect(flag).toBeDefined();
-    if (!flag) throw new Error('painEvidenceAdmission flag not found');
-    expect(flag.category).toBe('quiet');
-    expect(flag.enabled).toBe(true);
-    expect(flag.since).toBe('2026-06-06');
-    expect(flag.description).toContain('PEAT-B1');
-  });
-
-  it('PRI-609: pain_evidence_admission is NOT registered as an independent capability — it is an alias', () => {
-    expect(DEFAULT_FEATURE_FLAGS.find(f => f.id === 'pain_evidence_admission')).toBeUndefined();
-    expect(DEFAULT_FEATURE_FLAGS.find(f => f.id === 'pain_evidence_admission_default')).toBeUndefined();
-    expect(FEATURE_FLAG_ALIASES.pain_evidence_admission).toBe('painEvidenceAdmission');
-    expect(FEATURE_FLAG_ALIASES.pain_evidence_admission_default).toBe('painEvidenceAdmissionDefault');
-  });
-
-  it('PRI-609: snake_case alias override controls the canonical runtime flag', () => {
-    const result = computeEffectiveFlags(
-      { pain_evidence_admission: { enabled: false } },
-      DEFAULT_FEATURE_FLAGS,
-      '/test/.pd/config.yaml',
-    );
-    expect(result.flags.painEvidenceAdmission?.enabled).toBe(false);
-    expect(Object.hasOwn(result.flags, 'pain_evidence_admission')).toBe(false);
-    expect(result.warnings.some(w => w.includes('conflicting values'))).toBe(false);
-  });
-
-  it('PRI-609: canonical + alias with different values is a non-silent conflict; canonical wins (key order independent)', () => {
-    // alias first
-    const aliasFirst = computeEffectiveFlags(
-      { pain_evidence_admission: { enabled: false }, painEvidenceAdmission: { enabled: true } },
-      DEFAULT_FEATURE_FLAGS,
-      '/test/.pd/config.yaml',
-    );
-    expect(aliasFirst.flags.painEvidenceAdmission?.enabled).toBe(true);
-    expect(aliasFirst.warnings.some(w => w.includes("feature 'painEvidenceAdmission': conflicting values"))).toBe(true);
-
-    // canonical first
-    const canonicalFirst = computeEffectiveFlags(
-      { painEvidenceAdmission: { enabled: true }, pain_evidence_admission: { enabled: false } },
-      DEFAULT_FEATURE_FLAGS,
-      '/test/.pd/config.yaml',
-    );
-    expect(canonicalFirst.flags.painEvidenceAdmission?.enabled).toBe(true);
-    expect(canonicalFirst.warnings.some(w => w.includes("feature 'painEvidenceAdmission': conflicting values"))).toBe(true);
-  });
-
-  it('PRI-609: canonical + alias with identical values stays silent', () => {
-    const result = computeEffectiveFlags(
-      { painEvidenceAdmission: { enabled: false }, pain_evidence_admission: { enabled: false } },
-      DEFAULT_FEATURE_FLAGS,
-      '/test/.pd/config.yaml',
-    );
-    expect(result.flags.painEvidenceAdmission?.enabled).toBe(false);
-    expect(result.warnings.some(w => w.includes('conflicting values'))).toBe(false);
-  });
-
-  it('PRI-609: inherited enabled values never satisfy alias conflict checks', () => {
-    const inheritedOnly = Object.create({ enabled: true }) as Record<string, unknown>;
-    const result = computeEffectiveFlags(
-      { painEvidenceAdmission: { enabled: true }, pain_evidence_admission: inheritedOnly },
-      DEFAULT_FEATURE_FLAGS,
-      '/test/.pd/config.yaml',
-    );
-    expect(result.flags.painEvidenceAdmission?.enabled).toBe(true);
-    expect(result.warnings.some(w => w.includes('conflicting values'))).toBe(true);
-  });
-
   it('PRI-609: unknown flag never becomes an effective capability', () => {
     const result = computeEffectiveFlags(
       { totally_unknown_flag: { enabled: true } },
@@ -528,26 +455,6 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     );
     expect(Object.hasOwn(result.flags, 'totally_unknown_flag')).toBe(false);
     expect(result.warnings.some(w => w.includes("flag 'totally_unknown_flag': unknown flag ignored"))).toBe(true);
-  });
-
-  it('PRI-454: painEvidenceAdmissionDefault is registered as quiet, default-on', () => {
-    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'painEvidenceAdmissionDefault');
-    expect(flag).toBeDefined();
-    if (!flag) throw new Error('painEvidenceAdmissionDefault flag not found');
-    expect(flag.category).toBe('quiet');
-    expect(flag.enabled).toBe(true);
-    expect(flag.since).toBe('2026-06-24');
-    expect(flag.description).toContain('PRI-454');
-  });
-
-  it('PRI-609: pain_evidence_admission alias config reaches the canonical flag with no unknown warning', () => {
-    const userFlags = {
-      pain_evidence_admission: { enabled: true },
-    };
-    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
-    expect(result.flags.painEvidenceAdmission?.enabled).toBe(true);
-    expect(Object.hasOwn(result.flags, 'pain_evidence_admission')).toBe(false);
-    expect(result.warnings.some(w => w.includes('pain_evidence_admission') && w.includes('unknown'))).toBe(false);
   });
 
   it('PRI-375: diagnostician_async_cli is registered as quiet, default-off', () => {

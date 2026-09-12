@@ -5,18 +5,14 @@
  * (TriggerController + EvidenceTriage). Do not add new callers. New admission
  * logic must use `evaluateTriggerController` from runtime-v2/evidence-triage.
  *
- * Reality note (PRI-752, 2026-09-12): NO runtime routing reads
- * `painEvidenceAdmission` / `painEvidenceAdmissionDefault` to re-activate this
- * module — Gate B is unconditional and the documented flag-off rollback does
- * not exist as code. This module is dead-in-production, kept alive only by
- * its own tests (PRI-749 G-1 / PRI-752 finding). The historical PRI-454
- * removal criteria (both flags ON >=30 days + 5 MVP paths verified on Gate B)
- * require production evidence this repo does not hold; what IS verified here
- * is only that Gate B is unconditional, no runtime routing reads the flags,
- * and this module has no production importers. Disposition (delete Gate A +
- * flags vs wire the rollback vs document Gate B as non-rollbackable) awaits
- * the Owner decision recorded on PRI-752 —
- * see docs/plans/2026-06-pain-evidence-admission-track.md.
+ * Reality note (PRI-763, 2026-09-12): the `painEvidenceAdmission` /
+ * `painEvidenceAdmissionDefault` flags were RETIRED and REMOVED from the
+ * registry (PRI-763). They never had executable consumers (PRI-651-B1 /
+ * PRI-752 / PRI-762) and Gate B (TriggerController) is the only admission
+ * authority — no runtime routing ever read the flags. This module is
+ * dead-in-production, kept alive only by its own tests and the deprecated
+ * plugin adapter. The module's own retirement (core export surface + policy
+ * + plugin shim) is a separate Owner decision per Phase 5 discipline.
  *
  * Pure decision logic for pain-diagnostic cooldown and gate evaluation.
  *
