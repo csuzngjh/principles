@@ -94,7 +94,20 @@ $:
   #         事件键名 `web_trigger_audit` 必须与按钮的 `event` 字段一致
   #   注意：仅持有仓库写权限的用户可点击该按钮（CNB 平台限制）
   # ---------------------------------------------------------------------------
-  web_trigger_audit:
+  # T3b — 按需审计（远程 API 触发，PRI-762）
+  #   用途：让外部系统 / Agent 能远程发起一次审计（真正的"脱离本地 PC"闭环）
+  #   触发：OpenAPI `POST /{repo}/-/build/start`，
+  #         body `{"event":"api_trigger_audit","branch":"<ref>"}`
+  #         （实测：event 必须为 `api_trigger` 或 `api_trigger_` 前缀；
+  #          响应含 sn / buildLogUrl / success；repo-code:rw 令牌即可触发）
+  #
+  # ⚠️ One Audit Logic, Multiple Trigger Entry：
+  #    T3 与 T3b 是**同一个流水线定义** —— 在 web_trigger_audit 上定义 YAML 锚点
+  #    `&pd-audit-entry`，api_trigger_audit 用 `*pd-audit-entry` 引用。
+  #    修改审计行为只需改这一处；审计真正的单一事实源是
+  #    `.cnb/agents/pd-auditor.md`（章程）与 `.cnb/settings.yml`（角色定义）。
+  # ---------------------------------------------------------------------------
+  web_trigger_audit: &pd-audit-entry
     - name: pd-auditor-on-demand
       docker:
         image: cnbcool/default-npc:latest
@@ -108,13 +121,17 @@ $:
               硬约束：只读，不得修改代码/配置/文档，不得建分支、开 PR、合并 PR，
               不得改架构规则或 ADR 状态，不得写入 PD 运行时状态，不得使用任何密钥。
               全部使用中文。动手前先完整阅读仓库根目录的 `.cnb/agents/pd-auditor.md`。
+              若 userPrompt 为空、缺失或只是占位符，默认执行一次全仓架构健康检查
+              （按章程 §3 流程与 D1–D5 五个维度，审查当前 checkout 的 HEAD）。
             userPrompt: $userPrompt
 
         # 说明：此处不挂上传 stage。
-        #   - 手动触发的主产物是 NPC 的回复（交互式场景，人就在看）；
+        #   - 手动/远程触发的主产物是 NPC 的回复（交互式场景，或经 buildLogUrl 取日志）；
         #   - 「npc:go 能否写文件」尚未经 CNB 侧确认（见架构文档 §7 U1），
         #     在确认前不引入依赖该行为的 stage，避免制造假失败。
         #   - 需要正式报告时用 T2（每周定时）或 T1（PR 审查）。
+
+  api_trigger_audit: *pd-audit-entry
 
 main:
   # ---------------------------------------------------------------------------

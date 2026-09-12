@@ -164,12 +164,43 @@ cd .. && rm -rf empty
 |---|---|---|
 | 每周自动架构体检 | 自动（周一 02:00） | `cloud-audit-report.md` + `cloud-audit-deterministic.md`（commit 附件） |
 | 按需全仓审查 | 分支页「PD 云端审查」按钮 | **NPC 回复（唯一输出）**——此流水线未配置附件上传阶段 |
+| **远程 API 触发审计** | OpenAPI `POST /-/build/start`（`api_trigger_audit`） | NPC 回复（经 `buildLogUrl` 取日志） |
 | PR 自动审查 | CNB 侧创建 PR 时 | PR 评论 |
 | 人工深度调查 | 「云原生开发」→ WebIDE | 人工操作 |
 
-> 只有**定时审计（T2）**产出可下载的报告附件；手动审计（T3）与 PR 审查（T1）的产出是对话/评论本身。
-> 这是**文档与流水线的刻意对齐**（Codex 评审 P2 指出此前二者不一致）：手动与 PR 场景没有稳定的
+> 只有**定时审计（T2）**产出可下载的报告附件；手动（T3）、远程 API（T3b）与 PR 审查（T1）的产出是对话/评论/日志本身。
+> 这是**文档与流水线的刻意对齐**（Codex 评审 P2 指出此前二者不一致）：这些场景没有稳定的
 > "落盘报告"依赖（`npc:go` 能否写文件本就是待确认项 U1），承诺附件反而会制造无法兑现的预期。
+
+### 4.1 远程触发（`api_trigger_audit`，PRI-762）
+
+T3 与 T3b 是**同一个流水线定义**（`.cnb.yml` 内以 YAML 锚点 `&pd-audit-entry` 共享，零复制）。
+审计的单一事实源是 `.cnb/agents/pd-auditor.md`（章程）。
+
+```bash
+# 令牌需 repo-code:rw（实测该权限即可触发，无需 repo-cnb-trigger）
+curl -sS -X POST "https://api.cnb.cool/csuzngjh/principles/-/build/start" \
+  -H "Authorization: Bearer $CNB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"api_trigger_audit","branch":"main"}'
+```
+
+响应（实测）：
+
+```json
+{"sn":"cnb-xxxx","buildLogUrl":"https://cnb.cool/csuzngjh/principles/-/build/logs/cnb-xxxx",
+ "event":"api_trigger_audit","message":"...","success":true}
+```
+
+* `sn` = 流水线 ID；`buildLogUrl` = 审计输出所在（NPC 回复写在构建日志里）
+* `branch` 决定审计对象（CNB 会 checkout 该 ref 并读取其 `.cnb.yml`）
+* 不传 `userPrompt` 时，Agent 按 systemPrompt 回退执行**全仓架构健康检查**（D1–D5）
+* 消耗：CI CPU（核时）+ AI Credits（可在 `组织 → 设置 → 用量管理` 与
+  `GET /{repo}/-/build/logs/ai-audit/{sn}/{pipelineId}` 查明细）
+
+**权限边界（与手动触发一致，均为只读）**：NPC 未开启工作模式 ⇒ 只能读代码、写评论/日志，
+不能推代码、不能合并。`api_trigger` 在 CNB 属**可信事件**（权限宽于 PR 类不可信事件），
+但本流水线不持有写权限、不引用任何密钥。
 
 **查看报告**：构建详情页 → 对应 commit → 附件区。
 私有仓库下载附件需带令牌：
