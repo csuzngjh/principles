@@ -1668,7 +1668,18 @@
       "attempts": "尝试次数",
       "lastAttempt": "最近尝试",
       "noPainId": "—",
-      "partialResults": "仅显示前 {shown} 条，共 {total} 条。请缩小筛选范围或使用 'pd errors list --offset' 查看更多。"
+      "partialResults": "仅显示前 {shown} 条，共 {total} 条。请缩小筛选范围或使用 'pd errors list --offset' 查看更多。",
+      "detailToggle": "展开/收起任务详情",
+      "detailError": "加载任务详情失败",
+      "createdAt": "创建时间",
+      "updatedAt": "更新时间",
+      "runsTitle": "执行历史",
+      "runAttempt": "尝试",
+      "runStarted": "开始时间",
+      "runEnded": "结束时间",
+      "runReason": "原因",
+      "runErrorCategory": "错误类别",
+      "noRuns": "该任务暂无执行记录。"
     }
   },
   "components": {
