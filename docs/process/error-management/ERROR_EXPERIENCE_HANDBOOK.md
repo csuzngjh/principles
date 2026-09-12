@@ -43,7 +43,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
-| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358; PR #1574 |
+| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358; PR #1574; PRI-752 |
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
@@ -177,6 +177,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-111 | Test hard-fails on a host network capability (IPv6 loopback) that a VPN/WFP filter blocks — tests must probe-and-skip optional environment capabilities, not assume them | PRI-581 |
 | ERR-125 | New/refactored files under an eslint-ignored surface (create-principles-disciple `scripts/*.mjs`) ship dead code and lint-class defects because local lint never scans them — CodeQL on the PR is the only net; self-check unused symbols or extend lint coverage before handoff | PRI-727 / PR #1604 review (CodeQL) |
 | ERR-126 | New utility call site added via the nearest neighbor's import instead of surveying for the utility's existing owner — a duplicate capability grows and the owner's documented guardrails silently don't apply | PRI-749 / PR #1619 review |
+| ERR-127 | Deletion/audit PRs assert completeness claims ("zero consumers", "condition met", "only these files") from truncated sweeps (head -N), non-normative readings of governance lifecycle docs, and never-executed DoD commands — capture the FULL sweep output in the PR, treat registry/census lifecycle semantics as binding before choosing the deletion shape, and execute every DoD command once before opening the PR | PRI-751 / PR #1622-#1628 review |
 
 ---
 
@@ -541,18 +542,27 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
 - **Recurrence**: Yes — component (validator, handler, optional dep, or field) exists with isolated tests but is not wired into the production construction/enforcement path.
-- PR #1551 R2 (compressed; full text → ERROR_ARCHIVE.md): fresh 派生的出界处置未随 completion intent 持久化，resume 重推导致跨重启裁决漂移 — 处置在落库前派生并持久化，resume 重放效果。
-- 2026-08-26 PRI-606 (compressed; full text → ERROR_ARCHIVE.md): axiom builders tested in isolation but never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
-  - 2026-08-24 PR #1389 (compressed; full text → ERROR_ARCHIVE.md): dormant-consumer activation — forwarding two NEW telemetry events via a previously-unpassed optional dep woke four pre-existing dormant emission sites under the wrong channel; forward only intended events + negative-control test asserting dormant sites stay null. Grep ALL consumption sites when starting to pass a dormant dep.
-  - 2026-08-19 PR #1358 external review round 5 (verdict drift, compressed; full text → ERROR_ARCHIVE.md): crash-recovery re-consulted the LLM instead of the durably persisted `runnerDecision`, overwriting verdicts whose side effects had already materialized; fixed with the atomic `completionIntent` authority protocol + `maybeResumePendingIntent` resume gate. Rule of thumb: every re-entry path must treat a durably recorded decision as the authority — never re-consult a non-deterministic advisor for a decision already recorded but not yet applied; enumerate every branch that persists the decision and every side effect that changes consumable governance state.
-  - 2026-08-19 PR #1358 final-review blocker (compressed; full text → ERROR_ARCHIVE.md): succeeded-transition reconciliation was gated on a resource constructed after an early return, so the idle path never ran the budget; construct the budget's dependency before all early returns.
-  - 2026-07-04 PRI-510 (PR#1188, compressed; full text → ERROR_ARCHIVE.md): EvaluatorRunnerDeps optional deps passed at only 2 of the construction sites — repair loop was dead code at runtime; centralize dep construction in one helper.
-- 2026-08-20 PR #1358 authority-reset: retry edge predated the completionIntent authority protocol and silently resumed the OLD verdict; fixed as ONE atomic authority-reset patch; enumerate every decision RESET/re-entry path, and merge multi-write Owner mutations into one store patch. (full text archived)
-  - 2026-08-31 PRI-631 / PR #1462: an optional Evaluator V2 shape bypassed the canonical Artificer validator, so a valid code-bearing artifact could offer acceptance without a passed hard gate. Fixed at the live review builder with a code-bearing/V1 regression.
-  - 2026-06-25 PRI-467 (PR#1059, compressed; full text → ERROR_ARCHIVE.md): `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — size guard couldn't strip INTENT by priority. Fixed by adding to `blocks` + Step 1.5 strip
-  - 2026-06-19 PRI-408 (PR#972, compressed; full text → ERROR_ARCHIVE.md): `activateArtifact()` accepted `rolloutDecision='approved'` without verifying approval record — require `approvalId` + independent verification
-  - 2026-09-09 PRI-707 / PR #1574 review round 1 (telemetry emission-site flavor, review finding landed OUTSIDE the diff): finish-metadata evidence (`stopReason`/`truncated`/`outputTokens`) was added to the evidencePack and the `output_extraction_failed` telemetry payload, but the sibling terminal event `output_repair_exhausted` kept its old payload — monitoring could not distinguish a token-limit cut from an ordinary schema failure. Fixed by mirroring the three fields into the terminal payload + asserting them in the T8 test. Rule of thumb: when adding evidence fields to a failure payload that is mirrored across MULTIPLE observability surfaces (error details / evidencePack / telemetry events), grep ALL emission sites of the same logical failure and assert the full field set on EACH surface — partial-surface propagation silently blinds exactly the consumers the evidence was added for.
-  - Fix: when adding optional deps/fields/handlers to a constructor/service interface, grep ALL construction sites and update each one; add a test exercising the production construction path (not just the helper in isolation).
+  - 2026-09-12 PRI-752 / PR #1621+#1623 review, 7 findings one root cause (caught pre-merge): retirement declared complete without enumerating readers of the changed surface — config merge functions let a stored legacy `category: quiet` override the new `gone` tombstone in `pd runtime features`/effective config; a docs "run all tests" loop still invoked a deleted scenario; an Active architecture tree still inventoried deleted CLI files; a census count drifted; and a read-only CLI whose retention an audit had explicitly deferred to a separate Owner decision was deleted ahead of it (restored). Rule: a write-side change (registry value, deletion, rename) does not propagate itself — grep ALL read/display sites of the changed field plus every doc/test/inventory reference before claiming "synced/retired"; audit-deferred surfaces stay out of delete scope until the decision lands. (Census count-drift facet = second instance of baseline-inventory-edit-updates-sibling-count-guard, 2026-09-11; the read-enumeration rule generalizes it.)
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-12",
+    "pattern": "EP-02",
+    "invariant": "baseline-inventory-edit-updates-sibling-count-guard",
+    "severity": "P2",
+    "escaped": "none",
+    "caughtBy": "pr-review",
+    "guard": "none"
+  }
+  -->
+  - 2026-09-09 PR #1574 review: finish metadata added to evidencePack + `output_extraction_failed` but sibling terminal `output_repair_exhausted` kept the old payload — grep ALL emission sites of a mirrored failure payload and assert the full field set on EACH surface.
+  - 2026-08-31 PRI-631 / PR #1462: optional Evaluator V2 shape bypassed the canonical Artificer validator — route every accepted shape through the hard gate + shape regression.
+  - 2026-08-26 PRI-606: axiom builders tested in isolation, never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
+  - 2026-09-08 PR #1551 R2: fresh-derived disposition not persisted with completion intent; resume re-derived and drifted — persist the disposition before effects; resume replays it.
+  - 2026-08-24 PR #1389: forwarding two NEW telemetry events via a previously-unpassed optional dep woke four dormant emission sites under the wrong channel — grep ALL consumption sites when activating a dormant dep + negative-control test.
+  - 2026-08-20 PR #1358 (three rounds): per-cycle budget gated on a resource constructed after an early return; crash-recovery re-consulted the LLM over the durably persisted `runnerDecision`; retry edge reset the authority — construct budget deps before all early returns; every re-entry path consumes the durably recorded decision as authority; enumerate every decision reset path and merge multi-write Owner mutations into one patch.
+  - 2026-07-04 PRI-510 / PR#1188: optional deps passed at only 2 of N construction sites (repair loop dead at runtime) — centralize dep construction in one helper.
+  - 2026-06-25 PRI-467 / PR#1059: `truncateInjectionToBudget()` `blocks` param omitted `intentBlockContent` — priority strip could not remove INTENT.
+  - 2026-06-19 PRI-408 / PR#972: `activateArtifact()` accepted `rolloutDecision='approved'` without verifying the approval record — require `approvalId` + independent verification.
 
 ---
   - 2026-09-08 PRI-705 / PR #1551 review round: `partitionV2OutOfScopeFailures` shipped with direct-call unit tests (hand-built `requiresContextVersion: undefined`), but the production resolver `resolveRequiresContextVersion` collapsed "key absent on a PARSED artifact" (deterministically v1 — the classifier's entire target population) into the same `null` as "unresolvable", so the out-of-scope routing could never fire in production. Fixed with a three-state resolver (literal 2 / `undefined` = resolved-v1 / `null` = unresolvable) extracted as a pure function + a WIRING-level regression test that enters through the real artifact `contentJson` shape. Lesson: when a pure classifier sits behind a production resolver, "absent on valid input" and "input unresolvable" are different states — collapsing them creates dead branches direct-call tests cannot catch; always add one test driving the resolver→classifier composition with the production input shape.
@@ -686,9 +696,32 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-127]** | Deletion/audit completeness claims from truncated sweeps, non-normative lifecycle readings, and unexecuted DoD
+
+- **What happened**: During the PRI-751 flag-retirement series, three review-caught failures shared one root cause: (a) a residual-reference sweep piped through `head -8` missed `diag-chain-e2e.test.ts`, so a fixture was left unmigrated while the PR claimed a complete enumeration; (b) flag registry entries were deleted outright although the census doc's category table normatively requires removal PRs to flip flags to `gone` tombstones (stale `enabled:true` overrides must be rejected observably, not become silent unknown keys); (c) the audit SPEC asserted a "30-day production window met" from default+snapshot (continuity unprovable), labeled channel flags "no gate" after a `head`-truncated consumer sweep missed the `enabledChannels` CLI path, and wrote an `rg` DoD contradicted by a deliberately preserved test.
+- **Why it's wrong**: A deletion/audit PR's safety rests entirely on its completeness claims. Any claim generated by a truncated, non-replayable, or never-executed check is decoration, not evidence — and lifecycle/governance docs consulted during design are contracts, not background reading. Related: ERR-120 (asserted-but-unverified acceptance evidence), ERR-108 (normative spec clauses walked against the diff).
+- **Correct approach**: Every completeness claim ships with the FULL output of the exact command that produced it (no head/tail/grep -m truncation of the cited evidence); before designing a deletion, re-read the owning lifecycle doc's category/state table as binding semantics and derive the removal shape from it; every DoD command is executed once against the finished diff before the PR is opened, and its real output (including expected-hit exemptions) is pasted into the PR.
+- **How to prevent**: In deletion/cleanup/audit PR self-review, ask three 30-second questions: (1) Does any command that produced a "complete list" pipe through head/tail/-m? Re-run uncapped and diff the count. (2) Which governance doc defines the state machine of the thing being deleted, and does the chosen shape follow its transition rules? (3) Has each DoD command actually been run, with output in the PR? Linked: ERR-120, ERR-108.
+- **Source**: PRI-751 / PR #1622 review (chatgpt-codex-connector), PR #1625 review, PR #1628 review
+- **Date**: 2026-09-12
+- **Recurrence**: Yes — three PRs in one campaign, one root cause (grouped as the entry's first recording).
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-12",
+    "pattern": "EP-09",
+    "invariant": "deletion-audit-completeness-claims-untruncated-evidence",
+    "severity": "P1",
+    "escaped": "pr-handoff",
+    "caughtBy": "pr-review",
+    "guard": "none"
+  }
+  -->
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 118 |
+| Total lessons | 119 |
 | Last updated | 2026-09-12 |
 | Top category | Schema & Type |
 | Recurring errors | 63 |
@@ -751,7 +784,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PR #844
 - **Date**: 2026-06-07
 - **Recurrence**: Yes.
-  - 2026-09-12 PRI-754 / PR #1633 Codex review (own-README contract flavor): the ai-user CLI's README documented "LLM unavailable = infra failure, exit 1", but a zero-decision llm-error printed `ok:true` and exited 0 — the documented failure path was never executed against the implementation. Fixed with an `isInfraFailure()` guard (zero-decision llm-error → `ok:false` + exit 1, report still written for evidence) + README rewrite + decision-boundary unit tests.
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
@@ -775,7 +807,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: (1) The CLI/Operator Contract gate already requires this — apply it as a hard checklist before claiming "no real issues": for every --json command, run a manual test with a failing workspace, run a real `program.parseAsync` test with a failing workspace, and assert the JSON shape. (2) Add the failure-path test to the same test block as the success-path test so they ship together. (3) Self-review must NEVER mark "no real issues" without first running the failure path through a real test or a real production binary invocation. (4) Prefer shared registration helpers (e.g., `registerMvpCommands(program)`) so the failure-path test runs the same registration as production — a hand-rebuilt command tree can pass tests while production is broken.
 - **Source**: PRI-397 / PR #932
 - **Date**: 2026-06-15
-- **Recurrence**: First occurrence (related to EP-04 missing tests; same pattern as ERR-021, ERR-029, ERR-033, ERR-053)
+- **Recurrence**: Yes (related to EP-04 missing tests; same pattern as ERR-021, ERR-029, ERR-033, ERR-053).
+  - 2026-09-12 PRI-754 / PR #1633 Codex review (own-README contract flavor): the ai-user CLI's README documented "LLM unavailable = infra failure, exit 1", but a zero-decision llm-error printed `ok:true` and exited 0 — the documented failure path was never executed against the implementation. Fixed with an `isInfraFailure()` guard (zero-decision llm-error → `ok:false` + exit 1, report still written for evidence) + README rewrite + decision-boundary unit tests.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-12",
+    "pattern": "EP-04",
+    "invariant": "documented-failure-contract-never-executed",
+    "severity": "P1",
+    "escaped": "none",
+    "caughtBy": "pr-review",
+    "guard": "isInfraFailure decision-boundary unit tests"
+  }
+  -->
 [ERR-066]: docs/process/error-management/ERROR_EXPERIENCE_HANDBOOK.md#ERR-066
 
 ---
@@ -973,7 +1017,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
-    "pattern": "EP-01",
+    "pattern": "EP-08",
     "invariant": "boundary-control-on-raw-form-derived-form-unchecked",
     "severity": "P1",
     "escaped": "none",
@@ -1016,15 +1060,9 @@ Errors in how AI assistants approached the task — not reading context, not fol
 ---
 **[ERR-083]** | Changing a shared contract (store guard, type union, service method, default config value, package identity) without auditing all same-package AND cross-package consumers (callers, validators, tests, mocks, CI workflows) — downstream packages break
 
-- 2026-08-25 update Phase 2a quality review (no Linear issue): self-contained builds rewrote source versions from live npm and accepted labels unlike the native build host. Fixed by preserving source identity, rejecting target mismatches, and consuming in-asset identity. Prevention: immutable identity comes from pinned metadata; native outputs use the executed toolchain target.
-
-- **What happened**: In PRI-473, FK validation guards (throw if parent records missing) were added to three `principles-core` store methods (`createArtifact`, `enqueue`, `recordActivation`). Same-package tests seeded parent records, but cross-package callers were NOT audited — `pd-cli`, `pd-console`, and `openclaw-plugin` tests called these methods without seeding parents, causing 5 CI failures across 4 packages. In PRI-491 (PR #1137), two contract changes were not propagated to all consumers: (1) the `ActivationRecord.status` type union changed from `'active' | 'inactive'` to `'active' | 'deactivated' | 'suspended_by_flag'`, but the UI-side `VALID_ACTIVATION_STATUSES` set, the integration test assertion, and the UI test were not updated; (2) a new `recordRuleHostSkipped` method was added to `EventLogService`, but the mock in `gate-rule-context-v2.vm-e2e.test.ts` was not updated, causing a `TypeError: eventLog.recordRuleHostSkipped is not a function` and a stale assertion expecting the old skip-message format. In PRI-501 (PR #1162), the shared default runtime profile in `pd-config-defaults.ts` was changed from `openclaw.default` to `pd.default` (pi-ai placeholder), but `resolve-runtime-config-from-pd-config.test.ts` AC3/AC5 tests still asserted null config resolves to `openclaw-cli` success — principles-core CI failed because the new placeholder returns `needs_setup` error.
-- **Why it's wrong**: Changing a shared contract (adding a `throw` guard, changing a type union, adding a service method, **changing a shared default value, or changing the package identity (name field)**) tightens or shifts the contract: every existing consumer — callers, validators, tests, mocks, AND CI workflow `--workspace=<name>` references — must satisfy the new shape. Same-package tests don't prove cross-package paths still work. EP-02 family — isolated tests pass while real paths break.
-- **Generalized failure mode**: When changing ANY shared contract (store guard, type union, service method signature, new service method, shared default config value, **or package identity (name field)**) that crosses package boundaries, assistants must audit ALL cross-package consumers (callers, validators, tests, mocks, AND CI workflow references), otherwise downstream packages break at runtime/CI.
-- **Correct approach**: Before changing a shared contract: (1) grep all cross-package call sites AND consumers (validators, tests, mocks); (2) verify each consumer satisfies the new shape; (3) run cross-package tests. For type-union changes: grep for `Set<string>` validators and `as` narrowing in UI layers. For new service methods: grep all `vi.mock` of that service and add the new method. **For shared default config value changes: grep for tests that assert the old default (e.g., `resolve-runtime-config-from-pd-config.test.ts` AC3/AC5) and update their expectations.**
-- **How to prevent**: When changing a contract consumed by other packages, the PR must grep all same-package AND cross-package consumers (callers, validators, tests, mocks, CI workflows), confirm each satisfies the new contract, and run tests in each consuming package. Review triggers: (a) new `throw` in `sqlite-*-store.ts`; (b) type-union change on a shared interface — grep `Set<string>` validators and `as` narrowing; (c) new method on a service that has `vi.mock` in tests — grep `vi.mock('../../src/core/<service>.js')` and update each mock; (d) shared default value or constant change in `pd-config-defaults.ts` (or any `*-defaults.ts`), OR in any module that exports a shared constant array/object (e.g., `PRODUCTION_WORKSPACE_PATHS` in `production-workspace-guard.ts`) — grep for tests that hardcode the old value (e.g., `'D:\\.openclaw\\workspace'`) and replace with a constant mirroring the production default; **(e) package identity (name field) change in any `package.json` — grep `--workspace=<old-name>` in `.github/workflows/*.yml`, root `package.json` scripts, and all package.json scripts, and update every reference. CI workspace resolution uses the `name` field, not the directory name.** **(f) shared test fixture / environment assumption change in a test file (beforeEach setup, HOME/path redirection, mock wiring) — audit EVERY test in that file for the same dependency: in-process handler tests read env/filesystem DIRECTLY while subprocess tests inherit the injected env; then re-verify under the CLEAN environment condition (e.g., `HOME=<bogus>` locally), because a dev machine's real artifacts (a real `~/.openclaw` install) mask the failure that CI will hit.**
-- **Regression guard**: Cross-package CI tests now seed parent records in `pd-cli`, `pd-console`, and `openclaw-plugin`. Tests fail if FK guard is re-added without caller updates. For PRI-491: `ActivationValidators.ts` `VALID_ACTIVATION_STATUSES` set includes the new enum values; vm-e2e mock includes `recordRuleHostSkipped`. For PRI-501: AC3/AC5 now assert `needs_setup` error for null config.
-- **Related ERRs**: ERR-070, ERR-077, EP-02
+- **What happened**: Shared-contract changes (store FK guards, type unions, service methods, config defaults, package identity, shared test fixtures/env assumptions) broke same-package or cross-package consumers that only a repo-wide rg of construction/call/mock/workflow sites would have caught (PRI-473, PRI-491, PRI-501, PR #1182, #1358, #1389, #1413, #1535 CI, #1551, #1574). Full narrative + all recurrence stories: ERROR_ARCHIVE.md § "ERR-083 archived detailed entry body".
+- **How to prevent**: Before merging any shared-contract change, rg ALL same-package AND cross-package consumers (callers, validators, Set<string> validators, as-narrowing in UI, vi.mock module paths, workflow --workspace= names, hardcoded old defaults in tests) and update each in the same PR; when wiring a previously-dormant dependency, also rg the dependency's OWN emission/consumption sites and route each intentionally.
+- **Related ERRs**: ERR-070, ERR-077, EP-02, ERR-127 (completeness claims must ship untruncated evidence)
 - **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
