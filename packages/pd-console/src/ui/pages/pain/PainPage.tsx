@@ -21,9 +21,20 @@ import { ShinyText } from '../../components/ui/shiny-text.js';
 import { fetchEvidenceChain, recordIntentDecision, listIntentDecisionsByPainId, listIntentDecisionsByTaskId, dispatchFollowUp } from '../../api.js';
 import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData, IntentDecisionRecordData, FollowUpResponseData } from '../../api.js';
 import type { IntentTensionData } from '../../utils/validators.js';
-import { formatDate } from '../../utils/format.js';
+import { formatDate } from '../../utils/format-date.js';
+import i18n from '../../i18n/index.js';
 import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, type IntentDecisionContext } from './pain-card-helpers.js';
 import { enumLabel } from '../../utils/enum-labels.js';
+
+// utils/format.js was retired into the defensive single-owner formatter
+// (format-date.ts) — same datetime components, invalid dates now render the
+// raw string instead of Intl throwing.
+const DATETIME_FORMAT_OPTS: Intl.DateTimeFormatOptions = {
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+};
+function formatDateTime(iso: string): string {
+  return formatDate(iso, i18n.language, DATETIME_FORMAT_OPTS);
+}
 
 // ── State grouping ─────────────────────────────────────────────────────────────
 
@@ -298,7 +309,7 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
 
       {/* Generated-at timestamp */}
       <div className="mt-8 font-mono text-[11px] text-ink-4">
-        {t('pages.pain.generatedAt')}: {formatDate(data.generatedAt)}
+        {t('pages.pain.generatedAt')}: {formatDateTime(data.generatedAt)}
       </div>
     </>
   );
@@ -376,7 +387,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
               {t('pages.reportProblem.entryFeedback')}
             </Button>
             <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
-              {formatDate(record.observedAt)}
+              {formatDateTime(record.observedAt)}
             </span>
           </div>
         </div>

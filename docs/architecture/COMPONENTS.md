@@ -371,7 +371,6 @@ PD 系统有 5 类组件：
 
 | 组件 | 类型 | 包 | 文件 | 职责 | 状态 |
 |------|-----|----|----|----|------|
-| `EvolutionWorkerService` | 🔵 Service | plugin | `service/evolution-worker.ts` | legacy 进化队列调度 | ⚠️ 退役切换目标；不得增加职责 |
 | `IdleTrigger` | 🔵 Service | core | `runtime-v2/idle-trigger/`（历史策略） | 空闲检测策略 + wakeOnce 决策 | ⚠️ 退役目标；不再建设 plugin 宿主适配 |
 | `TrajectoryService` | 🔵 Service | plugin | `service/trajectory-service.ts` | 轨迹存储 | ✅ |
 | `PDTaskService` | 🔵 Service | plugin | `core/pd-task-service.ts` | 后台任务调度 | ⚠️ 部分实现 |
@@ -451,7 +450,6 @@ PD 系统有 5 类组件：
 | `pd central-sync` | `pd-cli/commands/central-sync.ts` | n/a | sync result | ❌ MVP-Gone (PRI-455: CLI command + service deleted; cross-workspace sync not in MVP scope) |
 | `pd samples list / review` | `pd-cli/commands/samples-*.ts` | filter | samples | ✅ |
 | `pd remediation output` | `pd-cli/commands/remediation-output.ts` | n/a | remediation list | ✅ |
-| `pd evolution-tasks list / show` | `pd-cli/commands/evolution-tasks-*.ts` | n/a | evolution tasks | ✅ |
 | `pd runtime-canary` | `pd-cli/commands/runtime-canary.ts` | n/a | canary report | ✅ |
 | `pd runtime-uat` | `pd-cli/commands/runtime-uat.ts` | n/a | UAT result | ✅ |
 
@@ -556,7 +554,6 @@ Owner 标记规则：
 `DiagnosticianValidator` §3.1 ✅
 `DreamerRunner` §3.2.2 ✅
 `EvaluatorRunner` §3.2.2 ✅
-`EvolutionWorkerService` §4.2 ⚠️
 `IdleTrigger` §4.2 ⚠️ Deprecated / retirement target (ADR-0012)
 `InternalizationOrchestrator` §3.2.1 ✅
 `IntakeToInternalizationBridge` §3.2.1 ✅

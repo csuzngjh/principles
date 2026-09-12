@@ -1,5 +1,11 @@
 # 项目记忆 — Principles Disciple
 
+<!-- PRI-752 (2026-09-12): 本文件自 2026-05-08 起停止更新，整体描述的是
+     2026-04/05 时代的架构（Nocturnal、EvolutionWorker、Runtime v2 迁移期），
+     与当前仓库现实严重不符，曾位于仓库根目录 MEMORY.md，对 AI Agent 构成
+     误导源。已归档至此作为历史记录；当前权威文档是根目录 AGENTS.md 与
+     docs/architecture/ 索引。请勿依据本文件做任何架构判断。 -->
+
 ## 当前状态 (2026-04-30)
 - **版本**: v1.10.40 (PR #414 已合并，PR #415 MEMORY 更新已合并)
 - **OpenClaw 版本**: 2026.4.11

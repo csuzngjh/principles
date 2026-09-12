@@ -326,8 +326,8 @@ const plugin = {
 
             // ── Start CorrectionObserver for THIS workspace ──
             // MVP-Core per ADR-0014 amendment, independently owned (PRI-293).
-            // (Legacy EvolutionWorker startup removed in PRI-737; its
-            // `evolution_worker` flag entry retires under a separate change.)
+            // (Legacy EvolutionWorker startup removed in PRI-737; the flag entry
+            // moved to `gone` in PRI-752.)
             const corrGate = shouldStartCorrectionObserver(workspaceDir, api.logger);
             if (corrGate.shouldStart) {
               CorrectionObserverService.start({
