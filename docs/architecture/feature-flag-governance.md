@@ -44,8 +44,8 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 | **principle_governance_projection_v2** | **ON（毕业）** | pd-console server/routes/principles.ts governance 端点 | ✅ 已毕业 |
 | **artificer_output_retry** | **ON（毕业）** | principles-core artificer-runner.ts permanentErrorCategories（PRI-621，2026-08-29 毕业：与其他 peer runner 的 output_invalid 重试语义对齐） | ✅ 已毕业 |
 | principle_receipt_self_report | OFF | prompt 注入 📝 行 + llm_output/before_message_write 捕获（PRI-532）；installer 与 registry 均保持关闭 | ✅ 实验性，保持默认关 |
-| correction_observer / signal_collector / l2_dreamer / intent_engineering / rulecode_context_v2 / artifact_summary_redundancy / context_manifest_budget / progressive_evaluator / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi / empathy_observer | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
-| nocturnal / idle_trigger / evolution_worker / internalization_core_grounding（PRI-751 墓碑化） | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝）。evolution_worker：worker 已于 PRI-737 删除，flag 2026-09-12 随 PRI-752 移入 gone（live 证据：flag=off、evolution_tasks/events 0 行；census 原 2026-12-01 隔离窗口因其主体（worker）已不存在而提前满足）。internalization_core_grounding：随 #1624 退役——grounding 由 runner 默认值无条件启用，flag 从未有可执行消费者（PRI-752 复核一致确认） | ✅ 正常退役 |
+| correction_observer / signal_collector / l2_dreamer / intent_engineering / rulecode_context_v2 / artifact_summary_redundancy / context_manifest_budget / progressive_evaluator / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
+| nocturnal / idle_trigger / evolution_worker / empathy_observer / internalization_core_grounding（PRI-751 墓碑化） | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝）。evolution_worker：worker 已于 PRI-737 删除，flag 2026-09-12 随 PRI-752 移入 gone（live 证据：flag=off、evolution_tasks/events 0 行；census 原 2026-12-01 隔离窗口因其主体（worker）已不存在而提前满足）。empathy_observer：随 #1625 退役（零可执行消费者，检测经 signal-collector-host 无条件运行）。internalization_core_grounding：随 #1624 退役——grounding 由 runner 默认值无条件启用，flag 从未有可执行消费者（PRI-752 复核一致确认） | ✅ 正常退役 |
 
 ## 3. 重点案例（本任务结论）
 
@@ -64,7 +64,7 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 需 Owner 择一：①把评分写入纳入 flag 门控（推荐，恢复 quiet 语义）；②确认评分常开后删除 flag。
 → 已建 follow-up 工单记录。
 
-### 3.2 `empathy_observer` — 断线控制（PRI-752 复核修正）
+### 3.2 `empathy_observer` — 断线控制（PRI-752 复核修正）；处置已执行（#1625）
 
 **本节 2026-09-12 前的描述有误**（曾声称 flag "gate 服务启动"）——PRI-752 逐项复核后的现实：
 
@@ -81,9 +81,12 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 - **live（2026-09-12）**：flag=on 且 `internalAgents.empathyObserver=on`——
   Owner 意图存在，行为缺席（安慰剂开关，PRI-749 G-5 定性成立）。
 
-处置：**待 Owner 二选一**——(a) 立项实现观测器接线（让开关有真实行为）；
-(b) 退役 flag + EmpathyObserver 类 + Console 展示面。维持现状（看起来开着
-但什么都不做）是最差选项，不建议保留。
+处置已执行（#1625，Owner 的 MVP-Gone 波次授权，采纳本节建议 (b) 的 flag 部分）：flag 翻转为
+gone 墓碑（存量 enabled:true 覆盖此后被可观察拒绝）、census 条目删除。`internalAgents.empathyObserver`
+agent 绑定不受影响（Control Center 的共情成本提示按 agent 绑定渲染）；pd-console 的
+'共情观察器' 标签保留（兼作 agent 显示名）。存量 `features.empathy_observer` 配置键此后走
+unknown-flag 告警。EmpathyObserver 类与公开导出未随本 PR 删除——若 Owner 后续要真实观测器，
+按 census 程序重新注册 flag 并接线即可。
 
 ### 3.3 installer 默认值快照 — 已按 PRI-645 收敛为 sparse shell
 

@@ -94,6 +94,9 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'feedback_channel': '反馈通道',
     'gfi': '全局摩擦指数',
     'evolution_worker': '进化工作器',
+    // 'empathy_observer' flag retired in PRI-751; the label is kept because
+    // EmpathyObserverCostHint reuses it as the display name of the
+    // internalAgents.empathyObserver AGENT (not a feature flag).
     'empathy_observer': '共情观察器',
     'painEvidenceAdmission': '痛点证据准入',
     'diagnostician_async_cli': '诊断器异步 CLI',

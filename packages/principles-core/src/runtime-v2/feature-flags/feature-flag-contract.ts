@@ -242,7 +242,16 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // (2026-12-01) was superseded — its subject, the quarantined worker, no
   // longer exists; live evidence: flag=off, 0 rows in evolution_tasks/events.
   { id: 'evolution_worker', category: 'gone', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (worker deleted in PRI-737; flag locked off, retired 2026-09-12 PRI-752)' },
-  { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },
+  // empathy_observer retired in PRI-751 (reality re-verified by PRI-752's
+  // audit): zero executable readers. The signal-collector refactor moved
+  // empathy detection to signal-collector-host (unconditional keyword path)
+  // and the observer service never materialized; the Console Control Center
+  // manages the `internalAgents.empathyObserver` agent binding instead
+  // (feature-flag-governance.md §3.2). Kept as a gone tombstone per the
+  // census lifecycle contract so a stale `enabled: true` override is
+  // rejected observably; the '共情观察器' label in pd-console enum-labels
+  // doubles as the agent display name for the cost hint.
+  { id: 'empathy_observer', category: 'gone', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking — retired (PRI-751, reality re-verified PRI-752): detection moved to signal-collector-host; gone tombstone' },
   // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
   // is now the primary admission gate.
   // PRI-752 reality check: NO code reads this flag for routing — Gate B is
