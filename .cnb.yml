@@ -118,6 +118,64 @@ $:
       docker:
         image: cnbcool/default-npc:latest
       stages:
+        # PRI-766：审计上下文（元数据 + 镜像漂移检测）。脚本经锚点复用于 T2 周定时。
+        #   - 漂移检测用 GitHub 匿名 API（本仓库 public）⇒ 全程零密钥；
+        #   - GitHub API 不可达时 fail-open 并留痕（审计继续，报告如实声明"漂移状态未知"）；
+        #   - 只输出 CNB_* 环境变量**名**，绝不输出值（CNB_TOKEN 不落盘）。
+        - name: 审计上下文准备
+          script: &pd-audit-context |
+            set -u
+            OUT=cloud-audit-context.md
+            COMMIT=$(git rev-parse HEAD)
+            BRANCH="${CNB_BRANCH:-unknown}"
+            EVENT="${CNB_EVENT:-unknown}"
+            START="${CNB_BUILD_START_TIME:-unknown}"
+            SLUG="${CNB_REPO_SLUG:-csuzngjh/principles}"
+            CHARTER=$(grep -m1 '^> 版本：' .cnb/agents/pd-auditor.md | sed 's/^> 版本：//' || echo 'unknown')
+
+            # 漂移检测：GitHub main（匿名 API）vs 本次流水线 checkout 的 commit。
+            #   node 输出 GitHub main 的 SHA 到 stdout；成功 exit 0，取不到 exit 2（fail-open）。
+            #   不落中间文件——bash 与 node 对 /tmp 的解析在部分平台不一致（实测踩坑）。
+            GH=$(node -e '
+              (async () => {
+                try {
+                  const r = await fetch("https://api.github.com/repos/csuzngjh/principles/commits/main", {
+                    headers: { "User-Agent": "pd-cnb-auditor", "Accept": "application/vnd.github+json" },
+                    signal: AbortSignal.timeout(15000),
+                  });
+                  if (!r.ok) throw new Error("HTTP " + r.status);
+                  const sha = (await r.json()).sha || "";
+                  if (!sha) throw new Error("empty sha in response");
+                  process.stdout.write(sha);
+                } catch (e) {
+                  process.stderr.write(String((e && e.message) || e));
+                  process.exit(2);
+                }
+              })();' 2>/tmp/pd-drift.err)
+            rc=$?
+
+            {
+              printf '# 审计上下文（流水线自动生成，非 Agent 产物）\n\n'
+              printf '## Metadata\n\n'
+              printf -- '- Repository: %s\n- Branch: %s\n- Commit: %s\n- Trigger: %s\n- Build start: %s\n- Charter: %s\n- Generated: %s\n\n' \
+                "$SLUG" "$BRANCH" "$COMMIT" "$EVENT" "$START" "$CHARTER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              printf '## Drift Check\n\n'
+              if [ "$rc" -eq 0 ] && [ "$GH" = "$COMMIT" ]; then
+                printf -- '- PASS：审计源与 GitHub main 一致（`%s`）。\n' "$GH"
+              elif [ "$rc" -eq 0 ]; then
+                printf 'Warning: Audit source differs from GitHub main\n\n'
+                printf -- '- Audit source (this pipeline): `%s`\n- GitHub main: `%s`\n' "$COMMIT" "$GH"
+                printf -- '- 影响：本报告结论仅对该镜像 commit 负责；请按 docs/runbooks/CNB_CLOUD_WORKER.md §2 方案A 同步镜像后复审。\n'
+              else
+                REASON=$(head -c 200 /tmp/pd-drift.err 2>/dev/null | tr '\n' ' ')
+                printf -- '- UNAVAILABLE：无法获取 GitHub main（%s）。审计继续，漂移状态未知（fail-open，已留痕）。\n' "${REASON:-unknown}"
+              fi
+              printf '\n## 附录：本次流水线可见的 CNB_* 环境变量名（仅名称，不含值）\n\n'
+              env | grep -o '^CNB_[A-Z_]*' | sort | sed 's/^/- /'
+            } > "$OUT"
+            echo "[PD] $OUT 已生成："
+            cat "$OUT"
+
         - name: npc go
           type: npc:go
           options:
@@ -198,6 +256,10 @@ main:
       docker:
         image: cnbcool/default-npc:latest
       stages:
+        # PRI-766：与 T3/T3b 共用同一段上下文脚本（锚点复用，One Audit Logic）。
+        - name: 审计上下文准备
+          script: *pd-audit-context
+
         - name: npc go
           type: npc:go
           options:
@@ -210,14 +272,20 @@ main:
               动手前先完整阅读仓库根目录的 `.cnb/agents/pd-auditor.md`（审查章程）。
             userPrompt: |
               对仓库 `main` 分支当前 HEAD 做一次**整体架构健康检查**（不是审查某个 diff）。
+              这是每周例行的 PD 治理审计（PRI-766），按 v2 报告契约输出。
 
               必读：AGENTS.md → docs/product/PRODUCT_IDENTITY.md → docs/adr/
                     → docs/architecture/ → .github/PULL_REQUEST_TEMPLATE.md
+              必读：工作目录下流水线预生成的 `cloud-audit-context.md`（元数据与镜像
+                    漂移检测），其 Metadata 与 Drift Warning 必须并入报告头部。
 
               请按 `.cnb/agents/pd-auditor.md` 的五个维度输出发现：
               D1 架构漂移 / D2 新增复杂度 / D3 测试风险 / D4 文档一致性 / D5 用户体验风险。
 
               要求：
+              - 报告格式严格遵循章程 §6 的 **v2 输出契约**（Metadata / Summary / Findings
+                含 Severity·Category·Evidence·Impact·Recommendation·Confidence /
+                Integrity Check 自检）。
               - 先把完整报告写入工作目录下的 `cloud-audit-report.md`，再在回复中给出结论摘要。
               - 报告必须包含「本次审查的局限」小节，如实声明未验证的部分。
               - 没有发现就写「未发现」，不要编造发现来显得有用。
