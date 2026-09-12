@@ -11,8 +11,12 @@
  * 启动方式：process.execPath 直接跑 tsx cli.mjs，无 shell 层；所有参数均为
  * 内部构造的字面量/数值/临时目录路径（无外部输入参与命令构造）。停止时
  * child.kill() 直接终止 node 进程自身，不存在孤儿化问题，也无需 taskkill。
+ *
+ * 宿主隔离：子进程的 HOME/USERPROFILE 重定向到临时目录——server 的生产
+ * 接线会读取 ~/.pd-console、~/.openclaw 甚至触达 ~/.pd/runtime 更新路由，
+ * QA run 绝不允许读写开发机真实安装（AGENTS.md §1.1）。
  */
-import { existsSync, mkdtempSync, openSync, rmSync } from 'node:fs';
+import { mkdtempSync, openSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,16 +49,29 @@ function pickFreePort(): Promise<number> {
   });
 }
 
+/** identity 必须成对：环境里只配置了一半时整体替换为固定测试对，避免拼出「半真半假」的已配置状态。 */
+function resolveOwnerEnv(): { PD_OWNER_ID: string; PD_OWNER_CREDENTIAL_ID: string } {
+  const realId = process.env['PD_OWNER_ID'];
+  const realCredential = process.env['PD_OWNER_CREDENTIAL_ID'];
+  if (realId && realCredential) {
+    return { PD_OWNER_ID: realId, PD_OWNER_CREDENTIAL_ID: realCredential };
+  }
+  return { PD_OWNER_ID: 'ai-user-qa', PD_OWNER_CREDENTIAL_ID: 'ai-user-qa' };
+}
+
 export async function startConsoleServer(opts?: {
   port?: number;
   logFile?: string;
 }): Promise<ConsoleServerHandle> {
-  // 与 e2e-start.mjs 同一前置守卫：前端静态资源缺失时 console 首屏只会返回
-  // 构建错误 JSON。真实装机用户的 dist/web 由 installer 发布，因此要求先
-  // build 才贴近真实「第一次使用」状态（rc-3 fail-loud + cli-6 nextAction）。
+  // dist/web 是构建产物（gitignored）；缺失时 console 首屏只会返回构建错误
+  // JSON。用 readdirSync 探测（非存在性检查后紧接使用，规避 TOCTOU 模式），
+  // 缺失即 fail-loud 并给出构建指引（rc-3 + cli-6）。真实装机用户的
+  // dist/web 由 installer 发布，build 后才贴近真实「第一次使用」状态。
   const webRoot = join(packageRoot, 'dist', 'web');
-  if (!existsSync(webRoot)) {
-    throw new Error('dist/web 缺失，console 无法呈现真实 UI。nextAction: 在 packages/pd-console 下运行 npm run build:ui 后重试');
+  try {
+    if (readdirSync(webRoot).length === 0) throw new Error('dist/web 为空');
+  } catch {
+    throw new Error('dist/web 缺失或为空，console 无法呈现真实 UI。nextAction: 在 packages/pd-console 下运行 npm run build:ui 后重试');
   }
   const port = opts?.port ?? (await pickFreePort());
   const workspaceDir = mkdtempSync(join(tmpdir(), 'pd-ai-user-'));
@@ -67,10 +84,10 @@ export async function startConsoleServer(opts?: {
       cwd: packageRoot,
       env: {
         ...process.env,
-        // 对齐 playwright.config.ts：identity 已配置 + no-auth，避免渲染出
-        // 与真实装机不符的「无 identity」恢复页
-        PD_OWNER_ID: process.env['PD_OWNER_ID'] ?? 'ai-user-qa',
-        PD_OWNER_CREDENTIAL_ID: process.env['PD_OWNER_CREDENTIAL_ID'] ?? 'ai-user-qa',
+        // 宿主全局状态隔离（见文件头）：homedir() 族解析全部落进临时目录
+        HOME: workspaceDir,
+        USERPROFILE: workspaceDir,
+        ...resolveOwnerEnv(),
       },
       stdio: logFile ? ['ignore', openSync(logFile, 'a'), openSync(logFile, 'a')] : 'inherit',
     },

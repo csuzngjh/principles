@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildReport, renderReportMarkdown, writeReport } from './report.js';
 import { parseScenario } from './scenario.js';
-import type { ScenarioRunResult } from './runner.js';
+import type { ScenarioRunResult, StepRecord } from './runner.js';
 
 const scenario = parseScenario({
   id: 'demo',
@@ -36,6 +36,8 @@ const run: ScenarioRunResult = {
       screenshot: 'step-01.png',
     },
   ],
+  effectiveMaxSteps: 8,
+  initialScreenshot: 'step-00.png',
   startedAt: '2026-09-12T00:00:00.000Z',
   finishedAt: '2026-09-12T00:01:00.000Z',
   model: 'test-model',
@@ -51,7 +53,51 @@ describe('buildReport', () => {
     expect(report.scenario.id).toBe('demo');
     expect(report.result).toEqual({ status: 'passed', finishReason: 'user-finished-success', stepsExecuted: 1 });
     expect(report.evidence.screenshots).toEqual(['step-00.png', 'step-01.png']);
-    expect(report.run.maxSteps).toBe(scenario.maxSteps);
+    expect(report.evidence.screenshotFailures).toBe(0);
+    // 报告必须记录实际生效预算（含 CLI 覆盖），不是 scenario 原始值
+    expect(report.run.maxSteps).toBe(8);
+  });
+
+  it('截图失败的步骤不冒充证据（rc-9 可观察）', () => {
+    const broken = {
+      ...run,
+      steps: [
+        {
+          index: 1,
+          thought: '点击开始',
+          action: { type: 'click', target: 'text=开始' } as const,
+          execution: { ok: true },
+          observation: { url: 'http://127.0.0.1:3101/', title: 'PD Console' },
+          screenshot: null,
+        },
+      ],
+      initialScreenshot: null,
+    };
+    const report = buildReport(broken, '/tmp/run-broken');
+    expect(report.evidence.screenshots).toEqual([]);
+    expect(report.evidence.screenshotFailures).toBe(2);
+    const md = renderReportMarkdown(report);
+    expect(md).toContain('（截图失败）');
+    expect(md).toContain('2 张失败');
+  });
+
+  it('markdown 单元格转义反斜杠与竖线（CodeQL incomplete-escaping 负向对照）', () => {
+    const hostileSteps: StepRecord[] = [
+      {
+        index: 1,
+        thought: '想法含 \\ 和 | 特殊字符',
+        action: { type: 'click', target: 'text=a|b\\\\c' },
+        execution: { ok: false, error: '失败信息含 | 竖线' },
+        observation: { url: 'http://127.0.0.1:3101/', title: '' },
+        screenshot: 'step-01.png',
+      },
+    ];
+    const hostile = { ...run, problems: ['单元格注入尝试 \\ | 原文保留'], steps: hostileSteps };
+    const md = renderReportMarkdown(buildReport(hostile, '/tmp/run-3'));
+    expect(md).toContain('想法含 \\\\ 和 \\| 特殊字符');
+    expect(md).toContain('text=a\\|b\\\\\\\\c');
+    expect(md).toContain('失败信息含 \\| 竖线');
+    expect(md).toContain('\\\\ \\| 原文保留');
   });
 });
 

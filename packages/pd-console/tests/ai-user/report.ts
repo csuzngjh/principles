@@ -20,7 +20,9 @@ export interface AiUserReport {
   steps: StepRecord[];
   evidence: {
     runDir: string;
+    /** 实际捕获成功的截图文件名（截图失败的步骤不冒充证据）。 */
     screenshots: string[];
+    screenshotFailures: number;
   };
   problems: string[];
   suggestions: string[];
@@ -29,11 +31,17 @@ export interface AiUserReport {
     baseUrlOrigin: string;
     startedAt: string;
     finishedAt: string;
+    /** 实际生效的步数预算（含 CLI 覆盖）。 */
     maxSteps: number;
   };
 }
 
 export function buildReport(run: ScenarioRunResult, runDir: string): AiUserReport {
+  const captured = [
+    run.initialScreenshot,
+    ...run.steps.map(step => step.screenshot),
+  ].filter((name): name is string => name !== null);
+  const expected = run.steps.length + 1;
   return {
     scenario: {
       id: run.scenario.id,
@@ -50,8 +58,8 @@ export function buildReport(run: ScenarioRunResult, runDir: string): AiUserRepor
     steps: run.steps,
     evidence: {
       runDir,
-      // step-00.png 是初始状态截图，其余按步骤递增
-      screenshots: ['step-00.png', ...run.steps.map(s => s.screenshot)],
+      screenshots: captured,
+      screenshotFailures: expected - captured.length,
     },
     problems: run.problems,
     suggestions: run.suggestions,
@@ -60,7 +68,7 @@ export function buildReport(run: ScenarioRunResult, runDir: string): AiUserRepor
       baseUrlOrigin: run.baseUrlOrigin,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
-      maxSteps: run.scenario.maxSteps,
+      maxSteps: run.effectiveMaxSteps,
     },
   };
 }
@@ -71,11 +79,16 @@ const STATUS_LABELS: Record<ScenarioRunResult['result'], string> = {
   incomplete: '未完成 — 步数耗尽或运行中断',
 };
 
+/** markdown 表格单元格转义：先转反斜杠再转竖线（CodeQL incomplete-escaping）。 */
+function mdEscape(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+}
+
 function actionCell(step: StepRecord): string {
   const parts: string[] = [step.action.type];
   if (step.action.target) parts.push(step.action.target);
   if (step.action.value !== undefined) parts.push(`「${step.action.value}」`);
-  return parts.join(' ').replace(/\|/g, '\\|');
+  return mdEscape(parts.join(' '));
 }
 
 export function renderReportMarkdown(report: AiUserReport): string {
@@ -86,10 +99,10 @@ export function renderReportMarkdown(report: AiUserReport): string {
   lines.push(`- 用户身份：${report.scenario.persona}`);
   lines.push(`- 目标：${report.scenario.goal}`);
   lines.push('- 成功标准：');
-  for (const item of report.scenario.success) lines.push(`  - ${item}`);
+  for (const item of report.scenario.success) lines.push(`  - ${mdEscape(item)}`);
   if (report.scenario.observe.length > 0) {
     lines.push('- 观察点：');
-    for (const item of report.scenario.observe) lines.push(`  - ${item}`);
+    for (const item of report.scenario.observe) lines.push(`  - ${mdEscape(item)}`);
   }
   lines.push('');
   lines.push('## Result');
@@ -97,6 +110,7 @@ export function renderReportMarkdown(report: AiUserReport): string {
   lines.push(`- 结束原因：${report.result.finishReason}`);
   lines.push(`- 执行步数：${report.result.stepsExecuted}`);
   lines.push(`- 模型：${report.run.model}（端点 ${report.run.baseUrlOrigin}）`);
+  lines.push(`- 步数预算：${report.run.maxSteps}`);
   lines.push(`- 时间：${report.run.startedAt} → ${report.run.finishedAt}`);
   lines.push('');
   lines.push('## Steps');
@@ -105,26 +119,26 @@ export function renderReportMarkdown(report: AiUserReport): string {
   for (const step of report.steps) {
     const outcome = step.execution.ok ? 'ok' : `失败：${step.execution.error ?? ''}`;
     lines.push(
-      `| ${step.index} | ${step.thought.replace(/\|/g, '\\|')} | ${actionCell(step)} | ${outcome.replace(/\|/g, '\\|')} | ${step.screenshot} |`,
+      `| ${step.index} | ${mdEscape(step.thought)} | ${actionCell(step)} | ${mdEscape(outcome)} | ${step.screenshot ?? '（截图失败）'} |`,
     );
   }
   lines.push('');
   lines.push('## Evidence');
   lines.push(`- 运行目录：\`${report.evidence.runDir}\``);
-  lines.push(`- 截图：${report.evidence.screenshots.join(', ')}`);
+  lines.push(`- 截图（${report.evidence.screenshots.length} 张捕获成功${report.evidence.screenshotFailures > 0 ? `，${report.evidence.screenshotFailures} 张失败` : ''}）：${report.evidence.screenshots.join(', ') || '（无）'}`);
   lines.push('');
   lines.push('## Problems');
   if (report.problems.length === 0) {
     lines.push('- （无记录）');
   } else {
-    for (const item of report.problems) lines.push(`- ${item}`);
+    for (const item of report.problems) lines.push(`- ${mdEscape(item)}`);
   }
   lines.push('');
   lines.push('## Suggestions');
   if (report.suggestions.length === 0) {
     lines.push('- （无记录）');
   } else {
-    for (const item of report.suggestions) lines.push(`- ${item}`);
+    for (const item of report.suggestions) lines.push(`- ${mdEscape(item)}`);
   }
   lines.push('');
   return lines.join('\n');

@@ -49,8 +49,18 @@ export async function executeAiUserAction(
           return { ok: false, error: 'navigate 需要 / 开头的站内路径' };
         }
         // 模型给出的是站内路径（可能含 hash 路由如 /#/settings），必须先解析
-        // 成绝对 URL，直接 goto 相对路径会报 invalid URL
-        await page.goto(new URL(url, opts.baseUrl).toString(), { waitUntil: 'load', timeout: 15_000 });
+        // 成绝对 URL；协议相对形式（//evil.example/path）会被解析到他源，
+        // 必须与 Console 同源才放行，防止把内网页面快照送给 LLM（rc-1 信任边界）
+        let resolved: URL;
+        try {
+          resolved = new URL(url, opts.baseUrl);
+        } catch {
+          return { ok: false, error: 'navigate 路径无法解析' };
+        }
+        if (resolved.origin !== new URL(opts.baseUrl).origin) {
+          return { ok: false, error: `navigate 目标越权（非 Console 同源）: ${url}` };
+        }
+        await page.goto(resolved.toString(), { waitUntil: 'load', timeout: 15_000 });
         return { ok: true };
       }
       case 'click': {

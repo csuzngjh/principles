@@ -124,6 +124,7 @@ describe('parseAiUserDecision', () => {
     ['navigate 越权外链', { ...clickDecision, action: { type: 'navigate', value: 'https://evil.example.com' } }],
     ['problems 元素非字符串', { ...clickDecision, problems: [1] }],
     ['finish success 非布尔', { ...clickDecision, action: { type: 'finish', success: 'yes' } }],
+    ['finish 缺 success（协议必填）', { ...clickDecision, action: { type: 'finish', note: '没有结论字段' } }],
   ])('%s 时拒绝（负向对照）', (_label, bad) => {
     expect(() => parseAiUserDecision(JSON.stringify(bad))).toThrow();
   });

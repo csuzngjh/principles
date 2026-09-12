@@ -157,10 +157,12 @@ function validateAction(action: unknown): AiUserAction {
       }
       break;
     case 'finish':
-      if (record['success'] !== undefined) {
-        if (typeof record['success'] !== 'boolean') throw new Error('动作 finish 的 success 必须是布尔值');
-        result.success = record['success'];
+      // success 是 finish 的判定结论（协议必填），缺失时按协议违规重问，
+      // 避免 runner 把「未表态」当「失败」产出失真报告
+      if (typeof record['success'] !== 'boolean') {
+        throw new Error('动作 finish 缺少布尔字段 "success"');
       }
+      result.success = record['success'];
       if (record['note'] !== undefined) {
         if (typeof record['note'] !== 'string') throw new Error('动作 finish 的 note 必须是字符串');
         result.note = record['note'];
@@ -234,7 +236,7 @@ export const AI_USER_SYSTEM_PROMPT = `你是「PD（Principles Disciple）」产
 - press：按键。value 如 Enter、Escape。
 - navigate：站内跳转。value 必须以 / 开头，如 / 或 /governance。
 - wait：等待页面变化。value=毫秒（最大 2000）。
-- finish：结束。目标已达成 success=true；确定无法完成 success=false，并把卡点写进 problems。
+- finish：结束，必须带 success（布尔）：目标已达成 success=true；确定无法完成 success=false，并把卡点写进 problems。
 
 规则：
 - 一次只输出一个动作。

@@ -15,19 +15,21 @@
  * 正是本工具的目的）；1 = 基础设施故障，无法完成运行。
  */
 import { mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { loadScenario } from './scenario.js';
 import { createLlmClient, resolveLlmConfig } from './llm.js';
 import { startConsoleServer, type ConsoleServerHandle } from './bootstrap.js';
-import { runScenario } from './runner.js';
+import { isInfraFailure, runScenario } from './runner.js';
 import { writeReport } from './report.js';
 
 interface CliOptions {
   scenario: string;
   out: string | null;
   baseUrl: string | null;
+  consoleToken: string | null;
   model: string | null;
   maxSteps: number | null;
   headed: boolean;
@@ -43,6 +45,7 @@ function parseArgs(argv: string[]): CliOptions {
     scenario: '',
     out: null,
     baseUrl: null,
+    consoleToken: null,
     model: null,
     maxSteps: null,
     headed: false,
@@ -65,6 +68,9 @@ function parseArgs(argv: string[]): CliOptions {
       case '--base-url':
         opts.baseUrl = value();
         break;
+      case '--console-token':
+        opts.consoleToken = value();
+        break;
       case '--model':
         opts.model = value();
         break;
@@ -86,7 +92,8 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 function runStamp(date: Date): string {
-  return date.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
+  // 毫秒精度 + 随机后缀：同一 scenario 的并发 run 不得共享目录
+  return `${date.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-')}-${randomUUID().slice(0, 8)}`;
 }
 
 async function main(): Promise<void> {
@@ -108,6 +115,13 @@ async function main(): Promise<void> {
     browser = await chromium.launch({ headless: !opts.headed });
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' });
     const page = await context.newPage();
+    if (opts.consoleToken !== null) {
+      // attach 到启用认证的 console：UI 从 sessionStorage["pd_token"] 读取令牌
+      await page.addInitScript(
+        (token: string) => sessionStorage.setItem('pd_token', token),
+        opts.consoleToken,
+      );
+    }
 
     const run = await runScenario({
       scenario,
@@ -119,23 +133,31 @@ async function main(): Promise<void> {
     });
 
     const { jsonPath, mdPath } = writeReport(runDir, run);
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          scenario: scenario.id,
-          result: run.result,
-          finishReason: run.finishReason,
-          stepsExecuted: run.steps.length,
-          problems: run.problems.length,
-          suggestions: run.suggestions.length,
-          runDir,
-          report: { json: jsonPath, markdown: mdPath },
-        },
-        null,
-        2,
-      ),
-    );
+    // CLI 契约：LLM 在零决策情况下不可用 = 基础设施故障 → ok:false + 退出码 1
+    //（报告仍写盘，保留 server.log/截图证据）；已产生决策的 run 无论结果如何
+    // 都是有效 QA 产出 → ok:true + 退出码 0。
+    const output = {
+      ok: !isInfraFailure(run),
+      scenario: scenario.id,
+      result: run.result,
+      finishReason: run.finishReason,
+      stepsExecuted: run.steps.length,
+      problems: run.problems.length,
+      suggestions: run.suggestions.length,
+      runDir,
+      report: { json: jsonPath, markdown: mdPath },
+    };
+    if (!output.ok) {
+      console.error(
+        JSON.stringify(
+          { ...output, reason: 'LLM 全程不可用（零决策）。nextAction: 检查 OPENAI_BASE_URL/OPENAI_API_KEY/PD_AI_USER_MODEL 与端点可用性后重试' },
+          null,
+          2,
+        ),
+      );
+      process.exit(1);
+    }
+    console.log(JSON.stringify(output, null, 2));
   } finally {
     await browser?.close().catch(() => undefined);
     server?.close();

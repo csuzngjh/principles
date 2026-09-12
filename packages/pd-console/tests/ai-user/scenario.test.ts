@@ -60,6 +60,20 @@ describe('parseScenario', () => {
     expect(() => parseScenario({ ...valid, maxSteps: bad })).toThrow(/maxSteps/);
   });
 
+  it.each([
+    ['相对路径逃逸', '../../escape'],
+    ['目录分隔符', 'a/b'],
+    ['反斜杠分隔符', 'a\\b'],
+    ['点开头隐藏名', '.hidden'],
+    ['纯点逃逸', '..'],
+  ])('id 含路径逃逸形态 %p 拒绝（rc-3）', (_label, badId) => {
+    expect(() => parseScenario({ ...valid, id: badId })).toThrow(/"id"/);
+  });
+
+  it.each(['demo-1', 'Demo_2.1', 'x'])('合法 id %p 通过', goodId => {
+    expect(parseScenario({ ...valid, id: goodId }).id).toBe(goodId);
+  });
+
   it('根节点不是 mapping 时拒绝', () => {
     expect(() => parseScenario('just a string')).toThrow(/mapping/);
     expect(() => parseScenario(['a'])).toThrow(/mapping/);

@@ -20,23 +20,27 @@ AI User 发现的问题只记录在报告里，不自动修改代码、不自动
 ## 用法
 
 ```bash
-# 在 packages/pd-console 目录下
+# 在 packages/pd-console 目录下（脚本会先自动 build:ui，干净 checkout 可直接运行）
 npm run test:ai-user -- --scenario tests/ai-user/scenarios/first-run-onboarding.yaml
 
 # 常用选项
 npm run test:ai-user -- --scenario <yaml> --model <id> --max-steps 8 --headed
-npm run test:ai-user -- --scenario <yaml> --base-url http://127.0.0.1:3100   # 附加到已运行的 console
+npm run test:ai-user -- --scenario <yaml> --base-url http://127.0.0.1:3100 --console-token <token>
+#   attach 模式：附加到已运行的 console；目标启用了认证时必须提供 --console-token，
+#   否则 AI User 只会看到登录页，无法进入真实产品流程。
 ```
 
 Runner 会自动：在临时目录创建**全新 workspace** → 以 `--no-auth` 启动真实
 console server（与 `playwright.config.ts` 的 e2e webServer 同一生产入口，
-SqliteConnection 自动 bootstrap schema，无 seed——即「第一次使用」的真实状态）
+SqliteConnection 自动 bootstrap schema，无 seed——即「第一次使用」的真实状态；
+子进程 HOME/USERPROFILE 重定向到临时目录，QA run 不触碰开发机真实安装）
 → 启动 chromium → 循环执行「观察 → LLM 决策 → 动作 → 截图」→ 生成报告 →
 清理进程与临时 workspace。
 
 退出码：`0` = 运行完成且报告已生成（`result: failed` 也是有效产出——发现
 问题正是本工具的目的）；`1` = 基础设施故障（scenario 非法、server 起不来、
-LLM 不可达等），不会产生部分报告。
+**LLM 全程不可用导致零决策** 等）。LLM 中途失败（已有部分决策）不算基础
+设施故障：报告以 `incomplete`/`llm-error` 如实记录后正常退出。
 
 ## Scenario 格式（简单 YAML，非 DSL）
 

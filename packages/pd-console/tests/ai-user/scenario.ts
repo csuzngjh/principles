@@ -72,13 +72,24 @@ function parseMaxSteps(record: Record<string, unknown>): number {
   return value;
 }
 
+/** id 会成为运行目录名，必须是文件名安全标识，杜绝路径逃逸（rc-3）。 */
+const SCENARIO_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function parseScenarioId(record: Record<string, unknown>): string {
+  const id = requireNonEmptyString(record, 'id');
+  if (!SCENARIO_ID_PATTERN.test(id)) {
+    throw new Error('scenario 字段 "id" 只允许字母/数字开头的字母、数字、点、下划线、连字符（禁止路径分隔符）');
+  }
+  return id;
+}
+
 export function parseScenario(raw: unknown): AiUserScenario {
   const record = asRecord(raw);
   if (record === null) {
     throw new Error('scenario 根节点必须是 YAML mapping（rc-3 fail-loud）');
   }
   return {
-    id: requireNonEmptyString(record, 'id'),
+    id: parseScenarioId(record),
     persona: requireNonEmptyString(record, 'persona'),
     goal: requireNonEmptyString(record, 'goal'),
     success: requireStringArray(record, 'success', { required: true }),

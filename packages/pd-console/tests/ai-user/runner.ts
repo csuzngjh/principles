@@ -23,8 +23,8 @@ export interface StepRecord {
   action: AiUserAction;
   execution: { ok: boolean; error?: string };
   observation: { url: string; title: string };
-  /** 相对 screenshotsDir 的截图文件名。 */
-  screenshot: string;
+  /** 相对 screenshotsDir 的截图文件名；截图失败时为 null（rc-9 可观察）。 */
+  screenshot: string | null;
 }
 
 export interface ScenarioRunResult {
@@ -34,10 +34,22 @@ export interface ScenarioRunResult {
   problems: string[];
   suggestions: string[];
   steps: StepRecord[];
+  /** 实际生效的步数预算（含 CLI 覆盖），报告必须记录真实预算。 */
+  effectiveMaxSteps: number;
+  initialScreenshot: string | null;
   startedAt: string;
   finishedAt: string;
   model: string;
   baseUrlOrigin: string;
+}
+
+/**
+ * 基础设施故障判定：LLM 在零决策的情况下不可用——整个 run 没有产生任何
+ * AI 决策，属于「无法完成运行」而非「运行后发现问题」，按 CLI 契约走
+ * 退出码 1（区别于已产生决策后的中途失败，后者是有效的 QA 观察结果）。
+ */
+export function isInfraFailure(run: ScenarioRunResult): boolean {
+  return run.result === 'incomplete' && run.finishReason === 'llm-error' && run.steps.length === 0;
 }
 
 interface PageObservation {
@@ -104,11 +116,13 @@ ${observation.snapshot || '（快照为空——页面可能仍在加载，可�
 基于以上信息，输出下一个动作的 JSON 决策。`;
 }
 
-async function takeScreenshot(page: Page, screenshotsDir: string, fileName: string): Promise<void> {
+/** 截图并返回文件名；失败返回 null 并由调用方落入 problems（rc-9 不静默）。 */
+async function takeScreenshot(page: Page, screenshotsDir: string, fileName: string): Promise<string | null> {
   try {
     await page.screenshot({ path: join(screenshotsDir, fileName), fullPage: true });
+    return fileName;
   } catch {
-    // 截图失败（如导航中）不阻塞流程；后续步骤会继续尝试
+    return null;
   }
 }
 
@@ -136,7 +150,10 @@ export async function runScenario(opts: {
     timeout: 15_000,
   });
   // 初始状态截图：第一步动作之前的页面（证据链起点）
-  await takeScreenshot(opts.page, opts.screenshotsDir, 'step-00.png');
+  const initialScreenshot = await takeScreenshot(opts.page, opts.screenshotsDir, 'step-00.png');
+  if (initialScreenshot === null) {
+    pushUnique(problems, '初始状态截图（step-00.png）捕获失败');
+  }
 
   for (let i = 0; i < maxSteps; i++) {
     const observation = await observePage(opts.page);
@@ -154,8 +171,14 @@ export async function runScenario(opts: {
     }
 
     const execution = await executeAiUserAction(opts.page, decision.action, { baseUrl: opts.baseUrl });
-    const screenshot = `step-${String(i + 1).padStart(2, '0')}.png`;
-    await takeScreenshot(opts.page, opts.screenshotsDir, screenshot);
+    const screenshot = await takeScreenshot(
+      opts.page,
+      opts.screenshotsDir,
+      `step-${String(i + 1).padStart(2, '0')}.png`,
+    );
+    if (screenshot === null) {
+      pushUnique(problems, `步骤 ${i + 1} 截图捕获失败（页面可能在导航中或已崩溃）`);
+    }
 
     steps.push({
       index: i + 1,
@@ -193,6 +216,8 @@ export async function runScenario(opts: {
     problems,
     suggestions,
     steps,
+    effectiveMaxSteps: maxSteps,
+    initialScreenshot,
     startedAt,
     finishedAt: new Date().toISOString(),
     model: opts.llm.config.model,
