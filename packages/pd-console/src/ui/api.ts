@@ -32,6 +32,7 @@ import {
   validateOutputLanguage,
   validateGovernanceQueue,
   validateRecoveryResult,
+  validateFailedTaskDetail,
   validateOwnerDecisionsData,
   validateOwnerResolutionResult,
   validateActivations,
@@ -90,6 +91,7 @@ import type {
   OutputLanguageData,
   GovernanceQueueData,
   RecoveryResultData,
+  FailedTaskDetailData,
   ActivationsData,
   DisableActivationData,
   LifecycleMetricsData,
@@ -791,6 +793,14 @@ async function recoverFailedTask(taskId: string, reason?: string, force?: boolea
   }, validateRecoveryResult);
 }
 
+// PRI-747 F22 / PRI-749: consume the existing single-task detail endpoint
+// (task record + run history). The server route and
+// SqliteTaskStore.getFailedTaskDetail already existed; this wrapper is the
+// missing UI-side consumer the Failed Tasks page expands into.
+async function fetchFailedTaskDetail(taskId: string): Promise<ApiResponse<FailedTaskDetailData>> {
+  return request<FailedTaskDetailData>('/api/v1/failed-tasks/' + encodeURIComponent(taskId), undefined, validateFailedTaskDetail);
+}
+
 // PRI-629: unified Owner Decision inbox — read projection + resolution.
 async function fetchOwnerDecisions(): Promise<ApiResponse<OwnerDecisionsData>> {
   return request<OwnerDecisionsData>('/api/v1/governance/owner-decisions', undefined, validateOwnerDecisionsData);
@@ -1094,6 +1104,7 @@ export {
   fetchGovernanceQueue,
   fetchGovernanceExperience,
   recoverFailedTask,
+  fetchFailedTaskDetail,
   fetchOwnerDecisions,
   resolveOwnerDecision,
   fetchApprovalsGrouped,
@@ -1150,6 +1161,7 @@ export type {
   DisableActivationData,
   RuleCodeOwnerReviewData,
   RuleCodeMutationData,
+  FailedTaskDetailData,
   LifecycleMetricsData,
   UpdateStatusData,
   UpdateHistoryData,
