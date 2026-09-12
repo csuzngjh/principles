@@ -276,9 +276,10 @@ export function recordSelfReportFromText(
  * PRI-755 (review fix): marker ids and session ids are untrusted input —
  * JSON-encode (single-line by construction, rc-8) before interpolating into
  * warn logs so control characters cannot forge additional log lines.
+ * safeStringifyPreview bounds strings at 200 chars internally.
  */
 function safeLogField(value: string | undefined): string {
-  return safeStringifyPreview(value ?? '(none)', 200);
+  return safeStringifyPreview(value ?? '(none)');
 }
 
 /** Test hook: close cached connections and reset the retention sweep clock. */
