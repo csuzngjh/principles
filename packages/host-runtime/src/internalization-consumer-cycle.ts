@@ -489,6 +489,9 @@ export async function runInternalizationConsumerCycle(
           timeoutMs: taskRuntimeConfig.timeoutMs,
           baseUrl: taskRuntimeConfig.baseUrl,
           workspace: workspaceDir,
+          // PRI-758: profile reasoning level rides to pi-ai (thinking control
+          // for always-thinking zai models, e.g. glm-5.3-flash).
+          ...(taskRuntimeConfig.reasoning !== undefined ? { reasoning: taskRuntimeConfig.reasoning } : {}),
           // PRI-633: profile systemPrompt rides as the append layer.
           ...(taskRuntimeConfig.systemPrompt ? { systemPrompt: taskRuntimeConfig.systemPrompt } : {}),
         });
