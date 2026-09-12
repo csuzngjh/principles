@@ -244,14 +244,17 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'evolution_worker', category: 'gone', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (worker deleted in PRI-737; flag locked off, retired 2026-09-12 PRI-752)' },
   { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },
   // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
-  // is now the primary admission gate. Roll back = set painEvidenceAdmissionDefault to false.
-  { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate.' },
+  // is now the primary admission gate.
+  // PRI-752 reality check: NO code reads this flag for routing — Gate B is
+  // unconditional and no flag-off rollback path exists (PRI-749 G-1 finding).
+  { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate. PRI-752: no executable consumers — flag value has no runtime effect; disposition pending Owner decision.' },
   // PRI-404/PRI-609: the snake_case IDs `pain_evidence_admission` and
   // `pain_evidence_admission_default` are no longer registered as independent
   // capabilities — see FEATURE_FLAG_ALIASES above.
-  // PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B owns admission.
-  // When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated on all paths.
-  { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B (TriggerController) owns admission. When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated.' },
+  // PRI-454 historical intent: global kill switch for the Gate B migration.
+  // PRI-752 reality check: the documented OFF→Gate A re-activation routing was
+  // never implemented — Gate B is unconditional (PRI-749 G-1 finding).
+  { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: historical kill switch for the Gate B migration. PRI-752: the documented flag-off Gate A rollback does not exist as code — flag value has no runtime effect; disposition pending Owner decision.' },
   { id: 'diagnostician_async_cli', category: 'quiet', enabled: false, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background. Default: false until orchestrator exists.' },
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
   { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders (dreamer, philosopher, scribe)' },

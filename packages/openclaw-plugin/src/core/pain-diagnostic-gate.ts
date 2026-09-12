@@ -2,15 +2,16 @@
  * Pain Diagnostic Gate — PRI-446 thin adapter
  *
  * @deprecated PRI-454 — Gate A (PainDiagnosticGate) is superseded by Gate B
- * (TriggerController + EvidenceTriage). This module remains as the rollback
- * path when `painEvidenceAdmission` or `painEvidenceAdmissionDefault` flags
- * are OFF. Do not add new callers. New admission logic must use
- * `evaluateTriggerController` from runtime-v2/evidence-triage.
+ * (TriggerController + EvidenceTriage). Do not add new callers. New admission
+ * logic must use `evaluateTriggerController` from runtime-v2/evidence-triage.
  *
- * Disposition: Archive (do not delete) per PRI-454 plan step 6.
- * Removal conditions: Both flags confirmed ON in production for 30 days,
- * and all 5 MVP paths verified on Gate B. See
- * docs/plans/2026-06-pain-evidence-admission-track.md.
+ * Reality note (PRI-752, 2026-09-12): NO runtime routing reads
+ * `painEvidenceAdmission` / `painEvidenceAdmissionDefault` to re-activate this
+ * module — the documented flag-off rollback does not exist as code. This
+ * adapter has ZERO production importers; only tests import it
+ * (PRI-749 G-1 / PRI-752 finding). The PRI-454 removal conditions were met
+ * in production; disposition awaits the Owner decision recorded on PRI-752 —
+ * see docs/plans/2026-06-pain-evidence-admission-track.md.
  *
  * The pure decision logic (threshold tree, cooldown comparison, episode-key
  * construction) now lives in principles-core
@@ -21,9 +22,8 @@
  *   - SystemLogger for unknown-source telemetry
  *
  * It preserves the original export names (evaluatePainDiagnosticGate,
- * isCooldownActiveForEpisode, resetPainDiagnosticGateForTest) so all 5 callers
- * (gate-block-helper, llm, pain, prompt x2) and the characterization test keep
- * working unchanged.
+ * isCooldownActiveForEpisode, resetPainDiagnosticGateForTest) for the
+ * remaining test consumers (auto-entry-gate, characterization, mocks).
  *
  * ERR checklist:
  * - ERR-011: this is a stateful adapter delegating to core pure logic.

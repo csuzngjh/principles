@@ -35,7 +35,9 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 | flag | 默认 | 生产 consumer（file:line 级证据见测试） | 判定 |
 | --- | --- | --- | --- |
 | prompt / code_tool_hook / defer_archive / rulecode_* / code_rule_capability / host.codex / internalization_full_chain / new_user_onboarding | ON (core) | 三条激活路径与 RuleHost 管线（ADR-0014 §2.4） | ✅ |
-| internalization_auto_consumer / story_a_approval_completion / failed_tasks_observability / evaluator_artificer_repair_loop / painEvidenceAdmission(+alias/Default) / feedback_channel / diagnostician_core_grounding / internalization_core_grounding / failed_task_recovery_console | ON (quiet) | 各自运行时路径（PRI-239 起"仅注册有真实消费路径的 flag"约束） | ✅ |
+| internalization_auto_consumer / story_a_approval_completion / failed_tasks_observability / evaluator_artificer_repair_loop / feedback_channel / diagnostician_core_grounding / failed_task_recovery_console | ON (quiet) | 各自运行时路径（PRI-239 起"仅注册有真实消费路径的 flag"约束） | ✅ |
+| painEvidenceAdmission(+alias/Default) | ON (quiet) | **零可执行消费者**（PRI-752 复核 2026-09-12：pain.ts/llm.ts/gate-block-helper.ts 均无引用；Gate B 无条件运行，文档化的 flag-off 回滚路由不存在——PRI-749 G-1）。处置（删/接线/声明不可回退）待 Owner 决策 | ⚠️ placebo switch |
+| internalization_core_grounding | ON (quiet) | **零可执行消费者**（PRI-752 复核：dreamer runner 硬编码 coreGrounding:true——dreamer-runner.ts:95；诊断器走另一个真实 flag diagnostician_core_grounding）。控制断线：census 退休条件「prompt design drops grounding block」未满足（行为仍活跃）。重接线 vs 退役待 Owner 决策 | ⚠️ disconnected control |
 | diagnostician_split_pipeline | ON (quiet) | 仅剩 config 一致性 guard（pain-signal-runtime-factory：`split && !async_cli` fail-loud）。**PRI-638 起不再是 capability kill switch，也不再选择实现**——树中只剩 split 实现，capability 开关是 `internalAgents.agents.diagnostician.enabled` | ⚠️ DEPRECATE / DEFER DELETE |
 | **principle_receipt_ledger** | **ON（毕业）** | openclaw-plugin gate.ts:158/322、prompt.ts:613、pd-console ReceiptsConsoleModel、pd-cli principles-stats | ✅ 已毕业 |
 | **principle_receipt_block_copy** | **ON（毕业）** | openclaw-plugin gate-block-helper.ts:242 | ✅ 已毕业 |
