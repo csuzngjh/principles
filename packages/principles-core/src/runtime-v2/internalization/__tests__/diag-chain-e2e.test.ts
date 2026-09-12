@@ -509,7 +509,6 @@ describe('Diag chain e2e', () => {
         feedback_channel: { category: 'quiet', enabled: true },
         gfi: { category: 'quiet', enabled: false },
         evolution_worker: { category: 'gone', enabled: false },
-        painEvidenceAdmission: { category: 'quiet', enabled: false },
         diagnostician_async_cli: { category: 'quiet', enabled: false },
         diagnostician_core_grounding: { category: 'quiet', enabled: true },
         diagnostician_split_pipeline: { category: 'quiet', enabled: true },

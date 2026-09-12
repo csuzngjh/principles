@@ -140,18 +140,18 @@ describe('PRI-645 existing-config compatibility preserved', () => {
     expect(effective.warnings.some(w => w.includes('PRI-638 cutover'))).toBe(true);
   });
 
-  it('PRI-609 snake_case aliases still normalize onto canonical IDs', () => {
-    expect(Object.keys(FEATURE_FLAG_ALIASES).length).toBeGreaterThan(0);
-    for (const [alias, canonical] of Object.entries(FEATURE_FLAG_ALIASES)) {
-      const config = withFeatures({
-        [alias]: { category: 'quiet', enabled: false },
-      });
-      const effective = computeEffectivePdConfig(config);
-      // Alias key controls the canonical flag's effective value.
-      expect(effective.config.features[canonical]?.enabled).toBe(false);
-      // The alias key itself never becomes a capability entry.
-      expect(Object.hasOwn(effective.config.features, alias)).toBe(false);
-    }
+  it('PRI-763: no registered aliases remain (pain admission aliases retired)', () => {
+    expect(Object.keys(FEATURE_FLAG_ALIASES)).toHaveLength(0);
+    // A stale snake_case pain key on an existing config must be diagnosed as
+    // unknown — never silently honored, never an effective capability.
+    const config = withFeatures({
+      pain_evidence_admission: { category: 'quiet', enabled: false },
+    });
+    const effective = computeEffectivePdConfig(config);
+    // Unknown keys are filtered out of the effective feature map entirely
+    // (PRI-609: "not effective capabilities") and surface as a diagnostic.
+    expect(Object.hasOwn(effective.config.features, 'pain_evidence_admission')).toBe(false);
+    expect(effective.warnings.some(w => w.includes('pain_evidence_admission') && w.includes('unknown'))).toBe(true);
   });
 
   it('explicit owner overrides keep their source on a sparse-config workspace', () => {

@@ -108,22 +108,10 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   // longer existed at retirement time (live: flag=off, evolution tables 0 rows).
   // empathy_observer: RETIRED 2026-09-12 (#1625, MVP-Gone wave; PRI-752's audit
   // verified zero executable readers). Gone flags carry no lifecycle entry.
-  painEvidenceAdmission: {
-    decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/hooks/pain.ts', 'openclaw-plugin/src/hooks/llm.ts', 'openclaw-plugin/src/hooks/gate-block-helper.ts'],
-    evidence: 'PEAT-B1 admission gate; PRI-454 default-on, Gate B (TriggerController) primary (since 2026-06-06)',
-    decided: '2026-08-27',
-    graduationCriteria: 'Already default-on; promotion to core optional — quiet retained so Gate A rollback stays config-only',
-    retirementCriteria: 'Gate A/B duality resolved (Gate A deleted) — flag collapses into Gate B default behavior',
-  },
-  painEvidenceAdmissionDefault: {
-    decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/hooks/pain.ts', 'openclaw-plugin/src/hooks/llm.ts', 'openclaw-plugin/src/hooks/gate-block-helper.ts'],
-    evidence: 'PRI-454 Gate B migration kill switch; default-on, OFF re-activates Gate A (since 2026-06-24)',
-    decided: '2026-08-27',
-    graduationCriteria: 'Kill-switch semantics — will not graduate',
-    retirementCriteria: 'Gate A (PainDiagnosticGate) deleted after Gate B stability window; kill switch then meaningless',
-  },
+  // painEvidenceAdmission / painEvidenceAdmissionDefault: RETIRED 2026-09-12 (PRI-763).
+  // Flags removed from DEFAULT_FEATURE_FLAGS — zero executable consumers verified
+  // (PRI-652-B1/PRI-752/PRI-762); admission is unconditional Gate B. Gone/deleted
+  // flags carry no lifecycle entry (terminal state).
   diagnostician_async_cli: {
     decision: 'KEEP_QUIET',
     consumers: ['pd-cli/src/commands/pain-record.ts', 'principles-core pain-sign* async path'],
