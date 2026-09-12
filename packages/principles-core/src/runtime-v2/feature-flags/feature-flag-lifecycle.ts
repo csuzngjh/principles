@@ -106,14 +106,8 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   // lifecycle entry (terminal state, enforced by feature-flag-lifecycle.test).
   // The 2026-12-01 quarantine window was superseded: the quarantined worker no
   // longer existed at retirement time (live: flag=off, evolution tables 0 rows).
-  empathy_observer: {
-    decision: 'KEEP_QUIET',
-    consumers: ['pd-console/src/ui/pages/control-center/EmpathyObserver*', 'openclaw-plugin observer wiring'],
-    evidence: 'Empathy observer service for sentiment checking (since 2026-06-02); default-off',
-    decided: '2026-08-27',
-    graduationCriteria: 'Dogfood evidence that sentiment checking changes owner-visible behavior positively',
-    retirementCriteria: 'No dogfood activation for 6 months (2026-12-02) or signal_collector merge removes the standalone observer',
-  },
+  // empathy_observer: RETIRED 2026-09-12 (#1625, MVP-Gone wave; PRI-752's audit
+  // verified zero executable readers). Gone flags carry no lifecycle entry.
   painEvidenceAdmission: {
     decision: 'KEEP_QUIET',
     consumers: ['openclaw-plugin/src/hooks/pain.ts', 'openclaw-plugin/src/hooks/llm.ts', 'openclaw-plugin/src/hooks/gate-block-helper.ts'],
@@ -142,14 +136,6 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     decision: 'KEEP_QUIET',
     consumers: ['principles-core/src/runtime-v2/internaliz*/diagnostician prompt builders'],
     evidence: 'Core principle grounding in diagnostician prompt (Arm 2, since 2026-06-11); default-on',
-    decided: '2026-08-27',
-    graduationCriteria: 'Stable prompt feature; promotion to core optional',
-    retirementCriteria: 'Prompt design drops grounding block',
-  },
-  internalization_core_grounding: {
-    decision: 'KEEP_QUIET',
-    consumers: ['principles-core/src/runtime-v2/internaliz*', 'principles-core/src/runtime-v2/runner/pe*'],
-    evidence: 'Core principle grounding in internalization prompt builders (since 2026-06-16); default-on',
     decided: '2026-08-27',
     graduationCriteria: 'Stable prompt feature; promotion to core optional',
     retirementCriteria: 'Prompt design drops grounding block',

@@ -237,7 +237,6 @@ describe('computeEffectiveFlags', () => {
       if (flag.id === 'diagnostician_async_cli') continue;
       if (flag.id === 'diagnostician_core_grounding') continue;
       if (flag.id === 'diagnostician_split_pipeline') continue;
-      if (flag.id === 'internalization_core_grounding') continue;
       if (flag.id === 'internalization_auto_consumer') continue;
       if (flag.id === 'story_a_approval_completion') continue;
       // P0-D (2026-08-18): repair loop promoted to default-on (INV-02 liveness)

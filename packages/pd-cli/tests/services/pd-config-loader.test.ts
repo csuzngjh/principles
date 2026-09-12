@@ -58,7 +58,7 @@ function makeValidConfigYaml(): string {
       code_tool_hook: { category: 'core', enabled: true },
       defer_archive: { category: 'core', enabled: true },
       correction_observer: { category: 'quiet', enabled: false },
-      empathy_observer: { category: 'quiet', enabled: false },
+      gfi: { category: 'quiet', enabled: false },
     },
     runtimeProfiles: {
       'openclaw.default': { type: 'openclaw', source: 'default' },

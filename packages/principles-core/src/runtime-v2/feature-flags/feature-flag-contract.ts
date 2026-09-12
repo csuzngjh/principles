@@ -242,19 +242,38 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // (2026-12-01) was superseded — its subject, the quarantined worker, no
   // longer exists; live evidence: flag=off, 0 rows in evolution_tasks/events.
   { id: 'evolution_worker', category: 'gone', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (worker deleted in PRI-737; flag locked off, retired 2026-09-12 PRI-752)' },
-  { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },
+  // empathy_observer retired in PRI-751 (reality re-verified by PRI-752's
+  // audit): zero executable readers. The signal-collector refactor moved
+  // empathy detection to signal-collector-host (unconditional keyword path)
+  // and the observer service never materialized; the Console Control Center
+  // manages the `internalAgents.empathyObserver` agent binding instead
+  // (feature-flag-governance.md §3.2). Kept as a gone tombstone per the
+  // census lifecycle contract so a stale `enabled: true` override is
+  // rejected observably; the '共情观察器' label in pd-console enum-labels
+  // doubles as the agent display name for the cost hint.
+  { id: 'empathy_observer', category: 'gone', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking — retired (PRI-751, reality re-verified PRI-752): detection moved to signal-collector-host; gone tombstone' },
   // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
-  // is now the primary admission gate. Roll back = set painEvidenceAdmissionDefault to false.
-  { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate.' },
+  // is now the primary admission gate.
+  // PRI-752 reality check: NO code reads this flag for routing — Gate B is
+  // unconditional and no flag-off rollback path exists (PRI-749 G-1 finding).
+  { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate. PRI-752: no executable consumers — flag value has no runtime effect; disposition pending Owner decision.' },
   // PRI-404/PRI-609: the snake_case IDs `pain_evidence_admission` and
   // `pain_evidence_admission_default` are no longer registered as independent
   // capabilities — see FEATURE_FLAG_ALIASES above.
-  // PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B owns admission.
-  // When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated on all paths.
-  { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B (TriggerController) owns admission. When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated.' },
+  // PRI-454 historical intent: global kill switch for the Gate B migration.
+  // PRI-752 reality check: the documented OFF→Gate A re-activation routing was
+  // never implemented — Gate B is unconditional (PRI-749 G-1 finding).
+  { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: historical kill switch for the Gate B migration. PRI-752: the documented flag-off Gate A rollback does not exist as code — flag value has no runtime effect; disposition pending Owner decision.' },
   { id: 'diagnostician_async_cli', category: 'quiet', enabled: false, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background. Default: false until orchestrator exists.' },
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
-  { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders (dreamer, philosopher, scribe)' },
+  // internalization_core_grounding retired in PRI-751 (reality re-verified by
+  // PRI-752's audit): no production reader ever materialized — the
+  // dreamer/philosopher/scribe runners enable core grounding unconditionally
+  // via their own `coreGrounding: true` runner-option defaults. Kept as a gone
+  // tombstone per the census lifecycle contract so a stale `enabled: true`
+  // override is rejected observably instead of silently honoring a future
+  // re-registration of the same ID.
+  { id: 'internalization_core_grounding', category: 'gone', enabled: false, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders — retired (PRI-751, reality re-verified PRI-752): unconditional runner behavior; gone tombstone' },
   { id: 'diagnostician_split_pipeline', category: 'quiet', enabled: true, since: '2026-06-11', description: '3-stage split diagnostician pipeline (RootCause→Distiller→Router)' },
   // ADR-0019: Diagnostician LLM rate-limit graceful degradation. On persistent rate-limit,
   // mark task failed with `rate_limit` errorCategory + emit `diag_llm_rate_limit_degraded`
@@ -325,8 +344,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // a token budget, with an information-floor fallback to the legacy
   // full-predecessor injection when resolution is too sparse. Default off;
   // flag-off = runners use the existing buildContext assembly (byte-identical).
-  // Independent of internalization_core_grounding (§8.1): budgetTokens covers
-  // ONLY manifest-declared fields, never core grounding text.
+  // Independent of core grounding (§8.1): budgetTokens covers ONLY
+  // manifest-declared fields, never core grounding text (which is injected
+  // unconditionally via runner defaults; the former
+  // internalization_core_grounding flag was retired in PRI-751 — it never had
+  // runtime readers, as PRI-752's audit independently confirmed).
   { id: 'context_manifest_budget', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 1 — manifest + budget-driven context injection with information-floor fallback. Default off; flag-off = existing buildContext assembly unchanged.' },
   // Internalization progressive disclosure — Layer 2 two-stage evaluation
   // (design §6.5/§8, PR 4). Evaluator runs Stage 1 (summary) then optionally
