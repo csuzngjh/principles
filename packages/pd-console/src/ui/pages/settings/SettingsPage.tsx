@@ -9,6 +9,7 @@ import { SectionTitle } from "../../components/layout/section-title.js";
 import {
   getToken,
   setToken,
+  clearToken,
   fetchWorkspaces,
   addWorkspace,
   removeWorkspace,
@@ -111,6 +112,12 @@ interface CompanionBridge {
     reason?: string;
     nextAction?: string;
   }>;
+  clearConsoleToken(): Promise<{
+    cleared: boolean;
+    restartRequested: boolean;
+    reason?: string;
+    nextAction?: string;
+  }>;
 }
 
 function getCompanionBridge(): CompanionBridge | undefined {
@@ -131,6 +138,8 @@ export function SettingsPage() {
 
   // Auth token state
   const [tokenInput, setTokenInput] = useState("");
+  // Inline confirm for credential clearing (J.1 pattern, same as workspace removal)
+  const [confirmClearToken, setConfirmClearToken] = useState(false);
 
   // ADR-0022 (PRI-578): Owner identity registration state
   const [ownerIdentity, setOwnerIdentity] = useState<OwnerIdentityViewData | null>(null);
@@ -297,6 +306,49 @@ export function SettingsPage() {
       toast.error(t("pages.settings.tokenSaveFailed"));
     }
   }, [tokenInput, loadOnboardingFlag, t]);
+
+  // Credential lifecycle rollback (SPEC §6.4 清除凭证): drop the durable
+  // credential and return the Console to its pre-binding no-auth state. In a
+  // plain browser there is nothing durable — only the session cache.
+  const handleClearToken = useCallback(async () => {
+    setConfirmClearToken(false);
+    const companion = getCompanionBridge();
+    if (companion === undefined) {
+      clearToken();
+      setTokenInput("");
+      toast.success(t("pages.settings.tokenClearedSession"));
+      return;
+    }
+    try {
+      const result = await companion.clearConsoleToken();
+      if (!result.cleared) {
+        // inherited_env_token: the token comes from the OS environment and
+        // would return on the next launch — refuse the fake-durable clear and
+        // tell the Owner where the real authority lives (rc-9).
+        if (result.reason === "inherited_env_token") {
+          toast.info(t("pages.settings.tokenInheritedEnv"));
+        } else {
+          toast.error(t("pages.settings.tokenClearFailed"));
+        }
+        if (result.nextAction) toast.info(result.nextAction, { duration: 8000 });
+        return;
+      }
+      clearToken();
+      setTokenInput("");
+      if (result.reason === "external_console_attached") {
+        // Clear-specific message: the credential IS cleared on this side;
+        // the external server still enforces its own copy.
+        toast.info(t("pages.settings.tokenClearedExternalAttached"));
+      } else if (result.restartRequested) {
+        toast.success(t("pages.settings.tokenClearedRestarting"));
+      } else {
+        toast.success(t("pages.settings.tokenCleared"));
+      }
+      if (result.nextAction) toast.info(result.nextAction, { duration: 8000 });
+    } catch {
+      toast.error(t("pages.settings.tokenClearFailed"));
+    }
+  }, [t]);
 
   // ── Workspace handlers ─────────────────────────────────────────────────
 
@@ -489,14 +541,39 @@ export function SettingsPage() {
             placeholder={t("pages.settings.enterAccessToken")}
             className="w-full border border-line bg-surface rounded-[3px] px-3 py-2 text-sm text-ink focus:outline-none focus:border-gov focus:ring-1 focus:ring-gov"
           />
-          <div className="flex items-center justify-between mt-3">
-            <button
-              onClick={handleSaveToken}
-              disabled={tokenInput.trim().length === 0}
-              className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-            >
-              {t("common.save")}
-            </button>
+          <div className="flex items-center justify-between mt-3 gap-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSaveToken}
+                disabled={tokenInput.trim().length === 0}
+                className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              >
+                {t("common.save")}
+              </button>
+              {confirmClearToken ? (
+                <>
+                  <button
+                    onClick={handleClearToken}
+                    className="border border-amber bg-amber text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:opacity-90 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                  >
+                    {t("pages.settings.clearTokenConfirm")}
+                  </button>
+                  <button
+                    onClick={() => setConfirmClearToken(false)}
+                    className="border border-line text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:border-gov transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                  >
+                    {t("common.cancel")}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setConfirmClearToken(true)}
+                  className="border border-line text-ink-3 rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:border-gov hover:text-ink transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                >
+                  {t("pages.settings.clearToken")}
+                </button>
+              )}
+            </div>
             <span className="text-ink-4 text-[12px]">
               {getCompanionBridge() === undefined
                 ? t("pages.settings.tokenSessionOnly")

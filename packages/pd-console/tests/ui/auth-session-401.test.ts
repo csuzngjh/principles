@@ -20,7 +20,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldRedirectToLoginOnUnauthorized } from '../../src/ui/api.js';
+import {
+  shouldRedirectToLoginOnUnauthorized,
+  shouldInvalidateSessionTokenOn401,
+} from '../../src/ui/api.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC_ROOT = join(__dirname, '..', '..', 'src', 'ui');
@@ -54,9 +57,18 @@ describe('unauthorized redirect predicate', () => {
 });
 
 describe('api.ts 401 handling contract', () => {
-  it('clears the token on every 401, not only when a token was attached', () => {
+  it('clears the token on a 401 that is still current (no hadToken-style gating)', () => {
     expect(apiSource).toContain('clearToken();');
     expect(apiSource).not.toContain('hadToken');
+  });
+
+  it('guards against a stale 401 erasing a newer restored token (PR #1635 review race)', () => {
+    // The unconditional clear was a race: a tokenless mount probe's late 401
+    // could clear the token the login form's restore flow just set. The
+    // clear (and the login redirect) must be gated on the request-time token
+    // snapshot still being current.
+    expect(apiSource).toContain('if (shouldInvalidateSessionTokenOn401(token, getToken())) {');
+    expect(apiSource).toMatch(/if \(shouldInvalidateSessionTokenOn401\(token, getToken\(\)\)\) \{\s*\n\s*clearToken\(\);/);
   });
 
   it('redirects to the login route with the session-expired marker', () => {
@@ -66,6 +78,18 @@ describe('api.ts 401 handling contract', () => {
 
   it('discloses the HTTP status on failure envelopes', () => {
     expect(apiSource).toContain('status: response.status');
+  });
+});
+
+describe('shouldInvalidateSessionTokenOn401 (stale-401 policy)', () => {
+  it('invalidates when the stored token is unchanged since the request', () => {
+    expect(shouldInvalidateSessionTokenOn401(null, null)).toBe(true); // tokenless probe, still tokenless
+    expect(shouldInvalidateSessionTokenOn401('tok-a', 'tok-a')).toBe(true); // same token
+  });
+
+  it('does NOT invalidate when a newer token was restored while the request was in flight', () => {
+    expect(shouldInvalidateSessionTokenOn401(null, 'tok-new')).toBe(false);
+    expect(shouldInvalidateSessionTokenOn401('tok-old', 'tok-new')).toBe(false);
   });
 });
 
