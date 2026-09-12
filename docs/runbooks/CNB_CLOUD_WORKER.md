@@ -3,7 +3,7 @@
 > 状态：Phase 1（只读）
 > 读者：Owner / 仓库维护者
 > 设计：[`docs/audit/cnb-cloud-agent-architecture.md`](../audit/cnb-cloud-agent-architecture.md)
-> 角色章程：[`.cnb/agents/pd-auditor.md`](../../.cnb/agents/pd-auditor.md)
+> 角色章程：[`.cnb/agents/pd-auditor.md`](../../.cnb/agents/pd-auditor.md)（Auditor，只读）、[`.cnb/agents/pd-developer.md`](../../.cnb/agents/pd-developer.md)（Developer，受限写，见 §4.3）
 
 ---
 
@@ -166,6 +166,8 @@ cd .. && rm -rf empty
 | 按需全仓审查 | 分支页「PD 云端审查」按钮 | **NPC 回复（唯一输出）**——此流水线未配置附件上传阶段 |
 | **远程 API 触发审计** | OpenAPI `POST /-/build/start`（`api_trigger_audit`） | NPC 回复（经 `buildLogUrl` 取日志） |
 | PR 自动审查 | CNB 侧创建 PR 时 | PR 评论 |
+| **开发任务（执行）** | 分支页「PD Developer 任务」按钮（`web_trigger_dev`） | 特性分支 + CNB 镜像仓库 PR（见 §4.3） |
+| **远程 API 触发开发任务** | OpenAPI `POST /-/build/start`（`api_trigger_dev`） | 特性分支 + CNB 镜像仓库 PR（见 §4.3） |
 | 人工深度调查 | 「云原生开发」→ WebIDE | 人工操作 |
 
 > 只有**定时审计（T2）**产出可下载的报告附件；手动（T3）、远程 API（T3b）与 PR 审查（T1）的产出是对话/评论/日志本身。
@@ -296,14 +298,21 @@ Linear 记录 ✓。
 
 ### 4.3 开发任务入口（`PD Developer`，PRI-768）
 
-Owner 在分支详情页点 **「PD Developer 任务」** 按钮（`web_trigger_dev`，仅 owner/master
-可见），输入任务描述，触发 `PD Developer` 角色执行**低风险开发任务**（文档更新 /
-prompt 优化 / workflow 调整 / runbook 维护 / 测试辅助）。与 T3/T3b 同构，亦有
-`api_trigger_dev` API 入口供测试与自动化。
+本节流水线在 `.cnb.yml` 中编号 **T5**。Owner 在分支详情页点 **「PD Developer 任务」**
+按钮（`web_trigger_dev`，仅 owner/master 可见），输入任务描述，触发 `PD Developer`
+角色执行**低风险开发任务**（文档更新 / prompt 优化 / workflow 调整 / runbook 维护 /
+测试辅助）。与 T3/T3b 同构：两个事件（`web_trigger_dev` / `api_trigger_dev`）在
+`.cnb.yml` 内以 YAML 锚点 `&pd-dev-entry` 共享同一份流水线定义，零复制。
 
 **与 Auditor 的分工**：PD Auditor 只观察（只读）；PD Developer 只执行明确任务
 （受限写）。两个角色、两份章程（`.cnb/agents/pd-auditor.md` /
 `.cnb/agents/pd-developer.md`），互不替代。
+
+**触发参数**：与 T3/T3b 相同，非 NPC 事件下 `npc:go` 会硬校验 `userPrompt`——
+缺失/为空时直接报 `npc:go requires "userPrompt" parameter for non-NPC events`，
+agent 根本不会启动（实测，见 §4.1）。因此 `api_trigger_dev` 远程触发**必须**通过
+`env.userPrompt` 显式传入任务描述；按钮面（`web_trigger_dev`）的 `userPrompt`
+已是 `required: true`（`.cnb/web_trigger.yml`）。
 
 **权限边界（如实陈述）**：
 
