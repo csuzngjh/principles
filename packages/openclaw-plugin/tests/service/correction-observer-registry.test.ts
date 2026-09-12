@@ -37,17 +37,9 @@ describe('Correction Observer Ownership — Feature Flag & Surface Registry Cons
     expect(surface!.enabledByDefault).toBe(true);
   });
 
-  it('evolution_worker feature flag remains quiet with enabled:false (flag retirement deferred, PRI-737)', () => {
-    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'evolution_worker');
-    expect(flag).toBeDefined();
-    expect(flag!.category).toBe('quiet');
-    expect(flag!.enabled).toBe(false);
-  });
-
-  it('service:evolution-worker surface remains quiet with enabledByDefault:false (flag retirement deferred, PRI-737)', () => {
-    const surface = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker');
-    expect(surface).toBeDefined();
-    expect(surface!.category).toBe('quiet');
-    expect(surface!.enabledByDefault).toBe(false);
+  it('evolution_worker flag and its surfaces are fully retired (PRI-737 worker deletion; PRI-751 registry cleanup)', () => {
+    expect(DEFAULT_FEATURE_FLAGS.find(f => f.id === 'evolution_worker')).toBeUndefined();
+    expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker')).toBeUndefined();
+    expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'startup:evolution-worker')).toBeUndefined();
   });
 });

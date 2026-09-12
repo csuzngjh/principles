@@ -114,9 +114,9 @@ describe('surface-guard', () => {
     });
 
     it('returns disabledReason for disabled surface', () => {
-      const result = isSurfaceEnabled('service:evolution-worker');
+      const result = isSurfaceEnabled('service:pd-task');
       expect(result.enabled).toBe(false);
-      expect(result.reason).toContain('evolution_worker');
+      expect(result.reason).toContain('Disabled by default');
     });
   });
 

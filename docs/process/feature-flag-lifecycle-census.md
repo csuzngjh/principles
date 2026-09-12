@@ -30,7 +30,7 @@ A "production consumer" = a reference in `packages/*/src/**` outside the registr
 | `gone` | Retired; can never be re-enabled; terminal state (no lifecycle entry) | rejected with warning |
 | `legacy_retire` | Deletion approved and scheduled; behaves like quiet until the removal PR lands, then flips to `gone` | full override (transition only) |
 
-Currently no flag is in `legacy_retire` transition. Flags expected to retire (e.g. `evolution_worker`) carry a RETIRE-ready `retirementCriteria` in the census instead; the category flip happens with the actual deletion PR.
+Currently no flag is in `legacy_retire` transition. Flags expected to retire carry a RETIRE-ready `retirementCriteria` in the census instead; the category flip happens with the actual deletion PR. (`evolution_worker` followed this path: worker deleted in PRI-737, flag + surface-registry entries removed in PRI-751.)
 
 ## Decisions (34 quiet flags at census time)
 
@@ -38,9 +38,9 @@ Full per-flag evidence (consumers, rationale, criteria) lives in `QUIET_FLAG_LIF
 
 | Decision | Flags | Count |
 |---|---|---|
-| KEEP_QUIET | correction_observer, signal_collector, internalization_auto_consumer, story_a_approval_completion, feedback_channel, gfi, evolution_worker, empathy_observer, painEvidenceAdmission, painEvidenceAdmissionDefault, diagnostician_async_cli, diagnostician_core_grounding, internalization_core_grounding, diagnostician_split_pipeline, l2_dreamer, intent_engineering, rulecode_context_v2, failed_tasks_observability, evaluator_artificer_repair_loop, artifact_summary_redundancy, context_manifest_budget, progressive_evaluator, abstraction_layer_v1, principle_receipt_self_report, failed_task_recovery_console, pain_diagnosis_persistence, governance_experience_v1, anonymous_product_telemetry | 28 |
+| KEEP_QUIET | correction_observer, signal_collector, internalization_auto_consumer, story_a_approval_completion, feedback_channel, gfi, empathy_observer, painEvidenceAdmission, painEvidenceAdmissionDefault, diagnostician_async_cli, diagnostician_core_grounding, internalization_core_grounding, diagnostician_split_pipeline, l2_dreamer, intent_engineering, rulecode_context_v2, failed_tasks_observability, evaluator_artificer_repair_loop, artifact_summary_redundancy, context_manifest_budget, progressive_evaluator, abstraction_layer_v1, principle_receipt_self_report, failed_task_recovery_console, pain_diagnosis_persistence, governance_experience_v1, anonymous_product_telemetry | 27 |
 | GRADUATE (executed) | diagnostician_llm_degradation, principle_receipt_block_copy, principle_receipt_ledger, principle_governance_projection_v2 — all via PRI-571 (2026-08-24); artificer_output_retry via PRI-621 (2026-08-29, live evidence: dreamer self-healed the same error category while artificer dead-ended 5/6 chains); all stay category=quiet so config rollback remains available | 5 |
-| RETIRE | none — `evolution_worker` is RETIRE-ready (retirementCriteria = quarantine window closes 2026-12-01) but deletion is a separate PR | 0 |
+| RETIRE | none — `evolution_worker` was the RETIRE-ready case: worker deleted PRI-737, flag + registry entries removed PRI-751 | 0 |
 | STAGED | release_manager_shadow — zero current consumer by design; wiring arrives with PRI-614 Gate B (update convergence roadmap). NOT dead code. | 1 |
 
 **Feature purgatory check:** `zero consumer + no roadmap + no retirement decision = 0` ✅ (the one zero-consumer flag, `release_manager_shadow`, has an explicit staged roadmap owner: PRI-614).

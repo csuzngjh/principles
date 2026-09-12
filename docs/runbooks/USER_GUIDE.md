@@ -205,7 +205,7 @@ That is enough for most day-to-day use.
 
 ### “Some features seem disabled or missing”
 
-Some subsystems (such as `evolution_worker` and `correction_observer`) are **default OFF** by design (MVP-Quiet, ADR-0014). This is intentional — they are not broken. They will be enabled in a future release once seed-customer evidence justifies broader activation. You can verify which subsystems are enabled in your workspace's `.pd/config.yaml`.
+Some subsystems (such as `signal_collector` and `correction_observer`) are **default OFF** by design (MVP-Quiet, ADR-0014). This is intentional — they are not broken. They will be enabled in a future release once seed-customer evidence justifies broader activation. You can verify which subsystems are enabled in your workspace's `.pd/config.yaml`.
 
 ## Console
 

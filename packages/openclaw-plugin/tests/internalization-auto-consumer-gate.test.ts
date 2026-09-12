@@ -52,7 +52,6 @@ function writeConfigYaml(workspaceDir: string, featureOverrides: Record<string, 
     defer_archive: { category: 'core', enabled: true },
     correction_observer: { category: 'quiet', enabled: false },
     empathy_observer: { category: 'quiet', enabled: false },
-    evolution_worker: { category: 'quiet', enabled: false },
     internalization_auto_consumer: { category: 'quiet', enabled: true },
     nocturnal: { category: 'gone', enabled: false },
   };
