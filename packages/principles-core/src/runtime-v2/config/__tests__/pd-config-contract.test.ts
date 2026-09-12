@@ -520,6 +520,26 @@ describe('Scenario 7: Feature flags from new config contract', () => {
     expect(effective.warnings.some(w => w.includes('gone flag cannot be re-enabled'))).toBe(true);
   });
 
+  it('PRI-752: legacy quiet shape of a retired flag normalizes to the registry tombstone', () => {
+    // Upgraded workspaces still store the pre-retirement entry
+    // `evolution_worker: { category: 'quiet', enabled: false }`; the effective
+    // config and flag map must observe the registry's terminal category
+    // (`gone`), not echo the stored `quiet`.
+    const raw = makeValidConfig();
+    raw.features.evolution_worker = { category: 'quiet', enabled: false };
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error('Expected ok');
+    const effective = computeEffectivePdConfig(result.value);
+    const flags = computeFeatureFlagsFromConfig(effective);
+
+    expect(nn(flags.flags.evolution_worker).category).toBe('gone');
+    expect(nn(flags.flags.evolution_worker).enabled).toBe(false);
+    expect(nn(effective.config.features.evolution_worker).category).toBe('gone');
+    expect(nn(effective.config.features.evolution_worker).enabled).toBe(false);
+    // Disabled legacy shape is a silent normalization — no re-enable warning.
+    expect(effective.warnings.some(w => w.includes('evolution_worker'))).toBe(false);
+  });
+
   it('quiet flags can be toggled', () => {
     const raw = makeValidConfig();
     raw.features.gfi = { category: 'quiet', enabled: true };
@@ -852,9 +872,8 @@ describe('Regression: Flag Registry Consistency', () => {
     expect(defaults.features.diagnostician_core_grounding).toEqual({ category: 'quiet', enabled: true });
   });
 
-  it('internalization_core_grounding is in defaults', () => {
+  it('internalization_core_grounding is a gone tombstone (PRI-751: runners hardcode coreGrounding=true)', () => {
     const defaults = getDefaultPdConfig();
-    expect(Object.hasOwn(defaults.features, 'internalization_core_grounding')).toBe(true);
-    expect(defaults.features.internalization_core_grounding).toEqual({ category: 'quiet', enabled: true });
+    expect(defaults.features.internalization_core_grounding).toEqual({ category: 'gone', enabled: false });
   });
 });

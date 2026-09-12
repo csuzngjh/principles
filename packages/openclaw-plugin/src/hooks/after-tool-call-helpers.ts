@@ -28,7 +28,7 @@ import { resolveSourceKind, buildToolFailureObservation, type RawObservation } f
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import { evaluateTriggerController } from '@principles/core/runtime-v2';
 import { buildTrajectoryEvidence } from './trajectory-evidence.js';
-import { BASH_TOOL_NAMES } from '../constants/tools.js';
+import { BASH_TOOL_NAMES, WRITE_TOOLS } from '../constants/tools.js';
 import type { ToolCallOutcome, ToolCallObservation, PainAdmissionDecision } from './after-tool-call-types.js';
 
 const RESULT_PREVIEW_MAX_LENGTH = 500;
@@ -386,7 +386,12 @@ export function handleProbationFeedback(
 
 // ── Stage 6: Pain Admission ─────────────────────────────────────────────────
 
-const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
+// PRI-747 F32: the write-tool admission scope is derived from the ONE
+// vocabulary owner — WRITE_TOOLS in constants/tools.ts (write/edit/apply_patch
+// post-PRI-741). A former local array had drifted to include generic LLM
+// names (write_file/edit_file/replace) that the OpenClaw hook never
+// dispatches, so pain admission silently diverged from the gate/registry
+// tool face.
 
 /**
  * Evaluate whether a tool failure should trigger pain diagnosis.
@@ -418,10 +423,10 @@ export function evaluatePainAdmissionForToolCall(
   // happens to contain "e2e-workspace" would silently get E2E behavior (rc-9).
   const isE2E = process.env.PD_E2E_MODE === '1';
   const allowedTools = isE2E
-    ? [...WRITE_TOOLS, ...BASH_TOOL_NAMES]
+    ? new Set([...WRITE_TOOLS, ...BASH_TOOL_NAMES])
     : WRITE_TOOLS;
 
-  if (!allowedTools.includes(event.toolName) || !outcome.isFailure) {
+  if (!allowedTools.has(event.toolName) || !outcome.isFailure) {
     // PRI-442 A-09: rc-9-no-silent-fallback. Only emit observability when we
     // are DECLINING an actual failure (Case A). Successful tool calls (happy
     // path) must stay silent — they are not degradation. evaluatePainAdmission

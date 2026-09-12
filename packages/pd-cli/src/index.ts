@@ -105,7 +105,7 @@ function handleVersionFlag(args: readonly string[]): boolean {
 
 program
   .name('pd')
-  .description('PD CLI — Pain recording, sample management, and evolution tasks')
+  .description('PD CLI — Pain recording, sample management, and evolution task history')
   .option('-V, --version', 'output the canonical PD product version')
   .enablePositionalOptions();
 
@@ -182,9 +182,15 @@ samplesCmd
     await handleSamplesReview({ sampleId, decision: decision === 'approve' ? 'approved' : 'rejected', note });
   });
 
+// ── Evolution task reader (hidden) ────────────────────────────────────────────
+// PRI-752 review: the worker is gone (flag retired to `gone`), but this
+// read-only surface stays for historical `evolution_tasks` rows in already-
+// provisioned workspaces — data-retention disposition is a separate Owner
+// decision (PRI-737 reality audit §7.3). Table schema + quality-scorecard
+// reader are retained accordingly.
 const evolutionCmd = program
   .command('evolution', { hidden: true })
-  .description('Evolution task management');
+  .description('Evolution task management (historical data reader)');
 
 const tasksCmd = evolutionCmd
   .command('tasks')

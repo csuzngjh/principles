@@ -188,7 +188,9 @@ export async function handlePainEvidence(opts: EvidenceOptions): Promise<void> {
   if (decisions.length === 0) {
     console.log('No trigger decisions found in logs.');
     console.log(`Searched: ${path.join(logDir, 'SYSTEM_*.log')}`);
-    console.log('Tip: Enable painEvidenceAdmission feature flag to start recording trigger decisions.');
+    // PRI-752: the old tip advised enabling painEvidenceAdmission — that flag
+    // has no executable consumers (Gate B records unconditionally when the
+    // plugin runs), so the advice was a placebo and was removed.
     return;
   }
 
