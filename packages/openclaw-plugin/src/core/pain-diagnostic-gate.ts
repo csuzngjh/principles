@@ -5,16 +5,15 @@
  * (TriggerController + EvidenceTriage). Do not add new callers. New admission
  * logic must use `evaluateTriggerController` from runtime-v2/evidence-triage.
  *
- * Reality note (PRI-752, 2026-09-12): NO runtime routing reads
- * `painEvidenceAdmission` / `painEvidenceAdmissionDefault` to re-activate this
- * module — the documented flag-off rollback does not exist as code. This
- * adapter has ZERO production importers; only tests import it
- * (PRI-749 G-1 / PRI-752 finding). The historical PRI-454 removal criteria
- * (both flags ON >=30 days + 5 MVP paths verified on Gate B) require
- * production evidence this repo does not hold — what IS verified here is
- * only the zero-importer / no-routing-effect facts above; disposition awaits
- * the Owner decision recorded on PRI-752 —
- * see docs/plans/2026-06-pain-evidence-admission-track.md.
+ * Reality note (PRI-763, 2026-09-12): the `painEvidenceAdmission` /
+ * `painEvidenceAdmissionDefault` flags were RETIRED and REMOVED from the
+ * registry (PRI-763) — they never re-activated this module and had zero
+ * executable consumers (PRI-651-B1 / PRI-752 / PRI-762). Gate B
+ * (TriggerController) is the only admission authority. This adapter keeps
+ * ZERO production importers; only tests import it. The module itself is left
+ * archived (Phase 5 discipline: core export surface and plugin shim are not
+ * removed in the flag-contract PR — retirement of this module is a separate
+ * Owner decision).
  *
  * The pure decision logic (threshold tree, cooldown comparison, episode-key
  * construction) now lives in principles-core

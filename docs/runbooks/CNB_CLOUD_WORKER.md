@@ -164,12 +164,83 @@ cd .. && rm -rf empty
 |---|---|---|
 | 每周自动架构体检 | 自动（周一 02:00） | `cloud-audit-report.md` + `cloud-audit-deterministic.md`（commit 附件） |
 | 按需全仓审查 | 分支页「PD 云端审查」按钮 | **NPC 回复（唯一输出）**——此流水线未配置附件上传阶段 |
+| **远程 API 触发审计** | OpenAPI `POST /-/build/start`（`api_trigger_audit`） | NPC 回复（经 `buildLogUrl` 取日志） |
 | PR 自动审查 | CNB 侧创建 PR 时 | PR 评论 |
 | 人工深度调查 | 「云原生开发」→ WebIDE | 人工操作 |
 
-> 只有**定时审计（T2）**产出可下载的报告附件；手动审计（T3）与 PR 审查（T1）的产出是对话/评论本身。
-> 这是**文档与流水线的刻意对齐**（Codex 评审 P2 指出此前二者不一致）：手动与 PR 场景没有稳定的
+> 只有**定时审计（T2）**产出可下载的报告附件；手动（T3）、远程 API（T3b）与 PR 审查（T1）的产出是对话/评论/日志本身。
+> 这是**文档与流水线的刻意对齐**（Codex 评审 P2 指出此前二者不一致）：这些场景没有稳定的
 > "落盘报告"依赖（`npc:go` 能否写文件本就是待确认项 U1），承诺附件反而会制造无法兑现的预期。
+
+### 4.1 远程触发（`api_trigger_audit`，PRI-762）
+
+T3 与 T3b 是**同一个流水线定义**（`.cnb.yml` 内以 YAML 锚点 `&pd-audit-entry` 共享，零复制）。
+审计的单一事实源是 `.cnb/agents/pd-auditor.md`（章程）。
+
+> ⚠️ **`env.userPrompt` 是必需参数**（实测）：`npc:go` 在非 NPC 事件下会硬校验 userPrompt，
+> 缺失/为空时直接报 `npc:go requires "userPrompt" parameter for non-NPC events`，
+> agent 根本不会启动。systemPrompt 里的"空则回退"救不了 —— 校验发生在 agent 启动前。
+
+```bash
+# 审计指令即 "audit mode"：想审什么就写什么；留空会导致 npc:go 校验失败
+CNB_TOKEN=<repo-code:rw 的访问令牌>
+AUDIT_PROMPT="对当前分支做一次全仓架构健康检查，按 .cnb/agents/pd-auditor.md 的 D1–D5 五个维度输出发现。"
+BRANCH="main"
+
+# 用 node 做真正的 JSON 编码（Codex 评审 P2）：审计指令里出现引号/反斜杠/换行时，
+# shell 直接插值进 JSON 字符串会产生非法 body，请求在到达流水线前就失败。
+PAYLOAD="$(node -e '
+  const branch = process.argv[1];   // node -e 模式下 argv 不含脚本身：[execPath, branch, prompt]
+  const prompt = process.argv[2];
+  process.stdout.write(JSON.stringify({
+    event: "api_trigger_audit",
+    branch,
+    env: { userPrompt: prompt },
+  }));
+' "$BRANCH" "$AUDIT_PROMPT")"
+
+# --fail-with-body（curl ≥ 7.76，Codex 评审 P2）：HTTP 4xx/5xx（令牌过期/权限不足等）
+# 时退出码非 0 但仍打印响应体 —— 避免把被拒绝的触发误判为已受理。
+curl -sS --fail-with-body -X POST "https://api.cnb.cool/csuzngjh/principles/-/build/start" \
+  -H "Authorization: Bearer $CNB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD"
+```
+
+响应（实测）：
+
+```json
+{"sn":"cnb-js8-1k2abof41","buildLogUrl":"https://cnb.cool/csuzngjh/principles/-/build/logs/cnb-js8-1k2abof41",
+ "event":"api_trigger_audit","message":"cnb received, but didn't finish build yet","success":true}
+```
+
+* `sn` = 流水线 ID；`buildLogUrl` = 审计输出所在（NPC 回复写在构建日志里，
+  可经 `GET /{repo}/-/build/logs/stage/{sn}/{pipelineId}/{stageId}` 读取）
+* `branch` 决定审计对象（CNB 会 checkout 该 ref 并读取其 `.cnb.yml`）
+* `env.userPrompt` 即 **audit mode**：调用方决定审什么、审多深
+* 判读：HTTP 失败时 `curl` 退出码非 0（`--fail-with-body`）；受理成功的响应含
+  `"success":true`（`message` 此刻仅表示"已受理，尚未跑完"，结果看 `buildLogUrl`）
+* 消耗：CI CPU（核时）+ AI Credits（可在 `组织 → 设置 → 用量管理`、
+  `GET /{slug}/-/charge/quota` 与 `GET /{repo}/-/build/logs/ai-audit/{sn}/{pipelineId}` 查明细，
+  后者需要 `repo-cnb-history:r` 权限）
+
+**权限边界（如实陈述）**：`api_trigger` 在 CNB 属**可信事件**，平台自动注入的临时令牌
+`CNB_TOKEN` 因此持有 `repo-code:rw` 等完整权限（`docs/audit/cnb-capability-validation-report.md`
+§5.4；令牌构建结束自动销毁）。本流水线的"只读"是**治理级约束，不是凭证级隔离**：
+
+* `.cnb/settings.yml` 明文禁止 NPC 角色开启「工作模式」；章程（`.cnb/agents/pd-auditor.md`）
+  约束审计行为（只读、不 push、不建分支、不引用任何密钥文件）；T3/T3b 不挂任何写/上传 stage；
+* 触发端本身需要持有仓库写权限的凭证（CNB 平台限制），非授权主体无法发起；
+* **残余风险**：npc 容器内进程可访问该临时令牌 ⇒ 只读边界最终依赖上述治理约束而非平台强制；
+  现有仓库证据（能力报告 §5.4）未覆盖"可信事件下 `npc:go` 阶段的令牌是否被工作模式收窄"
+  这一层，在补齐该证据前按此保守口径理解。
+
+**实测记录（2026-09-12）**：
+
+| 次 | 传参 | 结果 | 说明 |
+|---|---|---|---|
+| 1 | 无 env | ❌ npc go error（856ms） | `npc:go requires "userPrompt" parameter for non-NPC events` |
+| 2 | `env.userPrompt`="连接测试：请只回复 PONG" | ✅ pipeline success | agent 启动、role=PD Auditor 解析成功、模型 `deepseek-v4.1-flash`、回复 PONG；token in=11061/out=2；**AI Credits 消耗 0** |
 
 **查看报告**：构建详情页 → 对应 commit → 附件区。
 私有仓库下载附件需带令牌：

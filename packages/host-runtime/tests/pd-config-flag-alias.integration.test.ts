@@ -8,19 +8,14 @@ import {
 } from '../src/pd-config.js';
 
 /**
- * PRI-609 integration coverage — the real production consumer path.
+ * PRI-763 integration coverage — retired pain admission flag contract.
  *
- * Production consumers (openclaw-plugin pain.ts / llm.ts / gate-block-helper.ts)
- * read the canonical camelCase IDs via `loadFeatureFlagFromConfig`. These tests
- * write a REAL `.pd/config.yaml` to disk and drive the REAL loader chain
- * (yaml parse → validatePdConfig → computeEffectivePdConfig →
- * computeFeatureFlagsFromConfig), asserting that a snake_case alias config key
- * controls the canonical flag the consumer reads.
- *
- * The alias-disable scenario is the negative control for the pre-fix defect:
- * before PRI-609, `pain_evidence_admission: {enabled: false}` left
- * `painEvidenceAdmission` at its default-on value — a silently dead kill
- * switch. This test fails against that state.
+ * The pain admission flags (painEvidenceAdmission / painEvidenceAdmissionDefault)
+ * and their snake_case aliases were retired (PRI-763): admission is unconditional
+ * Gate B (TriggerController). A stale snake_case key on an existing config must
+ * be diagnosed as unknown and never read back as an enabled capability through
+ * the real production loader chain (yaml parse → validatePdConfig →
+ * computeEffectivePdConfig → computeFeatureFlagsFromConfig).
  */
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-alias-it-'));
@@ -76,7 +71,27 @@ afterAll(() => {
 });
 
 describe('PRI-609 feature flag alias identity — production loader integration', () => {
-  it('snake_case alias disable reaches the canonical flag the production consumer reads (kill-switch fix)', () => {
+  it('PRI-763: stale canonical pain key is diagnosed unknown and reads back disabled', () => {
+    const dir = makeWorkspace(
+      baseYaml(`  prompt:             { category: core,  enabled: true }
+  code_tool_hook:     { category: core,  enabled: true }
+  defer_archive:      { category: core,  enabled: true }
+  painEvidenceAdmission: { category: quiet, enabled: true }`),
+    );
+
+    const loadResult = loadPdConfigForPlugin(dir);
+    expect(loadResult.ok).toBe(true);
+    expect(
+      loadResult.warnings.some(w => w.includes("feature 'painEvidenceAdmission': unknown flag ignored")),
+    ).toBe(true);
+
+    // A consumer asking for the retired ID reads disabled — never an effective
+    // runtime capability.
+    const triage = loadFeatureFlagFromConfig(dir, 'painEvidenceAdmission');
+    expect(triage.enabled).toBe(false);
+  });
+
+  it('PRI-763: stale snake_case pain key is diagnosed unknown and reads back disabled', () => {
     const dir = makeWorkspace(
       baseYaml(`  prompt:             { category: core,  enabled: true }
   code_tool_hook:     { category: core,  enabled: true }
@@ -84,44 +99,14 @@ describe('PRI-609 feature flag alias identity — production loader integration'
   pain_evidence_admission: { category: quiet, enabled: false }`),
     );
 
-    // The exact call production consumers make (pain.ts:503 reads
-    // 'painEvidenceAdmission' through this function).
-    const triage = loadFeatureFlagFromConfig(dir, 'painEvidenceAdmission');
-    expect(triage.enabled).toBe(false);
-
-    // The alias key itself must not exist as an independent capability.
-    const loadResult = loadPdConfigForPlugin(dir);
-    expect(loadResult.ok).toBe(true);
-    expect(loadResult.warnings.some(w => w.includes('pain_evidence_admission'))).toBe(false);
-  });
-
-  it('snake_case alias disable also reaches painEvidenceAdmissionDefault', () => {
-    const dir = makeWorkspace(
-      baseYaml(`  prompt:             { category: core,  enabled: true }
-  code_tool_hook:     { category: core,  enabled: true }
-  defer_archive:      { category: core,  enabled: true }
-  pain_evidence_admission_default: { category: quiet, enabled: false }`),
-    );
-
-    const killSwitch = loadFeatureFlagFromConfig(dir, 'painEvidenceAdmissionDefault');
-    expect(killSwitch.enabled).toBe(false);
-  });
-
-  it('canonical + alias with different values is a non-silent conflict; canonical wins', () => {
-    const dir = makeWorkspace(
-      baseYaml(`  prompt:             { category: core,  enabled: true }
-  painEvidenceAdmission:      { category: quiet, enabled: true }
-  pain_evidence_admission:    { category: quiet, enabled: false }`),
-    );
-
     const loadResult = loadPdConfigForPlugin(dir);
     expect(loadResult.ok).toBe(true);
     expect(
-      loadResult.warnings.some(w => w.includes("feature 'painEvidenceAdmission': conflicting values")),
+      loadResult.warnings.some(w => w.includes("feature 'pain_evidence_admission': unknown flag ignored")),
     ).toBe(true);
 
-    const triage = loadFeatureFlagFromConfig(dir, 'painEvidenceAdmission');
-    expect(triage.enabled).toBe(true);
+    const triage = loadFeatureFlagFromConfig(dir, 'pain_evidence_admission');
+    expect(triage.enabled).toBe(false);
   });
 
   it('unknown flag key is diagnosed and never reads back as an enabled capability', () => {
@@ -142,16 +127,16 @@ describe('PRI-609 feature flag alias identity — production loader integration'
     expect(unknown.enabled).toBe(false);
   });
 
-  it('existing valid config without pain flags keeps registry defaults (compatibility)', () => {
+  it('PRI-763: a config without the retired pain keys loads cleanly (no unknown warnings)', () => {
     const dir = makeWorkspace(
       baseYaml(`  prompt:             { category: core,  enabled: true }
   code_tool_hook:     { category: core,  enabled: true }
   defer_archive:      { category: core,  enabled: true }`),
     );
 
-    const triage = loadFeatureFlagFromConfig(dir, 'painEvidenceAdmission');
-    expect(triage.enabled).toBe(true);
-    const killSwitch = loadFeatureFlagFromConfig(dir, 'painEvidenceAdmissionDefault');
-    expect(killSwitch.enabled).toBe(true);
+    const loadResult = loadPdConfigForPlugin(dir);
+    expect(loadResult.ok).toBe(true);
+    expect(loadResult.warnings.some(w => w.includes('painEvidenceAdmission'))).toBe(false);
+    expect(loadResult.warnings.some(w => w.includes('pain_evidence_admission'))).toBe(false);
   });
 });
