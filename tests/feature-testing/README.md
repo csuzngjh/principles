@@ -66,7 +66,7 @@ tests/feature-testing/
 ./tests/feature-testing/framework/feature-test-runner.sh trust-system
 
 # 运行所有核心测试
-for scenario in trust-system gatekeeper evolution-worker thinking-os; do
+for scenario in trust-system gatekeeper thinking-os; do
     ./tests/feature-testing/framework/feature-test-runner.sh $scenario
 done
 ```

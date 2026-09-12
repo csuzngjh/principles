@@ -13,6 +13,8 @@ import { handlePainEvidence } from './commands/pain-evidence.js';
 import { handlePainList } from './commands/pain-list.js';
 import { handleSamplesList } from './commands/samples-list.js';
 import { handleSamplesReview } from './commands/samples-review.js';
+import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
+import { handleEvolutionTasksShow } from './commands/evolution-tasks-show.js';
 import { registerHealthCommand } from './commands/health.js';
 import { registerVersionCommand } from './commands/version.js';
 import { buildVersionReport, formatShortVersion, VersionReportError } from './services/version-report.js';
@@ -103,7 +105,7 @@ function handleVersionFlag(args: readonly string[]): boolean {
 
 program
   .name('pd')
-  .description('PD CLI — Pain recording, sample management, and task inspection')
+  .description('PD CLI — Pain recording, sample management, and evolution task history')
   .option('-V, --version', 'output the canonical PD product version')
   .enablePositionalOptions();
 
@@ -178,6 +180,39 @@ samplesCmd
       process.exit(1);
     }
     await handleSamplesReview({ sampleId, decision: decision === 'approve' ? 'approved' : 'rejected', note });
+  });
+
+// ── Evolution task reader (hidden) ────────────────────────────────────────────
+// PRI-752 review: the worker is gone (flag retired to `gone`), but this
+// read-only surface stays for historical `evolution_tasks` rows in already-
+// provisioned workspaces — data-retention disposition is a separate Owner
+// decision (PRI-737 reality audit §7.3). Table schema + quality-scorecard
+// reader are retained accordingly.
+const evolutionCmd = program
+  .command('evolution', { hidden: true })
+  .description('Evolution task management (historical data reader)');
+
+const tasksCmd = evolutionCmd
+  .command('tasks')
+  .description('List and show evolution tasks');
+
+tasksCmd
+  .command('list')
+  .description('List evolution tasks')
+  .option('-s, --status <status>', 'Filter by status (pending|in_progress|completed|all)', 'all')
+  .option('-l, --limit <number>', 'Maximum tasks to return', parseInt, 50)
+  .option('-f, --date-from <date>', 'Filter tasks created on or after this date')
+  .option('-t, --date-to <date>', 'Filter tasks created on or before this date')
+  .action(async (opts) => {
+    await handleEvolutionTasksList(opts);
+  });
+
+tasksCmd
+  .command('show')
+  .description('Show full details for an evolution task')
+  .argument('<id>', 'Task ID (numeric or string taskId)')
+  .action(async (id, _opts) => {
+    await handleEvolutionTasksShow({ id });
   });
 
 registerHealthCommand(program);

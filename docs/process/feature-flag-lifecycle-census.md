@@ -69,5 +69,5 @@ Time-based triggers (>30 days inactive) are review triggers only — never autom
 
 ## Relationship to prior audits
 
-- The 2026-08-27 complexity audit's "47 flags" count is a historical snapshot; the registry has continued evolving (`legacy_retire` category, PRI-571 graduations, telemetry flags). This census counts 34 quiet + 9 core + 2 gone = 45 registered flags after PRI-609 removed the 2 snake_case alias entries.
+- The 2026-08-27 complexity audit's "47 flags" count is a historical snapshot; the registry has continued evolving (`legacy_retire` category, PRI-571 graduations, telemetry flags, PRI-752 retirement). This census counts 33 quiet + 9 core + 3 gone = 45 registered flags after PRI-609 removed the 2 snake_case alias entries.
 - `docs/archive/reports/feature-flag-graduation-audit.md` (PRI-571) remains the graduation-decision record; this census imports its outcomes as GRADUATE rows.

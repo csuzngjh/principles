@@ -358,7 +358,6 @@ packages/pd-cli/src/
 │   │   ├── runtime-gfi-snapshot.ts
 │   │   └── runtime-diagnostics-export.ts
 │   ├── activation.ts                ★ 待建（pd activation list/status）
-│   ├── evolution-tasks-*.ts
 │   ├── remediation-output.ts
 │   ├── legacy-import.ts             ← 历史数据迁移
 │   └── legacy-cleanup.ts
