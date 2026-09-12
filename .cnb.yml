@@ -330,8 +330,22 @@ main:
               }));
             ' "$CNB_COMMIT_SHORT" "${CNB_PIPELINE_ID:-}" "$SUBJECT")
 
-            curl -sS --fail-with-body -H @"$HDR" -H "Accept: application/vnd.github+json" \
-              -d "$BODY" "$API/pulls"
+            # 创建 PR：推送后立即建 PR 可能撞上 GitHub ref 可见性延迟（422 head invalid，
+            # 第三跑实证）——退避重试 3 次（0s/5s/10s）。422 若因同 head PR 已存在，
+            # 幂等预检已在上一步覆盖；此处仍失败则 fail-loud 打印响应体。
+            rc=1
+            for wait in 0 5 10; do
+              sleep "$wait"
+              if curl -sS --fail-with-body -H @"$HDR" -H "Accept: application/vnd.github+json" \
+                -d "$BODY" "$API/pulls"; then
+                rc=0
+                break
+              fi
+            done
+            if [ "$rc" != "0" ]; then
+              echo "[bridge] ERROR: PR 创建在 3 次尝试后仍失败（head=$HEAD_REF）。" >&2
+              exit 1
+            fi
             echo "[bridge] GitHub PR 已创建（head=$HEAD_REF）"
 
   # ---------------------------------------------------------------------------
