@@ -17,13 +17,19 @@
  * /api/v1/failed-tasks/:id/recover. The success state means "Recovery
  * Accepted" — the task is pending again; execution is asynchronous.
  *
+ * PRI-747 F22 / PRI-749: each row can be expanded into its detail — the full
+ * task record plus run history — fetched lazily from the pre-existing
+ * GET /api/v1/failed-tasks/:id endpoint (server route +
+ * SqliteTaskStore.getFailedTaskDetail already existed; the UI simply never
+ * consumed them).
+ *
  * Runtime Contract (rc-*):
  * - rc-1: API response is treated as `unknown` and validated before use
  * - rc-2: no `as` type assertions — runtime type guards only
  * - rc-5: `Object.hasOwn()` for untrusted object keys
  * - rc-9: every error/disabled path surfaces a reason + next action
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -43,8 +49,25 @@ import {
   AlertDialogCancel,
 } from "../../components/ui/alert-dialog.js";
 import { ShinyText } from "../../components/ui/shiny-text.js";
-import { formatDate } from "../../utils/format.js";
-import { recoverFailedTask, fetchConfigSummary, request } from "../../api.js";
+import { formatDate } from "../../utils/format-date.js";
+import i18n from "../../i18n/index.js";
+import { recoverFailedTask, fetchConfigSummary, fetchFailedTaskDetail, request } from "../../api.js";
+import type { FailedTaskDetailData } from "../../utils/validators.js";
+
+// Same component set the former utils/format.js rendered, now served by the
+// defensive single-owner formatter: an invalid date string returns the raw
+// input instead of Intl throwing RangeError mid-render (review round of
+// PRI-747 F22 — utils/format.js was retired with this migration).
+const DATETIME_FORMAT_OPTS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+};
+function formatDateTime(iso: string): string {
+  return formatDate(iso, i18n.language, DATETIME_FORMAT_OPTS);
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -507,10 +530,48 @@ interface TaskTableProps {
 }
 
 function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
+  // PRI-747 F22: one row at a time is expanded into its detail panel.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TaskDetailState>({ status: "idle" });
+  // Drop responses from a superseded expand/collapse (rc-7: only the newest
+  // request's result may become current state).
+  const detailRequestIdRef = useRef(0);
+
+  // Fetch (or refetch) one task's detail; a stale response from a superseded
+  // request is dropped (rc-7: only the newest request's result may land).
+  const requestDetail = useCallback(async (taskId: string) => {
+    const requestId = ++detailRequestIdRef.current;
+    setDetail({ status: "loading", taskId });
+    // Lazy fetch on expand: the list view stays cheap; the run history is
+    // only loaded when the Owner actually asks for this task's detail.
+    const result = await fetchFailedTaskDetail(taskId);
+    if (requestId !== detailRequestIdRef.current) return;
+    if (result.success) {
+      setDetail({ status: "loaded", taskId, data: result.data });
+    } else {
+      // rc-9: surface the server-provided reason + next action (404 = the
+      // task recovered/changed state after the list was loaded).
+      setDetail({ status: "error", taskId, message: result.error, nextAction: result.nextAction });
+    }
+  }, []);
+
+  const toggleDetail = useCallback((taskId: string) => {
+    if (expandedId === taskId) {
+      // Invalidate any in-flight response, then collapse.
+      detailRequestIdRef.current += 1;
+      setExpandedId(null);
+      setDetail({ status: "idle" });
+      return;
+    }
+    setExpandedId(taskId);
+    void requestDetail(taskId);
+  }, [expandedId, requestDetail]);
+
   return (
     <div className="space-y-2">
       {/* Column headers */}
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto] gap-3 pb-2 border-b border-line font-mono text-[10px] uppercase tracking-[0.08em] text-ink-4">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] gap-3 pb-2 border-b border-line font-mono text-[10px] uppercase tracking-[0.08em] text-ink-4">
+        <span aria-hidden="true" />
         <span>{t("pages.failedTasks.taskId")}</span>
         <span>{t("pages.failedTasks.painId")}</span>
         <span>{t("pages.failedTasks.status")}</span>
@@ -518,55 +579,195 @@ function TaskTable({ tasks, onCreateDraft, onRecover, t }: TaskTableProps) {
         <span>{t("pages.failedTasks.attempts")}</span>
         <span>{t("pages.failedTasks.lastAttempt")}</span>
         <span aria-hidden="true" />
+        <span aria-hidden="true" />
       </div>
 
       {/* Rows */}
-      {tasks.map((task) => (
-        <div
-          key={task.taskId}
-          className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto] gap-3 py-2 items-center text-[13px] border-b border-line/50 last:border-b-0"
-        >
-          <span className="font-mono text-ink-2 truncate" title={task.taskId}>
-            {truncateId(task.taskId)}
-          </span>
-          <span className="font-mono text-ink-3 truncate" title={task.painId ?? ""}>
-            {task.painId ? truncateId(task.painId) : t("pages.failedTasks.noPainId")}
-          </span>
-          <Badge variant={statusToVariant(task.status)}>{task.status}</Badge>
-          <span className="text-ink-3 truncate" title={task.lastError ?? ""}>
-            {task.lastError ?? "—"}
-          </span>
-          <span className="font-mono text-ink-2 text-center">{task.attemptCount}</span>
-          <span className="font-mono text-ink-3 text-[12px]">
-            {task.lastAttemptAt ? formatDate(task.lastAttemptAt) : "—"}
-          </span>
-          {task.ownerDecisionRequired === true ? (
-            <span className="whitespace-nowrap text-[12px]">
-              <span className="text-amber">{t("pages.failedTasks.awaitingOwnerDecision")}</span>{" "}
-              <a href="#/focus" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
-                {t("pages.failedTasks.goGovernanceFocus")}
-              </a>
-            </span>
-          ) : onRecover ? (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => onRecover(task)}
-              className="whitespace-nowrap"
-            >
-              {t("pages.failedTasks.recover")}
-            </Button>
-          ) : null}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onCreateDraft(task)}
-            className="whitespace-nowrap"
-          >
-            {t("pages.failedTasks.createDraft")}
+      {tasks.map((task) => {
+        const isExpanded = expandedId === task.taskId;
+        return (
+          <Fragment key={task.taskId}>
+            <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] gap-3 py-2 items-center text-[13px] border-b border-line/50 last:border-b-0">
+              <Button
+                variant="quiet"
+                size="icon"
+                className="h-6 w-6 shrink-0 text-[12px]"
+                onClick={() => toggleDetail(task.taskId)}
+                aria-label={t("pages.failedTasks.detailToggle")}
+                aria-expanded={isExpanded}
+                data-testid={`detail-toggle-${task.taskId}`}
+              >
+                {isExpanded ? "▾" : "▸"}
+              </Button>
+              <span className="font-mono text-ink-2 truncate" title={task.taskId}>
+                {truncateId(task.taskId)}
+              </span>
+              <span className="font-mono text-ink-3 truncate" title={task.painId ?? ""}>
+                {task.painId ? truncateId(task.painId) : t("pages.failedTasks.noPainId")}
+              </span>
+              <Badge variant={statusToVariant(task.status)}>{task.status}</Badge>
+              <span className="text-ink-3 truncate" title={task.lastError ?? ""}>
+                {task.lastError ?? "—"}
+              </span>
+              <span className="font-mono text-ink-2 text-center">{task.attemptCount}</span>
+              <span className="font-mono text-ink-3 text-[12px]">
+                {task.lastAttemptAt ? formatDateTime(task.lastAttemptAt) : "—"}
+              </span>
+              {task.ownerDecisionRequired === true ? (
+                <span className="whitespace-nowrap text-[12px]">
+                  <span className="text-amber">{t("pages.failedTasks.awaitingOwnerDecision")}</span>{" "}
+                  <a href="#/focus" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
+                    {t("pages.failedTasks.goGovernanceFocus")}
+                  </a>
+                </span>
+              ) : onRecover ? (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => onRecover(task)}
+                  className="whitespace-nowrap"
+                >
+                  {t("pages.failedTasks.recover")}
+                </Button>
+              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onCreateDraft(task)}
+                className="whitespace-nowrap"
+              >
+                {t("pages.failedTasks.createDraft")}
+              </Button>
+            </div>
+            {isExpanded && (
+              <div className="border border-line/60 rounded-[var(--radius-md)] bg-panel/60 p-4 mb-2" data-testid={`detail-panel-${task.taskId}`}>
+                <TaskDetailPanel
+                  state={detail.status === "idle" ? { status: "loading", taskId: task.taskId } : detail}
+                  taskId={task.taskId}
+                  onRetry={requestDetail}
+                  t={t}
+                />
+              </div>
+            )}
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Task detail panel (PRI-747 F22) ─────────────────────────────────────────
+
+type TaskDetailState =
+  | { status: "idle" }
+  | { status: "loading"; taskId: string }
+  | { status: "loaded"; taskId: string; data: FailedTaskDetailData }
+  | { status: "error"; taskId: string; message: string; nextAction?: string };
+
+interface TaskDetailPanelProps {
+  state: TaskDetailState;
+  taskId: string;
+  onRetry: (taskId: string) => void;
+  t: (key: string) => string;
+}
+
+function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
+  if (state.status === "loading") {
+    return (
+      <div className="text-ink-3 text-[13px]" data-testid="detail-loading">
+        {t("common.loading")}
+      </div>
+    );
+  }
+
+  if (state.status === "error") {
+    // rc-9: reason + next action + an explicit retry affordance
+    return (
+      <div className="text-[13px] space-y-2" data-testid="detail-error">
+        <div className="text-danger">
+          {t("pages.failedTasks.detailError")}: {state.message}
+        </div>
+        {state.nextAction && <div className="text-ink-3">{state.nextAction}</div>}
+        <div>
+          <Button variant="outline" size="sm" onClick={() => onRetry(taskId)}>
+            {t("common.refresh")}
           </Button>
         </div>
-      ))}
+      </div>
+    );
+  }
+
+  // The idle state only occurs if the panel renders for a task whose fetch was
+  // superseded mid-flight; treat it as loading for the row just expanded.
+  if (state.status === "idle" || state.taskId !== taskId) {
+    return (
+      <div className="text-ink-3 text-[13px]" data-testid="detail-loading">
+        {t("common.loading")}
+      </div>
+    );
+  }
+
+  const { data } = state;
+
+  return (
+    <div className="space-y-4 text-[13px]">
+      {/* Full task record (the list truncates ids and error category) */}
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-[12px]">
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.taskId")}</span>
+        <span className="text-ink-2 break-all">{data.taskId}</span>
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.kind")}</span>
+        <span className="text-ink-2">{data.taskKind}</span>
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.status")}</span>
+        <span className="text-ink-2">{data.status}</span>
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.createdAt")}</span>
+        <span className="text-ink-3">{formatDateTime(data.createdAt)}</span>
+        {data.updatedAt && (
+          <>
+            <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.updatedAt")}</span>
+            <span className="text-ink-3">{formatDateTime(data.updatedAt)}</span>
+          </>
+        )}
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.attempts")}</span>
+        <span className="text-ink-2">
+          {data.attemptCount} / {data.maxAttempts}
+        </span>
+        <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.lastError")}</span>
+        <span className={data.lastError ? "text-danger" : "text-ink-3"}>{data.lastError ?? "—"}</span>
+      </div>
+
+      {/* Run history — the per-attempt free-text reason is the part the list
+          view cannot show and the reason this endpoint was built. */}
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-4 mb-2">
+          {t("pages.failedTasks.runsTitle")} ({data.runs.length})
+        </div>
+        {data.runs.length === 0 ? (
+          <div className="text-ink-3">{t("pages.failedTasks.noRuns")}</div>
+        ) : (
+          <div className="space-y-1">
+            <div className="grid grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)] gap-3 pb-1 border-b border-line/50 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-4">
+              <span>{t("pages.failedTasks.runAttempt")}</span>
+              <span>{t("pages.failedTasks.status")}</span>
+              <span>{t("pages.failedTasks.runStarted")}</span>
+              <span>{t("pages.failedTasks.runReason")}</span>
+            </div>
+            {data.runs.map((run) => (
+              <div
+                key={run.runId}
+                className="grid grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)] gap-3 py-1 text-[12px] border-b border-line/30 last:border-b-0"
+                title={`${t("pages.failedTasks.runEnded")}: ${run.endedAt ? formatDateTime(run.endedAt) : "—"}${run.errorCategory ? ` · ${t("pages.failedTasks.runErrorCategory")}: ${run.errorCategory}` : ""}`}
+              >
+                <span className="font-mono text-ink-2">#{run.attemptNumber}</span>
+                <span className="font-mono text-ink-3">{run.executionStatus}</span>
+                <span className="font-mono text-ink-3">{formatDateTime(run.startedAt)}</span>
+                <span className="text-ink-3 break-words" title={run.reason ?? undefined}>
+                  {run.reason ?? (run.errorCategory ?? "—")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

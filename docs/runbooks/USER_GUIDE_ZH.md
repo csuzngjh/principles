@@ -207,7 +207,7 @@ Legacy replay 生成路径已在 PRI-230 退役，当前没有 CLI 入口可以�
 
 ### "有些功能看起来被禁用了或者缺失"
 
-部分子系统（如 `signal_collector` 和 `correction_observer`）**默认关闭**，这是 MVP-Quiet 设计（ADR-0014），不是故障。在种子客户证据支持更大范围激活之前，它们会保持关闭。你可以在工作区的 `.pd/config.yaml` 中查看哪些子系统已启用。
+部分子系统（如 `correction_observer`）**默认关闭**，这是 MVP-Quiet 设计（ADR-0014），不是故障。在种子客户证据支持更大范围激活之前，它们会保持关闭。你可以在工作区的 `.pd/config.yaml` 中查看哪些子系统已启用。
 
 ## 可视化控制台
 
@@ -226,8 +226,7 @@ pd console open --workspace "<path>"
 控制台适合做：
 
 - 看趋势和队列
-- 看 evolution 事件
-- 看 correction samples
+- 看修正样本
 - 看 principle / implementation 的整体活动情况
 
 ## 最后只记住这三件事

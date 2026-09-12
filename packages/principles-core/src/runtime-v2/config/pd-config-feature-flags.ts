@@ -65,9 +65,15 @@ export function computeFeatureFlagsFromConfig(effective: EffectivePdConfig): Fea
       const defaultFlag = flags[id];
       if (!defaultFlag) continue;
 
-      // Gone flags can never be re-enabled
-      if (defaultFlag.category === 'gone' && userEntry.enabled) {
-        warnings.push(`feature '${id}': gone flag cannot be re-enabled`);
+      // Gone flags are terminal: never re-enable, and the registry's tombstone
+      // category is authoritative even when a legacy config still stores the
+      // pre-retirement shape (e.g. evolution_worker `{ category: 'quiet' }`)
+      // — otherwise upgraded workspaces would keep displaying the retired
+      // flag as quiet (PRI-752 review finding).
+      if (defaultFlag.category === 'gone') {
+        if (userEntry.enabled) {
+          warnings.push(`feature '${id}': gone flag cannot be re-enabled`);
+        }
         continue;
       }
 

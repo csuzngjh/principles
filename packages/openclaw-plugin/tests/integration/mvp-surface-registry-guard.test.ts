@@ -235,10 +235,8 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
 
     it('registered service IDs match expected MVP set', () => {
-      // Quiet/disabled services (e.g. pd-task) exist in the
+      // Quiet/disabled services (e.g. pd-task per PRI-294) exist in the
       // registry but are NOT registered via guardService in index.ts.
-      // (service:evolution-worker retired with the worker in PRI-737; its
-      // registry entries were removed in PRI-751 once no consumer remained.)
       const source = read('packages/openclaw-plugin/src/index.ts');
       const registrations = extractServiceRegistrations(source);
 
@@ -273,7 +271,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(coreHooks).toContain('hook:llm_output');
     });
 
-    it('evolution-worker surfaces are fully retired (PRI-737 worker deletion + PRI-751 registry cleanup)', () => {
+    it('evolution-worker surfaces are removed from the registry (PRI-737 deletion, PRI-752 residue retirement)', () => {
       expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker')).toBeUndefined();
       expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'startup:evolution-worker')).toBeUndefined();
     });
@@ -409,7 +407,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(logs.length).toBe(0);
     });
 
-    it('guardService returns null for pd-task (quiet, default off)', async () => {
+    it('guardService returns null for quiet surfaces (pd-task, default off)', async () => {
       const { guardService } = await import('@principles/core/runtime-v2');
       const service = { api: null, start: () => {} };
       const guarded = guardService('service:pd-task', service);
