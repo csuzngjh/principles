@@ -24,7 +24,6 @@ tests/feature-testing/
 │   └── test-scenarios/                 # 测试场景定义
 │       ├── trust-system.json           # Trust System测试
 │       ├── gatekeeper.json             # Gatekeeper测试
-│       ├── evolution-worker.json       # Evolution Worker测试
 │       └── thinking-os.json            # Thinking OS测试
 ├── tools/
 │   ├── create-scenario.sh              # 场景生成器（交互式）
@@ -67,7 +66,7 @@ tests/feature-testing/
 ./tests/feature-testing/framework/feature-test-runner.sh trust-system
 
 # 运行所有核心测试
-for scenario in trust-system gatekeeper evolution-worker thinking-os; do
+for scenario in trust-system gatekeeper thinking-os; do
     ./tests/feature-testing/framework/feature-test-runner.sh $scenario
 done
 ```
@@ -121,23 +120,7 @@ cat tests/reports/feature-testing/trust-system-20260311-120000/test-report.json 
 
 **预期结果**: 11个步骤全部通过，约需4-6分钟
 
-### 3. Evolution Worker (evolution-worker.json)
-
-**测试内容**:
-- ✅ 服务状态检查
-- ✅ 痛苦信号创建
-- ✅ 队列处理（等待90秒扫描周期）
-- ✅ 事件日志记录
-- ✅ 清理测试信号
-
-**运行命令**:
-```bash
-./tests/feature-testing/framework/feature-test-runner.sh evolution-worker
-```
-
-**预期结果**: 6个步骤全部通过，约需2-3分钟
-
-### 4. Thinking OS (thinking-os.json)
+### 3. Thinking OS (thinking-os.json)
 
 **测试内容**:
 - ✅ THINKING_OS.md 配置验证

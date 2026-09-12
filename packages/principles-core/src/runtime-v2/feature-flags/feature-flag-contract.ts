@@ -237,20 +237,27 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Requires PD_RELEASE_METADATA_URL at readiness; rollback migration stays Phase 2.
   { id: 'release_manager_write_authority', category: 'quiet', enabled: true, since: '2026-09-06', description: 'PRI-698 Phase 1 — ReleaseManager.apply() serves Console /apply-full (installer + journal deployment); graduated default-on 2026-09-07 (Owner decision) with pre-transaction legacy fallback; flag-off = legacy console updater with explicit release_manager_write_disabled fallback reason' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
-  { id: 'evolution_worker', category: 'quiet', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5)' },
+  // PRI-752: worker code deleted in PRI-737; flag entry moved to `gone` here
+  // (the "separate change" PRI-737 deferred). The census retirement window
+  // (2026-12-01) was superseded — its subject, the quarantined worker, no
+  // longer exists; live evidence: flag=off, 0 rows in evolution_tasks/events.
+  { id: 'evolution_worker', category: 'gone', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (worker deleted in PRI-737; flag locked off, retired 2026-09-12 PRI-752)' },
   { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },
   // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
-  // is now the primary admission gate. Roll back = set painEvidenceAdmissionDefault to false.
-  { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate.' },
+  // is now the primary admission gate.
+  // PRI-752 reality check: NO code reads this flag for routing — Gate B is
+  // unconditional and no flag-off rollback path exists (PRI-749 G-1 finding).
+  { id: 'painEvidenceAdmission', category: 'quiet', enabled: true, since: '2026-06-06', description: 'Pre-diagnosis evidence triage for pain signals (PEAT-B1). PRI-454: default-on, Gate B is primary gate. PRI-752: no executable consumers — flag value has no runtime effect; disposition pending Owner decision.' },
   // PRI-404/PRI-609: the snake_case IDs `pain_evidence_admission` and
   // `pain_evidence_admission_default` are no longer registered as independent
   // capabilities — see FEATURE_FLAG_ALIASES above.
-  // PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B owns admission.
-  // When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated on all paths.
-  { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B (TriggerController) owns admission. When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated.' },
+  // PRI-454 historical intent: global kill switch for the Gate B migration.
+  // PRI-752 reality check: the documented OFF→Gate A re-activation routing was
+  // never implemented — Gate B is unconditional (PRI-749 G-1 finding).
+  { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: historical kill switch for the Gate B migration. PRI-752: the documented flag-off Gate A rollback does not exist as code — flag value has no runtime effect; disposition pending Owner decision.' },
   { id: 'diagnostician_async_cli', category: 'quiet', enabled: false, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background. Default: false until orchestrator exists.' },
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
-  { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders (dreamer, philosopher, scribe)' },
+  { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders — disconnected control (PRI-752): no runtime readers; grounding is unconditional via runner defaults; rewire vs retire pending Owner decision' },
   { id: 'diagnostician_split_pipeline', category: 'quiet', enabled: true, since: '2026-06-11', description: '3-stage split diagnostician pipeline (RootCause→Distiller→Router)' },
   // ADR-0019: Diagnostician LLM rate-limit graceful degradation. On persistent rate-limit,
   // mark task failed with `rate_limit` errorCategory + emit `diag_llm_rate_limit_degraded`
@@ -321,8 +328,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // a token budget, with an information-floor fallback to the legacy
   // full-predecessor injection when resolution is too sparse. Default off;
   // flag-off = runners use the existing buildContext assembly (byte-identical).
-  // Independent of internalization_core_grounding (§8.1): budgetTokens covers
-  // ONLY manifest-declared fields, never core grounding text.
+  // Independent of core grounding (§8.1): budgetTokens covers ONLY
+  // manifest-declared fields, never core grounding text (which is injected
+  // unconditionally via runner defaults; the internalization_core_grounding
+  // flag currently has no runtime readers — disconnected control, PRI-752).
   { id: 'context_manifest_budget', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 1 — manifest + budget-driven context injection with information-floor fallback. Default off; flag-off = existing buildContext assembly unchanged.' },
   // Internalization progressive disclosure — Layer 2 two-stage evaluation
   // (design §6.5/§8, PR 4). Evaluator runs Stage 1 (summary) then optionally

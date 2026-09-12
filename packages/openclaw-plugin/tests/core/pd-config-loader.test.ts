@@ -288,7 +288,7 @@ describe('Feature flag loading from .pd/config.yaml', () => {
   it('loadFeatureFlagFromConfig returns disabled for quiet flags by default', () => {
     const tmp = mkTmpDir();
     try {
-      const result = loadFeatureFlagFromConfig(tmp, 'evolution_worker');
+      const result = loadFeatureFlagFromConfig(tmp, 'gfi');
       expect(result.enabled).toBe(false);
     } finally { rmTmpDir(tmp); }
   });
