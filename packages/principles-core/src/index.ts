@@ -70,7 +70,7 @@ export type {
 } from './prompt-builder/index.js';
 
 // TrajectoryStore — correction sample primitives (SAMPLES-01, SAMPLES-02)
-export { listCorrectionSamples, reviewCorrectionSample } from './trajectory-store.js';
+export { listCorrectionSamples, reviewCorrectionSample, TrajectoryDbUnavailableError } from './trajectory-store.js';
 export type { CorrectionSampleRecord, CorrectionSampleReviewStatus } from './trajectory-store.js';
 
 // Runtime v2 Foundation Contracts (M1)
