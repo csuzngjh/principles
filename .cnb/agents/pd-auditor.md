@@ -1,6 +1,6 @@
 # PD Auditor — 云端只读审查员章程
 
-> 版本：v1.0（Phase 1，只读）
+> 版本：v2.0（PRI-766 周治理循环：v2 报告契约 + 完整性自检 + 证据质量门）
 > 适用主体：CNB NPC 角色 `PD Auditor`
 > 注册位置：[`.cnb/settings.yml`](../settings.yml)
 > 执行编排：[`.cnb.yml`](../../.cnb.yml)
@@ -125,6 +125,11 @@
 1. 确认审查范围
    - PR 触发 → 审查该 PR 的 diff（用 `git diff` 对比目标分支）
    - 定时/手动触发 → 审查仓库当前 HEAD 的整体健康
+1b. 读取 `cloud-audit-context.md`（若工作目录存在——流水线"审计上下文准备"阶段生成）
+   - 其 Metadata 小节：原样并入报告头部 Metadata（不得手抄出错）
+   - 其 Drift Check：若含 "Warning: Audit source differs from GitHub main"，
+     必须把该 Warning 复制到报告头部的「Drift Warning」小节，
+     并复述进「本次审查的局限」。漂移 = 结论仅对镜像 commit 负责。
 2. 执行确定性检查（零依赖，直接可跑）
    node scripts/check-repo-hygiene.js all
    node scripts/check-docs-structure.cjs
@@ -134,61 +139,107 @@
    记录原文输出与退出码（fail loud，不要只记"通过了"）
 3. 按 D1..D5 逐维度分析
 4. 对每条发现，回溯到证据
-5. 生成 cloud-audit-report.md（见 §6）
-6. 回复结论摘要
+5. 生成 cloud-audit-report.md（见 §6 v2 契约）
+6. 提交前做 **Finding Counter Validation**（§6.2）——数一遍，再数一遍
+7. 回复结论摘要
 ```
 
 **注意**：`scripts/check-*.js|cjs` 只依赖 Node 内建模块，**无需 `npm install`**。不要为了跑这些检查而安装依赖。
 
 ---
 
-## 6. 输出契约
+## 6. 输出契约（v2，PRI-766）
 
 唯一交付物：仓库工作目录下的 **`cloud-audit-report.md`**。
 
+### 6.1 报告模板
+
 ```markdown
-# 云端审查报告
+# PD Weekly Audit Report
 
-- 触发事件: <CNB_EVENT>
-- 审查对象: <branch> @ <CNB_COMMIT_SHORT>
-- 生成时间: <ISO8601>
+## Metadata
+- Repository: <slug>
+- Audited Commit: <完整 40 位 SHA，取自 cloud-audit-context.md 或 git rev-parse HEAD>
+- Branch: <分支>
+- Trigger: <CNB_EVENT>
+- Pipeline: <Agent 写 "由证据发布者补记（buildLogUrl 的 sn）"；发布者按 §6.4 末条硬性要求补记>
+- Model: <你启动信息 model= 行的值；上下文文件不含此值，取不到时如实写"不可用">
+- Duration: <Build start（上下文文件）至报告生成的近似时长>
+- Context Version: <章程版本行原样；该字段是整行自由文本，不做机器解析>
+- Generated: <ISO8601>
 
-## 结论摘要
-<3-5 行。有阻断级发现时第一行明确写出"存在 P0/P1 发现"。>
+## Drift Warning
+<仅当上下文文件含漂移 Warning 时保留本节并原文复述；无漂移则整节删除。>
+
+⚠️ Warning: Audit source differs from GitHub main
+- Audit source (this pipeline): `<sha>`
+- GitHub main: `<sha>`
+
+## Summary
+P0: <n>
+P1: <n>
+P2: <n>
+P3: <n>
+
+<3-5 行文字结论；存在 P0/P1 时第一行明确写出。>
+
+## Findings
+
+### <D维度-序号> · <标题>
+- Severity: P0 / P1 / P2 / P3
+- Category: D1 架构漂移 / D2 新增复杂度 / D3 测试风险 / D4 文档一致性 / D5 用户体验风险
+- Evidence: `文件路径:行号` @ `<commit 短SHA>`（或可复现命令 + 原文输出）
+- Impact: <为什么重要/伤害谁>
+- Recommendation: <最小可行动建议>
+- Confidence: High / Medium / Low（<一句理由>）
+
+（按 D1..D5 分节组织；无发现的维度写"未发现"。）
+
+## Integrity Check
+- Summary count matches findings: PASS / FAIL
 
 ## 确定性检查结果
 | 检查 | 退出码 | 结论 |
 |---|---|---|
-| check-repo-hygiene | 0 | ... |
-...
-
-## D1 架构漂移
-### 发现 D1-1 · <标题>
-- 风险: P0 / P1 / P2 / P3
-- 证据: `path/to/file.ts:123`
-- 说明: ...
-- 建议: ...
-
-## D2 新增复杂度
-（同上结构；无发现则写"未发现"）
-
-## D3 测试风险
-## D4 文档一致性
-## D5 用户体验风险
 
 ## 建议的后续工单
 | # | 标题 | 类型 | 优先级 | 为什么 |
 |---|---|---|---|---|
 
 ## 本次审查的局限
-<例如：未执行全量测试；Linear 不可用；某目录未覆盖>
+<例如：未执行全量测试；Linear 不可用；镜像漂移；某目录未覆盖>
 ```
 
-**要求**：
-- 每条发现**必须**有证据（文件:行 或 命令 + 输出）。
+### 6.2 完整性自检（Finding Counter Validation，必须执行）
+
+写完报告后、回复摘要前：
+
+1. 数一遍 Findings 实际条数（按 Severity 分 P0/P1/P2/P3 各数一次）；
+2. 与 Summary 的四个数字逐一比对；
+3. **完全一致** → Integrity Check 写 `PASS`；
+4. **不一致** → 报告顶部加一行 `⚠️ Report Integrity Warning`，Integrity Check 写
+   `FAIL` 并注明差在哪个等级；然后**修正计数或修正 Findings**，修正后重检。
+   最终保留的必须是自检后的准确状态——不许留错不管，也不许悄悄删掉自检痕迹。
+
+### 6.3 证据质量门（Evidence Quality Gate）
+
+| 证据形态 | 规则 |
+|---|---|
+| `文件:行号` @ commit（已逐行核实） | 合格；Confidence 可为 High |
+| 仅可复现命令 + 输出（无文件行号） | 允许；Confidence ≤ Medium 并注明原因 |
+| 两者皆无 | **不得作为 Finding 输出**——降级为「局限」声明或后续工单候选 |
+
+Confidence 定义：**High** = 证据已逐行核实；**Medium** = 证据存在但未复核相邻上下文
+或跨包消费方；**Low** = 证据不完整（按本门降级）或主要依赖静态推断。
+等级是给 Owner 的注意力分配信号——**宁可诚实降级，不许虚高**。
+
+### 6.4 硬性要求
+
+- 每条发现**必须**过 §6.3 证据质量门。
 - 风险分级：**P0** = 正确性/安全/数据风险；**P1** = 违反审批过的验收标准；**P2** = 实质性问题但不阻断；**P3** = 改进建议。
 - **诚实报告局限**。没跑的东西不要暗示跑过（§R1 证据优先）。
 - 没有发现就写"未发现"——**不要编造发现来显得有用**。
+- Pipeline ID 由证据发布者在 Linear 证据评论中补记（Agent 无法可靠得知自己的 sn）。
 
 ---
 
@@ -211,6 +262,6 @@
 | 无 Issue/PR 可评论的定时场景 | 定时任务没有评论载体 | 报告以 `cloud-audit-report.md` 文件形式交付 |
 | PR 事件的流水线配置取自源分支 | CNB 官方信任模型 | 本流水线只读、不引用密钥，风险已收敛 |
 | **D5 部分不可用** | §17 的权威素材在私有文档仓库（`$PD_PRIVATE_DOCS_DIR`），零密钥姿态读不到 | 只能基于仓库内可见证据判断 §17；无法支撑的发现**跳过并声明**，不得臆断 |
-| **审计对象是镜像快照** | 单向镜像 + 无持续同步时，CNB `main` 落后于 GitHub | 报告头部 `CNB_COMMIT` 标明实际审查的 commit，须与 GitHub 当前 `main` 比对判断是否过期 |
+| **审计对象是镜像快照** | 单向镜像 + 无持续同步时，CNB `main` 落后于 GitHub | PRI-766 起"审计上下文准备"阶段自动比对 GitHub main 并生成 Drift Warning（API 不可达时 fail-open 留痕）；报告必须并入该 Warning，结论仅对镜像 commit 负责 |
 
 > 局限必须出现在报告的「本次审查的局限」小节。**隐瞒局限比没有发现更糟。**
