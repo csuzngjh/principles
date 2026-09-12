@@ -315,13 +315,16 @@ describe('evolution-store', () => {
       expect(dates).toEqual([...dates].sort((a, b) => (a < b ? 1 : -1)));
     });
 
-    it('throws TrajectoryDbUnavailableError when table does not exist in DB', () => {
+    // PRI-770 contract change: a missing TABLE (fresh workspace created after
+    // the evolution writer retired) degrades to an empty result instead of
+    // throwing. A missing DATABASE still throws TrajectoryDbUnavailableError.
+    it('returns empty array when evolution tables are absent from an existing DB (PRI-770)', () => {
       const dbPath = join(stateDir, 'trajectory.db');
       const db = new Database(dbPath);
       db.exec('CREATE TABLE some_other_table (id INTEGER PRIMARY KEY)');
       db.close();
 
-      expect(() => listEvolutionTasks(tmpDir)).toThrow(TrajectoryDbUnavailableError);
+      expect(listEvolutionTasks(tmpDir)).toEqual([]);
     });
   });
 
@@ -387,13 +390,14 @@ describe('evolution-store', () => {
       expect(task.lastError).toBe('max retries exceeded');
     });
 
-    it('throws TrajectoryDbUnavailableError when table does not exist in DB', () => {
+    // PRI-770 contract change (see listEvolutionTasks): missing table → null.
+    it('returns null when evolution tables are absent from an existing DB (PRI-770)', () => {
       const dbPath = join(stateDir, 'trajectory.db');
       const db = new Database(dbPath);
       db.exec('CREATE TABLE some_other_table (id INTEGER PRIMARY KEY)');
       db.close();
 
-      expect(() => getEvolutionTask(tmpDir, 'task-001')).toThrow(TrajectoryDbUnavailableError);
+      expect(getEvolutionTask(tmpDir, 'task-001')).toBeNull();
     });
 
     it('handles empty string taskId', () => {
