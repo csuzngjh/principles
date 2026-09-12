@@ -852,8 +852,8 @@ describe('Regression: Flag Registry Consistency', () => {
     expect(defaults.features.diagnostician_core_grounding).toEqual({ category: 'quiet', enabled: true });
   });
 
-  it('internalization_core_grounding is retired from defaults (PRI-751: runners hardcode coreGrounding=true)', () => {
+  it('internalization_core_grounding is a gone tombstone (PRI-751: runners hardcode coreGrounding=true)', () => {
     const defaults = getDefaultPdConfig();
-    expect(Object.hasOwn(defaults.features, 'internalization_core_grounding')).toBe(false);
+    expect(defaults.features.internalization_core_grounding).toEqual({ category: 'gone', enabled: false });
   });
 });

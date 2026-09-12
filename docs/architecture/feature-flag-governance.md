@@ -44,7 +44,7 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 | **artificer_output_retry** | **ON（毕业）** | principles-core artificer-runner.ts permanentErrorCategories（PRI-621，2026-08-29 毕业：与其他 peer runner 的 output_invalid 重试语义对齐） | ✅ 已毕业 |
 | principle_receipt_self_report | OFF | prompt 注入 📝 行 + llm_output/before_message_write 捕获（PRI-532）；installer 与 registry 均保持关闭 | ✅ 实验性，保持默认关 |
 | correction_observer / signal_collector / l2_dreamer / intent_engineering / rulecode_context_v2 / artifact_summary_redundancy / context_manifest_budget / progressive_evaluator / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi / evolution_worker / empathy_observer | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
-| nocturnal / idle_trigger | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝） | ✅ 正常退役 |
+| nocturnal / idle_trigger / internalization_core_grounding（PRI-751 墓碑化） | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝） | ✅ 正常退役 |
 
 ## 3. 重点案例（本任务结论）
 
