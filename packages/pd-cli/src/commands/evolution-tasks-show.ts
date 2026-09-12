@@ -7,8 +7,9 @@
  * Accepts both numeric id and string taskId.
  */
 
-import { getEvolutionTask } from '@principles/core/evolution-store';
+import { getEvolutionTask, TrajectoryDbUnavailableError } from '@principles/core/evolution-store';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { exitWithTrajectoryDbUnavailable } from './trajectory-db-unavailable.js';
 
 interface EvolutionTasksShowOptions {
   id: string;
@@ -17,14 +18,15 @@ interface EvolutionTasksShowOptions {
 export async function handleEvolutionTasksShow(opts: EvolutionTasksShowOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir();
 
-   
   let foundTask;
   try {
     const numericId = isNaN(Number(opts.id)) ? undefined : Number(opts.id);
     foundTask = getEvolutionTask(workspaceDir, numericId ?? opts.id);
-  } catch {
-    console.log('No evolution tasks found.');
-    return;
+  } catch (err) {
+    if (err instanceof TrajectoryDbUnavailableError) {
+      return exitWithTrajectoryDbUnavailable(err);
+    }
+    throw err;
   }
 
   if (!foundTask) {

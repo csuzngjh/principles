@@ -46,10 +46,9 @@ export { resolveSourceKind, buildToolFailureObservation, buildLlmDetectionObserv
  * This is the main entry point for hooks. It calls the pure triage policy
  * from principles-core and returns the result.
  *
- * The caller (hook) is responsible for:
- * - Checking the painEvidenceAdmission feature flag
- * - Acting on the triage result (proceed to diagnosis, store evidence, etc.)
- * - Falling back to existing behavior when the flag is off
+ * PRI-752 reality check: the painEvidenceAdmission flag is NOT consulted by
+ * any caller on this path — Gate B admission is unconditional. This doc block
+ * previously described a flag check / fallback that does not exist as code.
  */
 export function evaluateEvidenceTriage(
   sourceKind: SourceKind,

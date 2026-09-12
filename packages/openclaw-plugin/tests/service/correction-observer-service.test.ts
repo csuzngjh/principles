@@ -50,7 +50,7 @@ vi.mock('../../src/core/pd-config-loader.js', () => {
             code_tool_hook: { category: 'core', enabled: true },
             defer_archive: { category: 'core', enabled: true },
             correction_observer: { category: 'quiet', enabled: true },
-            empathy_observer: { category: 'quiet', enabled: false },
+            gfi: { category: 'quiet', enabled: false },
           },
           runtimeProfiles: {
             'openclaw.default': { type: 'openclaw', source: 'default' },
