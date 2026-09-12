@@ -43,7 +43,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
-| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358; PR #1574; PRI-752 |
+| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210; PR #1358; PR #1574; PRI-752; PRI-755 |
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
@@ -555,6 +555,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
   }
   -->
   - 2026-09-09 PR #1574 review: finish metadata added to evidencePack + `output_extraction_failed` but sibling terminal `output_repair_exhausted` kept the old payload — grep ALL emission sites of a mirrored failure payload and assert the full field set on EACH surface.
+  - 2026-09-12 PRI-755 / PR #1638 review, 5 findings one root cause (caught pre-merge): a NEW validation+warn mechanism inside an existing helper was verified only by direct-helper tests — production registration never passed the logger (every rc-9 warn was an optional-chain no-op), the fallback consumer keyed the session differently than the producer tracked, the producer skipped empty rounds so validation consumed a stale set, warns fired on healthy no-marker traffic, and untrusted marker ids went unescaped into logs. Rule: a NEW auxiliary mechanism in an existing pipeline must be evidence-verified on its OWN integration surfaces — production registration passes every dep it consumes; producer write cadence covers every cycle INCLUDING empty; producer/consumer resolve the identity identically; degradation signals fire only on actual degraded events; untrusted values are single-line-escaped before log interpolation — one wiring-level test each through the production call shape.
   - 2026-08-31 PRI-631 / PR #1462: optional Evaluator V2 shape bypassed the canonical Artificer validator — route every accepted shape through the hard gate + shape regression.
   - 2026-08-26 PRI-606: axiom builders tested in isolation, never injected on fresh installs (reducer empty + barrel miss) — registry-direct wiring + regression.
   - 2026-09-08 PR #1551 R2: fresh-derived disposition not persisted with completion intent; resume re-derived and drifted — persist the disposition before effects; resume replays it.
