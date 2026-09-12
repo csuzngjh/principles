@@ -29,6 +29,7 @@ import {
   LaunchResultError,
   type ConsoleOpenResult,
 } from '../lib/launch-result.js';
+import { buildConsoleTokenStatus, isLocalConsoleOrigin, type ConsoleTokenStatus } from '../lib/console-origin.js';
 import { ConsoleSupervisor } from '../lib/supervisor.js';
 import { buildDegradedPageHtml, describeDegraded } from '../lib/degraded.js';
 import {
@@ -560,6 +561,64 @@ function configureConsoleToken(senderId: number, value: unknown): ConsoleTokenCo
   return { persisted: true, restartRequested: restartFromTray() };
 }
 
+/**
+ * Read endpoint for the login form's auto-restore: hands the current runtime
+ * token (restored from the encrypted store at startup) to the renderer so a
+ * fresh browser session can connect without the Owner re-pasting it. The
+ * renderer never gains privilege the server process lacks — the console
+ * server already holds this token in its own environment — but the read is
+ * still origin-guarded so a foreign page loaded into the window cannot pull
+ * the credential. Denied senders get "no credential" and the login form
+ * falls back to manual entry.
+ */
+function getConsoleToken(senderId: number, senderUrl: string): ConsoleTokenStatus {
+  if (senderId !== mainWindow?.webContents.id || !isLocalConsoleOrigin(senderUrl)) {
+    return { available: false };
+  }
+  return buildConsoleTokenStatus(process.env.PD_CONSOLE_TOKEN);
+}
+
+interface ConsoleTokenClearResult {
+  cleared: boolean;
+  restartRequested: boolean;
+  reason?: 'invalid_sender' | 'state_save_failed' | 'external_console_attached';
+  nextAction?: string;
+}
+
+/**
+ * Credential lifecycle completion (rollback to the pre-binding state): drop
+ * the encrypted store entry and the runtime env, then restart the managed
+ * console so it comes back in no-auth mode — the state a fresh install
+ * starts from. Mirrors configureConsoleToken's rollback-on-failed-save and
+ * attached-server semantics.
+ */
+function clearConsoleToken(senderId: number): ConsoleTokenClearResult {
+  if (senderId !== mainWindow?.webContents.id) {
+    return { cleared: false, restartRequested: false, reason: 'invalid_sender', nextAction: 'Use the Console window opened by PD Companion.' };
+  }
+  const previousEncryptedToken = state.encryptedConsoleToken;
+  const previousProcessToken = process.env.PD_CONSOLE_TOKEN;
+  if (previousEncryptedToken === undefined && previousProcessToken === undefined) {
+    return { cleared: true, restartRequested: false };
+  }
+  const current = supervisor.getState();
+  delete state.encryptedConsoleToken;
+  if (!saveState()) {
+    if (previousEncryptedToken !== undefined) state.encryptedConsoleToken = previousEncryptedToken;
+    return { cleared: false, restartRequested: false, reason: 'state_save_failed', nextAction: 'Check Companion write permissions, then retry.' };
+  }
+  delete process.env.PD_CONSOLE_TOKEN;
+  if (current.kind === 'running' && current.mode === 'attached') {
+    return {
+      cleared: true,
+      restartRequested: false,
+      reason: 'external_console_attached',
+      nextAction: 'The external Console still enforces its own token; restart it without PD_CONSOLE_TOKEN to return to no-auth mode.',
+    };
+  }
+  return { cleared: true, restartRequested: restartFromTray() };
+}
+
 // ─── Polling: approvals + health + version watch + update check ─────────────
 
 async function fetchJson(url: string): Promise<unknown> {
@@ -751,6 +810,8 @@ if (!app.requestSingleInstanceLock()) {
      loadState();
      restoreEncryptedConsoleToken();
      ipcMain.handle('pd-companion:configure-console-token', (event, token: unknown) => configureConsoleToken(event.sender.id, token));
+     ipcMain.handle('pd-companion:get-console-token', (event) => getConsoleToken(event.sender.id, event.senderFrame?.url ?? ''));
+     ipcMain.handle('pd-companion:clear-console-token', (event) => clearConsoleToken(event.sender.id));
 
     // Locked decision #5: autostart defaults ON, announced on first run.
     if (!state.firstRunNoticeShown) {

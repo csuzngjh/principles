@@ -6,8 +6,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 test('authenticated Owner promotes and rejects exact shadow activations without CLI', async ({ page, request }) => {
   await page.goto('/#/activation');
-  await page.getByLabel('Bearer Token').fill('owner-e2e-token');
-  await page.getByRole('button', { name: '进入工作台' }).click();
+  await page.getByLabel('访问令牌').fill('owner-e2e-token');
+  await page.getByRole('button', { name: '连接' }).click();
   await expect(page).toHaveURL(/#\/(?:focus|welcome)$/);
   await page.goto('/#/activation');
 

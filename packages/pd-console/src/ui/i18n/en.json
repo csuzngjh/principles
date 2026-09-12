@@ -1054,6 +1054,12 @@
       "tokenExternalAttached": "Token saved, but an external Console is still connected.",
       "tokenSessionOnly": "Token is stored in browser session only.",
       "tokenDesktopStored": "Desktop: encrypted with the Windows system store.",
+      "clearToken": "Clear credential",
+      "clearTokenConfirm": "Confirm clear",
+      "tokenCleared": "Credential cleared",
+      "tokenClearedRestarting": "Credential cleared; restarting Console without authentication…",
+      "tokenClearedSession": "Browser session token cleared.",
+      "tokenClearFailed": "Failed to clear the credential.",
       "ownerIdentity": {
         "title": "Owner identity",
         "intro": "The Owner identity gates governance decision entry points (RuleCode promotion, emergency pause, etc.). Register to ~/.pd/owner.json (install-level, shared across workspaces). If the PD_OWNER_ID and PD_OWNER_CREDENTIAL_ID environment variables are set together, they take precedence as a pair.",
