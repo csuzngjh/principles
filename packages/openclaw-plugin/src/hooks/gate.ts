@@ -12,7 +12,7 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { persistGateBlock, recordGateBlockAndReturn } from './gate-block-helper.js';
 import type { RuleHostInput, RuleContextV2 } from '@principles/core/runtime-v2';
-import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, EvolutionTier } from '@principles/core/runtime-v2';
+import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
@@ -448,7 +448,9 @@ function _getCurrentGfi(sessionId?: string): number {
 // always the initial tier. The RuleHost input contract field stays because
 // generated rule code reads it via getEpTier().
 function _getEpTier(): number {
-  return EvolutionTier.Seed;
+  // EvolutionTier.Seed literalized (PRI-770): the points/tier enum was deleted
+  // with the retired Evolution Points subsystem; Seed === 1.
+  return 1;
 }
 
 function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' | 'dangerous' | 'unknown' {

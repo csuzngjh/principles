@@ -248,6 +248,15 @@ function validatePdLocalProfile(
     errors.push(err(`${path}.maxTokens`, `profile '${profileId}' maxTokens must be positive, got ${maxTokens}`, `Set maxTokens in profile '${profileId}' to a positive number`));
   }
 
+  // PRI-758: optional pi-ai reasoning level (union of levels, or false to
+  // explicitly disable on models that support it). Absent = pi-ai model default.
+  const VALID_REASONING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+  const reasoning = readOwn(raw, 'reasoning');
+  if (reasoning !== undefined && reasoning !== false
+    && !(isString(reasoning) && VALID_REASONING_LEVELS.includes(reasoning))) {
+    errors.push(err(`${path}.reasoning`, `profile '${profileId}' reasoning must be one of: ${VALID_REASONING_LEVELS.join(', ')} or false, got ${safePreview(reasoning)}`, `Fix reasoning in profile '${profileId}'`));
+  }
+
   // Reject raw secret values
   const forbiddenValueKeys = ['apiKey', 'api_key', 'token', 'gatewayToken', 'gateway_token', 'secret', 'password', 'auth'];
   for (const fk of forbiddenValueKeys) {
@@ -270,6 +279,7 @@ function validatePdLocalProfile(
   if (isNumber(timeoutMs)) result.timeoutMs = timeoutMs;
   if (isNumber(maxRetries)) result.maxRetries = maxRetries;
   if (isNumber(maxTokens)) result.maxTokens = maxTokens;
+  if (reasoning !== undefined) result.reasoning = reasoning as PdLocalRuntimeProfile['reasoning'];
   return { ok: true, value: result };
 }
 

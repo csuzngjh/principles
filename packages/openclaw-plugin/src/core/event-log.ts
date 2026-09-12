@@ -15,7 +15,6 @@ import type {
   HookExecutionEventData,
   GateBlockEventData,
   GateBypassEventData,
-  EvolutionTaskEventData,
   EmpathyRollbackEventData,
   DiagnosisTaskEventData,
   HeartbeatDiagnosisEventData,
@@ -147,14 +146,11 @@ export class EventLog {
     this.record('gate_bypass', 'bypassed', sessionId, data);
   }
 
-  recordEvolutionTask(data: EvolutionTaskEventData): void {
-    this.record('evolution_task', 'enqueued', undefined, data);
-  }
+  // recordEvolutionTask / recordEvolutionTaskCompleted removed (PRI-770):
+  // the evolution worker queue they logged was retired in PRI-737 and these
+  // wrappers had zero production callers. The 'evolution_task' event type
+  // stays registered for historical JSONL files.
 
-  recordEvolutionTaskCompleted(data: EvolutionTaskEventData): void {
-    this.record('evolution_task', 'completed', undefined, data);
-  }
-  
   recordEmpathyRollback(sessionId: string | undefined, data: EmpathyRollbackEventData): void {
     this.record('empathy_rollback', 'rolled_back', sessionId, data);
   }

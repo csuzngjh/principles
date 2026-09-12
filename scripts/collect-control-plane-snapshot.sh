@@ -111,7 +111,6 @@ copy_if_exists() {
 }
 
 copy_if_exists "$STATE_DIR/AGENT_SCORECARD.json" ".state/AGENT_SCORECARD.json"
-copy_if_exists "$STATE_DIR/evolution_queue.json" ".state/evolution_queue.json"
 copy_if_exists "$STATE_DIR/evolution_directive.json" ".state/evolution_directive.json"
 copy_if_exists "$STATE_DIR/pain_candidates.json" ".state/pain_candidates.json"
 copy_if_exists "$STATE_DIR/.pain_flag" ".state/.pain_flag"
@@ -138,7 +137,7 @@ cat > "$SNAPSHOT_DIR/review-template.md" <<EOF
 1. Trust did not inflate unexpectedly.
 2. \`user_empathy\` and \`system_infer\` both appear in \`.state/logs/events.jsonl\` when relevant.
 3. Empathy rollback reduced only the empathy slice and did not wipe unrelated GFI.
-4. \`evolution_queue.json\`, \`evolution_directive.json\`, and status output tell the same story.
+4. \`evolution_directive.json\` and status output tell the same story.
 5. \`daily-stats.json\` does not contradict active session snapshots in a way that would mislead operators.
 
 ## Files To Review First
@@ -146,7 +145,6 @@ cat > "$SNAPSHOT_DIR/review-template.md" <<EOF
 - \`.state/AGENT_SCORECARD.json\`
 - \`.state/logs/events.jsonl\`
 - \`.state/logs/daily-stats.json\`
-- \`.state/evolution_queue.json\`
 - \`.state/evolution_directive.json\`
 - \`.state/sessions/*.json\`
 

@@ -96,15 +96,6 @@ export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunH
 export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema, PD_TASK_STATUSES, isPDTaskStatus } from './task-status.js';
 // Context payload schemas (Phase 2)
 export { HistoryQueryEntrySchema, TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema, HistoryQueryResultSchema, DiagnosisTargetSchema, ContextPayloadSchema, DiagnosticianContextPayloadSchema, ToolCallEntrySchema, PainContextSchema, FullTracePayloadSchema, FullTracePayloadV2Schema, TraceSourceRefSchema, TraceTimelineEntrySchema, TraceEventKindSchema, SourceRefKindSchema, validateFullTracePayload, sanitizeFullTracePayload, buildFullTraceTimeline, buildSourceRefs, checkFullTracePayloadSchema, TRACE_EVENT_KINDS, SOURCE_REF_KINDS } from './context-payload.js';
-// Trace refiner (PRI-191)
-export { refineFullTrace, REFINED_EVENT_KINDS, SEVERITY_LEVELS } from './trace-refiner.js';
-export type { RefinedTraceEvent, RefinedEventKind, RefinedTracePayload, SeverityLevel, TraceRefinerOptions } from './trace-refiner.js';
-// Trace refiner agent shadow contract (PRI-192)
-export { createTraceRefinerAgentInput, validateTraceRefinerAgentOutput, applyTraceRefinerAgentShadowResult } from './trace-refiner-agent.js';
-export type { TraceRefinerAgentObjective, TraceRefinerAgentMode, TraceRefinerAgentInput, TraceRefinerEvidenceClaim, TraceRefinerRejectedEvidence, TraceRefinerAgentStatus, TraceRefinerAgentOutput } from './trace-refiner-agent.js';
-// GoldenTrace candidate builder (PRI-193)
-export { buildGoldenTraceCandidate } from './golden-trace-candidate-builder.js';
-export type { GoldenTraceCandidateDecision, GoldenTraceCandidateBuilderInput, GoldenTraceCandidateRefusal, GoldenTraceCandidateCreated, GoldenTraceCandidateBuilderResult } from './golden-trace-candidate-builder.js';
 // Diagnostician output schemas (Phase 2)
 export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, RecommendationKindSchema, DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema, DiagnosticianInvocationInputSchema } from './diagnostician-output.js';
 // Principle tree types schemas
@@ -1581,36 +1572,10 @@ export type {
   ReplayEvaluateFn,
 } from './golden-trace-replay-validator.js';
 
-export {
-  replayValidateCode,
-} from './golden-trace-replay-adapter.js';
-
 // ── Evolution Types (migrated from openclaw-plugin) ────────────────────────
 
 export {
-  EvolutionTier,
-  TIER_DEFINITIONS,
-  getTierDefinition,
-  getTierByPoints,
-  TASK_DIFFICULTY_CONFIG,
-  DEFAULT_EVOLUTION_CONFIG,
   isCompleteDetectorMetadata,
-  EvolutionTierSchema,
-  TierPermissionsSchema,
-  TierDefinitionSchema,
-  TaskDifficultySchema,
-  TaskDifficultyConfigSchema,
-  EvolutionEventTypeSchema,
-  EvolutionEventSchema,
-  EvolutionStatsSchema,
-  RecentFailureHashEntrySchema,
-  EvolutionScorecardSchema,
-  EvolutionStorageSchema,
-  EvolutionConfigSchema,
-  ArchivedEventStatsSchema,
-  GateDecisionSchema,
-  ToolCallContextSchema,
-  TierPromotionEventSchema,
   EvolutionPrincipleStatusSchema,
   PrincipleEvaluatorLevelSchema,
   EvaluabilitySchema,
@@ -1630,21 +1595,6 @@ export {
 } from './evolution/evolution-types.js';
 
 export type {
-  TierPermissions,
-  TierDefinition,
-  TaskDifficulty,
-  TaskDifficultyConfig,
-  EvolutionEventType,
-  EvolutionEvent,
-  EvolutionScorecard,
-  RecentFailureHashEntry,
-  EvolutionStats,
-  EvolutionStorage,
-  EvolutionConfig,
-  ArchivedEventStats,
-  GateDecision,
-  ToolCallContext,
-  TierPromotionEvent,
   EvolutionPrincipleStatus,
   PrincipleEvaluatorLevel,
   Evaluability,
@@ -1662,11 +1612,6 @@ export type {
   LegacyImportData,
   EvolutionLoopEvent,
 } from './evolution/evolution-types.js';
-
-export type {
-  ReplayCodeInput,
-  SandboxEvaluateLoader,
-} from './golden-trace-replay-adapter.js';
 
 // ── Refiner Sandbox Wrapper (PRI-172) ────────────────────────────────────
 
@@ -1715,21 +1660,8 @@ export type {
 
 // ── Queue, Hygiene, Runtime Summary, Event Types (migrated from openclaw-plugin) ──
 
-export type {
-  Brand,
-  QueueItemId,
-  WorkflowId,
-  SessionKey,
-} from './types/queue-types.js';
-
-export {
-  toQueueItemId,
-  toWorkflowId,
-  toSessionKey,
-  isQueueItemId,
-  isWorkflowId,
-  isSessionKey,
-} from './types/queue-types.js';
+// Queue branded types removed (PRI-770): the queue domain they branded was
+// retired with the evolution worker; zero production consumers remained.
 
 export type {
   PersistenceAction,

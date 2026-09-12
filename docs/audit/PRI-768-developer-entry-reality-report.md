@@ -62,3 +62,27 @@ CNB 分支 + CNB PR（提案载体，Owner 在 cnb.cool 评审）→ **Owner 认
 - 只动 `.cnb.yml`、`.cnb/web_trigger.yml`、`.cnb/settings.yml`、`.cnb/agents/pd-developer.md`（新增）、`docs/runbooks/CNB_CLOUD_WORKER.md`、本报告；
 - 不动 `packages/**`、`.github/**`；不改 PD Auditor 的任何定义（Phase 4 有专项验证）；
 - `src/**` 说明：仓库无根级 `src/`，包源码均在 `packages/*/src/`——对 `packages/**` 的禁止已覆盖；章程仍按任务书原文双列。
+
+---
+
+## 附录（测试执行后的补充事实，2026-09-12）
+
+### 第一轮测试：章程的"停止请求澄清"被真实触发
+
+测试任务（`cnb-mrg-1k2alhdo7`，109 轮，success）暴露了本报告初版的盲区：**CNB main 镜像漂移已让 CNB 侧 PR 工作流结构性不可用**——镜像 main（`f9e9dfd7`）落后 36 个 commit 且不含整个 `.cnb/` 目录，任何以镜像 main 为 base 的 PR 都会是巨型失真 PR（5 个"新增".cnb 文件 + 62 个无关文件）。
+
+PD Developer 的行为完全符合章程：P1 调查先行 → 发现基线异常 → **停止、不提交、不建 PR** → 给出 A/B/C 三选项与推荐（C：先修同步）→ 把 base 选择识别为治理决策（D9）不自行裁决。这不是测试失败，而是**章程防呆机制的实证**——它拒绝制造一个格式合规但语义错误的 PR。
+
+### 镜像同步已执行（方案 A-2 手动档）
+
+按 runbook §2 方案 A-2，以 PD-mirror 令牌将 CNB main **快进**至 GitHub main 的精确 SHA（`f9e9dfd7 → fbdc56332`，先验证祖先关系再推送，ls-remote 复核）。F-001 漂移在运维层面消除；T2 周定时审计自此审计当前 main。**持续同步机制（A-2a GHA）仍待 Owner 批准**——不建立它，漂移会重新累积。
+
+### 第二轮测试：全链路通过（AC 达成）
+
+测试任务（`cnb-2bf-1k2amca2k`，135s，success）在干净基线上完整走通：
+
+- 建分支 `ai/cnb-dev/pri-768-section43-consistency`（章程命名规范 ✓）
+- 提交 `a15b6f72e`：**仅改 `docs/runbooks/CNB_CLOUD_WORKER.md`**（范围合规 ✓，零 packages/** ✓），内容为 §4.3 的 4 处真实性遗漏补齐（头部双章程索引、§4 使用表补两行、T5 编号与锚点说明、api_trigger_dev 的 userPrompt 硬校验提示）
+- **创建 CNB PR #1**（`is_npc: true`，base = 任务分支，mergeable）✓
+- 提交信息含调查依据与验证记录（`check-docs-structure` OK、4 条相对链接核验）✓
+- 全程零密钥、未触碰 Auditor 任何配置 ✓

@@ -1276,6 +1276,13 @@ function validateProfileStructure(
   return { ok: true, type: typeRaw };
 }
 
+// PRI-758: valid pi-ai reasoning levels (mirrors PdLocalRuntimeProfile.reasoning).
+const VALID_REASONING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+
+function isReasoningLevel(value: unknown): boolean {
+  return value === false || (typeof value === 'string' && (VALID_REASONING_LEVELS as readonly string[]).includes(value));
+}
+
 /**
  * Extract only known, correctly-typed fields from a profile payload.
  * Prevents unknown fields from being persisted to .pd/config.yaml.
@@ -1310,6 +1317,9 @@ function extractProfileFields(
     if (Object.hasOwn(payload, 'maxRetries') && typeof payload.maxRetries === 'number') {
       result.maxRetries = payload.maxRetries;
     }
+    if (Object.hasOwn(payload, 'reasoning') && isReasoningLevel(payload.reasoning)) {
+      result.reasoning = payload.reasoning;
+    }
   }
   return result;
 }
@@ -1318,8 +1328,7 @@ function extractProfileFields(
  * Read raw config file preserving unknown root sections.
  * Returns an empty record if the file does not exist.
  * Treats parsed YAML as unknown (ERR-001).
- */
-function readRawConfig(configPath: string): Record<string, unknown> {
+ */function readRawConfig(configPath: string): Record<string, unknown> {
   if (!fs.existsSync(configPath)) {
     return {};
   }

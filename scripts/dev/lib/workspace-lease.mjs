@@ -45,14 +45,42 @@ export function defaultOwner() {
   return user + '@' + host + ' pid=' + process.pid;
 }
 
+/** 'active' | 'expired' — for a valid lease record. */
+export function leasePhase(lease, now = Date.now()) {
+  return Date.parse(lease.expiresAt) > now ? 'active' : 'expired';
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// A truncated JSON prefix is never valid JSON, so a parse failure is the one
+// invalid-lease signature that can be transient: it means a concurrent writer
+// was mid-write when we read (PRI-728 — the racing-acquire loser reported
+// "lease file is not valid JSON" instead of the winner's conflict). Re-read a
+// bounded number of times before declaring the file invalid; genuinely
+// malformed files still fail loud, just ~LEASE_READ_RETRY_DELAY_MS later.
+const LEASE_READ_RETRY_ATTEMPTS = 3;
+const LEASE_READ_RETRY_DELAY_MS = 5;
+
+function tryParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Read and validate the lease file in `root`.
  * Returns one of:
  *   { exists: false }
  *   { exists: true, valid: false, error }          — present but malformed
  *   { exists: true, valid: true, lease }           — parsed lease record
+ * `readRetryDelayFn` is injectable so tests can stage a mid-write race
+ * deterministically; production sleeps between retries.
  */
-export function readLease(root) {
+export function readLease(root, { readRetryDelayFn = () => sleepSync(LEASE_READ_RETRY_DELAY_MS) } = {}) {
   const file = leaseFilePath(root);
   let raw;
   try {
@@ -61,10 +89,18 @@ export function readLease(root) {
     if (err && err.code === 'ENOENT') return { exists: false };
     throw err;
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
+  let parsed = tryParseJson(raw);
+  for (let attempt = 0; parsed === undefined && attempt < LEASE_READ_RETRY_ATTEMPTS; attempt++) {
+    readRetryDelayFn();
+    try {
+      raw = fs.readFileSync(file, 'utf-8');
+    } catch (err) {
+      if (err && err.code === 'ENOENT') return { exists: false };
+      throw err;
+    }
+    parsed = tryParseJson(raw);
+  }
+  if (parsed === undefined) {
     return { exists: true, valid: false, error: 'lease file is not valid JSON' };
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -89,22 +125,35 @@ export function readLease(root) {
   return { exists: true, valid: true, lease: parsed };
 }
 
-/** 'active' | 'expired' — for a valid lease record. */
-export function leasePhase(lease, now = Date.now()) {
-  return Date.parse(lease.expiresAt) > now ? 'active' : 'expired';
-}
-
+/**
+ * Overwrite an EXISTING lease (renewal) atomically via temp+rename: a
+ * concurrent reader (guard, status, racing acquirer) sees either the old or
+ * the new record, never a truncated mixture. The temp file lives in the same
+ * directory so the rename stays on one volume, and is unlinked on failure.
+ */
 function writeLease(root, lease) {
-  fs.writeFileSync(leaseFilePath(root), JSON.stringify(lease, null, 2) + '\n', 'utf-8');
+  const file = leaseFilePath(root);
+  const tmp = file + '.tmp-' + process.pid + '-' + Date.now();
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(lease, null, 2) + '\n', 'utf-8');
+    fs.renameSync(tmp, file);
+  } finally {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      // Renamed away, or nothing was written — no temp file to clean.
+    }
+  }
 }
 
 /**
- * Create the FIRST lease atomically: flag 'wx' (O_EXCL) makes the create
+ * Create the FIRST lease exclusively: flag 'wx' (O_EXCL) makes the create
  * exclusive across processes, so of two racing acquires exactly one wins and
- * the loser re-reads the winner's ACTIVE lease and reports the conflict
- * instead of silently overwriting it. Renewal of an EXISTING lease keeps the
- * plain write (the holder already passed the same-owner check; a full
- * compare-and-swap protocol would exceed this tool's cooperative scope).
+ * the loser re-reads and reports the winner's ACTIVE lease instead of
+ * silently overwriting it. Content visibility of an O_EXCL create is NOT
+ * atomic (PRI-728), which is why readLease retries the transient parse
+ * failure — that retry is what makes "the loser re-reads the winner's lease"
+ * true even when the loser re-reads mid-write.
  */
 function createLeaseAtomically(root, lease) {
   try {
@@ -122,11 +171,12 @@ function createLeaseAtomically(root, lease) {
  * existing ACTIVE lease has the same owner (renewal by the holding session).
  * Fails loudly when an ACTIVE lease is held by a different owner.
  */
-export function acquireLease(root, { owner, branch, ttlMs = DEFAULT_TTL_MS, now = Date.now() }) {
+export function acquireLease(root, { owner, branch, ttlMs = DEFAULT_TTL_MS, now = Date.now(), readRetryDelayFn }) {
   // Racing first-acquires are serialized by the exclusive create below: the
-  // loser of the create re-reads and re-evaluates against the winner's lease.
+  // loser of the create re-reads and re-evaluates against the winner's lease
+  // (readLease's bounded retry rides out the winner's non-atomic write window).
   for (let attempt = 0; attempt < 3; attempt++) {
-    const current = readLease(root);
+    const current = readLease(root, { readRetryDelayFn });
     if (current.exists && !current.valid) {
       return {
         ok: false,

@@ -70,7 +70,7 @@ const EXPECTED_TRAJECTORY_TABLES = [
   'schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
   'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
   'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
-  'exports_audit', 'evolution_tasks', 'evolution_events',
+  'exports_audit',
 ];
 
 const EXPECTED_TRAJECTORY_INDEXES = [
@@ -83,11 +83,6 @@ const EXPECTED_TRAJECTORY_INDEXES = [
   'idx_pain_events_session_id',
   'idx_pain_events_canonical_pain_id',
   'idx_correction_samples_review_status',
-  'idx_evolution_tasks_trace_id',
-  'idx_evolution_tasks_status',
-  'idx_evolution_tasks_created_at',
-  'idx_evolution_events_trace_id',
-  'idx_evolution_events_created_at',
 ];
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -126,7 +121,7 @@ describe('pd runtime init — empty workspace integration', () => {
       }
     });
 
-    it('creates trajectory.db with all 16 expected tables', () => {
+    it('creates trajectory.db with all 14 expected tables', () => {
       buildRuntimeInitOutput(tmpDir, true);
       const trajDbPath = path.join(tmpDir, '.state', 'trajectory.db');
       expect(fs.existsSync(trajDbPath)).toBe(true);
@@ -167,19 +162,18 @@ describe('pd runtime init — empty workspace integration', () => {
       }
     });
 
-    it('evolution_tasks table has V2 migration columns', () => {
+    it('no longer creates evolution tables (retired in PRI-770, writer path gone since PRI-737)', () => {
       buildRuntimeInitOutput(tmpDir, true);
       const trajDbPath = path.join(tmpDir, '.state', 'trajectory.db');
       const db = new Database(trajDbPath, { readonly: true });
       try {
-        const cols = db.prepare('PRAGMA table_info(evolution_tasks)').all() as { name: string }[];
-        const colNames = cols.map(c => c.name);
-        expect(colNames).toContain('task_kind');
-        expect(colNames).toContain('priority');
-        expect(colNames).toContain('retry_count');
-        expect(colNames).toContain('max_retries');
-        expect(colNames).toContain('last_error');
-        expect(colNames).toContain('result_ref');
+        const tables = getTableNames(trajDbPath);
+        expect(tables).not.toContain('evolution_tasks');
+        expect(tables).not.toContain('evolution_events');
+        const legacy = db.prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('evolution_tasks','evolution_events')"
+        ).all();
+        expect(legacy).toHaveLength(0);
       } finally {
         db.close();
       }

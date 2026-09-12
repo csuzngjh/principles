@@ -13,8 +13,9 @@
  * + trajectory.db with canonicalPainId).
  *
  * `pd pain record` does not have a WorkspaceContext, so it uses this small
- * core writer to avoid an observability gap while keeping `evolution_tasks`
- * legacy queue disabled.
+ * core writer to avoid an observability gap. (PRI-770: the legacy
+ * `evolution_tasks` queue tables this file used to mirror were retired — the
+ * evolution.jsonl stream and trajectory.db pain_events write remain.)
  */
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
@@ -64,11 +65,24 @@ function getSessionsColumns(db: Database.Database): string[] {
 }
 
 /**
- * Type guard: narrows `object` to `{ name: unknown }` without `as` casts.
- * Used for PRAGMA table_info rows (rc-2-no-as-bypass).
+ * True when the named table exists in the open database (PRI-770): gates the
+ * conditional evolution_tasks column backfill without re-creating the table
+ * on fresh workspaces.
  */
-function hasNameField(row: object): row is { name: unknown } {
-  return Object.hasOwn(row, 'name');
+function tableExists(db: Database.Database, name: string): boolean {
+  const row = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
+  ).get(name);
+  return row !== undefined;
+}
+
+/**
+ * SQLite's only signal for "column already exists" is the error message text
+ * (there is no IF NOT EXISTS for ADD COLUMN); unexpected errors must rethrow.
+ */
+function isDuplicateColumnError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('duplicate column name') || message.includes('no column named');
 }
 
 /**
@@ -93,7 +107,7 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
     'schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
     'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
     'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
-    'exports_audit', 'evolution_tasks', 'evolution_events',
+    'exports_audit',
   ];
 
   db.exec(`
@@ -228,38 +242,10 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       row_count INTEGER NOT NULL,
       created_at TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS evolution_tasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT UNIQUE NOT NULL,
-      trace_id TEXT NOT NULL,
-      source TEXT NOT NULL,
-      reason TEXT,
-      score INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'pending',
-      enqueued_at TEXT,
-      started_at TEXT,
-      completed_at TEXT,
-      resolution TEXT,
-      task_kind TEXT,
-      priority TEXT,
-      retry_count INTEGER,
-      max_retries INTEGER,
-      last_error TEXT,
-      result_ref TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS evolution_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      trace_id TEXT NOT NULL,
-      task_id TEXT,
-      stage TEXT NOT NULL,
-      level TEXT DEFAULT 'info',
-      message TEXT NOT NULL,
-      summary TEXT,
-      metadata_json TEXT,
-      created_at TEXT NOT NULL
-    );
+    -- evolution_tasks / evolution_events are no longer created here (PRI-770):
+    -- their writer path was retired with the evolution worker (PRI-737). Keep
+    -- this DDL subset in sync with applyTrajectorySchema() in openclaw-plugin
+    -- trajectory.ts, which made the same removal.
   `);
 
   // Migration: Add text column to pain_events if it doesn't exist (MEM-01)
@@ -316,24 +302,41 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
     WHERE canonical_pain_id IS NOT NULL
   `);
 
-  // V2 migration: Add V2 columns to evolution_tasks if they don't exist
-  const v2Columns = [
-    { name: 'task_kind', type: 'TEXT' },
-    { name: 'priority', type: 'TEXT' },
-    { name: 'retry_count', type: 'INTEGER' },
-    { name: 'max_retries', type: 'INTEGER' },
-    { name: 'last_error', type: 'TEXT' },
-    { name: 'result_ref', type: 'TEXT' },
-  ];
-  for (const col of v2Columns) {
-    const exists = db.prepare(`PRAGMA table_info(evolution_tasks)`).all()
-      .some((row): boolean => {
-        if (typeof row !== 'object' || row === null) return false;
-        // Use type guard predicate to narrow without `as` (rc-2-no-as-bypass)
-        return hasNameField(row) && row.name === col.name;
-      });
-    if (!exists) {
-      db.exec(`ALTER TABLE evolution_tasks ADD COLUMN ${col.name} ${col.type}`);
+  // V2 evolution_tasks column migration removed (PRI-770): new workspaces no
+  // longer create the table. CodeRabbit review round 1: historical tables
+  // created BEFORE the V2 schema may lack the six nullable V2 columns, so
+  // backfill them when the table exists (same parity as applyTrajectorySchema
+  // in openclaw-plugin trajectory.ts).
+  if (tableExists(db, 'evolution_tasks')) {
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN task_kind TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN priority TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN retry_count INTEGER');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN max_retries INTEGER');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN last_error TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN result_ref TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
     }
   }
 
@@ -347,11 +350,6 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
     CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
     CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
-    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_trace_id ON evolution_tasks(trace_id);
-    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_status ON evolution_tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_created_at ON evolution_tasks(created_at);
-    CREATE INDEX IF NOT EXISTS idx_evolution_events_trace_id ON evolution_events(trace_id);
-    CREATE INDEX IF NOT EXISTS idx_evolution_events_created_at ON evolution_events(created_at);
   `);
 
   return { tables, warnings };

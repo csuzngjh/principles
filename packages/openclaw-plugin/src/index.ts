@@ -537,7 +537,10 @@ const plugin = {
           api.logger.warn(`[PD:llm_output] ${wsResult.consistencyWarning}`);
         }
         try {
-          handleLlmOutput(event, { ...ctx, workspaceDir });
+          // PRI-755 (review fix): api.logger must be passed explicitly — the
+          // receipt-capture skips/warns inside handleLlmOutput are the rc-9
+          // observability surface and ctx may not carry a host logger.
+          handleLlmOutput(event, { ...ctx, workspaceDir, logger: api.logger });
 
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'llm_output',
