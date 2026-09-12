@@ -7,6 +7,7 @@
 
 import { listEvolutionTasks, TrajectoryDbUnavailableError } from '@principles/core/evolution-store';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { exitWithTrajectoryDbUnavailable } from './trajectory-db-unavailable.js';
 
 interface EvolutionTasksListOptions {
   status?: string;
@@ -28,11 +29,7 @@ export async function handleEvolutionTasksList(opts: EvolutionTasksListOptions):
     });
   } catch (err) {
     if (err instanceof TrajectoryDbUnavailableError) {
-      console.error(`Error: ${err.message}`);
-      console.error(
-        "Trajectory data lives in the workspace database written by the PD plugin. Initialize this workspace with 'pd runtime init --confirm' or run PD here first."
-      );
-      process.exit(1);
+      return exitWithTrajectoryDbUnavailable(err);
     }
     throw err;
   }

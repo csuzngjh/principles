@@ -6,13 +6,11 @@
 
 import { listCorrectionSamples, TrajectoryDbUnavailableError } from '@principles/core/trajectory-store';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { exitWithTrajectoryDbUnavailable } from './trajectory-db-unavailable.js';
 
 interface SamplesListOptions {
   status?: 'pending' | 'approved' | 'rejected';
 }
-
-const UNAVAILABLE_NEXT_ACTION =
-  "Trajectory data lives in the workspace database written by the PD plugin. Initialize this workspace with 'pd runtime init --confirm' or run PD here first.";
 
 export async function handleSamplesList(opts: SamplesListOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir();
@@ -23,9 +21,7 @@ export async function handleSamplesList(opts: SamplesListOptions): Promise<void>
     samples = listCorrectionSamples(workspaceDir, status);
   } catch (err) {
     if (err instanceof TrajectoryDbUnavailableError) {
-      console.error(`Error: ${err.message}`);
-      console.error(UNAVAILABLE_NEXT_ACTION);
-      process.exit(1);
+      return exitWithTrajectoryDbUnavailable(err);
     }
     throw err;
   }
