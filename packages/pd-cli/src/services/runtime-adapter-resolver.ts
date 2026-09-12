@@ -307,6 +307,8 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
       timeoutMs: adapterTimeoutMs,
       baseUrl,
       workspace: opts.workspaceDir,
+      // PRI-758: profile reasoning level rides to pi-ai (always-thinking zai models).
+      ...(configFields.reasoning !== undefined ? { reasoning: configFields.reasoning } : {}),
       ...(configFields.systemPrompt ? { systemPrompt: configFields.systemPrompt } : {}),
     });
   }

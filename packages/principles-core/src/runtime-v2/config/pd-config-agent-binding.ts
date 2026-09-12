@@ -62,6 +62,8 @@ export interface PiAiAdapterConfigResult {
   maxRetries?: number;
   /** Optional max output tokens (max_tokens) for pi-ai LLM calls. */
   maxTokens?: number;
+  /** Optional reasoning level (from profile, flows to PiAiRuntimeAdapter; PRI-758). */
+  reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
   /** Optional system prompt (from profile, flows to PiAiRuntimeAdapter). */
   systemPrompt?: string;
   workspace: string;
@@ -279,6 +281,9 @@ export function createAdapterConfigFromProfile(
     }
     if (profile.maxTokens !== undefined) {
       result.maxTokens = profile.maxTokens;
+    }
+    if (profile.reasoning !== undefined) {
+      result.reasoning = profile.reasoning;
     }
     if (profile.systemPrompt) {
       result.systemPrompt = profile.systemPrompt;
