@@ -28,6 +28,7 @@ import {
   PhilosopherRunner,
   ScribeRunner,
   ArtificerRunner,
+  buildArtificerHostSemanticContext,
   EvaluatorRunner,
   RolloutReviewerRunner,
   DefaultDreamerValidator,
@@ -104,6 +105,12 @@ export interface InternalizationConsumerCyclePorts {
    * hosts that have not declared semantics keep core-baseline behavior.
    */
   readonly toolSemantics?: ToolSemanticRegistry;
+  /**
+   * PRI-741: host kind label(s) for the artificer's HOST SEMANTIC CONTEXT
+   * block (e.g. ['openclaw']). Only meaningful together with `toolSemantics`;
+   * omitted → the artificer prompt is built without host context.
+   */
+  readonly hostKinds?: readonly string[];
   /** Log label used in human log prefixes ('AutoConsumer' | 'CodexWorker' | …). */
   readonly logLabel: string;
   readonly envGetter?: (name: string) => string | undefined;
@@ -243,6 +250,13 @@ export async function runInternalizationConsumerCycle(
 ): Promise<InternalizationConsumerCycleOutcome> {
   const { logger, emitEvent, logLabel, owner } = ports;
   const {hostToolCatalog, toolSemantics} = ports;
+  // PRI-741: artificer host semantic projection — built once from the SAME
+  // registry the activation gate/replay use (ports.toolSemantics), so the
+  // generation prompt teaches exactly the host dispatch surface that
+  // validateRuleReliability will later enforce. Sanitized for prompt use.
+  const artificerHostSemanticContext = toolSemantics !== undefined
+    ? buildArtificerHostSemanticContext(toolSemantics, ports.hostKinds ?? [])
+    : undefined;
   const envGetter = ports.envGetter ?? ((name: string) => process.env[name]);
   let orchestrator: InternalizationOrchestrator | null = null;
   const flag = loadFeatureFlagFromConfig(workspaceDir, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, {
@@ -547,7 +561,8 @@ export async function runInternalizationConsumerCycle(
       case 'artificer':
         runner = new ArtificerRunner(
           { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultArtificerValidator(), contentHashFn },
-          runnerOptions,
+          // PRI-741: thread the host semantic projection into generation.
+          { ...runnerOptions, ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}) },
         );
         break;
       case 'evaluator':
@@ -582,6 +597,9 @@ export async function runInternalizationConsumerCycle(
             ...(hostToolCatalog
               ? { hostToolCatalog: { readOnlyTools: [...hostToolCatalog.readOnlyTools], writeTools: [...hostToolCatalog.writeTools] } }
               : {}),
+            // PRI-741: host-name parity replay case from the SAME registry
+            // provenance as the gateDeps above.
+            ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}),
           },
         );
         break;

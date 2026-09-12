@@ -113,7 +113,7 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
       INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run('perf-rule-artifact', 'rule', 'perf-task-perf-rule-artifact', 'perf-rule', '[]', 'validated', JSON.stringify({
-      ruleId: 'perf-rule', requiresContextVersion: 2, affectedTools: ['write_file'],
+      ruleId: 'perf-rule', requiresContextVersion: 2, affectedTools: ['write'],
       implementationCode: "function evaluate(input, helpers) { var p = input.action.normalizedPath || ''; if (p === '/etc/passwd') { return { decision: 'block', matched: true, reason: '" + PERF_BASELINE_BLOCK + "' }; } return { decision: 'allow', matched: false, reason: 'perf allow' }; } var meta = { name: 'perf', version: '1', ruleId: 'perf-rule', coversCondition: 'write' };",
     }), now, now);
     const store = new SqliteActivationStateStore(connection);
@@ -124,7 +124,7 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
     connection.close();
 
     // Target /etc/passwd so the rule matches and blocks (ERR-088 execution proof)
-    const event = { toolName: 'write_file', params: { file_path: '/etc/passwd', content: 'x' } };
+    const event = { toolName: 'write', params: { file_path: '/etc/passwd', content: 'x' } };
     const hookContext = { workspaceDir: tempWorkspaceDir, sessionId: 'perf-hook-session', logger: { warn: () => {}, info: () => {}, error: () => {} } };
 
     // ERR-088: assert the rule ACTUALLY blocked before measuring timing.

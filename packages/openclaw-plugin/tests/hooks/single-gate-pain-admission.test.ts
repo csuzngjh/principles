@@ -397,7 +397,7 @@ describe('Single-Gate Pain Admission — PRI-363', () => {
 
     it('rejects shell-tool failures when PD_E2E_MODE is unset, even if path contains e2e-workspace', () => {
       // This is the regression guard: path-substring matching was removed.
-      const toolName = 'bash';
+      const toolName = 'exec'; // OpenClaw's real shell tool (PRI-741: 'bash' is a config alias, never dispatched)
       const error = new Error('build failed');
       const workspaceDir = '/tmp/some-e2e-workspace-dir/test'; // contains "e2e-workspace"
       const event = createMockEvent(toolName, error, { command: 'npm run build' });
@@ -419,7 +419,7 @@ describe('Single-Gate Pain Admission — PRI-363', () => {
 
     it('admits shell-tool failures when PD_E2E_MODE=1', () => {
       process.env[ENV_KEY] = '1';
-      const toolName = 'bash';
+      const toolName = 'exec'; // OpenClaw's real shell tool (PRI-741: 'bash' is a config alias, never dispatched)
       const error = new Error('build failed');
       const workspaceDir = '/tmp/e2e-run';
       const event = createMockEvent(toolName, error, { command: 'npm run build' });

@@ -67,7 +67,7 @@ function insertRuleArtifact(): void {
       version: 1,
     },
     ruleHostGateDecision: 'accepted_shadow',
-    affectedTools: ['write_file'],
+    affectedTools: ['write'],
     painReasonSummary: 'Test: block /etc writes via gate',
   });
 
@@ -128,7 +128,7 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
 
     // Exercise the PUBLIC hook with a real event targeting /etc/passwd
     const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write_file',
+      toolName: 'write',
       params: { file_path: '/etc/passwd', content: 'malicious' },
     };
 
@@ -150,7 +150,7 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
     insertRuleArtifact();
     await insertActivation('code_tool_hook_shadow_activate');
     const result = handleBeforeToolCall({
-      toolName: 'write_file',
+      toolName: 'write',
       params: { file_path: '/etc/passwd', content: 'shadow probe' },
     }, {
       workspaceDir: tempWorkspaceDir,
@@ -179,7 +179,7 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
 
     // Exercise the PUBLIC hook with a safe path that does NOT match the block rule
     const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write_file',
+      toolName: 'write',
       params: { file_path: '/safe/project/file.txt', content: 'safe content' },
     };
 
@@ -200,7 +200,7 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
     insertRuleArtifact();
 
     const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write_file',
+      toolName: 'write',
       params: { file_path: '/etc/passwd', content: 'malicious' },
     };
 

@@ -134,17 +134,17 @@ describe('Write tools without file_path must go through RuleHost', () => {
     expect(mockEvaluate.mock.calls[0][0].action.normalizedPath).toBe('<tool:apply_patch>');
   });
 
-  it('patch tool with no path triggers RuleHost evaluate', () => {
+  it('write tool with no path still triggers RuleHost evaluate via the synthetic path', () => {
     mockEvaluate.mockReturnValue(undefined); // allow
 
     const result = handleBeforeToolCall(
-      { toolName: 'patch', params: {} } as any,
+      { toolName: 'write', params: {} } as any,
       { workspaceDir, sessionId } as any,
     );
 
     expect(result).toBeUndefined();
     expect(mockEvaluate).toHaveBeenCalledTimes(1);
-    expect(mockEvaluate.mock.calls[0][0].action.normalizedPath).toBe('<tool:patch>');
+    expect(mockEvaluate.mock.calls[0][0].action.normalizedPath).toBe('<tool:write>');
   });
 
   it('Write tool with valid file_path still uses real path', () => {
@@ -160,17 +160,17 @@ describe('Write tools without file_path must go through RuleHost', () => {
     expect(mockEvaluate.mock.calls[0][0].action.normalizedPath).toBe('src/app.ts');
   });
 
-  it('bash with no file target still goes through RuleHost (existing behavior)', () => {
+  it('exec with no file target still goes through RuleHost (existing behavior)', () => {
     mockEvaluate.mockReturnValue(undefined); // allow
 
     const result = handleBeforeToolCall(
-      { toolName: 'bash', params: { command: 'echo hello' } } as any,
+      { toolName: 'exec', params: { command: 'echo hello' } } as any,
       { workspaceDir, sessionId } as any,
     );
 
     expect(result).toBeUndefined();
     expect(mockEvaluate).toHaveBeenCalledTimes(1);
-    // Bash without file target uses the full command as path (existing heuristic)
+    // Shell without file target uses the full command as path (existing heuristic)
     const input = mockEvaluate.mock.calls[0][0];
     expect(input.action.normalizedPath).toContain('echo hello');
   });

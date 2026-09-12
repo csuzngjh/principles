@@ -3,6 +3,7 @@ import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { LastValidatorErrors } from './pitask-metadata.js';
 import type { IntentContractV1 } from './intent-contract.js';
+import type { ToolSemanticMappingV1, ToolSemanticRegistry } from './tool-semantic-registry.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 
@@ -26,6 +27,19 @@ export interface ArtificerDreamerContext {
   readonly rationale: string;
   readonly riskLevel?: string;
   readonly strategicPerspective?: string;
+}
+
+/**
+ * PRI-741: read-only projection of the host tool semantic context into the
+ * Artificer prompt. Built by entry points from the SAME ToolSemanticRegistry
+ * instance the production gate and the reliability validation use — this is a
+ * prompt DTO, not a new truth source: it carries no authority of its own.
+ */
+export interface ArtificerHostSemanticContext {
+  /** Host kind label(s) the generated rule will run under (e.g. 'openclaw'). */
+  readonly hostKinds: readonly string[];
+  /** The real host dispatch surface (raw tool name → canonicalKind). */
+  readonly tools: readonly ToolSemanticMappingV1[];
 }
 
 export interface ArtificerPromptBuilderInput {
@@ -81,6 +95,15 @@ export interface ArtificerPromptBuilderInput {
    * implementationCode, goldenTraceCases params, or lineage fields.
    */
   outputLanguage?: OutputLanguage;
+  /**
+   * PRI-741: optional host semantic projection (real host tool names + kinds,
+   * resolved from the ToolSemanticRegistry). When present the prompt carries a
+   * HOST SEMANTIC CONTEXT block constraining the generated rule to
+   * canonicalKind-first matching and host-dispatchable tool names. Undefined =
+   * prompt unchanged (backward compatible for workspaces without a host
+   * declaration).
+   */
+  hostSemanticContext?: ArtificerHostSemanticContext;
 }
 
 export interface ArtificerPromptInput {
@@ -108,6 +131,8 @@ export interface ArtificerPromptInput {
    * (backward compatible).
    */
   intentContract?: IntentContractV1;
+  /** PRI-741: present only when a host semantic projection was resolved. */
+  hostSemanticContext?: ArtificerHostSemanticContext;
 }
 
 export interface ArtificerPromptBuildResult {
@@ -147,12 +172,12 @@ OUTPUT FORMAT (pure JSON, no markdown):
     "dreamerArtifactId": "<from scribe artifact if available, or omit>"
   },
   "risks": ["<risk 1>", "<risk 2>"],
-  "implementationCode": "function evaluate(input, helpers) { ... }",
+  "implementationCode": "function evaluate(input, helpers) { if (input.action.canonicalKind === 'write' && typeof input.action.normalizedPath === 'string' && input.action.normalizedPath.startsWith('/system/')) { return { decision: 'block', matched: true, reason: 'write to system path' }; } return { decision: 'allow', matched: false, reason: 'no risk pattern' }; }",
   "goldenTraceCases": [
-    {"caseId":"negative-1","kind":"negative","toolName":"write_file","params":{"path":"/system/file"},"expectedDecision":"block"},
-    {"caseId":"positive-1","kind":"positive","toolName":"write_file","params":{"path":"/workspace/file"},"expectedDecision":"allow"}
+    {"caseId":"negative-1","kind":"negative","toolName":"write","params":{"path":"/system/file"},"expectedDecision":"block"},
+    {"caseId":"positive-1","kind":"positive","toolName":"write","params":{"path":"/workspace/file"},"expectedDecision":"allow"}
   ],
-  "affectedTools": ["write_file"],
+  "affectedTools": ["write"],
   "generatedAt": "<ISO-8601 timestamp>"
 }
 
@@ -172,7 +197,11 @@ CONSTRAINTS:
 - GOOD: return { decision: 'block', matched: true, reason: 'write to system path outside workspace' }
 - BAD:  return { matched: false } — missing decision and reason, will be rejected
 - BAD:  return { decision: 'allow', matched: true } — missing reason, will be rejected
-- input.action contains toolName, normalizedPath, and paramsSummary
+- input.action contains toolName, normalizedPath, paramsSummary, and canonicalKind
+- input.action.canonicalKind is the closed semantic kind of the current action: "read" | "search" | "write" | "execute" | "agent" | "other"
+- CANONICALKIND-FIRST MATCHING (PRI-741): match behavior PRIMARILY by input.action.canonicalKind (e.g. input.action.canonicalKind === 'write'); use input.action.toolName only as an auxiliary condition to distinguish tools within the same kind
+- When a HOST SEMANTIC CONTEXT block is present, affectedTools and EVERY goldenTraceCases toolName MUST be a real host tool name from that list — activation replay is machine-validated against the host declaration, and generic LLM vocabulary names (write_file, edit_file, bash, run_shell_command, delete_file, ...) are NOT real host tools and WILL be rejected
+- When NO HOST SEMANTIC CONTEXT block is present you have no authoritative host tool knowledge: match by canonicalKind and NEVER invent host-specific tool names
 - input.action.paramsSummary is an OBJECT (a map of parameter names to values), NOT a string
 - NEVER call string methods on paramsSummary itself — paramsSummary.includes(...), paramsSummary.startsWith(...), paramsSummary.match(...) are always bugs and will crash with "is not a function"
 - To inspect a parameter, access its specific key (e.g. paramsSummary.path) and guard its type at runtime (typeof paramsSummary.path === 'string') before using it as a string
@@ -180,7 +209,7 @@ CONSTRAINTS:
 - implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
 - goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block case
 - goldenTraceCases expectedDecision MUST be only "allow" or "block" — do NOT emit "propose_correction", "requireApproval", or "auto_correct" (seed-user MVP only supports allow/block; all other action types are rejected by the schema validator)
-- affectedTools MUST contain the non-empty tool names the rule can match
+- affectedTools MUST contain the non-empty tool names the rule can match (see the HOST SEMANTIC CONTEXT / canonicalKind-first rules above)
 
 PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
 - This is a RETRY. A prior version of your generated code was reviewed and failed adversarial sandbox replay.
@@ -250,7 +279,60 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * feedback block (priorValidatorErrors) — the repair attempt now receives the
  * verbatim schema-rejection reasons from its previous attempt.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v4';
+/**
+ * PRI-741: bumped v4 → v5. (1) canonicalKind-first matching contract —
+ * input.action.canonicalKind is the primary dispatch signal, the OUTPUT FORMAT
+ * example demonstrates canonicalKind matching and no longer teaches the
+ * phantom generic name `write_file`; (2) optional HOST SEMANTIC CONTEXT block
+ * (hostSemanticContext): the real host tool names + kinds projected from the
+ * ToolSemanticRegistry host layer, constraining affectedTools and
+ * goldenTraceCases toolNames to host-dispatchable names.
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v5';
+
+/**
+ * PRI-741: render the host semantic projection as a prompt block. Mirrors the
+ * evaluator's TOOL CATALOG AUTHORITY pattern: the list is authoritative for
+ * what really dispatches, and explicitly non-exhaustive for the host's total
+ * toolset (read-only tools are never routed to the gate).
+ */
+function buildHostSemanticContextBlock(context: ArtificerHostSemanticContext): string {
+  const toolList = context.tools.map((tool) => `${tool.rawToolName}→${tool.canonicalKind}`).join('; ');
+  const hostLine = context.hostKinds.length > 0 ? `- Target host(s): ${context.hostKinds.join(', ')}\n` : '';
+  return `
+HOST SEMANTIC CONTEXT (authoritative — overrides your prior tool-name knowledge):
+${hostLine}- Real host tools (rawToolName → canonicalKind): ${toolList}
+- affectedTools and EVERY goldenTraceCases toolName MUST be one of the real host tool names listed above (activation is machine-validated against this exact list).
+- This list is the declared dispatch surface; it is NOT the host's full toolset (read-only tools are not gated and are absent here).
+`;
+}
+
+/**
+ * PRI-741 (review round): build the host semantic projection DTO from a
+ * registry snapshot, sanitized for system-prompt interpolation. The
+ * declaration JSON validator accepts any non-empty rawToolName — including
+ * control characters — and this DTO travels into the system prompt, so names
+ * are restricted to identifier-shaped strings (no whitespace/newlines) and
+ * the projection is bounded (rc-8: bounded output at an LLM trust boundary).
+ * Declaration files are host-managed, but prompt content deserves defense in
+ * depth regardless of who wrote the file.
+ */
+const HOST_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const HOST_KIND_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const MAX_PROJECTED_HOST_TOOLS = 64;
+
+export function buildArtificerHostSemanticContext(
+  registry: ToolSemanticRegistry,
+  hostKinds: readonly string[] = [],
+): ArtificerHostSemanticContext {
+  return {
+    hostKinds: hostKinds.filter((kind) => HOST_KIND_PATTERN.test(kind)),
+    tools: registry
+      .hostMappings()
+      .filter((mapping) => HOST_NAME_PATTERN.test(mapping.rawToolName))
+      .slice(0, MAX_PROJECTED_HOST_TOOLS),
+  };
+}
 
 export class ArtificerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
@@ -265,6 +347,9 @@ export class ArtificerPromptBuilder {
     }
     const artificerInstruction = ARTIFICER_PROTOCOL_INSTRUCTION
       + (input.contextMode === 'v2' ? V2_CONTEXT_INSTRUCTION : V1_CONTEXT_INSTRUCTION)
+      // PRI-741: host semantic projection (absent = no block, prompt
+      // unchanged for workspaces without a host declaration).
+      + (input.hostSemanticContext !== undefined ? buildHostSemanticContextBlock(input.hostSemanticContext) : '')
       // PRI-714: language directive for human-readable implementation fields
       // (empty string when outputLanguage is undefined).
       + buildLanguageDirective(input.outputLanguage, 'implementation');
@@ -297,6 +382,9 @@ export class ArtificerPromptBuilder {
       // PRI-703 Phase 1: only include intentContract when present (pre-contract
       // scribe artifacts), so prompts stay backward-compatible.
       ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),
+      // PRI-741: only include hostSemanticContext when present, so prompts
+      // stay backward-compatible for host-neutral workspaces.
+      ...(input.hostSemanticContext !== undefined ? { hostSemanticContext: input.hostSemanticContext } : {}),
     };
 
     const message = serializePromptInput(promptInput);

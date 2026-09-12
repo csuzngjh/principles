@@ -41,7 +41,7 @@ import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
 import { CorrectionObserverService } from './service/correction-observer-service.js';
-import { InternalizationAutoConsumerService } from './service/internalization-auto-consumer-service.js';
+import { InternalizationAutoConsumerService, persistOpenClawToolDeclaration } from './service/internalization-auto-consumer-service.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { PDTaskService } from './core/pd-task-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
@@ -345,6 +345,11 @@ const plugin = {
             // ── Start InternalizationAutoConsumer for THIS workspace ──
             // PRI-381: Bounded auto-consumer for dreamer ready tasks.
             // Default ON for dogfood; kill switch via features.internalization_auto_consumer.enabled=false.
+            // PRI-741 (review round): the tool declaration persists UNCONDITIONALLY
+            // (before the consumer gate) — it is a host fact, and a flag-off
+            // workspace must not keep a stale declaration that defeats the
+            // activation gate's hasHostTool check.
+            persistOpenClawToolDeclaration(workspaceDir, api.logger);
             const autoConsGate = shouldStartInternalizationAutoConsumer(workspaceDir, api.logger);
             if (autoConsGate.shouldStart) {
               InternalizationAutoConsumerService.start({

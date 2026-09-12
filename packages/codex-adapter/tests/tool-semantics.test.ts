@@ -31,4 +31,17 @@ describe('CODEX_TOOL_SEMANTICS — SPEC Test 4 (apply_patch reachable)', () => {
       expect(routed.has(m.rawToolName), `'${m.rawToolName}' must be routed by the installer matcher`).toBe(true);
     }
   });
+
+  it('PRI-741: hostMappings() projects exactly the evidence-bound Codex dispatch surface', () => {
+    const byName = new Map(CODEX_TOOL_SEMANTICS.hostMappings().map((m) => [m.rawToolName, m.canonicalKind]));
+    expect([...byName.keys()].sort()).toEqual(['Bash', 'apply_patch']);
+    expect(byName.get('Bash')).toBe('execute');
+    expect(byName.get('apply_patch')).toBe('write');
+    // Generic LLM vocabulary names never enter the host projection…
+    expect(byName.has('write_file')).toBe(false);
+    expect(byName.has('bash')).toBe(false);
+    // …while the projection stays NON-EXHAUSTIVE (evidence-bound, PRI-657):
+    // the artificer prompt teaches "declared surface only", never "full toolset".
+    expect(CODEX_TOOL_SEMANTICS.hasHostTool('read')).toBe(false);
+  });
 });

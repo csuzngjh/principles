@@ -55,6 +55,13 @@ export interface ToolSemanticRegistry {
   hasHostTool(rawToolName: string): boolean;
   /** True iff this registry carries a host-declared layer at all. */
   readonly hasHostLayer: boolean;
+  /**
+   * PRI-741: read-only projection of the HOST layer declarations (raw name →
+   * canonicalKind), for prompt DTOs that must teach generators the real host
+   * dispatch surface. Empty for a baseline-only registry. This is a view of
+   * the declaration this registry was built from — never a writable surface.
+   */
+  hostMappings(): readonly ToolSemanticMappingV1[];
 }
 
 export interface ToolSemanticMappingValidationResult {
@@ -123,6 +130,7 @@ export function buildToolSemanticRegistry(
 ): { ok: true; registry: ToolSemanticRegistry } | { ok: false; errors: readonly string[] } {
   let merged: Readonly<Record<string, CanonicalKind>>;
   const hostNames = new Set<string>();
+  let declaredHostMappings: readonly ToolSemanticMappingV1[] = [];
   if (hostMappings === undefined) {
     merged = baselineToolAlias;
   } else {
@@ -136,6 +144,13 @@ export function buildToolSemanticRegistry(
       record[mapping.rawToolName] = mapping.canonicalKind;
       hostNames.add(mapping.rawToolName);
     }
+    // Deep-freeze per mapping (CodeRabbit review): a caller mutating its
+    // original objects after build must not drift the hostMappings()
+    // projection away from resolve()/hasHostTool(), which read the merged
+    // record captured above.
+    declaredHostMappings = Object.freeze(
+      hostMappings.map((mapping) => Object.freeze({ rawToolName: mapping.rawToolName, canonicalKind: mapping.canonicalKind })),
+    );
     merged = Object.freeze(record);
   }
 
@@ -147,6 +162,9 @@ export function buildToolSemanticRegistry(
       hasHostTool(rawToolName: string): boolean {
         if (typeof rawToolName !== 'string') return false;
         return hostNames.has(rawToolName);
+      },
+      hostMappings(): readonly ToolSemanticMappingV1[] {
+        return declaredHostMappings;
       },
       lookup(rawToolName: string): CanonicalKind | null {
         if (typeof rawToolName !== 'string') return null;

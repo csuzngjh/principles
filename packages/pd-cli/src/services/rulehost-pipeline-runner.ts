@@ -54,6 +54,7 @@ import {
   // PRI-714: resolve outputLanguage from the same effective config the
   // runners already receive (EP-07: canonical resolved value, not raw input).
   resolveOutputLanguage,
+  buildArtificerHostSemanticContext,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -411,12 +412,21 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       onProgress('adversarial_loop', 'failed', refusalReason);
       return rejectedResult(opts.painId, stages, `evaluator_runtime_context_unresolvable: ${evaluatorContext.reason} (nextAction: ${evaluatorContext.nextAction})`);
     }
+    // PRI-741: artificer generation + evaluator parity BOTH anchor on the ONE
+    // registry snapshot evaluatorContext resolved above (review round: a
+    // second independent resolveWorkspaceHostToolSemantics read could observe
+    // a different declaration snapshot than the replay gate). Unresolvable
+    // provenance already failed loud at the evaluatorContext refusal above.
+    const hostSemanticContext = buildArtificerHostSemanticContext(evaluatorContext.registry, evaluatorContext.hostKinds ?? []);
     const artificerRunner = new ArtificerRunner(
       {
         stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore,
         contextMode: opts.contextMode ?? 'v1', behaviorExamplePack: opts.behaviorExamplePack, contentHashFn,
       },
-      runnerOptsFor(capability.artificerAdapter),
+      {
+        ...runnerOptsFor(capability.artificerAdapter),
+        hostSemanticContext,
+      },
     );
     // PRI-510 (DEFECT-004): construct EvaluatorRunnerDeps via the centralized
     // helper so the repair-loop wiring (isRepairLoopEnabled + seeder) is
@@ -435,7 +445,13 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       // from durable provenance) — replaces the previous sandbox-only gate
       // deps so generation-time replay verdicts match the activation gate on
       // the same workspace. Options argument (2nd), never deps (1st).
-      { ...runnerOptsFor(agentAdapters.evaluator), gateDeps: evaluatorContext.gateDeps },
+      {
+        ...runnerOptsFor(agentAdapters.evaluator),
+        gateDeps: evaluatorContext.gateDeps,
+        // PRI-741: host-name parity replay case from the SAME registry
+        // snapshot as the gateDeps above (single resolution).
+        hostSemanticContext,
+      },
     );
 
     const loopResult = await runAdversarialLoop({

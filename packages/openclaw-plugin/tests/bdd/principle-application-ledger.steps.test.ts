@@ -97,7 +97,7 @@ registry.when(/RuleHost 拦截一次工具调用（规则 R-531，会话 sess-53
     principleId: 'princ-531',
   });
   handleBeforeToolCall(
-    { toolName: 'bash', params: { command: 'rm -rf build/' } },
+    { toolName: 'exec', params: { command: 'rm -rf build/' } },
     { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
   );
 });
@@ -119,7 +119,7 @@ registry.when(/RuleHost 对一次工具调用应用 live 自动纠正（dry_run 
     },
   });
   handleBeforeToolCall(
-    { toolName: 'bash', params: { command: 'rm -rf build/', dry_run: false } },
+    { toolName: 'exec', params: { command: 'rm -rf build/', dry_run: false } },
     { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
   );
 });
@@ -132,7 +132,7 @@ registry.when(/RuleHost 对一次工具调用返回 requireApproval/, () => {
     ruleId: 'R-531',
   });
   handleBeforeToolCall(
-    { toolName: 'bash', params: { command: 'x' } },
+    { toolName: 'exec', params: { command: 'x' } },
     { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
   );
 });
@@ -156,7 +156,7 @@ registry.when(/RuleHost 拦截一次工具调用/, () => {
     principleId: 'princ-531',
   });
   handleBeforeToolCall(
-    { toolName: 'bash', params: { command: 'rm -rf build/' } },
+    { toolName: 'exec', params: { command: 'rm -rf build/' } },
     { workspaceDir, sessionId: 'sess-531', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
   );
 });
