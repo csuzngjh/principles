@@ -101,14 +101,11 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'GFI validated as an Owner-facing signal worth default-on surfacing',
     retirementCriteria: 'Friction scoring superseded by telemetry milestones (anonymous_product_telemetry) with owner decision',
   },
-  evolution_worker: {
-    decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/index.ts (heartbeat registration, quarantined)', 'openclaw-plugin tests: evolution-worker-quarantine/slimming'],
-    evidence: 'Legacy heartbeat quarantined behind flag (ADR-0014 §2.5; quarantine tests enforce off-by-default)',
-    decided: '2026-08-27',
-    graduationCriteria: 'None — will not graduate',
-    retirementCriteria: 'Quarantine validated stable → delete worker + flag (MVP-Gone) once 6-month no-activation window closes (2026-12-01)',
-  },
+  // evolution_worker: RETIRED 2026-09-12 (PRI-752). Worker deleted in PRI-737;
+  // flag moved to `gone` in feature-flag-contract.ts. Gone flags carry no
+  // lifecycle entry (terminal state, enforced by feature-flag-lifecycle.test).
+  // The 2026-12-01 quarantine window was superseded: the quarantined worker no
+  // longer existed at retirement time (live: flag=off, evolution tables 0 rows).
   empathy_observer: {
     decision: 'KEEP_QUIET',
     consumers: ['pd-console/src/ui/pages/control-center/EmpathyObserver*', 'openclaw-plugin observer wiring'],
