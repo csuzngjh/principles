@@ -102,12 +102,15 @@ describe('context_manifest_budget flag propagation through PD config (Layer 1 / 
 
 // ── 5.12: switch independence (EXAMPLE) ───────────────────────────────────────
 //
-// design §8.1: context_manifest_budget and internalization_core_grounding are
+// design §8.1: context_manifest_budget and diagnostician_core_grounding are
 // independent flags with no coupling or order dependency. Enumerate all 4
 // value combinations and assert neither affects the other's resolution.
+// (Originally paired with internalization_core_grounding; that flag was
+// retired in PRI-751 — the grounding feature is unconditional via runner
+// defaults — so diagnostician_core_grounding now plays the default-on role.)
 
-describe('5.12 — switch independence: context_manifest_budget × internalization_core_grounding', () => {
-  const GROUNDING = 'internalization_core_grounding';
+describe('5.12 — switch independence: context_manifest_budget × diagnostician_core_grounding', () => {
+  const GROUNDING = 'diagnostician_core_grounding';
 
   it('both off: both resolve false/their-default', () => {
     const effective = computeEffectivePdConfig(null);

@@ -115,9 +115,6 @@ features:
   correction_observer:
     category: quiet
     enabled: false
-  empathy_observer:
-    category: quiet
-    enabled: false
   gfi:
     category: quiet
     enabled: false
