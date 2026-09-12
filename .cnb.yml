@@ -96,10 +96,16 @@ $:
   # ---------------------------------------------------------------------------
   # T3b — 按需审计（远程 API 触发，PRI-762）
   #   用途：让外部系统 / Agent 能远程发起一次审计（真正的"脱离本地 PC"闭环）
-  #   触发：OpenAPI `POST /{repo}/-/build/start`，
-  #         body `{"event":"api_trigger_audit","branch":"<ref>"}`
-  #         （实测：event 必须为 `api_trigger` 或 `api_trigger_` 前缀；
-  #          响应含 sn / buildLogUrl / success；repo-code:rw 令牌即可触发）
+  #   触发：OpenAPI `POST /{repo}/-/build/start`，body：
+  #         {"event":"api_trigger_audit","branch":"<ref>",
+  #          "env":{"userPrompt":"<审计指令>"}}
+  #
+  #   ⚠️ **env.userPrompt 是必需参数**（实测）：
+  #      `npc:go` 在非 NPC 事件下会硬校验 userPrompt —— 缺失/为空时直接报
+  #      `npc:go requires "userPrompt" parameter for non-NPC events`，
+  #      agent 根本不会启动（systemPrompt 里的任何"空则回退"都救不了）。
+  #      所以远程触发**必须**通过 env 显式传审计指令。
+  #   （实测：响应含 sn / buildLogUrl / success；repo-code:rw 令牌即可触发）
   #
   # ⚠️ One Audit Logic, Multiple Trigger Entry：
   #    T3 与 T3b 是**同一个流水线定义** —— 在 web_trigger_audit 上定义 YAML 锚点
@@ -121,8 +127,6 @@ $:
               硬约束：只读，不得修改代码/配置/文档，不得建分支、开 PR、合并 PR，
               不得改架构规则或 ADR 状态，不得写入 PD 运行时状态，不得使用任何密钥。
               全部使用中文。动手前先完整阅读仓库根目录的 `.cnb/agents/pd-auditor.md`。
-              若 userPrompt 为空、缺失或只是占位符，默认执行一次全仓架构健康检查
-              （按章程 §3 流程与 D1–D5 五个维度，审查当前 checkout 的 HEAD）。
             userPrompt: $userPrompt
 
         # 说明：此处不挂上传 stage。

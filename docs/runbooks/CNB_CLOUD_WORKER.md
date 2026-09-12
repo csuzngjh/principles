@@ -177,30 +177,46 @@ cd .. && rm -rf empty
 T3 与 T3b 是**同一个流水线定义**（`.cnb.yml` 内以 YAML 锚点 `&pd-audit-entry` 共享，零复制）。
 审计的单一事实源是 `.cnb/agents/pd-auditor.md`（章程）。
 
+> ⚠️ **`env.userPrompt` 是必需参数**（实测）：`npc:go` 在非 NPC 事件下会硬校验 userPrompt，
+> 缺失/为空时直接报 `npc:go requires "userPrompt" parameter for non-NPC events`，
+> agent 根本不会启动。systemPrompt 里的"空则回退"救不了 —— 校验发生在 agent 启动前。
+
 ```bash
-# 令牌需 repo-code:rw（实测该权限即可触发，无需 repo-cnb-trigger）
+# 审计指令即 "audit mode"：想审什么就写什么；留空会导致 npc:go 校验失败
+CNB_TOKEN=<repo-code:rw 的访问令牌>
+AUDIT_PROMPT="对当前分支做一次全仓架构健康检查，按 .cnb/agents/pd-auditor.md 的 D1–D5 五个维度输出发现。"
+
 curl -sS -X POST "https://api.cnb.cool/csuzngjh/principles/-/build/start" \
   -H "Authorization: Bearer $CNB_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"event":"api_trigger_audit","branch":"main"}'
+  -d "{\"event\":\"api_trigger_audit\",\"branch\":\"main\",\"env\":{\"userPrompt\":\"$AUDIT_PROMPT\"}}"
 ```
 
 响应（实测）：
 
 ```json
-{"sn":"cnb-xxxx","buildLogUrl":"https://cnb.cool/csuzngjh/principles/-/build/logs/cnb-xxxx",
- "event":"api_trigger_audit","message":"...","success":true}
+{"sn":"cnb-js8-1k2abof41","buildLogUrl":"https://cnb.cool/csuzngjh/principles/-/build/logs/cnb-js8-1k2abof41",
+ "event":"api_trigger_audit","message":"cnb received, but didn't finish build yet","success":true}
 ```
 
-* `sn` = 流水线 ID；`buildLogUrl` = 审计输出所在（NPC 回复写在构建日志里）
+* `sn` = 流水线 ID；`buildLogUrl` = 审计输出所在（NPC 回复写在构建日志里，
+  可经 `GET /{repo}/-/build/logs/stage/{sn}/{pipelineId}/{stageId}` 读取）
 * `branch` 决定审计对象（CNB 会 checkout 该 ref 并读取其 `.cnb.yml`）
-* 不传 `userPrompt` 时，Agent 按 systemPrompt 回退执行**全仓架构健康检查**（D1–D5）
-* 消耗：CI CPU（核时）+ AI Credits（可在 `组织 → 设置 → 用量管理` 与
-  `GET /{repo}/-/build/logs/ai-audit/{sn}/{pipelineId}` 查明细）
+* `env.userPrompt` 即 **audit mode**：调用方决定审什么、审多深
+* 消耗：CI CPU（核时）+ AI Credits（可在 `组织 → 设置 → 用量管理`、
+  `GET /{slug}/-/charge/quota` 与 `GET /{repo}/-/build/logs/ai-audit/{sn}/{pipelineId}` 查明细，
+  后者需要 `repo-cnb-history:r` 权限）
 
 **权限边界（与手动触发一致，均为只读）**：NPC 未开启工作模式 ⇒ 只能读代码、写评论/日志，
 不能推代码、不能合并。`api_trigger` 在 CNB 属**可信事件**（权限宽于 PR 类不可信事件），
 但本流水线不持有写权限、不引用任何密钥。
+
+**实测记录（2026-09-12）**：
+
+| 次 | 传参 | 结果 | 说明 |
+|---|---|---|---|
+| 1 | 无 env | ❌ npc go error（856ms） | `npc:go requires "userPrompt" parameter for non-NPC events` |
+| 2 | `env.userPrompt`="连接测试：请只回复 PONG" | ✅ pipeline success | agent 启动、role=PD Auditor 解析成功、模型 `deepseek-v4.1-flash`、回复 PONG；token in=11061/out=2；**AI Credits 消耗 0** |
 
 **查看报告**：构建详情页 → 对应 commit → 附件区。
 私有仓库下载附件需带令牌：
