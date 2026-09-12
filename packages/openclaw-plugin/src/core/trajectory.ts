@@ -134,6 +134,28 @@ function isPainEventRow(value: unknown): value is PainEventRow {
 }
 
 /**
+ * True when the named table exists in the open database (PRI-770): used to
+ * gate the conditional evolution_tasks column backfill without re-creating
+ * the table on fresh workspaces.
+ */
+function tableExists(db: Database.Database, name: string): boolean {
+  const row = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
+  ).get(name);
+  return row !== undefined;
+}
+
+/**
+ * SQLite's only signal for "column already exists" is the error message text
+ * (there is no IF NOT EXISTS for ADD COLUMN). Mirrors the MEM-01 migration
+ * pattern below; unexpected errors must rethrow.
+ */
+function isDuplicateColumnError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('duplicate column name') || message.includes('no column named');
+}
+
+/**
  * Apply the full trajectory.db schema (tables + indexes + views + migrations) to an open
  * Database handle. Used by TrajectoryDatabase.initSchema() and exported via
  * initTrajectorySchema() for external callers (e.g. `pd runtime init`).
@@ -350,6 +372,41 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
 
   // V2 evolution_tasks column migration removed (PRI-770): new workspaces no
   // longer create the table; historical tables already carry the columns.
+  // CodeRabbit review round 1: historical tables created BEFORE the V2 schema
+  // may lack the six nullable V2 columns, so backfill them when the table
+  // exists — otherwise the readers' SELECT fails with "no such column".
+  if (tableExists(db, 'evolution_tasks')) {
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN task_kind TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN priority TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN retry_count INTEGER');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN max_retries INTEGER');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN last_error TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN result_ref TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+  }
 
   db.exec(`
     CREATE VIEW IF NOT EXISTS v_error_clusters AS

@@ -65,6 +65,27 @@ function getSessionsColumns(db: Database.Database): string[] {
 }
 
 /**
+ * True when the named table exists in the open database (PRI-770): gates the
+ * conditional evolution_tasks column backfill without re-creating the table
+ * on fresh workspaces.
+ */
+function tableExists(db: Database.Database, name: string): boolean {
+  const row = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
+  ).get(name);
+  return row !== undefined;
+}
+
+/**
+ * SQLite's only signal for "column already exists" is the error message text
+ * (there is no IF NOT EXISTS for ADD COLUMN); unexpected errors must rethrow.
+ */
+function isDuplicateColumnError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('duplicate column name') || message.includes('no column named');
+}
+
+/**
  * Ensure trajectory.db has the full schema (all 16 tables + indexes + migrations).
  *
  * This mirrors packages/openclaw-plugin/src/core/trajectory.ts applyTrajectorySchema()
@@ -282,7 +303,42 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
   `);
 
   // V2 evolution_tasks column migration removed (PRI-770): new workspaces no
-  // longer create the table; historical tables already carry the columns.
+  // longer create the table. CodeRabbit review round 1: historical tables
+  // created BEFORE the V2 schema may lack the six nullable V2 columns, so
+  // backfill them when the table exists (same parity as applyTrajectorySchema
+  // in openclaw-plugin trajectory.ts).
+  if (tableExists(db, 'evolution_tasks')) {
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN task_kind TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN priority TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN retry_count INTEGER');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN max_retries INTEGER');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN last_error TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN result_ref TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+  }
 
   // Indexes (views intentionally omitted — not needed by pain record path)
   db.exec(`
