@@ -372,6 +372,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — validator/test silently passes when data is absent/malformed instead of failing loud. Same class as ERR-001/005/007.
+  - 2026-09-12 PRI-754 / PR #1633 Codex review (protocol-required flavor): the AI-User action protocol treated `finish.success` — the verdict that decides the whole run result — as optional; an absent field silently defaulted to "failed" and produced a misleading report instead of a protocol violation. Fixed by requiring it boolean in the parser (absence → violation → corrective re-ask) + missing-field negative test.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-12",
+    "pattern": "EP-01",
+    "invariant": "protocol-required-verdict-field-silently-defaulted",
+    "severity": "P1",
+    "escaped": "none",
+    "caughtBy": "pr-review",
+    "guard": "parser required-field negative test (ai-user llm protocol)"
+  }
+  -->
   - 2026-09-12 PRI-749 / PR #1619 review (derivation-source flavor): the UI validator for `GET /api/v1/failed-tasks/:id` was written field-by-field from the payload the client happened to construct — required `TaskRecord.updatedAt` was read as nullable (a lost/malformed field rendered a silently partial record) and `RunRecord.taskId` lineage was not validated at all (a mixed response could display another task's failure reasons under the selected task, rc-6). Fixed by requiring `updatedAt` as an owned string, requiring each run's `taskId` and equality with `task.taskId`, plus mismatch/absence tests. Prevention: derive every field's presence requirement and null acceptance INDEPENDENTLY from the SERVER's authoritative type (typebox schema / store types) — a property NOT wrapped in `Type.Optional` must be present; whether `null` is a legal VALUE comes from the property's own schema (`Type.Null()` members like `TraceTimelineEntrySchema.at` are required-AND-nullable) — and equality-check lineage identifiers (rc-6) with a mismatch test.
   <!-- recurrence-meta
   {
@@ -739,6 +751,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PR #844
 - **Date**: 2026-06-07
 - **Recurrence**: Yes.
+  - 2026-09-12 PRI-754 / PR #1633 Codex review (own-README contract flavor): the ai-user CLI's README documented "LLM unavailable = infra failure, exit 1", but a zero-decision llm-error printed `ok:true` and exited 0 — the documented failure path was never executed against the implementation. Fixed with an `isInfraFailure()` guard (zero-decision llm-error → `ok:false` + exit 1, report still written for evidence) + README rewrite + decision-boundary unit tests.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-12",
+    "pattern": "EP-04",
+    "invariant": "documented-failure-contract-never-executed",
+    "severity": "P1",
+    "escaped": "none",
+    "caughtBy": "pr-review",
+    "guard": "isInfraFailure decision-boundary unit tests"
+  }
+  -->
   - 2026-08-25 Phase 0 update safeguards self-review: the unstamped legacy-installer path staged and inspected a tarball, then returned `installer_bundle_stale` before production mutation. Because that return was inside the outer `try`, it bypassed the `catch` cleanup and left the temporary staging directory behind. Fixed by removing the staging directory before the refusal return and adding a real route test that records the tar extraction directory, asserts the stale result, and proves the directory no longer exists. Lesson: every early refusal after temporary-resource creation must either clean that resource locally or use a `finally`; test the refusal path with an observable resource-lifecycle assertion.
 
 
@@ -945,7 +969,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-056 (security transformation applied at wrong point in pipeline), ERR-024 (security validator not wired into real enforcement path), ERR-014 (bounding asymmetry across code paths), ERR-017 (unsafe serialization on unknown values), ERR-081 (same PR, TOCTOU in stat-then-read file size cap).
 - **Source**: PRI-467 / PR #1059 (CodeRabbit review)
 - **Date**: 2026-06-25
-- **Recurrence**: 2026-08-13 PRI-523 C1.2 quality review: RuleCode evaluation ran in a bounded child, but compilation still executed untrusted top-level source in the parent; the timeout applied per rule, so N active rules created an N×timeout gate; active rows/source/output/warnings were uncapped. The control protected one evaluation phase, not the canonical full untrusted workload. Fixed by moving compilation+evaluation into one 32 MiB child batch with one total deadline, bounded SQL/source/output/warnings, and parent-only validation of bounded child JSON. Narrow re-review found the same root cause at the storage/lifecycle boundary: the first SQL query still materialized full artifact JSON before checking its envelope size, and provider deadline timers survived early settlement. Fixed with a metadata-only SQLite byte-length preflight, a bounded second fetch with defensive actual-byte verification, and timer cleanup in `finally`. Regression covers top-level loops, syntax errors, memory/output/source exhaustion, active-rule overflow, multi-rule elapsed time, a small RuleCode inside oversized irrelevant JSON, and early provider resolve/reject timer cleanup. 2026-08-13 PRI-523 C1.1 review: the shared active-principle kernel budgeted compact pre-render lines, then XML-escaped and wrapped them as directives; expandable content could therefore make the final emitted block exceed the 2,000-character contract. Fixed by selecting only whole directives whose fully rendered escaped block fits, with regression coverage for 10 expandable principles, complete tags, truncation metadata, and exact fit. 2026-08-12 PR #1302 (CodeRabbit review, semantic-canonicalization flavor): the demo RuleCode exemplar in `story-a-demo.ts` / `proven-channel-baseline.ts` used `String(input.action.paramsSummary.path ?? input.action.normalizedPath ?? "")` — raw path first, so `/project/../../etc/passwd` bypassed the `/etc` block (demo activations run in the production RuleHost shadow, so this was a real, if low-impact, correctness gap). Fixed by swapping to `normalizedPath ?? paramsSummary.path`; regression test in `story-a-demo.test.ts` ("blocks via normalizedPath even when paramsSummary.path is a traversal").
+- **Recurrence**: 2026-09-12 PRI-754 / PR #1633 Codex review (derived-form flavors): (1) an AI-User navigate action validated the RAW model-supplied path with a `/`-prefix check, but the value is later resolved via `new URL(value, baseUrl)` — protocol-relative `//evil.example/path` passes the prefix check and resolves to a foreign origin, so the browser would snapshot internal pages for the configured LLM; fixed by comparing the RESOLVED URL's origin against the console origin before goto. (2) a scenario `id` flowed into the run-directory `join()` with no filename-safety check — `../../escape` escapes the output root; fixed with `^[A-Za-z0-9][A-Za-z0-9._-]*$` at parse time.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-12",
+    "pattern": "EP-01",
+    "invariant": "boundary-control-on-raw-form-derived-form-unchecked",
+    "severity": "P1",
+    "escaped": "none",
+    "caughtBy": "pr-review",
+    "guard": "navigate same-origin negative test + scenario id traversal test"
+  }
+  -->
+  2026-08-13 PRI-523 C1.2 review: RuleCode evaluation bounded the child but compiled untrusted source in the parent with per-rule timeouts (N rules = N×gate) — move compile+evaluate into one bounded child batch with one total deadline; storage-side recurrence (full artifact JSON materialized before envelope check, provider timers surviving early settlement) fixed with metadata-only byte preflight + bounded second fetch + timer cleanup in `finally`. C1.1 review: prompt kernel budgeted pre-render lines then XML-escaped them — select only whole directives whose rendered escaped block fits. 2026-08-12 PR #1302 (semantic-canonicalization flavor): demo RuleCode exemplar checked raw `paramsSummary.path` before `normalizedPath`, so `/project/../../etc/passwd` bypassed the `/etc` block — swap to `normalizedPath ?? paramsSummary.path` precedence + traversal regression. (Full texts → ERROR_ARCHIVE.md.)
 
 ---
 **[ERR-081]** | TOCTOU in stat-then-read file size cap — file growth between statSync and readFileSync bypasses oversized check
@@ -992,6 +1028,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-473 / PR #1066; PRI-491 / PR #1137; PRI-501 / PR #1162; PR #1182
 - **Date**: 2026-06-26
 - **Recurrence**: Yes
+  - 2026-09-12 PRI-754 / PR #1633 Codex review (spawned-process isolation flavor): the ai-user bootstrap spawned the REAL console server with the ambient environment — its production wiring reads the developer's `~/.pd-console` / `~/.openclaw` and exposes update routes that can mutate `~/.pd/runtime`, so a QA run could touch the live installation. Fixed by redirecting the child's `HOME`/`USERPROFILE` into the temp workspace at spawn + whole-pair Owner identity env (never half-real) + an isolation startup smoke.
+  <!-- recurrence-meta
+  {
+    "date": "2026-09-12",
+    "pattern": "EP-12",
+    "invariant": "spawned-server-inherits-host-global-state",
+    "severity": "P1",
+    "escaped": "none",
+    "caughtBy": "pr-review",
+    "guard": "isolation startup smoke (server healthy under redirected HOME)"
+  }
+  -->
   - 2026-09-11 PRI-737 / PR #1613 (baseline inventory removal): removed two retired files from the plugin-core anti-growth allowlist in principles-core's architecture-regression.test.ts but missed the sibling self-consistency guard `expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98)` in the SAME file → CI "Test principles-core" red; local gates passed because verify:merge does not run the owning package's vitest suite. Fixed 98→96 with a dated comment. Prevention: when editing an inventory/allowlist list, grep the same file for derived count assertions (`\.size).toBe(` / `toHaveLength`) and update them in the same commit; run the owning package's tests — the merge gate builds/typechecks but does not run every package's suite.
   <!-- recurrence-meta
   {
@@ -1026,8 +1074,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Related ERRs**: ERR-022, ERR-045, ERR-068
 - **Source**: PR #1068
 - **Date**: 2026-06-26
-- **Recurrence**: 2026-08-28 release-pipeline recovery PR #1439 round 3 (composite-action execution semantics, never exercised by PR CI): two defects in a newly added composite action consumed by the full-product publish train survived a fully green 31/31 CI because no PR check can trigger that dispatch-only path. (1) The action read `secrets.NPM_TOKEN`/`secrets.GITHUB_TOKEN`/`secrets.CLAWHUB_TOKEN` directly, but GitHub does not expose the `secrets` context to composite action steps — every token would have evaluated empty, so `npm publish` (especially the FIRST publish of a brand-new package) and the plugin GitHub Release would fail mid-train, and with the serial-step failure-blocking design the train would die after publishing only the upstream packages. Fixed by declaring token inputs on the action and passing `${{ secrets.* }}` explicitly from the calling job; contract test asserts `action.yml` contains no `secrets.` and every caller step passes all three. (2) The job's common build steps still built host-runtime before install-layout on a clean checkout — host-runtime's tsc imports `@principles/install-layout`, whose `types` entry (`dist/index.d.ts`) does not exist after `npm ci`, so the build fails with TS2307 before any publish step (reproduced locally by removing dist). Fixed by reordering core → install-layout → host-runtime in BOTH publish paths, with a contract test pinning the order. Lesson: a reusable composite action's execution semantics (context availability, clean-checkout filesystem state) cannot be validated by the package test suite alone — every new `uses:` path needs contract assertions that pin the semantics CI cannot execute, and the matrix job harboring the same build-order defect shows the fix must grep sibling paths, not just the flagged lines.
-  - 2026-08-14 PRI-524 (PR #1316 review): the plugin hook wrapper's fail-open path called process.exit(0) immediately after process.stdout.write('{}') — stdout on a pipe is asynchronous, so the exit can drop the very object the fail-open contract promises. Fixed with fs.writeSync(1/2). Rule of thumb: before any process.exit, stdout/stderr writes must be fs.writeSync or the code must return and let the loop drain (process.exitCode assignment).
+- **Recurrence**: 2026-08-28 release-pipeline recovery PR #1439 round 3 (composite-action execution semantics, never exercised by PR CI): a new composite action consumed by the publish train read `secrets.*` directly (GitHub does not expose the secrets context to composite steps — every token empty, train dies mid-publish) and the job built host-runtime before install-layout (TS2307 on clean checkout). Fixed by declaring token inputs + explicit `${{ secrets.* }}` pass-through and core → install-layout → host-runtime order in BOTH publish paths, each with a contract test. Lesson: composite-action execution semantics (context availability, clean-checkout filesystem state) cannot be validated by the package test suite alone — pin them with contract assertions CI cannot execute, and grep sibling build paths, not just flagged lines. (Full text → ERROR_ARCHIVE.md.)
+  - 2026-08-14 PRI-524 (PR #1316 review): fail-open path called `process.exit(0)` right after `process.stdout.write('{}')` — pipe stdout is async, exit can drop the promised object; use `fs.writeSync(1/2)` or return and let the loop drain (`process.exitCode`).
 
 ---
 **[ERR-088]** | Test assertion uses non-unique signal that cannot distinguish intended behavior from no-op/fail-soft path
@@ -1044,8 +1092,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-486 / PR #1109 (CodeRabbit review)
 - **Date**: 2026-06-29
 - **Recurrence**: (older inline recurrences compressed; full text → ERROR_ARCHIVE.md) 2026-08-13 PRI-523 C1.1: production-BDD seeded only a Runtime V2 activation then asserted its unique text — could not prove the legacy/Runtime V2 overlap branch; seed both paths, assert per-path unique signals. 2026-07-22 PRI-520 / PR #1249: a fail-loud contract test must assert BOTH the surfaced error text AND the preserved original outcome. 2026-07-15 PRI-516: fixture override destructured but never applied while tests mutated the real mock — remove dead overrides. 2026-07-04 PR #1182: non-unique UPDATE-by-painId + pagination-past-end false-empty — latest-row subquery + total-based emptiness. (2026-06-30/07-01/07-02/07-03 compressions unchanged.)
-- PR #1551 round 2 (R3/R5): 非唯一代理信号冒充目标判定——lineageResolvable（仅上游 artificer 存在）当"证据来源可达"，applicability 条目数（未去重）当"泛化"，NHR 状态当"Owner 可裁决"。修法：对外断言绑定唯一权威来源（BFS 祖先 taskKind/去重计数/capability 集合），代理信号只作提示。
-  - 2026-09-11 PRI-626 / PR #1608 review (two P1s, one root cause — self-authored verification whose failure paths were never executed): (1) the journey harness's no-approval guard compared `=== undefined` while the sentinel was initialized `null`, so the real needs_revision path threw an uncaught TypeError instead of the fail-loud JSON line — caught by the harness's own first live run; (2) the installed-gate zero-write probe wrapped a 0-byte fake trajectory.db in `catch { n = 0 }` and asserted hook exit-0 only, though the hook is fail-open. Fixed by: executing the failure branch once (bite-verify), the unique `reason=feature_disabled` structured marker + flag-ON negative control, a schema-initialized DB with a fail-loud probe. The bite-verify-every-contract-test must-check applies to guards and failure branches the author adds, not only to delivery contract tests.
+  - 2026-09-11 PRI-626 / PR #1608 review: two P1s, one root cause — self-authored verification whose failure paths were never executed (harness `=== undefined` vs `null` sentinel crashed the real needs_revision path; zero-write probe asserted exit-0 only on a fail-open hook). Bite-verify every failure branch the author adds, with a unique structured marker + flag-ON negative control. (Full text → ERROR_ARCHIVE.md.)
   <!-- recurrence-meta
   {
     "date": "2026-09-11",
@@ -1069,9 +1116,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
     "guard": "none"
   }
   -->
-  - 2026-08-28 PRI-614: gateway recovery test counted a restart without proving it followed the tar failure; fixed with strict call-order assertions + inverted-order negative control.
-  - 2026-08-20 PRI-553: governance BDD treated non-empty body text as SPA-ready before the `#/focus` redirect settled; fixed by waiting for the canonical focus URL.
-  - 2026-09-04 PRI-665 (diagnosis-side sibling): "barrel missing 8 exports" misdiagnosis from three text-level symbol checks sharing one blind spot (`export *` chains); real cause was stale physical dependency copies shadowing canonical packages. Root-cause claims about module interfaces require a REAL Node import; checks sharing one mechanism are ONE data point. (Full text → ERROR_ARCHIVE.md.)
+  - 2026-08-28 PRI-614: gateway recovery test counted a restart without proving it followed the tar failure; strict call-order assertions + inverted-order negative control. 2026-08-20 PRI-553: governance BDD treated non-empty body text as SPA-ready before the `#/focus` redirect settled; wait for the canonical focus URL. 2026-09-04 PRI-665 (diagnosis-side sibling): "barrel missing 8 exports" misdiagnosis from three text-level symbol checks sharing one blind spot (`export *` chains); real cause was stale physical dependency copies shadowing canonical packages — root-cause claims about module interfaces require a REAL Node import. (Full texts → ERROR_ARCHIVE.md.)
 
 ---
 **[ERR-089]** | Fix addresses primary failure path but leaves sibling failure branches with stale state, wrong command path, or CLI contract violation
