@@ -1,0 +1,220 @@
+# =============================================================================
+# Principles Disciple — CNB Cloud Agent Worker
+# =============================================================================
+#
+# 阶段：Phase 1 — ONLY READ / ANALYZE
+#
+# 允许：clone repository · install dependencies · run tests · analyze code
+#       · generate reports
+# 禁止：修改 main · 自动 merge · 修改架构规则 · 写入 PD 运行时状态
+#
+# -----------------------------------------------------------------------------
+# 治理说明（重要）
+# -----------------------------------------------------------------------------
+# 1) 本文件是 **CI / 开发环境配置**，与 `.github/workflows/` 同类。它不是 PD
+#    产品代码，不引入状态源，不改变任何生产逻辑。
+# 2) 生效范围：**仅 cnb.cool 侧仓库**。在 GitHub 上没有任何工具读取本文件，
+#    因此对 GitHub Actions / 本地开发 / OpenClaw 插件 / Companion / Console
+#    均无影响（详见 docs/audit/cnb-environment-compatibility-report.md §6）。
+# 3) 只读依赖平台默认：CNB 的 NPC 在**未开启工作模式**时只能读代码、写评论。
+#    **不得**在本仓库为 `PD Auditor` 开启「工作模式」。
+# 4) 第一阶段**不新增任何门禁**：确定性检查只记录退出码并产出报告，不阻塞。
+#
+# 设计文档：docs/audit/cnb-cloud-agent-architecture.md
+# 角色章程：.cnb/agents/pd-auditor.md
+# 能力依据：docs/audit/cnb-capability-validation-report.md
+# =============================================================================
+
+$:
+  # ---------------------------------------------------------------------------
+  # T4 — 云原生开发环境（交互式）
+  #   用途：人工在云端探索、深度调查、按需临时执行任务
+  #   镜像：优先用仓库根的 .ide/Dockerfile 构建；构建失败回退官方默认镜像
+  # ---------------------------------------------------------------------------
+  vscode:
+    - name: pd-cloud-workspace
+      docker:
+        build: .ide/Dockerfile
+        image: cnbcool/default-dev-env:latest
+      services:
+        - vscode
+        - docker
+      stages:
+        - name: 环境自检
+          script: |
+            set -eu
+            node --version
+            npm --version
+            git --version
+            git lfs version
+            rg --version
+            python3 --version
+            echo "[PD] 环境就绪。按需安装依赖：npm ci"
+
+  # ---------------------------------------------------------------------------
+  # T1 — 自动化代码审查（PR 维度，只读）
+  #   输出：PR 评论（NPC 回复）
+  #   注意：CNB 官方把 pull_request 列为「不可信事件」——流水线配置取自源分支。
+  #         因此本流水线**不持有写权限、不引用任何密钥**。
+  # ---------------------------------------------------------------------------
+  pull_request:
+    - name: pd-auditor-pr-review
+      docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: npc go
+          type: npc:go
+          options:
+            role: PD Auditor
+            systemPrompt: |
+              你是 Principles Disciple (PD) 仓库的云端只读架构审查员「PD Auditor」。
+              硬约束：只读，不得修改代码/配置/文档，不得建分支、开 PR、合并 PR，
+              不得改架构规则或 ADR 状态，不得写入 PD 运行时状态，不得使用任何密钥。
+              每条发现必须附可核验证据（文件路径:行号）。全部使用中文。
+              动手前先完整阅读仓库根目录的 `.cnb/agents/pd-auditor.md`（审查章程）。
+            userPrompt: |
+              审查本次 Pull Request 的代码变更。
+
+              范围：本次 PR 相对目标分支的 diff（可用 git diff 查看）。
+              上下文：标题「${CNB_PULL_REQUEST_TITLE}」，源分支「${CNB_PULL_REQUEST_BRANCH}」。
+
+              请按 `.cnb/agents/pd-auditor.md` 的五个维度逐一审查：
+              D1 架构漂移 / D2 新增复杂度 / D3 测试风险 / D4 文档一致性 / D5 用户体验风险。
+
+              要求：
+              - 以当前仓库的真实代码为准，不要凭记忆或历史 PR 推断架构。
+              - 每条发现标注风险等级（P0/P1/P2/P3）并附证据。
+              - 明确区分「阻断性问题」与「相邻改进建议」——相邻改进是建议，不是阻断项。
+              - 结尾给出「本次审查的局限」。没有发现就写「未发现」，不要编造发现。
+
+  # ---------------------------------------------------------------------------
+  # T3 — 按需审计（手动触发）
+  #   用途：Owner / 维护者想主动跑一次全仓审查
+  #   触发：分支详情页的自定义按钮，配置在 `.cnb/web_trigger.yml`
+  #         事件键名 `web_trigger_audit` 必须与按钮的 `event` 字段一致
+  #   注意：仅持有仓库写权限的用户可点击该按钮（CNB 平台限制）
+  # ---------------------------------------------------------------------------
+  web_trigger_audit:
+    - name: pd-auditor-on-demand
+      docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: npc go
+          type: npc:go
+          options:
+            role: PD Auditor
+            systemPrompt: |
+              你是 Principles Disciple (PD) 仓库的云端只读架构审查员「PD Auditor」。
+              硬约束：只读，不得修改代码/配置/文档，不得建分支、开 PR、合并 PR，
+              不得改架构规则或 ADR 状态，不得写入 PD 运行时状态，不得使用任何密钥。
+              全部使用中文。动手前先完整阅读仓库根目录的 `.cnb/agents/pd-auditor.md`。
+            userPrompt: $userPrompt
+
+        # 说明：此处不挂上传 stage。
+        #   - 手动触发的主产物是 NPC 的回复（交互式场景，人就在看）；
+        #   - 「npc:go 能否写文件」尚未经 CNB 侧确认（见架构文档 §7 U1），
+        #     在确认前不引入依赖该行为的 stage，避免制造假失败。
+        #   - 需要正式报告时用 T2（每周定时）或 T1（PR 审查）。
+
+main:
+  # ---------------------------------------------------------------------------
+  # T2 — 每周架构健康检查（定时任务）
+  #   时区 Asia/Shanghai；最小调度间隔 5 分钟（CNB 限制）
+  #   ⚠️ 执行身份 = 最后修改本配置并推送的用户。若该用户被移出组织，任务会失败。
+  #
+  #   拆成两条流水线，各自使用合适的镜像，避免"跨镜像未知工具链"的假设：
+  #     A. 确定性检查 —— 用本仓库自建的 .ide/Dockerfile（node/git/rg/python3 已知存在）
+  #     B. 叙事分析   —— 用 CNB 官方 NPC 镜像（npc:go 运行时）
+  #   两条流水线的制品都会挂到**同一个 commit 的附件**上（CNB 默认行为）。
+  # ---------------------------------------------------------------------------
+  "crontab: 0 2 * * 1":
+    # --- A. 确定性检查：跑 PD 既有的零依赖校验脚本（P2「连接优先于创建」） ----
+    - name: pd-auditor-deterministic
+      docker:
+        build: .ide/Dockerfile
+        image: cnbcool/default-dev-env:latest
+      stages:
+        - name: 运行确定性检查
+          script: |
+            set -u
+            OUT=cloud-audit-deterministic.md
+            printf '# PD 云端确定性检查\n\n- 事件: %s\n- 分支: %s\n- 提交: %s\n- 时间(UTC): %s\n\n| # | 检查 | 退出码 |\n|---|---|---|\n' \
+              "${CNB_EVENT:-unknown}" "${CNB_BRANCH:-unknown}" "${CNB_COMMIT:-unknown}" "${CNB_BUILD_START_TIME:-unknown}" > "$OUT"
+
+            # 这些脚本只依赖 Node 内建模块，**无需 npm install**。
+            # 第一阶段只记录、不阻塞：审计的职责是报告，不是新增门禁。
+            #
+            # ⚠️ 脚本路径与其参数必须分开传给 node（不能用 "path args" 单字符串再整体
+            #    加引号，否则 node 会把它当成一个文件名，报 MODULE_NOT_FOUND）。
+            i=0
+            run() {                  # $1=脚本路径  $2..=参数
+              i=$((i+1))
+              script="$1"; shift
+              echo "================ node $script $* ================"
+              node "$script" "$@"
+              rc=$?
+              printf '| %s | `node %s %s` | %s |\n' "$i" "$script" "$*" "$rc" >> "$OUT"
+            }
+
+            run scripts/check-repo-hygiene.js all
+            run scripts/check-docs-structure.cjs
+            run scripts/check-generated-artifacts.cjs
+            run scripts/check-security-baseline.js
+            run scripts/check-error-handbook.cjs
+
+            echo "----- $OUT -----"
+            cat "$OUT"
+
+        - name: 上传确定性报告
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - cloud-audit-deterministic.md
+            ttl: 30
+
+    # --- B. 叙事审查：NPC 读 AGENTS.md / ADR / architecture 做偏离分析 ----------
+    - name: pd-auditor-narrative
+      docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: npc go
+          type: npc:go
+          options:
+            role: PD Auditor
+            systemPrompt: |
+              你是 Principles Disciple (PD) 仓库的云端只读架构审查员「PD Auditor」。
+              硬约束：只读，不得修改代码/配置/文档，不得建分支、开 PR、合并 PR，
+              不得改架构规则或 ADR 状态，不得写入 PD 运行时状态，不得使用任何密钥。
+              每条发现必须附可核验证据（文件路径:行号）。全部使用中文。
+              动手前先完整阅读仓库根目录的 `.cnb/agents/pd-auditor.md`（审查章程）。
+            userPrompt: |
+              对仓库 `main` 分支当前 HEAD 做一次**整体架构健康检查**（不是审查某个 diff）。
+
+              必读：AGENTS.md → docs/product/PRODUCT_IDENTITY.md → docs/adr/
+                    → docs/architecture/ → .github/PULL_REQUEST_TEMPLATE.md
+
+              请按 `.cnb/agents/pd-auditor.md` 的五个维度输出发现：
+              D1 架构漂移 / D2 新增复杂度 / D3 测试风险 / D4 文档一致性 / D5 用户体验风险。
+
+              要求：
+              - 先把完整报告写入工作目录下的 `cloud-audit-report.md`，再在回复中给出结论摘要。
+              - 报告必须包含「本次审查的局限」小节，如实声明未验证的部分。
+              - 没有发现就写「未发现」，不要编造发现来显得有用。
+
+        - name: 校验报告已产出
+          script: |
+            set -eu
+            if [ ! -s cloud-audit-report.md ]; then
+              echo "[PD] 审计未产出 cloud-audit-report.md。" >&2
+              echo "[PD] nextAction: 检查上方 npc:go 阶段日志；若 NPC 仅以评论形式回复而不写文件，" >&2
+              echo "[PD]             按 docs/audit/cnb-cloud-agent-architecture.md §7 U1 的兜底方案调整。" >&2
+              exit 1
+            fi
+            echo "[PD] 报告已产出：$(wc -l < cloud-audit-report.md) 行"
+
+        - name: 上传审查报告
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - cloud-audit-report.md
+            ttl: 30
