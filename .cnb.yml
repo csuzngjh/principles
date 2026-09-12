@@ -244,7 +244,7 @@ main:
   #   触发：PR 合并到 main（pull_request.merged；配置取自目标分支 main，
   #         可信事件语义，可直接 imports 密钥仓库）
   #   行为：把合并后的 CNB main commit 推到 GitHub 的 sync/cnb-delivery/<short>
-  #         分支（官方 git-sync 插件，force=false），并创建 GitHub PR
+  #         分支（credential helper 从流水线环境变量取值，force 不可用），并创建 GitHub PR
   #         （base=main）——Owner 仍在 GitHub 评审合并，canonical 流程不变。
   #   安全：GitHub 令牌只存 CNB 密钥仓库 csuzngjh/pd-secrets
   #         （GITHUB_SYNC_TOKEN，fine-grained PAT：Contents RW + Pull requests RW），
@@ -265,20 +265,28 @@ main:
         - name: 准备交付分支
           script: |
             set -eu
+            # 环境变量在场性诊断（只报名，不报值）：imports 注入失败的最早信号
+            for v in GITHUB_SYNC_TOKEN GITHUB_SYNC_USERNAME; do
+              if [ -n "${!v:-}" ]; then echo "[bridge] env $v: present"; else echo "[bridge] env $v: MISSING（检查 pd-secrets@main/cnb-github-bridge.yml 的 key 名与 allow_* 声明）"; fi
+            done
             BRANCH="sync/cnb-delivery/${CNB_COMMIT_SHORT}"
             git branch "$BRANCH" HEAD
             echo "[bridge] 本地分支已建：$BRANCH @ $(git rev-parse HEAD)"
 
+        # 首跑（cnb-bdg-1k2b83ik7）实证：git-sync 插件容器收到的 settings ${} 变量为空
+        # （凭据缺失 → "could not read Username"），imports 本身解析成功。
+        # 改为脚本直推：credential helper 在运行时从流水线环境变量取值（已实证的机制）。
         - name: 推送到 GitHub
-          image: tencentcom/git-sync
-          settings:
-            target_url: https://github.com/csuzngjh/principles.git
-            auth_type: https
-            username: ${GITHUB_SYNC_USERNAME}
-            password: ${GITHUB_SYNC_TOKEN}
-            branch: sync/cnb-delivery/${CNB_COMMIT_SHORT}
-            force: false
-            push_tags: false
+          script: |
+            set -eu
+            : "${GITHUB_SYNC_TOKEN:?GITHUB_SYNC_TOKEN 未注入 —— 检查 pd-secrets@main/cnb-github-bridge.yml（key 名 / allow_* / PAT 值），见 runbook §4.4.1}"
+            BRANCH="sync/cnb-delivery/${CNB_COMMIT_SHORT}"
+            # LFS：交付内容为 docs/scripts 时无新 LFS 对象；关闭 locks API 校验避免额外凭据提示
+            git config lfs.https://github.com/csuzngjh/principles.git/info/lfs.locksverify false
+            # 凭据经 helper 子进程传给 git：不进命令行、不进日志
+            git -c credential.helper='!f() { printf "username=x-access-token\n"; printf "password=%s\n" "${GITHUB_SYNC_TOKEN}"; }; f' \
+              push https://github.com/csuzngjh/principles.git "${BRANCH}:${BRANCH}"
+            echo "[bridge] 已推送 ${BRANCH} @ $(git rev-parse HEAD)"
 
         - name: 创建 GitHub PR
           script: |
