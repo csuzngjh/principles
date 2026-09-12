@@ -25,8 +25,6 @@ import type {
   TrajectorySessionInput,
   TaskKind,
   TaskPriority,
-  EvolutionTaskInput,
-  EvolutionEventInput,
   EvolutionTaskRecord,
   EvolutionEventRecord,
   EvolutionTaskFilters,
@@ -84,14 +82,6 @@ const DEFAULT_ORPHAN_BLOB_GRACE_DAYS = 7;
 const SCHEMA_VERSION = 1;
 
 /**
- * Type guard: narrows `object` to `{ name: unknown }` without `as` casts.
- * Used for PRAGMA table_info rows (rc-2-no-as-bypass).
- */
-function hasNameField(row: object): row is { name: unknown } {
-  return Object.hasOwn(row, 'name');
-}
-
-/**
  * Type guard: narrows a raw better-sqlite3 row to a typed pain_event row
  * without `as` casts (rc-2-no-as-bypass, ERR-001).
  *
@@ -144,6 +134,28 @@ function isPainEventRow(value: unknown): value is PainEventRow {
 }
 
 /**
+ * True when the named table exists in the open database (PRI-770): used to
+ * gate the conditional evolution_tasks column backfill without re-creating
+ * the table on fresh workspaces.
+ */
+function tableExists(db: Database.Database, name: string): boolean {
+  const row = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
+  ).get(name);
+  return row !== undefined;
+}
+
+/**
+ * SQLite's only signal for "column already exists" is the error message text
+ * (there is no IF NOT EXISTS for ADD COLUMN). Mirrors the MEM-01 migration
+ * pattern below; unexpected errors must rethrow.
+ */
+function isDuplicateColumnError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('duplicate column name') || message.includes('no column named');
+}
+
+/**
  * Apply the full trajectory.db schema (tables + indexes + views + migrations) to an open
  * Database handle. Used by TrajectoryDatabase.initSchema() and exported via
  * initTrajectorySchema() for external callers (e.g. `pd runtime init`).
@@ -161,7 +173,7 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
     'schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
     'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
     'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
-    'exports_audit', 'evolution_tasks', 'evolution_events',
+    'exports_audit',
   ];
 
   db.exec(`
@@ -296,38 +308,11 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
       row_count INTEGER NOT NULL,
       created_at TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS evolution_tasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT UNIQUE NOT NULL,
-      trace_id TEXT NOT NULL,
-      source TEXT NOT NULL,
-      reason TEXT,
-      score INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'pending',
-      enqueued_at TEXT,
-      started_at TEXT,
-      completed_at TEXT,
-      resolution TEXT,
-      task_kind TEXT,
-      priority TEXT,
-      retry_count INTEGER,
-      max_retries INTEGER,
-      last_error TEXT,
-      result_ref TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS evolution_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      trace_id TEXT NOT NULL,
-      task_id TEXT,
-      stage TEXT NOT NULL,
-      level TEXT DEFAULT 'info',
-      message TEXT NOT NULL,
-      summary TEXT,
-      metadata_json TEXT,
-      created_at TEXT NOT NULL
-    );
+    -- evolution_tasks / evolution_events tables are no longer created (PRI-770):
+    -- the evolution worker that enqueued them was retired in PRI-737 and the
+    -- write path had zero production callers. Existing workspaces keep their
+    -- historical tables; read models (quality-scorecard, "pd evolution tasks")
+    -- still serve them and tolerate missing tables on fresh workspaces.
   `);
 
   // Migration: Add text column to pain_events if it doesn't exist (MEM-01)
@@ -385,24 +370,41 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
     WHERE canonical_pain_id IS NOT NULL
   `);
 
-  // V2 migration: Add V2 columns to evolution_tasks if they don't exist
-  const v2Columns = [
-    { name: 'task_kind', type: 'TEXT' },
-    { name: 'priority', type: 'TEXT' },
-    { name: 'retry_count', type: 'INTEGER' },
-    { name: 'max_retries', type: 'INTEGER' },
-    { name: 'last_error', type: 'TEXT' },
-    { name: 'result_ref', type: 'TEXT' },
-  ];
-  for (const col of v2Columns) {
-    const rows = db.prepare(`PRAGMA table_info(evolution_tasks)`).all();
-    const exists = rows.some((row): boolean => {
-      if (typeof row !== 'object' || row === null) return false;
-      // Use type guard predicate to narrow without `as` (rc-2-no-as-bypass)
-      return hasNameField(row) && row.name === col.name;
-    });
-    if (!exists) {
-      db.exec(`ALTER TABLE evolution_tasks ADD COLUMN ${col.name} ${col.type}`);
+  // V2 evolution_tasks column migration removed (PRI-770): new workspaces no
+  // longer create the table; historical tables already carry the columns.
+  // CodeRabbit review round 1: historical tables created BEFORE the V2 schema
+  // may lack the six nullable V2 columns, so backfill them when the table
+  // exists — otherwise the readers' SELECT fails with "no such column".
+  if (tableExists(db, 'evolution_tasks')) {
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN task_kind TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN priority TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN retry_count INTEGER');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN max_retries INTEGER');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN last_error TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
+    }
+    try {
+      db.exec('ALTER TABLE evolution_tasks ADD COLUMN result_ref TEXT');
+    } catch (err: unknown) {
+      if (!isDuplicateColumnError(err)) throw err;
     }
   }
 
@@ -430,11 +432,6 @@ function applyTrajectorySchema(db: Database.Database): { tables: string[]; warni
     CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
     CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
-    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_trace_id ON evolution_tasks(trace_id);
-    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_status ON evolution_tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_evolution_tasks_created_at ON evolution_tasks(created_at);
-    CREATE INDEX IF NOT EXISTS idx_evolution_events_trace_id ON evolution_events(trace_id);
-    CREATE INDEX IF NOT EXISTS idx_evolution_events_created_at ON evolution_events(created_at);
   `);
 
   return { tables, warnings };
@@ -795,130 +792,24 @@ export class TrajectoryDatabase {
     });
   }
 
-  recordEvolutionTask(input: EvolutionTaskInput): void {
-    const now = nowIso();
-    // Cast to V2 to access new fields
-    const v2 = input;
-    this.withWrite(() => {
-      this.db.prepare(`
-        INSERT INTO evolution_tasks (
-          task_id, trace_id, source, reason, score, status,
-          enqueued_at, started_at, completed_at, resolution, created_at, updated_at,
-          task_kind, priority, retry_count, max_retries, last_error, result_ref
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(task_id) DO UPDATE SET
-          status = excluded.status,
-          started_at = excluded.started_at,
-          completed_at = excluded.completed_at,
-          resolution = excluded.resolution,
-          updated_at = excluded.updated_at,
-          task_kind = excluded.task_kind,
-          priority = excluded.priority,
-          retry_count = excluded.retry_count,
-          max_retries = excluded.max_retries,
-          last_error = excluded.last_error,
-          result_ref = excluded.result_ref
-      `).run(
-        input.taskId,
-        input.traceId,
-        input.source,
-        input.reason ?? null,
-        input.score ?? 0,
-        input.status ?? 'pending',
-        input.enqueuedAt ?? null,
-        input.startedAt ?? null,
-        input.completedAt ?? null,
-        input.resolution ?? null,
-        input.createdAt ?? now,
-        input.updatedAt ?? now,
-        v2.taskKind ?? null,
-        v2.priority ?? null,
-        v2.retryCount ?? null,
-        v2.maxRetries ?? null,
-        v2.lastError ?? null,
-        v2.resultRef ?? null,
-      );
-    });
-  }
+  // recordEvolutionTask / updateEvolutionTask / recordEvolutionEvent removed
+  // (PRI-770): the evolution worker that called them was retired in PRI-737
+  // and these writers had zero production callers. The evolution tables are no
+  // longer created; readers below still serve historical workspaces.
 
-  updateEvolutionTask(taskId: string, updates: Partial<Omit<EvolutionTaskInput, 'taskId' | 'traceId' | 'source'>>): void {
-    const now = nowIso();
-    // Cast to V2 to access new fields
-    const v2Updates = updates;
-     
-    this.withWrite(() => {
-      const setClauses: string[] = ['updated_at = ?'];
-      const values: unknown[] = [now];
-
-      if (updates.status !== undefined) {
-        setClauses.push('status = ?');
-        values.push(updates.status);
-      }
-      if (updates.startedAt !== undefined) {
-        setClauses.push('started_at = ?');
-        values.push(updates.startedAt);
-      }
-      if (updates.completedAt !== undefined) {
-        setClauses.push('completed_at = ?');
-        values.push(updates.completedAt);
-      }
-      if (updates.resolution !== undefined) {
-        setClauses.push('resolution = ?');
-        values.push(updates.resolution);
-      }
-      if (updates.score !== undefined) {
-        setClauses.push('score = ?');
-        values.push(updates.score);
-      }
-      // V2 fields
-      if (v2Updates.taskKind !== undefined) {
-        setClauses.push('task_kind = ?');
-        values.push(v2Updates.taskKind);
-      }
-      if (v2Updates.priority !== undefined) {
-        setClauses.push('priority = ?');
-        values.push(v2Updates.priority);
-      }
-      if (v2Updates.retryCount !== undefined) {
-        setClauses.push('retry_count = ?');
-        values.push(v2Updates.retryCount);
-      }
-      if (v2Updates.maxRetries !== undefined) {
-        setClauses.push('max_retries = ?');
-        values.push(v2Updates.maxRetries);
-      }
-      if (v2Updates.lastError !== undefined) {
-        setClauses.push('last_error = ?');
-        values.push(v2Updates.lastError);
-      }
-      if (v2Updates.resultRef !== undefined) {
-        setClauses.push('result_ref = ?');
-        values.push(v2Updates.resultRef);
-      }
-
-      values.push(taskId);
-      this.db.prepare(`
-        UPDATE evolution_tasks SET ${setClauses.join(', ')} WHERE task_id = ?
-      `).run(...values);
-    });
-  }
-
-  recordEvolutionEvent(input: EvolutionEventInput): void {
-    this.withWrite(() => {
-      this.db.prepare(`
-        INSERT INTO evolution_events (trace_id, task_id, stage, level, message, summary, metadata_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        input.traceId,
-        input.taskId ?? null,
-        input.stage,
-        input.level ?? 'info',
-        input.message,
-        input.summary ?? null,
-        safeJson(input.metadata),
-        input.createdAt ?? nowIso(),
-      );
-    });
+  /**
+   * PRI-770: fresh workspaces no longer create the evolution tables (the
+   * writer path was retired with the evolution worker in PRI-737), while
+   * historical workspaces keep theirs. Readers degrade to empty results on a
+   * missing table instead of throwing — the same contract as the SDK readers'
+   * "DB does not exist → empty array" behaviour. This is an expected,
+   * observable state for new workspaces, not a silent failure.
+   */
+  private evolutionTableMissing(table: 'evolution_tasks' | 'evolution_events'): boolean {
+    const row = this.db.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
+    ).get(table) as { name?: unknown } | undefined;
+    return !row || typeof row.name !== 'string';
   }
 
   /**
@@ -928,6 +819,7 @@ export class TrajectoryDatabase {
    * Not: Runtime truth or real-time queue state.
    */
   listEvolutionTasks(filters: EvolutionTaskFilters = {}): EvolutionTaskRecord[] {
+    if (this.evolutionTableMissing('evolution_tasks')) return [];
     const conditions: string[] = [];
     const values: unknown[] = [];
 
@@ -989,6 +881,7 @@ export class TrajectoryDatabase {
    * Not: Runtime truth or real-time queue state.
    */
   listEvolutionEvents(traceId?: string, filters: { limit?: number; offset?: number } = {}): EvolutionEventRecord[] {
+    if (this.evolutionTableMissing('evolution_events')) return [];
     const limit = filters.limit ?? 100;
     const offset = filters.offset ?? 0;
 
@@ -1033,6 +926,7 @@ export class TrajectoryDatabase {
    */
      
   getEvolutionTaskByTraceId(traceId: string): EvolutionTaskRecord | null {
+    if (this.evolutionTableMissing('evolution_tasks')) return null;
     const row = this.db.prepare(`
       SELECT id, task_id, trace_id, source, reason, score, status,
              enqueued_at, started_at, completed_at, resolution, created_at, updated_at,
@@ -1074,6 +968,9 @@ export class TrajectoryDatabase {
    * Not: Runtime truth or real-time queue state.
    */
   getEvolutionStats(): { total: number; pending: number; inProgress: number; completed: number; failed: number } {
+    if (this.evolutionTableMissing('evolution_tasks')) {
+      return { total: 0, pending: 0, inProgress: 0, completed: 0, failed: 0 };
+    }
     const rows = this.db.prepare(`
       SELECT status, COUNT(*) as count FROM evolution_tasks GROUP BY status
     `).all() as { status: string; count: number }[];

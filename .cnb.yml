@@ -265,10 +265,10 @@ main:
         - name: 准备交付分支
           script: |
             set -eu
-            # 环境变量在场性诊断（只报名，不报值）：imports 注入失败的最早信号
-            for v in GITHUB_SYNC_TOKEN GITHUB_SYNC_USERNAME; do
-              if [ -n "${!v:-}" ]; then echo "[bridge] env $v: present"; else echo "[bridge] env $v: MISSING（检查 pd-secrets@main/cnb-github-bridge.yml 的 key 名与 allow_* 声明）"; fi
-            done
+            # 环境变量在场性诊断（只报名，不报值）：imports 注入失败的最早信号。
+            # 注意：stage shell 是 POSIX sh（dash），不能用 ${!v} 间接展开（第二跑实证 Bad substitution）。
+            if [ -n "${GITHUB_SYNC_TOKEN:-}" ]; then echo "[bridge] env GITHUB_SYNC_TOKEN: present"; else echo "[bridge] env GITHUB_SYNC_TOKEN: MISSING（检查 pd-secrets@main/cnb-github-bridge.yml 的 key 名与 allow_* 声明）"; fi
+            if [ -n "${GITHUB_SYNC_USERNAME:-}" ]; then echo "[bridge] env GITHUB_SYNC_USERNAME: present"; else echo "[bridge] env GITHUB_SYNC_USERNAME: MISSING"; fi
             BRANCH="sync/cnb-delivery/${CNB_COMMIT_SHORT}"
             git branch "$BRANCH" HEAD
             echo "[bridge] 本地分支已建：$BRANCH @ $(git rev-parse HEAD)"
@@ -330,8 +330,22 @@ main:
               }));
             ' "$CNB_COMMIT_SHORT" "${CNB_PIPELINE_ID:-}" "$SUBJECT")
 
-            curl -sS --fail-with-body -H @"$HDR" -H "Accept: application/vnd.github+json" \
-              -d "$BODY" "$API/pulls"
+            # 创建 PR：推送后立即建 PR 可能撞上 GitHub ref 可见性延迟（422 head invalid，
+            # 第三跑实证）——退避重试 3 次（0s/5s/10s）。422 若因同 head PR 已存在，
+            # 幂等预检已在上一步覆盖；此处仍失败则 fail-loud 打印响应体。
+            rc=1
+            for wait in 0 5 10; do
+              sleep "$wait"
+              if curl -sS --fail-with-body -H @"$HDR" -H "Accept: application/vnd.github+json" \
+                -d "$BODY" "$API/pulls"; then
+                rc=0
+                break
+              fi
+            done
+            if [ "$rc" != "0" ]; then
+              echo "[bridge] ERROR: PR 创建在 3 次尝试后仍失败（head=$HEAD_REF）。" >&2
+              exit 1
+            fi
             echo "[bridge] GitHub PR 已创建（head=$HEAD_REF）"
 
   # ---------------------------------------------------------------------------

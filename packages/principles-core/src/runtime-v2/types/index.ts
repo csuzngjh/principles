@@ -69,22 +69,8 @@ export {
 export type { PrincipleTreeStore } from './principle-tree-store.js';
 export { PrincipleTreeStoreSchema } from './principle-tree-store.js';
 
-// Queue branded types (migrated from openclaw-plugin)
-export type {
-  Brand,
-  QueueItemId,
-  WorkflowId,
-  SessionKey,
-} from './queue-types.js';
-
-export {
-  toQueueItemId,
-  toWorkflowId,
-  toSessionKey,
-  isQueueItemId,
-  isWorkflowId,
-  isSessionKey,
-} from './queue-types.js';
+// Queue branded types removed (PRI-770): the queue domain they branded was
+// retired with the evolution worker; zero production consumers remained.
 
 // Hygiene tracking types (migrated from openclaw-plugin)
 export type {
