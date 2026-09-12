@@ -185,11 +185,26 @@ T3 与 T3b 是**同一个流水线定义**（`.cnb.yml` 内以 YAML 锚点 `&pd-
 # 审计指令即 "audit mode"：想审什么就写什么；留空会导致 npc:go 校验失败
 CNB_TOKEN=<repo-code:rw 的访问令牌>
 AUDIT_PROMPT="对当前分支做一次全仓架构健康检查，按 .cnb/agents/pd-auditor.md 的 D1–D5 五个维度输出发现。"
+BRANCH="main"
 
-curl -sS -X POST "https://api.cnb.cool/csuzngjh/principles/-/build/start" \
+# 用 node 做真正的 JSON 编码（Codex 评审 P2）：审计指令里出现引号/反斜杠/换行时，
+# shell 直接插值进 JSON 字符串会产生非法 body，请求在到达流水线前就失败。
+PAYLOAD="$(node -e '
+  const branch = process.argv[1];   // node -e 模式下 argv 不含脚本身：[execPath, branch, prompt]
+  const prompt = process.argv[2];
+  process.stdout.write(JSON.stringify({
+    event: "api_trigger_audit",
+    branch,
+    env: { userPrompt: prompt },
+  }));
+' "$BRANCH" "$AUDIT_PROMPT")"
+
+# --fail-with-body（curl ≥ 7.76，Codex 评审 P2）：HTTP 4xx/5xx（令牌过期/权限不足等）
+# 时退出码非 0 但仍打印响应体 —— 避免把被拒绝的触发误判为已受理。
+curl -sS --fail-with-body -X POST "https://api.cnb.cool/csuzngjh/principles/-/build/start" \
   -H "Authorization: Bearer $CNB_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"event\":\"api_trigger_audit\",\"branch\":\"main\",\"env\":{\"userPrompt\":\"$AUDIT_PROMPT\"}}"
+  -d "$PAYLOAD"
 ```
 
 响应（实测）：
@@ -203,13 +218,22 @@ curl -sS -X POST "https://api.cnb.cool/csuzngjh/principles/-/build/start" \
   可经 `GET /{repo}/-/build/logs/stage/{sn}/{pipelineId}/{stageId}` 读取）
 * `branch` 决定审计对象（CNB 会 checkout 该 ref 并读取其 `.cnb.yml`）
 * `env.userPrompt` 即 **audit mode**：调用方决定审什么、审多深
+* 判读：HTTP 失败时 `curl` 退出码非 0（`--fail-with-body`）；受理成功的响应含
+  `"success":true`（`message` 此刻仅表示"已受理，尚未跑完"，结果看 `buildLogUrl`）
 * 消耗：CI CPU（核时）+ AI Credits（可在 `组织 → 设置 → 用量管理`、
   `GET /{slug}/-/charge/quota` 与 `GET /{repo}/-/build/logs/ai-audit/{sn}/{pipelineId}` 查明细，
   后者需要 `repo-cnb-history:r` 权限）
 
-**权限边界（与手动触发一致，均为只读）**：NPC 未开启工作模式 ⇒ 只能读代码、写评论/日志，
-不能推代码、不能合并。`api_trigger` 在 CNB 属**可信事件**（权限宽于 PR 类不可信事件），
-但本流水线不持有写权限、不引用任何密钥。
+**权限边界（如实陈述）**：`api_trigger` 在 CNB 属**可信事件**，平台自动注入的临时令牌
+`CNB_TOKEN` 因此持有 `repo-code:rw` 等完整权限（`docs/audit/cnb-capability-validation-report.md`
+§5.4；令牌构建结束自动销毁）。本流水线的"只读"是**治理级约束，不是凭证级隔离**：
+
+* `.cnb/settings.yml` 明文禁止 NPC 角色开启「工作模式」；章程（`.cnb/agents/pd-auditor.md`）
+  约束审计行为（只读、不 push、不建分支、不引用任何密钥文件）；T3/T3b 不挂任何写/上传 stage；
+* 触发端本身需要持有仓库写权限的凭证（CNB 平台限制），非授权主体无法发起；
+* **残余风险**：npc 容器内进程可访问该临时令牌 ⇒ 只读边界最终依赖上述治理约束而非平台强制；
+  现有仓库证据（能力报告 §5.4）未覆盖"可信事件下 `npc:go` 阶段的令牌是否被工作模式收窄"
+  这一层，在补齐该证据前按此保守口径理解。
 
 **实测记录（2026-09-12）**：
 
