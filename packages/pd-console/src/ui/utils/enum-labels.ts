@@ -98,7 +98,6 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'painEvidenceAdmission': '痛点证据准入',
     'diagnostician_async_cli': '诊断器异步 CLI',
     'diagnostician_core_grounding': '诊断器核心锚定',
-    'internalization_core_grounding': '内化核心锚定',
     'diagnostician_split_pipeline': '诊断器分流管线',
     'l2_dreamer': 'L2 Dreamer 循环',
   },

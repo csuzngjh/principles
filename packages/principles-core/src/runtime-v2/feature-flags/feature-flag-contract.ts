@@ -250,7 +250,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'painEvidenceAdmissionDefault', category: 'quiet', enabled: true, since: '2026-06-24', description: 'PRI-454: Global kill switch for Gate B migration. When ON (default), Gate B (TriggerController) owns admission. When OFF (rollback), Gate A (PainDiagnosticGate) is re-activated.' },
   { id: 'diagnostician_async_cli', category: 'quiet', enabled: false, since: '2026-06-11', description: 'Async pain-record CLI — submit and return immediately, diagnosis runs in background. Default: false until orchestrator exists.' },
   { id: 'diagnostician_core_grounding', category: 'quiet', enabled: true, since: '2026-06-11', description: 'Core principle grounding in diagnostician prompt (Arm 2)' },
-  { id: 'internalization_core_grounding', category: 'quiet', enabled: true, since: '2026-06-16', description: 'Core principle grounding in internalization prompt builders (dreamer, philosopher, scribe)' },
+  // `internalization_core_grounding` (2026-06-16) was retired in PRI-751: no
+  // production reader ever materialized — the dreamer/philosopher/scribe
+  // runners enable core grounding unconditionally via their own
+  // `coreGrounding: true` runner-option defaults, so the feature it described
+  // is always-on and the registry key was dead weight.
   { id: 'diagnostician_split_pipeline', category: 'quiet', enabled: true, since: '2026-06-11', description: '3-stage split diagnostician pipeline (RootCause→Distiller→Router)' },
   // ADR-0019: Diagnostician LLM rate-limit graceful degradation. On persistent rate-limit,
   // mark task failed with `rate_limit` errorCategory + emit `diag_llm_rate_limit_degraded`
@@ -321,8 +325,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // a token budget, with an information-floor fallback to the legacy
   // full-predecessor injection when resolution is too sparse. Default off;
   // flag-off = runners use the existing buildContext assembly (byte-identical).
-  // Independent of internalization_core_grounding (§8.1): budgetTokens covers
-  // ONLY manifest-declared fields, never core grounding text.
+  // Independent of core grounding (§8.1): budgetTokens covers
+  // ONLY manifest-declared fields, never core grounding text (which the
+  // internalization runners inject unconditionally via their
+  // `coreGrounding: true` option default).
   { id: 'context_manifest_budget', category: 'quiet', enabled: false, since: '2026-07-26', description: 'Internalization progressive disclosure Layer 1 — manifest + budget-driven context injection with information-floor fallback. Default off; flag-off = existing buildContext assembly unchanged.' },
   // Internalization progressive disclosure — Layer 2 two-stage evaluation
   // (design §6.5/§8, PR 4). Evaluator runs Stage 1 (summary) then optionally

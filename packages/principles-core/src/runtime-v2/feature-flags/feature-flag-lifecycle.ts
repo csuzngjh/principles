@@ -149,14 +149,6 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Stable prompt feature; promotion to core optional',
     retirementCriteria: 'Prompt design drops grounding block',
   },
-  internalization_core_grounding: {
-    decision: 'KEEP_QUIET',
-    consumers: ['principles-core/src/runtime-v2/internaliz*', 'principles-core/src/runtime-v2/runner/pe*'],
-    evidence: 'Core principle grounding in internalization prompt builders (since 2026-06-16); default-on',
-    decided: '2026-08-27',
-    graduationCriteria: 'Stable prompt feature; promotion to core optional',
-    retirementCriteria: 'Prompt design drops grounding block',
-  },
   diagnostician_split_pipeline: {
     decision: 'KEEP_QUIET',
     consumers: ['pd-cli/src/commands/diagnose.ts', 'pd-cli/src/commands/pain-retry.ts'],

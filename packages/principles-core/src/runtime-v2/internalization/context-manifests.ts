@@ -26,8 +26,8 @@
  *
  * budgetTokens semantics (design §6.2.1 / §6.3): the budget covers ONLY these
  * manifest-declared injection fields. It does NOT include core grounding text
- * (the quiet but default-on `internalization_core_grounding` flag), runner
- * base instructions, or output-schema descriptions. `usedTokens <= budgetTokens`
+ * (injected unconditionally via the runners' `coreGrounding: true` default),
+ * runner base instructions, or output-schema descriptions. `usedTokens <= budgetTokens`
  * is therefore an injection-field budget ceiling, NOT a prompt-total-length
  * hard cap. If prompt-total-length control is ever needed, a separate total
  * budget must be declared with an explicit priority relation to budgetTokens.
