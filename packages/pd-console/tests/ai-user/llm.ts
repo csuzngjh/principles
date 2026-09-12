@@ -140,8 +140,11 @@ function validateAction(action: unknown): AiUserAction {
       break;
     case 'navigate': {
       const url = requireActionString(record, 'value', type);
-      if (!url.startsWith('/')) {
-        throw new Error('动作 navigate 的 value 必须是站内路径（/ 开头）');
+      // 协议相对形式（//host、/\host）会被 new URL(value, baseUrl) 解析成
+      // 跨源地址，使 QA 浏览器携带页面快照访问任意外部/内网服务——单斜杠
+      // 站内路径是唯一合法形式（PRI-754 评审 C5）。
+      if (!url.startsWith('/') || url.startsWith('//') || url.startsWith('/\\')) {
+        throw new Error('动作 navigate 的 value 必须是站内相对路径（单 / 开头，禁止 // 或 /\\ 协议相对形式）');
       }
       result.value = url;
       break;

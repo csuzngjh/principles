@@ -122,6 +122,8 @@ describe('parseAiUserDecision', () => {
     ['未知动作类型', { ...clickDecision, action: { type: 'shell', command: 'rm -rf /' } }],
     ['click 缺 target', { ...clickDecision, action: { type: 'click' } }],
     ['navigate 越权外链', { ...clickDecision, action: { type: 'navigate', value: 'https://evil.example.com' } }],
+    ['navigate 协议相对形式会被解析为跨源', { ...clickDecision, action: { type: 'navigate', value: '//evil.example/path' } }],
+    ['navigate 反斜杠协议相对形式同样跨源', { ...clickDecision, action: { type: 'navigate', value: '/\\evil.example/path' } }],
     ['problems 元素非字符串', { ...clickDecision, problems: [1] }],
     ['finish success 非布尔', { ...clickDecision, action: { type: 'finish', success: 'yes' } }],
     ['finish 缺 success（协议必填）', { ...clickDecision, action: { type: 'finish', note: '没有结论字段' } }],
