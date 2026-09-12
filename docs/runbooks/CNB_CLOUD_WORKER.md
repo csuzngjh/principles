@@ -294,6 +294,35 @@ Linear 记录 ✓。
 已知边界：上下文脚本内联于 `.cnb.yml`，`verify:merge` 与 `test:scripts` 均覆盖不到
 （后续工单建议：抽为 `scripts/cnb-audit-context.mjs` 并补三分支测试）。
 
+### 4.3 开发任务入口（`PD Developer`，PRI-768）
+
+Owner 在分支详情页点 **「PD Developer 任务」** 按钮（`web_trigger_dev`，仅 owner/master
+可见），输入任务描述，触发 `PD Developer` 角色执行**低风险开发任务**（文档更新 /
+prompt 优化 / workflow 调整 / runbook 维护 / 测试辅助）。与 T3/T3b 同构，亦有
+`api_trigger_dev` API 入口供测试与自动化。
+
+**与 Auditor 的分工**：PD Auditor 只观察（只读）；PD Developer 只执行明确任务
+（受限写）。两个角色、两份章程（`.cnb/agents/pd-auditor.md` /
+`.cnb/agents/pd-developer.md`），互不替代。
+
+**权限边界（如实陈述）**：
+
+| 能力 | Auditor | Developer |
+|---|---|---|
+| 读代码 | ✓ | ✓ |
+| 写路径 | 无 | 仅 `.cnb/`、`docs/`、`scripts/`（治理级约束，章程 D1/D2） |
+| `packages/**`、`src/**`、`.github/**`、AGENTS.md | 禁止 | 禁止（章程 D2） |
+| 直推 main / 合并 PR / 发布 | 禁止 | 禁止（章程 D3/D4/D5；CNB_TOKEN 上限 Developer 角色） |
+| 「替我上班」工作模式 | 禁开 | **不使用**——写能力来自流水线 CNB_TOKEN（Owner 触发的可信事件），非评论入口的工作模式开关 |
+
+**产物生命周期（重要）**：Developer 产出 = 特性分支（`ai/cnb-dev/*`）+ **CNB 镜像仓库上的 PR**。
+PD 权威仓库是 GitHub，且云端零密钥无 GitHub 凭据 ⇒ CNB PR 只是提案载体；
+**落地 GitHub = Owner 认可后人工移植**（fetch CNB 分支 → push GitHub → 开 GitHub PR → Owner 合并）。
+
+**任务纪律**（章程摘要）：任务书没写的不做（D8）；任务含糊/越界 → 停止请求澄清；
+设计决策停手交 Owner（D9）；交付必须含 Problem / Investigation / Changes /
+Validation / PR，Validation 引用检查原文输出。
+
 ---
 
 ## 5. 已知限制（会出现在每份报告中）

@@ -204,6 +204,40 @@ $:
 
   api_trigger_audit: *pd-audit-entry
 
+  # ---------------------------------------------------------------------------
+  # T5 — 开发任务入口（Owner 手动下达，PRI-768）
+  #   用途：Owner 主动提交低风险开发任务（文档更新 / prompt 优化 / workflow 调整 /
+  #         runbook 维护 / 测试辅助）给 PD Developer
+  #   触发：web_trigger_dev（分支页「PD Developer 任务」按钮）与
+  #         api_trigger_dev（OpenAPI，测试/自动化用；与 T3/T3b 同构的双入口模式）
+  #   权限：不使用「替我上班」工作模式（那是 Issue/PR 评论入口的 UI 开关）。
+  #         写能力来自流水线 CNB_TOKEN——Owner 触发的可信事件，平台将令牌上限
+  #         压到 Developer 角色，天然无 master 级能力（无 merge/release）。
+  #         路径边界（.cnb/、docs/、scripts/）是治理级约束（章程 D1/D2），
+  #         产物一律特性分支 + PR，Owner 独占合并权（章程 D3/D4）。
+  #   ⚠️ 产物 PR 落在 CNB 镜像仓库；落地 GitHub 需 Owner 审后移植（runbook §4.3）。
+  # ---------------------------------------------------------------------------
+  web_trigger_dev: &pd-dev-entry
+    - name: pd-developer-on-demand
+      docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: npc go
+          type: npc:go
+          options:
+            role: PD Developer
+            systemPrompt: |
+              你是 Principles Disciple (PD) 仓库的云端开发执行者「PD Developer」。
+              你只执行触发入口明确下达的低风险开发任务；允许修改 .cnb/、docs/、scripts/，
+              禁止触碰 packages/**、src/**、.github/**、AGENTS.md 与一切架构决策文件；
+              禁止直推 main、禁止合并 PR、禁止发布；禁止使用任何密钥；不自行扩大 scope；
+              遇到设计决策停手，在 PR 里列选项交 Owner。
+              任务含糊、矛盾或超出允许范围时：停止并请求澄清，不猜测、不硬做。
+              全部使用中文。动手前先完整阅读仓库根目录的 `.cnb/agents/pd-developer.md`（章程）。
+            userPrompt: $userPrompt
+
+  api_trigger_dev: *pd-dev-entry
+
 main:
   # ---------------------------------------------------------------------------
   # T2 — 每周架构健康检查（定时任务）
