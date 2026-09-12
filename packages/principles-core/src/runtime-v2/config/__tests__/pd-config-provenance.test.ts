@@ -90,7 +90,7 @@ describe('PRI-637 override provenance — resolution precedence', () => {
 
 describe('PRI-637 legacy unknown — preserve, never guess', () => {
   it('legacy bare false → preserved, source stays undefined', () => {
-    const id = 'painEvidenceAdmission';
+    const id = 'feedback_channel';
     expect(DEFAULT_FEATURE_FLAGS[id]?.enabled).toBe(true);
     const effective = computeEffectivePdConfig(mkConfig({
       [id]: { category: 'quiet', enabled: false },
@@ -172,28 +172,9 @@ describe('PRI-637 source reaches the effective feature-flag surface', () => {
   });
 });
 
-describe('PRI-637 alias interaction — canonical precedence preserved', () => {
-  it('canonical entry wins over its snake_case alias and carries its own source', () => {
-    const [alias, canonical] = Object.entries(FEATURE_FLAG_ALIASES)[0] as [string, string];
-    if (!alias || !canonical) throw new Error('no alias fixture');
-    const effective = computeEffectivePdConfig(mkConfig({
-      [canonical]: { category: 'quiet', enabled: false, source: 'owner' },
-      [alias]: { category: 'quiet', enabled: true },
-    }));
-    // Canonical wins (existing PRI-609 precedence); the canonical entry's
-    // provenance is the one attached to the effective value.
-    expect(effective.config.features[canonical]?.enabled).toBe(false);
-    expect(effective.config.features[canonical]?.source).toBe('owner');
-  });
-
-  it('alias-only override normalizes onto the canonical ID with its source preserved', () => {
-    const [alias, canonical] = Object.entries(FEATURE_FLAG_ALIASES)[0] as [string, string];
-    if (!alias || !canonical) throw new Error('no alias fixture');
-    const effective = computeEffectivePdConfig(mkConfig({
-      [alias]: { category: 'quiet', enabled: false, source: 'owner' },
-    }));
-    expect(effective.config.features[canonical]?.enabled).toBe(false);
-    expect(effective.config.features[canonical]?.source).toBe('owner');
+describe('PRI-763 alias table retired — no alias interaction remains', () => {
+  it('FEATURE_FLAG_ALIASES is empty (pain admission aliases retired with their flags)', () => {
+    expect(Object.keys(FEATURE_FLAG_ALIASES)).toHaveLength(0);
   });
 });
 

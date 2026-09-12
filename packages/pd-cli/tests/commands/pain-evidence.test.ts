@@ -17,6 +17,8 @@ import os from 'os';
 
 // ── Fixture: Real SYSTEM log content with TRIGGER_DECISION entries ──────────
 
+// Historical SystemLogger fixture (kept verbatim — documents pre-PRI-763 log
+// shape; the painEvidenceAdmission flag line is legacy text, not a consumer).
 const LOG_HEADER_LINES = [
   '2026-06-08 10:15:30 [INFO] [PD:SystemLogger] Session started session_abc',
   '2026-06-08 10:15:31 [INFO] [PD:SystemLogger] painEvidenceAdmission feature flag enabled',
