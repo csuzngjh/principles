@@ -37,8 +37,11 @@ describe('Correction Observer Ownership — Feature Flag & Surface Registry Cons
     expect(surface!.enabledByDefault).toBe(true);
   });
 
-  it('evolution_worker flag and its surfaces are fully retired (PRI-737 worker deletion; PRI-751 registry cleanup)', () => {
-    expect(DEFAULT_FEATURE_FLAGS.find(f => f.id === 'evolution_worker')).toBeUndefined();
+  it('evolution_worker is a gone tombstone and its surfaces are fully retired (PRI-737 worker deletion; PRI-751 registry cleanup)', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'evolution_worker');
+    expect(flag).toBeDefined();
+    expect(flag!.category).toBe('gone');
+    expect(flag!.enabled).toBe(false);
     expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker')).toBeUndefined();
     expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'startup:evolution-worker')).toBeUndefined();
   });

@@ -237,6 +237,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Requires PD_RELEASE_METADATA_URL at readiness; rollback migration stays Phase 2.
   { id: 'release_manager_write_authority', category: 'quiet', enabled: true, since: '2026-09-06', description: 'PRI-698 Phase 1 — ReleaseManager.apply() serves Console /apply-full (installer + journal deployment); graduated default-on 2026-09-07 (Owner decision) with pre-transaction legacy fallback; flag-off = legacy console updater with explicit release_manager_write_disabled fallback reason' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
+  // evolution_worker retired in PRI-751 (worker itself deleted in PRI-737).
+  // Kept as a gone tombstone per the census lifecycle contract: a stale
+  // `enabled: true` override in an existing workspace is rejected observably
+  // instead of silently honoring a future re-registration of the same ID.
+  { id: 'evolution_worker', category: 'gone', enabled: false, since: '2026-06-01', description: 'Legacy evolution worker heartbeat (MVP-Quiet per ADR-0014 §2.5) — retired with the worker (PRI-737); gone tombstone (PRI-751)' },
   { id: 'empathy_observer', category: 'quiet', enabled: false, since: '2026-06-02', description: 'Empathy observer service for sentiment checking (MVP-Quiet)' },
   // PRI-454: painEvidenceAdmission flipped to default-on. Gate B (TriggerController)
   // is now the primary admission gate. Roll back = set painEvidenceAdmissionDefault to false.
