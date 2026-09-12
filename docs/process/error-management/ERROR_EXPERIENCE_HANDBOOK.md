@@ -372,11 +372,11 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
 - **Recurrence**: Yes — validator/test silently passes when data is absent/malformed instead of failing loud. Same class as ERR-001/005/007.
-  - 2026-09-12 PRI-749 / PR #1619 review (derivation-source flavor): the UI validator for `GET /api/v1/failed-tasks/:id` was written field-by-field from the payload the client happened to construct — required `TaskRecord.updatedAt` was read as nullable (a lost/malformed field rendered a silently partial record) and `RunRecord.taskId` lineage was not validated at all (a mixed response could display another task's failure reasons under the selected task, rc-6). Fixed by requiring `updatedAt` as an owned string, requiring each run's `taskId` and equality with `task.taskId`, plus mismatch/absence tests. Prevention: derive every field's required/nullable status from the SERVER's authoritative type (typebox schema / store types) — a field the typebox marks required is never nullable client-side — and equality-check lineage identifiers (rc-6) with a mismatch test.
+  - 2026-09-12 PRI-749 / PR #1619 review (derivation-source flavor): the UI validator for `GET /api/v1/failed-tasks/:id` was written field-by-field from the payload the client happened to construct — required `TaskRecord.updatedAt` was read as nullable (a lost/malformed field rendered a silently partial record) and `RunRecord.taskId` lineage was not validated at all (a mixed response could display another task's failure reasons under the selected task, rc-6). Fixed by requiring `updatedAt` as an owned string, requiring each run's `taskId` and equality with `task.taskId`, plus mismatch/absence tests. Prevention: derive every field's presence requirement and null acceptance INDEPENDENTLY from the SERVER's authoritative type (typebox schema / store types) — a property NOT wrapped in `Type.Optional` must be present; whether `null` is a legal VALUE comes from the property's own schema (`Type.Null()` members like `TraceTimelineEntrySchema.at` are required-AND-nullable) — and equality-check lineage identifiers (rc-6) with a mismatch test.
   <!-- recurrence-meta
   {
     "date": "2026-09-12",
-    "pattern": "EP-09",
+    "pattern": "EP-01",
     "invariant": "validator-derived-from-writer-controlled-shape-not-authoritative-contract",
     "severity": "P1",
     "escaped": "verify-merge",
@@ -1005,14 +1005,14 @@ Errors in how AI assistants approached the task — not reading context, not fol
   }
   -->
   - 2026-09-04 PRI-672 / PR #1511 (build-scope recurrence): pd-console deep-imported installer `dist` that the root `build` chain never produced — clean CI TS2307, local runs masked by prebuilt dist. Prevention: a new cross-package import of another package's `dist` (runtime or type-level) must add that package to the root build chain in the SAME PR.
-  - 2026-09-03 adhoc runtime-update-guards: update-route tests resolved the REAL canonical install and a fake tarball overwrote it — pin `os.homedir()`, refuse unself-identifying staged packages, sentinel test for isolation pins.
+  - 2026-09-03 adhoc runtime-update-guards: update-route tests resolved the REAL canonical install and a fake tarball overwrote it — pin homedir, refuse unself-identifying staged packages, isolation sentinel test.
   - 2026-08-31 PRI-631 / PR #1462: Console E2E inherited local Owner identity, clean CI had none — explicit Playwright server identity vars.
   - 2026-08-27 PRI-612 / PR #1426: new barrel export missing from a bare vi.mock factory — importOriginal spread.
   - 2026-08-26 PRI-595~603 / PR #1419: dependency-first build ordering + HOME/USERPROFILE env pins.
   - 2026-08-24 PRI-583 / PR #1406: install-layout producer/consumer/delivery paths audited end-to-end (related: ERR-040).
-  - 2026-08-18~21 RuleCode Owner Live Decision reviews ×6: duplicated anti-growth allowlists missed, guard classification missed, optional-note string broke SQLite read contract, env-sensitive error-subclass assertions.
+  - 2026-08-18~21 RuleCode Owner Live Decision reviews ×6: duplicated allowlists, guard classification, optional-note string broke SQLite read contract, env-sensitive error-subclass assertions.
   - 2026-08-13~15 PRI-523×5 + PRI-526: shared kernel wiring missed host-owned exclusion/enrichment; env fixture refactor missed in-process siblings reading real HOME.
-  - 2026-06-26~07-04 PR #1066/#1137/#1162/#1182/#1183: FK guards, status enum, default profile name, package rename, homedir path defaults — each missed same/cross-package validators and tests pinned to old values (full text → ERROR_ARCHIVE.md).
+  - 2026-06-26~07-04 PR #1066/#1137/#1162/#1182/#1183: FK guards, status enum, default profile name, package rename, homedir defaults — each missed same/cross-package validators/tests (full text → ERROR_ARCHIVE.md).
 
 ---
 **[ERR-084]** | shell:true in spawn() + immediate process.exit() in signal handlers orphans child processes; GitHub Actions not pinned to SHA
@@ -1558,12 +1558,12 @@ Errors in how AI assistants approached the task — not reading context, not fol
 ---
 **[ERR-126]** | New utility call site added via the nearest neighbor's import instead of surveying for the utility's existing owner — a duplicate capability grows and the owner's documented guardrails silently don't apply
 
-- **What happened**: PRI-749 PR #1619 review: the new Failed Tasks detail panel rendered dates through `utils/format.ts` — the module the page already imported — although the repo already owned a defensive formatter (`utils/format-date.ts`, 7+ consumers) whose header documents the exact guardrail: invalid input returns the raw string, "'Invalid Date' must never reach the screen". `format.ts`'s Intl path throws RangeError on an Invalid Date mid-render, and two of its three exports were dead. The review round made it a family fix: both remaining consumers migrated to the owner and `format.ts` was retired.
-- **Why it's wrong**: Reusing "whatever the neighboring file imports" is provenance by accident, not by contract. Duplicate utilities accumulate divergent behavior, and the guardrails in the real owner's contract (fail-soft invalid input, locale handling) silently don't apply to the new call site. Survey Before Acting (P2) applies to utilities and helpers, not only to subsystems.
+- **What happened**: PRI-749 PR #1619 review: the new Failed Tasks detail panel rendered dates through `utils/format.ts` — the module the page already imported — although the repo already owned a defensive formatter (`utils/format-date.ts`, 7+ consumers) whose header documents the exact guardrail: invalid input returns the raw string, "'Invalid Date' must never reach the screen". `format.ts`'s Intl path throws RangeError on an Invalid Date mid-render; two of its three exports were dead. Fixed as a family: both consumers migrated to the owner; `format.ts` retired.
+- **Why it's wrong**: Reusing "whatever the neighboring file imports" is provenance by accident, not by contract. Duplicate utilities accumulate divergent behavior; the owner's guardrails (fail-soft invalid input, locale handling) silently don't apply. Survey Before Acting (P2) covers utilities and helpers, not only subsystems.
 - **Generalized failure mode**: When adding a call site for a utility (formatting, validation, logging, hashing), assistants must survey the repo for sibling implementations of that utility and reuse the one whose contract documents the needed guardrails, otherwise the duplicate capability grows and known hardening silently doesn't apply.
-- **How to prevent**: Before importing a utility, grep for sibling implementations of the same purpose (e.g. `grep -rn "function formatDate" packages/<pkg>/src`) and compare their contracts; prefer the module whose header documents the failure behavior. Two live implementations are a retirement signal — migrate the remaining consumers (or record a dated follow-up) instead of adding a third consumer.
+- **How to prevent**: Before importing a utility, search for sibling implementations of the same purpose (e.g. `rg -n "function formatDate" packages/<pkg>/src`) and compare their contracts; prefer the module whose header documents the failure behavior. Two live implementations are a retirement signal — migrate the remaining consumers (or record a dated follow-up) instead of adding a third consumer.
 - **Regression guard**: `packages/pd-console/tests/ui/pages/FailedTasksDetail.test.ts` pins the page to `utils/format-date.js` and asserts no import of the retired `utils/format.js`; `packages/pd-console/tests/ui/format-date.test.ts` pins the owner's invalid-input contract.
 - **Related ERRs**: ERR-083 (the inverse direction: changing a shared contract without auditing consumers); EP-09 (evidence not derived from repo reality).
-- **Source**: PRI-747 F22 / PR #1619 review
+- **Source**: PRI-749 / PR #1619 review
 - **Date**: 2026-09-12
 - **Recurrence**: None
