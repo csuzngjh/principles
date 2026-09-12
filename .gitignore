@@ -192,6 +192,9 @@ packages/pd-console/playwright-report/
 packages/pd-console/test-results/
 packages/pd-console/playwright/.cache/
 
+# AI User QA run artifacts (PRI-754): reports + screenshots, never commit
+packages/pd-console/ai-user-runs/
+
 # Brainstorming visual companion (mockups, session state)
 .superpowers/
 .mimosa/
