@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { listCorrectionSamples, reviewCorrectionSample } from '../../trajectory-store.js';
+import { listCorrectionSamples, reviewCorrectionSample, TrajectoryDbUnavailableError } from '../../trajectory-store.js';
 
 const mockPrepare = vi.fn();
 const mockClose = vi.fn();
 let shouldThrowOnOpen = false;
+let dbFileExists = true;
+
+vi.mock('fs', () => ({
+  existsSync: vi.fn(() => dbFileExists),
+}));
 
 vi.mock('better-sqlite3', () => {
   return {
@@ -13,6 +18,7 @@ vi.mock('better-sqlite3', () => {
       }
       this.prepare = mockPrepare;
       this.close = mockClose;
+      this.transaction = (fn: () => void) => fn;
     }),
   };
 });
@@ -20,26 +26,31 @@ vi.mock('better-sqlite3', () => {
 describe('listCorrectionSamples', () => {
   beforeEach(() => {
     shouldThrowOnOpen = false;
+    dbFileExists = true;
     mockPrepare.mockReset();
     mockClose.mockReset();
   });
 
-  it('returns empty array when DB cannot be opened', () => {
-    shouldThrowOnOpen = true;
-    const result = listCorrectionSamples('/fake/workspace');
-    expect(result).toEqual([]);
+  it('throws TrajectoryDbUnavailableError when the database file does not exist', () => {
+    // A missing database is not the same as an empty database (PRI-753,
+    // rc-3/rc-9): the reader fails loud instead of returning no rows.
+    dbFileExists = false;
+    expect(() => listCorrectionSamples('/fake/workspace')).toThrow(TrajectoryDbUnavailableError);
   });
 
-  it('returns empty array when DB cannot be opened with custom status', () => {
+  it('throws TrajectoryDbUnavailableError when DB cannot be opened', () => {
     shouldThrowOnOpen = true;
-    const result = listCorrectionSamples('/fake/workspace', 'approved');
-    expect(result).toEqual([]);
+    expect(() => listCorrectionSamples('/fake/workspace')).toThrow(TrajectoryDbUnavailableError);
   });
 
-  it('returns empty array when query throws (e.g. table missing)', () => {
+  it('throws TrajectoryDbUnavailableError when DB cannot be opened with custom status', () => {
+    shouldThrowOnOpen = true;
+    expect(() => listCorrectionSamples('/fake/workspace', 'approved')).toThrow(TrajectoryDbUnavailableError);
+  });
+
+  it('translates query errors into TrajectoryDbUnavailableError (table missing)', () => {
     mockPrepare.mockReturnValue({ all: () => { throw new Error('SQLITE_ERROR: no such table: correction_samples'); } });
-    const result = listCorrectionSamples('/fake/workspace');
-    expect(result).toEqual([]);
+    expect(() => listCorrectionSamples('/fake/workspace')).toThrow(TrajectoryDbUnavailableError);
     expect(mockClose).toHaveBeenCalled();
   });
 
@@ -116,15 +127,23 @@ describe('listCorrectionSamples', () => {
 describe('reviewCorrectionSample', () => {
   beforeEach(() => {
     shouldThrowOnOpen = false;
+    dbFileExists = true;
     mockPrepare.mockReset();
     mockClose.mockReset();
   });
 
-  it('throws descriptive error when DB cannot be opened', () => {
+  it('throws TrajectoryDbUnavailableError when the database file does not exist', () => {
+    dbFileExists = false;
+    expect(() => {
+      reviewCorrectionSample('s1', 'approved', 'note', '/fake/workspace');
+    }).toThrow(TrajectoryDbUnavailableError);
+  });
+
+  it('throws TrajectoryDbUnavailableError when DB cannot be opened', () => {
     shouldThrowOnOpen = true;
     expect(() => {
       reviewCorrectionSample('s1', 'approved', 'note', '/fake/workspace');
-    }).toThrow(/Database not found or cannot be opened/);
+    }).toThrow(TrajectoryDbUnavailableError);
   });
 
   it('throws when sample not found (update changes=0)', () => {

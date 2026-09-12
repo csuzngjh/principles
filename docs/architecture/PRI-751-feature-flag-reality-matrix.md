@@ -10,9 +10,10 @@
 ## 1. 结论摘要
 
 - 注册 flag 47 个（core 9 / quiet 36 / gone 2），单一 SSoT（`feature-flag-contract.ts`，quiet 生命周期 census 由 contract test 强制双向覆盖）。
-- **DEAD（零可执行消费者）5 个**：`evolution_worker`、`internalization_core_grounding`、`empathy_observer`（本系列 PR #1622/#1624/#1625 退役）；`painEvidenceAdmission`、`painEvidenceAdmissionDefault`（涉 pain pipeline=protected zone → SPEC 待决策）。
-- **UNKNOWN 2 个**：`code_tool_hook`、`defer_archive`——channel 语义真实存在于 DB channel 标签与 UI，但 **flag 本身无门控读取点**；涉 activation（protected zone），只记录不动。
-- 其余 40 个 ACTIVE（其中 `diagnostician_llm_degradation` live 被 Owner 关闭、`release_manager_write_authority` 有效性依赖环境变量——均已在备注注明）。
+- **DEAD（零可执行消费者）5 个**：`evolution_worker`、`internalization_core_grounding`、`empathy_observer`（退役由独立 PR #1622/#1624/#1625 执行，**截至本基线树 `4dce7d942` 三项仍处于注册表，合并前本文档的矩阵快照与实现存在已知时差**）；`painEvidenceAdmission`、`painEvidenceAdmissionDefault`（涉 pain pipeline=protected zone → SPEC 待决策）。
+- **channel 双 flag 改判 ACTIVE**（评审修正）：`code_tool_hook`、`defer_archive` 经 `pd-config-feature-flags.ts:109-115` 计算 `enabledChannels`，被 `pd runtime internalization queue`（runtime-internalization-queue.ts:108/111）、`pd runtime canary`（runtime-canary.ts:226-227）、`pd runtime features`（runtime-features.ts:68）消费——显式关闭会改变任务可执行性判定与 canary 结果。host auto-consumer 侧硬编码 channels（internalization-consumer-cycle.ts:337）构成**同一 flag 的双消费腿**。
+- 其余 40 个 ACTIVE（含 `diagnostician_split_pipeline`——评审修正：其 PRI-638 兼容折叠是**主动行为**，会改写 diagnostician agent 绑定；`diagnostician_llm_degradation` live 被 Owner 关闭、`release_manager_write_authority` 有效性依赖环境变量——均已在备注注明）。
+- **INACTIVE-BUT-VALID 2 个**：`nocturnal`、`idle_trigger`（gone 墓碑）。
 - 注册表外残留：live config 的 `model_training`/`trainer` 两个未注册键（每次加载产生 unknown-flag 告警，属 workspace 配置卫生，按 §18 走 Owner 决策，不在本系列处理）。
 - 环境变量门控行为（`PD_RELEASE_METADATA_URL` 等）不属于 flag 注册体系，单列 §5。
 
@@ -27,8 +28,8 @@ Consumers 列只列**可执行门控点**（file:line）；"元数据"指注册�
 | Flag | Default | live | Consumers（可执行） | Runtime Effect | Status |
 |---|---|---|---|---|---|
 | prompt | on | on | active-principle-prompt.ts:42；runtime-v2-prompt-activation-reader.ts:26 | 控制提示注入读取路径 | ACTIVE |
-| code_tool_hook | on | on | ⚠ 无 flag 门控点（全仓命中均为 DB channel 标签/UI 比较）；consumer-cycle:337 硬编码 channels | 未知（channel 语义真实，flag 门控未证实） | UNKNOWN |
-| defer_archive | on | on | ⚠ 同上 | 未知 | UNKNOWN |
+| code_tool_hook | on | on | pd-config-feature-flags.ts:109-115 → enabledChannels → runtime-internalization-queue.ts:108/111、runtime-canary.ts:226-227、runtime-features.ts:68；⚠ host auto-consumer 腿为硬编码（consumer-cycle:337） | CLI 队列任务可执行性判定 + canary 检查结果随 flag 变化（host 腿不受控——双消费腿分裂，收敛待 Owner） | ACTIVE |
+| defer_archive | on | on | 同 code_tool_hook（同一 enabledChannels 集合） | 同 code_tool_hook | ACTIVE |
 | rulecode_safety_controls | on | on | runtime-activation.ts:566/597；ActivationsConsoleModel.ts:476/625 | RuleCode 安全隔离授权 | ACTIVE |
 | rulecode_owner_live_decision | on | on | runtime-activation.ts:565；ActivationsConsoleModel.ts:531/670（670 强制门） | Owner live 决策授权 | ACTIVE |
 | internalization_full_chain | on | on | internalization-consumer-cycle.ts | 全链 auto-consumer 推进 vs dreamer-only | ACTIVE |
@@ -48,7 +49,7 @@ Consumers 列只列**可执行门控点**（file:line）；"元数据"指注册�
 | **painEvidenceAdmission** | on | on | ⚠ 零可执行读取（PRI-651-B1 已摘除；引用全为元数据/注释/文案） | 无 | **DEAD → SPEC** |
 | **painEvidenceAdmissionDefault** | on | on | ⚠ 同上；"OFF 回滚 Gate A" 契约无接线 | 无 | **DEAD → SPEC** |
 | diagnostician_core_grounding | on | on | diag-rootcause-runner.ts:174；diag-distiller-runner.ts:176 | 诊断 prompt 锚定 | ACTIVE |
-| diagnostician_split_pipeline | on | on | pd-config-effective.ts:194（仅 legacy-false 折叠 shim；PRI-638 后不再选管线） | 升级安全（防静默激活） | INACTIVE-BUT-VALID |
+| diagnostician_split_pipeline | on | on | pd-config-effective.ts:194-203（legacy-fold shim；PRI-638 后不再选管线）；配套 pd-config-store.ts:484-497 须先移除该覆盖 Console 才能持久化 enable | **主动兼容行为**：对携带 legacy `enabled:false` 的存量 workspace 会主动禁用 diagnostician agent 绑定（防升级静默激活 LLM 管线）——不是休眠开关，清理它会使这些 workspace 的管线被静默重新启用 | ACTIVE（兼容行为） |
 | diagnostician_llm_degradation | on | **off** ⚠ | base-peer-runner.ts:1012 | rate-limit 优雅降级 vs 硬失败（live 走 legacy 硬失败，需 Owner 复核） | ACTIVE |
 | l2_dreamer | off | off | runtime-adapter-resolver.ts；consumer-cycle | dreamer L2 多轮循环 | ACTIVE |
 | failed_tasks_observability | on | on | routes/failed-tasks.ts | 失败任务面（off=403） | ACTIVE |
@@ -84,13 +85,13 @@ Consumers 列只列**可执行门控点**（file:line）；"元数据"指注册�
 | nocturnal | gone/off | 无行为消费者（scripts/nocturnal 为 dev 脚本）；computeEffectiveFlags 拒绝复活+告警 | 配置复活拒绝 | INACTIVE-BUT-VALID（墓碑） |
 | idle_trigger | gone/off | 同上（proven-channel-baseline.ts:141 仅 legacy 文本探测关键词） | 配置复活拒绝 | INACTIVE-BUT-VALID（墓碑） |
 
-## 3. 本次收敛执行记录（每个 flag 一个小 PR）
+## 3. 收敛执行记录（每个 flag 一个小 PR；**截至本文基线树 `4dce7d942` 以下变更均处于 OPEN PR，未在本分支树内**）
 
 | Flag | Before | Evidence（Definition/Consumer/Runtime） | Decision | Change | Verification |
 |---|---|---|---|---|---|
-| evolution_worker | quiet/off 注册、census 声称 "quarantined heartbeat"、surface-registry ×2、guard 测试断言存在 | 注册表项在；全仓零可执行消费者（worker 已删 PRI-737；PRI-737 审计预规划本删除；census 文档标注 RETIRE-ready "deletion is a separate PR"）；runtime effect 无 | C→退役（执行既定程序） | PR #1622：contract+census+surface×2+labels+3 测试文件+4 文档 | core 493 + plugin 61 测试 PASS；verify:merge exit 0 |
-| internalization_core_grounding | quiet/on 注册、census 声称 internaliz*/runner 消费者 | 注册表项在；三 runner `coreGrounding: true` 默认值无条件启用，flag ID 零读取；runtime effect 无 | C→退役 | PR #1624：contract+census+labels+3 注释纠偏+2 测试文件+2 文档 | core 1733 测试 PASS；verify:merge exit 0 |
-| empathy_observer | quiet/off 注册（live on）、census 声称 "observer wiring"、governance §3.2 已知旧消费点废弃 | 注册表项在；零可执行读取；empathy 检测无条件运行；真实控制面=internalAgents 绑定；governance §3.2 预告 MVP-Gone 波次 | C→退役（Owner 任务即该波次授权） | PR #1625：contract+census+ADR-0016 示例+governance §3.2 更新+8 测试文件 fixture 换元；label 保留（agent 显示名，CostHint 测试锁定） | 493+76+35+17 测试 PASS；verify:merge exit 0 |
+| evolution_worker | quiet/off 注册、census 声称 "quarantined heartbeat"、surface-registry ×2、guard 测试断言存在 | 注册表项在；全仓零可执行消费者（worker 已删 PRI-737；PRI-737 审计预规划本删除；census 文档标注 RETIRE-ready "deletion is a separate PR"）；runtime effect 无 | C→退役（执行既定程序；评审后按 census 契约改为 **gone 墓碑**——存量 enabled 覆盖被可观察拒绝） | PR #1622：contract（gone 墓碑）+census+surface×2+labels+测试+文档 | core 508 + plugin 61 测试 PASS；verify:merge exit 0 |
+| internalization_core_grounding | quiet/on 注册、census 声称 internaliz*/runner 消费者 | 注册表项在；三 runner `coreGrounding: true` 默认值无条件启用，flag ID 零读取；runtime effect 无 | C→退役（评审后改为 **gone 墓碑**） | PR #1624：contract（gone 墓碑）+census+labels+3 注释纠偏+测试+文档 | core 493 测试 PASS；verify:merge exit 0 |
+| empathy_observer | quiet/off 注册（live on）、census 声称 "observer wiring"、governance §3.2 已知旧消费点废弃 | 注册表项在；零可执行读取；empathy 检测无条件运行；真实控制面=internalAgents 绑定；governance §3.2 预告 MVP-Gone 波次 | C→退役（Owner 任务即该波次授权；评审后改为 **gone 墓碑**） | PR #1625：contract（gone 墓碑）+census+ADR-0016 示例+governance §3.2 更新+测试 fixture 换元（含评审补抓的 diag-chain-e2e）；label 保留（agent 显示名，CostHint 测试锁定） | 508+58+35+17 测试 PASS；verify:merge exit 0 |
 | painEvidenceAdmission(+Default) | quiet/on 注册、描述承诺"OFF 回滚 Gate A"、census 声称 production readers | 注册表项在；PRI-651-B1 特征测试锁定钩子**不读** flag；Gate A `@deprecated` 归档且零运行时调用方；alias 测试头注过期且自认 "silently dead kill switch"；runtime effect 无 | C→**SPEC**（涉 pain pipeline，protected zone 不直接改码） | `docs/specs/pain-admission-flag-contract-fix.md`（选项 A/B/C 待 Owner） | SPEC 附验证计划（pain 特征测试零改动为硬门） |
 
 ## 4. 配置面残留（注册表外，记录不动作）

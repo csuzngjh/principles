@@ -90,7 +90,6 @@ core.store.task.sqlite
 plugin.hook.pain
 plugin.hook.gate
 runtime.scheduler.explicit-trigger
-plugin.service.evolution-worker
 cli.command.diagnose
 console.server.routes.approvals
 ```

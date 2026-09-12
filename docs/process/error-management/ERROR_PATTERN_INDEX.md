@@ -70,12 +70,18 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
     "new ",
     "resolve",
     "symlink",
-    "link"
+    "link",
+    "RETIRE",
+    "retired",
+    "gone",
+    "tombstone",
+    "census"
   ],
   "requiredEvidence": [
     "Prove the real production/public entry point consumes the changed mechanism (production-path integration or smoke evidence).",
     "If a shared contract changed, inspect and exercise the relevant cross-package consumers.",
-    "Do not use isolated helper tests as the only production-wiring evidence."
+    "Do not use isolated helper tests as the only production-wiring evidence.",
+    "When retiring/renaming a registry-published value or deleting an operator-facing artifact, ALL read/display sites of the changed value plus every doc/test/inventory reference were enumerated before claiming synced/retired; audit-deferred surfaces stayed out of delete scope (ERR-024)."
   ],
   "enforcement": "semantic"
 }
@@ -215,7 +221,10 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
     "package.json",
     ".github/workflows",
     "lockfile",
-    "package-lock.json"
+    "package-lock.json",
+    "src/ui/pages",
+    "src/ui/utils",
+    "src/ui/components"
   ],
   "diffSignals": [
     "npm pack",
@@ -227,12 +236,17 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
     "exports",
     "webServer",
     "port",
-    "lstatSync"
+    "lstatSync",
+    "import { format",
+    "import { validate",
+    "from \"../../utils/",
+    "from '../utils/"
   ],
   "requiredEvidence": [
     "The source of truth was edited and the generator/artifact rebuilt, not the generated copy patched.",
     "The lockfile CI consumes is the one updated; smoke installs run from packed output.",
-    "New/changed entry points exist in ALL build paths (tsc, esbuild) that reference them."
+    "New/changed entry points exist in ALL build paths (tsc, esbuild) that reference them.",
+    "Before adding a NEW import of a shared utility (formatting/validation/logging/hashing), sibling implementations of the same purpose were searched (rg) and the one whose contract documents the needed guardrails was reused — two live implementations are a retirement signal, not a third-consumer license (ERR-126)."
   ],
   "enforcement": "semantic"
 }
@@ -241,8 +255,8 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: editing bundled packages, generated copies, package manifests, installer payloads, lockfiles, files under `packages/create-principles-disciple`, creating GitHub Actions workflows, or writing test infrastructure scripts (e.g., Playwright webServer launchers).
 - **Failure mode**: fixes are applied to generated copies or source-tree tests pass while the published artifact is incomplete; or the wrong package manager's lockfile is updated so CI's install step fails; **or `package.json` entry point (`main`/`exports`) is changed to reference a file that only one build tool generates (e.g., esbuild's `bundle.js`), breaking CI paths that use a different build tool (e.g., tsc generates `index.js`) (ERR-090)**; **or an E2E harness reuses any process already listening on a shared fixed port, so the browser tests an installed/stale build instead of the current worktree (ERR-101)**; **or a test hard-fails on a host network capability (e.g., IPv6 loopback) that a VPN/WFP filter silently blocks — `connect('::1')` returns EACCES while the IPv6 stack itself is healthy, so the test must probe-and-skip optional capabilities instead of assuming them (ERR-111)**.
 - **Must check**: edit the source of truth and rerun the generator; package runtime dependencies are declared in the package that imports them; the lockfile CI consumes is the one updated; smoke tests install from packed output; **a PR that adds or changes network-egress / privacy-boundary capability in a shipped package must update that package's published README disclosure (and root README absolute claims) in the same diff, locked by a disclosure-contract test (ERR-110)**; **when changing `package.json` entry points, verify the referenced file exists in ALL build paths (tsc, esbuild, webpack) — if not, add a re-export shim or post-build copy step**; **when creating new GitHub Actions workflows, grep existing workflows (e.g., ci.yml) for the `uses:` pinning convention and match it (commit SHA with `# vX` comment); when using `child_process.spawn()` in test scripts, avoid `shell: true` on Linux/CI (signals only kill the shell wrapper, orphaning the subprocess) and never call `process.exit()` in signal handlers before `child.on('exit')` fires**; **when adding LFS-tracked binary assets that tests read in CI, ensure every `actions/checkout` job running those tests has `lfs: true` (default is `false`, producing 132-byte pointer files that fail size/content assertions), and extend any pre-deploy LFS-pointer guard to cover the new asset paths (ERR-091)**; **Playwright `webServer` must use a test-only configurable port with `reuseExistingServer: false`; a port collision must fail loud rather than select an unidentified server (ERR-101)**; **on Windows, directory-ness checks that gate path canonicalization/containment must use stat-following semantics (`statSync().isDirectory()`), not `lstatSync()` — junctions and directory symlinks report as non-directories under lstat, silently skipping canonicalization and defeating lexical containment guards (ERR-090 recurrence)**; **a single-rename atomic directory publication issued right after a mass file write needs a bounded EPERM/EACCES retry with immutable-destination re-checks — antivirus/indexer handles transiently deny the rename on Windows (ERR-090 recurrence)**; **lexical path-containment guards must normalize BOTH sides (`path.resolve`) before comparing — a resolved read path never prefix-matches a raw env/workflow-provided root on Windows, where `${{ runner.temp }}` mixes `\` and `/` separators (ERR-090 recurrence 2026-08-28)**.
-- **Representative ERRs**: ERR-040, archived-041, archived-050, ERR-068, ERR-084, ERR-090, ERR-091, ERR-101, ERR-110, ERR-111, ERR-113.
-- **Automation target**: generated-artifact checks plus clean `npm pack` install smoke tests; CI lockfile-consistency gate; entry-point resolution check after both tsc and bundler builds; **for generators that reset+rewrite a tree, a rebuild test with a planted rogue file (must vanish) and a post-run `git status` cleanliness assertion (ERR-113)**.
+- **Representative ERRs**: ERR-040, archived-041, archived-050, ERR-068, ERR-084, ERR-090, ERR-091, ERR-101, ERR-110, ERR-111, ERR-113, ERR-126.
+- **Automation target**: generated-artifact checks plus clean `npm pack` install smoke tests; CI lockfile-consistency gate; entry-point resolution check after both tsc and bundler builds; **for generators that reset+rewrite a tree, a rebuild test with a planted rogue file (must vanish) and a post-run `git status` cleanliness assertion (ERR-113)**; **before importing a utility (formatting/validation/logging/hashing), rg-search for sibling implementations of the same purpose and reuse the one whose contract documents the needed guardrails — two live implementations are a retirement signal, not a third-consumer license (ERR-126)**.
 
 ### EP-07 Runtime State Source Alignment
 
@@ -344,12 +358,21 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
     "toBeUndefined",
     "process.platform",
     "process.arch",
-    "skip"
+    "skip",
+    "head -",
+    "tail -",
+    "grep -m",
+    "rg -m",
+    "zero consumers",
+    "RETIRE",
+    "tombstone",
+    "census"
   ],
   "requiredEvidence": [
     "A positive assertion uniquely identifies the intended execution path; indirect signals (undefined return, absence of error, zero count) are not the only proof.",
     "Regression tests for a fix include the negative control that fails against the pre-fix state.",
-    "Tests exercise the production boundary (real parser/registration/route), not source-string scans."
+    "Tests exercise the production boundary (real parser/registration/route), not source-string scans.",
+    "Every completeness claim in a deletion/cleanup/audit PR cites the FULL untruncated output of a re-runnable command; the owning lifecycle doc's state machine is followed as binding removal semantics; every DoD command was executed once with its real output in the PR (ERR-127)."
   ],
   "enforcement": "semantic"
 }
@@ -357,8 +380,8 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 
 - **Use when**: changing tests, fixtures, baselines, smoke tests, database schemas, package installs, or UI route/action state; also when asserting indirect/non-unique signals (undefined return, timing metrics, absence of error, zero side-effect count).
 - **Failure mode**: tests prove strings, helper behavior, or hand-written schemas instead of the real behavior users rely on; **OR the asserted signal is non-unique — a fail-soft / no-op / never-executed / cached-empty path also produces it, so the test passes on the unintended path without proving the claimed invariant (ERR-088)**; **OR a newly added conditional ships an alternate branch no production seam can reach — the new tests cover only the reachable side, codecov/patch fails on the dead alternate (ERR-099)**; **OR auth/splash/onboarding bootstrap renders a generic shell but overwrites the protected deep link the test and Owner actually requested (ERR-104)**; **OR implementation and tests are both written from a summarized spec interpretation, so they validate each other while both drift from the normative clauses — precedence orders and evidence requirements degrade to what the summary remembered (ERR-108)**; **OR an identity/route matcher extracted from legacy prefix code (`startsWith`) keeps the prefix form, so adjacent-but-different routes (`#/login` vs `#/login-help`) silently inherit the exemption and strand the user exactly where the fix promised not to (ERR-119)**; **OR a fixture declares platform-keyed data (platform/arch/node ABI) with hardcoded values while the code under test selects by `process.*` — green on the author's machine, fails in CI at an earlier step with a different refusal reason (ERR-121)**; **OR a benchmark/evaluation fixture deploy ships lab-side docs, packaging manifests, or tutorial-style verifier comments into the subject's workspace — the answer surface is the DEPLOYED FILE LIST, not repo-side intent, and hint leakage measures recall instead of the target behavior (ERR-122)**.
-- **Must check**: fixtures match production schema; tests fail if expected output is absent; package tests are run when package code changes; UI tests verify route/action contracts, not just source substrings; generated media dimensions and formats are read from the final file metadata, not inferred from viewport or render settings; **for any test asserting an indirect signal (undefined return, timing, absence of error, zero count), enumerate all code paths that produce the same signal — if a fail-soft / no-op / never-executed path is among them, add a positive assertion (status field, probe rule with unique reason, side-effect with distinguishing payload) that uniquely identifies the intended path**; **for every new conditional in a diff, name the production seam that makes EACH side true — if none exists for one side, restructure branch-free (join/fold degrading to the legacy format) or add a test for that branch before pushing (ERR-099)**; **a regression test that proves a fix must ship with its NEGATIVE CONTROL — the same probe/assertion run against the pre-fix state must fail; without it the positive test can pass vacuously once the probe stops exercising the claimed mechanism (PRI-561 follow-up: the ERR_MODULE_NOT_FOUND negative control committed beside the host-runtime resolution probe caught two parser bugs in the delivery-parity contract test during its own development — bite-verify every contract test before trusting green)**; **for specs with numbered normative clauses, walk each ordering/forbidden-inference/evidence sentence against the final diff during self-review and name the test locking it — rewrite any test that only asserts the implementation's own output shape (ERR-108)**; **for every contract claim in a diff defined over an identity (owner/key/actor — renew/idempotent-retry/resume), run the DEFAULT identity path once in a test, not only explicit parameters — execute the documented quick-start command verbatim twice and require the documented non-conflicting behavior on the second run (ERR-116)**; **when extracting a legacy conditional into a named matcher/predicate, re-derive its semantics from the authoritative identity registry (registered routes, enum members, ID spaces) instead of carrying the form over — prefix/equality choice must be justified against near-miss identities, with a negative test proving a prefix-sharing but non-identical value does NOT match (ERR-119)**; **when a ReDoS/security flag is fixed by removing one cited trigger, enumerate the remaining backtracking contributors of the flag before declaring closure — prefer replacing the whole regex with a linear implementation when input is untrusted, prove equivalence with an old-vs-new battery, and treat "the alert closes post-merge" as acceptance evidence that must be re-checked during closeout (ERR-120)**; **for any test whose code under test reads `process.platform|arch|versions.*`, check the fixture data it feeds declares those keys hardcoded — derive them from `process.*`, and when the trap is fixed in one fixture, fix every sibling fixture feeding the same module in the same commit (ERR-121)**; **for any test that mutates a process-global singleton (`process.platform` / `process.env` / prototype patches), require save-original + `try/finally` restore — a mid-test assertion failure must not leak the mutated state into sibling tests (ERR-124)**.
-- **Representative ERRs**: ERR-025, ERR-040, ERR-073, ERR-077, ERR-088, ERR-094, ERR-099, ERR-104, ERR-108, ERR-115, ERR-116, ERR-117, ERR-119, ERR-120, ERR-121, ERR-122, ERR-125.
+- **Must check**: fixtures match production schema; tests fail if expected output is absent; package tests are run when package code changes; UI tests verify route/action contracts, not just source substrings; generated media dimensions and formats are read from the final file metadata, not inferred from viewport or render settings; **for any test asserting an indirect signal (undefined return, timing, absence of error, zero count), enumerate all code paths that produce the same signal — if a fail-soft / no-op / never-executed path is among them, add a positive assertion (status field, probe rule with unique reason, side-effect with distinguishing payload) that uniquely identifies the intended path**; **for every new conditional in a diff, name the production seam that makes EACH side true — if none exists for one side, restructure branch-free (join/fold degrading to the legacy format) or add a test for that branch before pushing (ERR-099)**; **a regression test that proves a fix must ship with its NEGATIVE CONTROL — the same probe/assertion run against the pre-fix state must fail; without it the positive test can pass vacuously once the probe stops exercising the claimed mechanism (PRI-561 follow-up: the ERR_MODULE_NOT_FOUND negative control committed beside the host-runtime resolution probe caught two parser bugs in the delivery-parity contract test during its own development — bite-verify every contract test before trusting green)**; **for specs with numbered normative clauses, walk each ordering/forbidden-inference/evidence sentence against the final diff during self-review and name the test locking it — rewrite any test that only asserts the implementation's own output shape (ERR-108)**; **for every contract claim in a diff defined over an identity (owner/key/actor — renew/idempotent-retry/resume), run the DEFAULT identity path once in a test, not only explicit parameters — execute the documented quick-start command verbatim twice and require the documented non-conflicting behavior on the second run (ERR-116)**; **when extracting a legacy conditional into a named matcher/predicate, re-derive its semantics from the authoritative identity registry (registered routes, enum members, ID spaces) instead of carrying the form over — prefix/equality choice must be justified against near-miss identities, with a negative test proving a prefix-sharing but non-identical value does NOT match (ERR-119)**; **when a ReDoS/security flag is fixed by removing one cited trigger, enumerate the remaining backtracking contributors of the flag before declaring closure — prefer replacing the whole regex with a linear implementation when input is untrusted, prove equivalence with an old-vs-new battery, and treat "the alert closes post-merge" as acceptance evidence that must be re-checked during closeout (ERR-120)**; **for any test whose code under test reads `process.platform|arch|versions.*`, check the fixture data it feeds declares those keys hardcoded — derive them from `process.*`, and when the trap is fixed in one fixture, fix every sibling fixture feeding the same module in the same commit (ERR-121)**; **for any test that mutates a process-global singleton (`process.platform` / `process.env` / prototype patches), require save-original + `try/finally` restore — a mid-test assertion failure must not leak the mutated state into sibling tests (ERR-124)**. **for deletion/cleanup/audit PRs, every completeness claim ("zero consumers", "condition met", "only these files") must cite the FULL untruncated output of a re-runnable command, the owning lifecycle doc's state machine must be followed as binding semantics, and every DoD command must be executed once with its real output pasted into the PR (ERR-127)**.
+- **Representative ERRs**: ERR-025, ERR-040, ERR-073, ERR-077, ERR-088, ERR-094, ERR-099, ERR-104, ERR-108, ERR-115, ERR-116, ERR-117, ERR-119, ERR-120, ERR-121, ERR-122, ERR-125, ERR-127.
 - **Automation target**: production schema fixtures and real-path smoke tests; **static scan for assertions on `undefined` returns, timing-only assertions, and `not.toThrow()` without subsequent positive assertions — flag any that lack a companion assertion uniquely identifying the intended execution path**; **static scan for `expect(... >= ... || ... <= ...).toBe(true)` and similar `||`-joined range bounds in tests — these are tautologies when `low <= high` and must use `&&` (ERR-094)**; review checklist: for each new regression test in a diff, ask what specifically fails if the mechanism under test regresses — if the answer is "nothing else in the suite", require the pre-fix-state negative control in the same PR. **Root-cause claims about module interfaces must not rest on static text scans: rg/regex/`includes()` symbol searches are ALL blind to `export *` re-export chains — verify with a REAL Node import (scratch-process dynamic import) and first confirm WHICH physical copy Node actually resolves (nearest `node_modules` wins) before blaming the package. Multiple checks sharing one blind spot are not independent evidence (2026-09-04 PRI-665 misdiagnosis: three text-level checks converged on a nonexistent barrel defect while the real cause was stale physical dependency copies shadowing the canonical package).**
 
 ### EP-10 Workflow and Branch Hygiene

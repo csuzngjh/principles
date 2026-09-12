@@ -235,7 +235,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
 
     it('registered service IDs match expected MVP set', () => {
-      // Quiet/disabled services (e.g. evolution-worker per PRI-294) exist in the
+      // Quiet/disabled services (e.g. pd-task per PRI-294) exist in the
       // registry but are NOT registered via guardService in index.ts.
       const source = read('packages/openclaw-plugin/src/index.ts');
       const registrations = extractServiceRegistrations(source);
@@ -271,20 +271,9 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(coreHooks).toContain('hook:llm_output');
     });
 
-    it('evolution-worker service is MVP-Quiet (PRI-288/ADR-0014 alignment)', () => {
-      const ew = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker');
-      expect(ew).toBeDefined();
-      expect(ew!.category).toBe('quiet');
-      expect(ew!.enabledByDefault).toBe(false);
-      expect(ew!.disabledReason).toContain('PRI-288');
-    });
-
-    it('evolution-worker startup is MVP-Quiet (PRI-288/ADR-0014 alignment)', () => {
-      const ew = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'startup:evolution-worker');
-      expect(ew).toBeDefined();
-      expect(ew!.category).toBe('quiet');
-      expect(ew!.enabledByDefault).toBe(false);
-      expect(ew!.disabledReason).toContain('PRI-288');
+    it('evolution-worker surfaces are removed from the registry (PRI-737 deletion, PRI-752 residue retirement)', () => {
+      expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker')).toBeUndefined();
+      expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'startup:evolution-worker')).toBeUndefined();
     });
 
     it('trajectory hooks are MVP-Quiet (ADR-0014 §2.5)', () => {
@@ -418,10 +407,10 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(logs.length).toBe(0);
     });
 
-    it('guardService returns null for evolution-worker (quiet, default off)', async () => {
+    it('guardService returns null for quiet surfaces (pd-task, default off)', async () => {
       const { guardService } = await import('@principles/core/runtime-v2');
       const service = { api: null, start: () => {} };
-      const guarded = guardService('service:evolution-worker', service);
+      const guarded = guardService('service:pd-task', service);
       expect(guarded).toBeNull();
     });
 

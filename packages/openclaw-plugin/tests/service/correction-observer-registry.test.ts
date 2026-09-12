@@ -37,17 +37,17 @@ describe('Correction Observer Ownership — Feature Flag & Surface Registry Cons
     expect(surface!.enabledByDefault).toBe(true);
   });
 
-  it('evolution_worker feature flag remains quiet with enabled:false (flag retirement deferred, PRI-737)', () => {
+  // Tombstone guards (PRI-752): the worker was deleted in PRI-737 and its
+  // registry residue retired — these assertions keep the ghost from returning.
+  it('evolution_worker feature flag is gone/permanently disabled (retired PRI-752)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'evolution_worker');
     expect(flag).toBeDefined();
-    expect(flag!.category).toBe('quiet');
+    expect(flag!.category).toBe('gone');
     expect(flag!.enabled).toBe(false);
   });
 
-  it('service:evolution-worker surface remains quiet with enabledByDefault:false (flag retirement deferred, PRI-737)', () => {
-    const surface = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker');
-    expect(surface).toBeDefined();
-    expect(surface!.category).toBe('quiet');
-    expect(surface!.enabledByDefault).toBe(false);
+  it('evolution-worker surfaces are removed from the registry (retired PRI-752)', () => {
+    expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker')).toBeUndefined();
+    expect(PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'startup:evolution-worker')).toBeUndefined();
   });
 });

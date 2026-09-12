@@ -41,7 +41,7 @@ function makeValidConfigYaml(): string {
       code_tool_hook: { category: 'core', enabled: true },
       defer_archive: { category: 'core', enabled: true },
       correction_observer: { category: 'quiet', enabled: false },
-      empathy_observer: { category: 'quiet', enabled: false },
+      gfi: { category: 'quiet', enabled: false },
     },
     runtimeProfiles: {
       // Include pd.default (the M9 default) to avoid "profile not found" warnings

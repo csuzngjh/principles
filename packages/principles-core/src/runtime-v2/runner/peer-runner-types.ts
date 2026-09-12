@@ -39,7 +39,9 @@ export interface PeerRunnerOptions {
   readonly outputLanguage?: OutputLanguage;
   /**
    * Whether to inject CORE_PRINCIPLES into the prompt (default: true).
-   * Controlled by the `internalization_core_grounding` feature flag.
+   * Grounding is unconditional runner behavior — the former
+   * `internalization_core_grounding` flag was retired in PRI-751 (it never
+   * had a production reader).
    */
   readonly coreGrounding?: boolean;
 }
