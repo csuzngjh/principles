@@ -249,6 +249,12 @@ main:
             run scripts/check-generated-artifacts.cjs
             run scripts/check-security-baseline.js
             run scripts/check-error-handbook.cjs
+            # PRI-701：legacy updater usage census（ADR-0024 D-1 / PRI-738 Gate B）。
+            #   只读既有 transaction journal（~/.pd/transactions/），不新增计数器/状态源。
+            #   云构建机没有 PD 安装 ⇒ 此处必然报 UNDETERMINED（"无安装" ≠ "零使用"），
+            #   这正是设计行为：本机（Owner 机器）才是真实观察面，云端只保证脚本可复现执行。
+            #   退出码 0（无使用）/ 1（观察到使用）/ 2（census 不完整），本阶段只记录不阻塞。
+            run scripts/check-legacy-updater-usage.mjs
 
             echo "----- $OUT -----"
             cat "$OUT"
