@@ -162,10 +162,10 @@
 - Audited Commit: <完整 40 位 SHA，取自 cloud-audit-context.md 或 git rev-parse HEAD>
 - Branch: <分支>
 - Trigger: <CNB_EVENT>
-- Pipeline: <Agent 写 "由证据发布者补记（buildLogUrl 的 sn）"；发布者按 §6.3 填写>
-- Model: <你启动信息 model= 行的值>
+- Pipeline: <Agent 写 "由证据发布者补记（buildLogUrl 的 sn）"；发布者按 §6.4 末条硬性要求补记>
+- Model: <你启动信息 model= 行的值；上下文文件不含此值，取不到时如实写"不可用">
 - Duration: <Build start（上下文文件）至报告生成的近似时长>
-- Context Version: <章程版本行，例：v2.0 (PRI-766)>
+- Context Version: <章程版本行原样；该字段是整行自由文本，不做机器解析>
 - Generated: <ISO8601>
 
 ## Drift Warning

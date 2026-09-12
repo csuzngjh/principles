@@ -282,12 +282,17 @@ CNB Cloud Auditor 的每周运行不是"又一个定时任务"，而是一条**�
 4. **禁止把周报写进 main 的产品文档**——证据进 Linear / 附件，不污染仓库
    （`docs/audit/` 仅收审计基础设施文档，不收周期性审计结果）。
 
-**漂移升级路径**：若报告带 Drift Warning，先按 §2 方案A 手动同步镜像，
-同步后用 T3b（`api_trigger_audit`，branch=main）复审一次，再发布证据——
+**漂移升级路径**：Drift Warning 仅在**审计对象为 main** 时出现（分支审计给的是中性
+INFO 说明——分支与 main 有差异属预期）。若周报带该 Warning，先按 §2 方案A 手动同步
+镜像，同步后用 T3b（`api_trigger_audit`，branch=main）复审一次，再发布证据——
 带漂移警告的报告不得作为治理决策依据，只作记录。
 
-**验证点**（本循环 v1 于 2026-09-12 经真实模拟验证，见 Linear PRI-766）：
-触发 ✓ / 上下文与漂移检测 ✓ / v2 报告与完整性自检 ✓ / 附件与日志证据 ✓ / Linear 记录 ✓。
+**验证点**（本循环 v1 于 2026-09-12 经两次真实模拟验证，见 Linear PRI-766）：
+触发 ✓ / 上下文与漂移检测（含分支语义区分）✓ / v2 报告与完整性自检 ✓（模拟运行中
+Agent 的 Summary 首次计数错误被 §6.2 自检当场抓住并修正）/ 附件与日志证据 ✓ /
+Linear 记录 ✓。
+已知边界：上下文脚本内联于 `.cnb.yml`，`verify:merge` 与 `test:scripts` 均覆盖不到
+（后续工单建议：抽为 `scripts/cnb-audit-context.mjs` 并补三分支测试）。
 
 ---
 
