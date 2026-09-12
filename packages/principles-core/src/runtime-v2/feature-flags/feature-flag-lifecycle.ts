@@ -128,7 +128,7 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     evidence: 'Documented OFF→Gate A re-activation routing never existed as code; live has never been flag-off (PRI-749 G-1)',
     decided: '2026-09-12',
     graduationCriteria: 'N/A — kill-switch semantics with no switch',
-    retirementCriteria: 'Same Owner decision as painEvidenceAdmission (a/b/c above); PRI-454 removal conditions (flags ON 30d + 5 MVP paths on Gate B) were met in production',
+    retirementCriteria: 'Same Owner decision as painEvidenceAdmission (a/b/c above); the historical PRI-454 removal criteria (flags ON 30d + 5 MVP paths on Gate B) remain UNVERIFIED in production — what is verified: no executable consumers and no runtime routing effect (PRI-749 G-1 / PRI-752)',
   },
   diagnostician_async_cli: {
     decision: 'KEEP_QUIET',
@@ -148,11 +148,11 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   },
   internalization_core_grounding: {
     decision: 'KEEP_QUIET',
-    consumers: ['principles-core/src/runtime-v2/internaliz*', 'principles-core/src/runtime-v2/runner/pe*'],
-    evidence: 'Core principle grounding in internalization prompt builders (since 2026-06-16); default-on',
-    decided: '2026-08-27',
-    graduationCriteria: 'Stable prompt feature; promotion to core optional',
-    retirementCriteria: 'Prompt design drops grounding block',
+    consumers: ['none executable (PRI-752 re-verification: dreamer/philosopher/scribe runners hardcode coreGrounding:true — e.g. dreamer-runner.ts:95; zero reads of this flag ID in production code)'],
+    evidence: 'Disconnected control (PRI-752 re-verification of the 2026-08-27 entry): grounding behavior exists and is default-on via unconditional runner options; the flag does not control runtime. Rewire vs retire pending Owner decision (see feature-flag-governance.md ON-quiet table)',
+    decided: '2026-09-12',
+    graduationCriteria: 'N/A — no runtime effect; graduation meaningless until rewire-or-retire resolved',
+    retirementCriteria: 'Owner decision: (a) retire the flag (grounding stays unconditional runner behavior) or (b) re-wire the flag to the runners (restores the documented switch semantics)',
   },
   diagnostician_split_pipeline: {
     decision: 'KEEP_QUIET',

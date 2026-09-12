@@ -9,8 +9,11 @@
  * `painEvidenceAdmission` / `painEvidenceAdmissionDefault` to re-activate this
  * module — the documented flag-off rollback does not exist as code. This
  * adapter has ZERO production importers; only tests import it
- * (PRI-749 G-1 / PRI-752 finding). The PRI-454 removal conditions were met
- * in production; disposition awaits the Owner decision recorded on PRI-752 —
+ * (PRI-749 G-1 / PRI-752 finding). The historical PRI-454 removal criteria
+ * (both flags ON >=30 days + 5 MVP paths verified on Gate B) require
+ * production evidence this repo does not hold — what IS verified here is
+ * only the zero-importer / no-routing-effect facts above; disposition awaits
+ * the Owner decision recorded on PRI-752 —
  * see docs/plans/2026-06-pain-evidence-admission-track.md.
  *
  * The pure decision logic (threshold tree, cooldown comparison, episode-key
