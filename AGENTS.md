@@ -120,7 +120,19 @@ Before implementing a medium or large SPEC, run a Reality Audit. Do not assume a
 
 Prefer **Connection Before Creation**: if an existing capability exists but is not connected, fix the connection before introducing new abstractions.
 
-Reference (do not copy into repository docs): Linear document "PD Architecture Reality Audit Practice v1.0".
+**Medium or large SPEC** generally includes:
+
+* changes across multiple packages;
+* new architecture boundaries;
+* new contracts / interfaces;
+* runtime behavior changes.
+
+When uncertain, prefer performing a Reality Audit.
+
+Reference:
+
+* Detailed practice and historical decisions: Linear document "PD Architecture Reality Audit Practice v1.0".
+* This section defines the executable minimum rule; `AGENTS.md` is authoritative and the Linear document is supporting detail, not a dependency.
 
 ---
 
@@ -235,6 +247,20 @@ Judge design by whether the next likely change becomes:
 * reversible.
 
 Optimize total system cognitive load, not local stylistic purity.
+
+---
+
+## Constitution Change Rule
+
+Changes to engineering constitution rules require explicit Owner approval. This includes:
+
+* AGENTS.md principles;
+* mandatory AI development constraints;
+* governance rules.
+
+AI agents may propose changes, but must not silently weaken or replace these rules.
+
+`.github/CODEOWNERS` routes `AGENTS.md` changes to the Owner for review. This rule adds no new approval framework — it makes the existing Owner-review obligation explicit and enforceable.
 
 ---
 

@@ -79,7 +79,6 @@ function apiForWorkspace(): OpenClawPluginApi {
 function writeConfig(): void {
   const config = getDefaultPdConfig();
   config.features.abstraction_layer_v1.enabled = true;
-  config.features.evolution_worker.enabled = false;
   config.features.correction_observer.enabled = false;
   config.features.internalization_auto_consumer.enabled = false;
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });

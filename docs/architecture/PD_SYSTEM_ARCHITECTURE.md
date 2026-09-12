@@ -259,7 +259,6 @@ packages/openclaw-plugin/src/
 │   └── gate-block-helper.ts
 ├── service/                         ← 长生命周期服务
 │   ├── idle-trigger.ts              ← legacy retirement target；不新增宿主调度适配
-│   ├── evolution-worker.ts          ← legacy cutover/delete target
 │   ├── trajectory-service.ts
 │   ├── monitoring-query-service.ts
 │   ├── workflow-watchdog.ts
@@ -359,7 +358,6 @@ packages/pd-cli/src/
 │   │   ├── runtime-gfi-snapshot.ts
 │   │   └── runtime-diagnostics-export.ts
 │   ├── activation.ts                ★ 待建（pd activation list/status）
-│   ├── evolution-tasks-*.ts
 │   ├── remediation-output.ts
 │   ├── legacy-import.ts             ← 历史数据迁移
 │   └── legacy-cleanup.ts

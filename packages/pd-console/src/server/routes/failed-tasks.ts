@@ -59,6 +59,23 @@ function stateDbExists(workspaceDir: string): boolean {
   return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
 }
 
+/**
+ * Decode a percent-encoded path segment into the raw task id (PRI-747 F22
+ * review round). The UI client sends `encodeURIComponent(taskId)`; without
+ * this decode the store lookup would compare the encoded string ('task%2Fwith
+ * %20spaces') against raw ids and 404. Malformed sequences ('%ZZ') are
+ * rejected as invalid_encoding rather than thrown (400, same shape as the
+ * lifecycle route's decode guard).
+ */
+function decodeTaskIdSegment(raw: string): { ok: true; value: string } | { ok: false } {
+  if (!raw.includes('%')) return { ok: true, value: raw };
+  try {
+    return { ok: true, value: decodeURIComponent(raw) };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function getStore(workspaceDir: string): SqliteTaskStore {
   let entry = entries.get(workspaceDir);
   if (!entry) {
@@ -449,8 +466,13 @@ export async function handleFailedTasksRoute(
   const recoverMatch = subPath.match(/^\/([^/]+)\/recover$/);
   if (recoverMatch) {
     // recoverMatch[1] = captured task id (segment between the leading '/'
-    // and the trailing '/recover')
-    const taskId = recoverMatch[1] ?? '';
+    // and the trailing '/recover'); percent-decoded before store lookup
+    const decodedTaskId = decodeTaskIdSegment(recoverMatch[1] ?? '');
+    if (!decodedTaskId.ok) {
+      sendError(res, 400, 'invalid_encoding', 'task id path segment is not valid percent-encoding');
+      return;
+    }
+    const taskId = decodedTaskId.value;
 
     // Fail-closed gate: this is a mutation endpoint — recovery is enabled by
     // default (2026-08-24 owner decision) and 403 only when explicitly disabled
@@ -535,7 +557,12 @@ export async function handleFailedTasksRoute(
   }
 
   // Detail: GET /api/v1/failed-tasks/:id
-  const id = subPath.replace(/^\//, '');
+  const decodedId = decodeTaskIdSegment(subPath.replace(/^\//, ''));
+  if (!decodedId.ok) {
+    sendError(res, 400, 'invalid_encoding', 'task id path segment is not valid percent-encoding');
+    return;
+  }
+  const id = decodedId.value;
   if (id.length === 0) {
     sendNotFound(res, `Route /api/v1/failed-tasks${subPath} not found`);
     return;
