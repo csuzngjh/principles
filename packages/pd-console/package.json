@@ -15,6 +15,7 @@
     "test:e2e": "npm run build:ui && npx playwright test",
     "test:e2e:owner": "npm run build:ui && npx playwright test --config playwright.owner.config.ts",
     "test:e2e:headed": "npm run build:ui && npx playwright test --headed",
+    "test:ai-user": "npm run build:ui && tsx tests/ai-user/run.ts",
     "typecheck": "npx tsc --noEmit",
     "verify:build": "node scripts/verify-build.mjs"
   },
