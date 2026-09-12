@@ -103,6 +103,8 @@ export interface RuntimeConfig {
   maxRetries?: number;
   /** Max output tokens (max_tokens) for pi-ai LLM calls. */
   maxTokens?: number;
+  /** Optional reasoning level (flows from profile to PiAiRuntimeAdapter; PRI-758). */
+  reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
   /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
   baseUrl?: string;
   /** Optional system prompt (flows from profile to PiAiRuntimeAdapter). */
@@ -422,6 +424,7 @@ export function resolveRuntimeConfigForAgent(
       agentId: 'main',
       // PRI-719: profile identity for run evidence (declared == executed).
       runtimeProfileId: bindingResult.profileId,
+      ...(adapterConfig.reasoning !== undefined ? { reasoning: adapterConfig.reasoning } : {}),
       ...(adapterConfig.systemPrompt ? { systemPrompt: adapterConfig.systemPrompt } : {}),
     };
   }
@@ -578,6 +581,7 @@ async function constructBridge(
         timeoutMs: runtimeConfig.timeoutMs,
         baseUrl: runtimeConfig.baseUrl,
         workspace: opts.workspaceDir,
+        ...(runtimeConfig.reasoning !== undefined ? { reasoning: runtimeConfig.reasoning } : {}),
         ...(runtimeConfig.systemPrompt ? { systemPrompt: runtimeConfig.systemPrompt } : {}),
       })
     : new OpenClawCliRuntimeAdapter({

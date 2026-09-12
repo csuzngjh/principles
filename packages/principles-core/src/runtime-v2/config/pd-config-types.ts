@@ -93,6 +93,14 @@ export interface PdLocalRuntimeProfile {
    */
   maxTokens?: number;
   /**
+   * Optional pi-ai reasoning/thinking level forwarded to LLM completion calls.
+   * Always-thinking zai models (e.g. glm-5.3-flash) reject the
+   * `thinking: {type: "disabled"}` request pi-ai sends when no level is set
+   * (PRI-758), so such models need an explicit level ('low' is the cheapest).
+   * `false` explicitly disables reasoning for models that support it.
+   */
+  reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
+  /**
    * Optional system prompt passed to pi-ai Context.systemPrompt.
    * Enables Anthropic system-prompt caching and OpenAI developer-role priority.
    * Design intent: "system prompt is agent profile's responsibility" (DPB-07).
