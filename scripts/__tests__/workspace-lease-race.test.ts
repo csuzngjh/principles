@@ -12,7 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LEASE_FILENAME, acquireLease } from '../dev/lib/workspace-lease.mjs';
 import { makeTempDir, removeFixture } from './dev-worktree-test-utils';
 
@@ -90,16 +90,30 @@ describe('acquire vs an in-flight lease write (PRI-728)', () => {
     if (!result.ok) {
       expect(result.error).toContain('existing lease file is invalid: lease file is not valid JSON');
     }
-    // Bounded, not an infinite loop; the file is genuinely malformed.
-    expect(delayCalls).toBeGreaterThanOrEqual(1);
-    expect(delayCalls).toBeLessThanOrEqual(5);
+    // Bounded, not an infinite loop: exactly LEASE_READ_RETRY_ATTEMPTS (3)
+    // re-reads before the loud invalid-lease verdict.
+    expect(delayCalls).toBe(3);
   });
 
   it('renewal writes go through temp+rename and leave no temp files behind', () => {
     const first = acquireLease(root, { owner: 'solo/session', branch: 'work/renew' });
     expect(first.ok).toBe(true);
-    const renewed = acquireLease(root, { owner: 'solo/session', branch: 'work/renew' });
-    expect(renewed.ok).toBe(true);
+
+    // First create uses the exclusive wx path (no rename); renewal must go
+    // through an atomic temp+rename — assert the mechanism itself, not just
+    // the absence of temp leftovers (PRI-728 review round).
+    const renameSpy = vi.spyOn(fs, 'renameSync');
+    try {
+      const renewed = acquireLease(root, { owner: 'solo/session', branch: 'work/renew' });
+      expect(renewed.ok).toBe(true);
+
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+      const [from, to] = renameSpy.mock.calls[0];
+      expect(String(from)).toContain('.tmp-');
+      expect(String(to)).toBe(leasePath(root));
+    } finally {
+      renameSpy.mockRestore();
+    }
 
     const entries = fs.readdirSync(root);
     expect(entries).toContain(LEASE_FILENAME);
