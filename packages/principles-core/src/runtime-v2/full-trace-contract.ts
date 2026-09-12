@@ -2,7 +2,7 @@
  * FullTrace quality contract and schema hardening (PRI-190).
  *
  * Defines the structured payload contract for source execution traces
- * consumed by Diagnostician and downstream L2 components (TraceRefiner).
+ * consumed by the GoldenTrace fixture builder and read models.
  *
  * Key invariants:
  *   - sourceTaskId / sourcePainId / sourceRunIds provide traceability

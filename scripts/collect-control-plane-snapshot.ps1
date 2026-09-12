@@ -68,7 +68,6 @@ $manifest = New-Object 'System.Collections.Generic.List[object]'
 
 $staticFiles = @(
     @{ Source = Join-Path $stateDir "AGENT_SCORECARD.json"; Relative = ".state/AGENT_SCORECARD.json" },
-    @{ Source = Join-Path $stateDir "evolution_queue.json"; Relative = ".state/evolution_queue.json" },
     @{ Source = Join-Path $stateDir "evolution_directive.json"; Relative = ".state/evolution_directive.json" },
     @{ Source = Join-Path $stateDir "pain_candidates.json"; Relative = ".state/pain_candidates.json" },
     @{ Source = Join-Path $stateDir ".pain_flag"; Relative = ".state/.pain_flag" },
@@ -106,7 +105,7 @@ $reviewTemplate = @"
 1. Trust did not inflate unexpectedly.
 2. `user_empathy` and `system_infer` both appear in `.state/logs/events.jsonl` when relevant.
 3. Empathy rollback reduced only the empathy slice and did not wipe unrelated GFI.
-4. `evolution_queue.json`, `evolution_directive.json`, and status output tell the same story.
+4. `evolution_directive.json` and status output tell the same story.
 5. `daily-stats.json` does not contradict active session snapshots in a way that would mislead operators.
 
 ## Files To Review First
@@ -114,7 +113,6 @@ $reviewTemplate = @"
 - `.state/AGENT_SCORECARD.json`
 - `.state/logs/events.jsonl`
 - `.state/logs/daily-stats.json`
-- `.state/evolution_queue.json`
 - `.state/evolution_directive.json`
 - `.state/sessions/*.json`
 
