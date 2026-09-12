@@ -130,8 +130,13 @@ export function handleBeforeMessageWrite(
   if (msg.role === 'assistant') {
     // PRI-532: llm_output is unauthorized on this install — this hook is the
     // self-report capture fallback (same helper as the llm_output path).
+    // PRI-755 (review fix): the capture validates against the injection set the
+    // prompt hook tracked under ctx.sessionId, so the capture key must use the
+    // SAME authority — prefer ctx.sessionId over event.sessionKey here. The
+    // trajectory rows below keep their existing sessionKey-first lineage key.
+    const captureSessionId = ctx.sessionId ?? (event.sessionKey as string | undefined) ?? 'unknown';
     try {
-      recordSelfReportFromText(workspaceDir, content, sessionId, logger);
+      recordSelfReportFromText(workspaceDir, content, captureSessionId, logger);
     } catch {
       // capture must never block the sync before_message_write hook
     }
