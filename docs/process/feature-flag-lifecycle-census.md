@@ -46,7 +46,7 @@ Full per-flag evidence (consumers, rationale, criteria) lives in `QUIET_FLAG_LIF
 **Feature purgatory check:** `zero consumer + no roadmap + no retirement decision = 0` ✅ (the one zero-consumer flag, `release_manager_shadow`, has an explicit staged roadmap owner: PRI-614).
 
 Notable consumer-evidence anchors (abbreviated; full paths in the TS registry):
-- `painEvidenceAdmission`(+Default): openclaw-plugin pain.ts / llm.ts / gate-block-helper.ts (production readers since PRI-454).
+- `painEvidenceAdmission`(+Default): **zero executable consumers** (PRI-752 re-verification 2026-09-12 — pain.ts / llm.ts / gate-block-helper.ts have no references; prior "production readers" claim was stale). Gate B is unconditional; the documented flag-off rollback does not exist as code. Disposition (a/b/c) awaits Owner decision (PRI-749 G-1 / PRI-752).
 - `anonymous_product_telemetry`: host-runtime product-telemetry service + pd-cli telemetry command (PR #1419).
 - `governance_experience_v1`: pd-console governance experience route + Focus page (PR #1409).
 - `release_manager_shadow`: consumers = none (staged; ReleaseManager shadow implementation lives in create-principles-disciple/src/update/, wiring = PRI-614).
