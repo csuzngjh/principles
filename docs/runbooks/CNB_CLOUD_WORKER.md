@@ -68,20 +68,43 @@
 
 CNB 侧仓库只读跟随 GitHub，不产生第二个写入口。
 
-**A-1 一次性全量迁移（保留全部历史）**
+**A-1 一次性全量迁移（保留全部历史 + LFS 资产）**
+
+> ⚠️ **必须包含 LFS 步骤**。`git push --mirror` 只搬运 Git 引用与 LFS **指针文件**，
+> 不搬运 LFS 对象本体。PD 的 `*.mp4` / `*.webm` / `*.webp` 走 LFS
+> （`.gitattributes:46-50`），漏掉这一步会导致 CNB 侧 `test:website` 的
+> 首页契约测试失败（资产变成 132 字节指针）。与 CNB 官方"裸库迁移"指引一致。
 
 ```bash
-# 在 CNB 侧先建好空仓库与访问令牌
-# 令牌位置：cnb.cool → 个人设置 → 访问令牌   （用户名固定为 cnb，密码填令牌）
-git clone --bare https://github.com/csuzngjh/principles.git principles.git
-cd principles.git
-git push --mirror https://cnb.cool/<组织>/<仓库>.git
-cd .. && rm -rf principles.git
+# 令牌位置：cnb.cool → 个人设置 → 访问令牌（用户名固定为 cnb，密码填令牌）
+# 令牌需要 repo-code:rw + repo-basic-info:r；镜像含 LFS 时建议再给 registry 无关、无需额外权限
+CNB_URL="https://cnb.cool/csuzngjh/principles.git"
+
+mkdir empty && cd empty
+git clone --bare https://github.com/csuzngjh/principles.git .
+git lfs fetch origin --all          # ← 从 GitHub 拉取全部 LFS 对象（必需）
+git push --mirror "$CNB_URL"        # 推送 refs
+git lfs push "$CNB_URL" --all       # 推送 LFS 对象本体（必需）
+cd .. && rm -rf empty
 ```
 
-**A-2 后续自动同步（可选，需凭据）**
+**A-2 持续同步（⚠️ 实为前置条件，非可选）**
 
-用官方 `git-sync` 插件在 GitHub Actions 侧推送，或在 CNB 侧拉取。**注意**：这一步会引入访问令牌，与当前设计「云端零密钥」的姿态冲突——本节配置**不在本 PR 的交付范围内**，属于后续独立的凭据接入决策。
+> **这是 Codex 评审标记的 P1**：若只做 A-1 而不持续同步，CNB 侧 `main` 会立刻
+> 落后于 GitHub（实测：一次性迁移完成后数分钟内，GitHub `main` 就已因新合并
+> 前进了一个 commit）。定时审计会反复审查**过期的快照**，却把它当作"当前 main HEAD"
+> ——这比没有审计更糟（制造虚假信心）。
+
+因此**定时审计（T2）只在镜像保持同步的前提下有意义**。二选一：
+
+| 选项 | 做法 | 代价 |
+|---|---|---|
+| **A-2a 自动同步（推荐）** | 新增一个 GitHub Actions workflow：`push` 到 `main` 时把仓库推送到 CNB | 需要 Owner 在 GitHub 仓库 Settings → Secrets 添加 `CNB_MIRROR_TOKEN`；会新增 `.github/workflows/**`（属于对本 PR 范围的扩展，需 Owner 批准） |
+| **A-2b 手动定期同步** | Owner 每次合并后手动重跑 A-1 的 fetch+push（或交给 Agent 执行） | 无新增配置；依赖人工记得执行，容易遗漏 |
+
+在 A-2 落地前，**请把 `.cnb.yml` 中 `crontab` 的定时审计视为"审计上次同步的快照"**，
+其报告头部的 `CNB_COMMIT` 字段标明了实际审查的 commit —— 对比 GitHub 当前 `main`
+即可判断是否过期。
 
 ### 方案 B：双向同步
 
@@ -140,9 +163,13 @@ cd .. && rm -rf principles.git
 | 场景 | 入口 | 输出 |
 |---|---|---|
 | 每周自动架构体检 | 自动（周一 02:00） | `cloud-audit-report.md` + `cloud-audit-deterministic.md`（commit 附件） |
-| 按需全仓审查 | 分支页「PD 云端审查」按钮 | NPC 回复（+ 报告附件） |
+| 按需全仓审查 | 分支页「PD 云端审查」按钮 | **NPC 回复（唯一输出）**——此流水线未配置附件上传阶段 |
 | PR 自动审查 | CNB 侧创建 PR 时 | PR 评论 |
 | 人工深度调查 | 「云原生开发」→ WebIDE | 人工操作 |
+
+> 只有**定时审计（T2）**产出可下载的报告附件；手动审计（T3）与 PR 审查（T1）的产出是对话/评论本身。
+> 这是**文档与流水线的刻意对齐**（Codex 评审 P2 指出此前二者不一致）：手动与 PR 场景没有稳定的
+> "落盘报告"依赖（`npc:go` 能否写文件本就是待确认项 U1），承诺附件反而会制造无法兑现的预期。
 
 **查看报告**：构建详情页 → 对应 commit → 附件区。
 私有仓库下载附件需带令牌：

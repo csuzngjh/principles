@@ -143,19 +143,24 @@ main:
 
             # 这些脚本只依赖 Node 内建模块，**无需 npm install**。
             # 第一阶段只记录、不阻塞：审计的职责是报告，不是新增门禁。
+            #
+            # ⚠️ 脚本路径与其参数必须分开传给 node（不能用 "path args" 单字符串再整体
+            #    加引号，否则 node 会把它当成一个文件名，报 MODULE_NOT_FOUND）。
             i=0
-            for cmd in \
-              "scripts/check-repo-hygiene.js all" \
-              "scripts/check-docs-structure.cjs" \
-              "scripts/check-generated-artifacts.cjs" \
-              "scripts/check-security-baseline.js" \
-              "scripts/check-error-handbook.cjs" \
-            ; do
+            run() {                  # $1=脚本路径  $2..=参数
               i=$((i+1))
-              echo "================ node $cmd ================"
-              node "$cmd"
-              printf '| %s | `node %s` | %s |\n' "$i" "$cmd" "$?" >> "$OUT"
-            done
+              script="$1"; shift
+              echo "================ node $script $* ================"
+              node "$script" "$@"
+              rc=$?
+              printf '| %s | `node %s %s` | %s |\n' "$i" "$script" "$*" "$rc" >> "$OUT"
+            }
+
+            run scripts/check-repo-hygiene.js all
+            run scripts/check-docs-structure.cjs
+            run scripts/check-generated-artifacts.cjs
+            run scripts/check-security-baseline.js
+            run scripts/check-error-handbook.cjs
 
             echo "----- $OUT -----"
             cat "$OUT"
