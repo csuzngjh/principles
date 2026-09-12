@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import {
   listCorrectionSamples,
   reviewCorrectionSample,
+  TrajectoryDbUnavailableError,
 } from './trajectory-store.js';
 
 describe('trajectory-store', () => {
@@ -115,13 +116,26 @@ describe('trajectory-store', () => {
   }
 
   describe('listCorrectionSamples', () => {
-    it('returns empty array when DB does not exist', () => {
+    it('throws TrajectoryDbUnavailableError when DB does not exist', () => {
+      // A missing database is not the same as an empty database: the reader
+      // must fail loud instead of returning no rows (rc-3 / rc-9).
+      expect(() => listCorrectionSamples(tmpDir)).toThrow(TrajectoryDbUnavailableError);
+    });
+
+    it('returns empty array when the database exists but has no matching rows', () => {
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
+      mkdirSync(join(tmpDir, '.state'), { recursive: true });
+      setupTestDb(dbPath);
+      const db = new Database(dbPath);
+      db.prepare('DELETE FROM correction_samples').run();
+      db.close();
+
       const result = listCorrectionSamples(tmpDir);
       expect(result).toEqual([]);
     });
 
     it('returns pending samples by default', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -132,7 +146,7 @@ describe('trajectory-store', () => {
     });
 
     it('returns approved samples when filtered', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -142,7 +156,7 @@ describe('trajectory-store', () => {
     });
 
     it('returns rejected samples when filtered', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -152,7 +166,7 @@ describe('trajectory-store', () => {
     });
 
     it('returns samples with all expected fields', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -173,18 +187,17 @@ describe('trajectory-store', () => {
       expect(typeof sample?.updatedAt).toBe('string');
     });
 
-    it('returns empty array on database error', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+    it('throws when the database file has no expected schema', () => {
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       const db = new Database(dbPath);
       db.close();
 
-      const result = listCorrectionSamples(tmpDir);
-      expect(result).toEqual([]);
+      expect(() => listCorrectionSamples(tmpDir)).toThrow(/no such table/);
     });
 
     it('orders by created_at DESC', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -217,7 +230,7 @@ describe('trajectory-store', () => {
     });
 
     it('handles NULL optional fields gracefully', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       const db = new Database(dbPath);
       db.exec(`
@@ -269,7 +282,7 @@ describe('trajectory-store', () => {
 
   describe('reviewCorrectionSample', () => {
     it('approves a pending sample', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -289,7 +302,7 @@ describe('trajectory-store', () => {
     });
 
     it('rejects a pending sample', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -305,19 +318,19 @@ describe('trajectory-store', () => {
     });
 
     it('throws error when sample not found', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
       expect(() => reviewCorrectionSample('sample-unknown', 'approved', 'Note', tmpDir)).toThrow('Sample not found: sample-unknown');
     });
 
-    it('throws error when DB does not exist', () => {
-      expect(() => reviewCorrectionSample('sample-001', 'approved', 'Note', tmpDir)).toThrow(/Database not found/);
+    it('throws TrajectoryDbUnavailableError when DB does not exist', () => {
+      expect(() => reviewCorrectionSample('sample-001', 'approved', 'Note', tmpDir)).toThrow(TrajectoryDbUnavailableError);
     });
 
     it('updates updated_at timestamp', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -336,7 +349,7 @@ describe('trajectory-store', () => {
     });
 
     it('handles undefined note', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 
@@ -351,7 +364,7 @@ describe('trajectory-store', () => {
     });
 
     it('handles empty note', () => {
-      const dbPath = join(tmpDir, '.state', '.trajectory.db');
+      const dbPath = join(tmpDir, '.state', 'trajectory.db');
       mkdirSync(join(tmpDir, '.state'), { recursive: true });
       setupTestDb(dbPath);
 

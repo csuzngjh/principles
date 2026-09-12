@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import {
   listEvolutionTasks,
   getEvolutionTask,
+  TrajectoryDbUnavailableError,
   type EvolutionTaskRecord,
 } from './evolution-store.js';
 
@@ -142,13 +143,14 @@ describe('evolution-store', () => {
   }
 
   describe('listEvolutionTasks', () => {
-    it('returns empty array when DB does not exist', () => {
-      const result = listEvolutionTasks(tmpDir);
-      expect(result).toEqual([]);
+    it('throws TrajectoryDbUnavailableError when DB does not exist', () => {
+      // A missing database is not the same as an empty database: the reader
+      // must fail loud instead of returning no rows (rc-3 / rc-9).
+      expect(() => listEvolutionTasks(tmpDir)).toThrow(TrajectoryDbUnavailableError);
     });
 
     it('returns all tasks when no filters provided', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir);
@@ -159,7 +161,7 @@ describe('evolution-store', () => {
     });
 
     it('filters by status', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const completed = listEvolutionTasks(tmpDir, { status: 'completed' });
@@ -172,7 +174,7 @@ describe('evolution-store', () => {
     });
 
     it('filters by dateFrom', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, { dateFrom: '2026-06-02T00:00:00.000Z' });
@@ -182,7 +184,7 @@ describe('evolution-store', () => {
     });
 
     it('filters by dateTo', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, { dateTo: '2026-06-02T00:00:00.000Z' });
@@ -192,7 +194,7 @@ describe('evolution-store', () => {
     });
 
     it('filters by date range', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, {
@@ -204,7 +206,7 @@ describe('evolution-store', () => {
     });
 
     it('respects limit', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, { limit: 2 });
@@ -214,7 +216,7 @@ describe('evolution-store', () => {
     });
 
     it('respects offset', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, { offset: 1 });
@@ -224,7 +226,7 @@ describe('evolution-store', () => {
     });
 
     it('combines limit and offset for pagination', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const page1 = listEvolutionTasks(tmpDir, { limit: 2, offset: 0 });
@@ -237,7 +239,7 @@ describe('evolution-store', () => {
     });
 
     it('applies status filter with limit and offset', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, {
@@ -250,7 +252,7 @@ describe('evolution-store', () => {
     });
 
     it('returns empty array when status matches nothing', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, { status: 'nonexistent' });
@@ -258,7 +260,7 @@ describe('evolution-store', () => {
     });
 
     it('maps all fields correctly from DB rows', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, { status: 'completed' });
@@ -287,7 +289,7 @@ describe('evolution-store', () => {
     });
 
     it('handles NULL fields correctly', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir, { status: 'pending' });
@@ -304,18 +306,17 @@ describe('evolution-store', () => {
     });
 
     it('orders by created_at DESC by default', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = listEvolutionTasks(tmpDir);
       expect(result).toHaveLength(3);
-      const dates = result.map(r => r.createdAt);
-      expect(dates[0]! > dates[1]!).toBe(true);
-      expect(dates[1]! > dates[2]!).toBe(true);
+      const dates = result.map((r) => r.createdAt);
+      expect(dates).toEqual([...dates].sort((a, b) => (a < b ? 1 : -1)));
     });
 
     it('throws when table does not exist in DB', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       const db = new Database(dbPath);
       db.exec('CREATE TABLE some_other_table (id INTEGER PRIMARY KEY)');
       db.close();
@@ -325,13 +326,12 @@ describe('evolution-store', () => {
   });
 
   describe('getEvolutionTask', () => {
-    it('returns null when DB does not exist', () => {
-      const result = getEvolutionTask(tmpDir, 'task-001');
-      expect(result).toBeNull();
+    it('throws TrajectoryDbUnavailableError when DB does not exist', () => {
+      expect(() => getEvolutionTask(tmpDir, 'task-001')).toThrow(TrajectoryDbUnavailableError);
     });
 
     it('returns task by numeric id', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = getEvolutionTask(tmpDir, 1);
@@ -340,7 +340,7 @@ describe('evolution-store', () => {
     });
 
     it('returns task by string taskId', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = getEvolutionTask(tmpDir, 'task-002');
@@ -350,7 +350,7 @@ describe('evolution-store', () => {
     });
 
     it('returns null when task not found by taskId', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = getEvolutionTask(tmpDir, 'nonexistent-task');
@@ -358,7 +358,7 @@ describe('evolution-store', () => {
     });
 
     it('returns null when numeric id not found', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = getEvolutionTask(tmpDir, 999);
@@ -366,7 +366,7 @@ describe('evolution-store', () => {
     });
 
     it('maps all fields correctly when getting by taskId', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const task = getEvolutionTask(tmpDir, 'task-003');
@@ -388,7 +388,7 @@ describe('evolution-store', () => {
     });
 
     it('throws when table does not exist in DB', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       const db = new Database(dbPath);
       db.exec('CREATE TABLE some_other_table (id INTEGER PRIMARY KEY)');
       db.close();
@@ -397,7 +397,7 @@ describe('evolution-store', () => {
     });
 
     it('handles empty string taskId', () => {
-      const dbPath = join(stateDir, '.trajectory.db');
+      const dbPath = join(stateDir, 'trajectory.db');
       setupTestDb(dbPath);
 
       const result = getEvolutionTask(tmpDir, '');

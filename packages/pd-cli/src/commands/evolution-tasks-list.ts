@@ -5,7 +5,7 @@
  *                                 [--limit <number>] [--date-from <date>] [--date-to <date>]
  */
 
-import { listEvolutionTasks } from '@principles/core/evolution-store';
+import { listEvolutionTasks, TrajectoryDbUnavailableError } from '@principles/core/evolution-store';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface EvolutionTasksListOptions {
@@ -18,27 +18,34 @@ interface EvolutionTasksListOptions {
 export async function handleEvolutionTasksList(opts: EvolutionTasksListOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir();
 
+  let tasks;
   try {
-    const tasks = listEvolutionTasks(workspaceDir, {
+    tasks = listEvolutionTasks(workspaceDir, {
       status: opts.status === 'all' ? undefined : opts.status,
       limit: opts.limit,
       dateFrom: opts.dateFrom,
       dateTo: opts.dateTo,
     });
-    if (tasks.length === 0) {
-      console.log('No evolution tasks found.');
-      return;
-    }
-    for (const task of tasks) {
-      const enqueuedAt = task.enqueuedAt ?? 'null';
-      console.log(
-        `[${task.status}] ${task.taskId} (${task.taskKind}) score=${task.score} source=${task.source} enqueued=${enqueuedAt}`
+  } catch (err) {
+    if (err instanceof TrajectoryDbUnavailableError) {
+      console.error(`Error: ${err.message}`);
+      console.error(
+        "Trajectory data lives in the workspace database written by the PD plugin. Initialize this workspace with 'pd runtime init --confirm' or run PD here first."
       );
+      process.exit(1);
     }
-    console.log(`${tasks.length} task(s)`);
-    return;
-  } catch {
+    throw err;
+  }
+
+  if (tasks.length === 0) {
     console.log('No evolution tasks found.');
     return;
   }
+  for (const task of tasks) {
+    const enqueuedAt = task.enqueuedAt ?? 'null';
+    console.log(
+      `[${task.status}] ${task.taskId} (${task.taskKind}) score=${task.score} source=${task.source} enqueued=${enqueuedAt}`
+    );
+  }
+  console.log(`${tasks.length} task(s)`);
 }

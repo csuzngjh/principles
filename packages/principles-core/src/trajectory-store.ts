@@ -4,11 +4,16 @@
  * Extracts listCorrectionSamples and reviewCorrectionSample from TrajectoryDatabase
  * as pure functions that can be used without openclaw-plugin dependency.
  *
+ * Reads the canonical workspace trajectory database
+ * (`{workspaceDir}/.state/trajectory.db`) written by openclaw-plugin
+ * TrajectoryDatabase — see trajectory-db.ts for the shared path contract.
+ *
  * @example
  * import { listCorrectionSamples, reviewCorrectionSample } from '@principles/core/trajectory-store';
  */
 
 import Database from 'better-sqlite3';
+import { existsSync } from 'fs';
 import { join } from 'path';
 
 // ---------------------------------------------------------------------------
@@ -42,8 +47,68 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function getDbPath(workspaceDir: string): string {
-  return join(workspaceDir, '.state', '.trajectory.db');
+// ---------------------------------------------------------------------------
+// Canonical database access (shared with evolution-store)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical trajectory.db location shared by every SDK reader.
+ *
+ * The production writer is openclaw-plugin `TrajectoryDatabase`, whose path
+ * authority is openclaw-plugin `core/paths.ts`
+ * (`PD_FILES.TRAJECTORY_DB = .state/trajectory.db`). principles-core must not
+ * import from openclaw-plugin, so the relative path is pinned here; the
+ * plugin-to-core round-trip test
+ * (openclaw-plugin/tests/core/trajectory-store-round-trip.test.ts) writes
+ * through TrajectoryDatabase and reads through this module — if either side
+ * moves the file, that test fails.
+ *
+ * A missing database is NOT the same as an empty database: readers open the
+ * file through `openTrajectoryDbReadonly`, which throws
+ * `TrajectoryDbUnavailableError` (carrying the path and reason) instead of
+ * silently returning no rows (rc-3 fail-loud-missing, rc-9 no-silent-fallback).
+ */
+export function resolveTrajectoryDbPath(workspaceDir: string): string {
+  return join(workspaceDir, '.state', 'trajectory.db');
+}
+
+/**
+ * The trajectory database cannot be read at its canonical location.
+ *
+ * Distinct from "the database exists and has no rows": callers (CLI commands)
+ * must surface this as an operator-visible failure with a next action, never
+ * as an empty result.
+ */
+export class TrajectoryDbUnavailableError extends Error {
+  readonly dbPath: string;
+
+  constructor(dbPath: string, reason: string) {
+    super(`Trajectory database unavailable at ${dbPath} (${reason})`);
+    this.name = 'TrajectoryDbUnavailableError';
+    this.dbPath = dbPath;
+  }
+}
+
+/**
+ * Open the workspace trajectory database read-only or throw.
+ *
+ * Read-only on purpose: these primitives never create or migrate the file —
+ * the writer (openclaw-plugin TrajectoryDatabase / `pd runtime init`) owns
+ * creation, so a missing file is reported, not papered over.
+ */
+export function openTrajectoryDbReadonly(workspaceDir: string): Database.Database {
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
+
+  if (!existsSync(dbPath)) {
+    throw new TrajectoryDbUnavailableError(dbPath, 'database file does not exist');
+  }
+
+  try {
+    return new Database(dbPath, { readonly: true });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new TrajectoryDbUnavailableError(dbPath, `cannot be opened: ${msg}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -53,24 +118,18 @@ function getDbPath(workspaceDir: string): string {
 /**
  * List correction samples by review status.
  *
- * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/.trajectory.db)
+ * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)
  * @param status - Filter by review status (default: 'pending')
- * @returns Array of CorrectionSampleRecord, or empty array if DB does not exist
+ * @returns Array of CorrectionSampleRecord; empty array means the database
+ *          exists and has no matching rows
+ * @throws TrajectoryDbUnavailableError if the database does not exist or
+ *         cannot be opened — never silently treated as "no samples"
  */
 export function listCorrectionSamples(
   workspaceDir: string,
   status: CorrectionSampleReviewStatus = 'pending',
 ): CorrectionSampleRecord[] {
-  const dbPath = getDbPath(workspaceDir);
-
-   
-  let db: Database.Database;
-  try {
-    db = new Database(dbPath, { readonly: true });
-  } catch {
-    // Graceful fallback: DB does not exist yet
-    return [];
-  }
+  const db = openTrajectoryDbReadonly(workspaceDir);
 
   try {
     const rows = db.prepare(`
@@ -96,10 +155,6 @@ export function listCorrectionSamples(
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     }));
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[PD:TrajectoryStore] Failed to list correction samples: ${msg}`);
-    return [];
   } finally {
     db.close();
   }
@@ -111,9 +166,11 @@ export function listCorrectionSamples(
  * @param sampleId - The sample ID to review
  * @param decision - 'approved' or 'rejected'
  * @param note - Optional review note
- * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/.trajectory.db)
+ * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/trajectory.db)
  * @returns The updated CorrectionSampleRecord
- * @throws Error if the sample is not found or DB cannot be opened
+ * @throws TrajectoryDbUnavailableError if the database does not exist or
+ *         cannot be opened
+ * @throws Error if the sample is not found
  */
 // eslint-disable-next-line @typescript-eslint/max-params
 export function reviewCorrectionSample(
@@ -122,14 +179,18 @@ export function reviewCorrectionSample(
   note: string | undefined,
   workspaceDir: string,
 ): CorrectionSampleRecord {
-  const dbPath = getDbPath(workspaceDir);
+  const dbPath = resolveTrajectoryDbPath(workspaceDir);
 
-   
+  if (!existsSync(dbPath)) {
+    throw new TrajectoryDbUnavailableError(dbPath, 'database file does not exist');
+  }
+
   let db: Database.Database;
   try {
     db = new Database(dbPath);
-  } catch {
-    throw new Error(`Database not found or cannot be opened: ${dbPath}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new TrajectoryDbUnavailableError(dbPath, `cannot be opened: ${msg}`);
   }
 
   const updatedAt = nowIso();
