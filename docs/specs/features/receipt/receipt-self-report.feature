@@ -40,6 +40,14 @@ Feature: Principle Receipt — 软原则自述行 (PRI-532, PRI-755 校验)
     Then principle_applications 没有新增任何 self_reported 行
     And 捕获侧发出未验证告警
 
+  Scenario: 空注入轮后自报上一轮的原则——不写履历、发告警
+    Given principle_receipt_self_report 已启用
+    And 会话 sess-stale 已注入原则 princ-A
+    And 会话 sess-stale 当前轮注入集合为空
+    When assistant 回复包含「📌 应用了你的原则「princ-A」：上一轮用过」（会话 sess-stale）
+    Then principle_applications 没有新增任何 self_reported 行
+    And 捕获侧发出未验证告警
+
   Scenario: 同会话同原则重复标记——只记一行
     Given principle_receipt_self_report 已启用
     And 会话 sess-dup 已注入原则 princ-A

@@ -431,9 +431,16 @@ export function setInjectedProbationIds(sessionId: string, ids: string[], worksp
     return state;
 }
 
-/** PRI-534: record the principle ids injected into this session's prompt context. */
+/**
+ * PRI-534: record the principle ids injected into this session's prompt context.
+ * PRI-755 (review fix): call this on EVERY prompt build with the CURRENT set —
+ * including an empty one. An empty array is a known-empty round and overwrites
+ * a stale non-empty set from an earlier turn; the self-report capture validates
+ * against this set, so keeping a stale set would re-admit markers for
+ * principles no longer injected.
+ */
 export function setInjectedPrincipleIds(sessionId: string | undefined, ids: readonly string[], workspaceDir?: string): void {
-    if (!sessionId || ids.length === 0) return;
+    if (!sessionId) return;
     const state = getOrCreateSession(sessionId, workspaceDir);
     state.injectedPrincipleIds = [...ids];
     touchActivity(state, 'control');

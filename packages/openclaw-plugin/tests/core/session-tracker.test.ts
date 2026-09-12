@@ -205,4 +205,14 @@ describe('Session Tracker', () => {
         (ids as string[]).push('T-99');
         expect(getInjectedPrincipleIds('sess-pri755')).toEqual(['T-01', 'T-02']);
     });
+
+    it('setInjectedPrincipleIds records an empty set as known-empty, clearing stale rounds (PRI-755 review fix)', () => {
+        setInjectedPrincipleIds('sess-pri755', ['T-01']);
+        expect(getInjectedPrincipleIds('sess-pri755')).toEqual(['T-01']);
+
+        // An empty round (no Runtime V2 injection this turn) must OVERWRITE the
+        // stale set — a marker for T-01 after this point is unverifiable.
+        setInjectedPrincipleIds('sess-pri755', []);
+        expect(getInjectedPrincipleIds('sess-pri755')).toEqual([]);
+    });
 });

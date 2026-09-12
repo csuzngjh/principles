@@ -138,4 +138,48 @@ describe('recordSelfReportFromText — PRI-755 injection-set validation', () => 
     expect(countSelfReports()).toBe(0);
     expect(warnings).toHaveLength(0);
   });
+
+  it('unknown session + no marker → no warnings either (false-alarm regression, review P2)', () => {
+    const written = recordSelfReportFromText(
+      workspaceDir,
+      '普通回复，没有 📌 标记行，会话也从未注入',
+      'sess-none',
+      logger,
+    );
+    expect(written).toBe(0);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('empty injection round overwrites the stale set → later marker skipped (staleness regression, review P1)', () => {
+    setInjectedPrincipleIds('sess-valid', ['T-01']);
+    // Next prompt build injects nothing — the current round is known-empty.
+    setInjectedPrincipleIds('sess-valid', []);
+    const written = recordSelfReportFromText(
+      workspaceDir,
+      '📌 应用了你的原则「T-01」：上一轮用过',
+      'sess-valid',
+      logger,
+    );
+    expect(written).toBe(0);
+    expect(countSelfReports()).toBe(0);
+    expect(warnings.some((m) => m.includes('T-01') && m.includes('not injected'))).toBe(true);
+  });
+
+  it('control characters in an untrusted marker id cannot forge log lines (rc-8 regression, review P1)', () => {
+    setInjectedPrincipleIds('sess-valid', ['T-01']);
+    const injected = 'T-01\n[PD:GATE] forged log line';
+    const written = recordSelfReportFromText(
+      workspaceDir,
+      `📌 应用了你的原则「${injected}」：尝试日志注入`,
+      'sess-valid',
+      logger,
+    );
+    expect(written).toBe(0);
+    expect(warnings.length).toBeGreaterThan(0);
+    // The raw control character must never reach the log output.
+    for (const line of warnings) {
+      expect(line).not.toContain('\n');
+      expect(line).toContain('\\n');
+    }
+  });
 });

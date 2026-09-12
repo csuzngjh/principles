@@ -12,7 +12,7 @@
  * Never throws: ledger failures degrade to false + caller-side warn (rc-9) —
  * the hook decision (block/allow/inject) is NEVER affected by ledger writes.
  */
-import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS } from '@principles/core/runtime-v2';
+import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS, safeStringifyPreview } from '@principles/core/runtime-v2';
 import Database from 'better-sqlite3';
 import * as nodePath from 'node:path';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
@@ -229,22 +229,26 @@ export function recordSelfReportFromText(
   // prove membership — markers are skipped with a structured warn (rc-9),
   // never written on faith. This bounds the ledger to verified claims: a
   // hallucinated, echoed, or legacy-block principle id never becomes history.
+  // Scan FIRST: text without any marker must not produce membership warnings.
+  const matches = [...text.matchAll(SELF_REPORT_MARKER)];
+  if (matches.length === 0) return 0;
+
   const injectedIds = sessionId ? getInjectedPrincipleIds(sessionId) : undefined;
   if (!injectedIds) {
     logger?.warn?.(
-      `[PD:ReceiptLedger] self_report capture skipped: no tracked injection set for session ${sessionId ?? '(none)'} — marker not verifiable (PRI-755)`,
+      `[PD:ReceiptLedger] self_report capture skipped: no tracked injection set for session ${safeLogField(sessionId)} — marker not verifiable (PRI-755)`,
     );
     return 0;
   }
   const injected = new Set(injectedIds);
 
   let written = 0;
-  for (const match of text.matchAll(SELF_REPORT_MARKER)) {
+  for (const match of matches) {
     const principleId = (match[1] ?? '').trim();
     if (principleId.length === 0) continue;
     if (!injected.has(principleId)) {
       logger?.warn?.(
-        `[PD:ReceiptLedger] self_report skipped: principle ${principleId} was not injected into session ${sessionId} — unverified claim not recorded (PRI-755)`,
+        `[PD:ReceiptLedger] self_report skipped: principle ${safeLogField(principleId)} was not injected into session ${safeLogField(sessionId)} — unverified claim not recorded (PRI-755)`,
       );
       continue;
     }
@@ -262,10 +266,19 @@ export function recordSelfReportFromText(
         : 0;
       written += changes > 0 ? 1 : 0;
     } catch (ledgerErr) {
-      logger?.warn?.(`[PD:ReceiptLedger] self_report row write failed for principle ${principleId}: ${String(ledgerErr)}`);
+      logger?.warn?.(`[PD:ReceiptLedger] self_report row write failed for principle ${safeLogField(principleId)}: ${String(ledgerErr)}`);
     }
   }
   return written;
+}
+
+/**
+ * PRI-755 (review fix): marker ids and session ids are untrusted input —
+ * JSON-encode (single-line by construction, rc-8) before interpolating into
+ * warn logs so control characters cannot forge additional log lines.
+ */
+function safeLogField(value: string | undefined): string {
+  return safeStringifyPreview(value ?? '(none)', 200);
 }
 
 /** Test hook: close cached connections and reset the retention sweep clock. */

@@ -34,7 +34,7 @@ const PRINCIPLES = [
 ];
 
 /** Every session id seeded or captured against in this feature — cleared in afterEach. */
-const TRACKED_SESSIONS = ['sess-sr', 'sess-dup', 'sess-bad', 'sess-off', 'sess-fresh'];
+const TRACKED_SESSIONS = ['sess-sr', 'sess-dup', 'sess-bad', 'sess-off', 'sess-fresh', 'sess-stale'];
 
 function captureLogger(): { warn?: (m: string) => void } {
   return { warn: (m: string) => captureWarnings.push(m) };
@@ -64,9 +64,15 @@ registry.given(/principle_receipt_self_report (已|未)启用/, (_m: string, sta
 });
 
 registry.given(/会话 (sess-[\w-]+) 已注入原则 (princ-[\w-]+)/, (_m: string, sessionId: string, principleId: string) => {
-  // PRI-755: what production prompt.ts:684 does per prompt build — track the
+  // PRI-755: what production prompt.ts does per prompt build — track the
   // injected v2 principle ids the capture side validates against.
   setInjectedPrincipleIds(sessionId, [principleId], workspaceDir);
+});
+
+registry.given(/会话 (sess-[\w-]+) 当前轮注入集合为空/, (_m: string, sessionId: string) => {
+  // PRI-755 review fix: an empty round OVERWRITES the stale set (production
+  // prompt.ts now records every build, empty included).
+  setInjectedPrincipleIds(sessionId, [], workspaceDir);
 });
 
 registry.when(/渲染原则指令块/, () => {
@@ -131,6 +137,18 @@ registry.when(/assistant 回复包含「📌 应用了你的原则「princ-A」�
     workspaceDir,
     '📌 应用了你的原则「princ-A」：先读文档再动手',
     'sess-fresh',
+    captureLogger(),
+  );
+  expect(written).toBe(0);
+});
+
+registry.when(/assistant 回复包含「📌 应用了你的原则「princ-A」：上一轮用过」（会话 sess-stale）/, () => {
+  // PRI-755 review fix: the tracked set was emptied by the current round —
+  // the previous round's princ-A is stale and must not be recorded.
+  const written = recordSelfReportFromText(
+    workspaceDir,
+    '📌 应用了你的原则「princ-A」：上一轮用过',
+    'sess-stale',
     captureLogger(),
   );
   expect(written).toBe(0);
