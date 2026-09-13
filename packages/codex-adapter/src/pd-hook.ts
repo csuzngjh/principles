@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import type { HostEventKind } from '@principles/core/host';
+import { appendEventLogLine, redactTelemetryString } from '@principles/core/runtime-v2';
+import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
@@ -13,6 +15,41 @@ import { runGovernanceAdmission } from './ingestion/admission.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface PdHookResult { stdout: unknown; exitCode: number; stderr: string[] }
+
+/**
+ * PRI-750: event emitter for the Codex subprocess model. Writes the same
+ * `events_<date>.jsonl` line shape as the OpenClaw EventLog via the core
+ * writer, so the Codex host path stays independent of the OpenClaw plugin
+ * (codex-adapter must not depend on principles-disciple — bundle guard).
+ */
+function codexEventEmitter(stateDir: string): HostEventEmitter {
+  return {
+    recordRuntimeV2ActivationsInjected(data) {
+      appendEventLogLine(stateDir, {
+        ts: new Date().toISOString(),
+        type: 'runtime_v2_prompt_activations_injected',
+        category: 'injected',
+        sessionId: data.sessionId,
+        data,
+      });
+    },
+    recordToolCall(sessionId, data) {
+      // rc-8: tool events are telemetry — redact every string field before
+      // persisting (same policy as the OpenClaw EventLog redactEventData).
+      const redacted: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(data)) {
+        redacted[key] = typeof value === 'string' ? redactTelemetryString(value) : value;
+      }
+      appendEventLogLine(stateDir, {
+        ts: new Date().toISOString(),
+        type: 'tool_call',
+        category: data.error || (data.exitCode !== undefined && data.exitCode !== 0) ? 'failure' : 'success',
+        sessionId,
+        data: redacted,
+      });
+    },
+  };
+}
 const MAX_DIAGNOSTIC = 500;
 
 function diagnostic(reason: string, nextAction: string): string {
@@ -119,7 +156,16 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     const ingestionDiagnostics = ingestionEnabled
       ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
       : [];
-    const result = await createProductionHostRuntime({ hostKind: 'codex', toolSemantics: CODEX_TOOL_SEMANTICS }).dispatch(event);
+    // PRI-750: emit shared-path injection/tool events with the host's natural
+    // turn/tool ids (turn_id → runId, tool_use_id → toolCallId) through the core
+    // event-JSONL writer (same events_*.jsonl format as the OpenClaw EventLog;
+    // the Codex adapter stays independent of the OpenClaw plugin). The line
+    // writer appends synchronously — no flush/dispose needed for the subprocess.
+    const result = await createProductionHostRuntime({
+      hostKind: 'codex',
+      toolSemantics: CODEX_TOOL_SEMANTICS,
+      events: codexEventEmitter(path.join(resolution.workspaceDir, '.state')),
+    }).dispatch(event);
     const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {

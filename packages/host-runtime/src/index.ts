@@ -3,7 +3,9 @@ import {
   isHostEventResult,
   type HostEvent,
   type HostEventResult,
+  type HostEventEmitter,
 } from '@principles/core/host';
+import { RUNTIME_V2_PRINCIPLE_BUDGET } from '@principles/core/runtime-v2';
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
@@ -220,6 +222,15 @@ export function createProductionHostRuntime(
     hostKind?: GovernanceHostKind;
     /** PRI-634-F: host-declared tool semantics supplied by the constructing host adapter. */
     toolSemantics?: ToolSemanticRegistry;
+    /**
+     * PRI-750: optional event emission port. When present, the shared-path
+     * handlers record injection/tool events carrying the host's natural
+     * turn/tool ids (turnId/toolCallId) in the same events_*.jsonl format as
+     * the OpenClaw path (whose events additionally bind to
+     * assistant_turns.run_id). Only the Codex host adapter wires this; the
+     * OpenClaw plugin path owns its own emission.
+     */
+    events?: HostEventEmitter;
   } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
@@ -233,6 +244,7 @@ export function createProductionHostRuntime(
       ...(options.painEnrichmentProvider ? { painEnrichmentProvider: options.painEnrichmentProvider } : {}),
       ...(options.painDatabaseFactory ? { painDatabaseFactory: options.painDatabaseFactory } : {}),
       ...(options.hostKind ? { hostKind: options.hostKind } : {}),
+      ...(options.events ? { events: options.events } : {}),
     }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {
@@ -240,11 +252,45 @@ export function createProductionHostRuntime(
         workspaceDir: event.context.workspaceDir,
         excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
       });
-      if (options.beforePromptBuild) return options.beforePromptBuild(event, prompt);
+      // PRI-750: record the injection event on the shared path with the host
+      // turn id (Codex turn_id → runId) so receipt events carry a turn-level
+      // anchor in the same events_*.jsonl format as the OpenClaw path. The
+      // OpenClaw plugin additionally persists these to assistant_turns.run_id;
+      // the Codex DB-side anchor is a follow-up. Optional port — absent means
+      // no-op (the OpenClaw plugin path emits this event itself). Emission
+      // failure must not block the prompt result — it degrades to an
+      // observable warning (rc-9).
+      const emissionWarnings: string[] = [];
+      try {
+        options.events?.recordRuntimeV2ActivationsInjected({
+          sessionId: event.context.sessionId,
+          workspaceDir: event.context.workspaceDir,
+          principleIds: prompt.principleIds,
+          activationIds: prompt.activationIds,
+          artifactIds: prompt.artifactIds,
+          injectedCount: prompt.principleIds.length,
+          skippedWarnings: prompt.warnings,
+          injectedCharCount: prompt.additionalContext.length,
+          budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+          ...(prompt.truncated !== undefined ? { v2Truncated: prompt.truncated } : {}),
+          ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
+        });
+      } catch (err) {
+        emissionWarnings.push(`receipt_event_write_failed:${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);
+      }
+      // PRI-750 review: a custom beforePromptBuild must not swallow the
+      // receipt-emission warnings captured above (rc-9) — merge them into the
+      // handler result instead of replacing the result wholesale.
+      if (options.beforePromptBuild) {
+        const custom = await options.beforePromptBuild(event, prompt);
+        if (emissionWarnings.length === 0) return custom;
+        return { ...custom, warnings: [...(custom.warnings ?? []), ...emissionWarnings] };
+      }
       return {
         decision: prompt.additionalContext.length > 0 ? 'modify' : 'allow',
         source: event.source,
         ...(prompt.additionalContext.length > 0 ? { additionalContext: prompt.additionalContext } : {}),
+        ...(emissionWarnings.length > 0 ? { warnings: emissionWarnings } : {}),
       };
     },
   });
