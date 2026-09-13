@@ -15,6 +15,7 @@ export type {
   HostDecision,
   HostEventResult,
   HostAdapter,
+  HostEventEmitter,
 } from './host-adapter.js';
 
 export {

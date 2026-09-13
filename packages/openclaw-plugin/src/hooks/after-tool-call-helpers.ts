@@ -34,6 +34,15 @@ import type { ToolCallOutcome, ToolCallObservation, PainAdmissionDecision } from
 const RESULT_PREVIEW_MAX_LENGTH = 500;
 
 /**
+ * PRI-750: narrow an untrusted host id field (rc-1) — only non-empty strings
+ * pass. The OpenClaw after_tool_call event types these ids as `unknown` via
+ * the SDK index signature; the host supplies `runId`/`toolCallId`.
+ */
+function hostIdString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+/**
  * Extract a preview string from tool call result for diagnostic evidence.
  * Pure function — no I/O, no side effects. ERR-001 / ERR-014 compliant.
  */
@@ -243,6 +252,11 @@ export function handleFrictionTrackingForFailure(
     exitCode: outcome.exitCode as number | undefined,
     gfiBefore,
     gfiAfter: updatedState.currentGfi,
+    // PRI-750: host run/tool ids from the after_tool_call event — DIRECT
+    // turn binding to assistant_turns.run_id. Absent when the host supplies
+    // none (event stays compatible).
+    runId: hostIdString(event.runId),
+    toolCallId: hostIdString(event.toolCallId),
   });
 
   if (options.recordTrajectory !== false) wctx.trajectory?.recordToolCall?.({
@@ -313,6 +327,10 @@ export function handleFrictionTrackingForSuccess(
     gfi: resetState.currentGfi,
     gfiBefore,
     gfiAfter: resetState.currentGfi,
+    // PRI-750: host run/tool ids from the after_tool_call event — DIRECT
+    // turn binding to assistant_turns.run_id.
+    runId: hostIdString(event.runId),
+    toolCallId: hostIdString(event.toolCallId),
   });
 
   return resetState;

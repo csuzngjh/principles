@@ -3,7 +3,9 @@ import {
   isHostEventResult,
   type HostEvent,
   type HostEventResult,
+  type HostEventEmitter,
 } from '@principles/core/host';
+import { RUNTIME_V2_PRINCIPLE_BUDGET } from '@principles/core/runtime-v2';
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
@@ -220,6 +222,14 @@ export function createProductionHostRuntime(
     hostKind?: GovernanceHostKind;
     /** PRI-634-F: host-declared tool semantics supplied by the constructing host adapter. */
     toolSemantics?: ToolSemanticRegistry;
+    /**
+     * PRI-750: optional event emission port. When present, the shared-path
+     * handlers record injection/tool events carrying the host's natural
+     * turn/tool ids (turnId/toolCallId) for DIRECT binding to
+     * assistant_turns.run_id. Only the Codex host adapter wires this (single
+     * EventLog writer); the OpenClaw plugin path owns its own emission.
+     */
+    events?: HostEventEmitter;
   } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
@@ -233,12 +243,30 @@ export function createProductionHostRuntime(
       ...(options.painEnrichmentProvider ? { painEnrichmentProvider: options.painEnrichmentProvider } : {}),
       ...(options.painDatabaseFactory ? { painDatabaseFactory: options.painDatabaseFactory } : {}),
       ...(options.hostKind ? { hostKind: options.hostKind } : {}),
+      ...(options.events ? { events: options.events } : {}),
     }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
         excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
+      });
+      // PRI-750: record the injection event on the shared path with the host
+      // turn id (Codex turn_id → runId) so the receipt chain joins DIRECTly
+      // to assistant_turns.run_id. Optional port — absent means no-op (the
+      // OpenClaw plugin path emits this event itself).
+      options.events?.recordRuntimeV2ActivationsInjected({
+        sessionId: event.context.sessionId,
+        workspaceDir: event.context.workspaceDir,
+        principleIds: prompt.principleIds,
+        activationIds: prompt.activationIds,
+        artifactIds: prompt.artifactIds,
+        injectedCount: prompt.principleIds.length,
+        skippedWarnings: prompt.warnings,
+        injectedCharCount: prompt.additionalContext.length,
+        budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+        ...(prompt.truncated !== undefined ? { v2Truncated: prompt.truncated } : {}),
+        ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
       });
       if (options.beforePromptBuild) return options.beforePromptBuild(event, prompt);
       return {

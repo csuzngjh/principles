@@ -405,7 +405,7 @@ export type {
   PainIngressParseResult,
 } from './pain-ingress.js';
 /** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
-export { recordPainSignalObservability } from './pain-signal-observability.js';
+export { recordPainSignalObservability, appendEventLogLine } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
 export { sanitizeString, sanitizeValue, sanitizeToolParams, convergePath, MAX_EVIDENCE_VALUE_CHARS } from './evidence-sanitizer.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */

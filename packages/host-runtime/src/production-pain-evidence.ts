@@ -11,7 +11,7 @@ import {
   sanitizeValue,
 } from '@principles/core/runtime-v2';
 import type { GovernanceHostKind } from '@principles/core/runtime-v2';
-import type { HostEvent, HostEventResult } from '@principles/core/host';
+import type { HostEvent, HostEventEmitter, HostEventResult } from '@principles/core/host';
 
 const WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace']);
 /** Shared with the governance admission path so both gate tool failures identically. */
@@ -305,8 +305,25 @@ function hasCanonicalSchema(db: Database.Database): boolean {
  * this shared handler (OpenClaw / Codex adapters) — never guessed inside the
  * writer. Omitted -> NULL (unknown).
  */
-export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory; hostKind?: GovernanceHostKind } = {}) {
+export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory; hostKind?: GovernanceHostKind; events?: HostEventEmitter } = {}) {
   return async (event: HostEvent): Promise<HostEventResult> => {
+    // PRI-750: shared-path tool event with the host's natural turn/tool ids
+    // (Codex turn_id → runId, tool_use_id → toolCallId) — DIRECT binding to
+    // assistant_turns.run_id. Emitted BEFORE the trajectory-db availability
+    // gate so the receipt chain stays observable even when the trajectory
+    // store is unavailable (rc-9). Optional port: absent means no-op (the
+    // OpenClaw plugin path emits its own tool events).
+    {
+      const earlyOutcome = normalizeOutcome(event);
+      options.events?.recordToolCall(event.context.sessionId, {
+        toolName: event.context.toolName ?? '',
+        ...(earlyOutcome.error ? { error: earlyOutcome.error } : {}),
+        ...(earlyOutcome.exitCode !== 0 ? { exitCode: earlyOutcome.exitCode } : {}),
+        ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
+        ...(event.context.toolCallId !== undefined ? { toolCallId: event.context.toolCallId } : {}),
+      });
+    }
+
     const dbPath = path.join(event.context.workspaceDir, '.state', 'trajectory.db');
     if (!fs.existsSync(dbPath)) {
       return { decision: 'observe', source: event.source, warnings: ['trajectory_db_not_found'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'initialize the selected PD workspace before retrying the hook' } };
