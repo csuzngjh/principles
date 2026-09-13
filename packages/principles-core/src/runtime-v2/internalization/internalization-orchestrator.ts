@@ -428,7 +428,14 @@ export class InternalizationOrchestrator {
     // verdict 作 legacy 判据; 两者皆无 → BLOCKED_MISSING_VERDICT (fail-closed,
     // 禁止 missing=ADVANCE 复活审计的错误旁路)。
     const legacyVerdict = await this.resolveLegacyRunnerVerdict(taskId, rawTask.taskKind);
-    const transition = decideInternalizationTransition(transitionInputFromTask(piTask, legacyVerdict));
+    // PRI-758: an `approved` evaluator verdict whose deterministic adversarial
+    // replay FAILED must not ADVANCE (no rollout successor while the rule
+    // artifact is absent and repair is pending/required). Derived from the
+    // same durable runs the legacy verdict reads — fresh/resume-stable.
+    const adversarialReplayFailed = rawTask.taskKind === 'evaluator'
+      ? await this.resolveAdversarialReplayFailed(taskId)
+      : false;
+    const transition = decideInternalizationTransition(transitionInputFromTask(piTask, legacyVerdict, { adversarialReplayFailed }));
     if (transition.kind === 'HUMAN_REVIEW_REQUIRED') {
       return { decision: 'source_not_succeeded', taskId, status: piTask.status };
     }
@@ -717,6 +724,38 @@ export class InternalizationOrchestrator {
    * 新数据由 runner 的 durable runnerDecision 承载。解析失败/缺失 → undefined。
    * rc-1/rc-2: output_payload 按不可信 JSON 处理,逐字段类型守卫。
    */
+  /**
+   * PRI-758: true when the evaluator's latest succeeded run carries a
+   * deterministic adversarial replay that RAN and FAILED (passed===false).
+   * This is the durable signal that the approved rule artifact was never
+   * assembled and the chain must not ADVANCE while repair is required.
+   */
+  private async resolveAdversarialReplayFailed(taskId: string): Promise<boolean> {
+    let runs: { outputPayload?: string }[];
+    try {
+      runs = await this.stateManager.getRunsByTask(taskId);
+    } catch {
+      return false;
+    }
+    for (const run of [...runs].reverse()) {
+      const raw = run.outputPayload;
+      if (typeof raw !== 'string' || raw.length === 0) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (typeof parsed !== 'object' || parsed === null) continue;
+      const obj = parsed as Record<string, unknown>;
+      if (Object.hasOwn(obj, 'adversarialResult') && typeof obj.adversarialResult === 'object' && obj.adversarialResult !== null) {
+        const ar = obj.adversarialResult as Record<string, unknown>;
+        return ar.passed === false;
+      }
+    }
+    return false;
+  }
+
   private async resolveLegacyRunnerVerdict(taskId: string, taskKind: string): Promise<string | undefined> {
     if (taskKind !== 'evaluator' && taskKind !== 'rollout_reviewer') return undefined;
     let runs: { outputPayload?: string }[];
