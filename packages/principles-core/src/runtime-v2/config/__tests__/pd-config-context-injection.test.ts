@@ -50,7 +50,6 @@ describe('ContextInjection config validation', () => {
     const effective = computeEffectivePdConfig(result.value);
     expect(effective.resolvedContextInjection.thinkingOs).toBe(true);
     expect(effective.resolvedContextInjection.projectFocus).toBe('off');
-    expect(effective.resolvedContextInjection.evolutionContext.enabled).toBe(true);
   });
 
   it('accepts contextInjection with only projectFocus', () => {
@@ -65,34 +64,11 @@ describe('ContextInjection config validation', () => {
     expect(effective.resolvedContextInjection.projectFocus).toBe('summary');
   });
 
-  it('accepts contextInjection with evolutionContext', () => {
-    const raw = makeValidConfig();
-    raw.contextInjection = {
-      evolutionContext: {
-        enabled: false,
-        maxMessages: 10,
-        maxCharsPerMessage: 500,
-      },
-    };
-    const result = validatePdConfig(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('Expected ok');
-    const effective = computeEffectivePdConfig(result.value);
-    expect(effective.resolvedContextInjection.evolutionContext.enabled).toBe(false);
-    expect(effective.resolvedContextInjection.evolutionContext.maxMessages).toBe(10);
-    expect(effective.resolvedContextInjection.evolutionContext.maxCharsPerMessage).toBe(500);
-  });
-
   it('accepts full contextInjection config', () => {
     const raw = makeValidConfig();
     raw.contextInjection = {
       thinkingOs: false,
       projectFocus: 'off',
-      evolutionContext: {
-        enabled: true,
-        maxMessages: 5,
-        maxCharsPerMessage: 300,
-      },
     };
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(true);
@@ -100,9 +76,45 @@ describe('ContextInjection config validation', () => {
     const effective = computeEffectivePdConfig(result.value);
     expect(effective.resolvedContextInjection.thinkingOs).toBe(false);
     expect(effective.resolvedContextInjection.projectFocus).toBe('off');
-    expect(effective.resolvedContextInjection.evolutionContext.enabled).toBe(true);
-    expect(effective.resolvedContextInjection.evolutionContext.maxMessages).toBe(5);
-    expect(effective.resolvedContextInjection.evolutionContext.maxCharsPerMessage).toBe(300);
+  });
+
+  it('tolerates legacy evolutionContext with a removal warning (PRI-772)', () => {
+    const raw = makeValidConfig();
+    raw.contextInjection = {
+      evolutionContext: {
+        enabled: false,
+        maxMessages: 10,
+        maxCharsPerMessage: 500,
+      },
+    } as unknown as PdConfig['contextInjection'];
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected ok');
+    expect(result.warnings.some(w => w.includes('evolutionContext'))).toBe(true);
+    const effective = computeEffectivePdConfig(result.value);
+    expect(Object.hasOwn(effective.resolvedContextInjection, 'evolutionContext')).toBe(false);
+  });
+
+  it('tolerates legacy evolutionContext regardless of value shape', () => {
+    const raw = makeValidConfig();
+    raw.contextInjection = {
+      evolutionContext: 'enabled',
+    } as unknown as PdConfig['contextInjection'];
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected ok');
+    expect(result.warnings.some(w => w.includes('retired no-op'))).toBe(true);
+  });
+
+  it('emits no evolutionContext warning when the key is absent', () => {
+    const raw = makeValidConfig();
+    raw.contextInjection = {
+      thinkingOs: true,
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected ok');
+    expect(result.warnings.some(w => w.includes('evolutionContext'))).toBe(false);
   });
 
   it('rejects contextInjection with non-boolean thinkingOs', () => {
@@ -142,110 +154,6 @@ describe('ContextInjection config validation', () => {
     if (result.ok) throw new Error('Expected error');
     expect(result.errors.some(e =>
       e.path.includes('projectFocus')
-    )).toBe(true);
-  });
-
-  it('rejects contextInjection with non-object evolutionContext', () => {
-    const raw = makeValidConfig();
-    raw.contextInjection = {
-      evolutionContext: 'enabled' as unknown as { enabled: boolean },
-    };
-    const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('evolutionContext') &&
-      e.reason.includes('object')
-    )).toBe(true);
-  });
-
-  it('rejects contextInjection with non-boolean evolutionContext.enabled', () => {
-    const raw = makeValidConfig();
-    raw.contextInjection = {
-      evolutionContext: {
-        enabled: 'true' as unknown as boolean,
-        maxMessages: 4,
-        maxCharsPerMessage: 200,
-      },
-    };
-    const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('evolutionContext.enabled') &&
-      e.reason.includes('boolean')
-    )).toBe(true);
-  });
-
-  it('rejects contextInjection with negative maxMessages', () => {
-    const raw = makeValidConfig();
-    raw.contextInjection = {
-      evolutionContext: {
-        enabled: true,
-        maxMessages: -1,
-        maxCharsPerMessage: 200,
-      },
-    };
-    const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('maxMessages') &&
-      e.reason.includes('non-negative')
-    )).toBe(true);
-  });
-
-  it('rejects contextInjection with non-integer maxMessages', () => {
-    const raw = makeValidConfig();
-    raw.contextInjection = {
-      evolutionContext: {
-        enabled: true,
-        maxMessages: 4.5,
-        maxCharsPerMessage: 200,
-      },
-    };
-    const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('maxMessages') &&
-      e.reason.includes('integer')
-    )).toBe(true);
-  });
-
-  it('rejects contextInjection with negative maxCharsPerMessage', () => {
-    const raw = makeValidConfig();
-    raw.contextInjection = {
-      evolutionContext: {
-        enabled: true,
-        maxMessages: 4,
-        maxCharsPerMessage: -100,
-      },
-    };
-    const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('maxCharsPerMessage') &&
-      e.reason.includes('non-negative')
-    )).toBe(true);
-  });
-
-  it('rejects contextInjection with non-integer maxCharsPerMessage', () => {
-    const raw = makeValidConfig();
-    raw.contextInjection = {
-      evolutionContext: {
-        enabled: true,
-        maxMessages: 4,
-        maxCharsPerMessage: 200.5,
-      },
-    };
-    const result = validatePdConfig(raw);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected error');
-    expect(result.errors.some(e =>
-      e.path.includes('maxCharsPerMessage') &&
-      e.reason.includes('integer')
     )).toBe(true);
   });
 
@@ -297,9 +205,6 @@ describe('ContextInjection config validation', () => {
     const effective = computeEffectivePdConfig(result.value);
     expect(effective.resolvedContextInjection.thinkingOs).toBe(false);
     expect(effective.resolvedContextInjection.projectFocus).toBe('off');
-    expect(effective.resolvedContextInjection.evolutionContext.enabled).toBe(true);
-    expect(effective.resolvedContextInjection.evolutionContext.maxMessages).toBe(4);
-    expect(effective.resolvedContextInjection.evolutionContext.maxCharsPerMessage).toBe(200);
   });
 
   it('merges partial contextInjection with defaults', () => {
@@ -313,24 +218,5 @@ describe('ContextInjection config validation', () => {
     const effective = computeEffectivePdConfig(result.value);
     expect(effective.resolvedContextInjection.thinkingOs).toBe(false);
     expect(effective.resolvedContextInjection.projectFocus).toBe('off');
-    expect(effective.resolvedContextInjection.evolutionContext.enabled).toBe(true);
-    expect(effective.resolvedContextInjection.evolutionContext.maxMessages).toBe(4);
-    expect(effective.resolvedContextInjection.evolutionContext.maxCharsPerMessage).toBe(200);
-  });
-
-  it('accepts evolutionContext with only enabled field (uses defaults for other fields)', () => {
-    const raw = makeValidConfig();
-    raw.contextInjection = {
-      evolutionContext: {
-        enabled: false,
-      },
-    };
-    const result = validatePdConfig(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('Expected ok');
-    const effective = computeEffectivePdConfig(result.value);
-    expect(effective.resolvedContextInjection.evolutionContext.enabled).toBe(false);
-    expect(effective.resolvedContextInjection.evolutionContext.maxMessages).toBe(4);
-    expect(effective.resolvedContextInjection.evolutionContext.maxCharsPerMessage).toBe(200);
   });
 });

@@ -96,11 +96,6 @@ export const DEFAULT_UI: UiConfig = {
 export const DEFAULT_CONTEXT_INJECTION: ContextInjectionConfig = {
   thinkingOs: false,
   projectFocus: 'off',
-  evolutionContext: {
-    enabled: true,
-    maxMessages: 4,
-    maxCharsPerMessage: 200,
-  },
 };
 
 // ── Full Default Config ─────────────────────────────────────────────────────
