@@ -101,6 +101,86 @@ strictest reversible posture.
 ## References
 
 - Spec: [`2026-06-27-rulecode-context-vision-design.md`](../superpowers/specs/2026-06-27-rulecode-context-vision-design.md)
-- Plan: [`2026-06-28-rulecode-context-v2.md`](../superpowers/plans/2026-06-28-rulecode-context-v2.md)
+- Plan: [`2026-06-28-rulecode-context-v2.md`](../plans/2026-06-28-rulecode-context-v2.md)
 - Parent epic: PRI-478
 - ADR-0014 (MVP-First Strategy) — governs the quiet/core triage used here
+
+## Amendment (2026-09-13): PRI-780 — Default-On Convergence of Runtime Governance Context
+
+> **Status of amendment**: Accepted (SPEC v2 + Linear [PRI-780](https://linear.app/principlesdisciple/issue/PRI-780/runtime-governance-context-收敛rulecontextv2-成为唯一默认治理上下文), implementation directive issued 2026-09-13)
+> **Authority**: Owner-approved SPEC v2 "Runtime Governance Context Convergence"; root evidence: [PRI-758](https://linear.app/principlesdisciple/issue/PRI-758) RuleCode behavior-loop validation (0 activations; complex principles degraded to action-only rules) + Implementation Readiness Reality Audit (2026-09-13, recorded in the PRI-780 ticket).
+> **Supersedes within this ADR**: the "quiet, **default-off**" registration posture in §Decision and §Rollback Path below. The flag stays `quiet`-category but flips to `enabled: true`. All other historical passages are retained as decision history.
+
+### A.1 What changed in reality since 2026-06-28
+
+All phases the original ADR anticipated have landed and are verified by tests:
+`RuleContextV2` schema + validators (`rule-context-v2.ts`), the production
+assembler over the real trajectory source (`rule-context-assembler.ts` /
+`buildProductionRuleContext`), RuleHost context injection on **both** runtime
+governance routes (legacy `openclaw-plugin/src/hooks/gate.ts` and the shared
+`host-runtime` production gate via the OpenClaw `ruleContextProvider` wiring),
+v2 artifact gating at activation (`rule-host-writer.ts`) and evaluation
+(`rule-host.ts` `suspended_by_flag`, shared gate `rule_context_v2_unavailable`
+skip + warning). What never happened is the graduation: the flag remained
+default-off, so production `RuleHostInput.context` stayed absent and the
+Artificer kept a v1/v2 branch in which the production task-driven paths
+(consumer cycle, run-once) were permanently pinned to v1.
+
+### A.2 Decisions authorized by this amendment
+
+1. **Default-on flip.** `rulecode_context_v2` becomes `enabled: true` in the
+   flag registry SSoT (`feature-flag-contract.ts`). Category stays `quiet`:
+   explicit `.pd/config.yaml` disable remains the migration-period kill
+   switch. No new context flag is introduced.
+2. **Both routes covered.** Convergence targets the two coexisting runtime
+   governance routes (legacy OpenClaw hook path and shared host-runtime
+   production gate). Both assemble context through the same
+   `buildRuleContextIfEnabled`; `abstraction_layer_v1` keeps selecting the
+   route. Route unification is a non-goal of PRI-780.
+3. **Sequencing precondition.** The Codex capability declaration lands
+   BEFORE the default flip: Codex declares structured-unsupported runtime
+   context (flag-aware unavailable-posture context, see A.3), never a silent
+   skip.
+4. **BEP stays Owner-labelled.** `BehaviorExamplePack` remains
+   Owner-labelled evidence. Trajectory execution outcomes are NOT Owner
+   allow/block judgements and must not auto-generate a BEP. Missing BEP at
+   v2 generation = explicit failure; silent downgrade to a low-capability
+   (v1/action-only) rule is prohibited.
+5. **Artificer V2-only generation contract.** The `contextMode=v1` prompt
+   branch and the v1/v2 mode field are deleted; generation is v2-only
+   (`requiresContextVersion: 2` or explicit failure). Persisted legacy v1
+   artifacts keep evaluating unchanged — existing rules must not silently
+   gain new semantic dependencies (evaluation-side v1 compatibility for
+   already-approved artifacts remains).
+
+### A.3 Codex structured-unsupported declaration
+
+The Codex adapter passes no runtime context provider capability. Instead of
+leaving v2 rules to be skipped with a generic warning, Codex declares a
+schema-valid `unavailable`-posture `RuleContextV2`
+(`unavailableReason: codex_runtime_context_unsupported…`). Effects: v2 rules
+stay loaded on Codex and evaluate deterministically under the
+"context unavailable → allow, matched:false" contract; the declaration is
+flag-aware (flag disabled → `undefined` → same suspension semantics as
+OpenClaw, preserving the kill switch on both hosts).
+
+### A.4 Consequences
+
+- **Positive:** `RuleHostInput.context` is present by default; complex
+  principles can compile into evidence-aware RuleCode; the generation,
+  evaluation, and execution sides share one Runtime Governance Context.
+- **Behavior change (intended):** automatic code-rule generation without
+  Owner-labelled behavior examples now fails loud at the artificer stage
+  (task retries, then `needs_human_review`). Code-rule generation becomes
+  Owner-gated by design; text-principle flows are unaffected. Runbooks
+  updated accordingly.
+- **Risk / rollback:** explicit config disable
+  (`features.rulecode_context_v2.enabled: false`) restores the pre-flip
+  posture (context absent; v2 generation refused rather than silently v1 —
+  see A.2.5).
+
+### A.5 Revised acceptance criteria
+
+See Linear PRI-780 (SPEC v2, AC1–AC7), including the reality-evidence
+requirement: real `trajectory` → assembler → `RuleHostInput` → decision
+chain, no synthetic-only verification.

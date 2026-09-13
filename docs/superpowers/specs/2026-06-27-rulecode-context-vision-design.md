@@ -6,6 +6,11 @@
 >
 > 状态：Design ready for maintainer review，尚未批准实施
 >
+> **状态更新（2026-09-13）**：本设计的"flag 默认关闭"迁移姿态已被
+> [ADR 2026-06-28 Amendment (PRI-780)](../../adr/2026-06-28-rulecode-context-v2.md)
+> 取代——`rulecode_context_v2` 已收敛为默认启用（quiet 类别保留为迁移期熔断）。
+> 本文其余内容保留为设计历史，不再是当前实施指令。
+>
 > 代码基线：main@89c0cd09
 
 ## 0. 决策摘要
