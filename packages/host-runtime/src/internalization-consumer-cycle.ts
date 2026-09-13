@@ -448,20 +448,34 @@ export async function runInternalizationConsumerCycle(
       // PRI-419: when l2_dreamer flag is on AND this is a dreamer task, route
       // through the L2 multi-turn agent loop. Non-dreamer runners always use PiAi.
       const l2Flag = loadFeatureFlagFromConfig(workspaceDir, 'l2_dreamer');
-      // PRI-758: code_rule Artificer tasks ALWAYS route through the L2
-      // multi-turn agent loop (write→validate→replay→submit_rulecode) so the
-      // model can self-iterate before submitting. This is the last-mile fix:
-      // one-shot PiAi adapter produces plan-only or syntactically broken code
-      // that fails the evaluator's deterministic replay.
-      if (wakeResult.taskKind === 'artificer' && taskRuntimeKind === 'pi-ai') {
+      // PRI-758: code_rule Artificer tasks on code_tool_hook channel route
+      // through the L2 multi-turn agent loop (write→validate→replay→submit_rulecode)
+      // so the model can self-iterate before submitting. Honors the
+      // code_rule_capability emergency-disable flag (PR #1661 CodeRabbit P1).
+      const codeRuleFlag = loadFeatureFlagFromConfig(workspaceDir, 'code_rule_capability');
+      if (
+        wakeResult.taskKind === 'artificer'
+        && taskRuntimeKind === 'pi-ai'
+        && codeRuleFlag.enabled
+      ) {
         adapter = new ArtificerL2Adapter({
-          provider: taskRuntimeConfig.provider ?? 'openai',
-          model: taskRuntimeConfig.model ?? 'gpt-4o',
-          apiKeyEnv: taskRuntimeConfig.apiKeyEnv ?? 'OPENAI_API_KEY',
+          // Profile readiness check guarantees these are non-undefined for
+          // pi-ai runtime kind (validatePdLocalProfile enforces provider/model/apiKeyEnv).
+          provider: taskRuntimeConfig.provider ?? '',
+          model: taskRuntimeConfig.model ?? '',
+          apiKeyEnv: taskRuntimeConfig.apiKeyEnv ?? '',
           baseUrl: taskRuntimeConfig.baseUrl,
-          gateDeps: createProductionGateDeps(),
+          // PRI-758 CodeRabbit P1: pass toolSemantics + projectDir so the L2
+          // replay uses production-identical gate context (not baseline).
+          gateDeps: createProductionGateDeps({
+            toolSemantics: ports.toolSemantics,
+            projectDir: workspaceDir,
+          }),
           validator: new DefaultArtificerValidator(),
           totalBudgetMs: taskRuntimeConfig.timeoutMs,
+          // PRI-758 CodeRabbit P2: forward maxTokens + systemPrompt from profile.
+          ...(taskRuntimeConfig.maxTokens !== undefined ? { maxTokens: taskRuntimeConfig.maxTokens } : {}),
+          ...(taskRuntimeConfig.systemPrompt ? { systemPrompt: taskRuntimeConfig.systemPrompt } : {}),
         });
       } else if (l2Flag.enabled && wakeResult.taskKind === 'dreamer') {
         const stateDir = `${workspaceDir}/.state`;
