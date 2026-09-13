@@ -1690,7 +1690,7 @@ function syncPdCli(pluginDir: string): { ok: boolean; globalShim: GlobalPdShimRe
   // ext dir itself — Node resolves `import 'principles-disciple'` via the
   // plugin's package.json exports field.
   // Without this, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
-  // because runtime-init.ts statically imports initTrajectorySchema/initWorkflowSchema.
+  // because runtime-init.ts statically imports initTrajectorySchema.
   const pdLinkDir = path.join(installedPdCliDir, 'node_modules');
   const pdLinkTarget = installedPluginDir();
   mkdirSync(pdLinkDir, { recursive: true });
