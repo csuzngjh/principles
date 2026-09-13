@@ -157,6 +157,10 @@ export interface ToolCallEventData {
   gfiBefore?: number;
   /** PRI-79: GFI value after this tool call (post-friction or post-relief) */
   gfiAfter?: number;
+  /** PRI-750: host run/turn id — DIRECT turn binding (OpenClaw `runId`; Codex `turn_id`). Optional: absent when the host supplies none. */
+  runId?: string;
+  /** PRI-750: host tool-call id (OpenClaw `toolCallId`; Codex `tool_use_id`). Optional: absent when the host supplies none. */
+  toolCallId?: string;
 }
 
 export const ToolCallEventDataSchema = Type.Object({
@@ -169,6 +173,8 @@ export const ToolCallEventDataSchema = Type.Object({
   exitCode: Type.Optional(Type.Number()),
   gfiBefore: Type.Optional(Type.Number()),
   gfiAfter: Type.Optional(Type.Number()),
+  runId: Type.Optional(Type.String()),
+  toolCallId: Type.Optional(Type.String()),
 });
 export type ToolCallEventDataStatic = Static<typeof ToolCallEventDataSchema>;
 
@@ -627,6 +633,8 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
   v2Truncated?: boolean;
   /** PRI-562 Phase 0: principle ids injected via BOTH blocks in the same build. */
   crossBlockDuplicateIds?: string[];
+  /** PRI-750: host run/turn id — DIRECT turn binding (OpenClaw `runId`; Codex `turn_id`). Optional: absent when the host supplies none. */
+  runId?: string;
 }
 
 export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
@@ -646,6 +654,7 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
   legacyTruncated: Type.Optional(Type.Boolean()),
   v2Truncated: Type.Optional(Type.Boolean()),
   crossBlockDuplicateIds: Type.Optional(Type.Array(Type.String())),
+  runId: Type.Optional(Type.String()),
 });
 export type RuntimeV2PromptActivationsInjectedEventDataStatic = Static<typeof RuntimeV2PromptActivationsInjectedEventDataSchema>;
 

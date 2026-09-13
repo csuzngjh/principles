@@ -81,9 +81,11 @@ export function decodeCodexInput(raw: unknown): HostEvent {
   if (kind === 'before_tool_call' || kind === 'after_tool_call') {
     const toolName = requiredString(raw, 'tool_name');
     const toolInput = requiredUnknown(raw, 'tool_input');
-    requiredString(raw, 'tool_use_id');
+    // PRI-750: Codex `tool_use_id` is required and host-authoritative — keep it
+    // on the shared context so the receipt chain can bind tools to turns.
+    const toolCallId = requiredString(raw, 'tool_use_id');
     const toolOutput = kind === 'after_tool_call' ? requiredUnknown(raw, 'tool_response') : undefined;
-    context = { ...common, toolName, toolInput, ...(kind === 'after_tool_call' ? { toolOutput } : {}) };
+    context = { ...common, toolName, toolCallId, toolInput, ...(kind === 'after_tool_call' ? { toolOutput } : {}) };
     rawPayload = { toolInput: { toolName, params: toolInput } };
   } else if (kind === 'before_prompt_build') {
     context = { ...common, promptContent: requiredString(raw, 'prompt') };

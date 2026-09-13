@@ -59,6 +59,27 @@ function appendJsonLine(filePath: string, value: unknown): void {
   fs.appendFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf8');
 }
 
+/**
+ * PRI-750: shared event-JSONL line writer — same `events_<date>.jsonl` file and
+ * entry shape as the OpenClaw EventLog, reused by the Codex host path (which
+ * cannot import the plugin). Lives in this registered audit-observability seam;
+ * best-effort — a failed write is not raised here, callers degrade (rc-9).
+ */
+export function appendEventLogLine(
+  stateDir: string,
+  entry: { ts: string; type: string; category: string; sessionId: string | undefined; data: unknown },
+): void {
+  const date = entry.ts.slice(0, 10);
+  appendJsonLine(nodePath.join(stateDir, 'logs', `events_${date}.jsonl`), {
+    ts: entry.ts,
+    date,
+    type: entry.type,
+    category: entry.category,
+    sessionId: entry.sessionId,
+    data: entry.data,
+  });
+}
+
 function getSessionsColumns(db: Database.Database): string[] {
   const cols = db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[];
   return cols.map((c) => c.name);
