@@ -50,6 +50,12 @@ export interface TransitionDecisionInput {
   /** artificer 任务携带 repairPayload (PRI-509 repair 任务) */
   isRepairTask: boolean;
   revisionCount: number;
+  /**
+   * PRI-758: evaluator 的最新 succeeded run 中确定性对抗重放 ran 且 failed
+   * (passed===false)。approved 语义判定 + 重放失败 = 不得 ADVANCE (规则工件
+   * 未组装,修复环必须先行),转 REVISION_REQUIRED 阻断 rollout 后继播种。
+   */
+  adversarialReplayFailed?: boolean;
 }
 
 export interface TransitionDecision {
@@ -65,7 +71,7 @@ const ROLLOUT_VERDICTS = new Set(['approve_rollout', 'needs_revision', 'reject']
  * 调用方 (orchestrator.commitNextTaskProposal) 是唯一后继播种漏斗。
  */
 export function decideInternalizationTransition(input: TransitionDecisionInput): TransitionDecision {
-  const { taskKind, taskStatus, runnerDecision, legacyRunnerDecision, isRepairTask, revisionCount } = input;
+  const { taskKind, taskStatus, runnerDecision, legacyRunnerDecision, isRepairTask, revisionCount, adversarialReplayFailed } = input;
 
   // 1. 状态门: 只有 succeeded 的任务参与推进仲裁
   if (taskStatus === 'needs_human_review') {
@@ -87,6 +93,10 @@ export function decideInternalizationTransition(input: TransitionDecisionInput):
       ?? (legacyRunnerDecision !== undefined && EVALUATOR_VERDICTS.has(legacyRunnerDecision) ? legacyRunnerDecision : undefined);
     if (verdict === undefined) {
       return { kind: 'BLOCKED_MISSING_VERDICT', reason: 'evaluator_verdict_missing_durable_and_legacy' };
+    }
+    // PRI-758: approved 但确定性重放失败 → 修复环必须先行,阻断 rollout 后继
+    if (verdict === 'approved' && adversarialReplayFailed === true) {
+      return { kind: 'REVISION_REQUIRED', reason: 'evaluator_approved_adversarial_replay_failed_repair_required' };
     }
     if (verdict === 'approved') {
       return { kind: 'ADVANCE', reason: 'evaluator_approved' };
@@ -127,6 +137,7 @@ export function decideInternalizationTransition(input: TransitionDecisionInput):
 export function transitionInputFromTask(
   piTask: PITaskRecord,
   legacyRunnerDecision?: string,
+  extras?: { adversarialReplayFailed?: boolean },
 ): TransitionDecisionInput {
   return {
     taskKind: piTask.taskKind,
@@ -135,5 +146,6 @@ export function transitionInputFromTask(
     legacyRunnerDecision,
     isRepairTask: piTask.repairPayload !== undefined,
     revisionCount: piTask.revisionCount ?? 0,
+    ...(extras?.adversarialReplayFailed ? { adversarialReplayFailed: true } : {}),
   };
 }

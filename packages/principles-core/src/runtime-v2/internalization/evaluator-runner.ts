@@ -1157,6 +1157,18 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       if (replayOutcome.updatedOutput) {
         finalOutput = replayOutcome.updatedOutput;
         await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
+        // PRI-758: capture execution-time replay provenance on the approved
+        // path too — the approved+failed routing below forwards it into the
+        // repair payload (same provenance discipline as the needs_revision
+        // diagnostic branch at the top of this function).
+        const approvedReplayAr = replayOutcome.updatedOutput.adversarialResult;
+        if (approvedReplayAr) {
+          diagnosticReplayEvidence = {
+            ran: true,
+            passed: approvedReplayAr.passed === true,
+            failedCaseCount: Array.isArray(approvedReplayAr.failedCases) ? approvedReplayAr.failedCases.length : 0,
+          };
+        }
         // Re-persist the artifact with the populated adversarialResult so
         // downstream readers (Phase 6 assembly, orchestrator retry) see it.
         try {
@@ -1229,6 +1241,21 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // LLM,新 verdict 与已发生副作用形成治理矛盾 (repair drift /
     // validation drift / validated-rule drift)。同 epoch crash/retry 重跑经
     // maybeResumePendingIntent resume,不重问。
+    // ── PRI-758: effective transition decision ──
+    // An `approved` semantic verdict whose deterministic adversarial replay
+    // FAILED must not advance a code_tool_hook chain. The intent records the
+    // TRUTHFUL semantic verdict (resume consistency: recoverIntentOutput
+    // validates intent.decision against the durable run output); the ADVANCE
+    // block lives in the transition layer via
+    // TransitionDecisionInput.adversarialReplayFailed (orchestrator derives
+    // it from the durable run output). Repair loop on → the finalize routes
+    // this case into repair via transitionDecisionOverride. Raw semantic
+    // verdict stays preserved on the durable evaluator artifact for audit.
+    const approvedReplayFailed = isEvaluatorOutputV2(finalOutput)
+      && finalOutput.evaluation.decision === 'approved'
+      && finalOutput.adversarialResult?.passed === false
+      && this.isRepairLoopEnabled();
+
     await this.recordCompletionOrThrow(taskId, runId, {
       decision: finalOutput.evaluation.decision,
       governanceEffect,
@@ -1245,6 +1272,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId, ruleAssemblyInput,
       // 执行时权威事实：仅本次 succeedTask 真正运行了诊断重放才存在
       diagnosticReplayEvidence,
+      ...(approvedReplayFailed ? { transitionDecisionOverride: 'needs_revision' as const } : {}),
     });
     if (effectResult.kind === 'human_review') {
       return effectResult.result;
@@ -1318,12 +1346,23 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
      * resume / owner-override 路径无 live replay → undefined (fail-closed)。
      */
     diagnosticReplayEvidence?: { ran: true; passed: boolean; failedCaseCount: number } | undefined;
+    /**
+     * PRI-758: effective transition decision — an approved semantic verdict
+     * whose deterministic replay failed is routed to the repair loop as
+     * needs_revision, so the durable transition decision blocks ADVANCE
+     * instead of silently advancing without the mandatory rule artifact.
+     * The raw semantic verdict stays preserved on the durable artifact.
+     */
+    transitionDecisionOverride?: 'needs_revision';
   }): Promise<
     | { kind: 'human_review'; result: PeerRunnerResult<EvaluatorOutputV1> }
     | { kind: 'completed'; ruleArtifactId: string | null }
   > {
     const { taskId, runId, finalOutput, task, artifactId, contextHash, sourceArtificerArtifactId, diagnosticReplayEvidence } = args;
-    const decision = args.decisionOverride ?? finalOutput.evaluation.decision;
+    // PRI-758: transitionDecisionOverride routes approved+replay-failed into
+    // the needs_revision repair branch (see the caller). Owner override
+    // (decisionOverride) still takes precedence over both.
+    const decision = args.decisionOverride ?? args.transitionDecisionOverride ?? finalOutput.evaluation.decision;
 
     // ── Evaluator-specific: validate principle-bearing Scribe artifact ──
     // This is the critical business logic: approved evaluator must validate
@@ -1369,6 +1408,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // resume 的 assembly 输入由 durable lineage 重建 (store 按
       // sourceArtificerArtifactId 取 contentJson),deterministic
       // pi-rule-<taskId>-<runId> 保证重放不重复。
+      // ── PRI-758: transitionDecisionOverride 已把 approved+replay-failed
+      // 路由为 needs_revision (上方分支处理 repair/NHR)。能到达本分支的
+      // approved 必然 replay PASSED —— 强制 rule 工件组装,绝不静默跳过。
       if (isEvaluatorOutputV2(finalOutput) && finalOutput.adversarialResult?.passed === true) {
         let lineageIds: readonly string[] = [];
         try {
@@ -2237,6 +2279,27 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       }
     }
 
+    // ── PRI-758: crash-resume idempotency (rc-7) ──
+    // A resume of the SAME evaluator run (crash between repair creation and
+    // intent-applied) re-enters this seeder. If a repair task for this
+    // chain was already seeded FROM THIS evaluator runId, reuse it instead
+    // of incrementing the iteration (which would double-seed).
+    for (let iteration = 1; iteration <= priorRepairIteration; iteration++) {
+      const existing = await this.stateManager.getTask(artificerRepairTaskId(evaluatorTaskId, iteration));
+      if (!existing) continue;
+      const piExisting = hydratePITaskRecord(existing);
+      if (!piExisting) continue;
+      const existingPayload = piExisting.repairPayload;
+      if (existingPayload && existingPayload.sourceEvaluatorRunId === evaluatorRunId) {
+        this.emitEvent('repair_loop_idempotent_reuse', evaluatorTaskId, {
+          runId: evaluatorRunId,
+          repairTaskId: existing.taskId,
+          repairIteration: iteration,
+        });
+        return { kind: 'repair_seeded', taskId: existing.taskId };
+      }
+    }
+
     // ── Slice 5: max iterations (2) reached → fail loud ──
     if (priorRepairIteration >= 2) {
       // Task state update (→ needs_human_review) is handled by the caller
@@ -2281,6 +2344,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       repairIteration: priorRepairIteration + 1,
       sourceArtificerArtifactId,
       sourceEvaluatorTaskId: evaluatorTaskId,
+      sourceEvaluatorRunId: evaluatorRunId,
       ...(ctx.diagnosticReplayEvidence ? { diagnosticReplay: ctx.diagnosticReplayEvidence } : {}),
       ...(repairAttribution !== undefined ? { failureAttribution: repairAttribution } : {}),
     };

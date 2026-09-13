@@ -76,6 +76,14 @@ export interface RepairPayload {
     readonly failedCaseCount: number;
   };
   /**
+   * PRI-758: the evaluator run that seeded this repair. Crash-resume
+   * idempotency: a resume of the SAME evaluator run re-enters the seed
+   * path; when an existing repair task already carries this runId the
+   * seeder reuses it instead of incrementing the iteration (which would
+   * double-seed two repair tasks for one verdict).
+   */
+  readonly sourceEvaluatorRunId?: string;
+  /**
    * PRI-705 / PRI-703 Phase 2 (Owner 决策 2026-09-07): 修复轮失败归因 —
    * "哪里失败 / 为什么 / 下一步改哪里" 随载荷流动,修复 LLM 不再盲猜。
    * 仅在确定归因可得时携带 (evaluator 在 seed 时由确定性分类器填入):
