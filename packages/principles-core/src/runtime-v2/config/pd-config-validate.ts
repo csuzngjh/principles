@@ -533,53 +533,15 @@ function validateWorkspaceConfig(
 
 // ── Context Injection Validation ────────────────────────────────────────────
 
-function validateEvolutionContextConfig(
-  raw: unknown,
-  path: string,
-): { ok: true; value: ContextInjectionConfig['evolutionContext'] } | { ok: false; errors: PdConfigValidationError[] } {
-  const errors: PdConfigValidationError[] = [];
-
-  if (!isRecord(raw)) {
-    return { ok: false, errors: [err(path, 'evolutionContext must be an object', 'Fix evolutionContext to be an object with enabled, maxMessages, maxCharsPerMessage')] };
-  }
-
-  const enabled = readOwn(raw, 'enabled');
-  if (enabled !== undefined && !isBoolean(enabled)) {
-    errors.push(err(`${path}.enabled`, 'evolutionContext.enabled must be a boolean', 'Set evolutionContext.enabled to true or false'));
-  }
-
-  const maxMessages = readOwn(raw, 'maxMessages');
-  if (maxMessages !== undefined && (!isNumber(maxMessages) || !Number.isInteger(maxMessages) || maxMessages < 0)) {
-    errors.push(err(`${path}.maxMessages`, 'evolutionContext.maxMessages must be a non-negative integer', 'Set evolutionContext.maxMessages to a non-negative integer'));
-  }
-
-  const maxCharsPerMessage = readOwn(raw, 'maxCharsPerMessage');
-  if (maxCharsPerMessage !== undefined && (!isNumber(maxCharsPerMessage) || !Number.isInteger(maxCharsPerMessage) || maxCharsPerMessage < 0)) {
-    errors.push(err(`${path}.maxCharsPerMessage`, 'evolutionContext.maxCharsPerMessage must be a non-negative integer', 'Set evolutionContext.maxCharsPerMessage to a non-negative integer'));
-  }
-
-  if (errors.length > 0) {
-    return { ok: false, errors };
-  }
-
-  return {
-    ok: true,
-    value: {
-      enabled: isBoolean(enabled) ? enabled : true,
-      maxMessages: isNumber(maxMessages) ? maxMessages : 4,
-      maxCharsPerMessage: isNumber(maxCharsPerMessage) ? maxCharsPerMessage : 200,
-    },
-  };
-}
-
 function validateContextInjectionConfig(
   raw: unknown,
   path: string,
-): { ok: true; value: Partial<ContextInjectionConfig> } | { ok: false; errors: PdConfigValidationError[] } {
+): { ok: true; value: Partial<ContextInjectionConfig>; warnings: string[] } | { ok: false; errors: PdConfigValidationError[] } {
   const errors: PdConfigValidationError[] = [];
+  const warnings: string[] = [];
 
   if (!isRecord(raw)) {
-    return { ok: false, errors: [err(path, 'contextInjection must be an object', 'Fix contextInjection to be an object with optional thinkingOs, projectFocus, evolutionContext fields')] };
+    return { ok: false, errors: [err(path, 'contextInjection must be an object', 'Fix contextInjection to be an object with optional thinkingOs and projectFocus fields')] };
   }
 
   // Reject dangerous keys
@@ -609,30 +571,27 @@ function validateContextInjectionConfig(
     }
   }
 
-  const evolutionContext = readOwn(raw, 'evolutionContext');
-  if (evolutionContext !== undefined) {
-    const ecResult = validateEvolutionContextConfig(evolutionContext, `${path}.evolutionContext`);
-    if (ecResult.ok) {
-      result.evolutionContext = ecResult.value;
-    } else {
-      errors.push(...ecResult.errors);
-    }
-  }
-
-  // Reject unknown keys
+  // Reject unknown keys. `evolutionContext` stays a known key only as a
+  // tolerated legacy no-op (PRI-772): prompt assembly never consumed it, so
+  // accepting it keeps old configs loading — the warning keeps the tolerance
+  // observable (rc-9) instead of letting a dead key look live.
   const knownKeys = new Set(['thinkingOs', 'projectFocus', 'evolutionContext']);
   for (const key of Object.keys(raw)) {
     if (DANGEROUS_KEYS.has(key)) continue;
-    if (!knownKeys.has(key)) {
-      errors.push(err(`${path}.${key}`, `unknown key '${key}' in contextInjection`, `Remove unknown key '${key}' from contextInjection`));
-    }
+    if (knownKeys.has(key)) continue;
+    errors.push(err(`${path}.${key}`, `unknown key '${key}' in contextInjection`, `Remove unknown key '${key}' from contextInjection`));
+  }
+  if (Object.hasOwn(raw, 'evolutionContext')) {
+    warnings.push(
+      `${path}.evolutionContext is a retired no-op (no runtime consumer ever read it) and is now ignored — remove it from .pd/config.yaml`,
+    );
   }
 
   if (errors.length > 0) {
     return { ok: false, errors };
   }
 
-  return { ok: true, value: result };
+  return { ok: true, value: result, warnings };
 }
 
 // ── Top-Level Validation ────────────────────────────────────────────────────
@@ -643,6 +602,7 @@ function validateContextInjectionConfig(
  */
 export function validatePdConfig(raw: unknown): PdConfigValidationResult {
   const errors: PdConfigValidationError[] = [];
+  const warnings: string[] = [];
 
   if (raw === null || raw === undefined) {
     return {
@@ -778,6 +738,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     const ciResult = validateContextInjectionConfig(contextInjectionRaw, 'contextInjection');
     if (ciResult.ok) {
       contextInjection = ciResult.value;
+      warnings.push(...ciResult.warnings);
     } else {
       errors.push(...ciResult.errors);
     }
@@ -824,5 +785,5 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     ...(contextInjection ? { contextInjection } : {}),
   };
 
-  return { ok: true, value: config };
+  return { ok: true, value: config, warnings };
 }

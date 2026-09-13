@@ -398,7 +398,6 @@ describe('Diag chain e2e', () => {
       resolvedContextInjection: {
         thinkingOs: false,
         projectFocus: 'off',
-        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
       },
     };
 
@@ -433,7 +432,6 @@ describe('Diag chain e2e', () => {
       resolvedContextInjection: {
         thinkingOs: false,
         projectFocus: 'off',
-        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
       },
     };
 
@@ -573,7 +571,6 @@ describe('Diag chain e2e', () => {
       resolvedContextInjection: {
         thinkingOs: false,
         projectFocus: 'off',
-        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
       },
     };
 

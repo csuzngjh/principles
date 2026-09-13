@@ -7,7 +7,6 @@ import { getSession } from '../core/session-tracker.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { atomicWriteFileSync, normalizeCommandArgs } from '../utils/io.js';
 import type { ContextInjectionConfig } from '../types.js';
-import { defaultContextConfig } from '../types.js';
 import { loadContextInjectionConfig } from '../hooks/prompt.js';
 import { getPdConfigPath } from '../core/pd-config-loader.js';
 
@@ -252,22 +251,19 @@ function applyPreset(
         case 'minimal':
             config = {
                 thinkingOs: false,
-                projectFocus: 'off',
-                evolutionContext: { ...defaultContextConfig.evolutionContext }
+                projectFocus: 'off'
             };
             break;
         case 'standard':
             config = {
                 thinkingOs: false,
-                projectFocus: 'off',
-                evolutionContext: { ...defaultContextConfig.evolutionContext }
+                projectFocus: 'off'
             };
             break;
         case 'full':
             config = {
                 thinkingOs: true,
-                projectFocus: 'summary',
-                evolutionContext: { ...defaultContextConfig.evolutionContext }
+                projectFocus: 'summary'
             };
             break;
     }
