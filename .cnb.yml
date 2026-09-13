@@ -349,6 +349,30 @@ main:
             echo "[bridge] GitHub PR 已创建（head=$HEAD_REF）"
 
   # ---------------------------------------------------------------------------
+  # T7 — 自动投递（PRI-778 优化）：Developer PR 创建即同步 GitHub，评审合并只在 GH 一次
+  #   触发：pull_request.target（可信事件：配置取自目标分支 main；PR 创建/重开/源分支 push）
+  #   行为：枚举开放的 ai/cnb-dev/* → main 的 PR，逐个把 head 分支推到 GitHub
+  #         （同名分支，仅快进），创建/复用 GitHub PR，然后 best-effort 关闭 CNB PR。
+  #         Owner 只在 GitHub 评审合并一次；CNB 侧从此无需任何手工动作。
+  #   安全：GITHUB_SYNC_TOKEN 仅经 imports 注入本流水线；无匹配 PR 时不触碰 GitHub；
+  #         令牌经 credential helper / fetch 内联头传递，不进命令行与日志。
+  #   前置：pd-secrets 密钥文件 allow_events 需包含 pull_request.target
+  #         （未包含时本流水线 fail-loud，T6 merged 触发不受影响）。
+  #   幂等：可重复触发——已推送的分支仅快进更新，GitHub PR 已存在则跳过创建。
+  # ---------------------------------------------------------------------------
+  "pull_request.target":
+    - name: cnb-github-auto-deliver
+      docker:
+        build: .ide/Dockerfile
+        image: cnbcool/default-dev-env:latest
+      imports: https://cnb.cool/csuzngjh/pd-secrets/-/blob/main/cnb-github-bridge.yml
+      stages:
+        - name: 自动投递到 GitHub
+          script: |
+            set -eu
+            node scripts/dev/cnb-auto-deliver.mjs
+
+  # ---------------------------------------------------------------------------
   # T2 — 每周架构健康检查（定时任务）
   #   时区 Asia/Shanghai；最小调度间隔 5 分钟（CNB 限制）
   #   ⚠️ 执行身份 = 最后修改本配置并推送的用户。若该用户被移出组织，任务会失败。

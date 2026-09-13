@@ -74,7 +74,6 @@ function flagsOffConfig(): EffectivePdConfig {
     resolvedContextInjection: {
       thinkingOs: false,
       projectFocus: 'off',
-      evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
     },
   } as unknown as EffectivePdConfig;
 }
@@ -222,12 +221,13 @@ async function seedChain(ruleCode: string): Promise<string> {
   return art.artifactId;
 }
 
-function reviewEvaluator(
-  artId: string,
-  decision: 'approved' | 'needs_revision',
-  seeds: string[],
-  prompts: string[],
-) {
+function reviewEvaluator(opts: {
+  artId: string;
+  decision: 'approved' | 'needs_revision';
+  seeds: string[];
+  prompts: string[];
+}) {
+  const { artId, decision, seeds, prompts } = opts;
   return new EvaluatorRunner({
     stateManager,
     runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, artId, decision), prompts, 'eval-oos'),
@@ -274,7 +274,7 @@ describe('Round-2 R1/R2 — out-of-scope attribution and restart-stable governan
     const artId = await seedChain(LEAKY_RISK_GATE);
     const seeds: string[] = [];
     const prompts: string[] = [];
-    const result = await reviewEvaluator(artId, 'needs_revision', seeds, prompts).run(EVAL1_ID);
+    const result = await reviewEvaluator({ artId, decision: 'needs_revision', seeds, prompts }).run(EVAL1_ID);
 
     // The replay surface: v2-combination (/etc/passwd, oracle block) fails with
     // actual allow — a REAL rule defect. Repair MUST be seeded; NHR forbidden.
@@ -303,7 +303,7 @@ describe('Round-2 R1/R2 — out-of-scope attribution and restart-stable governan
       }
       return original(id, patch);
     });
-    await reviewEvaluator(artId, 'needs_revision', seeds, prompts).run(EVAL1_ID);
+    await reviewEvaluator({ artId, decision: 'needs_revision', seeds, prompts }).run(EVAL1_ID);
     expect(injected).toBe(true);
     expect(seeds).toHaveLength(0);
     const afterFailure = await stateManager.getTask(EVAL1_ID);
@@ -315,7 +315,7 @@ describe('Round-2 R1/R2 — out-of-scope attribution and restart-stable governan
 
     // ── Simulated restart: task requeued, fresh runner instance resumes ──
     await requeueEvaluator();
-    await reviewEvaluator(artId, 'needs_revision', seeds, prompts).run(EVAL1_ID);
+    await reviewEvaluator({ artId, decision: 'needs_revision', seeds, prompts }).run(EVAL1_ID);
 
     // Same durable facts ⇒ same disposition: NHR restored with the SAME
     // reasonCode, no LLM re-ask, no repair seeded, intent finally applied.

@@ -16,7 +16,7 @@
 > - ❌ **已废弃**：已从代码中删除或标记为 legacy_retire
 >
 > 权威源：`packages/principles-core/src/runtime-v2/store/sqlite-connection.ts`（state.db）和
-> `packages/openclaw-plugin/src/core/schema/schema-definitions.ts`（trajectory.db / central.db）。
+> `packages/openclaw-plugin/src/core/trajectory.ts` 的 `applyTrajectorySchema()`（trajectory.db；`packages/principles-core/src/runtime-v2/pain-signal-observability.ts` 内有同构 DDL）。
 > 本文档如与代码冲突，以代码为准。
 
 ---
@@ -39,7 +39,7 @@
 │                                                       │
 │  长期数据   —— state.db: principles / implementations │
 │  中期数据   —— state.db: tasks / runs / artifacts     │
-│  短期数据   —— state.db: events / audit              │
+│  短期数据   —— trajectory.db: 轨迹 / pain 事件流      │
 │  瞬时数据   —— 缓存 / module-level state             │
 └──────────────────────────────────────────────────────┘
 ```
@@ -54,7 +54,7 @@ PD Runtime V2 的权威数据存储分为**两个物理事实源**：
 
 | 物理路径 | 技术 | 存储内容 |
 |---------|------|---------|
-| `{workspace}/.pd/state.db` | SQLite（WAL 模式） | Task / Run / Commit / Candidate / Artifact / PIArtifact / History / Trajectory / Events / **Approvals**（新）/ **RejectionFeedbacks**（新）|
+| `{workspace}/.pd/state.db` | SQLite（WAL 模式） | Task / Run / Commit / Candidate / PIArtifact / Approval / Activation 及治理表（完整清单见 §3.1）|
 | `{workspace}/.state/principle_training_state.json` | JSON 文件（atomic write） | Principle Tree 账本（Principle / Rule / Implementation）|
 
 ### 2.2 Activation Pipeline 工件存储（新增 — ADR-0006）
@@ -71,8 +71,9 @@ PD Runtime V2 的权威数据存储分为**两个物理事实源**：
 
 | 物理路径 | 格式 | 写入特性 |
 |---------|------|---------|
-| `{workspace}/.pd/audit-log.jsonl` | JSONL | append-only，**永久保留**，同步 fsync |
 | `{workspace}/.state/pruning_reviews.jsonl` | JSONL | append-only |
+
+> **注**：仓库当前没有 `audit-log.jsonl` / `AuditLogger` 实现（代码零命中）。
 
 ### 2.4 Plugin / Host 辅助状态
 
@@ -118,8 +119,12 @@ state.db
 │   ├── tasks                          ✅ PITaskRecord 主表
 │   ├── runs                           ✅ RunRecord 主表
 │   └── leases (隐式：在 tasks 中通过 leaseOwner / leaseExpiresAt 字段)  ✅
+├── Pain 链路
+│   ├── dead_letter_pains              ✅ pain 摄入死信
+│   ├── pain_diagnoses                 ✅ pain 诊断记录
+│   └── pending_agent_drafts           ✅ 待处理 agent 草稿
 ├── Diagnostician 子系统
-│   ├── candidates                     ✅ PrincipleCandidate（principle_candidates 表）
+│   ├── principle_candidates           ✅ PrincipleCandidate 主表
 │   ├── artifacts                      ✅ Diagnostician artifact
 │   └── commits                        ✅ DiagnosticianCommit
 ├── Internalization 子系统
@@ -127,17 +132,24 @@ state.db
 ├── Activation 子系统（ADR-0006）
 │   ├── approvals                      ✅ ApprovalRecord
 │   ├── activations                    ✅ ActivationStateRecord（activation 状态追踪）
+│   ├── activation_decisions           ✅ 激活决策记录
+│   ├── activation_control_states      ✅ 激活控制状态
+│   ├── activation_evidence_snapshots  ✅ 激活证据快照
 │   └── rejection_feedbacks            ⏸️ post-MVP（ADR-0006，未实现）
+├── Rule 应用与治理
+│   ├── principle_applications         ✅ 规则应用记录
+│   └── global_rulecode_pauses         ✅ RuleCode 全局暂停
+├── Intent 治理
+│   ├── intent_decisions               ✅ Intent 决策记录
+│   └── intent_doc_versions            ✅ Intent 文档版本
+├── 运维
+│   └── reconciliation_cursor          ✅ 对账游标
 ├── Goals 子系统（ADR-0010）
 │   ├── objectives                     ⏸️ post-MVP（ADR-0010，未实现）
 │   ├── key_results                    ⏸️ post-MVP（ADR-0010，未实现）
 │   ├── missions                       ⏸️ post-MVP（ADR-0010，未实现）
 │   └── agent_session_checkpoints      ⏸️ post-MVP（ADR-0009，未实现）
-├── 历史与查询
-│   ├── history (各子表)               ✅ 在 trajectory.db 中
-│   └── trajectory (各子表)            ✅ 在 trajectory.db 中
 ├── 可观测性
-│   ├── events                         ✅ TelemetryEvent（trajectory.db）
 │   ├── correction_audit_events        ⏸️ post-MVP（ADR-0004，未实现）
 │   └── (可选) metrics_*               ⏸️ post-MVP
 ├── 元数据
@@ -146,12 +158,19 @@ state.db
 └── 已废弃
     └── confirm_first_state            ❌ 已 DROP（PRI-473 / P3-12，SqliteConfirmFirstStateStore 已删除）
 
-trajectory.db（由 plugin MigrationRunner 管理）
-├── events                             ✅ TelemetryEvent
-├── pain_signals                       ✅ PainSignal
-├── pain_evidence                      ✅ PainEvidence
-├── thinking_model_events              ✅ ThinkingModelEvent
-└── schema_version                     ✅ 装饰性版本标记（applyTrajectorySchema 管理，不驱动迁移决策）
+trajectory.db（由 applyTrajectorySchema() 管理：openclaw-plugin/src/core/trajectory.ts，
+pain-signal-observability.ts 内有同构 DDL）
+├── 轨迹原始数据
+│   ├── sessions / assistant_turns / user_turns / tool_calls   ✅
+├── Pain 可观测性
+│   └── pain_events / gate_blocks / trust_changes              ✅
+├── 行为事件
+│   └── principle_events / task_outcomes                       ✅
+├── 纠正样本
+│   └── correction_samples / sample_reviews                    ✅
+├── 运维
+│   ├── ingest_checkpoint / exports_audit                      ✅
+│   └── schema_version                 ✅ 装饰性版本标记（不驱动迁移决策）
 ```
 
 ### 3.2 关键表 Schema（新增表）
@@ -340,15 +359,23 @@ CREATE INDEX idx_checkpoints_task ON agent_session_checkpoints(task_id);
 
 详见 `@principles/core/runtime-v2/store/` 下的各 `sqlite-*.ts`。本文档不重复 schema 定义，仅总览。
 
-**state.db 已实现表**（✅ MVP 范围内）：
-- `tasks` / `runs` / `artifacts` / `commits` / `principle_candidates`（Diagnostician 子系统）
+**state.db 已实现表**（✅ MVP 范围内，DDL 见 `sqlite-connection.ts`）：
+- `tasks` / `runs` / `artifacts` / `commits` / `principle_candidates`（任务与 Diagnostician 子系统）
+- `dead_letter_pains` / `pain_diagnoses` / `pending_agent_drafts`（Pain 链路）
 - `pi_artifacts`（Internalization 子系统）
-- `approvals` / `activations`（Activation 子系统，ADR-0006）
+- `approvals` / `activations` / `activation_decisions` / `activation_control_states` / `activation_evidence_snapshots`（Activation 子系统）
+- `principle_applications` / `global_rulecode_pauses`（Rule 应用与治理）
+- `intent_decisions` / `intent_doc_versions`（Intent 治理）
+- `reconciliation_cursor`（运维）
 - `schema_version`（P2-10，精简版，core 实现）
 - ❌ `confirm_first_state`：已 DROP（PRI-473 / P3-12）
 
 **trajectory.db 已实现表**（✅ 由 trajectory.ts applyTrajectorySchema 管理）：
-- `events` / `pain_signals` / `pain_evidence` / `thinking_model_events`
+- `sessions` / `assistant_turns` / `user_turns` / `tool_calls`（轨迹原始数据）
+- `pain_events` / `gate_blocks` / `trust_changes`（Pain 可观测性）
+- `principle_events` / `task_outcomes`（行为事件）
+- `correction_samples` / `sample_reviews`（纠正样本）
+- `ingest_checkpoint` / `exports_audit`（运维）
 - `schema_version`（装饰性版本标记，不驱动迁移决策）
 
 ---
@@ -464,7 +491,8 @@ interface LedgerAdapter {
 ```
 [PainSignal]
    │
-   ├─► state.db: pain_signals（写）
+   ├─► trajectory.db: pain_events（写，openclaw-plugin）
+   ├─► state.db: dead_letter_pains（写，摄入失败死信）
    ├─► ledger.json: pain_flag（写，可选）
    └─► state.db: tasks (taskKind=diagnostician, status=pending)（写）
 
@@ -473,8 +501,7 @@ interface LedgerAdapter {
    ├─► state.db: tasks (status=leased → succeeded)（更新）
    ├─► state.db: runs (1 task: N runs)（写）
    ├─► state.db: artifacts (kind=diagnosis_report)（写）
-   ├─► state.db: candidates (status=pending)（写）
-   ├─► state.db: events（写 telemetry）
+   ├─► state.db: principle_candidates (status=pending)（写）
    └─► state.db: commits（写 commit record）
 
 [CandidateIntakeService.intake]
@@ -494,8 +521,7 @@ interface LedgerAdapter {
    │
    ├─► state.db: tasks (status 转换)（更新）
    ├─► state.db: runs（写）
-   ├─► state.db: pi_artifacts（每个 Runner 输出）（写）
-   └─► state.db: events（写 telemetry）
+   └─► state.db: pi_artifacts（每个 Runner 输出）（写）
 
 [RolloutReviewerRunner.succeed]
    │
@@ -517,15 +543,12 @@ interface LedgerAdapter {
    │   ├─► state.db: approvals (status=pending)（写）
    │   ├─► [pd-console 审批]
    │   ├─► state.db: approvals (status=approved/rejected)（更新）
-   │   ├─► 审计：audit-log.jsonl（写）
    │   ├─► [approved] ChannelWriter.activate
    │   │   ├─► [code_tool_hook] file: .principles/implementations/code/{id}/...
    │   │   │                  + ledger.json: implementations[id].lifecycleState=active
    │   │   │                  + ledger.json: implementations[id].shadowMode=true
    │   │   └─► [model_training] file: .pd/training-exports/{batchId}/...
-   │   └─► [rejected] state.db: rejection_feedbacks（写）
-   │
-   └─► 任何分支均：state.db: events（写 telemetry）
+   │   └─► [rejected] state.db: approvals 保留 rejected 终态
 ```
 
 ### 5.4 Operations Pipeline
@@ -539,8 +562,7 @@ interface LedgerAdapter {
 
 [人工审批]（pd-console）
    │
-   ├─► state.db: approvals（更新）
-   └─► audit-log.jsonl（写）
+   └─► state.db: approvals（更新）
 
 [低风险写]（pd-cli）
    │
@@ -584,14 +606,12 @@ interface LedgerAdapter {
 | ApprovalRecord | `ApprovalQueue.enqueue / approve / reject / secondConfirm` |
 | RejectionFeedback | `RejectionFeedbackService.emit` |
 | Ledger principle.status 变更 | `ChannelWriter.activate / deactivate`（仅通过 ActivationDispatcher）|
-| Audit log | `AuditLogger.write`（同步 fsync）|
 
 **写入保证**：
 
 - **Lease**：所有 task 状态变更必须先 `acquireLease`
 - **幂等性**：所有跨进程写入必须有幂等键
 - **原子性**：跨字段写入用事务（SQLite）或 atomic write（JSON）
-- **审计**：高风险写入必须同步写 audit log
 
 ### 6.2 读侧（Read Side）
 
@@ -625,7 +645,6 @@ interface LedgerAdapter {
 | RW-2 | 同一概念只能有**一个**写入路径 |
 | RW-3 | Write 必须经过 Service 层（不允许 SQL 直写）|
 | RW-4 | 高风险 Write 必须经过 ActivationDispatcher / ApprovalQueue |
-| RW-5 | Audit log 写入失败必须中止业务 |
 
 ---
 
@@ -688,7 +707,6 @@ db.pragma('synchronous = NORMAL'); // WAL 模式下 NORMAL 足够安全且性能
 ApprovalQueue.approve 会同时影响：
 - `state.db: approvals` (status=approved)
 - `ledger.json: principles[id].status` (active)
-- `audit-log.jsonl` (写记录)
 
 由于跨存储无法事务，采用**记录中间状态 + 重试**：
 
@@ -697,7 +715,6 @@ async approveAndActivate(approvalId): Promise<void> {
   // 1. 标记 approval=approved（state.db 单事务）
   await db.transaction(() => {
     updateApproval(approvalId, { status: 'approved' });
-    writeAuditLog({ event: 'approval_decided', ... });
   });
 
   // 2. 调用 ChannelWriter
@@ -709,7 +726,6 @@ async approveAndActivate(approvalId): Promise<void> {
     });
   } catch (err) {
     // 失败：approval 仍是 approved，下次重试
-    await writeAuditLog({ event: 'activation_failed', approvalId, error: err });
     throw err;
   }
 }
@@ -789,7 +805,6 @@ flowchart TD
         SQLite[(state.db)]
         Ledger[(ledger.json)]
         Files[/artifacts files/]
-        Audit[(audit-log.jsonl)]
     end
 
     Pain --> SQLite
@@ -802,7 +817,6 @@ flowchart TD
     Feedback --> SQLite
     Activate --> Ledger
     Activate --> Files
-    Console --> Audit
 ```
 
 ---
@@ -828,7 +842,6 @@ flowchart TD
 | state.db 软上限 100MB | 警告 |
 | state.db 硬上限 500MB | 自动归档 events / runs（保留 30 天）|
 | ledger.json 软上限 5MB | 警告（ledger 不归档，由 pruning 处理）|
-| Audit log | 不归档（永久）|
 
 ---
 
@@ -882,7 +895,6 @@ flowchart TD
 | DAT-2 | 一个 workspace 一个 ledger.json | path-resolver |
 | DAT-3 | Ledger 写入必须 atomic | mutateLedger 包装 |
 | DAT-4 | 跨进程写入必须 lease 协调 | LeaseManager |
-| DAT-5 | Audit log 必须 append-only | 文件权限 + 测试 |
 | DAT-6 | 工作区路径不允许逃逸 | validateWorkspacePath |
 | DAT-7 | Schema migration 不允许修改已发布版本 | hash 校验 |
 | DAT-8 | 只读 ReadModel 不允许触发写 | architecture-regression test |

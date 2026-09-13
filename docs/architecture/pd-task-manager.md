@@ -1,16 +1,16 @@
 # PD Task Manager — Design Document
 
-> **Status**: Partially Implemented
-> **Date**: 2026-04-07
+> **Status**: Implemented
+> **Date**: 2026-04-07（设计）；2026-09-13（状态与代码对齐）
 > **Author**: Qwen-Coder
 > **Related PR**: [#174](https://github.com/csuzngjh/principles/pull/174)
 >
-> **⚠️ 实现状态**：
-> - ✅ PDTaskSpec 类型定义已创建
-> - ✅ PDTaskStore 已创建
+> **实现状态**（2026-09-13 核对）：
+> - ✅ PDTaskSpec 类型定义（`src/core/pd-task-types.ts`）
+> - ✅ PDTaskStore（`src/core/pd-task-store.ts`）
 > - ✅ cron-initializer.ts 已删除
-> - ⏳ PDTaskService（Plugin Service 集成）待完成
-> - 📁 本文档保留作为迁移计划参考
+> - ✅ PDTaskService 已注册为 Plugin Service 并在启动时 reconcile（定义 `src/core/pd-task-service.ts`，注册见 `src/index.ts:644`，`start()` 调用 `reconcilePDTasks`）
+> - 📁 本文档保留作为设计历史参考
 
 ---
 

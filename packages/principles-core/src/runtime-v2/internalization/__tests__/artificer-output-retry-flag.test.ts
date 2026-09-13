@@ -57,7 +57,6 @@ function makeEffectiveConfig(artificerOutputRetry: boolean): EffectivePdConfig {
     resolvedContextInjection: {
       thinkingOs: false,
       projectFocus: 'off',
-      evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
     },
   };
 }
@@ -113,7 +112,6 @@ describe('ArtificerRunner permanentErrorCategories — `artificer_output_retry` 
       resolvedContextInjection: {
         thinkingOs: false,
         projectFocus: 'off',
-        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
       },
     });
     expect(runner.permanentErrorCategories.has('output_invalid')).toBe(false);
