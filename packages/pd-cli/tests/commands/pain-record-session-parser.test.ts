@@ -13,6 +13,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
 
 let tmpDir: string;
 
@@ -24,7 +25,12 @@ function createWorkspace(): void {
   const db = new Database(path.join(stateDir, 'trajectory.db'));
   db.exec("CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT, updated_at TEXT)");
   db.exec("CREATE TABLE IF NOT EXISTS assistant_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, sanitized_text TEXT, stop_reason TEXT, created_at TEXT NOT NULL)");
-  db.exec("CREATE TABLE IF NOT EXISTS user_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, raw_excerpt TEXT, correction_detected INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)");
+  // PRI-783 lesson recorded on the fixture: user_turns MUST carry
+  // correction_cue — collectEvidenceFromDb SELECTs it, and a missing column
+  // silently degraded the user-turns read into evidence_read_failed, so this
+  // file's 'accepts --session' case never actually exercised a real evidence
+  // read (it vacuously asserted on a refusal).
+  db.exec("CREATE TABLE IF NOT EXISTS user_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, raw_excerpt TEXT, correction_detected INTEGER NOT NULL DEFAULT 0, correction_cue TEXT, created_at TEXT NOT NULL)");
   db.exec("CREATE TABLE IF NOT EXISTS tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, error_type TEXT, exit_code INTEGER, params_json TEXT NOT NULL DEFAULT '{}', result_preview TEXT, created_at TEXT NOT NULL)");
   db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)')
     .run('real-session-1', '2026-01-01T09:00:00Z', '2026-01-01T09:00:00Z');
@@ -157,22 +163,19 @@ describe('pd pain record --session (real Commander + real trajectory.db)', () =>
     expect(typeof parsed.nextAction).toBe('string');
   }, 15_000);
 
-  it('accepts --session for a session that exists in the trajectory (validation passes, submission proceeds)', async () => {
-    const result = await runBuiltCli([
-      'pain', 'record',
-      '--reason', 'parser test pain with real session',
-      '--session', 'real-session-1',
-      '--workspace', tmpDir,
-      '--json',
-    ]);
+  it('accepts --session for a session that exists in the trajectory (real acquisition returns available evidence)', async () => {
+    // The spawned-CLI route is used above for the refusal contracts. The
+    // acceptance route ends in the diagnostician pipeline (out of this file's
+    // scope — the service has its own suite), so the acceptance boundary is
+    // asserted against the REAL acquisition function the CLI delegates to,
+    // over this file's real trajectory.db fixture (cli-7: real parser wiring
+    // is covered by the refusal spawns; real DB semantics here — PRI-783).
+    const stateDir = path.join(tmpDir, '.state');
+    const acquisition = acquireTrajectoryEvidenceFromDb(stateDir, 'real-session-1', tmpDir);
 
-    // The session exists, so session validation must NOT reject it. The run
-    // may still fail later (no LLM runtime configured in this temp
-    // workspace) — the assertion is only about the validation stage.
-    const trimmed = result.stdout.trim();
-    expect(trimmed.length).toBeGreaterThan(0);
-    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    expect(parsed.reason).not.toBe('session_not_found');
-    expect(parsed.reason).not.toBe('empty_trajectory');
+    expect(acquisition.status).toBe('available');
+    if (acquisition.status !== 'available') return;
+    expect(acquisition.entries.length).toBeGreaterThanOrEqual(1);
+    expect(acquisition.entries.some(e => e.sourceRef.startsWith('owner_message:'))).toBe(true);
   }, 15_000);
 });

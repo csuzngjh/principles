@@ -87,18 +87,22 @@ function toIngressEntry(entry: PainEvidenceEntry): IngressEvidenceEntry {
  * PRI-642 (SPEC §7.3/§7.4, review blocker 1): build the report from this
  * adapter's host-specific facts and let the SHARED evaluator decide.
  *
- * Per-channel policy (SPEC §7.3 vs OpenClaw):
+ * Per-channel policy (SPEC §7.3/§8.2 vs OpenClaw):
  *
  * - explicit `--session` + acquisition available (real session + real entries):
  *     → cli_explicit_session + bound → submit with real evidence.
- * - explicit `--session` + acquisition unavailable (session_not_found /
- *     empty_trajectory / trajectory_unavailable / evidence_read_failed):
- *     → cli_explicit_session + unbound → shared evaluator REFUSES
- *       (row 5) before any LLM/task/candidate mutation.
- *     The CLI does NOT share the OpenClaw funnel's "degrade" semantics
- *     because the CLI does not own the session identity the way the host
- *     command context does (Evidence Over Assumption — an unverified
- *     session claimed as bound would be a PRI-642 recurrence).
+ * - explicit `--session` + acquisition unavailable with the binding NOT
+ *     contradicted (empty_trajectory / trajectory_unavailable /
+ *     evidence_read_failed — SPEC §8.2: binding failure and evidence failure
+ *     are separate axes; a real session with unusable evidence is
+ *     bound + unavailable, not unbound):
+ *     → cli_explicit_session + bound → shared evaluator DEGRADES (row 4):
+ *       submit with honest empty evidence; the admission gate owns what
+ *       empty evidence is worth. PRI-783 Owner directive: a correct current
+ *       session id is sufficient — empty evidence must not hard-refuse.
+ * - explicit `--session` + `session_not_found` (binding claim unverified):
+ *     → cli_explicit_session + unbound → shared evaluator REFUSES (row 5)
+ *       before any LLM/task/candidate mutation.
  * - no `--session` → unbound Owner report (matrix row 6) → submit with
  *   disclosure; no sentinel session, no placeholder evidence, no trajectory
  *   projection (the CLI skips observability when the ingress yields no
@@ -159,27 +163,39 @@ function resolveIngressDecision(
     return { decision, acquisitionDetail: null, acquisitionReason: null };
   }
 
-  // --session: SPEC §7.3 demands a fail-loud refusal whenever the CLI
-  // cannot actually verify the claimed binding. We do not share the
-  // OpenClaw funnel's "degrade" semantics here because the CLI does
-  // not own the session identity the way the host command context does
-  // (Evidence Over Assumption): an unverified session that we still
-  // claimed as bound would be a PRI-642 recurrence in a different
-  // shape. Per-channel policy differs; semantic authority is shared.
+  // --session: SPEC §7.3/§8.2. Binding failure and evidence failure are
+  // separate axes: when the session is verified real (empty_trajectory) or
+  // the claim is not contradicted (unreadable/missing trajectory — the SPEC
+  // §8.2 note classifies those as bound too), the report is bound +
+  // unavailable and the shared evaluator DEGRADES (row 4): submit with
+  // honest empty evidence instead of refusing the Owner's report (PRI-783
+  // Owner directive: a correct current session id is sufficient). Only
+  // `session_not_found` — where the binding claim itself is unverified —
+  // stays a fail-loud refusal (row 5). Per-channel policy differs; semantic
+  // authority is shared.
   const acquisition = acquireTrajectoryEvidenceFromDb(stateDir, opts.session, workspaceDir);
   if (acquisition.status === 'unavailable') {
-    // session_not_found / empty_trajectory / trajectory_unavailable /
-    // evidence_read_failed — refuse (row 5) before any LLM/task/candidate
-    // mutation. The CLI surfaces the reasonCode with a SPEC §7.3 next
-    // action; the evaluator produces the refuse decision.
     const {reasonCode} = acquisition;
-    const decision = evaluatePainIngress({
-      ...base,
-      origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
-      correlation: { status: 'unbound', reason: 'external_cli' },
-      evidence: { status: 'unavailable', reason: reasonCode === 'session_not_found' ? 'not_applicable_unbound' : reasonCode },
-    });
-    if (decision.action === 'refuse') {
+    if (reasonCode === 'session_not_found') {
+      const decision = evaluatePainIngress({
+        ...base,
+        origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
+        correlation: { status: 'unbound', reason: 'external_cli' },
+        evidence: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      });
+      if (decision.action === 'refuse') {
+        return { decision, acquisitionDetail: acquisition.detail, acquisitionReason: reasonCode };
+      }
+    } else {
+      // empty_trajectory / trajectory_unavailable / evidence_read_failed —
+      // bound + unavailable (row 4): degrade to an honest empty-evidence
+      // submission; the admission gate decides what empty evidence is worth.
+      const decision = evaluatePainIngress({
+        ...base,
+        origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
+        correlation: { status: 'bound', hostKind: 'openclaw', sessionId: opts.session },
+        evidence: { status: 'unavailable', reason: reasonCode },
+      });
       return { decision, acquisitionDetail: acquisition.detail, acquisitionReason: reasonCode };
     }
   }
@@ -202,8 +218,9 @@ function resolveIngressDecision(
   }
 
   // Exhaustive — acquireTrajectoryEvidenceFromDb returns {available, unavailable}
-  // only. The empty-trajectory branch was collapsed to refuse above; a
-  // future-added reason would land here and must also refuse.
+  // only. Unavailable either returned above (refuse for session_not_found,
+  // degrade for the rest); a future-added reason must be classified
+  // explicitly here rather than silently degrading.
   const decision = evaluatePainIngress({
     ...base,
     origin: { kind: 'owner_manual', channel: 'cli_explicit_session' },
@@ -315,18 +332,23 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const { decision, acquisitionDetail, acquisitionReason } = resolveIngressDecision({ opts, stateDir, workspaceDir, painId });
 
   if (decision.action === 'refuse') {
-    // SPEC §7.3: the CLI must surface the specific acquisition reason
-    // (session_not_found / empty_trajectory / trajectory_unavailable /
-    // evidence_read_failed) — the shared evaluator produces the refuse
-    // decision; we map the acquisition detail to the Operator reason.
+    // SPEC §7.3: the CLI must surface the specific acquisition reason —
+    // the shared evaluator produces the refuse decision; we map the
+    // acquisition detail to the Operator reason. PRI-783: the evaluator's
+    // generic next action suggests `pd pain record --session` — the exact
+    // path that just failed — so override it with honest guidance for the
+    // only remaining CLI refuse (session_not_found).
     const reason = opts.session !== undefined && acquisitionReason !== null
       ? acquisitionReason
       : decision.reasonCode;
     const detailSuffix = acquisitionDetail !== null ? ` (${acquisitionDetail})` : '';
+    const nextAction = reason === 'session_not_found'
+      ? 'Check the session id — it is not present in this workspace trajectory — or drop --session to record an unbound Owner report.'
+      : decision.nextAction;
     emitSessionBindingFailure(opts, {
       reason,
       message: `${decision.warning}${detailSuffix}`,
-      nextAction: decision.nextAction,
+      nextAction,
     });
     return;
   }
