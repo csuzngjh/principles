@@ -80,6 +80,23 @@ describe('PRI-750 shared-path event emission (Codex host)', () => {
     expect(result.warnings?.join(' ')).toContain('receipt_event_write_failed:ENOSPC');
   });
 
+  it('preserves emission warnings when a custom beforePromptBuild overrides the result (rc-9)', async () => {
+    const workspaceDir = tempWorkspace();
+    const events: HostEventEmitter = {
+      recordRuntimeV2ActivationsInjected: vi.fn(() => {
+        throw new Error('EIO: i/o error');
+      }),
+      recordToolCall: vi.fn(),
+    };
+    const runtime = createProductionHostRuntime({
+      events,
+      beforePromptBuild: (event) => ({ decision: 'allow', source: event.source }),
+    });
+    const result = await runtime.dispatch(makeEvent('before_prompt_build', workspaceDir) as never);
+    expect(result).toMatchObject({ decision: 'allow', source: 'test:prompt' });
+    expect(result.warnings?.join(' ')).toContain('receipt_event_write_failed:EIO');
+  });
+
   it('keeps the tool dispatch when the tool emitter throws (receipt write failure, rc-9)', async () => {
     const workspaceDir = tempWorkspace();
     const events: HostEventEmitter = {

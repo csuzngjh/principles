@@ -278,7 +278,14 @@ export function createProductionHostRuntime(
       } catch (err) {
         emissionWarnings.push(`receipt_event_write_failed:${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);
       }
-      if (options.beforePromptBuild) return options.beforePromptBuild(event, prompt);
+      // PRI-750 review: a custom beforePromptBuild must not swallow the
+      // receipt-emission warnings captured above (rc-9) — merge them into the
+      // handler result instead of replacing the result wholesale.
+      if (options.beforePromptBuild) {
+        const custom = await options.beforePromptBuild(event, prompt);
+        if (emissionWarnings.length === 0) return custom;
+        return { ...custom, warnings: [...(custom.warnings ?? []), ...emissionWarnings] };
+      }
       return {
         decision: prompt.additionalContext.length > 0 ? 'modify' : 'allow',
         source: event.source,
