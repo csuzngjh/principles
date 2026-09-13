@@ -443,11 +443,15 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   // 4) Read auth token for health probes (PD_CONSOLE_TOKEN)
   const rawToken = opts.token ?? process.env.PD_CONSOLE_TOKEN;
   const token = !opts.noAuth && rawToken?.trim() ? rawToken.trim() : undefined;
+  // PRI-784: mismatch guidance must name where the token came from — a
+  // persistently set env var survives "reopen without a token", so the
+  // actionable advice differs fundamentally between flag and env sources.
+  const tokenSource: 'flag' | 'env' = opts.token ? 'flag' : 'env';
 
   // 5) Plan the launch (reuse or fresh bind)
   let plan;
   try {
-    plan = await planConsoleLaunch({ workspaceDir, preferredPort, host, token });
+    plan = await planConsoleLaunch({ workspaceDir, preferredPort, host, token, ...(token ? { tokenSource } : {}) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const result: ConsoleLaunchResult = {
@@ -711,6 +715,11 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   const tokenlessCallerOnNoAuthServer = !token?.trim() && readyAuthenticationMode === 'no_auth';
   if (authMismatch && !tokenlessCallerOnNoAuthServer) {
     try { child.kill('SIGTERM'); } catch { /* child may already have exited */ }
+    // PRI-784: name the token source. A freshly spawned server only receives
+    // --token (never the env var), so an env-sourced token ALWAYS lands here;
+    // without that fact the user cannot form a working command.
+    const tokenConfiguredVia =
+      tokenSource === 'env' ? 'the PD_CONSOLE_TOKEN environment variable' : '--token';
     const result: ConsoleLaunchResult = {
       status: 'refused',
       url: '',
@@ -722,8 +731,12 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       authenticationMode: readyAuthenticationMode,
       reason: 'console_authentication_mode_mismatch',
       nextAction:
-        'The Console is running without authentication (auto-launched default). ' +
-        'Reopen it without a token to reuse it, or stop it and start with --token for authenticated access.',
+        `The freshly started Console came up without authentication even though a token was configured via ${tokenConfiguredVia}. ` +
+        (tokenSource === 'env'
+          ? 'A token in that variable is not forwarded to a freshly started Console — pass it explicitly instead:\n' +
+            '    pd console open --token "$PD_CONSOLE_TOKEN"   (PowerShell: --token $env:PD_CONSOLE_TOKEN)\n' +
+            'or run it without authentication: pd console open --no-auth'
+          : 'Verify the token value, update the installed runtime (npx create-principles-disciple), or run pd console open --no-auth to use it without authentication.'),
     };
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
