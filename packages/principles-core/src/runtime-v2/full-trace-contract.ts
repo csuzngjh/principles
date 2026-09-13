@@ -2,7 +2,9 @@
  * FullTrace quality contract and schema hardening (PRI-190).
  *
  * Defines the structured payload contract for source execution traces
- * consumed by the GoldenTrace fixture builder and read models.
+ * consumed by `context-payload.ts` (schema re-export and validation).
+ * No runtime trace-refinement consumer exists since PRI-770 removed the
+ * TraceRefiner chain; remaining references are type/schema-level.
  *
  * Key invariants:
  *   - sourceTaskId / sourcePainId / sourceRunIds provide traceability

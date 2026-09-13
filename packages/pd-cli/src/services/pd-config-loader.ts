@@ -200,6 +200,7 @@ export function loadPdConfig(workspaceDir: string): PdConfigLoadResult {
     configPath,
     warnings: [
       ...effective.warnings,
+      ...validationResult.warnings,
       ...(legacyFilesDetected.length > 0
         ? [`Legacy config files detected (${legacyFilesDetected.length}): ${legacyFilesDetected.join(', ')}. PD now uses .pd/config.yaml.`]
         : []),

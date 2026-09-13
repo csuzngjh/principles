@@ -352,7 +352,6 @@ describe('Golden fixture: prompt output', () => {
         contextInjection: {
           thinkingOs: 'true',
           projectFocus: 'full',
-          evolutionContext: { enabled: true },
         },
       }),
       'utf-8',
@@ -364,7 +363,6 @@ describe('Golden fixture: prompt output', () => {
 
     expect(config.thinkingOs).toBe(false);
     expect(config.projectFocus).toBe('off');
-    expect(config.evolutionContext.enabled).toBe(true);
   });
 
   it('4. With project context + thinking OS', async () => {

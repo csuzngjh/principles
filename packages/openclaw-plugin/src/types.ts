@@ -8,7 +8,6 @@ export type { PluginCommandContext, PluginCommandResult } from './openclaw-sdk.j
 // Re-exported here so plugin consumers keep the same import path.
 export type {
   ContextInjectionConfig,
-  EvolutionContextConfig,
   ProjectFocusMode,
 } from '@principles/core';
 

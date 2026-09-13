@@ -63,7 +63,7 @@
     "build:types": "tsc --emitDeclarationOnly",
     "prepack": "npm run build:production && npm run build:types",
     "test": "vitest run",
-    "test:unit": "vitest run --config vitest.unit.config.ts tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts --exclude tests/commands/evolver.test.ts",
+    "test:unit": "vitest run --config vitest.unit.config.ts tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts",
     "test:integration": "vitest run tests/integration/",
     "test:host-runtime-parity": "vitest run --config vitest.parity.config.ts tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts tests/package/published-host-runtime-bundle.test.ts",
     "test:coverage": "vitest run --coverage",

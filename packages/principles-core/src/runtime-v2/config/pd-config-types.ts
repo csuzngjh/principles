@@ -264,30 +264,18 @@ export interface ProfileConfig {
 export const VALID_PROJECT_FOCUS_MODES = ['full', 'summary', 'off'] as const;
 export type ProjectFocusMode = (typeof VALID_PROJECT_FOCUS_MODES)[number];
 
-export interface EvolutionContextConfig {
-  /** Enable conversation context in evolution task (default: true) */
-  enabled: boolean;
-  /** Max recent messages included in evolution task (default: 4) */
-  maxMessages: number;
-  /** Max chars per message snippet (default: 200) */
-  maxCharsPerMessage: number;
-}
-
 /** Context injection — what runtime content gets injected into the LLM prompt. */
 export interface ContextInjectionConfig {
   /** Thinking OS (mental models) injection toggle. */
   thinkingOs: boolean;
   /** Project context (CURRENT_FOCUS.md) injection mode. */
   projectFocus: ProjectFocusMode;
-  /** Evolution task context injection settings. */
-  evolutionContext: EvolutionContextConfig;
 }
 
 /** Partial context injection config — for user input, defaults resolved in effective config. */
 export type PartialContextInjectionConfig = {
   thinkingOs?: boolean;
   projectFocus?: ProjectFocusMode;
-  evolutionContext?: Partial<EvolutionContextConfig>;
 };
 
 // ── Top-Level Config ────────────────────────────────────────────────────────
@@ -319,6 +307,8 @@ export interface PdConfigValidationError {
 export interface PdConfigValidationResultOk {
   ok: true;
   value: PdConfig;
+  /** Non-fatal notices (e.g. tolerated legacy keys) — surfaced by config loaders. */
+  warnings: string[];
 }
 
 export interface PdConfigValidationResultErr {
