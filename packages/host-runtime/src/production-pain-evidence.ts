@@ -308,12 +308,15 @@ function hasCanonicalSchema(db: Database.Database): boolean {
 export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory; hostKind?: GovernanceHostKind; events?: HostEventEmitter } = {}) {
   return async (event: HostEvent): Promise<HostEventResult> => {
     // PRI-750: shared-path tool event with the host's natural turn/tool ids
-    // (Codex turn_id → runId, tool_use_id → toolCallId) — DIRECT binding to
-    // assistant_turns.run_id. Emitted BEFORE the trajectory-db availability
-    // gate so the receipt chain stays observable even when the trajectory
-    // store is unavailable (rc-9). Optional port: absent means no-op (the
-    // OpenClaw plugin path emits its own tool events).
-    {
+    // (Codex turn_id → runId, tool_use_id → toolCallId) so receipt events
+    // carry a turn-level anchor in the same events_*.jsonl format as the
+    // OpenClaw path. Emitted BEFORE the trajectory-db availability gate so
+    // the receipt chain stays observable even when the trajectory store is
+    // unavailable. Emission failure must not block the tool result — it
+    // degrades to an observable warning (rc-9). Optional port: absent means
+    // no-op (the OpenClaw plugin path emits its own tool events).
+    let emissionWarning: string | undefined;
+    try {
       const earlyOutcome = normalizeOutcome(event);
       options.events?.recordToolCall(event.context.sessionId, {
         toolName: event.context.toolName ?? '',
@@ -322,11 +325,13 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
         ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
         ...(event.context.toolCallId !== undefined ? { toolCallId: event.context.toolCallId } : {}),
       });
+    } catch (err) {
+      emissionWarning = `receipt_event_write_failed:${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`;
     }
 
     const dbPath = path.join(event.context.workspaceDir, '.state', 'trajectory.db');
     if (!fs.existsSync(dbPath)) {
-      return { decision: 'observe', source: event.source, warnings: ['trajectory_db_not_found'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'initialize the selected PD workspace before retrying the hook' } };
+      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), 'trajectory_db_not_found'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'initialize the selected PD workspace before retrying the hook' } };
     }
 
     let db: Database.Database | undefined;
@@ -336,11 +341,11 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
       if (!hasCanonicalSchema(db)) {
         db.close();
         db = undefined;
-        return { decision: 'observe', source: event.source, warnings: ['trajectory_schema_invalid'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'run the supported PD workspace migration' } };
+        return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), 'trajectory_schema_invalid'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'run the supported PD workspace migration' } };
       }
     } catch (error) {
       try { db?.close(); } catch { /* best-effort cleanup of an unusable handle */ }
-      return { decision: 'observe', source: event.source, warnings: [`trajectory_database_unavailable:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'inspect or repair the selected PD trajectory database' } };
+      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), `trajectory_database_unavailable:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'inspect or repair the selected PD trajectory database' } };
     }
 
     const warnings: string[] = [];
@@ -353,7 +358,7 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     }
     if (!enrichment) {
       try { db.close(); } catch { /* no business write occurred */ }
-      return { decision: 'observe', source: event.source, warnings: warnings.length > 0 ? warnings : ['pain_enrichment_invalid'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'inspect host pain enrichment input' } };
+      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), ...(warnings.length > 0 ? warnings : ['pain_enrichment_invalid'])], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'inspect host pain enrichment input' } };
     }
 
     const outcome = normalizeOutcome(event);
@@ -426,13 +431,17 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
         cooldowns.set(cooldownKey, admittedAt);
       }
     } catch (error) {
-      return { decision: 'observe', source: event.source, warnings: [`trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: outcome.failure ? 'failure' : 'success', admitted: false, duplicate: false, nextAction: 'inspect the workspace trajectory database and retry' } };
+      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), `trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: outcome.failure ? 'failure' : 'success', admitted: false, duplicate: false, nextAction: 'inspect the workspace trajectory database and retry' } };
     } finally {
       try { db.close(); } catch { /* write result already determined; cleanup is best-effort */ }
     }
 
     const effectiveAdmitted = admitted || duplicateAdmitted;
-    return { decision: 'observe', source: event.source, metadata: {
+    return {
+      decision: 'observe',
+      source: event.source,
+      ...(emissionWarning ? { warnings: [emissionWarning] } : {}),
+      metadata: {
       eventId, painId: effectiveAdmitted ? painId : null, outcome: outcome.failure ? 'failure' : 'success', admitted: effectiveAdmitted, duplicate,
       sourceKind, failureSource: sourceObservation.failureSource ?? null, triggerOutcome: trigger.outcome,
       triggerReason: trigger.reason, painScore, isRisky, relativePath, agentId: enrichment.agentId ?? null,

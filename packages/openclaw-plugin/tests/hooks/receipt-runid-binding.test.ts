@@ -66,6 +66,22 @@ describe('PRI-750 receipt chain runId/toolCallId binding (OpenClaw after_tool_ca
     );
   });
 
+  it('accepts the host toolUseId alias with the same precedence as pain.ts', () => {
+    const event = {
+      toolName: 'edit',
+      params: { file_path: 'x.txt' },
+      result: { exitCode: 1 },
+      error: 'boom',
+      runId: 'run-abc',
+      toolUseId: 'alias-call-9',
+    };
+    handleFrictionTrackingForFailure('s-runid', event as never, outcomeFailure, observation, 0, workspaceDir, mockWctx.config as never, mockWctx as never, { recordTrajectory: false });
+    expect(mockEventLog.recordToolCall).toHaveBeenCalledWith(
+      's-runid',
+      expect.objectContaining({ toolName: 'edit', runId: 'run-abc', toolCallId: 'alias-call-9' }),
+    );
+  });
+
   it('stays compatible when the host supplies no runId/toolCallId', () => {
     const event = { toolName: 'edit', params: { file_path: 'x.txt' }, result: { exitCode: 1 }, error: 'boom' };
     handleFrictionTrackingForFailure('s-runid', event as never, outcomeFailure, observation, 0, workspaceDir, mockWctx.config as never, mockWctx as never, { recordTrajectory: false });

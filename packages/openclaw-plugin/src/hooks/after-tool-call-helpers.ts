@@ -43,6 +43,15 @@ function hostIdString(value: unknown): string | undefined {
 }
 
 /**
+ * PRI-750: narrow the host tool-id field with the same precedence as the pain
+ * pipeline (pain.ts): `toolUseId` is the preferred event identifier,
+ * `toolCallId` the fallback (both host-supported shapes).
+ */
+function hostToolIdString(event: Record<string, unknown>): string | undefined {
+  return hostIdString(Object.hasOwn(event, 'toolUseId') ? event.toolUseId : event.toolCallId);
+}
+
+/**
  * Extract a preview string from tool call result for diagnostic evidence.
  * Pure function — no I/O, no side effects. ERR-001 / ERR-014 compliant.
  */
@@ -256,7 +265,7 @@ export function handleFrictionTrackingForFailure(
     // turn binding to assistant_turns.run_id. Absent when the host supplies
     // none (event stays compatible).
     runId: hostIdString(event.runId),
-    toolCallId: hostIdString(event.toolCallId),
+    toolCallId: hostToolIdString(event as unknown as Record<string, unknown>),
   });
 
   if (options.recordTrajectory !== false) wctx.trajectory?.recordToolCall?.({
@@ -330,7 +339,7 @@ export function handleFrictionTrackingForSuccess(
     // PRI-750: host run/tool ids from the after_tool_call event — DIRECT
     // turn binding to assistant_turns.run_id.
     runId: hostIdString(event.runId),
-    toolCallId: hostIdString(event.toolCallId),
+    toolCallId: hostToolIdString(event as unknown as Record<string, unknown>),
   });
 
   return resetState;

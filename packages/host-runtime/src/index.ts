@@ -225,9 +225,10 @@ export function createProductionHostRuntime(
     /**
      * PRI-750: optional event emission port. When present, the shared-path
      * handlers record injection/tool events carrying the host's natural
-     * turn/tool ids (turnId/toolCallId) for DIRECT binding to
-     * assistant_turns.run_id. Only the Codex host adapter wires this (single
-     * EventLog writer); the OpenClaw plugin path owns its own emission.
+     * turn/tool ids (turnId/toolCallId) in the same events_*.jsonl format as
+     * the OpenClaw path (whose events additionally bind to
+     * assistant_turns.run_id). Only the Codex host adapter wires this; the
+     * OpenClaw plugin path owns its own emission.
      */
     events?: HostEventEmitter;
   } = {},
@@ -252,27 +253,37 @@ export function createProductionHostRuntime(
         excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
       });
       // PRI-750: record the injection event on the shared path with the host
-      // turn id (Codex turn_id → runId) so the receipt chain joins DIRECTly
-      // to assistant_turns.run_id. Optional port — absent means no-op (the
-      // OpenClaw plugin path emits this event itself).
-      options.events?.recordRuntimeV2ActivationsInjected({
-        sessionId: event.context.sessionId,
-        workspaceDir: event.context.workspaceDir,
-        principleIds: prompt.principleIds,
-        activationIds: prompt.activationIds,
-        artifactIds: prompt.artifactIds,
-        injectedCount: prompt.principleIds.length,
-        skippedWarnings: prompt.warnings,
-        injectedCharCount: prompt.additionalContext.length,
-        budget: RUNTIME_V2_PRINCIPLE_BUDGET,
-        ...(prompt.truncated !== undefined ? { v2Truncated: prompt.truncated } : {}),
-        ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
-      });
+      // turn id (Codex turn_id → runId) so receipt events carry a turn-level
+      // anchor in the same events_*.jsonl format as the OpenClaw path. The
+      // OpenClaw plugin additionally persists these to assistant_turns.run_id;
+      // the Codex DB-side anchor is a follow-up. Optional port — absent means
+      // no-op (the OpenClaw plugin path emits this event itself). Emission
+      // failure must not block the prompt result — it degrades to an
+      // observable warning (rc-9).
+      const emissionWarnings: string[] = [];
+      try {
+        options.events?.recordRuntimeV2ActivationsInjected({
+          sessionId: event.context.sessionId,
+          workspaceDir: event.context.workspaceDir,
+          principleIds: prompt.principleIds,
+          activationIds: prompt.activationIds,
+          artifactIds: prompt.artifactIds,
+          injectedCount: prompt.principleIds.length,
+          skippedWarnings: prompt.warnings,
+          injectedCharCount: prompt.additionalContext.length,
+          budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+          ...(prompt.truncated !== undefined ? { v2Truncated: prompt.truncated } : {}),
+          ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
+        });
+      } catch (err) {
+        emissionWarnings.push(`receipt_event_write_failed:${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);
+      }
       if (options.beforePromptBuild) return options.beforePromptBuild(event, prompt);
       return {
         decision: prompt.additionalContext.length > 0 ? 'modify' : 'allow',
         source: event.source,
         ...(prompt.additionalContext.length > 0 ? { additionalContext: prompt.additionalContext } : {}),
+        ...(emissionWarnings.length > 0 ? { warnings: emissionWarnings } : {}),
       };
     },
   });
