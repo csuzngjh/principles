@@ -1,470 +1,549 @@
-# Agent Delivery Operating Model — PD 长任务 Agent 执行规范
+# Agent Delivery Operating Model — PD 长任务执行规范
 
-> **状态**: Draft（Agent 起草的规范提案；Owner 认可后作为团队约定生效，见 §10）
-> **日期**: 2026-09-13（ISSUE #23）
-> **作者**: AI（CNB NPC `npc/CodeBuddy(deepseek-v4.1-flash)`）
-> **基线**: `main` @ `75589f15`（工作区 HEAD = `origin/main`）
-> **性质**: 纯规范文档。不修改任何代码、配置、Secret 或权限。
-> **读者**: 在 PD 仓库中执行任务的任何 AI Agent（CNB NPC / 本地会话 / 未来接入的 Agent）与 Owner。
+> **状态**: Draft（待 Owner Review）
+> **日期**: 2026-09-13
+> **作者**: AI（CNB NPC `npc/CodeBuddy(deepseek-v4.1-flash)`，ISSUE #23）
+> **基线**: `main` @ `75589f15`
+> **来源**: PRI-767 / PRI-768（云端 Developer 入口）、PRI-778（CNB → GitHub 交付桥）、PRI-782（集成凭据治理）的实践
+> **关联**:
+> - `AGENTS.md`（工程宪法，本文所有规则的上位来源）
+> - `docs/runbooks/CNB_CLOUD_WORKER.md`（云端 Worker 接入与运行手册）
+> - `docs/runbooks/CREDENTIAL_INVENTORY.md`（凭据台账）
+> - `docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md`（凭据信任边界决策）
+> - `docs/audit/PRI-778-cnb-github-bridge-reality-report.md`、`docs/audit/PRI-782-integration-credential-reality-report.md`
+> - `.cnb/agents/pd-developer.md`（PD Developer 章程）、`.cnb/agents/pd-auditor.md`（PD Auditor 章程）
 
 ---
 
-## 0. 这份文档解决什么
+## 0. 本文是什么 / 不是什么
 
-本文档把近期若干次真实治理任务中**已经验证有效的执行纪律**固化为一条可复用的
-长任务执行规范，使未来 Agent 能在**低 Owner 介入**下完成复杂任务。
+**是**：PD 长任务（跨多个 session、跨多个执行环境、持续数小时到数天）的**执行规范**。
+它回答三个问题：
 
-Owner 只应在三类节点被打断：
+1. 一个任务从 Owner 意图到 GitHub merge，中间必须发生什么、由谁负责；
+2. Agent 在执行中**何时必须停下**（而不是继续猜）；
+3. 所有治理产物**写到哪里才算存在**。
 
-1. **架构决策**（canonical source / trust boundary / 第二事实源）；
-2. **产品方向**（是否属于 PD 产品边界、MVP 取舍）；
-3. **风险接受**（凭据、权限、外部集成、不可逆操作）。
+**不是**：
 
-其余调查、分析、文档、PR、修测试等**低价值交互**应由 Agent 自主完成。
+- ❌ 不是新的工程宪法。`AGENTS.md` 是上位来源；本文只**落实与串联**它已有的规则（P1–P8、§21–§25、§23A、§29）。
+- ❌ 不是新的运行时机制、状态源或门禁。本文不引入任何 `packages/**` 改动、不新增脚本、不新增流水线阶段。
+- ❌ 不是工具使用手册。具体命令、平台细节仍以 `docs/runbooks/CNB_CLOUD_WORKER.md` 为准（单一事实源）。
+- ❌ 不是 Agent 编排系统。PD 不拥有通用任务编排（`AGENTS.md` §1）。
 
-### 0.1 本文档不解决什么（避免第二事实源）
+**稳定性**：本文所有规则 ID（`AL-*` / `SC-*` / `AP-*` / `OI-*`）为仓库稳定 ID，
+可被 PR、章程、runbook 与后续工单引用。**不得随意重命名或删除**——
+修改需按 `AGENTS.md` 的 Constitution Change Rule 走 Owner 评审。
 
-本文档**不重新定义**以下已经存在的单一事实源（SSoT）：
+---
 
-| 主题 | 唯一权威 | 本文档的位置 |
+## 1. 适用范围与不适用范围
+
+### 1.1 适用（长任务）
+
+满足任一条件的任务：
+
+- 跨多个 agent session（含被中断后恢复）；
+- 跨多个执行环境（本地 worktree / CNB 云容器 / GitHub CI）；
+- 预期产物 ≥ 1 份治理文档或 ≥ 1 个 PR；
+- 涉及不可逆外部动作（推送分支、开 PR、调用外部 API）。
+
+### 1.2 不适用
+
+- 单次问答、只读查询；
+- 单个小改动的即席修复（按 `AGENTS.md` §22 现有 PR 流程即可）；
+- PD 产品运行时内部的 Agent 编排行为（那是 ADR-0003/0008/0009 的领域）。
+
+---
+
+## 2. Canonical 模型（先读这一节）
+
+长任务的一切判断都依赖"哪一侧是权威"。本文沿用仓库已固化的模型，**不新建**：
+
+| 面 | 角色 | 依据 |
 |---|---|---|
-| 工程宪法（P1–P8、§14–§30、稳定 ID） | `AGENTS.md` | 引用，不复制 |
-| 产品边界 | `docs/product/PRODUCT_IDENTITY.md` | 引用 |
-| CNB Auditor / Developer 角色硬约束 | `.cnb/agents/pd-auditor.md` / `.cnb/agents/pd-developer.md` | 引用，不复制 |
-| CNB 接入与桥的运行细节 | `docs/runbooks/CNB_CLOUD_WORKER.md` | 引用 |
-| 凭据信任边界与残余风险 | `docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md` | 引用 |
-| 多 Agent Git 治理（worktree / lease） | `AGENTS.md` §23A | 引用 |
-| 错误经验检索 | `docs/process/error-management/ERROR_PATTERN_INDEX.md` | 引用 |
+| **GitHub `main`** | **Canonical 事实源**；唯一合并点；Owner 独占 merge 权 | `AGENTS.md` §23；`docs/runbooks/CREDENTIAL_INVENTORY.md` §0.0 |
+| **CNB** | **执行环境**（Auditor / Developer / 定时审计 / 交付桥），不是事实源 | 同上；`docs/runbooks/CNB_CLOUD_WORKER.md` §1–§2 |
+| **CNB PR / `ai/cnb-dev/*` 分支** | **提案载体**，不是落地。经 T7/T6 桥送到 GitHub 后才有意义 | runbook §4.3–§4.4 |
+| **`sync/cnb-delivery/*`** | 桥的传输分支（只推该前缀） | runbook §4.4.2 |
+| **本地/云端 worktree** | 一次性工作区，可丢弃；**不是**证据存储 | `AGENTS.md` §23A |
 
-> 阅读顺序建议：先 `AGENTS.md`（宪法），再本文档（长任务执行编排），
-> 最后按具体任务读相应章程 / runbook。
-
----
-
-## 1. Agent Mission Lifecycle
-
-一条 Agent 任务的生命周期由七个阶段构成。**每个阶段都有明确的允许、禁止与停止条件。**
-
-```
-Owner Intent
-   ↓
-Reality Check          ← 问题是否真实存在？（§2）
-   ↓
-Planning               ← 最小合理方案（§3）
-   ↓
-Implementation         ← 受限写入（§4）
-   ↓
-Verification           ← 以真实边界为证据（§P5）
-   ↓
-Delivery               ← PR / 桥（§6）
-   ↓
-Evidence Persistence   ← 产物必须落库（§6）
-```
-
-### 1.1 各阶段契约
-
-| 阶段 | Agent 可以做什么 | Agent 不可以做什么 | 何时停止 |
-|---|---|---|---|
-| **Owner Intent** | 复述任务目标、列出歧义点、判断合法性 | 凭 Issue 措辞直接假设现状；自行扩大范围 | 任务含糊 / 自相矛盾 / 超出授权边界 → 停止请求澄清（Developer 章程 D8/D9） |
-| **Reality Check** | 只读调查代码、配置、文档、测试、历史报告 | 修改任何文件；把 SPEC/Issue 描述当作 implementation truth | 目标**已完成** → 停止并报告（§2 Completion Check） |
-| **Planning** | 写计划、回答四问（§3）、预判 Complexity Delta | 设计新子系统；为假设的未来做抽象（`antipattern-future-extensibility`） | 需要架构选择 / 第二事实源 → 停止，列选项交 Owner（§5） |
-| **Implementation** | 在授权路径内做最小连贯改动 + 测试 + 文档 | 越界写 `packages/**`、`.github/**`、Secret、权限；制造第二状态源 | 触碰 §5 任一停止条件 → 停手 |
-| **Verification** | 跑真实边界测试、`error:context`、目标检查脚本 | 删/禁用/弱化测试以求绿；声称跑过但未跑 | 门禁红且无法在本任务内合法修复（pre-existing 除外，须附证据）→ 停止 |
-| **Delivery** | 建分支、提交、开 PR、写证据 | 直推 `main`、自行合并、force push、改动凭据 | 需要新凭据/权限 → 停止（§5） |
-| **Evidence Persistence** | 把报告 / 决策 / 验证结果提交进仓库或依既定 runbook 发布 | 只留 Agent 回复、流水线日志、临时文件系统（§6） | 产物无法持久化 → 停止并升级（这是 P1 同族风险） |
-
-### 1.2 阶段纪律的既有依据
-
-上述契约不是新发明，而是把已有经验收敛为一条通用生命周期：
-
-- **PRI-782** 实证了"产物只存在于临时容器"导致**历史结论不可恢复**（Artifact Lifecycle 缺陷）；
-  §6 的持久化契约就是把该教训前置到每一个任务。
-- **PRI-766** 实证了"Agent 输出必须可验证"（Evidence Quality Gate、完整性自检抓住了计数错误）；
-  §4 的实施纪律要求 Agent 自证而非自述。
-- **PRI-767/768** 建立了角色硬约束（Auditor H1–H7 / Developer D1–D9）与"停止请求澄清"；
-  §5 把它泛化为所有 Agent 的停止条件。
-- **PRI-778** 确立了 canonical 方向（GitHub 权威、CNB 执行）；
-  §4.3 的 canonical boundary 引用它。
-- **PRI-630** 是 Completion Check 的既有先例：Reality Check 证明任务已完成即停止。
+**推论（本文的核心动机）**：任何只存在于临时执行环境（容器文件系统、构建日志、聊天记录、Agent 回复）的产物，
+**在任务结束时等于不存在**。PRI-782 就是这个推论的实证：Phase 0 报告只存在于已被销毁的容器里，
+工作区文件系统、`git log --all`、全部 ref 的 `ls-tree`、`git stash list`、`git fsck --unreachable`、
+远端分支均无命中，只能整份重新取证（见 `docs/audit/PRI-782-integration-credential-reality-report.md` §0）。
 
 ---
 
-## 2. Reality Check Protocol
+## 3. 完整生命周期：Owner Intent → GitHub Merge
 
-**任何实施前必须先做 Reality Check。** 这是 `AGENTS.md` P1 / P2 / P2.1 在长任务上的落地。
+### 3.1 状态图
 
-### 2.1 Requirement Reality — 问题是否真实存在
+```text
+  [0] Owner Intent
+        │  载体：CNB Issue 评论 / Linear 工单 / GitHub Issue
+        │  动作：Owner 表达目标；Agent 只记录，不解释、不扩写
+        ▼
+  [1] Reality Check                ← 对应 Phase 模型 §4.1
+        │  动作：读任务书原文 → 读仓库现实 → 判定合法性（许可范围 / 有无冲突）
+        │  产物：若不足则停（SC-*）；若充分 → 调查结论（叙述，不落盘）
+        ▼
+  [2] Planning                     ← §4.2
+        │  动作：定义验收证据（P5）→ 最小变更面（P3）→ 选路（复用 or 新建）
+        │  产物：见 §6（本节通常只在 PR 描述里留痕）
+        ▼
+  [3] In Progress
+        │  动作：建立隔离工作区（§5）→ 取得写租约（git-9）
+        │  产物：worktree + 分支
+        ▼
+  [4] Implementation               ← §4.3
+        │  动作：最小改动 / 文档写入（按 §9 契约落盘）
+        │  产物：commit（+ 必要的中间证据）
+        ▼
+  [5] Verification                 ← §4.4
+        │  动作：跑真实检查（含负向控制，见 §8）
+        │  产物：**原文输出**（未跑的不许声称跑过）
+        ▼
+  [6] Delivery（提案）             ← §4.5
+        │  动作：push 分支 → 开 PR（本仓库 / CNB 镜像）→ 交付报告
+        │  产物：PR（提案状态）
+        ▼
+  [7] Bridge（CNB 场景）
+        │  动作：T7 自动投递 / T6 兜底 → 落地 GitHub PR
+        │  注意：桥只送内容，CNB main 的合并提交不进 GitHub 历史（runbook §4.4.3）
+        ▼
+  [8] Owner Review                 ← §7 OI-*
+        │  动作：Owner 在 GitHub 评审。Agent **等待**，不催、不改结论、不自认已审
+        ▼
+  [9] Merge（Owner 独占）
+        │  动作：Owner 合并。**AI 永不执行 merge**（AGENTS.md §23 / 章程 D4）
+        ▼
+  [10] Reconciliation              ← §7 OI-7
+        │  动作：工单状态收口（AGENTS.md §21 rules 9–11）；后续跟进项落盘
+        ▼
+      完成
+```
 
-- 从**当前仓库现实**出发：生产代码、schema、配置、生产 wiring、消费方、测试、运行证据。
-- **禁止**仅凭 Issue 描述、SPEC 假设、历史 PR 或记忆假设问题存在（§P1 原文）。
-- 判定优先级：`AGENTS.md` §3.1 Intent Truth（应该怎样）vs §3.2 Implementation Truth（实际怎样）。
-  两者冲突时**不要默默选一边**，把它作为 drift 记录进交付（§3.3）。
+### 3.2 授权来源
 
-### 2.2 Existing Mechanism Check — 是否已有机制
+| 决策 | 授权来源 |
+|---|---|
+| 是否开工 | Owner 的显式任务书 |
+| 允许改哪些路径 | 任务书原文（通常是 `D1`/`D2` 的白名单） |
+| 验收标准 | 任务书的"输出 / 覆盖 / 限制"三段 |
+| 是否可合并 | **Owner 独占** |
+| 是否可扩大范围 | 否（`P3`；`antipattern-review-missing`） |
+| 是否可新建架构 | 否，除非 Owner 显式要求（`P7`） |
 
-实施前必须检查：
+---
 
-- **已有代码**：`rg "SymbolName"` / `rg "new SomeService"` / `rg "interface SomePort"`；
-- **已有关联文档**：`docs/architecture/`、`docs/adr/`、`docs/audit/`、`docs/runbooks/`；
-- **已有配置**：`.cnb.yml`、`.cnb/`、`.github/workflows/`、各包 manifest；
-- **已有抽象**：哪个 owner 已经承担该职责？（§P2 question 5/6）
+## 4. Agent Phase 模型
 
-**禁止**的形状：
+五个 Phase：**Reality Check → Planning → Implementation → Verification → Delivery**。
+每个 Phase 有：入口条件、必做动作、产出、退出条件。
+**Phase 不得跳过**；不得用"任务很小"作为跳过 Reality Check 的理由。
 
-- 重复实现（同一职责出现第二套实现）；
-- 创建第二系统 / 第二事实源（§P4）；
-- 误判"缺失能力"，实为"已有能力未接通"（§P2.1 Connection Before Creation）。
+### 4.1 Phase 1 — Reality Check（现实核查）
 
-### 2.3 Completion Check — 是否已经完成
+> 上位规则：`P1 Evidence Over Assumption`、`P2 Survey Before Acting`、`P2.1 Architecture Reality Audit`、`AGENTS.md` §3.3。
+
+**必做**：
+
+1. 读任务书**原文**（不是摘要、不是上一轮 Agent 的复述）。
+2. 判定 Canonicity：任务要改的东西在哪一侧（GitHub / CNB / 平台后台）。
+3. 读仓库现实：目标文件是否存在、当前内容、消费者、测试、既有抽象。
+4. 判定合法性：目标路径是否在任务书许可范围内；是否存在与之冲突的既有决策。
+5. 标记 UNKNOWN：**无法取证的一律标 UNKNOWN，不猜测**（PRI-782 §5 的做法）。
+
+**禁止**：
+
+- 从记忆、历史 PR、SPEC 假设推断当前实现；
+- 把任务书的措辞当作现状描述（SPEC 表达意图，不证明现状）；
+- 在未读目标文件前起草内容。
+
+**退出条件**：能回答"当前行为在哪、权威源是谁、最小缺口是什么"三个问题。
+否则进入 **Stop Condition**。
+
+#### 4.1.1 Completion Check — 是否已经完成
 
 **如果目标已经完成，必须停止并报告，不得为了"有产出"而制造改动。**
 
 判定依据（全部来自当前仓库现实，而非记忆）：
 
-1. 目标能力是否已在生产路径存在并被消费？（§P2 question 3）
-2. 是否有保护它的测试 / 契约？（§P2 question 4）
-3. 是否只是**文档未更新**，而非功能缺失？（→ 交付收窄为文档修正或直接报告 drift）
+1. 目标能力是否已在生产路径存在并被消费？（`P2` question 3）
+2. 是否有保护它的测试 / 契约？（`P2` question 4）
+3. 是否只是**文档未更新**，而非功能缺失？（→ 交付收窄为文档修正，或直接报告 drift）
 
-**既有先例**：PRI-630 的 Reality Check 证明了任务已完成，执行随之终止——这正是本文档
+**既有先例**：PRI-630 的 Reality Check 证明任务已完成，执行随之终止——这正是本规范
 要求的行为，不是失败。
 
-### 2.4 与 Owner 的既有工作流衔接（§21）
+### 4.2 Phase 2 — Planning（规划）
 
-- 开工前：用 `linear-cli` 的 `context <ID>` 读工单与最新评论；
-- 进入实施：`start <ID>`（对 blocker fail-closed）；
-- 若发现工单描述与仓库现实冲突：按 §2.1 记录 drift，**不盲从 SPEC 假设**（§21 原文）。
+**必做**：
 
----
+1. 定**验收证据**（P5）：什么证据能说服我们改动是对的？先选方法，再动手。
+2. 定**最小变更面**（P3）：满足任务书所需的最小文件集合。
+3. 跑 **Reality Audit**（`P2.1`）：先找"已有能力 + 断开的连接"，再考虑新建抽象。
+4. 做 **Error Context 路由（Pass 1）**：`npm run error:context -- --paths <预期改动文件> --signals <概念>`，
+   人工复核 `ERROR_PATTERN_INDEX.md`，把命中项的 Required Evidence 变成验证计划。
+5. 列 **Stop Condition 预判**：本任务预计会撞到哪几条 `SC-*`。
 
-## 3. Planning Protocol
+**产出**：一段可复述的计划（落在 PR 描述 / 交付报告中，不单独造文件）。
 
-计划阶段必须显式回答以下四问（Project 自有的 `mvp-q-*` 稳定 ID 在 §4 已定义，此处是编排层面的最小集）。
+### 4.3 Phase 3 — Implementation（实现）
 
-### 3.1 Problem — 真正的问题是什么
+**必做**：
 
-- 用**自己的话**复述问题，暴露理解偏差（Developer 章程 §4 `Problem` 节即此意）。
-- 明确"当前系统实际发生什么"（Before）与"期望发生什么"（After）。
-- 如果复述不出与 Issue 措辞不同的一句话，说明 Reality Check 不足。
+1. 隔离工作区：`git-1-worktree-per-task`（本地）或独立云端容器（CNB）；开写前取租约 `git-9-lease-before-write`。
+2. 一次只做一个连贯改动（`P3`）；相邻改进**只记录，不顺手做**。
+3. 所有写入遵循 **Artifact Persistence Contract（§9）**。
+4. 不修改未授权路径；越界 = 最严重违规。
 
-### 3.2 Existing Mechanism — 是否已有可复用机制
+**禁止**：
 
-- 本轮任务的变更应**优先扩展既有 authority / module / subsystem**；
-- 若要新增：先回答"现有 owner 为何无法满足"（§13 要求逐项解释）。
+- 直推 `main`、`--force` 推送（`git-6-force-with-lease-only` 仅在确需重写时用 `--force-with-lease`）；
+- 修改他人 worktree / 未知分支 / stash（`git-2`、`git-4`、`git-5`）；
+- 用"为了让测试通过"为由弱化契约。
 
-### 3.3 Complexity Delta — 是否新增复杂度
+### 4.4 Phase 4 — Verification（验证）
 
-按 `AGENTS.md` §13 逐项判定并解释：
+**必做**：
 
-```
-New durable source of truth:        YES / NO
-New persisted schema/state:         YES / NO
-New subsystem/service/background:   YES / NO
-New public abstraction/interface:   YES / NO
-New runtime feature flag:           YES / NO
-New cross-package dependency:       YES / NO
-New host/platform-specific behavior:YES / NO
-New external/network capability:    YES / NO
-```
+1. 跑与改动面匹配的检查（文档改动至少跑 `node scripts/check-docs-structure.cjs`）。
+2. **原文输出**入交付报告；未跑的项如实列出。
+3. 关键结论需要**负向控制**：证明"改之前会失败、改之后通过"（EP-09 的要求）。
+4. **Error Context 路由（Pass 2，diff 模式）**：`npm run error:context` 对真实 diff 复跑，
+   新出现的 HIGH 命中必须处理或显式排除并给理由。
+5. 区分**预存在失败**与**本次回归**：任何 "pre-existing" 声明必须在 base 分支上复现（EP-10 / ERR-078）。
 
-多个无法解释的 `YES` 是架构警告。**权限 / 数据流的新增同样属于 Complexity Delta**，
-必须在计划中显式说明。
+**退出条件**：每条验收证据都有可复跑的命令与真实输出。
 
-### 3.4 Scope — 允许修改什么、禁止修改什么
+### 4.5 Phase 5 — Delivery（交付）
 
-每个任务书必须给出两张清单：
+**必做**：
 
-- **允许修改**：逐路径列出（例：`docs/**`）；
-- **禁止修改**：逐路径列出（例：`packages/**`、`.github/**`、`.cnb.yml`）。
+1. 建 PR（本仓库或 CNB 镜像），标题一行、无括号、无分支名（平台规范）。
+2. PR 描述按 `.github/PULL_REQUEST_TEMPLATE.md` 结构填充，含 Owner Review Card 与 Complexity Delta。
+3. 写交付报告：Problem / Investigation / Changes / Validation / PR / 未做的事（Developer 章程 §4）。
+4. 更新工单状态（`AGENTS.md` §21 rules 9–11）。
+5. **停止并等待 Review**（OI-1）。
 
-范围外的相邻改进 → 写进交付的 "未做的事 / 建议" 区（§P3、Developer 章程 D8），
-**不顺手实施**（`antipattern-review-missing`）。
+**禁止**：
 
----
-
-## 4. Implementation Rules
-
-### 4.1 允许
-
-- 在授权路径内创建必要代码 / 测试 / 文档；
-- 跑既有检查脚本（`scripts/check-*.js|cjs`，零依赖）与目标测试；
-- 建分支、提交、开 PR（见 §6）。
-
-### 4.2 禁止 — Architecture Expansion
-
-- **未授权新增系统 / 子系统 / 后台进程**（§P7、`antipattern-prep-next-phase`）；
-- **第二状态源 / 第二事实源**（§P4）：缓存、投影、只读模型只能是派生的，
-  不得悄然成为写权威；
-- **投机 seam**：零实现或仅一实现的 factory / registry / provider（§P7）；
-- **无端复活退役架构**（§8.3）：历史文档描述过的 Nocturnal / 旧调度 / 旧状态机制
-  不因文档仍在而被重建。
-
-### 4.3 禁止 — Secret Boundary
-
-- **禁止输出 Secret**：不打印、不写评论、不写 PR、不进日志与命令行；
-- **禁止创建 Secret**：Agent 不得生成新凭据；
-- **禁止修改权限**：不改 Token scope、不改仓库权限、不改外部集成授权。
-
-**除非 Owner 明确批准**，以上三条不可由 Agent 自行放宽。
-
-现状事实（引用，不重述）：交付桥容器同时持有 `CNB_TOKEN` 与 `GITHUB_SYNC_TOKEN`
-属**已接受的残余风险**（P0-01 / RA-1~RA-5），
-详见 `docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md` 与
-`docs/runbooks/CNB_CLOUD_WORKER.md` §4.4.2 / §5.1。新增任何凭据引用都必须走最小授权
-（`allow_*`）并在 `docs/runbooks/CREDENTIAL_INVENTORY.md` 登记。
-
-### 4.4 禁止 — Canonical Boundary
-
-**当前架构事实（不得由 Agent 改变）：**
-
-```
-GitHub = canonical source（唯一事实源、PR 合并权、分支保护）
-CNB    = AI execution environment（执行环境、镜像、PR 提案）
-```
-
-- 方向约束：桥只做 **CNB → GitHub**（推分支 + 开 PR），**永不直推 GitHub main**；
-  GitHub → CNB 是独立的单向镜像机制。
-- 依据：`docs/audit/PRI-778-cnb-github-bridge-reality-report.md` §1（GitHub main 有平台级
-  保护：`Verify Merge Gate` strict + `enforce_admins` + 禁 force/删除）。
-- **改变 canonical 方向属架构决策 → 停止并请求 Owner（§5）。**
-
-### 4.5 实施纪律
-
-1. **最小连贯改动**（§P3）：解决既定问题的最小变更面；
-2. **多 Agent 并发**：遵循 §23A —— 每任务一个 worktree（`git-1`）、一 worktree 一写者
-   （`git-2`）、主 checkout 只读（`git-3`）、写前取 lease（`git-9`）、
-   不 `reset --hard`/`clean -fdx`（`git-4`）、force-with-lease（`git-6`）；
-3. **自验如实**：没跑的检查不许声称跑过（Developer 章程 §3.4）；
-4. **失败要 loud 且可行动**：结构化 reason + nextAction，禁止静默降级（`rc-9`、ERR-002）。
+- 轮询 CI 与评审（平台规范：失败会自动唤起 NPC）；
+- 合并 / 关闭 PR；
+- 把"交付完成"表述为"工作已落地"（**提案 ≠ 落地**）。
 
 ---
 
-## 5. Stop Conditions
+## 5. Worktree / Session 纪律（长任务的物理前提）
 
-以下是**必须停止并等待 Owner** 的情况。停止不是失败——它是 §P2.1 / PRI-767
-"Agent 不是无限执行器"的直接体现。
-
-### 5.1 Architecture Decision Required
-
-触发例：
-
-- 需要改变 **canonical source**（GitHub ↔ CNB 关系）；
-- 需要改变 **Trust Boundary**（凭据的信任区划分、存储面）；
-- 需要引入**第二事实源**或新的架构边界 / 契约 / 接口；
-- 发现当前实现与已批准架构冲突，需要选择"改代码"还是"改设计"。
-
-动作：**停止**，在交付里列出选项、利弊与自己的倾向，交 Owner 裁决（Developer 章程 D9）。
-
-### 5.2 Evidence Missing
-
-触发例：
-
-- 审计报告 / 结论的**来源已丢失**，无法验证历史结论（PRI-782 的原始 Phase 0 报告
-  只存在于已销毁容器，即此类）；
-- 关键事实无法用当前仓库证据核实；
-- 需要引用的私有文档不可访问（如 Auditor 零密钥姿态下 `$PD_PRIVATE_DOCS_DIR` 不可读）。
-
-动作：**停止**，显式声明 `UNKNOWN` / 不可用范围，**不猜测、不编造**（Auditor 章程 D5 局限声明
-即此纪律）。若必须基于不可验证结论继续，需 Owner 明确接受该风险。
-
-### 5.3 Secret / Permission Change
-
-触发例：
-
-- 需要扩大 Token scope；
-- 需要修改仓库权限 / 分支保护；
-- 需要新增外部集成授权；
-- 需要新增任何密钥引用面。
-
-动作：**停止**。Agent 不得自行创建、修改或输出凭据（§4.3）。
-
-### 5.4 Scope Expansion
-
-触发例：原任务**没有授权**，但实施中发现需要修改：
-
-- `packages/**`；
-- `.github/**`；
-- `.cnb.yml` / `.cnb/**`（CI 配置）；
-- `AGENTS.md` / `docs/adr/**` / `docs/product/**`。
-
-动作：**停止**，把发现写成 follow-up 建议；若要纳入本任务，先请 Owner 显式扩大授权
-（§P3、`antipattern-review-missing`）。
-
-### 5.5 其他停止信号
-
-- 需要 **merge PR / 发布 / 打 tag / 改版本号**（Owner 独占，Developer 章程 D4/D5）；
-- 需要 **force push**（`git-6` 只允许 `--force-with-lease`，且不得绕过评审）；
-- 任务**含糊或自相矛盾**（停止请求澄清）；
-- 门禁红且修复方式会**弱化契约**（不得为了让测试变绿而降低 observable expectation，§15）。
-
-### 5.6 停止时的交付要求
-
-停止报告必须包含：
-
-1. 已核实的事实与证据（`文件:行号` 或可复现命令 + 输出）；
-2. 触发了哪一条停止条件；
-3. 需要 Owner 决策的具体问题 + 可选项；
-4. 自己的倾向与理由（不代替 Owner 决策）；
-5. 已完成的、可保留的中间产物（若有）。
+| ID | 规则 | 上位 | 失效后果 |
+|---|---|---|---|
+| `AL-5` | 每个写入型任务独占一个 worktree/容器；分支不是并发边界 | `git-1` | 两 Agent 互相覆盖工作文件 |
+| `AL-6` | 一个 worktree 同一时刻最多一个写入者 | `git-2` | 静默污染 |
+| `AL-7` | 主检出（primary worktree）只用于 fetch / 查看 / 建 worktree | `git-3` | 控制面被特性代码污染 |
+| `AL-8` | 开写前取写租约，结束释放 | `git-9` | 并发会话覆盖他人未提交工作（PRI-663） |
+| `AL-9` | 他人未提交文件 / 未知分支 / 未知 worktree 视为他人工作，不得清理 | `git-4` | 不可恢复的工作丢失 |
+| `AL-10` | 需要重写远端分支时 `git fetch` 后 `--force-with-lease` | `git-6` | 覆盖他人提交 |
+| `AL-11` | 云端长任务的会话状态不是证据；结论必须在同一 Phase 内落盘 | 本文 §2 | PRI-782 Phase 0 报告不可恢复 |
 
 ---
 
-## 6. Artifact Persistence Contract
+## 6. Stop Conditions
 
-### 6.1 契约
+> **总则**：Stop Condition 命中时，Agent **立即停止推进**，按 `SC-1` 的格式输出停点报告，
+> 并保持当前已完成的落盘产物不变。**停止不是失败**——PRI-768 第一轮测试中 PD Developer
+> 因基线漂移主动停止并给出 A/B/C 选项，被认定为章程防呆机制的**成功**（见
+> `docs/audit/PRI-768-developer-entry-reality-report.md` 附录）。
 
-**所有 Agent 重要产物必须走完：**
+### `SC-1-stop-report-format`
 
+**所有**停点必须使用同一格式，保证 Owner 无需追问即可决策：
+
+```text
+STOPPED — <一句话停点>
+
+Evidence missing:   <缺什么证据，为什么取不到（不是"我没查"）>
+Architecture:       <涉及的架构决策面，及你为什么无权决定>
+Scope:              <任务书哪两处/哪几处冲突，或越界点>
+Secret/Permission:  <触及的边界，及为什么不该由你越过>
+Already done:       <已落盘产物（分支/commit/PR），以及它们是否可安全丢弃>
+Options:            <2–3 个互斥路径，各含代价>
+Recommendation:     <你的倾向 + 理由；只建议，不执行>
+Blocking question:  <Owner 需要回答的最小问题（越具体越好）>
 ```
-Created
-   ↓
-Committed
-   ↓
-Reviewed
-   ↓
-Merged
-```
 
-产物类型包括：
+### `SC-2-evidence-missing`
 
-- Audit Report（审计报告）；
-- Architecture Decision（架构决策）；
-- Investigation Report（调查报告 / Reality Audit）；
-- Validation Result（验证结果 / 证据）。
+**触发**：
 
-### 6.2 禁止的持久化位置
+- 关键事实只能靠登录后台 / 持有凭据 / 物理接触才能取得（UNKNOWN）；
+- 目标文件的"真相"无法从仓库现状确定（文档互斥、代码与文档冲突且无法判定哪边陈旧）；
+- 需要外部系统的当前状态（权限粒度、令牌 scope、平台能力）才能选路。
 
-产物**不得只存在于**：
+**动作**：停止。把 UNKNOWN 登记进产物（可引用 `docs/runbooks/CREDENTIAL_INVENTORY.md`
+的 UNKNOWN 清单格式：ID / UNKNOWN / 为何无法取证 / 阻断的决策）。
 
-- Agent 回复（评论 / 对话）；
-- Pipeline output（构建日志）；
-- 临时文件系统（一次性容器 workspace）；
-- Agent memory。
+**禁止**：用记忆或合理推测填补（`P1`）；把猜测写成结论再让别人去核对。
 
-**依据**：PRI-782 实证 —— 一次只读调查的报告只存在于已销毁容器，事后
-`git log --all`、全 ref `ls-tree`、`git stash list`、`git fsck --unreachable`、
-远端分支、`cnb workspace list-workspaces` **全部无命中**，结论不可恢复，
-只能按当前代码重新取证（Phase 0.1 Recovery Run）。该 PR 的根因归类即
-**Artifact Lifecycle 缺陷**。
+**示例（真实）**：PRI-782 UNK-05「CNB 是否支持 stage 级 `imports`」——该 UNKNOWN 直接决定
+REC-1 走路径 A 还是路径 B，Agent 无权用假设选路。
 
-### 6.3 落地路径
+### `SC-3-architecture-decision-required`
 
-| 产物 | 持久化位置 | 说明 |
+**触发**：
+
+- 需要新增/改变架构边界、公共契约、状态源、门禁、feature flag；
+- 两个可行方案在**架构层面**互斥（不是实现细节之争）；
+- 发现 Intent Truth 与 Implementation Truth 冲突（`AGENTS.md` §3.3）；
+- 改动会触及 `docs/adr/`、`docs/product/`、`AGENTS.md` 的决策面。
+
+**动作**：停止，列选项与倾向，交 Owner 裁决（Developer 章程 `D9`）。
+
+**禁止**：自行选一条路并把另一条写成"follow-up"来掩盖已做的架构选择。
+
+### `SC-4-scope-conflict`
+
+**触发**：
+
+- 任务书内部矛盾（例：要求输出 X，同时禁止改 X 所在的目录）；
+- 任务的基线异常（例：镜像落后、目标分支不含必要文件——PRI-768 第一轮的巨型失真 PR 风险）；
+- 实现中发现必须做任务书未列出的改动才能正确完成任务；
+- 评审发现了相邻问题（`antipattern-review-missing`）。
+
+**动作**：停止。列出冲突两侧 + 选项 + 推荐。
+
+**禁止**：
+
+- 猜一个读法硬做；
+- 顺手扩大 scope；
+- 制造"格式合规但语义错误"的产物（比不作为更糟：它会被误当作已完成）。
+
+### `SC-5-secret-permission-boundary`
+
+**触发**：任务要求以下任一动作时：
+
+- 请求 / 读取 / 打印 / 存储任何 Secret、Token、PAT 值；
+- 新增跨仓 `imports`、新增密钥仓库引用、变更 `allow_*` 授权声明；
+- 修改 GitHub Settings / CNB 组织设置 / Cloudflare Secret / Linear 后台；
+- 直推 `main`、合并 PR、发布 / 打 tag / 改版本号；
+- 开启 NPC「工作模式」；
+- 读写安装运行时目录（`~/.pd/runtime/`、`~/.openclaw/extensions/`、`<workspace>/.pd/`——`AGENTS.md` §1.1 硬规则）。
+
+**动作**：停止。说明触及的边界与为什么必须由 Owner 执行（参照 runbook §1「Owner 前置清单」中
+"为什么 Agent 做不了"那一列）。
+
+**禁止**：任何"只是试一下"的越界（读一个 token、临时开个权限、patch 一个已安装文件）。
+
+**另注**：凭据治理的既有结论（`docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md`）已把
+"容器同时持有两个事实源写权限"（P0-01）登记为**已接受残余风险**（RA-1~RA-5）。
+`SC-5` 不重开该议题，只约束**新增**边界。
+
+---
+
+## 7. Owner Interaction Rules
+
+### 7.1 必须等待 Owner（硬等待）
+
+| ID | 情形 | 依据 |
 |---|---|---|
-| 审计 / 调查报告 | `docs/audit/<ID>-*.md` → PR → merge | 需进 canonical 仓库 |
-| 架构决策 / 规范 | `docs/architecture/*.md` 或 `docs/adr/*`（ADR 需 Owner 决策） | ADR 属 Owner 决策面 |
-| 验证结果 | PR 描述的 Verification Evidence + 相关测试 | 可复现命令 + 原文输出 |
-| 周期性审计结果 | **不进 `main` 产品文档**；走 commit 附件 + Linear 证据评论 | 见 runbook §4.2（避免第二写入口） |
+| `OI-1` | 任务书要求"创建 PR 后停止等待 Review"——PR 创建即停，不做后续动作 | 平台 PR 规范 |
+| `OI-2` | 任一 `SC-*` 命中 | §6 |
+| `OI-3` | 任何合并、打 tag、发布、关 PR、改版本号 | `AGENTS.md` §23；章程 `D4/D5` |
+| `OI-4` | 触及 `docs/adr/`、`docs/product/`、`AGENTS.md` 的决策面 | 章程 `D6`；Constitution Change Rule |
+| `OI-5` | 新增凭据引用 / 新增密钥仓库 / 新增外部网络能力 | §6 `SC-5`；runbook §8 |
+| `OI-6` | 任务的**验收标准**本身需要 Owner 判定（"这样做算不算达成目标"） | 无客观判据时不得自评通过 |
+| `OI-7` | 工单状态收口（`In Review`→`Done`/`Canceled`）中，涉及**推翻原诊断**或**判定工作被取代**的动作 | `AGENTS.md` §21 rules 9–11 |
 
-> 周期性审计产物的特殊处理来自 PRI-766 的既有约定，
-> 引用 `docs/runbooks/CNB_CLOUD_WORKER.md` §4.2，不在此重述。
+**等待期间的行为禁令**：不轮询、不催促、不替 Owner 预写结论、不把"未合并"表述为"已落地"。
 
-### 6.4 判断准则
+### 7.2 Agent 可自主推进（无需等待）
 
-> 如果这次任务明天被忘记，产物是否仍能被 Owner 找到并核验？
->
-> 若答案是否，则持久化未完成 —— 该任务不算交付完成。
+| ID | 情形 | 边界 |
+|---|---|---|
+| `OI-8` | 任务书已明确授权的路径内的事实核查与调查 | 只读；结论须带 `文件:行号` |
+| `OI-9` | 在任务书许可范围内的最小实现与自验 | 不越白名单、不扩大 scope |
+| `OI-10` | 建分支、commit、push 特性分支、开 PR | 仅限本任务；不直推 `main`；不合并 |
+| `OI-11` | 按 §6 格式写停点报告 | 含选项与推荐；不执行推荐 |
+| `OI-12` | 更新工单状态为 `In Progress` / `In Review`、留证据评论 | 文本用中文；不新建工单除非任务书要求 |
+| `OI-13` | 失效/不可行路径的排除，并说明理由 | 必须在产物中留下可核验的排除理由 |
+| `OI-14` | 相邻改进的记录（作为 follow-up 候选写入 PR，**不实施**） | `P3`；`antipattern-review-missing` |
 
----
+### 7.3 判定口诀
 
-## 7. Owner Interaction Model
-
-### 7.1 目标
-
-减少 Owner 的**低价值交互**，保留 Owner 的**高价值决策控制**。
-
-> 不是减少 Owner 控制，而是减少低价值交互。
-
-### 7.2 Agent 可自主
-
-- 调查（只读）；
-- 分析（判断 + 证据）；
-- 创建文档（授权路径内）；
-- 创建 PR（不合并）；
-- 修复测试（在授权范围内，且不弱化契约）。
-
-### 7.3 Agent 必须请求 Owner
-
-- **架构选择**（canonical / trust boundary / 第二事实源 / 新契约）；
-- **风险接受**（凭据、权限、残余风险）；
-- **产品方向**（是否属于 PD 边界、MVP 取舍、优先级）。
-
-### 7.4 交互纪律
-
-1. **不要问可以通过仓库回答的问题** —— 先调查，再无解时才问（§P1）；
-2. **不要用评论轰炸 Owner** —— 汇总成一个可决策的问题，附证据与选项；
-3. **不替 Owner 填 Owner 区** —— PR 模板的 "产品品味审计" 由 Owner 填，
-   Agent 不得代填（PR 模板 policy 原文）；
-4. **不请假式交付** —— 不要"我做了 X，请您看着办"，要给出明确的 before/after、
-   证据与 nextAction；
-5. **不做无信息的仪式性评论**（§21 原文）。
+> 不确定时按"**能否回滚 + 是否改变他人可见事实 + 是否触碰决策面**"三问：
+> 三者全否 → `OI-8`~`OI-13` 自主推进；任一为是 → 停下来问。
 
 ---
 
-## 8. Constraints 与自我约束（本类任务）
+## 8. Verification Contract（证据契约）
 
-对于**纯治理 / 规范类任务**（如本文档本身），附加约束：
+> 与 §9 的分工：§8 管"**什么算证据**"，§9 管"**证据写到哪里才算存在**"。
 
-| 项 | 约束 |
+| ID | 规则 | 上位 |
+|---|---|---|
+| `AL-12` | 验证方法按任务类型选（可复现 bug→回归测试；不变量→守卫；Owner 可见流程→BDD；文档→对应 `check:*`） | `P5` |
+| `AL-13` | 测试要打在生产/公共边界，只测内部 helper 不算证据 | `P5`、EP-02 |
+| `AL-14` | 完整性声明（"零消费方""只有这些文件""已全部同步"）必须附**未经截断**的可复跑命令全文输出 | ERR-127 |
+| `AL-15` | 关键修复需**负向控制**：证明修复前会失败 | EP-09 |
+| `AL-16` | "pre-existing / 环境性失败"必须先在 base 分支复现才可声明 | ERR-078、EP-10 |
+| `AL-17` | 未跑的检查不许声称跑过；未验证的部分必须显式列为"本次审查的局限" | 章程 §4 |
+| `AL-18` | 长任务跨越多个 session 时，每个 session 结束后留下的**结论**必须已落盘（不然等于没做） | §2、PRI-782 §0 |
+
+---
+
+## 9. Artifact Persistence Contract（产物持久化契约）
+
+> **一句话**：任何治理产物，若未 commit + PR + 在 canonical 侧可被引用，就**不算存在**。
+
+### 9.1 三类产物与接收位置
+
+| 类别 | 例子 | 接收位置 | 长期可引用形式 |
+|---|---|---|---|
+| **Governance Artifact** | Reality Report、架构文档、决策文档、runbook、台账、规范（本文） | 仓库路径（`docs/**`、`.cnb/**`、`scripts/**` 视许可范围） | **commit + PR + canonical reference** |
+| **Evidence** | 检查命令输出、diff、评审回复、UNKNOWN 登记 | PR 描述 / PR 评论 或随文档提交 | PR 内可复跑命令 + 其原文输出 |
+| **Ephemeral** | 构建日志、NPC 回复、容器文件、临时报告、聊天记录 | 不接收（允许存在，不可依赖） | **无** |
+
+### 9.2 规则
+
+| ID | 规则 |
 |---|---|
-| 允许修改 | `docs/**` |
-| 禁止修改 | `packages/**`、`.github/**`、`.cnb.yml`、Secret、权限、运行逻辑 |
-| 验证 | `node scripts/check-docs-structure.cjs`、`node scripts/check-repo-hygiene.js all` |
-| 交付 | PR diff 只含 docs 文件；PR 描述声明"未修改运行行为、未改变权限模型" |
-| 收尾 | 交付后停止，等待 Owner Review，不自行扩展新治理任务 |
+| `AP-1` | 所有 Governance Artifact 必须 **commit + push 分支 + 开 PR**；只写在工作区 / 只发在评论里的治理产物**不算产物** |
+| `AP-2` | 每条对外结论必须能**回溯**到 canonical 侧的一个引用（PR / 文档路径 + 章节 / 工单），不允许只有"我记得" |
+| `AP-3` | 跨环境产物（CNB 容器 → GitHub）必须经交付桥落分支，**不得**依赖容器文件系统续命 |
+| `AP-4` | 数据不落点：**不得**把治理产物写进运行时状态（`.pd/`、`.state/`、任何 DB） |
+| `AP-5` | 周报 / 周期审计结果**不进 main 的产品文档**；证据进工单或 commit 附件（runbook §4.2） |
+| `AP-6` | 序列化边界：产物中出现的运行时值按 `rc-8-safe-serialization` 处理；日志/预览要有界 |
+| `AP-7` | 凭据边界：产物中**只允许变量名**，不得出现任何 Secret 值、token 片段、密钥内容（`CREDENTIAL_INVENTORY.md` §0） |
+| `AP-8` | PR 被关闭 / 被取代时，产物仍需在仓库或工单留下可追溯痕迹（不得留下悬空结论） |
+
+### 9.3 反模式
+
+| 反模式 | 为什么被禁止 | 真实先例 |
+|---|---|---|
+| 报告只写在容器里 | 容器销毁 = 产物消失，后续只能重新取证 | PRI-782 Phase 0 → Phase 0.1 Recovery Run |
+| 结论只发在聊天/评论 | 不可检索、不可引用、无法复核 | 本文 §2 推论 |
+| 把"已验证"写成结论但没有输出 | 是装饰，不是证据 | ERR-127 |
+| 把治理产物写进 `main` 的周期性文档 | 制造第二个写入口、污染产品文档 | runbook §4.2 / §8 |
+| 把产物写进 `.pd/` 等运行时状态 | 与产品状态源混淆，无法评审 | `AGENTS.md` §1.1 |
 
 ---
 
-## 9. 与既有文档的关系（避免重复建设）
+## 10. Cross-environment 交付（CNB ↔ GitHub）
 
-本文档是**编排层（orchestration layer）**规范，位于既有文档之上：
+| ID | 规则 | 依据 |
+|---|---|---|
+| `AL-19` | 方向单一：CNB → GitHub 只经 T6/T7 桥；GitHub → CNB 只经镜像，**不做双向同步** | runbook §2 方案 B 明确不推荐 |
+| `AL-20` | 桥只推 `sync/cnb-delivery/*` 与 `ai/cnb-dev/*`；**永不直推 GitHub `main`** | runbook §4.4.2 |
+| `AL-21` | CNB main 的合并提交不进 GitHub 历史；同步用 `--force-with-lease` 重置，前提是所有已合并 CNB PR 均已桥接 | runbook §4.4.3 |
+| `AL-22` | CNB 侧合并 ≠ 落地；只有 GitHub merge 才是完成 | §2 |
+| `AL-23` | 云端写权限是**治理级**约束（`D1`/`D2`），不是凭证级隔离；越界视同事故 | 章程 §5 |
+| `AL-24` | 平台级保护（GitHub `main` 分支保护）削弱任一条件即视为重开 P0-01 | runbook §5.1 接受条件 3 |
 
+---
+
+## 11. 与既有规范的关系（不重复建设）
+
+| 主题 | 单一事实源 | 本文的角色 |
+|---|---|---|
+| 工程宪法（P1–P8、稳定 ID） | `AGENTS.md` | 引用；**不重述** |
+| 多 Agent Git 治理（`git-1`~`git-9`） | `AGENTS.md` §23A | 引用为 `AL-5`~`AL-10` |
+| 云端 Worker 接入 / 桥 / 安全边界 | `docs/runbooks/CNB_CLOUD_WORKER.md` | 引用；不复制具体命令 |
+| 凭据台账 / UNKNOWN 登记 | `docs/runbooks/CREDENTIAL_INVENTORY.md` | 引用其登记格式 |
+| 凭据信任边界决策 | `docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md` | 引用；不重开 P0-01 |
+| 错误经验（EP/ERR） | `docs/process/error-management/*` | 引用为 `AL-14`~`AL-16` 的依据 |
+| PR 模板 / 交付报告格式 | `.github/PULL_REQUEST_TEMPLATE.md`、`docs/runbooks/CNB_CLOUD_WORKER.md` §4.3 | 引用 |
+| 云端角色约束（`D1`–`D9`、`H1`–`H7`） | `.cnb/agents/pd-developer.md`、`.cnb/agents/pd-auditor.md` | 引用 |
+
+**结论**：本文的价值在于**串联与判定**（何时停、产物写哪里），
+不在于新增规则。若本文与 `AGENTS.md` 冲突，**以 `AGENTS.md` 为准**。
+
+---
+
+## 12. Conformance Checklist（可执行）
+
+任务交付前逐条自检（把结果写进 PR 或交付报告）：
+
+```text
+[ ] Reality Check 先于任何写入（§4.1 / P1）
+[ ] 验收证据在动手前已定义（§4.2 / P5）
+[ ] 变更面 = 最小；相邻改进只记录未实施（§4.2 / P3）
+[ ] 只改任务书许可路径；越界为零（章程 D1/D2）
+[ ] 独立 worktree；写租约已取并释放（AL-5 / AL-8）
+[ ] 检查已运行，原文输出在报告中（AL-17 / ERR-127）
+[ ] 完整性声明附未截断输出（AL-14）
+[ ] 关键结论有负向控制（AL-15）
+[ ] "pre-existing" 声明已在 base 复现（AL-16）
+[ ] Pass 2 error:context 已跑，HIGH 命中已处理或排除并给理由（§4.4）
+[ ] 治理产物已 commit + PR + 可引用（AP-1 / AP-2）
+[ ] 产物中零 Secret 值，仅变量名（AP-7）
+[ ] PR 已建；未合并、未关闭、未轮询（OI-1 / OI-3）
+[ ] 停点（若有）使用 SC-1 格式（SC-1）
+[ ] 工单状态已按 AGENTS.md §21 收口（OI-12 / OI-7）
 ```
-AGENTS.md（宪法：原则 + 稳定 ID + 校验门）
-    ↓  本文档只编排"何时做、谁决策、产物去哪"
-任务专属章程（.cnb/agents/*.md） / runbook（docs/runbooks/*） / 审计报告（docs/audit/*）
-```
-
-**明确不重复的内容**：宪法原则正文、角色硬约束清单、桥的实现细节、凭据台账、
-错误模式清单 —— 这些各自已有 SSoT，本文档只**引用**。
 
 ---
 
-## 10. 已知局限（如实声明）
+## 13. 参考实现（真实实践索引）
 
-| 局限 | 说明 |
-|---|---|
-| 本文档是规范，不是平台强制 | §4 的路径边界、§5 的停止条件是**治理级约束**，靠 Agent 遵守 + Owner PR Review 兜底；CNB 凭证级无法限制写路径（Developer 章程 §5 原文）。 |
-| 无自动 enforcement | 本文档未新增任何 lint / guard / 脚本。是否机械化部分停止条件，属后续独立工单（见 §11）。 |
-| 附录证据为快照 | §1.2 / §6.2 引用的任务结论基于撰写时的仓库证据，若后续 PR 推翻，以新证据为准。 |
-| Owner 认可状态 | 本文档由 Agent 起草，属提案；Owner 认可后其 §1–§7 方作为团队约定生效。 |
+| 事件 | 观察到的规范行为 | 出处 |
+|---|---|---|
+| PRI-767 / PRI-768 | 任务书四问先行；基线漂移时**主动停止**并给 A/B/C 选项；修复后端到端验证 | `docs/audit/PRI-768-developer-entry-reality-report.md` |
+| PRI-778 | 桥的安全设计依据逐条落文档（令牌只存密钥仓库、只推固定前缀、永不直推 main）；双平台令牌风险**显式登记**而非沉默接受 | `docs/audit/PRI-778-cnb-github-bridge-reality-report.md`、runbook §4.4.2 / §5.1 |
+| PRI-782 | 只读重新取证；UNKNOWN 显式登记不猜测；产物生命周期缺陷（报告只存在于已销毁容器）被定为根因类别；凭据只以变量名出现 | `docs/audit/PRI-782-integration-credential-reality-report.md` |
 
 ---
 
-## 11. 本 PR 未做的事（Follow-ups，供 Owner 决策）
+## 14. 已知边界与非目标
 
-1. **机械化部分停止条件**：例如 Scope Expansion（§5.4）可由 CI 对比
-   `git diff --name-only` 与任务授权路径自动告警。本 PR 未实施
+1. 本文**不**为 CNB 云容器增加任何门禁（`.cnb.yml` 头部治理说明：第一阶段不新增门禁）。
+2. 本文**不**引入 Agent 编排、状态机或后台进程；Phase 模型是**人的执行纪律**，不是运行时组件。
+3. 本文**不**解决"云端 Agent 与本地 Agent 并发修改同一文件"的平台级冲突——
+   现有手段是 worktree + 租约（`git-9`），属协作信号，不是权限系统。
+4. 本文**不**覆盖 Linear 工单的全部状态语义（`AGENTS.md` §21 是权威）。
+5. 角色章程（`.cnb/agents/*.md`）仍是云端 Agent 的**运行时**约束来源；本文是仓库级规范，
+   两者冲突时以章程对**该角色**的约束为准，并应同步修正其一（避免第二事实源）。
+6. 本文件为 `Draft`；晋升 `Active` 需经 Owner Review（`docs/architecture/README.md` 文档贡献规范）。
+
+---
+
+## 14.1 Follow-ups（已知尚未实施，供 Owner 决策）
+
+1. **机械化部分停止条件**：例如 Scope Expansion（`SC-4`）可由 CI 对比
+   `git diff --name-only` 与任务授权路径自动告警。本文未实施
    （属 `scripts/**` + CI 面，超出 docs-only 授权）。
-2. **与线性 / 角色章程的引用打通**：现有章程（`.cnb/agents/*.md`）可增加
+2. **与角色章程的引用打通**：现有章程（`.cnb/agents/*.md`）可增加
    "遵循 `docs/architecture/AGENT_DELIVERY_OPERATING_MODEL.md`"一行指向。
-   本 PR 未改 `.cnb/**`（超出授权）。
-3. **文档索引登记**：`docs/README.md`、`docs/architecture/README.md` 可将本文档
-   加入导航；本 PR 为保持最小改动面未动索引（若 Owner 要求，可随后续 PR 补）。
-4. **周期性审计产物存储面的进一步收敛**：见 PRI-782 REC 系列，
-   属既有 follow-up 家族，本 PR 不重复单独立项。
+3. **周期性审计产物存储面的进一步收敛**：见 PRI-782 REC 系列，
+   属既有 follow-up 家族，不重复单独立项。
+4. **规则 ID 的机械化校验**：`AL-*` / `SC-*` / `AP-*` / `OI-*` 目前仅靠人工评审保证稳定，
+   可考虑由检查脚本核对引用不悬空（属 `scripts/**`，超出本文范围）。
 
 ---
 
-## 附录 A — 证据索引（本规范各条的来源）
+## 15. Complexity Delta
 
-| 规范条目 | 依据 |
+| 项 | 值 |
 |---|---|
-| §1 生命周期、§6 产物持久化 | PRI-782 Recovery Run（`docs/audit/PRI-782-integration-credential-reality-report.md`）§0 根因归类 |
-| §1.1 停止条件雏形 | PRI-767 / PRI-768 Developer 章程 D8/D9、`.cnb/agents/pd-developer.md` §3 |
-| §1 证据质量、自证而非自述 | PRI-766（`docs/audit/PRI-766-weekly-audit-reality-report.md`）§2 缺口分析 |
-| §4.4 Canonical Boundary | PRI-778（`docs/audit/PRI-778-cnb-github-bridge-reality-report.md`）§1 |
-| §4.3 凭据边界与残余风险 | PRI-782 + `docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md` §4 |
-| §2.3 Completion Check | PRI-630 Reality Check 先例（见 `docs/audit/pri-626-r1-consent-rollout-gate.md` 引用） |
-| §2.1 / §3 / §4.2 原则 | `AGENTS.md` P1–P8、§13、§22–§25 |
-| §4.5 多 Agent Git 纪律 | `AGENTS.md` §23A（`git-1`…`git-9`） |
-| §6.3 周期审计产物处理 | `docs/runbooks/CNB_CLOUD_WORKER.md` §4.2 |
+| New durable source of truth | **NO**（复用 `AGENTS.md` + runbook + 台账） |
+| New persisted schema/state | NO |
+| New subsystem/service/background process | NO |
+| New public abstraction/interface | NO（仅新增文档 + 稳定规则 ID） |
+| New runtime feature flag | NO |
+| New cross-package dependency | NO |
+| New host/platform-specific behavior | NO |
+| New external/network capability | NO |
+
+---
+
+## 16. 验收对照（对应 ISSUE #23 的覆盖要求）
+
+- [x] Owner Intent → GitHub Merge 完整生命周期（§3，含状态图与授权来源）
+- [x] Agent Phase 模型：Reality Check / Planning / Implementation / Verification / Delivery（§4）
+- [x] Stop Conditions：evidence missing（`SC-2`）/ architecture decision required（`SC-3`）/
+      scope conflict（`SC-4`）/ secret-permission boundary（`SC-5`）（§6）
+- [x] Artifact Persistence Contract：commit + PR + canonical reference（§9）
+- [x] Owner Interaction Rules：必须等待 vs 可自主推进（§7）
+- [x] Completion Check：目标已完成即停止（§4.1.1，PRI-630 先例）
+- [x] 只修改 `docs/**`；未触碰 `packages/**`、`.cnb.yml`、`.github/**`、任何 Secret
