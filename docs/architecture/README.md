@@ -141,6 +141,10 @@
 | ADR-0010 | Accepted | Goal-Aligned Pain Signal（GAP）|
 | ADR-0011 | Accepted | Three-Tier Task Model and MissionScheduler |
 | [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) | Accepted | Runtime V2 独立调度与 legacy execution 退役；取代 IdleTrigger 保留决策 |
+| [ADR-0026](../adr/0026-cnb-token-injection-boundary.md) | Proposed | CNB_TOKEN 注入边界不可由 imports 配置消除（P0-01 归因修正）|
+
+> 注：ADR-0013 ~ ADR-0025 未在本表登记（表格最后更新于 ADR-0012）。
+> 补齐属独立的文档治理动作，本次仅登记本决策相关的 ADR-0026。
 
 ### 架构治理（Governance）
 

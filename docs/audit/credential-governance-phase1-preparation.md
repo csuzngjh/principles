@@ -1,6 +1,22 @@
 # Credential Governance — Phase 1 Preparation Report
 
-> **状态**: Complete（待 Owner Review）
+> **状态**: Complete（已 Owner Review；**结论经 ADR-0026 修正**，Phase 2 暂停）
+>
+> ## ⚠️ 修正通知（2026-09-13，Owner 复审后）
+>
+> Owner 复审否决了本文档 §4.1 推荐方向，并给出架构结论：
+>
+> > CNB stage/job imports cannot remove CNB_TOKEN from the execution environment.
+> > P0-01 is therefore not an imports configuration problem.
+>
+> **本文档 §1.3 末段与 §4.1 对 Option A 的"可行但收益边际"判断不准确**，
+> 正确表述为「**命题不成立**」：`imports` 只能控制密钥仓库导入的自定义变量，
+> `CNB_TOKEN` 由平台注入（内置只读变量，构建过程中无法覆盖），
+> 因此 **imports 层级调整在原理上无法关闭 P0-01**。
+>
+> 完整归因修正与取证见 **`docs/adr/0026-cnb-token-injection-boundary.md`**。
+> **阅读本文档 §3 Option A / §4 时必须以 ADR-0026 为准。**
+> 其余取证事实（§1.1 三级支持、§1.2 三条限制、§2 台账）仍然有效。
 > **日期**: 2026-09-13
 > **调查人**: AI（CNB NPC `npc/CodeBuddy(deepseek-v4.1-flash)`，ISSUE #19）
 > **基线**: `main` @ `4bfd74fb`
@@ -16,10 +32,10 @@
 |---|---|---|---|
 | 1 | CNB 是否支持 stage / job / pipeline 级 `imports`？ | **支持全部三级**，且语义为"注入到该级作用域内的环境变量" | **高**（官方文档三处独立定义） |
 | 2 | 能否实现"Audit Stage 无 GitHub 凭据、Delivery Stage 仅有 GitHub 凭据"？ | **部分可行，但不能达到理想隔离**——因为 **Pipeline 级 `imports` 会整容器注入**，而 T6/T7 目前用的正是 Pipeline 级 | **高**（文档语义 + 本仓配置实证） |
-| 3 | P0-01 应如何处置？ | 推荐 **Option A'（Pipeline 级 `imports` → Stage 级）**：这是**文档支持的配置改动**，能把凭据注入面从"整流水线"收窄到"仅需要它的 Stage" | **中高**（机制有据，效果需一次真实运行验证） |
+| 3 | P0-01 应如何处置？ | ~~推荐 Option A'（Pipeline 级 `imports` → Stage 级）~~ **已被 ADR-0026 否决**：P0-01 **不是 imports 配置问题**，`imports` 层级调整在原理上无法关闭它。处置须落到 GitHub 侧后果控制 | **高**（官方文档 + 本仓实证，见 ADR-0026） |
 | 4 | 是否存在 Option C（其他方案）？ | 存在一个**文档级**候选（受控配置库 + `include`），但与本仓现有 T6/T7 架构冲突，且不解决同容器问题 → 记录为不推荐 | 中 |
 
-**一句话**：Task 1 的答案是"支持，但关键限制是**作用域=整容器**而非"仅脚本"。因此 Option A 的正确形态不是"两个 Stage 各拿一份凭据"，而是"**把凭据注入下沉到真正消费它的那个 Stage**"，配合 Job/Stage 拆分才能收窄暴露窗口。
+**一句话**：Task 1 的答案是"支持三级，但关键限制是**作用域=整容器**而非"仅脚本"；且 `imports` 只作用于**密钥仓库导入项**，对平台内置的 `CNB_TOKEN` 无管辖权。故 **P0-01 不是 imports 配置问题**（ADR-0026）。
 
 ---
 
@@ -91,11 +107,21 @@ Stage/Job 级 `imports` 收窄的是**该容器内环境变量的注入范围**�
 
 **关键发现（对 P0-01 的直接修正）**：`CNB_TOKEN` **不是** `imports` 引入的凭据，而是 CNB 平台自动注入到容器、构建结束即销毁的临时令牌（`.cnb.yml:249-251` 的注解即此意；本环境 `env | grep CNB_TOKEN` 亦可观察到其存在）。
 
+**官方文档证据（权威，2026-09-13 取证）** — `docs.cnb.cool/zh/build/build-in-env.md`：
+
+> 首句：「`云原生构建`内置了一些**只读环境变量，构建过程中无法覆盖**。」
+>
+> §`CNB_TOKEN`：「流水线运行期间的临时令牌，结束后自动销毁……」
+
+⇒ `CNB_TOKEN` 属**内置只读变量**，其在场性由平台决定，**不由 `.cnb.yml` 的 `imports`/`env` 决定**。
+
 ⇒ **`CNB_TOKEN` 的在场性无法通过 `imports` 作用域控制。** 因此 **Option A 只能消除 `GITHUB_SYNC_TOKEN` 在无关 Stage 的暴露，不能消除 `CNB_TOKEN` 的在场**。
 
 这与 Phase 0 的 P0-01 描述完全一致（P0-01 的本质是"两权限同容器"），也说明：
 
-> **Option A 是"降低暴露面"，不是"消除 P0-01"。** 任何声称 Option A 能完全解决 P0-01 的表述都是不准确的。
+> **Option A 是"降低暴露面"，不是"消除 P0-01"。**
+
+**⇒ Owner 结论（ADR-0026 固化）：`imports` 只能控制密钥仓库导入的自定义变量，管不到平台内置变量，因此 P0-01 不是 imports 配置问题。** 任何声称 Option A 能解决 P0-01 的表述都是不准确的。
 
 ### 1.4 未取证项（显式标记 UNKNOWN，不猜测）
 
@@ -198,7 +224,13 @@ Stage/Job 级 `imports` 收窄的是**该容器内环境变量的注入范围**�
 
 #### A.4 结论
 
-**可行但收益边际。** 只有配合"Stage 拆分 + 实机验证"才有意义；单独下移 `imports` 属于**形式改动**（违反 AGENTS.md P3 最小改动面原则的精神——改了但没有解决可观察问题）。
+> **⚠️ 本节结论已被 ADR-0026 修正。** 原文"可行但收益边际"不准确。
+>
+> 正确结论：**Option A 对 P0-01 命题不成立。** 它只能收窄 `GITHUB_SYNC_TOKEN` 的
+> 注入层级，**无法移除 `CNB_TOKEN`**（平台注入的内置只读变量）。因此它不能作为
+> P0-01 的处置路径。详见 `docs/adr/0026-cnb-token-injection-boundary.md`。
+
+~~**可行但收益边际。** 只有配合"Stage 拆分 + 实机验证"才有意义；单独下移 `imports` 属于**形式改动**（违反 AGENTS.md P3 最小改动面原则的精神——改了但没有解决可观察问题）。~~
 
 ---
 
@@ -294,6 +326,14 @@ Stage/Job 级 `imports` 收窄的是**该容器内环境变量的注入范围**�
 
 ### 4.1 建议：**Option B 为基线 + Option A 作为条件化后续项**
 
+> **⚠️ 修正（2026-09-13，Owner 复审）**：本节将 Option A 列为"条件化后续项"的
+> 前提是"它能收窄暴露面"，这一前提**部分成立但对 P0-01 无效**。
+> Owner 结论：**P0-01 不是 imports 配置问题**。因此：
+>
+> - Option A **不再作为 P0-01 的处置路径**（见 ADR-0026）；
+> - 仅保留其"多 Stage 结构下收敛 `GITHUB_SYNC_TOKEN` 无关暴露"的**次要价值**；
+> - **Phase 2 全部暂停**，等待 Owner 就"缓解组合"作出决定。
+
 理由与依据：
 
 1. **Option A 在当前 T6/T7 结构下收益不足**（§A.1、§A.4）。T6/T7 各只有 1 个 Stage，机械下移 `imports` 不改变暴露面。
@@ -310,7 +350,12 @@ Stage/Job 级 `imports` 收窄的是**该容器内环境变量的注入范围**�
 | P2-3 | 回填 `CREDENTIAL_INVENTORY.md` 的 8 项 UNKNOWN | 文档 | Owner 登录各后台 |
 | P2-4 | 为 `sync/cnb-delivery/*` 与 `ai/cnb-dev/*` 评估 ruleset | 平台配置 | Owner 决定 |
 | P2-5 | **在独立测试仓库**验证 stage 级 `imports` 的真实行为（UNK-10） | 实验 | 不触碰本仓 `.cnb.yml` |
-| P2-6 | 若 P2-5 通过，再评估 T6/T7 的 Stage 拆分是否值得做 | 设计 | P2-5 |
+| P2-6 | ~~若 P2-5 通过，再评估 T6/T7 的 Stage 拆分是否值得做~~ **已否决**（ADR-0026：对 P0-01 无效） | 设计 | — |
+
+> **⚠️ 上表整体处于暂停状态（2026-09-13 Owner 指令）。**
+> Owner 要求：**Phase 2 实施一律不得启动，等待 Owner 决策**。
+> 表中 P2-1~P2-3 为文档级动作，同样需在 Owner 决策后执行。
+> 尤其：P2-4（ruleset）与 P2-6（Stage 拆分）属平台/配置改动，**当前明确禁止**。
 
 ### 4.3 明确不做的事（Phase 1 边界）
 
@@ -319,6 +364,16 @@ Stage/Job 级 `imports` 收窄的是**该容器内环境变量的注入范围**�
 - ❌ 不创建 Token
 - ❌ 不实施任何隔离方案
 - ❌ 不在本仓做 stage 级 `imports` 的实机验证（会触碰 `.cnb.yml`）
+
+### 4.4 Phase 2 冻结状态（Owner 指令 2026-09-13）
+
+> Stop implementation.
+> Do not modify: `.cnb.yml` / secrets / permissions.
+> The next task is architecture decision only.
+> Wait for Owner decision before any Phase 2 implementation.
+
+本仓库当前处于 **P0-01 架构决策等待期**：
+Phase 2 的任何实施动作（配置改动 / 平台配置 / 方案落地）均**未获授权**。
 
 ---
 
