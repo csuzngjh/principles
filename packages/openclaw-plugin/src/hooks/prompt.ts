@@ -644,6 +644,11 @@ export async function handleBeforePromptBuild(
       eventLog.recordRuntimeV2ActivationsInjected({
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
+        // PRI-750: host run/turn id from the OpenClaw hook context — DIRECT
+        // turn binding to assistant_turns.run_id. Absent when the host
+        // supplies none (event stays compatible; signal collection already
+        // warns on missing runId at prompt build).
+        ...(runId ? { runId } : {}),
         principleIds: sharedActivePrinciplePrompt?.principleIds ?? alignedPrinciples.map((p) => p.principleId),
         activationIds: sharedActivePrinciplePrompt?.activationIds ?? alignedPrinciples.map((p) => p.activationId),
         artifactIds: sharedActivePrinciplePrompt?.artifactIds ?? alignedPrinciples.map((p) => p.artifactId),
