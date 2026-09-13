@@ -1384,6 +1384,57 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         );
         return { kind: 'completed', ruleArtifactId };
       }
+      // ── PRI-758: approved + deterministic replay FAILED must not advance ──
+      // a code_tool_hook chain without the mandatory validated rule artifact
+      // (assembleRuleArtifact requires passed===true). Route the replay
+      // failure into the PRI-509 repair loop — identical budget/NHR semantics
+      // as needs_revision — so the Artificer regenerates against the
+      // immutable failed cases. Repair loop off → legacy advance (fail-soft
+      // principle-only chain, unchanged).
+      if (
+        isEvaluatorOutputV2(finalOutput)
+        && finalOutput.adversarialResult
+        && finalOutput.adversarialResult.passed === false
+        && this.isRepairLoopEnabled()
+      ) {
+        const repairOutcome = await this.maybeSeedArtificerRepair(
+          taskId,
+          { runId, output: finalOutput, sourceArtificerArtifactId, diagnosticReplayEvidence },
+        );
+        if (repairOutcome.kind === 'max_iterations_reached') {
+          const reasonCode = repairOutcome.detail === 'budget_exhausted'
+            ? HUMAN_REVIEW_REASON.evaluatorRepairBudgetExhausted
+            : repairOutcome.detail === 'test_out_of_scope'
+              ? HUMAN_REVIEW_REASON.evaluatorTestOutOfScope
+              : HUMAN_REVIEW_REASON.evaluatorRepairSeedFailed;
+          const resultRef = `${this.config.resultRefPrefix}://${runId}`;
+          await this.markNeedsHumanReviewOrThrow(taskId, { runId, reasonCode, sourceArtifactId: artifactId });
+          this.emitEvent('task_needs_human_review', taskId, {
+            attemptCount: task.attemptCount,
+            resultRef,
+            evaluationDecision: finalOutput.evaluation.decision,
+            evaluationScore: finalOutput.evaluation.score,
+            ruleArtifactId: null,
+            reason: `replay_failure_repair_loop_${reasonCode}`,
+          });
+          return {
+            kind: 'human_review',
+            result: {
+              status: 'succeeded',
+              taskId,
+              runId,
+              artifactId,
+              resultRef,
+              contextHash,
+              output: finalOutput,
+              attemptCount: task.attemptCount,
+            },
+          };
+        }
+        // repairOutcome.kind === 'repair_seeded' → fall through (completed
+        // without rule artifact); the seeded repair re-runs the Artificer and
+        // re-enters the Evaluator with the replay failure evidence.
+      }
       return { kind: 'completed', ruleArtifactId: null };
     }
 
