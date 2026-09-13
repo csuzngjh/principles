@@ -17,7 +17,7 @@
  *
  * Adding a new quiet flag REQUIRES a lifecycle entry here stating:
  * Purpose / Default / Rollback / Graduation criteria / Retirement criteria /
- * Exit path (see docs/governance/feature-flag-lifecycle-census.md §New-flag rule).
+ * Exit path (see docs/process/feature-flag-lifecycle-census.md §New-flag rule).
  */
 
 export type QuietFlagLifecycleDecision = 'KEEP_QUIET' | 'GRADUATE' | 'RETIRE' | 'STAGED';
@@ -178,7 +178,12 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   },
   evaluator_artificer_repair_loop: {
     decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/service/auto-consume*', 'pd-cli rulehost-pipeline runner'],
+    // PRI-779 reality sync: the former 'openclaw-plugin/src/service/auto-consume*'
+    // glob no longer resolves (file renamed/moved). Verified executable reads
+    // (both `isFeatureEnabled(flags, 'evaluator_artificer_repair_loop')`):
+    // host-runtime/src/internalization-consumer-governance.ts:160 and
+    // pd-cli/src/services/rulehost-pipeline-runner.ts:693.
+    consumers: ['host-runtime/src/internalization-consumer-governance.ts', 'pd-cli/src/services/rulehost-pipeline-runner.ts'],
     evidence: 'PRI-509/P0-D repair loop; MVP_CORE_LOOP_CONTRACT INV-02 (needs_revision out-edge); production-wired since 2026-08-18; default-on',
     decided: '2026-08-27',
     graduationCriteria: 'INV-02 liveness depends on it — promotion to core warranted',

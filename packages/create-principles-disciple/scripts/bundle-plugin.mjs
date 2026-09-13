@@ -460,7 +460,7 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'princip
 // file reference so the bundled package is self-contained. The installer's syncPdCli()
 // creates a node_modules/principles-disciple symlink to the installed plugin directory.
 // Without this rewrite + symlink, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
-// because pd-cli statically imports initTrajectorySchema/initWorkflowSchema from it.
+// because pd-cli statically imports initTrajectorySchema from it.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principles-disciple', 'file:../plugin');
 // PRI-672: console gains a runtime dependency on the ReleaseManager authority
 // module. Ship it as the release-manager/ payload component and rewrite the
