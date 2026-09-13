@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { appendEventLogLine, redactTelemetryString } from '@principles/core/runtime-v2';
-import type { HostEventEmitter, HostEventKind, HostEventResult } from '@principles/core/host';
+import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
@@ -161,16 +161,11 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // event-JSONL writer (same events_*.jsonl format as the OpenClaw EventLog;
     // the Codex adapter stays independent of the OpenClaw plugin). The line
     // writer appends synchronously — no flush/dispose needed for the subprocess.
-    let result: HostEventResult;
-    try {
-      result = await createProductionHostRuntime({
-        hostKind: 'codex',
-        toolSemantics: CODEX_TOOL_SEMANTICS,
-        events: codexEventEmitter(path.join(resolution.workspaceDir, '.state')),
-      }).dispatch(event);
-    } finally {
-      // best-effort: nothing to flush (synchronous append)
-    }
+    const result = await createProductionHostRuntime({
+      hostKind: 'codex',
+      toolSemantics: CODEX_TOOL_SEMANTICS,
+      events: codexEventEmitter(path.join(resolution.workspaceDir, '.state')),
+    }).dispatch(event);
     const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {
