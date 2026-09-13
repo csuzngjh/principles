@@ -328,6 +328,29 @@ describe('ArtificerRunner (PRI-111)', () => {
     expect(artifacts[0]?.artifactKind).toBe('principle');
   });
 
+  it('PRI-780 B2: missing BehaviorExamplePack fails the attempt LOUD before any LLM call', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeScribeArtifact());
+    // Task-driven constructors (consumer cycle, run-once) have no pack channel:
+    // the runner must refuse at invokeRuntime (pre-LLM), never degrade to v1.
+    const deps = createMockDeps({ artifactStore: store, behaviorExamplePack: undefined });
+
+    const runner = new ArtificerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'artificer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ARTIFICER_TASK_ID);
+    expect(result.status).toBe('failed');
+    expect(JSON.stringify(result)).toContain('behavior_example_pack_missing');
+
+    // Pre-LLM proof: the runtime adapter was never invoked — no token spend.
+    const {startRun} = (deps.runtimeAdapter as unknown as { startRun: ReturnType<typeof vi.fn> });
+    expect(startRun).not.toHaveBeenCalled();
+  });
+
   it('valid runtime output marks task succeeded', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeScribeArtifact());

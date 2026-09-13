@@ -458,6 +458,40 @@ describe('ActivationsConsoleModel — Owner review', () => {
  * - ERR-088: tests assert unique status fields, not only absence of blocking.
  */
 describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
+  /**
+   * Write a valid base config (without a features: section, mimicking a fresh
+   * install) and toggle rulecode_context_v2 via the public updateFeatureFlag
+   * API. Hand-writing a partial config.yaml without
+   * version/runtimeProfiles/internalAgents/ui would fail validatePdConfig,
+   * causing loadPdConfig to fall back to defaults.
+   */
+  function enableV2FlagViaConfig(enabled: boolean): void {
+    const pdDir = path.join(workspaceDir, '.pd');
+    fs.mkdirSync(pdDir, { recursive: true });
+    const yamlLines = [
+      'version: 1',
+      'runtimeProfiles:',
+      '  openclaw.default:',
+      '    type: openclaw',
+      '    source: default',
+      'internalAgents:',
+      '  defaultRuntime: openclaw.default',
+      '  agents:',
+      '    diagnostician:',
+      '      enabled: true',
+      '    dreamer:',
+      '      enabled: true',
+      '    scribe:',
+      '      enabled: true',
+      'ui:',
+      '  diagnostics:',
+      '    mode: simple',
+    ];
+    fs.writeFileSync(path.join(pdDir, 'config.yaml'), yamlLines.join('\n') + '\n', 'utf8');
+    const flagResult = updateFeatureFlag(workspaceDir, 'rulecode_context_v2', enabled);
+    expect(flagResult.ok).toBe(true);
+  }
+
   function seedV2Artifact(db: ReturnType<SqliteConnection['getDb']>, artifactId: string, evidenceRefs: string[]) {
     const now = new Date().toISOString();
     const contentJson = JSON.stringify({
@@ -516,8 +550,10 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
   }
 
   it('shadow v2 activation with flag off shows status=suspended_by_flag and nextAction to enable flag or deactivate', async () => {
-    // rulecode_context_v2 flag defaults to off — no .pd/config.yaml means
-    // suspended_by_flag (rc-9: reason surfaced via nextAction).
+    // PRI-780: rulecode_context_v2 defaults ON — "flag off" means the explicit
+    // config kill switch, not a missing config entry (rc-9: reason surfaced
+    // via nextAction).
+    enableV2FlagViaConfig(false);
     const conn = new SqliteConnection({ workspaceDir, readonly: false });
     const db = conn.getDb();
     seedV2Artifact(db, 'art-v2-shadow', ['ex-1', 'ex-2']);
@@ -544,6 +580,7 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
   });
 
   it('live v2 activation with flag off still shows suspended_by_flag (not silently active)', async () => {
+    enableV2FlagViaConfig(false);
     const conn = new SqliteConnection({ workspaceDir, readonly: false });
     const db = conn.getDb();
     seedV2Artifact(db, 'art-v2-live', ['ex-1']);
@@ -566,6 +603,32 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
     expect(rec.mode).toBe('live');
     expect(rec.contextVersion).toBe('v2');
     expect(rec.promotedAt).toBe('2026-06-15T10:00:00.000Z');
+    expect(rec.nextAction).toContain('Enable rulecode_context_v2 flag');
+  });
+
+  it('PRI-780 B3: unreadable config fail-closes the display — v2 activation shows suspended_by_flag, never active', async () => {
+    // The registry default is ON, but a malformed config means the gate cannot
+    // know the flag state and fails closed (context undefined → v2 skipped).
+    // Status derivation must mirror that: no config-defaulted "active".
+    const pdDir = path.join(workspaceDir, '.pd');
+    fs.mkdirSync(pdDir, { recursive: true });
+    fs.writeFileSync(path.join(pdDir, 'config.yaml'), 'features: [bad', 'utf8');
+
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    seedV2Artifact(db, 'art-v2-broken-cfg', ['ex-1']);
+    insertActivation(db, {
+      activationId: 'act-v2-broken-cfg',
+      artifactId: 'art-v2-broken-cfg',
+      action: 'code_tool_hook_live_activate',
+      promotedAt: '2026-09-13T10:00:00.000Z',
+    });
+    conn.close();
+
+    const result = await model.getActivations();
+    expect(result.activations).toHaveLength(1);
+    const rec = result.activations[0]!;
+    expect(rec.status).toBe('suspended_by_flag');
     expect(rec.nextAction).toContain('Enable rulecode_context_v2 flag');
   });
 
@@ -639,36 +702,9 @@ describe('ActivationsConsoleModel — PRI-491 owner observability', () => {
   });
 
   it('v2 activation with rulecode_context_v2 flag ON shows status=active (not suspended)', async () => {
-    // Write a valid base config (without a features: section, mimicking a
-    // fresh install), then call the public updateFeatureFlag API to toggle
-    // the rulecode_context_v2 flag on. Hand-writing a partial config.yaml
-    // without version/runtimeProfiles/internalAgents/ui would fail
-    // validatePdConfig, causing loadPdConfig to fall back to defaults
-    // (where rulecode_context_v2 is off).
-    const pdDir = path.join(workspaceDir, '.pd');
-    fs.mkdirSync(pdDir, { recursive: true });
-    const yamlLines = [
-      'version: 1',
-      'runtimeProfiles:',
-      '  openclaw.default:',
-      '    type: openclaw',
-      '    source: default',
-      'internalAgents:',
-      '  defaultRuntime: openclaw.default',
-      '  agents:',
-      '    diagnostician:',
-      '      enabled: true',
-      '    dreamer:',
-      '      enabled: true',
-      '    scribe:',
-      '      enabled: true',
-      'ui:',
-      '  diagnostics:',
-      '    mode: simple',
-    ];
-    fs.writeFileSync(path.join(pdDir, 'config.yaml'), yamlLines.join('\n') + '\n', 'utf8');
-    const flagResult = updateFeatureFlag(workspaceDir, 'rulecode_context_v2', true);
-    expect(flagResult.ok).toBe(true);
+    // PRI-780: the flag defaults ON, but this test pins it explicitly so the
+    // assertion stays meaningful regardless of the registry default.
+    enableV2FlagViaConfig(true);
 
     const conn = new SqliteConnection({ workspaceDir, readonly: false });
     const db = conn.getDb();

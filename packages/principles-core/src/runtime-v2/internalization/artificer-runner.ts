@@ -975,9 +975,10 @@ ${context.revisionFeedback}
       errors: [...result.errors, ...modeErrors],
       valid: result.valid && modeErrors.length === 0,
       // CodeRabbit PR2 outside-diff comment: when the base validator passes but
-      // v1/v2 mode validation fails, errorCategory is still undefined. Since
-      // modeErrors are structural contract violations (permanent, not retriable),
-      // classify them as 'output_invalid' to match permanentErrorCategories.
+      // the v2-only output contract validation fails, errorCategory is still
+      // undefined. Since modeErrors are structural contract violations
+      // (permanent, not retriable), classify them as 'output_invalid' to match
+      // permanentErrorCategories.
       errorCategory: errorCategory ?? (modeErrors.length > 0 ? 'output_invalid' : undefined),
     };
   }

@@ -101,9 +101,11 @@ strictest reversible posture.
 ## References
 
 - Spec: [`2026-06-27-rulecode-context-vision-design.md`](../superpowers/specs/2026-06-27-rulecode-context-vision-design.md)
-- Plan: [`2026-06-28-rulecode-context-v2.md`](../plans/2026-06-28-rulecode-context-v2.md)
 - Parent epic: PRI-478
 - ADR-0014 (MVP-First Strategy) — governs the quiet/core triage used here
+- (Historical note: the original ADR also referenced an execution-plan
+  document under `docs/superpowers/plans/` that was never committed; the
+  dead link was removed in the PRI-780 amendment.)
 
 ## Amendment (2026-09-13): PRI-780 — Default-On Convergence of Runtime Governance Context
 

@@ -522,15 +522,23 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
       // fundamental blocker (text_principle_only readiness, disabled agent,
       // kill switch) keeps precedence and stays the reported reason.
       effectiveCapability = { enabled: false, disabledReason: `${behaviorExamplesReason}; nextAction: provide reliable Owner-labelled tool call IDs with --behavior-examples` };
-    } else if (behaviorExamplesReason) {
-      behaviorExamplesReason = undefined;
     }
+    // behaviorExamplesReason is intentionally KEPT even when a more fundamental
+    // blocker takes precedence: the dry-run behaviorExamples field must still
+    // report 'unreliable' (M6 — clearing it here masked the evidence problem).
   }
 
   // ── Dry-run mode: report what would happen, don't run the pipeline ──
   // Default is dry-run (CLI gate rule 4: mutating commands default to dry-run).
   const isDryRun = opts.dryRun || !opts.confirm;
   if (isDryRun) {
+    // PRI-780 review M2: the status string derives from the EFFECTIVE
+    // capability (kill switch / BEP refusal included), never from the
+    // pre-flag resolvedRuntime snapshot — otherwise a kill-switched workspace
+    // would display "ON" with a misleading "pass --confirm" nextAction.
+    const effectiveCapabilityStatus = effectiveCapability.enabled
+      ? resolvedRuntime.capabilityStatus
+      : `code_rule_capability: OFF (${effectiveCapability.disabledReason ?? 'disabled'})`;
     if (opts.json) {
       process.stdout.write(JSON.stringify({
         status: 'dry_run',
@@ -539,9 +547,7 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         channel,
         readiness,
         readinessStatus: readiness.status,
-        capabilityStatus: behaviorExamplesReason
-          ? `code_rule_capability: OFF (${behaviorExamplesReason})`
-          : resolvedRuntime.capabilityStatus,
+        capabilityStatus: effectiveCapabilityStatus,
         agentRuntimeProfiles: resolvedRuntime.agentRuntimeProfiles,
         codeRuleCapability: { enabled: effectiveCapability.enabled, disabledReason: effectiveCapability.disabledReason },
         // PRI-780: 'v2' is the only generation contract (observability field).
@@ -550,17 +556,14 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
           ? { path: behaviorExamplesPath, status: behaviorExamplesReason ? 'unreliable' : 'provided' }
           : { status: resolvedRuntime.contextV2Enabled ? 'missing' : 'not_required' },
         nextAction: readiness.status === 'ready'
-          ? 'pass --confirm to run the full pipeline'
+          ? (effectiveCapability.enabled
+            ? 'pass --confirm to run the full pipeline'
+            : 'fix the code-rule capability issues above; --confirm runs text-principle-only internalization')
           : readiness.status === 'text_principle_only'
             ? 'pass --confirm to run in text-principle-only mode (code-rule capability OFF), or fix the issues above to enable full pipeline'
             : 'fix the readiness issues above before running the pipeline',
       }) + '\n');
     } else {
-      // P2 fix (CodeRabbit PR2 Comment 2): text branch must use the same v2-aware
-      // capabilityStatus source as the JSON branch (behaviorExamplesReason-aware).
-      const effectiveCapabilityStatus = behaviorExamplesReason
-        ? `code_rule_capability: OFF (${behaviorExamplesReason})`
-        : resolvedRuntime.capabilityStatus;
       process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: effectiveCapabilityStatus, workspaceDir, readiness }) + '\n');
     }
     return;

@@ -118,7 +118,8 @@ Behavior Evidence → Reflection → Principle Proposal → Owner Approval
 ## Feature Flag 状态(审计基线)
 
 - **Core / 默认开**:`prompt`、`code_tool_hook`、`defer_archive`、`rulecode_safety_controls`、`rulecode_owner_live_decision`、`host.codex`、`internalization_full_chain`、`internalization_auto_consumer`、`diagnostician_split_pipeline`、`story_a_approval_completion`、`feedback_channel`(`packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts` 等)。
-- **Quiet / 默认关**(不得对外宣传为现有能力):`principle_receipt_block_copy` / `principle_receipt_ledger` / `principle_receipt_self_report` / `principle_governance_projection_v2`(见 `feature-flag-contract.ts` Quiet 清单)、`abstraction_layer_v1`(共享生产门路由)、`rulecode_context_v2`、`intent_engineering`、`gfi` 等。
+- **Quiet / 默认开(PRI-780 毕业,2026-09-13)**:`rulecode_context_v2` — Runtime Governance Context(ADR 2026-06-28 amendment);显式 `enabled: false` = 迁移期熔断。
+- **Quiet / 默认关**(不得对外宣传为现有能力):`principle_receipt_self_report`、`abstraction_layer_v1`(共享生产门路由)、`intent_engineering`、`gfi` 等;其余已毕业转默认开的 quiet flag(`principle_receipt_block_copy` / `principle_receipt_ledger` / `principle_governance_projection_v2` 等)以 `feature-flag-governance.md` 毕业清单为准。
 
 ---
 

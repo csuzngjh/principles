@@ -61,11 +61,29 @@ $ pd runtime internalization run-rulehost -w <ws> --pain-id … --behavior-examp
 
 ## 5. 测试结果汇总
 
-- principles-core 全量：7821 passed（含迁移后 artificer/adversarial/evaluator 套件）
+- principles-core 全量：7821 passed（含迁移后 artificer/adversarial/evaluator 套件 + PRI-780 B2 runner 级缺 pack 前置失败测试）
 - openclaw-plugin 全量：2200 passed（2 个 EPERM 临时目录清理 flake 单独验证为环境性：单文件运行通过、stash 后基线复现同错）
-- pd-cli 全量：1708 passed（复跑 0 失败；一次并行 flake）
-- host-runtime 全量：302 passed；codex-adapter：220 passed（workspace-worker 1 个 EPERM flake，stash 后基线复现同错，环境性）
-- `workspace-worker.test.ts` / `principle-application-ledger.steps.test.ts` 的 Windows temp-dir sqlite 锁 EPERM 为**预存环境问题**（证据：stash 全部改动后仍以同样方式失败）
+- pd-cli 全量：1708+ passed（复跑 0 失败；一次并行 flake）
+- **pd-console：activations-console-model 28 passed**（含 B1 迁移的 2 个 kill-switch 测试与 B3 fail-closed 显示回归）
+- host-runtime 全量：**308 passed**（合并 main@fe8f8da05 后，含 #1663 新增 receipt-runid 套件；合并前基线为 302）
+- codex-adapter：220+ passed（workspace-worker 1 个 EPERM flake，stash 后基线复现同错，环境性）
+- `npm run verify:merge`：**EXIT=0**（在合并 main@fe8f8da05 后的最终状态上运行）
+
+`workspace-worker.test.ts` / `principle-application-ledger.steps.test.ts` 的 Windows temp-dir sqlite 锁 EPERM 为**预存环境问题**（证据：stash 全部改动后仍以同样方式失败）。
+
+## 5.1 评审修复轮（2026-09-13，PR #1665 review）
+
+| 项 | 修复 |
+|---|---|
+| B1 | pd-console 2 个 flag-off 测试改为显式 kill-switch config（`enableV2FlagViaConfig(false)` helper，同步修正 flag-ON 测试的过期注释） |
+| B2 | 新增 runner 级测试：缺 pack 在 `invokeRuntime`（LLM 前）失败 + `startRun` 未被调用（无 token 消耗）——覆盖 codecov patch 缺失行 |
+| B3 | `computeFlagsFromLoadResult`（pd-cli 与 pd-console 两份）在 config 加载失败时对 fail-closed 门控 flag（`rulecode_context_v2`）强制 disabled + 可观测 warning——显示侧与执行侧（gate ok:false → context undefined → v2 skip）语义对齐；新增 console 回归测试（config 损坏 → suspended_by_flag，绝不 active） |
+| M2+M6 | dry-run `capabilityStatus` 改从 EFFECTIVE capability 派生（kill-switch 显示 `OFF (rulecode_context_v2_disabled…)`，不再显示 ON + 误导 nextAction）；`behaviorExamplesReason` 不再被静默清除（behaviorExamples 字段保持 `unreliable` 观测性） |
+| M3 | `docs/audit/governance-runtime-map.md` flag 状态行同步（该 flag 移入"Quiet / 默认开（PRI-780 毕业）"） |
+| M4 | ADR References 的 Plan 死链删除（该 plan 文件从未提交入库，两处路径均为死链；留历史注记） |
+| M5 | 过期注释清理：runtime-activation.test.ts、artificer-runner.ts（"v1/v2 mode"→"v2-only"）、console 测试默认值注释 |
+| M8 | `external-review-p0-regressions.test.ts` 的 P0_TEST_PACK 各 case 补 ruleContext（消除 v1 形态 fixture 埋雷） |
+| M1 | **决策：保持现行为并记录**——`--confirm` + 缺 BEP 时 CLI 在任何 LLM 消耗前关闭 code-rule capability，管线以 text_principle_only 完成，拒绝原因（`behavior_examples_missing` + nextAction）在 capabilityStatus/codeRuleCapability 字段显式可见。不采用"仅在 dry-run 关闭、confirm 走管线 guard"方案：那会先烧 dreamer/philosopher/scribe 三段 LLM 再失败。文本原则不是低能力规则（非 v1 降级产物），且拒绝结构化可见——符合 ADR A.2.4"缺 BEP = 显式失败、禁止静默降级为低能力规则"的字面与意图。 |
 
 ## 6. 遗留与后续
 

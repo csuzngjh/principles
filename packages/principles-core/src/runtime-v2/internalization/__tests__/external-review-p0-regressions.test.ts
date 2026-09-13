@@ -24,15 +24,24 @@ import type { TaskRecord } from '../../task-status.js';
 import type { BehaviorExamplePack } from '../behavior-example-pack.js';
 
 // PRI-780: v2-only generation — the artificer prompt only builds with a pack.
+// Case-level ruleContext is included so the fixture could also represent an
+// output that passes the v2 contract (M8: not a latent v1-shaped fixture).
+const P0_RULE_CONTEXT = {
+  version: 2 as const,
+  history: { status: 'available' as const, truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
 const P0_TEST_PACK: BehaviorExamplePack = {
   sourceNegativeCase: {
     caseId: 'neg-1', kind: 'negative', toolName: 'write_file',
     params: { path: '/etc/passwd' }, expectedDecision: 'block',
+    ruleContext: P0_RULE_CONTEXT,
   },
   ownerDesiredOutcome: 'read before write',
   positiveCounterexamples: [{
     caseId: 'pos-1', kind: 'positive', toolName: 'write_file',
     params: { path: '/workspace/src/a.ts' }, expectedDecision: 'allow',
+    ruleContext: P0_RULE_CONTEXT,
   }],
   evidenceRefs: ['pain://p0-1'],
   redactionNotes: [],
