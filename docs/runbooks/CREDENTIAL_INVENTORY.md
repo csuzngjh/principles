@@ -4,8 +4,21 @@
 > **最后更新**: 2026-09-13
 > **来源**: `docs/audit/PRI-782-integration-credential-reality-report.md`（Phase 0.1 Recovery Run）+ `docs/audit/credential-governance-phase1-preparation.md`
 > **适用角色**: Owner / 仓库维护者
+>
+> **注**：本文引用的 `ADR-0026` 目前为 `Proposed`，存在于 **CNB PR #21**，尚未合入 `main`（见 `docs/adr/`）。
 
 ---
+
+## 0.0 Canonical 模式（先读这一行）
+
+> **Canonical = GitHub `main`。** CNB 是**执行环境**（审计 / 开发任务 / NPC），不是事实源。
+> CNB 产物经 T6/T7 交付桥送到 GitHub，Owner 在 GitHub 合并一次。
+>
+> 决策来源：`docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md` §3（模式 G）。
+>
+> **为什么要在这里写**：台账记录凭据的"相对重要性"时，必须先知道哪一侧是权威历史。
+> 同一份权限在 canonical 侧（可达权威历史）与非 canonical 侧（只达镜像）**后果不对等**。
+> 此前本台账未记录该模式 ⇒ 读者无法判断优先级。
 
 ## 0. 这份台账是什么 / 不是什么
 
@@ -52,7 +65,9 @@
 | Credential | System | Purpose | Storage Location | Permission | Rotation |
 |---|---|---|---|---|---|
 | `CNB_TOKEN` | CNB | 平台自动注入；`cnb-auto-deliver.mjs` 调 CNB API | **平台自动注入，构建结束销毁** | 可信事件 = 平台上限（`repo-code:rw` 级） | 平台自动 |
+| ⤷ 备注 | CNB | **平台注入的内置只读变量，`imports` 无法移除**（ADR-0026）。在 canonical 模式下 CNB 侧为**镜像**，非权威历史 ⇒ 写权限后果**降级**（但不可消除）。与 `GITHUB_SYNC_TOKEN` **同行** = P0-01，已接受为残余风险 RA-3/RA-4 | — | — | — |
 | `GITHUB_SYNC_TOKEN` | CNB → GitHub | T6/T7 桥推送分支 + 建 GitHub PR | CNB 私有密钥仓库 `csuzngjh/pd-secrets` → `imports` 注入 | fine-grained PAT：Contents RW + Pull requests RW（仅 `csuzngjh/principles`） | Owner 手动 |
+| ⤷ 备注 | CNB → GitHub | **唯一可达 canonical 事实源的令牌 ⇒ 本台账的收敛重点**（CG-1）。权限**不得扩大**（CG-2）：任何新增权限（如 Actions/Workflows）必须先于实施被拒绝。残余风险 RA-1/RA-2/RA-4/RA-5 | — | — | — |
 | `GITHUB_SYNC_USERNAME` | CNB → GitHub | 固定占位 `x-access-token`（**非敏感**） | `pd-secrets/cnb-github-bridge.yml` | N/A | N/A |
 | CNB 个人访问令牌 | CNB | Owner 手动镜像 GitHub → CNB | **Owner 本机**（不入库） | `repo-code:rw` + `repo-basic-info:r` | Owner 手动，建议 90 天（UNK-01） |
 | `pd-secrets` 授权声明（`allow_slugs` / `allow_events` / `allow_branches`） | CNB | 密钥文件访问范围控制（**治理约束，非凭据本身**） | `pd-secrets/cnb-github-bridge.yml` | 声明式 glob | 随 `pd-secrets` 变更（UNK-07） |
@@ -99,6 +114,7 @@
 | **Telemetry 清理同名双面** | `PRODUCT_TELEMETRY_CLEANUP_TOKEN`（GitHub Secret + Pages Secret） | 漏改一侧 → 定时清理或清理端点失效 |
 | **NPM 回退对** | `NPM_READ_TOKEN` || `NPM_TOKEN`（`publish-npm.yml:314,730`、`release-metadata.yml:120`） | 回退生效时"只读安装"实际用发布令牌 → **只读分离未落地**（P1-02） |
 | **Cloudflare 双形态** | `CLOUDFLARE_API_TOKEN`（GitHub Secret）+ wrangler OAuth（本机） | 权限边界未声明，轮换只做一半（P2-02） |
+| **镜像方向未自动化** | GitHub → CNB 镜像（runbook §2 方案 A-2b，手动） | CNB `main` 静默落后于 GitHub `main` ⇒ **云端审计审的是过期快照**却称"当前 main"（runbook §A-2 已自述为 P1）。这不是凭据问题，但会改变"凭据作用面"的时效性判断——见 `CREDENTIAL_GOVERNANCE_DECISION.md` §3.2 D1 / §4.1 RA-6 |
 
 ---
 
@@ -125,6 +141,9 @@
 2. **轮换凭据时必须检查第 2 节耦合组**。
 3. 值永不入本文件；本文件可安全提交到公开仓库。
 4. 本台账的描述性事实以代码为准；发现漂移时以 `文件:行号` 证据修正本文件。
+5. **Canonical 模式变更时必须更新本文件 §0.0**——模式的改变会重排所有凭据的相对重要性。
+6. 凭据的"后果等级"由 **§0.0 的 canonical 模式 + 该凭据的写权限**共同决定；
+   台账只描述现状与优先级，**不改变任何权限**。
 
 ---
 
