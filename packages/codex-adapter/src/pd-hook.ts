@@ -7,7 +7,7 @@ import { appendEventLogLine, redactTelemetryString } from '@principles/core/runt
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
-import { computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, type RuleContextV2 } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
@@ -63,25 +63,25 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * PRI-780 Codex capability declaration (structured unsupported): the Codex
- * host has no runtime context provider — no session tool-call history window
- * source exists on this host. Rather than leaving v2 rules to be skipped with
- * the shared gate's generic `rule_context_v2_unavailable` warning, Codex
- * declares a schema-valid UNAVAILABLE-posture RuleContextV2: v2 rules stay
- * loaded and evaluate deterministically under the v2 contract
- * (context unavailable → allow, matched:false). The provider only returns
- * the declaration while `rulecode_context_v2` is enabled, so an explicit
- * config disable keeps the same suspension semantics as OpenClaw.
+ * PRI-780 Codex capability declaration (structured UNSUPPORTED — suspension
+ * semantics, revised after Codex review round 2 P1): the Codex host has no
+ * runtime context provider, and the "unavailable → allow" contract is
+ * generation-time prompt discipline, NOT a runtime-enforced invariant. Handing
+ * v2 rules a truthy unavailable-posture context would let a persisted rule
+ * evaluate context-blind and DENY tool calls that were previously suspended —
+ * a silent governance behavior change. Codex therefore passes NO context
+ * provider: the shared gate skips v2 rules with its structured
+ * `rule_context_v2_unavailable` warning, and this hook annotates that warning
+ * with the explicit host-unsupported reason before it reaches Codex stderr
+ * (see annotateContextWarnings — ticket option B: 明确 unsupported + 结构化
+ * warning, never a silent skip).
  */
-export function buildCodexRuntimeContextDeclaration(): RuleContextV2 {
-  return Object.freeze({
-    version: 2,
-    history: Object.freeze({
-      ...UNAVAILABLE_RULE_CONTEXT.history,
-      unavailableReason: 'codex_runtime_context_unsupported: the Codex host declares no runtime context provider (PRI-780 capability declaration)',
-    }),
-    facts: UNAVAILABLE_RULE_CONTEXT.facts,
-  });
+const CODEX_CONTEXT_UNSUPPORTED_NOTE = 'codex_runtime_context_unsupported: the Codex host provides no runtime context provider; v2 rules stay suspended on this host';
+
+export function annotateContextWarnings(warnings: readonly string[]): string[] {
+  return warnings.map((warning) => warning.startsWith('rule_context_v2_unavailable')
+    ? `${warning}; ${CODEX_CONTEXT_UNSUPPORTED_NOTE}`
+    : warning);
 }
 
 // Bounded governance-observation ingestion (Codex Governance Closure Slice
@@ -187,14 +187,11 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       hostKind: 'codex',
       toolSemantics: CODEX_TOOL_SEMANTICS,
       events: codexEventEmitter(path.join(resolution.workspaceDir, '.state')),
-      // PRI-780: structured-unsupported runtime context declaration (see
-      // buildCodexRuntimeContextDeclaration). Flag-off returns undefined so
-      // v2 rules suspend exactly like on OpenClaw.
-      ruleContextProvider: () => (flags.rulecode_context_v2?.enabled === true
-        ? buildCodexRuntimeContextDeclaration()
-        : undefined),
+      // PRI-780 (revised after Codex review round 2 P1): NO context provider —
+      // v2 rules stay SUSPENDED on Codex (never loaded context-blind). See
+      // annotateContextWarnings for the structured unsupported declaration.
     }).dispatch(event);
-    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
+    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;

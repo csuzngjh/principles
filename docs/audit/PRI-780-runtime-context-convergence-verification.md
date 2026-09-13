@@ -17,7 +17,7 @@ PRI-780 将 `rulecode_context_v2` 收敛为默认治理上下文（default-ON）
 | AC3 | 新生成 RuleCode 必须 `requiresContextVersion=2` 或明确失败 | v2-only 输出契约（`validateV2OutputContract`）；runner 缺 pack 在 LLM 前显式抛错；CLI 缺 BEP → `code_rule_capability: OFF (behavior_examples_missing)`（实机输出见 §3.1）；kill switch → `rulecode_context_v2_disabled` 结构化 reason |
 | AC4 | 不存在 v2 rule + context missing + silent execution | 双路径既有 fail-loud 保持：legacy `suspended_by_flag`、shared gate `rule_context_v2_unavailable` warning+skip；Codex 声明后 v2 规则在 Codex 确定性运行于 unavailable 契约（非静默）；新增 Codex 生产级测试断言 flag-off 时结构化 warning 存在 |
 | AC5 | Console/CLI 可观察 contextVersion=2 | CLI dry-run 输出 `contextMode: "v2"`（实机证据 §3.1/§3.2）；v2 激活默认不再显示 `suspended_by_flag`（flag 默认 on）；`pd runtime features` 默认输出 `enabled: true` |
-| AC6 | Codex 支持或结构化 unsupported | Option B 落地：`buildCodexRuntimeContextDeclaration()` 返回 schema-valid unavailable 姿态（`unavailableReason: codex_runtime_context_unsupported…`）；flag-aware（off → undefined → 与 OpenClaw 同 suspension 语义）；生产级测试：flag ON v2 规则加载并在声明上下文下评估、flag OFF 结构化挂起 |
+| AC6 | Codex 支持或结构化 unsupported | Option B（**rev 2 语义**，Codex review round 2 P1 后修订）：Codex 传入**无** provider——v2 规则在 Codex 保持挂起（绝不 context-blind 执行），共享 gate 的 `rule_context_v2_unavailable` 结构化警告经 pd-hook `annotateContextWarnings` 追加显式宿主注记（`codex_runtime_context_unsupported: … v2 rules stay suspended`）后到达 Codex stderr；生产级测试断言：v2 规则（会无条件 block 的实现）在 flag on/off 两态下均被放行（=挂起）且 stderr 含两层结构化警告 |
 | AC7 | Reality Evidence：trajectory→assembler→RuleHostInput→decision | ① committed：`gate-rule-context-v2.vm-e2e.test.ts` 用**真实 TrajectoryDatabase**（生产 schema、`recordToolCall` 写入）→ assembler → v2 规则 VM 执行 → block/allow 决策；② committed：`cross-package-acceptance.test.ts` 全链（pain→v2 工件→审批→激活→shadow→live block）；③ 实机：真实 workspace dry-run（§3） |
 
 ## 3. 实机验证记录（真实 workspace，零 LLM 消耗）
@@ -84,6 +84,9 @@ $ pd runtime internalization run-rulehost -w <ws> --pain-id … --behavior-examp
 | M5 | 过期注释清理：runtime-activation.test.ts、artificer-runner.ts（"v1/v2 mode"→"v2-only"）、console 测试默认值注释 |
 | M8 | `external-review-p0-regressions.test.ts` 的 P0_TEST_PACK 各 case 补 ruleContext（消除 v1 形态 fixture 埋雷） |
 | M1 | **决策：保持现行为并记录**——`--confirm` + 缺 BEP 时 CLI 在任何 LLM 消耗前关闭 code-rule capability，管线以 text_principle_only 完成，拒绝原因（`behavior_examples_missing` + nextAction）在 capabilityStatus/codeRuleCapability 字段显式可见。不采用"仅在 dry-run 关闭、confirm 走管线 guard"方案：那会先烧 dreamer/philosopher/scribe 三段 LLM 再失败。文本原则不是低能力规则（非 v1 降级产物），且拒绝结构化可见——符合 ADR A.2.4"缺 BEP = 显式失败、禁止静默降级为低能力规则"的字面与意图。 |
+| **Codex R2-P1** | **撤销 unavailable 姿态声明，改为挂起语义**（对 head 的 Codex 复审提出，采纳）：原实现给 v2 规则注入 truthy unavailable context，使"unavailable → allow"契约成为唯一的（prompt 级、非机械强制的）防线——持久化 v2 规则可在 Codex 上 context-blind deny 先前被挂起的调用，零 operator 警告。修订：pd-hook 不再传 provider（gate 结构化 skip 保持），新增 `annotateContextWarnings` 在 stderr 警告上追加 `codex_runtime_context_unsupported` 显式注记（ticket option B 字面：明确 unsupported + 结构化 warning）；生产级测试反转为"挂起 + 双层警告"断言；ADR A.3 重写记录设计变更及理由。 |
+| **Codex R2-P2** | 文本 dry-run 的 Next 行接入有效能力：`formatDryRunOutput` 新增 `capabilityEnabled` 入参——capability 关闭时显示 `Next: fix the code-rule capability issue above; --confirm runs text-principle-only internalization.`，不再误导性宣称 "pass --confirm to actually run the pipeline"；补 kill-switch 文本分支回归断言。 |
+| **CodeRabbit 场外 Minor** | playbook 附录 B 第 524 行"默认开启 v2（必须显式开启）"改为"默认开启；显式 `enabled: false` 是迁移期熔断"，消除与 §1.2/§13 的矛盾。 |
 
 ## 6. 遗留与后续
 

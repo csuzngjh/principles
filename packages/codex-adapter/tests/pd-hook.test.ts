@@ -72,17 +72,15 @@ describe('pd-hook production boundary', () => {
 });
 
 describe('PRI-780 Codex runtime context capability declaration', () => {
-  it('buildCodexRuntimeContextDeclaration is a schema-valid unavailable-posture declaration', async () => {
-    const { buildCodexRuntimeContextDeclaration } = await import('../src/pd-hook.js');
-    const { validateRuleContextV2 } = await import('@principles/core/runtime-v2');
-    const declaration = buildCodexRuntimeContextDeclaration();
-    const validation = validateRuleContextV2(declaration);
-    expect(validation.valid, validation.errors.join('; ')).toBe(true);
-    expect(declaration.version).toBe(2);
-    expect(declaration.history.status).toBe('unavailable');
-    expect(declaration.history.unavailableReason).toContain('codex_runtime_context_unsupported');
-    expect(declaration.history.calls).toEqual([]);
-    expect(declaration.facts.priorReadOfTarget).toBe('unknown');
-    expect(declaration.facts.readCount).toBeNull();
+  it('annotateContextWarnings enriches the gate suspension warning with the explicit host-unsupported reason', async () => {
+    const { annotateContextWarnings } = await import('../src/pd-hook.js');
+    const out = annotateContextWarnings([
+      'rule_context_v2_unavailable: enable and wire the host rule context provider',
+      'unrelated_warning: stay untouched',
+    ]);
+    expect(out[0]).toContain('rule_context_v2_unavailable');
+    expect(out[0]).toContain('codex_runtime_context_unsupported');
+    expect(out[0]).toContain('v2 rules stay suspended');
+    expect(out[1]).toBe('unrelated_warning: stay untouched');
   });
 });

@@ -141,8 +141,8 @@ Artificer kept a v1/v2 branch in which the production task-driven paths
    route. Route unification is a non-goal of PRI-780.
 3. **Sequencing precondition.** The Codex capability declaration lands
    BEFORE the default flip: Codex declares structured-unsupported runtime
-   context (flag-aware unavailable-posture context, see A.3), never a silent
-   skip.
+   context (v2 rules stay suspended with an explicit host-unsupported
+   warning, see A.3), never a silent skip.
 4. **BEP stays Owner-labelled.** `BehaviorExamplePack` remains
    Owner-labelled evidence. Trajectory execution outcomes are NOT Owner
    allow/block judgements and must not auto-generate a BEP. Missing BEP at
@@ -155,16 +155,26 @@ Artificer kept a v1/v2 branch in which the production task-driven paths
    gain new semantic dependencies (evaluation-side v1 compatibility for
    already-approved artifacts remains).
 
-### A.3 Codex structured-unsupported declaration
+### A.3 Codex structured-unsupported declaration (rev 2 — Codex review round 2 P1)
 
-The Codex adapter passes no runtime context provider capability. Instead of
-leaving v2 rules to be skipped with a generic warning, Codex declares a
-schema-valid `unavailable`-posture `RuleContextV2`
-(`unavailableReason: codex_runtime_context_unsupported…`). Effects: v2 rules
-stay loaded on Codex and evaluate deterministically under the
-"context unavailable → allow, matched:false" contract; the declaration is
-flag-aware (flag disabled → `undefined` → same suspension semantics as
-OpenClaw, preserving the kill switch on both hosts).
+The Codex host has no runtime context provider, and it PASSES NONE: v2 rules
+stay **suspended** on Codex. The shared production gate skips them with its
+structured `rule_context_v2_unavailable` warning, and the Codex hook annotates
+that warning with the explicit host reason
+(`codex_runtime_context_unsupported: the Codex host provides no runtime
+context provider; v2 rules stay suspended on this host`) before it reaches
+Codex stderr — ticket option B: 明确 unsupported + 结构化 warning, never a
+silent skip.
+
+An earlier draft of this amendment declared a schema-valid
+unavailable-posture `RuleContextV2` instead, keeping v2 rules loaded and
+relying on the generation-time contract "unavailable → allow, matched:false".
+Codex review round 2 correctly rejected that posture: the contract is
+prompt-level discipline, not a runtime-enforced invariant — a persisted v2
+rule may evaluate context-blind and DENY tool calls that were previously
+suspended, silently changing governance behavior. Suspension is the safe,
+spec-literal choice; a real Codex context provider (option A) remains the
+follow-up that unlocks v2 enforcement on Codex.
 
 ### A.4 Consequences
 

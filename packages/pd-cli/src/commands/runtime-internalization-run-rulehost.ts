@@ -306,10 +306,12 @@ interface DryRunFormatInput {
   readonly capabilityStatus: string;
   readonly workspaceDir: string;
   readonly readiness: RuleHostReadinessResult;
+  /** PRI-780 review: the EFFECTIVE code-rule capability — conditions the ready "Next" line. */
+  readonly capabilityEnabled: boolean;
 }
 
 function formatDryRunOutput(input: DryRunFormatInput): string {
-  const { opts, capabilityStatus, workspaceDir, readiness } = input;
+  const { opts, capabilityStatus, workspaceDir, readiness, capabilityEnabled } = input;
   const lines: string[] = [];
   lines.push('RuleHost Pipeline (PRI-429) — DRY RUN');
   lines.push(`pain: ${opts.painId}`);
@@ -324,7 +326,12 @@ function formatDryRunOutput(input: DryRunFormatInput): string {
   lines.push('');
   lines.push('No tasks created, no LLM calls made, no artifacts written.');
   if (readiness.status === 'ready') {
-    lines.push('Next: pass --confirm to actually run the pipeline.');
+    // PRI-780 review: derive the next action from the EFFECTIVE capability —
+    // a kill-switched / BEP-missing workspace cannot run the code-rule
+    // pipeline on --confirm, only text-principle-only internalization.
+    lines.push(capabilityEnabled
+      ? 'Next: pass --confirm to actually run the pipeline.'
+      : 'Next: fix the code-rule capability issue above; --confirm runs text-principle-only internalization.');
   } else if (readiness.status === 'text_principle_only') {
     lines.push('Next: pass --confirm to run in text-principle-only mode, or fix the issues above to enable full pipeline.');
   } else {
@@ -564,7 +571,7 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
             : 'fix the readiness issues above before running the pipeline',
       }) + '\n');
     } else {
-      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: effectiveCapabilityStatus, workspaceDir, readiness }) + '\n');
+      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: effectiveCapabilityStatus, workspaceDir, readiness, capabilityEnabled: effectiveCapability.enabled }) + '\n');
     }
     return;
   }

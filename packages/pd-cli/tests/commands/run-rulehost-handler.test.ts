@@ -705,5 +705,9 @@ describe('handleRunRuleHost — PR #1122 behavior-examples fail-fast (CodeRabbit
     );
     expect(stdout).toMatch(/code_rule_capability: OFF \(rulecode_context_v2_disabled/);
     expect(stdout).not.toMatch(/code_rule_capability: ON/);
+    // Codex review round 2 P2: the plain-text "Next" line must derive from the
+    // EFFECTIVE capability too — confirmation cannot run the code-rule pipeline.
+    expect(stdout).not.toMatch(/Next: pass --confirm to actually run the pipeline/);
+    expect(stdout).toMatch(/Next: fix the code-rule capability issue above/);
   });
 });

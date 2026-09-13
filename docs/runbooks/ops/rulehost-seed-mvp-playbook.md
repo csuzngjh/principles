@@ -521,6 +521,6 @@ pd runtime features --json | jq '.features[] | select(.id == "rulecode_context_v
 - 自动任务执行（agent 不代 owner 决策）
 - 自动价值判断（v2 仅 allow / block）
 - 真正 live auto-correct（必须人审）
-- 默认开启 v2（必须显式开启）
+- v2 不可关闭（默认开启；显式 `enabled: false` 是迁移期熔断，PRI-780）
 
 任何超出上述边界的提案必须走 ADR 流程，并在 `docs/plans/post-mvp-conditional-roadmap.md` 评估重启条件。本 playbook 随 ADR-0014 MVP-First 阶段同步——MVP 阶段结束后由 maintainer 决定是否归档或演进。
