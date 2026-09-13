@@ -106,7 +106,7 @@ export function loadPdConfigForPlugin(workspaceDir: string): PluginConfigLoadRes
     };
   }
   const effective = computeEffectivePdConfig(validation.value);
-  return { ok: true, effective, source: 'user_config', configPath, warnings: effective.warnings, errors: [] };
+  return { ok: true, effective, source: 'user_config', configPath, warnings: [...effective.warnings, ...validation.warnings], errors: [] };
 }
 
 export function loadFeatureFlagFromConfig(

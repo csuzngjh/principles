@@ -40,7 +40,6 @@ export type {
   RedactedProfileSummary,
   // Context Injection types
   ProjectFocusMode,
-  EvolutionContextConfig,
   ContextInjectionConfig,
   PartialContextInjectionConfig,
 } from './pd-config-types.js';

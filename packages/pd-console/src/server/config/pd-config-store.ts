@@ -320,7 +320,7 @@ export function loadPdConfig(workspaceDir: string): ConfigLoadResult {
     effective,
     source: 'user_config',
     configPath,
-    warnings: effective.warnings,
+    warnings: [...effective.warnings, ...validationResult.warnings],
   };
 }
 

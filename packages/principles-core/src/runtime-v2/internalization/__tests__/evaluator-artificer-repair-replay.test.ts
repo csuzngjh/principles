@@ -102,7 +102,6 @@ function flagsOffConfig(): EffectivePdConfig {
     resolvedContextInjection: {
       thinkingOs: false,
       projectFocus: 'off',
-      evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
     },
   } as unknown as EffectivePdConfig;
 }
