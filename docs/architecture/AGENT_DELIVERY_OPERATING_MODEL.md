@@ -164,6 +164,19 @@
 **退出条件**：能回答"当前行为在哪、权威源是谁、最小缺口是什么"三个问题。
 否则进入 **Stop Condition**。
 
+#### 4.1.1 Completion Check — 是否已经完成
+
+**如果目标已经完成，必须停止并报告，不得为了"有产出"而制造改动。**
+
+判定依据（全部来自当前仓库现实，而非记忆）：
+
+1. 目标能力是否已在生产路径存在并被消费？（`P2` question 3）
+2. 是否有保护它的测试 / 契约？（`P2` question 4）
+3. 是否只是**文档未更新**，而非功能缺失？（→ 交付收窄为文档修正，或直接报告 drift）
+
+**既有先例**：PRI-630 的 Reality Check 证明任务已完成，执行随之终止——这正是本规范
+要求的行为，不是失败。
+
 ### 4.2 Phase 2 — Planning（规划）
 
 **必做**：
@@ -495,6 +508,20 @@ REC-1 走路径 A 还是路径 B，Agent 无权用假设选路。
 
 ---
 
+## 14.1 Follow-ups（已知尚未实施，供 Owner 决策）
+
+1. **机械化部分停止条件**：例如 Scope Expansion（`SC-4`）可由 CI 对比
+   `git diff --name-only` 与任务授权路径自动告警。本文未实施
+   （属 `scripts/**` + CI 面，超出 docs-only 授权）。
+2. **与角色章程的引用打通**：现有章程（`.cnb/agents/*.md`）可增加
+   "遵循 `docs/architecture/AGENT_DELIVERY_OPERATING_MODEL.md`"一行指向。
+3. **周期性审计产物存储面的进一步收敛**：见 PRI-782 REC 系列，
+   属既有 follow-up 家族，不重复单独立项。
+4. **规则 ID 的机械化校验**：`AL-*` / `SC-*` / `AP-*` / `OI-*` 目前仅靠人工评审保证稳定，
+   可考虑由检查脚本核对引用不悬空（属 `scripts/**`，超出本文范围）。
+
+---
+
 ## 15. Complexity Delta
 
 | 项 | 值 |
@@ -518,4 +545,5 @@ REC-1 走路径 A 还是路径 B，Agent 无权用假设选路。
       scope conflict（`SC-4`）/ secret-permission boundary（`SC-5`）（§6）
 - [x] Artifact Persistence Contract：commit + PR + canonical reference（§9）
 - [x] Owner Interaction Rules：必须等待 vs 可自主推进（§7）
+- [x] Completion Check：目标已完成即停止（§4.1.1，PRI-630 先例）
 - [x] 只修改 `docs/**`；未触碰 `packages/**`、`.cnb.yml`、`.github/**`、任何 Secret
