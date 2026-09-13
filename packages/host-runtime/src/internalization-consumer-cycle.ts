@@ -39,6 +39,7 @@ import {
   DefaultRolloutReviewerValidator,
   PiAiRuntimeAdapter,
   L2AgentLoopAdapter,
+  ArtificerL2Adapter,
   buildL2PrincipleReaderFromLedger,
   OpenClawCliRuntimeAdapter,
   storeEmitter,
@@ -447,7 +448,22 @@ export async function runInternalizationConsumerCycle(
       // PRI-419: when l2_dreamer flag is on AND this is a dreamer task, route
       // through the L2 multi-turn agent loop. Non-dreamer runners always use PiAi.
       const l2Flag = loadFeatureFlagFromConfig(workspaceDir, 'l2_dreamer');
-      if (l2Flag.enabled && wakeResult.taskKind === 'dreamer') {
+      // PRI-758: code_rule Artificer tasks ALWAYS route through the L2
+      // multi-turn agent loop (write→validate→replay→submit_rulecode) so the
+      // model can self-iterate before submitting. This is the last-mile fix:
+      // one-shot PiAi adapter produces plan-only or syntactically broken code
+      // that fails the evaluator's deterministic replay.
+      if (wakeResult.taskKind === 'artificer' && taskRuntimeKind === 'pi-ai') {
+        adapter = new ArtificerL2Adapter({
+          provider: taskRuntimeConfig.provider ?? 'openai',
+          model: taskRuntimeConfig.model ?? 'gpt-4o',
+          apiKeyEnv: taskRuntimeConfig.apiKeyEnv ?? 'OPENAI_API_KEY',
+          baseUrl: taskRuntimeConfig.baseUrl,
+          gateDeps: createProductionGateDeps(),
+          validator: new DefaultArtificerValidator(),
+          totalBudgetMs: taskRuntimeConfig.timeoutMs,
+        });
+      } else if (l2Flag.enabled && wakeResult.taskKind === 'dreamer') {
         const stateDir = `${workspaceDir}/.state`;
         const principleReader = buildL2PrincipleReaderFromLedger(loadLedger(stateDir), {
           logger: { warn: (msg: string) => logger.warn(msg) },
