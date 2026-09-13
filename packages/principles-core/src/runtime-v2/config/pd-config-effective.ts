@@ -38,12 +38,6 @@ function resolveContextInjection(
   return {
     thinkingOs: userPartial.thinkingOs ?? DEFAULT_CONTEXT_INJECTION.thinkingOs,
     projectFocus: userPartial.projectFocus ?? DEFAULT_CONTEXT_INJECTION.projectFocus,
-    evolutionContext: {
-      enabled: userPartial.evolutionContext?.enabled ?? DEFAULT_CONTEXT_INJECTION.evolutionContext.enabled,
-      maxMessages: userPartial.evolutionContext?.maxMessages ?? DEFAULT_CONTEXT_INJECTION.evolutionContext.maxMessages,
-      maxCharsPerMessage:
-        userPartial.evolutionContext?.maxCharsPerMessage ?? DEFAULT_CONTEXT_INJECTION.evolutionContext.maxCharsPerMessage,
-    },
   };
 }
 

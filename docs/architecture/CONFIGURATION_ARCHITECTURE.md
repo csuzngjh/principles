@@ -1,10 +1,11 @@
 # 配置架构（Configuration Architecture）
 
-> **状态**: Active
-> **最后更新**: 2026-05-15
+> **状态**: Active（2026-09-13 与代码事实对齐）
+> **最后更新**: 2026-09-13（ADR-0016 单文件现实对齐；未实施的多层设计降级为历史记录）
 > **关联**: `PD_ARCHITECTURE_OVERVIEW.md`, `SECURITY_ARCHITECTURE.md` §7
 
 > **ADR-0012 修订（2026-05-23）**: `idle-trigger.yaml` 与 OpenClaw-owned runtime scheduling 已废止。新的执行配置必须由 PD 自有 config/SDK 边界提供；下方旧 trigger 示例仅作迁移证据，不能作为新实现规范。
+> **现实对齐（ADR-0016，2026-06 起）**: PD 只有**一个**用户配置文件 `{workspace}/.pd/config.yaml`。已实现的加载链 = code defaults（`pd-config-defaults.ts`）→ 单文件覆盖 → 手写校验（`pd-config-validate.ts`）→ effective 合并（`pd-config-effective.ts`），三处消费方（host-runtime `pd-config.ts` / pd-cli `pd-config-loader.ts` / pd-console `pd-config-store.ts`）同构。本文其余部分描述的**多级合并（Level 2–5）、per-domain yaml、`${ENV_VAR}` 引用解析、热重载、配置审计日志在代码中不存在**，仅作历史设计记录。
 
 本文档定义 PD 系统的配置加载、层级合并、热重载、校验、变更审计规范。
 
@@ -35,7 +36,19 @@
 
 ## 2. 配置层级（Priority Order）
 
-### 2.1 五级合并
+### 2.1 已实现层级（ADR-0016 单文件）
+
+```
+Lower priority                                        Higher priority
+─────────────────────────────────────────────────────────────────────
+Level 1: Code defaults（pd-config-defaults.ts）
+       │
+       │ overridden by
+       ▼
+Level 2: {workspace}/.pd/config.yaml（唯一用户配置文件）
+```
+
+### 2.2 历史设计：五级合并（⚠️ 未实施，代码中不存在）
 
 ```
 Lower priority                                        Higher priority
@@ -59,7 +72,9 @@ Level 4: Environment variables (PD_* prefix)
 Level 5: Command-line flags (pd-cli only)
 ```
 
-### 2.2 各级用途
+> Level 2/3 的 per-domain yaml 与 Level 4 的 env 覆盖（`applyEnvOverrides`）均无实现；`${ENV_VAR}` 解析（`resolveEnvReferences`）同样不存在。
+
+### 2.3 各级用途（历史设计）
 
 | Level | 用途 | 维护者 |
 |-------|-----|-------|
@@ -69,7 +84,7 @@ Level 5: Command-line flags (pd-cli only)
 | 4 (env) | 临时调试 / CI 注入 | 运维 / CI |
 | 5 (cli flag) | 单次执行覆盖 | 用户 |
 
-### 2.3 合并语义
+### 2.4 合并语义（历史设计）
 
 **深度合并（deep merge）**，但有特殊规则：
 
@@ -111,27 +126,19 @@ internalization:
 
 ## 3. 配置文件清单
 
-### 3.1 标准配置文件
+### 3.1 标准配置文件（现实）
 
 | 文件 | 路径 | 加载者 | 用途 |
 |------|------|------|------|
-| `activation.yaml` | `{workspace}/.pd/config/` | core | 通道激活策略（详见 ADR-0006）|
-| `internalization.yaml` | `{workspace}/.pd/config/` | core | 内化流水线参数 |
-| `runtime-scheduling.yaml` | `{workspace}/.pd/config/` | PD SDK/operator | 显式 Runtime V2 调度策略；取代废止的 `idle-trigger.yaml` |
-| `runtime.yaml` | `{workspace}/.pd/config/` | core | RuntimeAdapter 选择与配置 |
-| `gfi.yaml` | `{workspace}/.pd/config/` | core | GFI 策略 |
-| `observability.yaml` | `{workspace}/.pd/config/` | core | 日志/指标/追踪/审计配置 |
-| `console.yaml` | `{workspace}/.pd/config/` | console | pd-console 监听配置 |
-| `pruning.yaml` | `{workspace}/.pd/config/` | core | Pruning 策略 |
-| `routing-policy.yaml` | `{workspace}/.pd/config/` | core | 内化路由覆盖（可选）|
+| `config.yaml` | `{workspace}/.pd/` | host-runtime `pd-config.ts` / pd-cli `pd-config-loader.ts` / pd-console `pd-config-store.ts` | PD 唯一用户配置文件（ADR-0016）|
 
-### 3.2 默认配置文件
+**历史设计记录（未实施）**：per-domain yaml（`activation.yaml` / `internalization.yaml` / `runtime-scheduling.yaml` / `runtime.yaml` / `gfi.yaml` / `observability.yaml` / `console.yaml` / `pruning.yaml` / `routing-policy.yaml`）从未落地，代码零命中。
 
-`~/.openclaw/extensions/principles-disciple/default-config.yaml`
+### 3.2 默认配置文件（未实施）
 
-可包含上述任意 yaml 的内容（合并语义）。
+`~/.openclaw/extensions/principles-disciple/default-config.yaml` 属于上文未实施的多层设计，代码中无加载点。
 
-### 3.3 工作区初始化时
+### 3.3 工作区初始化（历史设计）
 
 `pd init` 命令在 `{workspace}/.pd/config/` 写入：
 
@@ -144,7 +151,9 @@ internalization:
 
 ## 4. Schema 与校验
 
-### 4.1 设计
+> **现实**：校验不使用 TypeBox，而是手写校验器四件套：`pd-config-types.ts`（类型）/ `pd-config-defaults.ts`(默认值) / `pd-config-validate.ts`（逐字段校验，返回结构化 errors/warnings）/ `pd-config-effective.ts`（合并）。本节以下内容为未实施的历史设计记录。
+
+### 4.1 设计（历史设计）
 
 每个配置文件都有对应的 TypeBox schema：
 
@@ -174,7 +183,7 @@ export const ActivationConfigSchema = Type.Object({
 export type ActivationConfig = Static<typeof ActivationConfigSchema>;
 ```
 
-### 4.2 加载流程
+### 4.2 加载流程（历史设计；现实流程见下方说明）
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -238,22 +247,25 @@ export type ActivationConfig = Static<typeof ActivationConfigSchema>;
 
 ## 5. 环境变量
 
-### 5.1 命名规范
+### 5.1 生产代码实际消费的 `PD_*` 变量
+
+`PD_LOG_LEVEL` / `PD_RUNTIME_KIND` / `PD_PIAI_API_KEY` / `PD_OPENAI_API_KEY` / `PD_USE_INTERNALIZATION_ENGINE` / `PD_CONFIG_DIR` 等早期设计变量**生产代码零消费**（`PD_CONFIG_DIR` 仅是值为 `'.pd'` 的常量名，不是环境变量）。实际消费的变量包括：
 
 ```
-PD_{DOMAIN}_{NAME}
-
-例：
-PD_LOG_LEVEL                       # 覆盖 observability.logs.level
-PD_RUNTIME_KIND                    # 默认 RuntimeKind
-PD_PIAI_API_KEY                    # PiAi adapter key
-PD_OPENAI_API_KEY                  # OpenAI key
-PD_USE_INTERNALIZATION_ENGINE      # ADR-0005 feature flag
 PD_WORKSPACE_DIR                   # 显式指定工作区
-PD_CONFIG_DIR                      # 覆盖 config 目录
+PD_CONSOLE_TOKEN                   # Console 认证 token
+PD_CONSOLE_PORT_BASE               # Console 端口基数
+PD_RELEASE_METADATA_URL            # 发布元数据源
+PD_OWNER_ID / PD_OWNER_CREDENTIAL_ID
+PD_HOST_CODEX_ENABLED              # Codex host 开关
+PD_ALLOW_LEGACY_NPM_INSTALL / PD_SKIP_NPM_UPGRADE / PD_SKIP_GLOBAL_SHIM  # 安装器行为
+PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED
+PD_REPO_ROOT / PD_PRODUCTION_WORKSPACE / PD_STATE_DIR
 ```
 
-### 5.2 yaml 中的引用语法
+（完整清单以代码为准：`rg "process\.env\.PD_" packages --include="*.ts"`）
+
+### 5.2 yaml 中的引用语法（⚠️ 未实施）
 
 ```yaml
 runtime:
@@ -262,10 +274,9 @@ runtime:
     base_url: ${PD_PIAI_BASE_URL:-https://api.example.com}  # 可有默认
 ```
 
-`${VAR}` 必须存在，否则启动失败。
-`${VAR:-default}` 允许默认值。
+`${VAR}` / `${VAR:-default}` 引用解析（`resolveEnvReferences`）不存在于代码，上方示例仅作历史设计记录。
 
-### 5.3 安全要求
+### 5.3 安全要求（历史设计）
 
 详见 `SECURITY_ARCHITECTURE.md` §6：
 
@@ -297,9 +308,9 @@ pd [global-flags] <command> [command-flags]
 
 ---
 
-## 7. 热重载（Hot Reload）
+## 7. 热重载（Hot Reload）（⚠️ 未实施：代码中无 `ConfigWatcher` / `config-watcher.ts`）
 
-### 7.1 适用范围
+### 7.1 适用范围（历史设计）
 
 | 进程类型 | 是否支持热重载 |
 |---------|--------------|
@@ -321,7 +332,7 @@ pd [global-flags] <command> [command-flags]
 | `console.bind_host / bind_port` | ❌ | 仅启动 |
 | `observability.audit.*` | ❌ | 仅启动 |
 
-### 7.3 实现机制
+### 7.3 实现机制（历史设计）
 
 ```typescript
 // @principles/core/runtime-v2/config/config-watcher.ts
@@ -345,7 +356,7 @@ class ConfigWatcher {
 
 **注意**：fs.watch 在某些 OS 上不可靠，关键配置建议轮询补充。
 
-### 7.4 热重载时的副作用
+### 7.4 热重载时的副作用（历史设计）
 
 | 配置变更 | 副作用 |
 |---------|-------|
@@ -356,9 +367,9 @@ class ConfigWatcher {
 
 ---
 
-## 8. 配置审计
+## 8. 配置审计（⚠️ 未实施：无审计日志机制；`pd config` 现仅有 `doctor` 子命令）
 
-### 8.1 强制要求
+### 8.1 强制要求（历史设计）
 
 | ID | 约束 |
 |----|------|
@@ -367,10 +378,10 @@ class ConfigWatcher {
 | CFG-AUDIT-3 | 直接编辑文件被发现时（启动 hash 不匹配）**必须**写警告审计 |
 | CFG-AUDIT-4 | 关键安全字段的修改尝试（即使被强制覆盖）**必须**审计 |
 
-### 8.2 配置变更命令
+### 8.2 配置变更命令（未实施）
 
 ```bash
-# 显式修改
+# 显式修改（⚠️ 历史设计：pd config set / show / diff / verify / history 均不存在）
 pd config set activation.channels.skill.auto_activate false --reason "stricter review"
 
 # 输出：
@@ -380,7 +391,7 @@ pd config set activation.channels.skill.auto_activate false --reason "stricter r
 # ✓ Audit log written: aud_abc123
 ```
 
-### 8.3 配置查看
+### 8.3 配置查看（未实施）
 
 ```bash
 pd config show                      # 显示合并后的配置
@@ -393,9 +404,9 @@ pd config history                   # 显示最近的变更历史（来自审计
 
 ---
 
-## 9. 各配置文件示例
+## 9. 各配置文件示例（⚠️ 历史设计：以下 per-domain yaml 均未实施，现实只有 `.pd/config.yaml` 单文件）
 
-### 9.1 activation.yaml
+### 9.1 activation.yaml（历史设计）
 
 参见 `ACTIVATION_CHANNELS.md` §7。
 
@@ -492,9 +503,9 @@ console:
 
 ---
 
-## 10. 配置加载实现
+## 10. 配置加载实现（⚠️ 历史设计：`config-loader.ts` 从未创建；现实加载链见文首"现实对齐"）
 
-### 10.1 核心组件
+### 10.1 核心组件（历史设计）
 
 ```typescript
 // @principles/core/runtime-v2/config/config-loader.ts (待建)
@@ -521,7 +532,7 @@ interface LoadOptions<T> {
 }
 ```
 
-### 10.2 加载顺序实现
+### 10.2 加载顺序实现（历史设计：`applyEnvOverrides` / `resolveEnvReferences` 不存在）
 
 ```typescript
 async function loadConfig<T>(opts: LoadOptions<T>): Promise<T> {
@@ -628,6 +639,8 @@ test('CFG-INV-3: core does not read process.env directly', () => {
 ---
 
 ## 13. 实施进度
+
+> **2026-09 现实**：下表所列的统一 ConfigLoader 设计不再按原计划实施。ADR-0016 已落地单一 `.pd/config.yaml` 方案（`pd-config-types.ts` / `pd-config-defaults.ts` / `pd-config-validate.ts` / `pd-config-effective.ts` + 三处同构 loader），本表仅作历史设计记录。
 
 | 项目 | 状态 |
 |------|-----|
