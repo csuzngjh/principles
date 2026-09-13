@@ -94,8 +94,16 @@ vi.mock('../../src/core/rule-context-assembler.js', () => ({
 function flagOffConfig(): ReturnType<typeof loadPdConfigForPlugin> {
   return {
     ok: true,
-    effective: { config: { features: {} } } as unknown as EffectivePdConfig,
-    source: 'defaults',
+    // PRI-780: the flag defaults ON — "flag OFF" means the explicit config
+    // kill switch (features.rulecode_context_v2.enabled: false).
+    effective: {
+      config: {
+        features: {
+          rulecode_context_v2: { category: 'quiet' as const, enabled: false },
+        },
+      },
+    } as unknown as EffectivePdConfig,
+    source: 'user_config',
     configPath: '/mock/.pd/config.yaml',
     warnings: [],
     errors: [],

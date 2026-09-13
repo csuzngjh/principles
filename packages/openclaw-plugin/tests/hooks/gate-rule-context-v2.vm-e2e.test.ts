@@ -105,9 +105,11 @@ function setupTempWorkspace(enableV2Flag: boolean): void {
       prompt: { category: 'core', enabled: true },
       code_tool_hook: { category: 'core', enabled: true },
       defer_archive: { category: 'core', enabled: true },
+      // PRI-780: the flag defaults ON — the OFF branch must set the explicit
+      // config kill switch (not merely omit the feature key).
       ...(enableV2Flag
         ? { rulecode_context_v2: { category: 'quiet', enabled: true } }
-        : {}),
+        : { rulecode_context_v2: { category: 'quiet', enabled: false } }),
     },
     runtimeProfiles: { 'openclaw.default': { type: 'openclaw', source: 'default' } },
     internalAgents: { defaultRuntime: 'openclaw.default', agents: { diagnostician: { enabled: true } } },

@@ -431,7 +431,6 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
   }
 
   let effectiveCapability = resolvedRuntime.capability;
-  let contextMode: 'v1' | 'v2' = 'v1';
   let behaviorExamplePack: BehaviorExamplePack | undefined;
   let behaviorExamplesReason: string | undefined;
   const behaviorExamplesPath = opts.behaviorExamples
@@ -439,18 +438,26 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
     : undefined;
 
   if (!resolvedRuntime.contextV2Enabled && behaviorExamplesPath) {
-    const reason = 'behavior_examples_not_allowed: rulecode_context_v2 is disabled';
+    const reason = 'behavior_examples_not_allowed: rulecode_context_v2 is disabled (kill switch) and v2 is the only generation contract (PRI-780)';
     if (opts.json) {
-      process.stdout.write(JSON.stringify({ status: 'failed', reason, nextAction: 'enable rulecode_context_v2 or remove --behavior-examples' }) + '\n');
+      process.stdout.write(JSON.stringify({ status: 'failed', reason, nextAction: 're-enable rulecode_context_v2 or remove --behavior-examples' }) + '\n');
     } else {
-      console.error(`Error: ${reason}. Enable rulecode_context_v2 or remove --behavior-examples.`);
+      console.error(`Error: ${reason}. Re-enable rulecode_context_v2 or remove --behavior-examples.`);
     }
     process.exitCode = 1;
     return;
   }
 
-  if (resolvedRuntime.contextV2Enabled) {
-    contextMode = 'v2';
+  // PRI-780: the generation contract is v2-only. With the kill switch active
+  // (explicit rulecode_context_v2 disable) code-rule generation is refused
+  // with a structured reason — never a silent fallback to an action-only
+  // (v1) rule. Text-principle internalization continues (capability OFF).
+  if (!resolvedRuntime.contextV2Enabled) {
+    effectiveCapability = {
+      enabled: false,
+      disabledReason: 'rulecode_context_v2_disabled: kill switch active — v2 is the only RuleCode generation contract (PRI-780); re-enable the flag to generate code rules',
+    };
+  } else {
     if (!behaviorExamplesPath) {
       behaviorExamplesReason = 'behavior_examples_missing';
     } else {
@@ -510,8 +517,13 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         }
       }
     }
-    if (behaviorExamplesReason) {
+    if (behaviorExamplesReason && effectiveCapability.enabled) {
+      // Only override when code-rule generation would actually run — a more
+      // fundamental blocker (text_principle_only readiness, disabled agent,
+      // kill switch) keeps precedence and stays the reported reason.
       effectiveCapability = { enabled: false, disabledReason: `${behaviorExamplesReason}; nextAction: provide reliable Owner-labelled tool call IDs with --behavior-examples` };
+    } else if (behaviorExamplesReason) {
+      behaviorExamplesReason = undefined;
     }
   }
 
@@ -532,7 +544,8 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
           : resolvedRuntime.capabilityStatus,
         agentRuntimeProfiles: resolvedRuntime.agentRuntimeProfiles,
         codeRuleCapability: { enabled: effectiveCapability.enabled, disabledReason: effectiveCapability.disabledReason },
-        contextMode,
+        // PRI-780: 'v2' is the only generation contract (observability field).
+        contextMode: 'v2',
         behaviorExamples: behaviorExamplesPath
           ? { path: behaviorExamplesPath, status: behaviorExamplesReason ? 'unreliable' : 'provided' }
           : { status: resolvedRuntime.contextV2Enabled ? 'missing' : 'not_required' },
@@ -562,7 +575,6 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
       runtimeAdapter: resolvedRuntime.agentAdapters.dreamer,
       agentAdapters: resolvedRuntime.agentAdapters,
       codeRuleCapability: effectiveCapability,
-      contextMode,
       behaviorExamplePack,
       channel: channel as RuleHostChannel,
       maxRounds: opts.maxRounds,

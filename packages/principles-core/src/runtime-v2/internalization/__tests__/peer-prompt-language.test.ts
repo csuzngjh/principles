@@ -219,8 +219,20 @@ describe('RolloutReviewerPromptBuilder — outputLanguage (PRI-714)', () => {
 
 describe('ArtificerPromptBuilder — outputLanguage (PRI-714)', () => {
   const builder = new ArtificerPromptBuilder();
+  // PRI-780: v2-only contract — the pack is required input.
+  const ruleContext = {
+    version: 2 as const,
+    history: { status: 'available' as const, truncated: false, calls: [] },
+    facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+  };
   const input = {
-    contextMode: 'v1' as const,
+    behaviorExamplePack: {
+      sourceNegativeCase: { caseId: 'negative-1', kind: 'negative' as const, toolName: 'write_file', params: { path: 'unread' }, expectedDecision: 'block' as const, ruleContext },
+      ownerDesiredOutcome: 'Block unread writes.',
+      positiveCounterexamples: [{ caseId: 'positive-1', kind: 'positive' as const, toolName: 'write_file', params: { path: 'read' }, expectedDecision: 'allow' as const, ruleContext }],
+      evidenceRefs: ['pain:1'],
+      redactionNotes: [],
+    },
     taskId: 'artificer-task-001',
     contextHash: 'ctx-abc123',
     sourceScribeArtifactId: 'pi-art-scribe-001',
@@ -236,35 +248,20 @@ describe('ArtificerPromptBuilder — outputLanguage (PRI-714)', () => {
     expect(result.systemPrompt).not.toContain('requiredChanges');
   });
 
-  it('directive appears after the context-mode block in v2 mode too', () => {
-    const ruleContext = {
-      version: 2 as const,
-      history: { status: 'available' as const, truncated: false, calls: [] },
-      facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
-    };
+  it('directive appears after the context-mode block (PRI-780: v2 is the only block)', () => {
     const result = builder.buildPrompt({
       ...input,
-      contextMode: 'v2' as const,
-      behaviorExamplePack: {
-        sourceNegativeCase: { caseId: 'negative-1', kind: 'negative' as const, toolName: 'write_file', params: { path: 'unread' }, expectedDecision: 'block' as const, ruleContext },
-        ownerDesiredOutcome: 'Block unread writes.',
-        positiveCounterexamples: [{ caseId: 'positive-1', kind: 'positive' as const, toolName: 'write_file', params: { path: 'read' }, expectedDecision: 'allow' as const, ruleContext }],
-        evidenceRefs: ['pain:1'],
-        redactionNotes: [],
-      },
       outputLanguage: 'zh-CN',
     });
     expect(result.systemPrompt).toContain('CONTEXT MODE: v2');
     expect(result.systemPrompt).toContain('LANGUAGE DIRECTIVE');
   });
 
-  it('instruction is byte-identical to base protocol + v1 context block when outputLanguage is undefined', () => {
+  it('instruction is the base protocol + v2 context block with no language directive when outputLanguage is undefined', () => {
     const result = builder.buildPrompt(input);
-    const base = ARTIFICER_PROTOCOL_INSTRUCTION
-      + '\nCONTEXT MODE: v1\n- You MUST NOT read input.context.\n'
-      + '- You MUST NOT output requiresContextVersion or case-level ruleContext.\n'
-      + '- Generate an action-only rule from the Scribe principle.\n';
-    expect(result.systemPrompt).toBe(base);
+    expect(result.systemPrompt.startsWith(ARTIFICER_PROTOCOL_INSTRUCTION)).toBe(true);
+    expect(result.systemPrompt).toContain('CONTEXT MODE: v2');
+    expect(result.systemPrompt).not.toContain('LANGUAGE DIRECTIVE');
   });
 });
 

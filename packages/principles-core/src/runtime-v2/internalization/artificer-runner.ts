@@ -219,7 +219,12 @@ export function resolveArtificerRunnerOptions(options: ArtificerRunnerOptions): 
 
 export interface ArtificerRunnerDeps extends PeerRunnerDeps {
   readonly validator: ArtificerValidator;
-  readonly contextMode?: 'v1' | 'v2';
+  /**
+   * PRI-780: v2-only generation. The pack stays optional at the type level
+   * only because task-driven constructors (consumer cycle, run-once) have no
+   * Owner-labelled pack channel — a missing pack fails the attempt LOUD at
+   * prompt-build time (no v1/action-only fallback exists).
+   */
   readonly behaviorExamplePack?: BehaviorExamplePack;
 }
 
@@ -517,21 +522,21 @@ function deepJsonEqual(left: unknown, right: unknown): boolean {
   return leftKeys.every((key) => Object.hasOwn(right, key) && deepJsonEqual(left[key], right[key]));
 }
 
-function validateContextModeOutput(
+/**
+ * PRI-780: the v2-only output contract. Every Artificer output must declare
+ * requiresContextVersion: 2 and copy the Owner-labelled BehaviorExamplePack
+ * obligations verbatim (goldenTraceCases protected fields + evidenceRefs).
+ * A missing pack is itself an error — there is no v1 fallback contract.
+ */
+function validateV2OutputContract(
   output: unknown,
-  contextMode: 'v1' | 'v2',
   pack: BehaviorExamplePack | undefined,
 ): string[] {
   if (!isRecord(output)) return [];
-  if (contextMode === 'v1') {
-    return Object.hasOwn(output, 'requiresContextVersion')
-      ? ['v1 Artificer output must not declare requiresContextVersion']
-      : [];
-  }
   const errors: string[] = [];
   if (output.requiresContextVersion !== 2) errors.push('v2 Artificer output must declare requiresContextVersion: 2');
   if (!pack) {
-    errors.push('v2 Artificer output cannot be validated without BehaviorExamplePack');
+    errors.push('v2-only Artificer generation requires a BehaviorExamplePack (Owner-labelled evidence, PRI-780)');
     return errors;
   }
   if (!Array.isArray(output.goldenTraceCases)) {
@@ -586,7 +591,6 @@ export interface ArtificerRunnerOptions extends PeerRunnerOptions {
 
 export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerRuleOutput> {
   private readonly validator: ArtificerValidator;
-  private readonly contextMode: 'v1' | 'v2';
   private readonly behaviorExamplePack: BehaviorExamplePack | undefined;
   private readonly hostSemanticContext: ArtificerHostSemanticContext | undefined;
 
@@ -601,7 +605,6 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       effectiveConfig: options.effectiveConfig,
     });
     this.validator = deps.validator;
-    this.contextMode = deps.contextMode ?? 'v1';
     this.behaviorExamplePack = deps.behaviorExamplePack;
     this.hostSemanticContext = options.hostSemanticContext;
   }
@@ -886,9 +889,15 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // the focused-manifest narrowing — see the comment at the capture site).
     const intentContract = extractIntentContract(fullScribeArtifact);
 
+    // PRI-780: v2-only generation. Task-driven callers (consumer cycle,
+    // run-once) have no Owner-labelled pack channel; a missing pack fails
+    // this attempt LOUD before any LLM call — never a v1/action-only fallback.
+    if (this.behaviorExamplePack === undefined) {
+      throw new Error('behavior_example_pack_missing: v2-only Artificer generation requires a BehaviorExamplePack (Owner-labelled evidence, PRI-780); provide --behavior-examples');
+    }
+
     const builder = new ArtificerPromptBuilder();
     const { message, systemPrompt } = builder.buildPrompt({
-      contextMode: this.contextMode,
       behaviorExamplePack: this.behaviorExamplePack,
       taskId,
       contextHash: context.contextHash,
@@ -943,7 +952,7 @@ ${context.revisionFeedback}
 
   async validateOutput(output: unknown, taskId: string, context: ArtificerContext): Promise<PeerRunnerValidationResult> {
     const result = await this.validator.validate(output, taskId, context.sourceScribeArtifactId ?? undefined);
-    const modeErrors = validateContextModeOutput(output, this.contextMode, this.behaviorExamplePack);
+    const modeErrors = validateV2OutputContract(output, this.behaviorExamplePack);
 
     // Trust-boundary: validator returns `string | undefined` for errorCategory.
     // Must not `as`-cast; validate at runtime (ERR-001, ERR-005).

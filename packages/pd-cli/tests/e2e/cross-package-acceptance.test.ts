@@ -171,15 +171,32 @@ function scribeOut(taskId: string, priorId?: string): unknown {
   };
 }
 
+// PRI-780: v2-only generation — the acceptance chain carries an Owner-labelled
+// pack whose cases match artificerV2's goldenTraceCases (parity is checked).
+const XPKG_RULE_CONTEXT = {
+  version: 2 as const,
+  history: { status: 'available' as const, truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
+const XPKG_TEST_PACK = {
+  sourceNegativeCase: { caseId: 'neg-1', kind: 'negative' as const, toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' as const, ruleContext: XPKG_RULE_CONTEXT },
+  ownerDesiredOutcome: 'block system path writes',
+  positiveCounterexamples: [{ caseId: 'pos-1', kind: 'positive' as const, toolName: 'write_file', params: { path: '/project/f.txt' }, expectedDecision: 'allow' as const, ruleContext: XPKG_RULE_CONTEXT }],
+  evidenceRefs: ['pain://xpkg-1'],
+  redactionNotes: [],
+};
+
 function artificerV2(taskId: string, priorId?: string): unknown {
   return {
     taskId, sourceScribeArtifactId: requireLineage(priorId, 'sourceScribeArtifactId'),
+    requiresContextVersion: 2,
+    evidenceRefs: ['pain://xpkg-1'],
     implementationPlan: { summary: 'Block /etc writes', targetSurface: 'rule-host', changes: ['matcher'], tests: ['unit'], rolloutNotes: ['shadow'], confidence: 0.85 },
     implementationCode: 'function evaluate(input, helpers) { const p = String(input?.action?.paramsSummary?.path ?? input?.action?.normalizedPath ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "system path" }; const ctx = input?.context; if (ctx && ctx.facts && ctx.facts.priorReadOfTarget === "no") { return { decision: "block", matched: true, reason: "no prior read" }; } return { decision: "allow", matched: false, reason: "ok" }; }',
     implementationSummary: 'Block system path writes',
     goldenTraceCases: [
-      { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/f.txt' }, expectedDecision: 'allow' },
-      { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+      { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/f.txt' }, expectedDecision: 'allow', ruleContext: XPKG_RULE_CONTEXT },
+      { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block', ruleContext: XPKG_RULE_CONTEXT },
     ],
     affectedTools: ['write_file'],
     sourceTrace: { scribeArtifactId: requireLineage(priorId, 'sourceTrace.scribeArtifactId') },
@@ -267,6 +284,7 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
       pollIntervalMs: 5,
       timeoutMs: 5000,
       codeRuleCapability: capability,
+      behaviorExamplePack: XPKG_TEST_PACK,
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
@@ -377,7 +395,9 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
       {
         writers: [
           new PromptWriter(),
-          new RuleHostWriter({ gateDeps: createProductionGateDeps() }),
+          // PRI-780: rulecode_context_v2 defaults ON — production callers
+          // inject the real flag probe; mirror that here for the v2 artifact.
+          new RuleHostWriter({ gateDeps: createProductionGateDeps(), featureFlagProbe: (flagId) => flagId === 'rulecode_context_v2' }),
           new DeferArchiveWriter(),
         ],
         approvalQueueStore: approvalStore,
@@ -426,12 +446,15 @@ describe('Cross-Package Acceptance Test (PRI-408 P1/P2 fixes) — unsplippable c
     // Shadow mode is observation-only. The RuleHost loads the activation but
     // records shadowDecisions instead of blocking. evaluate() must return
     // undefined (no block) for shadow activations, even for /etc/passwd.
+    // PRI-780: production RuleHostInput always carries context (flag on) —
+    // the v2 activation only loads when context.version === 2.
     const makeRuleHostInput = (targetPath: string): RuleHostInput => ({
       action: { toolName: 'write_file', normalizedPath: targetPath, paramsSummary: { path: targetPath } },
       workspace: { isRiskPath: targetPath.startsWith('/etc') },
       session: { currentGfi: 0 },
       evolution: { epTier: 0 },
       derived: { estimatedLineChanges: 1, bashRisk: 'safe' },
+      context: XPKG_RULE_CONTEXT,
     });
     const shadowRuleHost = new RuleHost(
       path.join(tmpDir, '.state'),

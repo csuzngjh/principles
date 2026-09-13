@@ -168,6 +168,15 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     const dir = mkTmpDir();
     tmpDirs.push(dir);
     writeConfig(dir, configFactory(dir));
+    // PRI-780: v2-only generation — every dry-run in this suite carries a
+    // valid Owner-labelled behavior-examples file so the capability assertions
+    // isolate their intended variable (agent/flag/key state), not the
+    // behavior_examples_missing refusal.
+    fs.writeFileSync(
+      path.join(dir, 'behavior-examples.json'),
+      JSON.stringify({ ownerDesiredOutcome: 'block system path writes', sourceNegativeToolCallId: 1, positiveToolCallIds: [2] }),
+      'utf8',
+    );
     return dir;
   }
 
@@ -188,6 +197,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     await handleRunRuleHost({
       workspace,
       painId: 'pain-wiring-001',
+      behaviorExamples: 'behavior-examples.json',
       dryRun: true,
       json: true,
     });
@@ -212,7 +222,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
       return config;
     });
 
-    await handleRunRuleHost({ workspace, painId: 'pain-flag-default', dryRun: true, json: true });
+    await handleRunRuleHost({ workspace, painId: 'pain-flag-default', behaviorExamples: 'behavior-examples.json', dryRun: true, json: true });
 
     const output = parseJsonOutput();
     const codeRuleCapability = requireRecord(output.codeRuleCapability, 'codeRuleCapability');
@@ -235,7 +245,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
       return config;
     });
 
-    await handleRunRuleHost({ workspace, painId: 'pain-emergency-disable', dryRun: true, json: true });
+    await handleRunRuleHost({ workspace, painId: 'pain-emergency-disable', behaviorExamples: 'behavior-examples.json', dryRun: true, json: true });
 
     const output = parseJsonOutput();
     const codeRuleCapability = requireRecord(output.codeRuleCapability, 'codeRuleCapability');
@@ -316,6 +326,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     await handleRunRuleHost({
       workspace,
       painId: 'pain-wiring-002',
+      behaviorExamples: 'behavior-examples.json',
       dryRun: true,
       json: true,
     });
@@ -336,6 +347,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     await handleRunRuleHost({
       workspace,
       painId: 'pain-wiring-003',
+      behaviorExamples: 'behavior-examples.json',
       dryRun: true,
       json: true,
     });
@@ -397,10 +409,16 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
         },
       },
     });
+    fs.writeFileSync(
+      path.join(dir, 'behavior-examples.json'),
+      JSON.stringify({ ownerDesiredOutcome: 'block system path writes', sourceNegativeToolCallId: 1, positiveToolCallIds: [2] }),
+      'utf8',
+    );
 
     await handleRunRuleHost({
       workspace: dir,
       painId: 'pain-wiring-004',
+      behaviorExamples: 'behavior-examples.json',
       dryRun: true,
       json: true,
     });
