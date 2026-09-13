@@ -776,6 +776,12 @@ describe('CLI command wiring (pd console open)', () => {
       expect(run.parsed.status).toBe('refused');
       expect(run.parsed.reason).toBe('console_authentication_mode_mismatch');
       expect(run.parsed).not.toHaveProperty('serverPid');
+      // PRI-784 review fix (PR #1670): the fresh-start env guidance is part of
+      // the user contract — assert its content, not just the refusal shell.
+      expect(run.parsed.nextAction).toContain('PD_CONSOLE_TOKEN');
+      expect(run.parsed.nextAction).toContain('not forwarded');
+      expect(run.parsed.nextAction).toContain('--token "$PD_CONSOLE_TOKEN"');
+      expect(run.parsed.nextAction).toContain('--no-auth');
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(await isPortInUse('127.0.0.1', 49391)).toBe(false);
     } finally {

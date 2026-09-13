@@ -396,28 +396,37 @@ export interface OrchestratorInput {
  * PD_CONSOLE_TOKEN (and how to remove it durably).
  */
 function buildAuthMismatchNextAction(port: number, tokenSource?: 'flag' | 'env'): string {
-  const why =
-    tokenSource === 'env'
-      ? 'but this command requested authenticated access because the PD_CONSOLE_TOKEN environment variable is set. If it was saved as a permanent user-level environment variable, it silently applies to every run — no terminal can "reopen without a token" until it is removed at its source.'
-      : tokenSource === 'flag'
-        ? 'but this command requested authenticated access via --token.'
-        : 'but this command requested authenticated access by presenting a token.';
-  const reuse =
-    tokenSource === 'env'
-      ? 'Option 1 — reuse the running Console without authentication:\n' +
-        '    pd console open --no-auth\n' +
-        '  and remove the variable at its source so this error stops returning:\n' +
-        "    Windows PowerShell: [Environment]::SetEnvironmentVariable('PD_CONSOLE_TOKEN', $null, 'User')\n" +
-        "    macOS/Linux: delete the 'export PD_CONSOLE_TOKEN=...' line in your shell profile, then reopen the terminal"
-      : tokenSource === 'flag'
-        ? 'Option 1 — reuse the running Console without authentication:\n' +
-          '    pd console open --no-auth   (drop --token)'
-        : 'Option 1 — reuse the running Console without authentication: run pd console open again with --no-auth';
-  const authenticated =
-    tokenSource === 'env'
-      ? 'Option 2 — keep token authentication: stop the running Console (close the terminal or window it runs in), then pass the variable\'s value explicitly:\n' +
-        '    pd console open --token "$PD_CONSOLE_TOKEN"   (PowerShell: --token $env:PD_CONSOLE_TOKEN)'
-      : 'Option 2 — keep token authentication: stop the running Console (close the terminal or window it runs in), then run pd console open again with --token <YOUR_TOKEN>.';
+  let why: string;
+  let reuse: string;
+  let authenticated: string;
+  if (tokenSource === 'env') {
+    why =
+      'but this command requested authenticated access because the PD_CONSOLE_TOKEN environment variable is set. ' +
+      'If it was saved as a permanent user-level environment variable, it silently applies to every run — ' +
+      'no terminal can "reopen without a token" until it is removed at its source.';
+    reuse =
+      'Option 1 — reuse the running Console without authentication:\n' +
+      '    pd console open --no-auth\n' +
+      '  and remove the variable at its source so this error stops returning:\n' +
+      "    Windows PowerShell: [Environment]::SetEnvironmentVariable('PD_CONSOLE_TOKEN', $null, 'User')\n" +
+      "    macOS/Linux: delete the 'export PD_CONSOLE_TOKEN=...' line in your shell profile, then reopen the terminal";
+    authenticated =
+      'Option 2 — keep token authentication: stop the running Console (close the terminal or window it runs in), then pass the variable\'s value explicitly:\n' +
+      '    pd console open --token "$PD_CONSOLE_TOKEN"   (PowerShell: --token $env:PD_CONSOLE_TOKEN)';
+  } else if (tokenSource === 'flag') {
+    why = 'but this command requested authenticated access via --token.';
+    reuse =
+      'Option 1 — reuse the running Console without authentication:\n' +
+      '    pd console open --no-auth   (drop --token)';
+    authenticated =
+      'Option 2 — keep token authentication: stop the running Console (close the terminal or window it runs in), then run pd console open again with --token <YOUR_TOKEN>.';
+  } else {
+    why = 'but this command requested authenticated access by presenting a token.';
+    reuse =
+      'Option 1 — reuse the running Console without authentication: run pd console open again with --no-auth';
+    authenticated =
+      'Option 2 — keep token authentication: stop the running Console (close the terminal or window it runs in), then run pd console open again with --token <YOUR_TOKEN>.';
+  }
   return (
     `A Console is already running on port ${port} without authentication (the post-install default), ` +
     `${why}\n\n${reuse}\n\n${authenticated}`
