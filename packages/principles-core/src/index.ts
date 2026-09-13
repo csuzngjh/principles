@@ -241,7 +241,7 @@ export type {
 } from './workflow-funnel-loader.js';
 
 // PD Config — context injection types re-exported for openclaw-plugin consumers
-export type { ContextInjectionConfig, EvolutionContextConfig, ProjectFocusMode } from './runtime-v2/config/index.js';
+export type { ContextInjectionConfig, ProjectFocusMode } from './runtime-v2/config/index.js';
 export { DEFAULT_CONTEXT_INJECTION } from './runtime-v2/config/index.js';
 
 // Host Adapter — Multi-platform host abstraction (ADR-0020 §2.2, §2.3)

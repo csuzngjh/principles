@@ -258,7 +258,6 @@ describe('PainToPrincipleService', () => {
       resolvedContextInjection: {
         thinkingOs: false,
         projectFocus: 'off',
-        evolutionContext: { enabled: true, maxMessages: 4, maxCharsPerMessage: 200 },
       },
     };
 
