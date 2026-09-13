@@ -65,4 +65,35 @@ describe('PRI-750 shared-path event emission (Codex host)', () => {
     await expect(runtime.dispatch(makeEvent('before_prompt_build', workspaceDir) as never)).resolves.toMatchObject({ decision: 'allow' });
     await expect(runtime.dispatch(makeEvent('after_tool_call', workspaceDir) as never)).resolves.toMatchObject({ decision: 'observe' });
   });
+
+  it('keeps the prompt result when the injection emitter throws (receipt write failure, rc-9)', async () => {
+    const workspaceDir = tempWorkspace();
+    const events: HostEventEmitter = {
+      recordRuntimeV2ActivationsInjected: vi.fn(() => {
+        throw new Error('ENOSPC: no space left on device');
+      }),
+      recordToolCall: vi.fn(),
+    };
+    const runtime = createProductionHostRuntime({ events });
+    const result = await runtime.dispatch(makeEvent('before_prompt_build', workspaceDir) as never);
+    expect(result).toMatchObject({ decision: 'allow' });
+    expect(result.warnings?.join(' ')).toContain('receipt_event_write_failed:ENOSPC');
+  });
+
+  it('keeps the tool dispatch when the tool emitter throws (receipt write failure, rc-9)', async () => {
+    const workspaceDir = tempWorkspace();
+    const events: HostEventEmitter = {
+      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordToolCall: vi.fn(() => {
+        throw new Error('EACCES: permission denied');
+      }),
+    };
+    const runtime = createProductionHostRuntime({
+      events,
+      painDatabaseFactory: () => new Database(':memory:'),
+    });
+    const result = await runtime.dispatch(makeEvent('after_tool_call', workspaceDir) as never);
+    expect(result).toMatchObject({ decision: 'observe' });
+    expect(result.warnings?.join(' ')).toContain('receipt_event_write_failed:EACCES');
+  });
 });
