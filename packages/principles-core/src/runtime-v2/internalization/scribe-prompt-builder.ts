@@ -99,6 +99,7 @@ CONSTRAINTS:
 - principleDraft.antiPatterns MUST be an array of strings (can be empty)
 - principleDraft.confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
 - intentContract is REQUIRED and every one of its five fields MUST be a non-empty string (no placeholders, no "TBD")
+- intentContract itself MUST be a nested JSON OBJECT — never a JSON-encoded string (do not double-encode it as "{\"ownerIntent\": ...}")
 - intentContract.ownerIntent / targetBehavior / forbiddenBehavior MUST stay consistent with principleDraft.statement and antiPatterns — they express the SAME intent at different precision, never a different one
 - sourcePhilosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId (non-empty string)
 - sourceTrace.philosopherArtifactId MUST be copied exactly from input.sourcePhilosopherArtifactId
