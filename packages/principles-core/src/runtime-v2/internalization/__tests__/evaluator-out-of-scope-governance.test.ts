@@ -193,6 +193,17 @@ async function succeed(id: string): Promise<void> {
  * Seed scribe + a REAL artificer run producing the given rule code, then the
  * evaluator task. Returns the artificer artifact id for the evaluator wiring.
  */
+/**
+ * Seed scribe + a PERSISTED legacy-v1 artificer artifact carrying the given
+ * rule code, then the evaluator task. Returns the artificer artifact id for
+ * the evaluator wiring.
+ *
+ * PRI-780: Artificer generation converged to v2-only, so a v1 artifact can no
+ * longer be PRODUCED by the runner — but persisted v1 artifacts remain legal
+ * evaluation objects (existing rules must not silently gain new semantic
+ * dependencies). This suite exercises exactly that surface, so the legacy
+ * artifact is seeded directly into the store.
+ */
 async function seedChain(ruleCode: string): Promise<string> {
   await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: [] });
   await succeed(SCRIBE_ID);
@@ -206,19 +217,16 @@ async function seedChain(ruleCode: string): Promise<string> {
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   });
   await mkTask({ id: ART1_ID, kind: 'artificer', deps: [SCRIBE_ID] });
-  const { ArtificerRunner } = await import('../artificer-runner.js');
-  const { DefaultArtificerValidator } = await import('../artificer-output.js');
-  const artRunner = new ArtificerRunner({
-    stateManager,
-    runtimeAdapter: scriptedAdapter(artificerOutput(ruleCode, ART1_ID), [], 'art-oos'),
-    eventEmitter: emitter, artifactStore: store, validator: new DefaultArtificerValidator(),
-  }, { owner: 'oos-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5000 });
-  const artResult = await artRunner.run(ART1_ID);
-  if (artResult.status !== 'succeeded') throw new Error(`artificer run failed: ${JSON.stringify(artResult).slice(0, 300)}`);
-  const art = (await store.listBySourceTaskId(ART1_ID)).find((a) => a.artifactKind === 'principle');
-  if (!art) throw new Error('missing artificer artifact');
+  const artifactId = `pi-art-${ART1_ID}-seed-legacy-v1`;
+  await store.upsertArtifact({
+    artifactId, artifactKind: 'principle', sourceTaskId: ART1_ID,
+    lineageArtifactIds: [SCRIBE_ART], validationStatus: 'validated',
+    contentJson: JSON.stringify(artificerOutput(ruleCode, ART1_ID)),
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+  await succeed(ART1_ID);
   await mkTask({ id: EVAL1_ID, kind: 'evaluator', deps: [ART1_ID] });
-  return art.artifactId;
+  return artifactId;
 }
 
 function reviewEvaluator(opts: {

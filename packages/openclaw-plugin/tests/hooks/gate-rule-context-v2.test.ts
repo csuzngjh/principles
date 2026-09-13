@@ -94,8 +94,16 @@ vi.mock('../../src/core/rule-context-assembler.js', () => ({
 function flagOffConfig(): ReturnType<typeof loadPdConfigForPlugin> {
   return {
     ok: true,
-    effective: { config: { features: {} } } as unknown as EffectivePdConfig,
-    source: 'defaults',
+    // PRI-780: the flag defaults ON — "flag OFF" means the explicit config
+    // kill switch (features.rulecode_context_v2.enabled: false).
+    effective: {
+      config: {
+        features: {
+          rulecode_context_v2: { category: 'quiet' as const, enabled: false },
+        },
+      },
+    } as unknown as EffectivePdConfig,
+    source: 'user_config',
     configPath: '/mock/.pd/config.yaml',
     warnings: [],
     errors: [],
@@ -199,6 +207,28 @@ describe('Gate RuleContext v2 — flag-gated context assembly (PRI-483 Phase 4)'
   });
 
   describe('flag ON — context assembly', () => {
+    it('PRI-780 AC1: a config with NO feature overrides defaults ON and assembles context', () => {
+      // The registry default is enabled:true (graduated 2026-09-13) — an
+      // untouched workspace gets context assembly with zero configuration.
+      vi.mocked(loadPdConfigForPlugin).mockReturnValue({
+        ok: true,
+        effective: { config: { features: {} } } as unknown as EffectivePdConfig,
+        source: 'defaults',
+        configPath: '/mock/.pd/config.yaml',
+        warnings: [],
+        errors: [],
+      });
+      vi.mocked(buildProductionRuleContext).mockReturnValue(availableContext());
+
+      const event = makeWriteEvent('src/default-on.ts');
+      handleBeforeToolCall(event as unknown as GateEvent, { workspaceDir, sessionId } as unknown as GateCtx);
+
+      expect(_mockEvaluate).toHaveBeenCalledTimes(1);
+      const hostInput = _mockEvaluate.mock.calls[0][0];
+      expect(hostInput.context).toBeDefined();
+      expect(hostInput.context.version).toBe(2);
+    });
+
     it('Test B: hostInput.context.version === 2 when flag is ON and trajectory is empty', () => {
       vi.mocked(loadPdConfigForPlugin).mockReturnValue(flagOnConfig());
       vi.mocked(buildProductionRuleContext).mockReturnValue(availableContext());

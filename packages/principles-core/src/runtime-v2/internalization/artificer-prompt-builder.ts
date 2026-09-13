@@ -43,8 +43,13 @@ export interface ArtificerHostSemanticContext {
 }
 
 export interface ArtificerPromptBuilderInput {
-  contextMode: 'v1' | 'v2';
-  behaviorExamplePack?: BehaviorExamplePack;
+  /**
+   * PRI-780: the Artificer generation contract is v2-only. The
+   * BehaviorExamplePack (Owner-labelled evidence) is REQUIRED — a missing or
+   * invalid pack fails generation loud instead of degrading to an action-only
+   * (v1) rule. There is no v1 mode anymore.
+   */
+  behaviorExamplePack: BehaviorExamplePack;
   taskId: string;
   contextHash: string;
   sourceScribeArtifactId: string;
@@ -107,8 +112,7 @@ export interface ArtificerPromptBuilderInput {
 }
 
 export interface ArtificerPromptInput {
-  contextMode: 'v1' | 'v2';
-  behaviorExamplePack?: BehaviorExamplePack;
+  behaviorExamplePack: BehaviorExamplePack;
   taskId: string;
   contextHash: string;
   sourceScribeArtifactId: string;
@@ -238,8 +242,8 @@ REPAIR FEEDBACK (PRI-509, when \`repairFeedback\` is present):
 ADVERSARIAL CASE VOCABULARY NOTE (apply whenever replay evidence or repair feedback mentions case ids):
 - Case ids such as "v2-unavailable", "v2-truncated", "v2-alias" (and any "v2-*" prefixed id) are INTERNAL EVALUATOR CASE NUMBERING — they describe which adversarial fixture was run, NOT a request to use context-version-2 features.
 - NEVER respond to a case id by declaring \`requiresContextVersion\`, adding case-level \`ruleContext\`, or changing \`expectedDecision\` to satisfy the case NAME. Case names are labels, not instructions.
-- Your output must ALWAYS satisfy the CONTEXT MODE block above (v1/v2 contract) regardless of which case ids appear in the feedback text.
-- In v1 mode the ONLY legal decisions are "allow" and "block"; the ONLY legal field set is the one in OUTPUT FORMAT above. Any field not listed there (e.g. requiresContextVersion, ruleContext) is a contract violation and WILL be rejected.
+- Your output must ALWAYS satisfy the CONTEXT MODE block above (the v2 contract) regardless of which case ids appear in the feedback text.
+- The ONLY legal decisions are "allow" and "block"; the ONLY legal field set is the one in OUTPUT FORMAT above plus the v2 CONTEXT MODE obligations (requiresContextVersion: 2, case-level ruleContext, evidenceRefs). Any other field is a contract violation and WILL be rejected.
 
 PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
 - Your previous attempt was rejected by the OUTPUT CONTRACT GATE (schema validation) — it never reached evaluation. The \`priorValidatorErrors.errors\` list contains the exact, verbatim rejection reasons.
@@ -248,12 +252,11 @@ PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
 - After addressing every listed error, re-check the full OUTPUT FORMAT and CONTEXT MODE blocks once more before emitting.
 `;
 
-const V1_CONTEXT_INSTRUCTION = `
-CONTEXT MODE: v1
-- You MUST NOT read input.context.
-- You MUST NOT output requiresContextVersion or case-level ruleContext.
-- Generate an action-only rule from the Scribe principle.
-`;
+// PRI-780: the v1 context-mode branch (V1_CONTEXT_INSTRUCTION — "MUST NOT
+// read input.context, MUST NOT output requiresContextVersion") is DELETED.
+// The v2 contract below is the only generation contract; a missing
+// BehaviorExamplePack fails generation loud rather than degrading to an
+// action-only rule.
 
 const V2_CONTEXT_INSTRUCTION = `
 CONTEXT MODE: v2 (Owner-labelled evidence is present)
@@ -264,6 +267,7 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - Prefer deterministic context.facts and canonicalKind over raw context.history.calls.
 - An empty or truncated history is insufficient evidence; do not infer "not done" from it.
 - You MUST copy evidenceRefs exactly from the behaviorExamplePack into your output. Do not omit, reorder, or rewrite any evidenceRef string.
+- The RuleHost runtime always assembles input.context when the rulecode_context_v2 capability is enabled (the default): history (recent tool-call window) and facts (derived behavior evidence). On hosts that declare no runtime context provider (e.g. Codex), input.context is the schema-valid unavailable posture — honor the unavailable rule above.
 `;
 
 /**
@@ -288,7 +292,14 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * ToolSemanticRegistry host layer, constraining affectedTools and
  * goldenTraceCases toolNames to host-dispatchable names.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v5';
+/**
+ * PRI-780: bumped v5 → v6. The v1 context-mode branch is DELETED — the v2
+ * contract is the only generation contract. The prompt input no longer
+ * carries a `contextMode` field; the BehaviorExamplePack is unconditional;
+ * the CONTEXT MODE block documents the runtime context capabilities
+ * (history/facts, default-on assembly, host unavailable declarations).
+ */
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v6';
 
 /**
  * PRI-741: render the host semantic projection as a prompt block. Mirrors the
@@ -337,16 +348,14 @@ export function buildArtificerHostSemanticContext(
 export class ArtificerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(input: ArtificerPromptBuilderInput): ArtificerPromptBuildResult {
-    if (input.contextMode === 'v2') {
-      const validation = validateBehaviorExamplePack(input.behaviorExamplePack);
-      if (!validation.valid) {
-        throw new Error(`behaviorExamplePack is required and must be valid in v2 mode: ${validation.errors.join('; ')}`);
-      }
-    } else if (input.behaviorExamplePack !== undefined) {
-      throw new Error('behaviorExamplePack is forbidden in v1 mode');
+    // PRI-780: v2-only. A missing or invalid BehaviorExamplePack is a hard
+    // generation failure — never a silent downgrade to an action-only rule.
+    const validation = validateBehaviorExamplePack(input.behaviorExamplePack);
+    if (!validation.valid) {
+      throw new Error(`behaviorExamplePack is required and must be valid (v2-only generation contract, PRI-780): ${validation.errors.join('; ')}`);
     }
     const artificerInstruction = ARTIFICER_PROTOCOL_INSTRUCTION
-      + (input.contextMode === 'v2' ? V2_CONTEXT_INSTRUCTION : V1_CONTEXT_INSTRUCTION)
+      + V2_CONTEXT_INSTRUCTION
       // PRI-741: host semantic projection (absent = no block, prompt
       // unchanged for workspaces without a host declaration).
       + (input.hostSemanticContext !== undefined ? buildHostSemanticContextBlock(input.hostSemanticContext) : '')
@@ -354,15 +363,12 @@ export class ArtificerPromptBuilder {
       // (empty string when outputLanguage is undefined).
       + buildLanguageDirective(input.outputLanguage, 'implementation');
     const promptInput: ArtificerPromptInput = {
-      contextMode: input.contextMode,
+      behaviorExamplePack: input.behaviorExamplePack,
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceScribeArtifactId: input.sourceScribeArtifactId,
       scribeArtifact: input.scribeArtifact,
       promptContractVersion: ARTIFICER_PROMPT_CONTRACT_VERSION,
-      ...(input.contextMode === 'v2' && input.behaviorExamplePack !== undefined
-        ? { behaviorExamplePack: input.behaviorExamplePack }
-        : {}),
       // Only include adversarialFeedback when present + non-empty, so
       // Round-1 prompts stay backward-compatible (test asserts absence).
       ...(typeof input.adversarialFeedback === 'string' && input.adversarialFeedback.trim() !== ''

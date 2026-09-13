@@ -23,6 +23,7 @@ import { EvaluatorRunner } from '../internalization/evaluator-runner.js';
 import { DefaultArtificerValidator } from '../internalization/artificer-output.js';
 import { DefaultEvaluatorValidator } from '../internalization/evaluator-output.js';
 import type { ArtificerRuleOutput } from '../internalization/artificer-output.js';
+import type { BehaviorExamplePack } from '../internalization/behavior-example-pack.js';
 import type { EvaluatorOutputV1, EvaluatorOutputV2 } from '../internalization/evaluator-output.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
@@ -126,14 +127,39 @@ function makeScribeArtifact(): PIArtifactRecord {
   };
 }
 
+// PRI-780: v2-only generation — the loop harness carries a valid pack and
+// v2-aligned outputs (case parity incl. ruleContext is machine-checked).
+const LOOP_RULE_CONTEXT = {
+  version: 2 as const,
+  history: { status: 'available' as const, truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
+const LOOP_TEST_PACK: BehaviorExamplePack = {
+  sourceNegativeCase: {
+    caseId: 'neg-1', kind: 'negative', toolName: 'write_file',
+    params: { path: '/etc/passwd' }, expectedDecision: 'block',
+    ruleContext: LOOP_RULE_CONTEXT,
+  },
+  ownerDesiredOutcome: 'block system-path writes',
+  positiveCounterexamples: [{
+    caseId: 'pos-1', kind: 'positive', toolName: 'write_file',
+    params: { path: '/project/file.txt' }, expectedDecision: 'allow',
+    ruleContext: LOOP_RULE_CONTEXT,
+  }],
+  evidenceRefs: ['pain://loop-1'],
+  redactionNotes: [],
+};
+
 function makeArtificerOutput(taskId: string): ArtificerRuleOutput {
   return {
     taskId,
     sourceScribeArtifactId: 'pi-art-scribe-loop-001',
+    requiresContextVersion: 2,
+    evidenceRefs: ['pain://loop-1'],
     implementationCode: 'function evaluate(input, helpers) { return { decision: "block", matched: true, reason: "system path" }; }',
     goldenTraceCases: [
-      { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow' },
-      { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+      { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow', ruleContext: LOOP_RULE_CONTEXT },
+      { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block', ruleContext: LOOP_RULE_CONTEXT },
     ],
     affectedTools: ['write_file'],
     implementationSummary: 'Block system path writes',
@@ -227,7 +253,7 @@ async function makeHarness(opts: { gateDeps?: RefinerRuleHostGateDeps } = {}): P
   adapter.artifactStore = artifactStore;
 
   const artificerRunner = new ArtificerRunner(
-    { stateManager, runtimeAdapter: adapter as unknown as PDRuntimeAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore },
+    { stateManager, runtimeAdapter: adapter as unknown as PDRuntimeAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore, behaviorExamplePack: LOOP_TEST_PACK },
     { owner: 'loop-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 1000 },
   );
   const evaluatorRunner = new EvaluatorRunner(

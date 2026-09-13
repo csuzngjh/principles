@@ -289,11 +289,11 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'intent_engineering', category: 'quiet', enabled: false, since: '2026-06-25', description: 'INTENT.md-grounded constructive friction and Stage-A intent tension diagnosis (PRI-465). Default off; flag-off = no INTENT read, no prompt injection, no intentTension.' },
   // PRI-479: RuleContext v2 — foundation flag for the rule-code context vision
   // (spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md).
-  // Quiet + default off: registering the flag does NOT change any production
-  // behavior. Subsequent phases gate new RuleHostInput fields and context
-  // builders behind this flag; v1 rule behavior is unchanged while the flag
-  // is off. Roll back = leave the flag off (or set enabled: false in config).
-  { id: 'rulecode_context_v2', category: 'quiet', enabled: false, since: '2026-06-27', description: 'RuleContext v2 — rule-code context vision (PRI-479). Foundation flag; default off, v1 rule behavior unchanged. See docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md' },
+  // PRI-780 (2026-09-13): graduated to default-ON — Runtime Governance Context
+  // is the default governance path (ADR 2026-06-28 amendment). Category stays
+  // quiet so an explicit `enabled: false` in .pd/config.yaml remains the
+  // migration-period kill switch (context absent; v2 generation refused).
+  { id: 'rulecode_context_v2', category: 'quiet', enabled: true, since: '2026-06-27', description: 'RuleContext v2 — runtime governance context. Default ON since 2026-09-13 (PRI-479 foundation, PRI-780 convergence); explicit config disable = migration kill switch. See ADR 2026-06-28 amendment and docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md' },
   // Task 7: Failed tasks observability — list/view failed pipeline tasks.
   // Unsolicited new code defaults to MVP-Quiet (ADR-0014 §2.5). Default-on so
   // operators can list failed tasks out of the box; disable via .pd/config.yaml:

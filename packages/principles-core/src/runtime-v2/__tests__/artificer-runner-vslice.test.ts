@@ -60,14 +60,45 @@ function makeArtificerTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   };
 }
 
+// PRI-780: v2 is the only generation contract — the runner-level fixtures
+// carry a valid Owner-labelled pack and v2-aligned outputs.
+const V2_RULE_CONTEXT = {
+  version: 2 as const,
+  history: { status: 'available' as const, truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
+const V2_TEST_PACK: BehaviorExamplePack = {
+  sourceNegativeCase: {
+    caseId: 'negative-1',
+    kind: 'negative',
+    toolName: 'write_file',
+    params: { path: '/etc/passwd' },
+    expectedDecision: 'block',
+    ruleContext: V2_RULE_CONTEXT,
+  },
+  ownerDesiredOutcome: 'block writes outside the workspace',
+  positiveCounterexamples: [{
+    caseId: 'positive-1',
+    kind: 'positive',
+    toolName: 'write_file',
+    params: { path: '/project/file.txt' },
+    expectedDecision: 'allow',
+    ruleContext: V2_RULE_CONTEXT,
+  }],
+  evidenceRefs: ['pain://1'],
+  redactionNotes: [],
+};
+
 function makeArtificerOutput(): ArtificerRuleOutput {
   return {
     taskId: ARTIFICER_TASK_ID,
     sourceScribeArtifactId: 'pi-art-scribe-001-run-001',
+    requiresContextVersion: 2,
+    evidenceRefs: ['pain://1'],
     implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
     goldenTraceCases: [
-      { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow' },
-      { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+      { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow', ruleContext: V2_RULE_CONTEXT },
+      { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block', ruleContext: V2_RULE_CONTEXT },
     ],
     affectedTools: ['write_file'],
     implementationSummary: 'Add input validation to all async operations',
@@ -167,6 +198,7 @@ describe('ArtificerRunner (PRI-111)', () => {
       eventEmitter,
       validator,
       artifactStore,
+      behaviorExamplePack: V2_TEST_PACK,
       ...overrides,
     };
   }
@@ -294,6 +326,29 @@ describe('ArtificerRunner (PRI-111)', () => {
     const artifacts = await store.listBySourceTaskId(ARTIFICER_TASK_ID);
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0]?.artifactKind).toBe('principle');
+  });
+
+  it('PRI-780 B2: missing BehaviorExamplePack fails the attempt LOUD before any LLM call', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeScribeArtifact());
+    // Task-driven constructors (consumer cycle, run-once) have no pack channel:
+    // the runner must refuse at invokeRuntime (pre-LLM), never degrade to v1.
+    const deps = createMockDeps({ artifactStore: store, behaviorExamplePack: undefined });
+
+    const runner = new ArtificerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'artificer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(ARTIFICER_TASK_ID);
+    expect(result.status).toBe('failed');
+    expect(JSON.stringify(result)).toContain('behavior_example_pack_missing');
+
+    // Pre-LLM proof: the runtime adapter was never invoked — no token spend.
+    const {startRun} = (deps.runtimeAdapter as unknown as { startRun: ReturnType<typeof vi.fn> });
+    expect(startRun).not.toHaveBeenCalled();
   });
 
   it('valid runtime output marks task succeeded', async () => {
@@ -436,7 +491,6 @@ describe('ArtificerRunner.validateOutput — v2 mode-error errorCategory (CodeRa
       eventEmitter: {},
       artifactStore: new MemoryPIArtifactStore(),
       validator: new DefaultArtificerValidator(),
-      contextMode: 'v2' as const,
       behaviorExamplePack: pack,
     } as unknown as ArtificerRunnerDeps;
     const runner = new ArtificerRunner(deps, {
@@ -446,9 +500,9 @@ describe('ArtificerRunner.validateOutput — v2 mode-error errorCategory (CodeRa
       timeoutMs: 1000,
     });
 
-    // makeArtificerOutput() passes the base validator but lacks
-    // requiresContextVersion: 2, so v2 mode validation fails.
-    const output = makeArtificerOutput();
+    // PRI-780: the base validator passes, but an output that omits
+    // requiresContextVersion: 2 violates the v2-only contract.
+    const output = { ...makeArtificerOutput(), requiresContextVersion: undefined };
     const context = {
       contextHash: 'test-hash',
       scribeArtifact: null,
@@ -694,10 +748,12 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
         payload: {
           taskId: ARTIFICER_TASK_ID,
           sourceScribeArtifactId: capturedSourceScribeArtifactId,
+          requiresContextVersion: 2,
+          evidenceRefs: ['pain://1'],
           implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
           goldenTraceCases: [
-            { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow' },
-            { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+            { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow', ruleContext: V2_RULE_CONTEXT },
+            { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block', ruleContext: V2_RULE_CONTEXT },
           ],
           affectedTools: ['write_file'],
           implementationSummary: 'Add input validation to all async operations',
@@ -744,6 +800,7 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
       eventEmitter,
       validator: new DefaultArtificerValidator(),
       artifactStore,
+      behaviorExamplePack: V2_TEST_PACK,
     };
 
     const runner = new ArtificerRunner(deps, {
@@ -882,10 +939,12 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
     return {
       taskId: ARTIFICER_TASK_ID_PRI508,
       sourceScribeArtifactId: SCRIBE_ART_ID,
+      requiresContextVersion: 2,
+      evidenceRefs: ['pain://1'],
       implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
       goldenTraceCases: [
-        { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/workspace/file' }, expectedDecision: 'allow' },
-        { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow', ruleContext: V2_RULE_CONTEXT },
+        { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block', ruleContext: V2_RULE_CONTEXT },
       ],
       affectedTools: ['write_file'],
       implementationSummary: 'Validate parent path before write',
@@ -949,6 +1008,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
       eventEmitter,
       artifactStore,
       validator,
+      behaviorExamplePack: V2_TEST_PACK,
     };
 
     const runner = new ArtificerRunner(deps, {
@@ -1043,6 +1103,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
       eventEmitter,
       artifactStore,
       validator,
+      behaviorExamplePack: V2_TEST_PACK,
     };
 
     const runner = new ArtificerRunner(deps, {
@@ -1106,6 +1167,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
       eventEmitter,
       artifactStore,
       validator,
+      behaviorExamplePack: V2_TEST_PACK,
     };
 
     const runner = new ArtificerRunner(deps, {
@@ -1193,6 +1255,7 @@ describe('PRI-508: ArtificerRunner.buildContext reads dreamer artifact via scrib
       eventEmitter,
       artifactStore,
       validator,
+      behaviorExamplePack: V2_TEST_PACK,
     };
 
     const runner = new ArtificerRunner(deps, {
@@ -1501,10 +1564,12 @@ describe('PRI-509: ArtificerRunner.buildContext reads repairPayload → repairFe
     return {
       taskId: ARTIFICER_TASK_ID_PRI509,
       sourceScribeArtifactId: SCRIBE_ART_ID_PRI509,
+      requiresContextVersion: 2,
+      evidenceRefs: ['pain://1'],
       implementationCode: 'function evaluate(input, helpers) { return { decision: "allow", matched: false, reason: "ok" }; }',
       goldenTraceCases: [
-        { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/workspace/file' }, expectedDecision: 'allow' },
-        { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+        { caseId: 'positive-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow', ruleContext: V2_RULE_CONTEXT },
+        { caseId: 'negative-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block', ruleContext: V2_RULE_CONTEXT },
       ],
       affectedTools: ['write_file'],
       implementationSummary: 'Validate parent path before write',
@@ -1576,6 +1641,7 @@ describe('PRI-509: ArtificerRunner.buildContext reads repairPayload → repairFe
       eventEmitter,
       artifactStore: store,
       validator,
+      behaviorExamplePack: V2_TEST_PACK,
     };
 
     const runner = new ArtificerRunner(deps, {

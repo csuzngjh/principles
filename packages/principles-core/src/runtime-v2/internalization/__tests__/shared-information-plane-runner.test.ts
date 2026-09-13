@@ -93,10 +93,22 @@ const BAD_RULE_CODE = `function evaluate(input, helpers) {
   return { decision: 'allow', matched: false, reason: 'safe path' };
 }`;
 
-const GOLDEN_TRACE_CASES = [
-  { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
-  { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/workspace/src/a.ts' }, expectedDecision: 'allow' },
-];
+// PRI-780: v2-only generation — case parity (incl. ruleContext) is machine-checked.
+const RULE_CONTEXT = {
+  version: 2 as const,
+  history: { status: 'available' as const, truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
+const NEG_CASE = { caseId: 'neg-1', kind: 'negative' as const, toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' as const, ruleContext: RULE_CONTEXT };
+const POS_CASE = { caseId: 'pos-1', kind: 'positive' as const, toolName: 'write_file', params: { path: '/workspace/src/a.ts' }, expectedDecision: 'allow' as const, ruleContext: RULE_CONTEXT };
+const GOLDEN_TRACE_CASES = [NEG_CASE, POS_CASE];
+const TEST_PACK = {
+  sourceNegativeCase: NEG_CASE,
+  ownerDesiredOutcome: 'read before write',
+  positiveCounterexamples: [POS_CASE],
+  evidenceRefs: ['pain://test-1'],
+  redactionNotes: [],
+};
 
 function flagsConfig(allOn: boolean): EffectivePdConfig {
   return {
@@ -267,6 +279,8 @@ function artificerOutput(implementationCode: string, scribeArtifactId: string, t
   return {
     taskId,
     sourceScribeArtifactId: scribeArtifactId,
+    requiresContextVersion: 2,
+    evidenceRefs: ['pain://test-1'],
     implementationSummary: 'read-before-write guard',
     sourceTrace: { scribeArtifactId },
     risks: [],
@@ -345,6 +359,7 @@ function makeArtificerRunner(outputs: unknown[], prompts: string[], runId: strin
       eventEmitter: emitter,
       artifactStore: store,
       validator: new DefaultArtificerValidator(),
+      behaviorExamplePack: TEST_PACK,
     },
     { owner: 'sip-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000, effectiveConfig: config },
   );

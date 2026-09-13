@@ -258,6 +258,10 @@ describe('computeEffectiveFlags', () => {
       // pre-transaction legacy fallback — see QUIET_FLAG_LIFECYCLE GRADUATE rows.
       if (flag.id === 'release_manager_shadow') continue;
       if (flag.id === 'release_manager_write_authority') continue;
+      // PRI-780 graduation (2026-09-13): Runtime Governance Context converged
+      // to the default governance path (ADR 2026-06-28 amendment) — see
+      // QUIET_FLAG_LIFECYCLE GRADUATE row; rollback = config override.
+      if (flag.id === 'rulecode_context_v2') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });

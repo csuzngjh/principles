@@ -213,12 +213,37 @@ export function loadPdConfig(workspaceDir: string): PdConfigLoadResult {
 // ── Feature Flags from Config ────────────────────────────────────────────────
 
 /**
+ * Flags whose production gate FAILS CLOSED when the workspace config cannot
+ * be loaded: the gate cannot know the flag state, so the gated capability is
+ * suspended (OpenClaw `buildRuleContextIfEnabled` returns undefined context on
+ * config failure → v2 rules skip). Status derivation must mirror that posture
+ * or the CLI would display "active" for rules that are actually not
+ * enforcing (PRI-780 review B3).
+ */
+const CONFIG_FAILURE_FAIL_CLOSED_FLAGS: ReadonlySet<string> = new Set(['rulecode_context_v2']);
+
+/**
  * Compute feature flags from the loaded PD config.
  * Works with both ok and error results (uses defaults for errors).
+ *
+ * On a failed load, flags whose gate fail-closes on config errors are forced
+ * disabled with an observable warning — the registry default (ON for a
+ * graduated flag) must never be displayed as enforcing when the workspace
+ * config is unreadable.
  */
 export function computeFlagsFromLoadResult(result: PdConfigLoadResult): FeatureFlagsResult {
   const effective = result.ok ? result.effective : result.defaults;
-  return computeFeatureFlagsFromConfig(effective);
+  const flags = computeFeatureFlagsFromConfig(effective);
+  if (!result.ok) {
+    for (const flagId of CONFIG_FAILURE_FAIL_CLOSED_FLAGS) {
+      const flag = flags.flags[flagId];
+      if (flag?.enabled) {
+        flags.flags[flagId] = { ...flag, enabled: false };
+        flags.warnings.push(`${flagId}: config load failed — flag treated as disabled (fail-closed, matches the gate's config-failure suspension)`);
+      }
+    }
+  }
+  return flags;
 }
 
 // ── Redacted Summary from Config ─────────────────────────────────────────────
