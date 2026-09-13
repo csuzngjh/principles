@@ -192,6 +192,20 @@ describe('PRI-758: approved + adversarial replay failed routes into repair', () 
       transitionInputFromTask(piTask, undefined, { adversarialReplayFailed: true }),
     );
     expect(transition.kind).toBe('REVISION_REQUIRED');
+    // CodeRabbit blocker: assert the PRODUCTION commit boundary —
+    // commitNextTaskProposal must return blocked_by_revision and must NOT
+    // seed a rollout successor while repair is pending.
+    const { InternalizationOrchestrator } = await import('../internalization-orchestrator.js');
+    const orchestrator = new InternalizationOrchestrator(
+      { stateManager },
+      { owner: 'p758', runtimeKind: 'test-double', dryRun: true },
+    );
+    const commit = await orchestrator.commitNextTaskProposal(EVAL_ID);
+    expect(commit.decision).toBe('blocked_by_revision');
+    const rolloutTasks = (await stateManager.listTasks({})).filter(
+      (t) => t.taskKind === 'rollout_reviewer',
+    );
+    expect(rolloutTasks.length).toBe(0);
   });
 
   it('does not seed repair when the repair loop is disabled (legacy advance)', async () => {
