@@ -156,3 +156,82 @@ evaluator 任务已恢复为 pending（设计内自动重试将随 auto-consumer
 | 免费通道 + 6 项补丁 | 可能最终收敛但缓慢且脆弱 |
 | 只提超时 | 内层 300s 仍在 |
 | 只加密集重试 | 放大限频级联 |
+
+---
+
+## 8. 最终链状态快照（2026-09-13 06:51 UTC）
+
+```
+两链合计 15 个任务 / 130+ 次运行 / 42 次 evaluator 尝试
+succeeded: 13 | failed/retry_wait: 2
+pi-rule-* 工件: 0 | approvals: 0 | code_tool_hook 激活: 0
+
+1e5f1614 链:
+  dreamer ✅(9) philosopher ✅(2) scribe ✅(1) artificer ✅(7) rollout ✅(2)
+  evaluator: failed (42/42) — 20 次完整判决均为 needs_revision
+  repair-r1: ✅(3) | repair-r2: leased(22) — 持续自动重试
+
+0b25ce1a 链:
+  dreamer ✅(2) philosopher ✅(1) scribe ✅(5) artificer ✅(1) rollout ✅(3)
+  evaluator: ✅(18) — approved 但 replay failed
+  repair-r1: retry_wait(27) — 持续自动重试
+```
+
+### 冲刺期间实施的基础设施修复
+
+| # | 修复 | PR | 状态 |
+|---|---|---|---|
+| 1 | profile `reasoning` 字段全链透传 | #1646 | MERGED |
+| 2 | approved+replay-failed → REVISION_REQUIRED | #1654 | MERGED |
+| 3 | ArtificerL2Adapter 路由 + CodeRabbit 修复 | #1661 | MERGED |
+| 4 | 通道切换（8 通道实测） | Console API | ✅ |
+
+### 最终收敛阻塞
+
+免费 glm-5.3-flash 通道撑不住 evaluator 的 10K token 全量治理合同调用。
+
+充值后恢复命令：
+```bash
+# 1. 改绑定
+curl -X PATCH -H "Authorization: Bearer $PD_CONSOLE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"runtimeProfile":"pi-ai.glm","enabled":true}' \
+  "http://127.0.0.1:3100/api/v1/config/agents/evaluator/binding"
+# 2. 恢复
+curl -X POST -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"reason":"channel restored","force":true}' \
+  "http://127.0.0.1:3100/api/v1/failed-tasks/evaluator-1e5f1614-03ed-47e7-af97-4fcd5640026f-code_tool_hook/recover"
+# 3. auto-consumer 自动驱动 → pi-rule 工件 → 审批 → 激活 → L2/L3
+```
+
+## 9. Codex SOL 深度根因分析
+
+### 9.1 根因：可靠性预算错配
+
+19/80 = 24% 完成率 × 需连续 3 个完成迁移 ≈ 1.3% 概率。
+
+因果链：大 prompt + 强制思考 → 300s 超时 → 1 req/min 重试 → 级联失败 → 迁移不足 → 永不收敛。
+
+### 9.2 四因子
+
+1. glm-5.3-flash 强制思考（400 code 1210 如果尝试关闭）
+2. 300s pi-ai 内层帽（PRI-683）
+3. JSON 位于最高风险路径末端
+4. 确定性重放要求精确代码
+
+### 9.3 最小可行变更
+
+路由到可靠付费通道。PD 代码不变。
+
+### 9.4 理论最少 LLM 调用
+
+- 无修复环：2 次
+- 含一轮修复：4 次
+
+### 9.5 推荐部署策略
+
+1. 初始候选用 one-shot adapter
+2. 自动运行 host-side compile + replay
+3. 确定性修复需要时才升级到 L2
+4. L2 限制 1-2 轮 + 不可变测试 + 窄域写权限
+5. 本地门全过才调 evaluator
