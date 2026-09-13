@@ -161,12 +161,12 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     retirementCriteria: 'INTENT.md direction descoped by owner',
   },
   rulecode_context_v2: {
-    decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/core/rule-host.ts', 'openclaw-plugin/src/hooks/gate.ts'],
-    evidence: 'PRI-479 RuleContext v2 foundation flag (since 2026-06-27); default-off, v1 behavior unchanged while off',
-    decided: '2026-08-27',
-    graduationCriteria: 'RuleContext v2 phases land and context vision validated (docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md)',
-    retirementCriteria: 'RuleCode context vision descoped',
+    decision: 'GRADUATE',
+    consumers: ['openclaw-plugin/src/hooks/gate.ts (buildRuleContextIfEnabled, legacy route)', 'openclaw-plugin/src/index.ts (shared-route ruleContextProvider)', 'openclaw-plugin/src/core/rule-host.ts (suspended_by_flag)', 'principles-core activation/writers/rule-host-writer.ts (canActivate v2 gate)', 'pd-cli runtime-internalization-run-rulehost (contextMode decision)', 'pd-cli runtime-activation (suspended_by_flag status)', 'pd-console ActivationsConsoleModel (suspended_by_flag status)', 'codex-adapter pd-hook (structured-unsupported declaration)'],
+    evidence: 'PRI-780 Runtime Governance Context convergence — graduated to default-on 2026-09-13 per SPEC v2 + ADR 2026-06-28 amendment; real trajectory→assembler→RuleHostInput→decision chain verified; Codex structured-unsupported declaration landed before the flip (sequencing precondition)',
+    decided: '2026-09-13',
+    graduationCriteria: 'Executed: graduated to default-on 2026-09-13 (PRI-780). Every phase the original PRI-479 ADR anticipated had landed (schema+validators, trajectory assembler, both-route injection, activation/evaluation gating) and PRI-758 proved action-only rules cannot express complex principles',
+    retirementCriteria: 'Context assembly becomes an unconditional part of the RuleHost contract (quiet flag entry removed) once the migration window closes and no workspace needs the config kill switch',
   },
   failed_tasks_observability: {
     decision: 'KEEP_QUIET',

@@ -25,12 +25,12 @@ describe('rulecode_context_v2 flag registration (PRI-479)', () => {
     expect(findFlag()).toBeDefined();
   });
 
-  it('has category "quiet" (not core — must not expand MVP-Core default-on set)', () => {
+  it('has category "quiet" (graduated default-on stays config-disableable, not core)', () => {
     expect(findFlag().category).toBe('quiet');
   });
 
-  it('defaults to enabled=false (default off)', () => {
-    expect(findFlag().enabled).toBe(false);
+  it('defaults to enabled=true (PRI-780 default-on convergence)', () => {
+    expect(findFlag().enabled).toBe(true);
   });
 
   it('has since field matching YYYY-MM-DD', () => {
@@ -48,9 +48,9 @@ describe('rulecode_context_v2 flag registration (PRI-479)', () => {
     ).toBe(true);
   });
 
-  it('is disabled by default at the contract layer with no overrides', () => {
+  it('is enabled by default at the contract layer with no overrides', () => {
     const r = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
-    expect(r.flags[FLAG_ID]?.enabled).toBe(false);
+    expect(r.flags[FLAG_ID]?.enabled).toBe(true);
   });
 
   it('can be explicitly enabled at the contract layer', () => {
@@ -62,7 +62,7 @@ describe('rulecode_context_v2 flag registration (PRI-479)', () => {
     expect(r.flags[FLAG_ID]?.enabled).toBe(true);
   });
 
-  it('stays off when explicitly disabled at the contract layer', () => {
+  it('stays off when explicitly disabled at the contract layer (migration kill switch)', () => {
     const r = computeEffectiveFlags(
       { [FLAG_ID]: { enabled: false } },
       DEFAULT_FEATURE_FLAGS,
@@ -73,16 +73,16 @@ describe('rulecode_context_v2 flag registration (PRI-479)', () => {
 });
 
 describe('rulecode_context_v2 flag propagation through PD config (PRI-479)', () => {
-  it('is present in getDefaultPdConfig().features with quiet/false', () => {
+  it('is present in getDefaultPdConfig().features with quiet/true (PRI-780 default-on)', () => {
     const defaults = getDefaultPdConfig();
     expect(Object.hasOwn(defaults.features, FLAG_ID)).toBe(true);
-    expect(defaults.features[FLAG_ID]).toEqual({ category: 'quiet', enabled: false });
+    expect(defaults.features[FLAG_ID]).toEqual({ category: 'quiet', enabled: true });
   });
 
-  it('is disabled by default when computing feature flags from a null config', () => {
+  it('is enabled by default when computing feature flags from a null config', () => {
     const effective = computeEffectivePdConfig(null);
     const result = computeFeatureFlagsFromConfig(effective);
-    expect(result.flags[FLAG_ID]?.enabled).toBe(false);
+    expect(result.flags[FLAG_ID]?.enabled).toBe(true);
     expect(result.flags[FLAG_ID]?.category).toBe('quiet');
   });
 
@@ -98,7 +98,7 @@ describe('rulecode_context_v2 flag propagation through PD config (PRI-479)', () 
     ).toBe(false);
   });
 
-  it('stays disabled when config override explicitly sets enabled=false', () => {
+  it('stays disabled when config override explicitly sets enabled=false (kill switch)', () => {
     const rawConfig = getDefaultPdConfig();
     rawConfig.features[FLAG_ID] = { category: 'quiet', enabled: false };
     const effective = computeEffectivePdConfig(rawConfig);
