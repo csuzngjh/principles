@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import type { HostEventKind } from '@principles/core/host';
 import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, type RuleContextV2 } from '@principles/core/runtime-v2';
 import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
@@ -23,6 +23,28 @@ function diagnostic(reason: string, nextAction: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, MAX_DIAGNOSTIC) : 'unknown_error';
+}
+
+/**
+ * PRI-780 Codex capability declaration (structured unsupported): the Codex
+ * host has no runtime context provider — no session tool-call history window
+ * source exists on this host. Rather than leaving v2 rules to be skipped with
+ * the shared gate's generic `rule_context_v2_unavailable` warning, Codex
+ * declares a schema-valid UNAVAILABLE-posture RuleContextV2: v2 rules stay
+ * loaded and evaluate deterministically under the v2 contract
+ * (context unavailable → allow, matched:false). The provider only returns
+ * the declaration while `rulecode_context_v2` is enabled, so an explicit
+ * config disable keeps the same suspension semantics as OpenClaw.
+ */
+export function buildCodexRuntimeContextDeclaration(): RuleContextV2 {
+  return Object.freeze({
+    version: 2,
+    history: Object.freeze({
+      ...UNAVAILABLE_RULE_CONTEXT.history,
+      unavailableReason: 'codex_runtime_context_unsupported: the Codex host declares no runtime context provider (PRI-780 capability declaration)',
+    }),
+    facts: UNAVAILABLE_RULE_CONTEXT.facts,
+  });
 }
 
 // Bounded governance-observation ingestion (Codex Governance Closure Slice
@@ -119,7 +141,16 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     const ingestionDiagnostics = ingestionEnabled
       ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
       : [];
-    const result = await createProductionHostRuntime({ hostKind: 'codex', toolSemantics: CODEX_TOOL_SEMANTICS }).dispatch(event);
+    const result = await createProductionHostRuntime({
+      hostKind: 'codex',
+      toolSemantics: CODEX_TOOL_SEMANTICS,
+      // PRI-780: structured-unsupported runtime context declaration (see
+      // buildCodexRuntimeContextDeclaration). Flag-off returns undefined so
+      // v2 rules suspend exactly like on OpenClaw.
+      ruleContextProvider: () => (flags.rulecode_context_v2?.enabled === true
+        ? buildCodexRuntimeContextDeclaration()
+        : undefined),
+    }).dispatch(event);
     const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...ingestionDiagnostics];
     return { stdout: adapter.encodeOutput(result, event.kind), exitCode: 0, stderr };
   } catch (error) {

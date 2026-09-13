@@ -70,3 +70,19 @@ describe('pd-hook production boundary', () => {
     expect(result.stderr.length).toBeLessThanOrEqual(1_200);
   });
 });
+
+describe('PRI-780 Codex runtime context capability declaration', () => {
+  it('buildCodexRuntimeContextDeclaration is a schema-valid unavailable-posture declaration', async () => {
+    const { buildCodexRuntimeContextDeclaration } = await import('../src/pd-hook.js');
+    const { validateRuleContextV2 } = await import('@principles/core/runtime-v2');
+    const declaration = buildCodexRuntimeContextDeclaration();
+    const validation = validateRuleContextV2(declaration);
+    expect(validation.valid, validation.errors.join('; ')).toBe(true);
+    expect(declaration.version).toBe(2);
+    expect(declaration.history.status).toBe('unavailable');
+    expect(declaration.history.unavailableReason).toContain('codex_runtime_context_unsupported');
+    expect(declaration.history.calls).toEqual([]);
+    expect(declaration.facts.priorReadOfTarget).toBe('unknown');
+    expect(declaration.facts.readCount).toBeNull();
+  });
+});

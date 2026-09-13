@@ -86,6 +86,44 @@ describe('pd-hook executable shared MVP paths', () => {
   });
 });
 
+describe('PRI-780 Codex runtime context capability declaration (v2 rules)', () => {
+  const V2_DECL_RULE_CODE = `function evaluate(input) { if (input.action.normalizedPath.indexOf('ctxdecl-always-780') >= 0) return { decision: 'block', matched: true, reason: 'CODEX_V2_LOADED_780' }; if (input.action.normalizedPath.indexOf('ctxdecl-ctx-780') >= 0) { if (input.context === undefined) return { decision: 'block', matched: true, reason: 'CODEX_V2_CONTEXT_MISSING_780' }; return { decision: 'allow', matched: false, reason: 'context declared unavailable by codex host' }; } return { decision: 'allow', matched: false, reason: 'not target' }; } var meta = { name: 'codex-v2-decl', version: '1', ruleId: 'R_CODEX_V2_DECL_780', coversCondition: 'all' };`;
+  function workspaceWithRuleContext(v2Enabled: boolean): string {
+    const root = workspace();
+    const config = getDefaultPdConfig();
+    config.features['host.codex'].enabled = true;
+    config.features['rulecode_context_v2'].enabled = v2Enabled;
+    fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+    return root;
+  }
+  async function v2Rule(root: string): Promise<void> {
+    await artifact(root, { id: 'art-rule-780', kind: 'rule', principleId: 'P_CODEX_V2_780', ruleId: 'R_CODEX_V2_DECL_780', content: { principleId: 'P_CODEX_V2_780', ruleId: 'R_CODEX_V2_DECL_780', requiresContextVersion: 2, implementationCode: V2_DECL_RULE_CODE }, channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_CODEX_V2_DECL_780' });
+  }
+
+  it('flag ON: a v2 rule evaluates under the declared unavailable context instead of being skipped', async () => {
+    const root = workspaceWithRuleContext(true);
+    await v2Rule(root);
+    // Load proof: this branch blocks regardless of context — a skipped rule
+    // would allow, so the deny proves the v2 rule actually loaded and ran.
+    const loaded = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'ctxdecl-always-780.txt'), content: 'x' }, tool_use_id: 'call-loaded' });
+    expect(JSON.parse(loaded.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'CODEX_V2_LOADED_780' } });
+    // Declaration proof: with the codex unavailable-posture declaration the
+    // context-sensitive branch sees a present, unavailable context and allows;
+    // an undefined context (no declaration) would block with CONTEXT_MISSING.
+    const declared = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'ctxdecl-ctx-780.txt'), content: 'x' }, tool_use_id: 'call-declared' });
+    expect(JSON.parse(declared.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    expect(declared.stderr).not.toContain('rule_context_v2_unavailable');
+  });
+
+  it('flag OFF (kill switch): the same v2 rule is suspended with the structured warning, not silently enforced', async () => {
+    const root = workspaceWithRuleContext(false);
+    await v2Rule(root);
+    const suspended = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'ctxdecl-always-780.txt'), content: 'x' }, tool_use_id: 'call-suspended' });
+    expect(JSON.parse(suspended.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    expect(suspended.stderr).toContain('rule_context_v2_unavailable');
+  });
+});
+
 const registry = createStepRegistry();
 let bddRoot = '';
 let bddResult: ReturnType<typeof invoke>;
