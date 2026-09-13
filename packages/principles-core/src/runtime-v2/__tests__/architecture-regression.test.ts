@@ -3516,6 +3516,83 @@ describe('PRI-416: barrel cap guards', () => {
   });
 });
 
+// ── PRI-775: Barrel Export Surface Freeze ─────────────────────────────────────
+//
+// The two public barrels (src/index.ts, src/runtime-v2/index.ts) are the first
+// surface every AI task and developer reads; ghost exports accumulate exactly
+// there (PRI-751 audit section 2). The export-name SET of each barrel is
+// frozen via snapshot fixtures: adding OR removing a name must update the
+// fixture with a PRI-tagged reason in the PR. Count-only caps are blind to
+// delete-one-add-one drift, which is how ghost families regrow.
+
+describe('PRI-775: barrel export surface freeze', () => {
+  interface BarrelSurfaceFixture {
+    barrel: string;
+    count: number;
+    names: string[];
+  }
+
+  function extractExportNames(src: string): string[] {
+    const names = new Set<string>();
+    for (const block of src.match(/export (?:type )?\{[^}]*\}/g) ?? []) {
+      const inner = block.slice(block.indexOf('{') + 1, block.indexOf('}'));
+      for (let token of inner.split(',')) {
+        token = token.trim();
+        if (!token) continue;
+        if (token.startsWith('type ')) token = token.slice(5).trim();
+        const asIdx = token.indexOf(' as ');
+        if (asIdx !== -1) token = token.slice(asIdx + 4).trim();
+        if (token) names.add(token);
+      }
+    }
+    for (const m of src.match(/^export (?:const|function|class|interface|enum|abstract class) [A-Za-z0-9_]+/gm) ?? []) {
+      const decl = m.split(/\s/).pop();
+      if (decl) names.add(decl);
+    }
+    return [...names].sort();
+  }
+
+  async function readFixture(fixtureFile: string): Promise<BarrelSurfaceFixture> {
+    const fsMod: typeof import('fs') = await import('fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    const pathMod: typeof import('path') = await import('path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+    return JSON.parse(fsMod.readFileSync(
+      pathMod.resolve(__dirname, 'fixtures', fixtureFile), 'utf-8',
+    )) as BarrelSurfaceFixture;
+  }
+
+  for (const fixtureFile of ['runtime-v2-barrel-surface.json', 'core-barrel-surface.json']) {
+    it(`${fixtureFile}: export surface matches the frozen snapshot`, async () => {
+      const fsMod: typeof import('fs') = await import('fs'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+      const pathMod: typeof import('path') = await import('path'); // eslint-disable-line @typescript-eslint/consistent-type-imports
+      const fixture = await readFixture(fixtureFile);
+      const src = fsMod.readFileSync(pathMod.resolve(__dirname, '..', '..', '..', fixture.barrel), 'utf-8');
+      const current = extractExportNames(src);
+
+      const added = current.filter((n) => !fixture.names.includes(n));
+      const removed = fixture.names.filter((n) => !current.includes(n));
+
+      const diffMessage = [
+        `${fixture.barrel} export surface drifted from the frozen snapshot (PRI-775):`,
+        ...(added.length > 0 ? [`  + added (${added.length}): ${added.join(', ')}`] : []),
+        ...(removed.length > 0 ? [`  - removed (${removed.length}): ${removed.join(', ')}`] : []),
+        'To change the surface intentionally: update __tests__/fixtures/' + fixtureFile,
+        '  and state the reason with a PRI tag in the PR description. Ghost exports',
+        '  without production consumers are how barrel entropy regrows (PRI-751 audit).',
+      ].join('\n');
+      expect(added.length + removed.length, diffMessage).toBe(0);
+    });
+  }
+
+  it('barrel surface snapshots are self-consistent', async () => {
+    for (const fixtureFile of ['runtime-v2-barrel-surface.json', 'core-barrel-surface.json']) {
+      const fixture = await readFixture(fixtureFile);
+      expect(fixture.names.length, `${fixtureFile}: "count" field is stale`).toBe(fixture.count);
+      expect([...fixture.names].sort(), `${fixtureFile}: names are not sorted/deduped`).toEqual(fixture.names);
+      expect(new Set(fixture.names).size, `${fixtureFile}: duplicate names`).toBe(fixture.names.length);
+    }
+  });
+});
+
 // ── PRI-443: Pure module boundary guards ──────────────────────────────────────
 //
 // Phases 1-3 extracted pure types/codecs/schema out of I/O modules. These guards
