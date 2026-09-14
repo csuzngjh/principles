@@ -357,7 +357,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
         loopConfig,
         async (event: AgentEvent) => {
           if (event.type === 'message_end') {
-            const message = (event as { message?: { stopReason?: string; errorMessage?: string } }).message;
+            const { message } = event as { message?: { stopReason?: string; errorMessage?: string } };
             if (message && (message.stopReason === 'error' || message.stopReason === 'aborted')) {
               lastErrorMessage = `LLM stream ended with stopReason=${message.stopReason}${message.errorMessage ? `: ${message.errorMessage}` : ''}`;
             }
