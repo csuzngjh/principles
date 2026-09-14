@@ -566,6 +566,7 @@ describe('pd pain record', () => {
       status: 'unavailable',
       reasonCode: 'session_not_found',
       detail: 'session not present in trajectory.db sessions table',
+      binding: 'unverified',
     } as any);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -596,6 +597,7 @@ describe('pd pain record', () => {
       status: 'unavailable',
       reasonCode: 'session_not_found',
       detail: 'session not present',
+      binding: 'unverified',
     } as any);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
@@ -620,6 +622,7 @@ describe('pd pain record', () => {
       status: 'unavailable',
       reasonCode: 'empty_trajectory',
       detail: 'session exists but no usable evidence',
+      binding: 'verified',
     } as any);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
@@ -646,14 +649,15 @@ describe('pd pain record', () => {
     exitSpy.mockRestore();
   });
 
-  it.each([
-    ['evidence_read_failed', 'trajectory.db unreadable'],
-    ['trajectory_unavailable', 'no trajectory.db at workspace .state'],
-  ] as const)('degrades to a bound, honest empty-evidence submission on %s (SPEC §8.2 note: unreadable trajectory is bound + unavailable)', async (reasonCode, detail) => {
+  it('degrades on evidence_read_failed when the binding was verified (tables unreadable after the sessions check)', async () => {
+    // SPEC §8.2 note: a real session with an unreadable trajectory is
+    // bound + unavailable — the sessions row was found, only the evidence
+    // read failed.
     vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
       status: 'unavailable',
-      reasonCode,
-      detail,
+      reasonCode: 'evidence_read_failed',
+      detail: 'trajectory_tables_unreadable',
+      binding: 'verified',
     } as any);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = mockProcessExit();
@@ -666,14 +670,47 @@ describe('pd pain record', () => {
     expect(lastRecordPainInput!.painIngress.correlation.status).toBe('bound');
     expect(lastRecordPainInput!.painIngress.evidenceClass).toEqual({
       status: 'unavailable',
-      reason: reasonCode,
+      reason: 'evidence_read_failed',
     });
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
     expect(jsonOutput.status).toBe('succeeded');
-    expect(String(jsonOutput.warning ?? '')).toMatch(new RegExp(reasonCode));
+    expect(String(jsonOutput.warning ?? '')).toMatch(/evidence_read_failed/);
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it.each([
+    ['trajectory_unavailable', 'no trajectory.db at workspace .state'],
+    ['evidence_read_failed', 'trajectory_db_unreadable: file is not a database'],
+  ] as const)('refuses %s when the binding is UNVERIFIED (PRI-783 review P1: no verified session, no bound claim)', async (reasonCode, detail) => {
+    // PRI-783 review P1: when trajectory.db is missing or unopenable the id
+    // could not be verified. Claiming bound here would let the observability
+    // writer persist the unverified id into a freshly created trajectory.db —
+    // a self-proving loop. It must refuse instead.
+    vi.mocked(acquireTrajectoryEvidenceFromDb).mockReturnValueOnce({
+      status: 'unavailable',
+      reasonCode,
+      detail,
+      binding: 'unverified',
+    } as any);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', session: 'sess-x', json: true });
+
+    // Refused before any mutation, with honest next guidance.
+    expect(lastRecordPainInput).toBeNull();
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.reason).toBe(reasonCode);
+    expect(jsonOutput.nextAction).not.toMatch(/pd pain record --session/);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 

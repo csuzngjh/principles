@@ -178,4 +178,51 @@ describe('pd pain record --session (real Commander + real trajectory.db)', () =>
     expect(acquisition.entries.length).toBeGreaterThanOrEqual(1);
     expect(acquisition.entries.some(e => e.sourceRef.startsWith('owner_message:'))).toBe(true);
   }, 15_000);
+
+  // ── PRI-783 review P1: unverified bindings must refuse, never persist ──────
+
+  it('locks the review P1: --session with a missing trajectory.db refuses and NEVER creates a db containing the fake id', async () => {
+    // Remove the fixture db so the id cannot be verified at all (the shared
+    // createWorkspace always seeds one). The run must fail loud
+    // (trajectory_unavailable) BEFORE any mutation — the observability writer
+    // must not create a trajectory.db and upsert the unverified id into
+    // sessions (self-proving loop).
+    fs.rmSync(path.join(tmpDir, '.state', 'trajectory.db'), { force: true });
+    const result = await runBuiltCli([
+      'pain', 'record',
+      '--reason', 'PRI-783 review P1 lock',
+      '--session', 'fake-unverified-id',
+      '--workspace', tmpDir,
+      '--json',
+    ]);
+
+    expect(result.status).not.toBe(0);
+    const parsed = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+    expect(parsed.status).toBe('failed');
+    expect(parsed.reason).toBe('trajectory_unavailable');
+    expect(parsed.nextAction).not.toMatch(/pd pain record --session/);
+    // The lock: no trajectory.db was created by this run — the fake id can
+    // never appear in a sessions table.
+    expect(fs.existsSync(path.join(tmpDir, '.state', 'trajectory.db'))).toBe(false);
+  }, 15_000);
+
+  it('real empty session reports empty_trajectory with a VERIFIED binding (the degrade precondition)', async () => {
+    // Gate the degrade path on the real acquisition semantics: a session
+    // row that exists with zero evidence rows is the only unavailable shape
+    // allowed to degrade to a bound submission.
+    const stateDir = path.join(tmpDir, '.state');
+    const db = new Database(path.join(stateDir, 'trajectory.db'));
+    db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?)')
+      .run('real-empty-session', '2026-01-01T08:00:00Z', '2026-01-01T08:00:00Z');
+    db.prepare('INSERT INTO user_turns (session_id, raw_excerpt, correction_detected, correction_cue, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run('real-empty-session', 'ordinary message, not a correction', 0, null, '2026-01-01T08:01:00Z');
+    db.close();
+
+    const acquisition = acquireTrajectoryEvidenceFromDb(stateDir, 'real-empty-session', tmpDir);
+
+    expect(acquisition.status).toBe('unavailable');
+    if (acquisition.status !== 'unavailable') return;
+    expect(acquisition.reasonCode).toBe('empty_trajectory');
+    expect(acquisition.binding).toBe('verified');
+  }, 15_000);
 });
