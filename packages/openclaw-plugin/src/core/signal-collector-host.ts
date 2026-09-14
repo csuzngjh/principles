@@ -262,7 +262,7 @@ export class SignalCollectorHost {
         // PRI-788 G2: 异常不再静默丢候选——持久化待确认（通道恢复后批量确认）。
         // 无 verdict ⇒ 立即结束：绝不能落到下方"当 none 处理"分支，否则通道故障
         // 会被当成"LLM 判为普通消息"并 emitCueFeedback(false)，把通道故障记成
-        // 关键词 FP、拉低权重并撤销 earned precision（CodeRabbit review）。
+        // 关键词 FP、拉低权重并撤销 earned precision（CodeRabbit G3 review）。
         this.queueUnconfirmedForBatch(pending, 'llm_classifier_threw');
         return;
       }
