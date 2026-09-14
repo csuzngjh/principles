@@ -104,6 +104,21 @@ function formatTextOutput(output: DoctorOutput): string {
   }
   lines.push('');
 
+  // PRI-788 G4: signal detection health
+  const sh = output.signalHealth;
+  lines.push('Signal detection health:');
+  lines.push(`  status:                     ${sh.status}`);
+  if (sh.counts) {
+    const c = sh.counts;
+    lines.push(`  today:                      stage1Strong=${c.stage1Strong} stage2Confirmed=${c.stage2Confirmed} queued=${c.stage2Queued} dropped=${c.stage2Dropped} pending=${c.pendingCount}`);
+  }
+  if (sh.observerLastSuccessAt) lines.push(`  observer last success:      ${sh.observerLastSuccessAt}`);
+  if (sh.observerConsecutiveFailures !== null) lines.push(`  observer consecutive fails: ${sh.observerConsecutiveFailures}`);
+  if (sh.updatedAt) lines.push(`  updatedAt:                  ${sh.updatedAt}`);
+  lines.push(`  reason:                     ${sh.reason}`);
+  if (sh.nextAction) lines.push(`  nextAction:                 ${sh.nextAction}`);
+  lines.push('');
+
   if (output.legacyFilesDetected.length > 0) {
     lines.push('Legacy files detected (not used for resolution):');
     for (const f of output.legacyFilesDetected) {

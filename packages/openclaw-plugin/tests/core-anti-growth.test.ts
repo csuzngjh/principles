@@ -121,6 +121,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'principle-receipt-metadata.ts',
     // PRI-531: receipt ledger writer (state.db inserts + retention sweep).
     'principle-application-ledger.ts',
+    // PRI-788 G4: 纠正信号检测健康度旁路观测 — 插件 I/O 边界（原子读写
+    // <workspace>/.state/signal-health.json + mkdir + SYSTEM log 上报）。
+    // 纯计数/跨日归零策略亦在此文件，但价值在于持久化契约而非领域逻辑。
+    'signal-health.ts',
   ] as const;
 
   // Category 6: Test files

@@ -12,6 +12,7 @@ import { SystemLogger } from '../core/system-logger.js';
 import { resolveObserverConfig } from '../core/pd-config-loader.js';
 import { createSignalLlmClassifierFromConfig } from '../core/signal-collector-host.js';
 import { getSignalCollectorHost } from '../hooks/prompt.js';
+import { updateSignalHealth } from '../core/signal-health.js';
 
 export interface CorrectionObserverServiceShape {
     id: string;
@@ -123,6 +124,12 @@ export async function batchConfirmPendingSignals(
             }
             trajectory.markSignalConfirmationResult(item.id, result.disposition, result.detail);
             resolved++;
+            if (result.disposition === 'confirmed') {
+                updateSignalHealth(wctx.stateDir, (s) => {
+                    s.stage2Confirmed += 1;
+                    s.lastStage2SuccessAt = new Date().toISOString();
+                });
+            }
             SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CONFIRMATION_RESOLVED',
                 `${item.id} -> ${result.disposition} (${result.detail.slice(0, 80)})`);
         } catch (err) {
@@ -190,6 +197,18 @@ export function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<
     }
 }
 
+/** PRI-788 G4: 周期成功/失败计数（旁路；成功归零连续失败计数）。 */
+function recordObserverCycleOutcome(wctx: WorkspaceContext, ok: boolean): void {
+    updateSignalHealth(wctx.stateDir, (s) => {
+        if (ok) {
+            s.observerLastSuccessAt = new Date().toISOString();
+            s.observerConsecutiveFailures = 0;
+        } else {
+            s.observerConsecutiveFailures += 1;
+        }
+    });
+}
+
 export async function runCorrectionObserverCycle(
     wctx: WorkspaceContext,
     logger: PluginLogger,
@@ -203,13 +222,19 @@ export async function runCorrectionObserverCycle(
             logger?.info?.(`[PD:CorrectionObserver] batch-confirmed ${confirmedCount} pending signals`);
         }
         // 服务在等待 classifier 期间被 stop/重启 ⇒ 本轮其余（会写 keyword store
-        // 与 signal-health）不再执行。
+        // 与 signal-health）不再执行，也不计成功/失败轮。
         if (isStale?.()) return;
+        // PRI-788 G4: 刷新队列深度快照
+        updateSignalHealth(wctx.stateDir, (s) => {
+            s.pendingCount = wctx.trajectory?.countPendingSignalConfirmations?.() ?? s.pendingCount;
+        });
 
         const observer = resolveCorrectionObserver(wctx, logger);
         if (!observer) {
             // PRI-307: No noisy "no API key" cycling. Only log at debug level.
             logger?.debug?.(`[PD:CorrectionObserver] Observer not resolved. Skipping cycle.`);
+            // G4: 周期正常完成（observer 未配置不是失败）
+            recordObserverCycleOutcome(wctx, true);
             return;
         }
 
@@ -273,13 +298,22 @@ export async function runCorrectionObserverCycle(
         const result = await scheduler.dispatch('correction-observer', payload);
         logger?.info?.(`[PD:CorrectionObserver] Completed: updated=${result.updated}, summary="${result.summary}"`);
 
+        // dispatch 期间可能被 stop/重启 ⇒ 不再写 keyword store / 健康度。
+        if (isStale?.()) return;
         if (result.updated) {
             optimizationService.applyResult(result);
         }
+        // PRI-788 G4: 整个周期成功（含 observer 未配置的 no-op 轮）
+        recordObserverCycleOutcome(wctx, true);
     } catch (err) {
         const errMsg = `Correction observer cycle failed: ${String(err)}`;
         logger?.warn?.(`[PD:CorrectionObserver] ${errMsg}`);
         SystemLogger.log(wctx.workspaceDir, 'CORRECTION_OBSERVER_CYCLE_FAILED', errMsg);
+        // PRI-788 G4: 失败计数上浮到健康产物（doctor 呈现 degraded）。
+        // 若本轮已因 stop/重启失效，则不再把失败记到新一代的计数上。
+        if (!isStale?.()) {
+            recordObserverCycleOutcome(wctx, false);
+        }
     }
 }
 
