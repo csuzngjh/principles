@@ -70,6 +70,8 @@ const EXPECTED_TRAJECTORY_TABLES = [
   'schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
   'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
   'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
+  // PRI-790 G2: Stage2 待确认信号的持久队列（observer 周期批量确认的输入）。
+  'signal_confirmations',
   'exports_audit',
 ];
 
@@ -83,6 +85,8 @@ const EXPECTED_TRAJECTORY_INDEXES = [
   'idx_pain_events_session_id',
   'idx_pain_events_canonical_pain_id',
   'idx_correction_samples_review_status',
+  // PRI-790 G2: 队列扫描索引（status + attempts）。
+  'idx_signal_confirmations_status',
 ];
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -121,7 +125,7 @@ describe('pd runtime init — empty workspace integration', () => {
       }
     });
 
-    it('creates trajectory.db with all 14 expected tables', () => {
+    it('creates trajectory.db with all 15 expected tables', () => {
       buildRuntimeInitOutput(tmpDir, true);
       const trajDbPath = path.join(tmpDir, '.state', 'trajectory.db');
       expect(fs.existsSync(trajDbPath)).toBe(true);
