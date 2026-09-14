@@ -135,6 +135,14 @@ function isValidLearnedKeyword(v: unknown): v is LearnedKeywordShape {
   const k = v as Record<string, unknown>;
   if (typeof k.term !== 'string' || k.term.length === 0) return false;
   if (typeof k.weight !== 'number' || !Number.isFinite(k.weight)) return false;
+  // earned precision 的计数是安全门（tp >= 3 才升 high），必须先约束数值形状：
+  // `correction_keywords.json` 里被篡改/损坏的 `truePositiveCount: 3.1` 若放行，
+  // 会让只有 3 条样本（甚至根本没有样本）的词项挤进 high 确定性路径。
+  // 缺失按可选字段语义放行，存在则必须是【非负安全整数】。
+  const isCount = (value: unknown): boolean =>
+    value === undefined ||
+    (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
+  if (!isCount(k.truePositiveCount) || !isCount(k.falsePositiveCount)) return false;
   return k.source === 'seed' || k.source === 'llm' || k.source === 'user';
 }
 

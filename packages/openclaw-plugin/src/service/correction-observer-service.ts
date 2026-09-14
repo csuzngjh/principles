@@ -21,6 +21,29 @@ export interface CorrectionObserverServiceShape {
 
 let correctionObserverTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let correctionObserverStopped = false;
+/**
+ * PRI-788 G2: 单消费者边界——同一进程内任意时刻只允许一个周期在跑。
+ * `runCycle` 会等上一周期结束再调度下一周期，但 `stop` 只清定时器、不取消
+ * 正在 await classifier 的周期；随后 `start` 又把 `correctionObserverStopped`
+ * 置回 false。没有这道闸，stop→start 后新旧周期会同时读到同一批 pending，
+ * 两边都执行 emitCueFeedback / routeStrong，而 markSignalConfirmationResult
+ * 只对 pending 生效，于是关键词 TP/FP 与 STRONG 路由被记录两次。
+ *
+ * 取"单消费者边界"而不是 DB 层 `pending → processing` 认领：审查意见本身允许
+ * 二者等价（"或使用等价的单消费者边界"）。被描述的竞态是**进程内**的
+ * （stop 不取消在途周期 → start 复活），边界 + epoch 已完整覆盖；而给
+ * `signal_confirmations.status` 增加 'processing' 需要改 CHECK 约束，该表由
+ * PRI-790/791/792 三个并行 PR 共同创建，只有其中一个改 CHECK 会让另一个建的
+ * 库拒绝 'processing'（`CREATE TABLE IF NOT EXISTS` 不会迁移既有表），
+ * 反而引入更危险的静默失效。
+ */
+let correctionObserverCycleRunning = false;
+/**
+ * PRI-788 G2: 每次 start/stop 递增。周期在开始时捕获自己的 epoch；一旦 epoch
+ * 变化（服务被 stop 或 stop→start 重启过），旧周期不再继续写任何状态。
+ * 与单消费者边界互补：边界防并发，epoch 防"停顿后复活"的旧周期。
+ */
+let correctionObserverEpoch = 0;
 const startedWorkspaces = new Set<string>();
 
 const CORRECTION_OBSERVER_INTERVAL_MS = 15 * 60 * 1000;
@@ -42,8 +65,14 @@ const SIGNAL_CONFIRM_MAX_ATTEMPTS = 5;
  * → abandoned。classifier 本身不可用（通道仍死）时整批跳过、不计失败次数。
  *
  * @returns 本轮 resolved（confirmed/rejected/abandoned）条数。
+ * @param isStale 可选：返回 true 时停止继续处理（服务已 stop / 已重启），
+ *   用于让旧周期在 stop→start 之后不再写状态（单消费者边界的第二道闸）。
  */
-export async function batchConfirmPendingSignals(wctx: WorkspaceContext, logger: PluginLogger): Promise<number> {
+export async function batchConfirmPendingSignals(
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+    isStale?: () => boolean,
+): Promise<number> {
     const trajectory = wctx.trajectory;
     if (!trajectory?.listPendingSignalConfirmations) return 0;
     const pending = trajectory.listPendingSignalConfirmations(SIGNAL_CONFIRM_BATCH_LIMIT);
@@ -58,7 +87,25 @@ export async function batchConfirmPendingSignals(wctx: WorkspaceContext, logger:
     const host = getSignalCollectorHost(wctx, logger);
 
     let resolved = 0;
+
+    /**
+     * 单条候选确认失败一次：attempts++，达上限转 abandoned。
+     * `failed` disposition 与"抛异常"共用同一套计数/终止规则——确定性失败
+     * （classifier 每次都抛）也必须能走到 abandoned，否则它会以最低 attempts
+     * 永久留在队首，反复占用批次容量并阻塞后续候选。
+     */
+    const recordFailedAttempt = (id: string, detail: string): void => {
+        const attempts = trajectory.bumpSignalConfirmationAttempt(id);
+        if (attempts >= SIGNAL_CONFIRM_MAX_ATTEMPTS) {
+            trajectory.markSignalConfirmationResult(id, 'abandoned', `attempts exhausted (${attempts}): ${detail}`);
+            resolved++;
+            SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CONFIRMATION_ABANDONED', `${id} after ${attempts} attempts`);
+        }
+    };
+
     for (const item of pending) {
+        // 服务已 stop / 已重启 ⇒ 旧周期立即停手，不与新周期争同一批 pending。
+        if (isStale?.()) break;
         try {
             const result = await host.confirmPendingSignal(
                 {
@@ -71,12 +118,7 @@ export async function batchConfirmPendingSignals(wctx: WorkspaceContext, logger:
                 classifier,
             );
             if (result.disposition === 'failed') {
-                const attempts = trajectory.bumpSignalConfirmationAttempt(item.id);
-                if (attempts >= SIGNAL_CONFIRM_MAX_ATTEMPTS) {
-                    trajectory.markSignalConfirmationResult(item.id, 'abandoned', `attempts exhausted (${attempts}): ${result.detail}`);
-                    resolved++;
-                    SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CONFIRMATION_ABANDONED', `${item.id} after ${attempts} attempts`);
-                }
+                recordFailedAttempt(item.id, result.detail);
                 continue;
             }
             trajectory.markSignalConfirmationResult(item.id, result.disposition, result.detail);
@@ -84,8 +126,10 @@ export async function batchConfirmPendingSignals(wctx: WorkspaceContext, logger:
             SystemLogger.log(wctx.workspaceDir, 'SIGNAL_CONFIRMATION_RESOLVED',
                 `${item.id} -> ${result.disposition} (${result.detail.slice(0, 80)})`);
         } catch (err) {
-            // 单条失败不中断整批；该条仍是 pending，下一周期重试（rc-9）
+            // 单条失败不中断整批（rc-9）；该条仍 pending，下一周期重试，
+            // 但必须累加 attempts 才能最终 abandoned。
             logger?.warn?.(`[PD:CorrectionObserver] confirm failed for ${item.id}: ${String(err)}`);
+            recordFailedAttempt(item.id, `threw: ${String(err)}`);
         }
     }
     return resolved;
@@ -146,14 +190,21 @@ export function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<
     }
 }
 
-export async function runCorrectionObserverCycle(wctx: WorkspaceContext, logger: PluginLogger): Promise<void> {
+export async function runCorrectionObserverCycle(
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+    isStale?: () => boolean,
+): Promise<void> {
     try {
         // PRI-788 G2: 先批量确认持久化的待确认信号——独立于 observer 本身的
         // 解析结果（observer 未就绪时，信号补确认仍应进行）。
-        const confirmedCount = await batchConfirmPendingSignals(wctx, logger);
+        const confirmedCount = await batchConfirmPendingSignals(wctx, logger, isStale);
         if (confirmedCount > 0) {
             logger?.info?.(`[PD:CorrectionObserver] batch-confirmed ${confirmedCount} pending signals`);
         }
+        // 服务在等待 classifier 期间被 stop/重启 ⇒ 本轮其余（会写 keyword store
+        // 与 signal-health）不再执行。
+        if (isStale?.()) return;
 
         const observer = resolveCorrectionObserver(wctx, logger);
         if (!observer) {
@@ -271,16 +322,29 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
 
         startedWorkspaces.add(workspaceDir);
         correctionObserverStopped = false;
+        // 新一代 epoch：任何仍在 await 的旧周期（来自上一次 start）就此失效。
+        correctionObserverEpoch += 1;
+        const myEpoch = correctionObserverEpoch;
 
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
         if (logger) logger.info(`[PD:CorrectionObserver] Starting with workspaceDir=${wctx.workspaceDir}, stateDir=${wctx.stateDir}`);
 
         const interval = CORRECTION_OBSERVER_INTERVAL_MS;
 
+        /** 本轮（或本代服务）是否已失效：被 stop 过，或已 stop→start 换过代。 */
+        const isStale = () => correctionObserverStopped || myEpoch !== correctionObserverEpoch;
+
         async function runCycle(): Promise<void> {
-            if (correctionObserverStopped) return;
-            await runCorrectionObserverCycle(wctx, logger);
-            if (correctionObserverStopped) return;
+            if (isStale()) return;
+            // 单消费者边界：上一周期（可能来自 stop 之前的旧 start）尚未结束时不重入。
+            if (correctionObserverCycleRunning) return;
+            correctionObserverCycleRunning = true;
+            try {
+                await runCorrectionObserverCycle(wctx, logger, isStale);
+            } finally {
+                correctionObserverCycleRunning = false;
+            }
+            if (isStale()) return;
             correctionObserverTimeoutId = setTimeout(runCycle, interval);
             correctionObserverTimeoutId.unref();
         }
@@ -288,7 +352,7 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
         correctionObserverTimeoutId = setTimeout(() => {
             void runCycle().catch((err) => {
                 if (logger) logger.error(`[PD:CorrectionObserver] Startup cycle failed: ${String(err)}`);
-                if (correctionObserverStopped) return;
+                if (isStale()) return;
                 correctionObserverTimeoutId = setTimeout(runCycle, interval);
                 correctionObserverTimeoutId.unref();
             });
@@ -298,6 +362,9 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
 
     stop(_ctx: OpenClawPluginServiceContext): void {
         correctionObserverStopped = true;
+        // 使在途周期失效：它可能在 classifier await 期间观察到 stopped=false（若
+        // 期间发生过 start），epoch 递增保证它不会继续写状态。
+        correctionObserverEpoch += 1;
         startedWorkspaces.clear();
         if (correctionObserverTimeoutId) clearTimeout(correctionObserverTimeoutId);
         correctionObserverTimeoutId = null;

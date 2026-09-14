@@ -134,4 +134,43 @@ describe('batchConfirmPendingSignals (PRI-788 G2)', () => {
     expect(resolved).toBe(1);
     expect(trajectory.markSignalConfirmationResult).toHaveBeenCalledWith('sq_y', 'confirmed', 'ok');
   });
+
+  it('单条抛异常也累加 attempts，达上限转 abandoned（确定性异常不再永久 pending）', async () => {
+    mockConfirmPendingSignal.mockRejectedValue(new Error('deterministic failure'));
+    const { wctx, trajectory } = makeWctx([makePendingRow({ id: 'sq_throw', attempts: 4 })]);
+    (trajectory.bumpSignalConfirmationAttempt as ReturnType<typeof vi.fn>).mockReturnValue(5); // 4+1=5 → 上限
+
+    const resolved = await batchConfirmPendingSignals(wctx, console);
+
+    expect(resolved).toBe(1);
+    expect(trajectory.bumpSignalConfirmationAttempt).toHaveBeenCalledWith('sq_throw');
+    expect(trajectory.markSignalConfirmationResult).toHaveBeenCalledWith(
+      'sq_throw', 'abandoned', expect.stringContaining('attempts exhausted (5)'),
+    );
+  });
+
+  it('单条抛异常但未达上限 → 仍是 pending，不计 resolved（可下周期重试）', async () => {
+    mockConfirmPendingSignal.mockRejectedValue(new Error('transient'));
+    const { wctx, trajectory } = makeWctx([makePendingRow({ id: 'sq_throw2', attempts: 0 })]);
+    (trajectory.bumpSignalConfirmationAttempt as ReturnType<typeof vi.fn>).mockReturnValue(1);
+
+    const resolved = await batchConfirmPendingSignals(wctx, console);
+
+    expect(resolved).toBe(0);
+    expect(trajectory.bumpSignalConfirmationAttempt).toHaveBeenCalledWith('sq_throw2');
+    expect(trajectory.markSignalConfirmationResult).not.toHaveBeenCalled();
+  });
+
+  it('isStale 变真后立即停手，不再处理后续条目（stop→start 竞态的单消费者边界）', async () => {
+    mockConfirmPendingSignal.mockResolvedValue({ disposition: 'confirmed', detail: 'ok' });
+    const { wctx, trajectory } = makeWctx([makePendingRow({ id: 'sq_1' }), makePendingRow({ id: 'sq_2' })]);
+    let probes = 0;
+    const isStale = () => ++probes > 1; // 处理完第 1 条后判定为失效
+
+    const resolved = await batchConfirmPendingSignals(wctx, console, isStale);
+
+    expect(resolved).toBe(1);
+    expect(trajectory.markSignalConfirmationResult).toHaveBeenCalledTimes(1);
+    expect(trajectory.markSignalConfirmationResult).toHaveBeenCalledWith('sq_1', 'confirmed', 'ok');
+  });
 });

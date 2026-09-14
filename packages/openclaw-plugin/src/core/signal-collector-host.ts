@@ -253,20 +253,21 @@ export class SignalCollectorHost {
       } catch (e) {
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', `LLM classifier threw: ${String(e)}`);
         // PRI-788 G2: 异常不再静默丢候选——持久化待确认（通道恢复后批量确认）。
+        // 无 verdict ⇒ 立即结束：绝不能落到下方"当 none 处理"分支，否则通道故障
+        // 会被当成"LLM 判为普通消息"并 emitCueFeedback(false)，把通道故障记成
+        // 关键词 FP、拉低权重并撤销 earned precision（CodeRabbit G3 review）。
         this.queueUnconfirmedForBatch(pending, 'llm_classifier_threw');
+        return;
       }
       const llmDetectedAt = new Date().toISOString();
       if (llmResult) {
         confirmed = mapLlmResultToOutput(llmResult, pending.text, pending.sessionId, this.config, llmDetectedAt);
       } else {
-        // LLM 返回非法结果 → 当 none 处理 (rc-1),降级不静默
-        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, treating as none');
+        // 超时/不可用返回 null 同样没有 verdict —— 入队一次后结束（rc-1，降级不静默）。
+        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, queued for batch confirm');
         // PRI-788 G2: 同上——超时/不可用返回 null 的候选持久化，不丢。
         this.queueUnconfirmedForBatch(pending, 'llm_result_unavailable');
-        confirmed = mapLlmResultToOutput(
-          { is_feedback: false, type: 'none', confidence: 1, reason: 'LLM parse failed' },
-          pending.text, pending.sessionId, this.config, llmDetectedAt,
-        );
+        return;
       }
     } else {
       // LLM 不可用 → 降级:empathy ambiguous 候选作为 WEAK 信号路由(累积 GFI,不触发 STRONG)。
