@@ -416,7 +416,9 @@ function diagnoseInternalAgent(
 
 // ─── Signal detection health (PRI-788 G4) ───────────────────────────────────
 
-const SIGNAL_HEALTH_STALE_MS = 25 * 60 * 60 * 1000;
+// PRI-788 G4 契约：健康产物 >24h 未更新即视为 degraded（PR 描述与下方 reason 文案
+// 均写 >24h；此前常量为 25h，会让 24–25h 之间错误地显示健康）。
+const SIGNAL_HEALTH_STALE_MS = 24 * 60 * 60 * 1000;
 /** observer 连续失败超过该次数（≈1 小时无成功轮）→ degraded */
 const OBSERVER_FAILURE_DEGRADED_THRESHOLD = 4;
 

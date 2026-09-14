@@ -181,16 +181,22 @@ describe('shared correction detector (SPEC §12)', () => {
 });
 
 describe('earned precision (PRI-788 G3)', () => {
+  // 单调递增的测试 mtime：Date.now() 粒度可能粗于两次写入间隔，若两次调用拿到
+  // 同一个值，文件缓存不会失效、重新加载行为不被验证，断言会随机失败。
+  let learnerMtimeMs = 0;
+
   beforeEach(() => {
     fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    learnerMtimeMs = 0;
   });
 
   function writeLearnerFile(keywords: unknown[]): void {
     const filePath = path.join(workspaceDir, '.state', 'correction_keywords.json');
     fs.writeFileSync(filePath, JSON.stringify({ keywords }));
     // mtime 粒度可能低于写入间隔——强制推进以绕过 mtime 缓存
-    const now = Date.now();
-    fs.utimesSync(filePath, new Date(now), new Date(now));
+    const mtimeMs = Math.max(Date.now(), learnerMtimeMs + 1);
+    learnerMtimeMs = mtimeMs;
+    fs.utimesSync(filePath, new Date(mtimeMs), new Date(mtimeMs));
   }
 
   function resolveTerm(term: string) {
@@ -220,6 +226,21 @@ describe('earned precision (PRI-788 G3)', () => {
       { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 2 },
     ]);
     expect(resolveTerm('先确认再改')?.precision).toBe('ambiguous');
+  });
+
+  it('非整数/负数/越界计数不通过校验，词项被拒绝（不能借伪造证据进 high）', () => {
+    writeLearnerFile([
+      // 3.1 满足 `tp >= 3` 却并非三个真实确认样本 → 必须被拒绝
+      { term: '伪造证据', weight: 0.8, source: 'llm', truePositiveCount: 3.1, falsePositiveCount: 0 },
+      { term: '负证据', weight: 0.8, source: 'llm', truePositiveCount: 9, falsePositiveCount: -1 },
+      { term: '越界证据', weight: 0.8, source: 'llm', truePositiveCount: Number.MAX_SAFE_INTEGER + 1, falsePositiveCount: 0 },
+      // 合法整数计数仍照常升 high
+      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+    ]);
+    expect(resolveTerm('伪造证据')).toBeUndefined();
+    expect(resolveTerm('负证据')).toBeUndefined();
+    expect(resolveTerm('越界证据')).toBeUndefined();
+    expect(resolveTerm('先确认再改')?.precision).toBe('high');
   });
 
   it('owner-promoted terms keep the weight-based rule (Owner decision not gated by evidence)', () => {

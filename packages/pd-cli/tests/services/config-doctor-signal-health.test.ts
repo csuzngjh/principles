@@ -81,6 +81,20 @@ describe('buildSignalHealthEntry (PRI-788 G4)', () => {
     expect(entry.reason).toContain('>24h');
   });
 
+  it('恰好超过 24h（24.5h）即 degraded — 常量必须与「>24h」契约一致', () => {
+    const stateDir = makeStateDir();
+    const stale = new Date(Date.now() - 24.5 * 60 * 60 * 1000).toISOString();
+    writeHealth(stateDir, { updatedAt: stale });
+    expect(buildSignalHealthEntry(stateDir).status).toBe('degraded');
+  });
+
+  it('23h 未更新仍是 ok（不误报 degraded）', () => {
+    const stateDir = makeStateDir();
+    const fresh = new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString();
+    writeHealth(stateDir, { updatedAt: fresh });
+    expect(buildSignalHealthEntry(stateDir).status).toBe('ok');
+  });
+
   it('non-finite garbage fields degrade gracefully without throwing (rc-2)', () => {
     const stateDir = makeStateDir();
     writeHealth(stateDir, {

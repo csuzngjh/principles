@@ -216,8 +216,12 @@ export class SignalCollectorHost {
 
     // 5. 高精度短语命中 (high, STRONG) → 直接走 STRONG 分流 (同步)
     if (output.isSignal && output.strength === 'STRONG' && output.matchedPrecision === 'high') {
-      // PRI-788 G4: 健康度计数（旁路，失败不阻塞）
-      updateSignalHealth(this.wctx.stateDir, (s) => { s.stage1Strong += 1; });
+      // PRI-788 G4: 健康度计数（旁路，失败不阻塞）。
+      // updateSignalHealth 是同步文件 I/O（readFileSync + mkdirSync + 原子写），
+      // 不能留在 before_prompt_build 的同步检测路径上；交由 countStage1Strong
+      // 推迟到微任务队列执行（与 hooks/trajectory-collector.ts 同一惯例），
+      // routeStrong 与 hook 返回不再被磁盘延迟放大。
+      this.countStage1Strong();
       this.routeStrong(output, sessionId, userMessage, this.resolveOccurrenceId(sessionId, userMessage, options));
       return;
     }
@@ -256,20 +260,21 @@ export class SignalCollectorHost {
       } catch (e) {
         SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', `LLM classifier threw: ${String(e)}`);
         // PRI-788 G2: 异常不再静默丢候选——持久化待确认（通道恢复后批量确认）。
+        // 无 verdict ⇒ 立即结束：绝不能落到下方"当 none 处理"分支，否则通道故障
+        // 会被当成"LLM 判为普通消息"并 emitCueFeedback(false)，把通道故障记成
+        // 关键词 FP、拉低权重并撤销 earned precision（CodeRabbit review）。
         this.queueUnconfirmedForBatch(pending, 'llm_classifier_threw');
+        return;
       }
       const llmDetectedAt = new Date().toISOString();
       if (llmResult) {
         confirmed = mapLlmResultToOutput(llmResult, pending.text, pending.sessionId, this.config, llmDetectedAt);
       } else {
-        // LLM 返回非法结果 → 当 none 处理 (rc-1),降级不静默
-        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, treating as none');
+        // 超时/不可用返回 null 同样没有 verdict —— 入队一次后结束（rc-1，降级不静默）。
+        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL', 'LLM returned invalid result, queued for batch confirm');
         // PRI-788 G2: 同上——超时/不可用返回 null 的候选持久化，不丢。
         this.queueUnconfirmedForBatch(pending, 'llm_result_unavailable');
-        confirmed = mapLlmResultToOutput(
-          { is_feedback: false, type: 'none', confidence: 1, reason: 'LLM parse failed' },
-          pending.text, pending.sessionId, this.config, llmDetectedAt,
-        );
+        return;
       }
     } else {
       // LLM 不可用 → 降级:empathy ambiguous 候选作为 WEAK 信号路由(累积 GFI,不触发 STRONG)。
@@ -380,6 +385,20 @@ export class SignalCollectorHost {
   /** PRI-788 G4: 未经确认就消失的候选计数（旁路，失败不阻塞）。 */
   private countStage2Dropped(): void {
     updateSignalHealth(this.wctx.stateDir, (s) => { s.stage2Dropped += 1; });
+  }
+
+  /**
+   * PRI-788 G4: stage1Strong 计数（旁路观测），刻意离开同步检测路径。
+   *
+   * `updateSignalHealth` 是同步 read-modify-write，直接放在 `detectSync` 里会让
+   * `before_prompt_build` 承担磁盘延迟。这里只触发计数，实际写入推迟到微任务
+   * 队列执行（写入本身仍在一个 tick 内同步完成，不会与其它写入交错）。
+   */
+  private countStage1Strong(): void {
+    const stateDir = this.wctx.stateDir;
+    queueMicrotask(() => {
+      updateSignalHealth(stateDir, (s) => { s.stage1Strong += 1; });
+    });
   }
 
   /**

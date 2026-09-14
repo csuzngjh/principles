@@ -135,6 +135,12 @@ export function updateSignalHealth(stateDir: string, mutate: (state: SignalHealt
     fs.mkdirSync(stateDir, { recursive: true });
     atomicWriteFileSync(healthFilePath(stateDir), JSON.stringify(state, null, 2));
   } catch (err) {
-    SystemLogger.log(undefined, 'SIGNAL_HEALTH_WRITE_FAIL', String(err));
+    // SystemLogger.log 对 falsy workspaceDir 直接 return——之前传 undefined 等于把
+    // "健康文件写失败"这件事本身也静默吞掉了，违反本模块"旁路失败必须留痕"的契约。
+    // stateDir 形如 <workspace>/.state，取父目录即工作区根；无 stateDir 时无法
+    // 归属到任何工作区，此时保持静默（不往 cwd 写）。
+    if (stateDir) {
+      SystemLogger.log(path.dirname(stateDir), 'SIGNAL_HEALTH_WRITE_FAIL', String(err));
+    }
   }
 }
