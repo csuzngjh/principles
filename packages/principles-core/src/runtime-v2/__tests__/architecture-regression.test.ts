@@ -3524,6 +3524,12 @@ describe('PRI-416: barrel cap guards', () => {
 // frozen via snapshot fixtures: adding OR removing a name must update the
 // fixture with a PRI-tagged reason in the PR. Count-only caps are blind to
 // delete-one-add-one drift, which is how ghost families regrow.
+//
+// The extractor strips comments from captured tokens and validates that every
+// frozen entry is a real identifier — the snapshot must be a name SET, never
+// source-text fragments (review finding: 12/1719 comment-polluted entries).
+// Wildcard re-exports and non-identifier captures fail loud: the guard refuses
+// to freeze a surface it cannot prove.
 
 describe('PRI-775: barrel export surface freeze', () => {
   interface BarrelSurfaceFixture {
@@ -3532,17 +3538,40 @@ describe('PRI-775: barrel export surface freeze', () => {
     names: string[];
   }
 
+  const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
   function extractExportNames(src: string): string[] {
+    if (/^export\s+\*/m.test(src)) {
+      throw new Error(
+        'PRI-775: wildcard re-export (`export *`) detected. A name-set snapshot cannot prove '
+        + 'the surface of a star re-export, so the freeze refuses to guess: enumerate the '
+        + 'exports explicitly or extend this guard deliberately.',
+      );
+    }
     const names = new Set<string>();
     for (const block of src.match(/export (?:type )?\{[^}]*\}/g) ?? []) {
-      const inner = block.slice(block.indexOf('{') + 1, block.indexOf('}'));
+      // Strip comments BEFORE splitting on commas: a comment that itself
+      // contains a comma would otherwise be cut in half and glue comment
+      // text onto the following real symbol (hit on real barrel source).
+      const inner = block
+        .slice(block.indexOf('{') + 1, block.indexOf('}'))
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/.*$/gm, '');
       for (let token of inner.split(',')) {
         token = token.trim();
         if (!token) continue;
         if (token.startsWith('type ')) token = token.slice(5).trim();
         const asIdx = token.indexOf(' as ');
         if (asIdx !== -1) token = token.slice(asIdx + 4).trim();
-        if (token) names.add(token);
+        if (!token) continue;
+        if (!IDENTIFIER_RE.test(token)) {
+          throw new Error(
+            `PRI-775: extractor captured a non-identifier export token ${JSON.stringify(token)}. `
+            + 'This guard freezes identifier names only; fail loud instead of freezing '
+            + 'source-text fragments. Fix the extractor or the barrel formatting.',
+          );
+        }
+        names.add(token);
       }
     }
     for (const m of src.match(/^export (?:const|function|class|interface|enum|abstract class) [A-Za-z0-9_]+/gm) ?? []) {
@@ -3589,7 +3618,57 @@ describe('PRI-775: barrel export surface freeze', () => {
       expect(fixture.names.length, `${fixtureFile}: "count" field is stale`).toBe(fixture.count);
       expect([...fixture.names].sort(), `${fixtureFile}: names are not sorted/deduped`).toEqual(fixture.names);
       expect(new Set(fixture.names).size, `${fixtureFile}: duplicate names`).toBe(fixture.names.length);
+      expect(
+        fixture.names.every((n) => IDENTIFIER_RE.test(n)),
+        `${fixtureFile}: snapshot contains non-identifier names (comment/text pollution)`,
+      ).toBe(true);
     }
+  });
+
+  it('extractor contract: comments, aliases, type-only blocks, and fail-loud traps', () => {
+    // Comments inside an export block must never leak into the frozen names.
+    expect(extractExportNames([
+      'export {',
+      '  /** @deprecated use Bar instead */',
+      '  Foo,',
+      '  Bar, // trailing note',
+      "} from './x.js';",
+    ].join('\n'))).toEqual(['Bar', 'Foo']);
+
+    // A comma inside a comment must not split the comment in half and glue
+    // comment text onto the next symbol (hit on real barrel source).
+    expect(extractExportNames([
+      'export {',
+      '  // re-exports Foo, not deep imports.',
+      '  Foo,',
+      '  /* block, comment */ Baz,',
+      "} from './x.js';",
+    ].join('\n'))).toEqual(['Baz', 'Foo']);
+
+    // Aliases freeze the exported (right-hand) name; inline `type` modifier is honored.
+    expect(extractExportNames([
+      'export {',
+      '  InternalFoo as Foo,',
+      '  type InternalBar as Bar,',
+      "} from './x.js';",
+    ].join('\n'))).toEqual(['Bar', 'Foo']);
+
+    // `export type { ... }` blocks and value declarations are all captured.
+    expect(extractExportNames([
+      'export type { Baz };',
+      'export const QUX = 1;',
+      'export function qux(): void {}',
+      'export class Qux {}',
+      'export interface IQux {}',
+      'export enum QuxKind { A }',
+      'export abstract class BaseQux {}',
+    ].join('\n'))).toEqual(['BaseQux', 'Baz', 'IQux', 'QUX', 'Qux', 'QuxKind', 'qux']);
+
+    // Wildcard re-exports cannot be proven by a name snapshot: refuse.
+    expect(() => extractExportNames("export * from './x.js';")).toThrow(/wildcard/);
+
+    // Text fragments that never reduce to an identifier fail loud, never freeze.
+    expect(() => extractExportNames('export { 123bad } from "./x.js";')).toThrow(/non-identifier/);
   });
 });
 
