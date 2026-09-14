@@ -194,7 +194,7 @@ PD 倾向于**小批量同步写**（确保数据安全），不追求极致 thr
 |------|------------|----------------|
 | `state.db`（含 WAL）| 100 MB | 500 MB |
 | `principle_training_state.json` | 5 MB | 10 MB |
-| `audit-log.jsonl` | n/a | n/a（永久保留）|
+| `audit-log.jsonl` | n/a | n/a（永久保留；**未实现**——无代码写入方，见 OBSERVABILITY_ARCHITECTURE §10 设计）|
 | 单个 `.principles/skills/{id}/SKILL.md` | 5 KB | 10 KB |
 | 单个 `.principles/implementations/code/{id}/entry.ts` | 10 KB | 50 KB |
 | `.pd/training-exports/{batch}/dataset.jsonl` | 50 MB | 100 MB |
