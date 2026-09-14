@@ -335,21 +335,22 @@ interface TelemetryEvent {
 
 ### 4.4 必发的 TelemetryEvent
 
-每个 Runner / Bridge / Service 必须发的最小事件集合：
+每个 Runner / Bridge / Service 必须发的最小事件集合。
 
-#### 4.4.1 Diagnostician
+> **PRI-786/PRI-773 真况**：Diagnostician 单体已被 PRI-625 拆分管线取代，事件按 runner 前缀命名；完整注册面见 `telemetry-event.ts`（PRI-773 起由 check:telemetry-events 守卫强制双向同步）。
+
+#### 4.4.1 Diagnostician（现 split pipeline：router / distiller / rootcause）
 
 ```
-diagnostician_task_leased
-diagnostician_context_built
-diagnostician_run_started
-diagnostician_artifact_committed
-principle_candidate_registered  (per candidate)
-diagnostician_artifact_commit_failed (on failure)
-diagnostician_task_succeeded
-diagnostician_task_retried
-diagnostician_task_failed
-output_validation_succeeded / output_validation_failed
+diag_router_task_leased / diag_distiller_task_leased / diag_rootcause_task_leased
+diag_router_context_built / diag_distiller_context_built / diag_rootcause_context_built
+diag_router_run_started / diag_distiller_run_started / diag_rootcause_run_started
+diag_router_candidate_registered  (per candidate)
+diag_router_artifact_committed
+diag_router_artifact_commit_failed (on failure)
+diag_router_task_succeeded / diag_distiller_task_succeeded / diag_rootcause_task_succeeded
+diag_router_task_retried / diag_distiller_task_retried / diag_rootcause_task_retried
+diag_router_task_failed / diag_distiller_task_failed / diag_rootcause_task_failed
 ```
 
 #### 4.4.2 各 Peer Runner（统一格式）

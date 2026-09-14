@@ -602,7 +602,7 @@ ApprovalRecord（可选） → 实际激活
 
 | 阶段 | 事件 |
 |------|------|
-| Diagnostician | `diagnostician_task_leased` / `diagnostician_run_started` / `diagnostician_task_succeeded` 或 `_failed` |
+| Diagnostician（现 split pipeline） | `diag_router_task_leased` / `diag_distiller_run_started` / `diag_router_task_succeeded` 或 `_failed`（每 runner 同构，完整清单见 telemetry-event.ts） |
 | Bridge | `probation_to_internalization_bridged` / `bridge_skipped` |
 | 每个 Peer Runner | `<runner>_task_leased` / `<runner>_run_started` / `<runner>_task_succeeded` 或 `_failed` |
 | Activation | 详见 ADR-0006 |
