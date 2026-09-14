@@ -359,8 +359,10 @@ main:
   #   前置：pd-secrets 密钥文件 allow_events 需包含 pull_request.target
   #         （未包含时本流水线 fail-loud，T6 merged 触发不受影响）。
   #   幂等：可重复触发——已推送的分支仅快进更新，GitHub PR 已存在则跳过创建。
+  #   可观测（PRI-785）：投递 JSON 摘要写 cnb-deliver-report.json 并挂为构建附件；
+  #         零匹配时也会在日志枚举当次全部开放 PR 的 head/base——静默空转不再不可见。
   # ---------------------------------------------------------------------------
-  "pull_request.target":
+  "pull_request.target": &cnb-auto-deliver
     - name: cnb-github-auto-deliver
       docker:
         build: .ide/Dockerfile
@@ -370,7 +372,23 @@ main:
         - name: 自动投递到 GitHub
           script: |
             set -eu
-            node scripts/dev/cnb-auto-deliver.mjs
+            DELIVER_REPORT_FILE=cnb-deliver-report.json node scripts/dev/cnb-auto-deliver.mjs
+
+        - name: 上传投递报告
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - cnb-deliver-report.json
+            ttl: 30
+
+  # ---------------------------------------------------------------------------
+  # T7b — 手动/远程投递（PRI-785）：与 T7 同一份流水线定义（YAML 锚点复用）。
+  #   触发：OpenAPI POST /{repo}/-/build/start
+  #         {"event":"api_trigger_deliver","branch":"main"}（需 repo-cnb-trigger:rw）
+  #   用途：T7 事件未触发、或需立即补投积压时，远程跑同一投递脚本（幂等）。
+  #   注意：脚本零匹配时成功退出——判断是否真投递要看日志枚举与附件报告。
+  # ---------------------------------------------------------------------------
+  api_trigger_deliver: *cnb-auto-deliver
 
   # ---------------------------------------------------------------------------
   # T2 — 每周架构健康检查（定时任务）
