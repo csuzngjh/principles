@@ -379,6 +379,10 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // persists circuit-breaker isolation through the core-owned SQLite safety store.
   // Pure threshold policy remains in principles-core.
   'rulecode-safety-circuit.ts',
+  // PRI-788 G4: Plugin I/O boundary — atomically maintains
+  // <workspace>/.state/signal-health.json (mkdir + atomicWriteFileSync +
+  // SystemLogger) so `pd config doctor` can surface detection-chain health.
+  'signal-health.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -477,7 +481,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // as the plugin I/O shell for scope reads and durable safety isolation.
     // PRI-737: Removed evolution-logger.ts + evolution-engine.ts (98 → 96) —
     // legacy evolution worker retirement (trace-id util moved to src/utils/).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
+    // PRI-788 G4: Added signal-health.ts (96 → 97) — plugin I/O boundary for
+    // <workspace>/.state/signal-health.json (atomic write + mkdir + SYSTEM log),
+    // consumed by `pd config doctor` for detection-chain health visibility.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
   });
 });
 

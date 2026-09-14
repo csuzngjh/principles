@@ -54,18 +54,53 @@ function healthFilePath(stateDir: string): string {
   return path.join(stateDir, SIGNAL_HEALTH_FILE);
 }
 
+/**
+ * 结构校验：只接受带全部必需数值/字符串字段的对象（ERR-001/ERR-013）。
+ * 用 Object.hasOwn + typeof 做运行时收窄，避免 `in` 命中原型链、
+ * 也避免 `as` 把未校验数据直接断言成领域类型。
+ */
+function isSignalHealthState(value: unknown): value is SignalHealthState {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const obj = value as Record<string, unknown>;
+  const numericFields = [
+    'stage1Strong',
+    'stage2Confirmed',
+    'stage2Queued',
+    'stage2Dropped',
+    'pendingCount',
+    'observerConsecutiveFailures',
+  ] as const;
+  for (const field of numericFields) {
+    if (!Object.hasOwn(obj, field) || typeof obj[field] !== 'number') {
+      return false;
+    }
+  }
+  return (
+    typeof obj['day'] === 'string' &&
+    typeof obj['updatedAt'] === 'string'
+  );
+}
+
 function loadState(stateDir: string, now: Date): SignalHealthState {
   try {
     const raw = fs.readFileSync(healthFilePath(stateDir), 'utf-8');
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed !== null && 'stage1Strong' in parsed) {
-      const state = parsed as SignalHealthState;
+    if (isSignalHealthState(parsed)) {
       const today = now.toISOString().slice(0, 10);
-      if (state.day !== today) {
+      if (parsed.day !== today) {
         // 跨日：计数归零，时间戳与失败计数保留
-        return { ...state, stage1Strong: 0, stage2Confirmed: 0, stage2Queued: 0, stage2Dropped: 0, day: today };
+        return {
+          ...parsed,
+          stage1Strong: 0,
+          stage2Confirmed: 0,
+          stage2Queued: 0,
+          stage2Dropped: 0,
+          day: today,
+        };
       }
-      return state;
+      return parsed;
     }
   } catch {
     // 缺失/损坏 → 重建默认值（doctor 侧以 updatedAt/字段存在性呈现 unknown）
@@ -80,10 +115,7 @@ export function readSignalHealth(stateDir: string): SignalHealthState | null {
   try {
     const raw = fs.readFileSync(healthFilePath(stateDir), 'utf-8');
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed !== null && 'stage1Strong' in parsed) {
-      return parsed as SignalHealthState;
-    }
-    return null;
+    return isSignalHealthState(parsed) ? parsed : null;
   } catch {
     return null;
   }
