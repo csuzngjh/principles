@@ -74,10 +74,11 @@ PD 的痛苦信号按重要性分为三层。**只有 Layer 1 和 Layer 2 独立
    emitPainDetectedEvent → PainSignalBridge
          │
          ▼
-   ┌─────────────────────────┐
-   │  state.db: pain_signals │
-   │  ledger.json: pain_flag │
-   └──────────┬──────────────┘
+   ┌────────────────────────────────────────────┐
+   │  trajectory.db: pain_events（canonical）   │
+   │  state.db: dead_letter_pains（失败兜底）   │
+   │  ledger.json: pain_flag                    │
+   └──────────┬─────────────────────────────────┘
               │
               ▼
    PainBridge.onPainDetected(painId)

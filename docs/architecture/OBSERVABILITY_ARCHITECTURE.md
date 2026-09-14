@@ -123,6 +123,8 @@ console.server.routes.approvals
 | pd-console 后端日志 | `{workspace}/.pd/logs/console.jsonl` | 单文件 ≤ 50MB，保留 7 天 | 7 天 |
 | 审计日志 | `{workspace}/.pd/audit-log.jsonl` | 不滚动（**append only**）| 永久 |
 
+> **PRI-786 真况**：`audit-log.jsonl` 当前**没有代码实现**（零写入方/读取方）；上行与 §5.4/§10 为设计规范。现存的治理事实落盘是 state.db（`activation_decisions`/`approvals` 等）与 trajectory.db。
+
 ---
 
 ## 3. Metrics（指标）
@@ -478,6 +480,8 @@ interface AuditLogEntry {
 
 ### 5.4 写入规范
 
+> **PRI-786 真况**：以下 AUDIT-* 规则为**未实施的设计规范**（当前仓库没有 audit-log 写入方）；实现时必须满足全部规则。
+
 | 规则 | 描述 |
 |-----|------|
 | AUDIT-1 | 写入位置：`{workspace}/.pd/audit-log.jsonl` |
@@ -666,6 +670,8 @@ function jsonLog(level: string, message: string, context: object) {
 ---
 
 ## 10. 配置
+
+> **PRI-786 真况**：`observability.yaml`（per-domain 配置文件）为**未实施的设计**——ADR-0016 单文件 `.pd/config.yaml` 中不存在 `observability` 键，且配置校验对未知键 fail-loud。本节仅作未来设计参考。
 
 ### 10.1 observability.yaml
 
