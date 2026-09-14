@@ -19,9 +19,16 @@ export interface OwnerDecisionCardProps {
   item: OwnerDecisionItemData;
   onResolved: () => void;
   governanceReady?: boolean;
+  /** 非空时在动作区渲染可见的锁定原因（rc-9：禁用不允许是无声的）。 */
+  actionsLockedReason?: string;
 }
 
-export function OwnerDecisionCard({ item, onResolved, governanceReady = true }: OwnerDecisionCardProps) {
+export function OwnerDecisionCard({
+  item,
+  onResolved,
+  governanceReady = true,
+  actionsLockedReason,
+}: OwnerDecisionCardProps) {
   const { t } = useTranslation();
   const [actionLoading, setActionLoading] = useState<VerdictAction | null>(null);
   const [instruction, setInstruction] = useState("");
@@ -133,9 +140,8 @@ export function OwnerDecisionCard({ item, onResolved, governanceReady = true }: 
           )}
         </div>
       )}
-      {item.review?.brief.kind === "rollout" && item.review.brief.summary && (
-        <p className="mb-3 text-[12.5px] text-ink-2">{item.review.brief.summary}</p>
-      )}
+      {/* rollout 的 brief.summary 已由上方 item.summary 渲染（模型层 title 也
+          不再复用它）— 这里不再重复渲染同一段评审原文（PRI-787）。 */}
 
       {item.review && (
         <div className="mb-2 flex flex-wrap gap-2 text-[10.5px] font-mono uppercase tracking-[0.06em]">
@@ -201,6 +207,21 @@ export function OwnerDecisionCard({ item, onResolved, governanceReady = true }: 
               />
               <span>{t("pages.focus.ownerDecision.partialEvidenceAcknowledgement")}</span>
             </label>
+          )}
+          {!governanceReady && actionsLockedReason && (
+            <div
+              className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 p-3"
+              data-testid={`owner-actions-locked-${item.taskId}`}
+            >
+              <p className="text-ink-2 text-[12.5px] leading-relaxed">{actionsLockedReason}</p>
+              <Link
+                to="/settings"
+                data-testid={`owner-actions-locked-settings-${item.taskId}`}
+                className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
+              >
+                {t("pages.focus.ownerDecision.goSettingsCta")}
+              </Link>
+            </div>
           )}
           <div className="flex flex-wrap gap-2 mt-3">
             {canAccept && (
