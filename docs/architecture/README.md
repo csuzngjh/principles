@@ -27,6 +27,7 @@
 | **新建内置代理 / 切换 CLI 后端** | [`COMPONENTS.md`](./COMPONENTS.md) §3.8（BALM）+ ADR-0008 |
 | **代理长程任务 / 自校验工具** | [`COMPONENTS.md`](./COMPONENTS.md) §3.9（LRAS）+ ADR-0009 |
 | **痛苦信号来源 / 目标对齐** | [`INTERNALIZATION_PIPELINE.md`](./INTERNALIZATION_PIPELINE.md) §2.1.1 + ADR-0010 |
+| **长任务执行 / Agent 交付规范（何时停、产物写哪）** | [`AGENT_DELIVERY_OPERATING_MODEL.md`](./AGENT_DELIVERY_OPERATING_MODEL.md) |
 | **OKR / Mission / 任务调度** | [`COMPONENTS.md`](./COMPONENTS.md) §3.10-3.11 + ADR-0010/0011 |
 
 ---
@@ -141,6 +142,10 @@
 | ADR-0010 | Accepted | Goal-Aligned Pain Signal（GAP）|
 | ADR-0011 | Accepted | Three-Tier Task Model and MissionScheduler |
 | [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) | Accepted | Runtime V2 独立调度与 legacy execution 退役；取代 IdleTrigger 保留决策 |
+| [ADR-0026](../adr/0026-cnb-token-injection-boundary.md) | Proposed | CNB_TOKEN 注入边界不可由 imports 配置消除（P0-01 归因修正）|
+
+> 注：ADR-0013 ~ ADR-0025 未在本表登记（表格最后更新于 ADR-0012）。
+> 补齐属独立的文档治理动作，本次仅登记本决策相关的 ADR-0026。
 
 ### 架构治理（Governance）
 
