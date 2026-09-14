@@ -1074,6 +1074,18 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const ruleCodePending = ruleCodeItems.filter(item => item.action === 'code_tool_hook_shadow_activate' && item.enforcement !== 'safety_isolated');
   const ruleCodeAlerts = ruleCodeItems.filter(item => item.enforcement === 'safety_isolated');
 
+  // PRI-787: 决策动作被治理就绪门锁定时，必须在卡片上给出可见原因（rc-9 —
+  // 禁用不允许是无声的）。experienceData 未加载（null）时门默认放行、无锁定。
+  const ownerActionsLockedReason = experienceData === null
+    || (experienceData.readiness.authenticationMode === "authenticated"
+      && experienceData.readiness.ownerIdentityConfiguration === "configured")
+    ? null
+    : t(
+      experienceData.readiness.authenticationMode !== "authenticated"
+        ? "pages.focus.ownerDecision.actionsLockedAuth"
+        : "pages.focus.ownerDecision.actionsLockedIdentity",
+    );
+
   // Map codes to i18n text
   // Governance Recovery Actions v1: tasks_need_human_review interpolates the
   // needs_human_review task count, not the approvals count.
@@ -1127,6 +1139,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               experienceData.readiness.authenticationMode === "authenticated"
               && experienceData.readiness.ownerIdentityConfiguration === "configured"
             )}
+            actionsLockedReason={ownerActionsLockedReason ?? undefined}
             onResolved={() => { void loadData(); }}
           />
         ))}
