@@ -300,6 +300,69 @@ describe('PRI-439 ArtificerL2Adapter — loop error', () => {
 
     await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/agent loop threw/);
   });
+
+  // PRI-758/EP002-R3: LLM-call failures arrive as message_end with
+  // stopReason 'error'/'aborted' — the loop ends without calling
+  // shouldStopAfterTurn, so the adapter must surface them loudly itself.
+  it('surfaces LLM stream stopReason=error as the failure reason', async () => {
+    const adapter = makeAdapter();
+    // eslint-disable-next-line @typescript-eslint/max-params -- mirrors the 5-param runAgentLoop signature
+    hoisted.impl = async (_p: unknown, _c: unknown, _cfg: unknown, emit: (e: unknown) => Promise<void>) => {
+      await emit({ type: 'message_end', message: { stopReason: 'error', errorMessage: 'boom from provider' } });
+      return [];
+    };
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/stopReason=error.*boom from provider/);
+  });
+});
+
+// ── no-tool-call nudge continuation (EP002-R3) ───────────────────────────────
+
+describe('PRI-758/EP002-R3 ArtificerL2Adapter — getFollowUpMessages nudge', () => {
+  interface FollowUpMessage { role: string; content: string }
+
+  function makeGetFollowUp(): (cfg: { getFollowUpMessages?: () => Promise<FollowUpMessage[]> }) => Promise<FollowUpMessage[]> {
+    return async (cfg) => {
+      if (typeof cfg.getFollowUpMessages !== 'function') throw new Error('getFollowUpMessages missing from loopConfig');
+      return cfg.getFollowUpMessages();
+    };
+  }
+
+  it('returns bounded nudges (≤2) while no output is captured', async () => {
+    const adapter = makeAdapter();
+    const getFollowUp = makeGetFollowUp();
+    hoisted.impl = async (_p: unknown, _c: unknown, cfg: { getFollowUpMessages?: () => Promise<FollowUpMessage[]> }) => {
+      const first = await getFollowUp(cfg);
+      const second = await getFollowUp(cfg);
+      const third = await getFollowUp(cfg);
+      expect(first).toHaveLength(1);
+      expect(first[0]?.role).toBe('user');
+      expect(first[0]?.content).toMatch(/submit_rulecode/);
+      expect(second).toHaveLength(1);
+      expect(third).toHaveLength(0);
+      return [];
+    };
+
+    await expect(adapter.startRun(makeStartRun())).rejects.toThrow(/agent loop ended without a submit_rulecode call/);
+  });
+
+  it('stops nudging once output has been captured', async () => {
+    const adapter = makeAdapter();
+    const getFollowUp = makeGetFollowUp();
+    hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }, cfg: { getFollowUpMessages?: () => Promise<FollowUpMessage[]> }) => {
+      const submit = context.tools?.find((t) => t.name === 'submit_rulecode');
+      if (submit) {
+        await submit.execute('call-1', makeRuleOutput());
+      }
+      const followUp = await getFollowUp(cfg);
+      expect(followUp).toHaveLength(0);
+      return [];
+    };
+
+    const handle = await adapter.startRun(makeStartRun());
+    const output = await adapter.fetchOutput(handle.runId);
+    expect(output?.payload).toEqual(makeRuleOutput());
+  });
 });
 
 // ── runtime metadata ─────────────────────────────────────────────────────────
