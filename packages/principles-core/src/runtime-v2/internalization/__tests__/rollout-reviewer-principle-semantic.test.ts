@@ -24,7 +24,6 @@ import type { TaskRecord } from '../../task-status.js';
 
 const SCRIBE_ID = 'scribe-sem-1';
 const ROLLOUT_ID = 'rollout-reviewer-sem-1';
-const EVAL_ID = 'evaluator-sem-1';
 const RUN_ID = 'run-sem-1';
 const SCRIBE_ARTIFACT_ID = `pi-art-${SCRIBE_ID}-${RUN_ID}`;
 
@@ -39,11 +38,11 @@ function meta(overrides: Partial<PITaskMetadata> = {}): PITaskMetadata {
   };
 }
 
-function task(taskId: string, taskKind: string, status: TaskRecord['status'], m: PITaskMetadata): TaskRecord {
+function task(taskId: string, taskKind: string, opts: { status: TaskRecord['status']; m: PITaskMetadata }): TaskRecord {
   return {
-    taskId, taskKind, status, attemptCount: 0, maxAttempts: 3,
+    taskId, taskKind, status: opts.status, attemptCount: 0, maxAttempts: 3,
     createdAt: '2026-09-15T00:00:00.000Z', updatedAt: '2026-09-15T00:00:00.000Z',
-    diagnosticJson: createPITaskDiagnosticJson(m),
+    diagnosticJson: createPITaskDiagnosticJson(opts.m),
   };
 }
 
@@ -167,8 +166,7 @@ describe('DefaultRolloutReviewerValidator — 模式分支', () => {
     const result = await validator.validate(
       principleModeOutput('approve_rollout') as never,
       ROLLOUT_ID,
-      SCRIBE_ARTIFACT_ID,
-      { reviewMode: 'principle_semantic' },
+      { expectedSourceArtifactId: SCRIBE_ARTIFACT_ID, reviewMode: 'principle_semantic' },
     );
     expect(result.valid).toBe(true);
   });
@@ -176,14 +174,14 @@ describe('DefaultRolloutReviewerValidator — 模式分支', () => {
   it('principle_semantic: 缺 sourceScribeArtifactId → output_invalid', async () => {
     const output = principleModeOutput('approve_rollout') as Record<string, unknown>;
     delete output.sourceScribeArtifactId;
-    const result = await validator.validate(output as never, ROLLOUT_ID, SCRIBE_ARTIFACT_ID, { reviewMode: 'principle_semantic' });
+    const result = await validator.validate(output as never, ROLLOUT_ID, { expectedSourceArtifactId: SCRIBE_ARTIFACT_ID, reviewMode: 'principle_semantic' });
     expect(result.valid).toBe(false);
     expect(result.errors.join('\n')).toContain('sourceScribeArtifactId must be non-empty string');
   });
 
   it('principle_semantic: source 与 authority 不一致 → mismatch', async () => {
     const output = { ...principleModeOutput('approve_rollout'), sourceScribeArtifactId: 'pi-art-wrong' };
-    const result = await validator.validate(output as never, ROLLOUT_ID, SCRIBE_ARTIFACT_ID, { reviewMode: 'principle_semantic' });
+    const result = await validator.validate(output as never, ROLLOUT_ID, { expectedSourceArtifactId: SCRIBE_ARTIFACT_ID, reviewMode: 'principle_semantic' });
     expect(result.valid).toBe(false);
     expect(result.errors.join('\n')).toContain('mismatch');
   });
@@ -196,7 +194,7 @@ describe('DefaultRolloutReviewerValidator — 模式分支', () => {
       sourceTrace: { evaluatorArtifactId: 'pi-art-eval-1' },
       risks: [],
       generatedAt: '2026-09-15T00:00:00.000Z',
-    }, ROLLOUT_ID, 'pi-art-eval-1');
+    }, ROLLOUT_ID, { expectedSourceArtifactId: 'pi-art-eval-1' });
     expect(result.valid).toBe(true);
   });
 });
@@ -206,8 +204,8 @@ describe('DefaultRolloutReviewerValidator — 模式分支', () => {
 describe('RolloutReviewer principle semantic mode — fresh run', () => {
   it('scribe 依赖被选为评审源;approve 后 scribe artifact 被 validated 且 dispatch 的就是它', async () => {
     const artifacts = makeArtifacts();
-    const rolloutTask = task(ROLLOUT_ID, 'rollout_reviewer', 'pending', meta({ dependencyTaskIds: [SCRIBE_ID] }));
-    const scribeSucceeded = task(SCRIBE_ID, 'scribe', 'succeeded', meta({ dependencyTaskIds: [] }));
+    const rolloutTask = task(ROLLOUT_ID, 'rollout_reviewer', { status: 'pending', m: meta({ dependencyTaskIds: [SCRIBE_ID] }) })
+    const scribeSucceeded = task(SCRIBE_ID, 'scribe', { status: 'succeeded', m: meta({ dependencyTaskIds: [] }) })
     const h = makeHarness({
       tasks: [rolloutTask, scribeSucceeded],
       artifacts,
@@ -240,8 +238,8 @@ describe('RolloutReviewer principle semantic mode — fresh run', () => {
 
   it('reject: 不翻转 validated、不 dispatch（terminal，零 side effect）', async () => {
     const artifacts = makeArtifacts();
-    const rolloutTask = task(ROLLOUT_ID, 'rollout_reviewer', 'pending', meta({ dependencyTaskIds: [SCRIBE_ID] }));
-    const scribeSucceeded = task(SCRIBE_ID, 'scribe', 'succeeded', meta({ dependencyTaskIds: [] }));
+    const rolloutTask = task(ROLLOUT_ID, 'rollout_reviewer', { status: 'pending', m: meta({ dependencyTaskIds: [SCRIBE_ID] }) })
+    const scribeSucceeded = task(SCRIBE_ID, 'scribe', { status: 'succeeded', m: meta({ dependencyTaskIds: [] }) })
     const h = makeHarness({
       tasks: [rolloutTask, scribeSucceeded],
       artifacts,

@@ -88,12 +88,18 @@ export interface RolloutReviewerValidationResult {
   readonly errorCategory?: string;
 }
 
+export interface RolloutReviewerValidatorOptions {
+  /** Runner-owned source artifact id the output must echo exactly (rc-6). */
+  expectedSourceArtifactId?: string;
+  /** PRI-720: review contract mode; defaults to the legacy code_chain. */
+  reviewMode?: RolloutReviewMode;
+}
+
 export interface RolloutReviewerValidator {
   validate(
     output: RolloutReviewerOutputV1,
     taskId: string,
-    expectedSourceArtifactId?: string,
-    options?: { reviewMode?: RolloutReviewMode },
+    options?: RolloutReviewerValidatorOptions,
   ): Promise<RolloutReviewerValidationResult>;
 }
 
@@ -102,8 +108,7 @@ export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator
   async validate(
     output: RolloutReviewerOutputV1,
     taskId: string,
-    expectedSourceArtifactId?: string,
-    options?: { reviewMode?: RolloutReviewMode },
+    options?: RolloutReviewerValidatorOptions,
   ): Promise<RolloutReviewerValidationResult> {
     const errors: string[] = [];
 
@@ -115,6 +120,7 @@ export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator
       errors.push(`taskId mismatch: expected ${taskId}, got ${String(output.taskId)}`);
     }
 
+    const expectedSourceArtifactId = options?.expectedSourceArtifactId;
     const reviewMode = options?.reviewMode ?? 'code_chain';
 
     // PRI-720: the lineage field under review depends on the review mode —

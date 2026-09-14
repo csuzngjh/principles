@@ -319,10 +319,16 @@ export class RolloutReviewerRunner {
       // Overwrite the echoed lineage with the authoritative values before
       // validation; emit telemetry whenever an echo differed so the
       // correction rate stays observable (rc-9-no-silent-fallback).
-      this.reconcileLineageEcho(taskId, output, sourceArtifactId, reviewMode);
+      this.reconcileLineageEcho(taskId, output, {
+        authoritativeSourceArtifactId: sourceArtifactId,
+        reviewMode,
+      });
 
       this.phase = RunnerPhase.Validating;
-      const validationResult = await this.validator.validate(output, taskId, sourceArtifactId, { reviewMode });
+      const validationResult = await this.validator.validate(output, taskId, {
+        expectedSourceArtifactId: sourceArtifactId,
+        reviewMode,
+      });
       if (!validationResult.valid) {
         return await this.handleValidationError({
           taskId,
@@ -378,30 +384,29 @@ export class RolloutReviewerRunner {
   private reconcileLineageEcho(
     taskId: string,
     output: RolloutReviewerOutputV1,
-    authoritativeSourceArtifactId: string,
-    reviewMode: RolloutReviewMode,
+    params: { authoritativeSourceArtifactId: string; reviewMode: RolloutReviewMode },
   ): void {
-    const principleSemantic = reviewMode === 'principle_semantic';
+    const principleSemantic = params.reviewMode === 'principle_semantic';
     const correctedFields = reconcileLineageEcho(output, {
       topFields: [
         { field: 'taskId', authoritativeValue: taskId },
         principleSemantic
-          ? { field: 'sourceScribeArtifactId', authoritativeValue: authoritativeSourceArtifactId }
-          : { field: 'sourceEvaluatorArtifactId', authoritativeValue: authoritativeSourceArtifactId },
+          ? { field: 'sourceScribeArtifactId', authoritativeValue: params.authoritativeSourceArtifactId }
+          : { field: 'sourceEvaluatorArtifactId', authoritativeValue: params.authoritativeSourceArtifactId },
       ],
       trace: {
         traceField: 'sourceTrace',
         fields: [principleSemantic
-          ? { field: 'scribeArtifactId', authoritativeValue: authoritativeSourceArtifactId }
-          : { field: 'evaluatorArtifactId', authoritativeValue: authoritativeSourceArtifactId }],
+          ? { field: 'scribeArtifactId', authoritativeValue: params.authoritativeSourceArtifactId }
+          : { field: 'evaluatorArtifactId', authoritativeValue: params.authoritativeSourceArtifactId }],
       },
     });
 
     if (correctedFields.length > 0) {
       this.emitRolloutReviewerEvent('rollout_reviewer_lineage_echo_corrected', taskId, {
         correctedFields,
-        authoritativeSourceArtifactId,
-        reviewMode,
+        authoritativeSourceArtifactId: params.authoritativeSourceArtifactId,
+        reviewMode: params.reviewMode,
       });
     }
   }
@@ -1581,12 +1586,18 @@ export class RolloutReviewerRunner {
     // validate + lineage echo reconciliation,这里是对存储腐坏的防御)
     let echoedArtifactId: string | undefined;
     if (typeof parsed === 'object' && parsed !== null) {
-      const v = (parsed as Record<string, unknown>).sourceEvaluatorArtifactId;
+      const v = (parsed as Record<string, unknown>).sourceEvaluatorArtifactId
+        ?? (parsed as Record<string, unknown>).sourceScribeArtifactId;
       if (typeof v === 'string') echoedArtifactId = v;
     }
     // runtime-contract-exempt: ERR-001 minimal shape check then full validator.validate — same pattern as fetchAndParseOutput; the cast only narrows post-validation
     const candidate = parsed as RolloutReviewerOutputV1;
-    const vr = await this.validator.validate(candidate, taskId, echoedArtifactId);
+    const rawTask = await this.stateManager.getTask(taskId);
+    const reviewMode = await this.resolveReviewModeForTask(rawTask ? hydratePITaskRecord(rawTask) ?? undefined : undefined);
+    const vr = await this.validator.validate(candidate, taskId, {
+      expectedSourceArtifactId: echoedArtifactId,
+      reviewMode,
+    });
     if (!vr.valid) {
       throw new PDRuntimeError('storage_unavailable', `completion intent output unrecoverable: run ${sourceRunId} of task ${taskId} failed revalidation (${vr.errors.join('; ')})`);
     }
