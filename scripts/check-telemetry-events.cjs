@@ -24,7 +24,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
-const SCAN_ROOTS = ['packages/principles-core/src'];
+// pd-cli/src is in scope: `pd diagnose` emits runtime_adapter_selected
+// through a StoreEventEmitter directly (TELE-01). host-runtime has no
+// direct literal emitTelemetry sites (typed passthrough only).
+const SCAN_ROOTS = ['packages/principles-core/src', 'packages/pd-cli/src'];
 const UNION_FILE = 'packages/principles-core/src/telemetry-event.ts';
 const ARTIFACT_SUMMARY_FILE =
   'packages/principles-core/src/runtime-v2/internalization/artifact-summary.ts';

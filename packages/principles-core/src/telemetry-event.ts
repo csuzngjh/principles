@@ -2,15 +2,12 @@
  * TelemetryEvent schema for the Evolution SDK.
  *
  * TypeBox schema describing the shape of in-process evolution events.
- * Per D-07, this is a documentation artifact -- the existing EvolutionLogger
- * output should conform to this schema. No new TelemetryService is created.
- *
- * Per D-08, covers the 3 core events aligned with EvolutionHook:
- * - pain_detected (maps to EvolutionStage 'pain_detected')
- * - principle_candidate_created (maps to EvolutionStage 'principle_generated')
- * - principle_promoted (maps to EvolutionStage 'completed')
- *
- * Injection and storage events are out of scope for this phase.
+ * The union below is the SINGLE registration authority for every event name
+ * that flows through StoreEventEmitter: an unregistered name is silently
+ * rewritten to `degradation_triggered` (ERR-060). scripts/check-telemetry-events.cjs
+ * (verify:merge --strict since PRI-773) keeps this union two-way in sync with
+ * the real emit sites — add a Type.Literal here in the same PR that adds the
+ * emit call.
  */
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
@@ -20,52 +17,35 @@ import { Value } from '@sinclair/typebox/value';
 // ---------------------------------------------------------------------------
 
 /**
- * The 30+ telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician + 3 M5 commit + 7 M6 runtime adapter + 2 PRI-419 L2 agent loop (dreamer_l2_turn, dreamer_l2_complete).
+ * Telemetry event types (361 registered names after the PRI-773 catch-up —
+ * see the family comments inside the union for per-family provenance).
  *
- * Core evolution events (aligned with EvolutionHook methods):
- * - pain_detected -> EvolutionStage 'pain_detected'
- * - principle_candidate_created -> EvolutionStage 'principle_generated'
- * - principle_promoted -> EvolutionStage 'completed'
+ * Historical note: the original D-07/D-08 design covered only 3 core events
+ * (pain_detected / principle_candidate_created / principle_promoted) plus a
+ * diagnostician_* monolith family; those were pruned in PRI-773 after their
+ * emit sites disappeared (the live surface is the per-runner prefixed
+ * families registered below).
  *
  * M2 state transition events (task/run lifecycle):
  * - lease_acquired, lease_released, lease_renewed, lease_expired
  * - task_retried, task_failed, task_succeeded
- * - run_started, run_completed
+ * - run_completed
  *
  * M3 degradation events:
  * - degradation_triggered — graceful degradation fallback activated
  *
- * M4 diagnostician runner events:
- * - diagnostician_task_leased — runner acquired lease on a task
- * - diagnostician_context_built — context assembly completed
- * - diagnostician_run_started — runtime invocation started
- * - diagnostician_run_failed — runtime execution failed
- * - diagnostician_output_invalid — output validation failed
- * - diagnostician_task_succeeded — task marked succeeded
- * - diagnostician_task_retried — task sent to retry_wait
- * - diagnostician_task_failed — task permanently failed
- *
- * M5: Artifact commit + candidate registration events:
- * - diagnostician_artifact_committed — artifact + candidates committed successfully
- * - diagnostician_artifact_commit_failed — commit attempt threw
- * - principle_candidate_registered — individual candidate registered
- *
- * M6: Runtime adapter events:
- * - runtime_adapter_selected — runtime adapter selected for invocation
+ * M6 runtime adapter events:
+ * - runtime_adapter_selected — runtime adapter selected for invocation (pd diagnose TELE-01)
  * - runtime_invocation_started — runtime invocation started
  * - runtime_invocation_succeeded — runtime invocation succeeded
  * - runtime_invocation_failed — runtime invocation failed
- * - output_validation_succeeded — output validation passed
- * - output_validation_failed — output validation failed
  * - output_repair_attempted — PRI-71 schema repair attempted (bounded by maxRepairAttempts)
  * - output_extraction_failed — JSON extraction from LLM response failed (no parseable JSON found)
  * - output_schema_invalid — PRI-200 schema validation failed (before repair)
  * - output_repair_exhausted — PRI-200 repair loop exhausted, output still invalid
+ * - output_path_chosen / output_path_fallback — PRI-271 weak-model output path
  */
 export const TelemetryEventType = Type.Union([
-  Type.Literal('pain_detected'),
-  Type.Literal('principle_candidate_created'),
-  Type.Literal('principle_promoted'),
   // M2: Task/Run state transition events
   Type.Literal('lease_acquired'),
   Type.Literal('lease_released'),
@@ -74,35 +54,21 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('task_retried'),
   Type.Literal('task_failed'),
   Type.Literal('task_succeeded'),
-  Type.Literal('run_started'),
   Type.Literal('run_completed'),
 // M3: Degradation events
   Type.Literal('degradation_triggered'),
-  // M4: Diagnostician runner events
-  Type.Literal('diagnostician_task_leased'),
-  Type.Literal('diagnostician_context_built'),
-  Type.Literal('diagnostician_run_started'),
-  Type.Literal('diagnostician_run_failed'),
-  Type.Literal('diagnostician_output_invalid'),
-  Type.Literal('diagnostician_task_succeeded'),
-  Type.Literal('diagnostician_task_retried'),
-  Type.Literal('diagnostician_task_failed'),
-  Type.Literal('diagnostician_cancel_run_failed'),
-  Type.Literal('diagnostician_mark_succeeded_failed'),
+  // M4: Diagnostician runner events — the monolithic diagnostician_* family
+  // was pruned in PRI-773 (zero emit sites since the PRI-625 split pipeline;
+  // the live surface is the prefixed diag_router_/diag_distiller_/diag_rootcause_
+  // families registered in the PRI-773 catch-up block below).
   Type.Literal('diag_router_invariant_override'),
-  // PRI-371: Core grounding telemetry
-  Type.Literal('diagnostician_core_grounding_result'),
-  // M5: Artifact commit events
-  Type.Literal('diagnostician_artifact_committed'),
-  Type.Literal('diagnostician_artifact_commit_failed'),
-  Type.Literal('principle_candidate_registered'),
+  // (PRI-371 core-grounding and M5 artifact-commit events were pruned in
+  // PRI-773 together with the diagnostician_* monolith family above.)
   // M6: Runtime adapter events
   Type.Literal('runtime_adapter_selected'),
   Type.Literal('runtime_invocation_started'),
   Type.Literal('runtime_invocation_succeeded'),
   Type.Literal('runtime_invocation_failed'),
-  Type.Literal('output_validation_succeeded'),
-  Type.Literal('output_validation_failed'),
   Type.Literal('output_repair_attempted'),
   Type.Literal('output_extraction_failed'),
   Type.Literal('output_schema_invalid'),
@@ -224,10 +190,10 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_l2_complete'),
   Type.Literal('dreamer_l2_fallback_to_l1'),
   // PRI-424/PRI-439: Artificer L2 agent loop telemetry.
-  // - artificer_l2_attempt: per LLM attempt in the legacy write-test-fix loop (kept for backward compat)
   // - artificer_l2_turn: per tool-execution turn inside the L2 agent loop (PRI-439 Phase 4)
   // - artificer_l2_complete: when the loop finishes (turnCount, toolsInvoked, succeeded, timedOut)
-  Type.Literal('artificer_l2_attempt'),
+  // (artificer_l2_attempt pruned in PRI-773: legacy write-test-fix loop event,
+  // zero emit sites since PRI-439 replaced the loop.)
   Type.Literal('artificer_l2_turn'),
   Type.Literal('artificer_l2_complete'),
   // PRI-634 PR-A: repair-round deterministic replay evidence resolution
@@ -317,6 +283,234 @@ export const TelemetryEventType = Type.Union([
   //   reason. Non-fatal — principle artifact is already written.
   Type.Literal('evaluator_rule_assembled'),
   Type.Literal('evaluator_rule_assembly_failed'),
+  // ── PRI-773 catch-up: register the remaining real emit surface. ──
+  // Every name below has a live this.emitEvent/emitRolloutReviewerEvent/
+  // eventType call site in principles-core (verified by
+  // scripts/check-telemetry-events.cjs). Before this PR they were silently
+  // rewritten to degradation_triggered (ERR-060).
+  // Artificer runner (PRI-302 family, expanded surface)
+  Type.Literal('artificer_agent_draft_insert_failed'),
+  Type.Literal('artificer_agent_draft_inserted'),
+  Type.Literal('artificer_artifact_summary_predecessor_skipped'),
+  Type.Literal('artificer_artifact_summary_skipped'),
+  Type.Literal('artificer_diag_llm_rate_limit_degraded'),
+  Type.Literal('artificer_lineage_echo_corrected'),
+  Type.Literal('artificer_no_dependencies'),
+  Type.Literal('artificer_no_scribe_artifact'),
+  Type.Literal('artificer_prior_validator_errors_suppressed'),
+  Type.Literal('artificer_scribe_dep_selected'),
+  // Dreamer runner (expanded surface)
+  Type.Literal('dreamer_agent_draft_insert_failed'),
+  Type.Literal('dreamer_agent_draft_inserted'),
+  Type.Literal('dreamer_artifact_summary_predecessor_skipped'),
+  Type.Literal('dreamer_artifact_summary_skipped'),
+  Type.Literal('dreamer_artifact_write_failed'),
+  Type.Literal('dreamer_context_lineage_unavailable'),
+  Type.Literal('dreamer_diag_llm_rate_limit_degraded'),
+  Type.Literal('dreamer_lineage_echo_corrected'),
+  Type.Literal('dreamer_lineage_partial'),
+  Type.Literal('dreamer_lineage_resolve_failed'),
+  Type.Literal('dreamer_required_context_evidence_unresolved'),
+  Type.Literal('dreamer_wrong_task_kind'),
+  // Philosopher runner (expanded surface)
+  Type.Literal('philosopher_agent_draft_insert_failed'),
+  Type.Literal('philosopher_agent_draft_inserted'),
+  Type.Literal('philosopher_artifact_summary_predecessor_skipped'),
+  Type.Literal('philosopher_artifact_summary_skipped'),
+  Type.Literal('philosopher_context_lineage_unavailable'),
+  Type.Literal('philosopher_context_truncated'),
+  Type.Literal('philosopher_diag_llm_rate_limit_degraded'),
+  Type.Literal('philosopher_lineage_echo_corrected'),
+  Type.Literal('philosopher_manifest_resolution_insufficient'),
+  Type.Literal('philosopher_required_context_evidence_unresolved'),
+  // Scribe runner (expanded surface)
+  Type.Literal('scribe_agent_draft_insert_failed'),
+  Type.Literal('scribe_agent_draft_inserted'),
+  Type.Literal('scribe_artifact_summary_predecessor_skipped'),
+  Type.Literal('scribe_artifact_summary_skipped'),
+  Type.Literal('scribe_context_lineage_unavailable'),
+  Type.Literal('scribe_diag_llm_rate_limit_degraded'),
+  Type.Literal('scribe_lineage_echo_corrected'),
+  Type.Literal('scribe_required_context_evidence_unresolved'),
+  // Evaluator runner (expanded surface)
+  Type.Literal('evaluator_adversarial_replay_error'),
+  Type.Literal('evaluator_adversarial_result_persist_failed'),
+  Type.Literal('evaluator_agent_draft_insert_failed'),
+  Type.Literal('evaluator_agent_draft_inserted'),
+  Type.Literal('evaluator_artifact_summary_predecessor_skipped'),
+  Type.Literal('evaluator_artifact_summary_skipped'),
+  Type.Literal('evaluator_artificer_dep_selected'),
+  Type.Literal('evaluator_attribution_scope_resolve_failed'),
+  Type.Literal('evaluator_completion_intent_finalize_terminal'),
+  Type.Literal('evaluator_completion_intent_read_failed'),
+  Type.Literal('evaluator_completion_intent_resumed'),
+  Type.Literal('evaluator_completion_intent_stale_epoch'),
+  Type.Literal('evaluator_completion_mark_applied_failed'),
+  Type.Literal('evaluator_completion_record_failed'),
+  Type.Literal('evaluator_diag_llm_rate_limit_degraded'),
+  Type.Literal('evaluator_governance_effect_out_of_scope_selected'),
+  Type.Literal('evaluator_intent_contract_absent_on_principle'),
+  Type.Literal('evaluator_lineage_echo_corrected'),
+  Type.Literal('evaluator_lineage_integrity_violation'),
+  Type.Literal('evaluator_no_artificer_artifact'),
+  Type.Literal('evaluator_no_dependencies'),
+  Type.Literal('evaluator_no_principle_bearer_found'),
+  Type.Literal('evaluator_owner_resolution_applying'),
+  Type.Literal('evaluator_owner_resolution_rejected_by_policy'),
+  Type.Literal('evaluator_previous_evaluation_context_degraded'),
+  Type.Literal('evaluator_principle_bearer_ambiguous'),
+  Type.Literal('evaluator_repair_loop_idempotent_reuse'),
+  Type.Literal('evaluator_repair_loop_lineage_missing'),
+  Type.Literal('evaluator_repair_loop_mark_review_failed'),
+  Type.Literal('evaluator_repair_loop_max_iterations'),
+  Type.Literal('evaluator_repair_loop_seeder_missing'),
+  Type.Literal('evaluator_repair_loop_test_out_of_scope'),
+  Type.Literal('evaluator_repair_task_seed_failed'),
+  Type.Literal('evaluator_repair_task_seeded'),
+  Type.Literal('evaluator_rule_principle_id_resolve_failed'),
+  Type.Literal('evaluator_scribe_artifact_not_principle'),
+  Type.Literal('evaluator_scribe_artifact_unresolvable'),
+  Type.Literal('evaluator_source_validation_update_failed'),
+  Type.Literal('evaluator_source_validation_update_not_found'),
+  Type.Literal('evaluator_stage1_output_contract_violation'),
+  Type.Literal('evaluator_task_needs_human_review'),
+  Type.Literal('evaluator_v2_adversarial_cases_skipped'),
+  // Diag router runner (PRI-625 split pipeline)
+  Type.Literal('diag_router_agent_draft_insert_failed'),
+  Type.Literal('diag_router_agent_draft_inserted'),
+  Type.Literal('diag_router_artifact_commit_failed'),
+  Type.Literal('diag_router_artifact_committed'),
+  Type.Literal('diag_router_artifact_summary_predecessor_skipped'),
+  Type.Literal('diag_router_artifact_summary_skipped'),
+  Type.Literal('diag_router_artifact_write_failed'),
+  Type.Literal('diag_router_cancel_run_failed'),
+  Type.Literal('diag_router_candidate_registered'),
+  Type.Literal('diag_router_context_built'),
+  Type.Literal('diag_router_context_lineage_unavailable'),
+  Type.Literal('diag_router_context_truncated'),
+  Type.Literal('diag_router_diag_llm_rate_limit_degraded'),
+  Type.Literal('diag_router_manifest_resolution_insufficient'),
+  Type.Literal('diag_router_mark_failed_error'),
+  Type.Literal('diag_router_mark_retry_error'),
+  Type.Literal('diag_router_mark_succeeded_failed'),
+  Type.Literal('diag_router_output_extraction_failed'),
+  Type.Literal('diag_router_output_invalid'),
+  Type.Literal('diag_router_output_validated'),
+  Type.Literal('diag_router_required_context_evidence_unresolved'),
+  Type.Literal('diag_router_router_completed'),
+  Type.Literal('diag_router_run_failed'),
+  Type.Literal('diag_router_run_started'),
+  Type.Literal('diag_router_task_failed'),
+  Type.Literal('diag_router_task_leased'),
+  Type.Literal('diag_router_task_retried'),
+  Type.Literal('diag_router_task_succeeded'),
+  Type.Literal('diag_router_update_output_failed'),
+  Type.Literal('diag_router_wrong_task_kind'),
+  // Diag distiller runner (PRI-625 split pipeline)
+  Type.Literal('diag_distiller_agent_draft_insert_failed'),
+  Type.Literal('diag_distiller_agent_draft_inserted'),
+  Type.Literal('diag_distiller_artifact_summary_predecessor_skipped'),
+  Type.Literal('diag_distiller_artifact_summary_skipped'),
+  Type.Literal('diag_distiller_artifact_write_failed'),
+  Type.Literal('diag_distiller_cancel_run_failed'),
+  Type.Literal('diag_distiller_context_built'),
+  Type.Literal('diag_distiller_context_lineage_unavailable'),
+  Type.Literal('diag_distiller_context_truncated'),
+  Type.Literal('diag_distiller_diag_llm_rate_limit_degraded'),
+  Type.Literal('diag_distiller_distiller_completed'),
+  Type.Literal('diag_distiller_lineage_integrity_violation'),
+  Type.Literal('diag_distiller_lineage_partial'),
+  Type.Literal('diag_distiller_lineage_resolve_failed'),
+  Type.Literal('diag_distiller_manifest_resolution_insufficient'),
+  Type.Literal('diag_distiller_mark_failed_error'),
+  Type.Literal('diag_distiller_mark_retry_error'),
+  Type.Literal('diag_distiller_mark_succeeded_failed'),
+  Type.Literal('diag_distiller_output_extraction_failed'),
+  Type.Literal('diag_distiller_output_invalid'),
+  Type.Literal('diag_distiller_output_validated'),
+  Type.Literal('diag_distiller_required_context_evidence_unresolved'),
+  Type.Literal('diag_distiller_run_failed'),
+  Type.Literal('diag_distiller_run_started'),
+  Type.Literal('diag_distiller_task_failed'),
+  Type.Literal('diag_distiller_task_leased'),
+  Type.Literal('diag_distiller_task_retried'),
+  Type.Literal('diag_distiller_task_succeeded'),
+  Type.Literal('diag_distiller_update_output_failed'),
+  Type.Literal('diag_distiller_wrong_task_kind'),
+  // Diag rootcause runner (PRI-625 split pipeline)
+  Type.Literal('diag_rootcause_agent_draft_insert_failed'),
+  Type.Literal('diag_rootcause_agent_draft_inserted'),
+  Type.Literal('diag_rootcause_artifact_summary_predecessor_skipped'),
+  Type.Literal('diag_rootcause_artifact_summary_skipped'),
+  Type.Literal('diag_rootcause_artifact_write_failed'),
+  Type.Literal('diag_rootcause_cancel_run_failed'),
+  Type.Literal('diag_rootcause_context_built'),
+  Type.Literal('diag_rootcause_context_lineage_unavailable'),
+  Type.Literal('diag_rootcause_context_truncated'),
+  Type.Literal('diag_rootcause_diag_llm_rate_limit_degraded'),
+  Type.Literal('diag_rootcause_intent_doc_read_failed'),
+  Type.Literal('diag_rootcause_lineage_partial'),
+  Type.Literal('diag_rootcause_lineage_resolve_failed'),
+  Type.Literal('diag_rootcause_manifest_resolution_insufficient'),
+  Type.Literal('diag_rootcause_mark_failed_error'),
+  Type.Literal('diag_rootcause_mark_retry_error'),
+  Type.Literal('diag_rootcause_mark_succeeded_failed'),
+  Type.Literal('diag_rootcause_output_extraction_failed'),
+  Type.Literal('diag_rootcause_output_invalid'),
+  Type.Literal('diag_rootcause_output_validated'),
+  Type.Literal('diag_rootcause_required_context_evidence_unresolved'),
+  Type.Literal('diag_rootcause_rootcause_completed'),
+  Type.Literal('diag_rootcause_run_failed'),
+  Type.Literal('diag_rootcause_run_started'),
+  Type.Literal('diag_rootcause_task_failed'),
+  Type.Literal('diag_rootcause_task_leased'),
+  Type.Literal('diag_rootcause_task_retried'),
+  Type.Literal('diag_rootcause_task_succeeded'),
+  Type.Literal('diag_rootcause_update_output_failed'),
+  Type.Literal('diag_rootcause_wrong_task_kind'),
+  // Rollout reviewer (PRI-653 family)
+  Type.Literal('rollout_activation_candidate_resolved'),
+  Type.Literal('rollout_activation_candidate_unresolved'),
+  Type.Literal('rollout_completion_intent_finalize_terminal'),
+  Type.Literal('rollout_completion_intent_resumed'),
+  Type.Literal('rollout_completion_intent_stale_epoch'),
+  Type.Literal('rollout_completion_mark_applied_failed'),
+  Type.Literal('rollout_completion_record_failed'),
+  Type.Literal('rollout_dispatch_not_wired'),
+  Type.Literal('rollout_mark_human_review_failed'),
+  Type.Literal('rollout_owner_resolution_applying'),
+  Type.Literal('rollout_reviewer_artifact_write_failed'),
+  Type.Literal('rollout_reviewer_cancel_run_failed'),
+  Type.Literal('rollout_reviewer_context_built'),
+  Type.Literal('rollout_reviewer_dependency_not_succeeded'),
+  Type.Literal('rollout_reviewer_evaluator_dep_selected'),
+  Type.Literal('rollout_reviewer_lineage_echo_corrected'),
+  Type.Literal('rollout_reviewer_mark_failed_error'),
+  Type.Literal('rollout_reviewer_mark_retry_error'),
+  Type.Literal('rollout_reviewer_mark_succeeded_failed'),
+  Type.Literal('rollout_reviewer_no_dependencies'),
+  Type.Literal('rollout_reviewer_no_evaluator_artifact'),
+  Type.Literal('rollout_reviewer_output_invalid'),
+  Type.Literal('rollout_reviewer_output_validated'),
+  Type.Literal('rollout_reviewer_run_failed'),
+  Type.Literal('rollout_reviewer_run_started'),
+  Type.Literal('rollout_reviewer_task_failed'),
+  Type.Literal('rollout_reviewer_task_leased'),
+  Type.Literal('rollout_reviewer_task_needs_human_review'),
+  Type.Literal('rollout_reviewer_task_retried'),
+  Type.Literal('rollout_reviewer_task_succeeded'),
+  Type.Literal('rollout_reviewer_update_output_failed'),
+  Type.Literal('rollout_reviewer_wrong_task_kind'),
+  Type.Literal('rollout_revision_already_materialized'),
+  Type.Literal('rollout_revision_not_wired'),
+  Type.Literal('rollout_revision_record_failed'),
+  Type.Literal('rollout_revision_route_failed'),
+  Type.Literal('rollout_revision_routed'),
+  // Singles (admission/evidence-triage + refusal paths)
+  Type.Literal('admission_decision'),
+  Type.Literal('diagnosis_task_created'),
+  Type.Literal('evidence_only_recorded'),
+  Type.Literal('skipped_refused'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
