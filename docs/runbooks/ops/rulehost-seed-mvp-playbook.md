@@ -41,7 +41,7 @@ PD（Principles Disciple）的 RuleHost seed-MVP **只做** owner 审批后可�
 | 自动任务执行 | 所有 `code_tool_hook` 激活必须经 owner 审批；RuleHost 不代 owner 决策"该不该执行某个工具调用" |
 | 自动价值判断 | v2 seed rules 只允许 `allow` / `block`；不允许 `propose_correction`、`requireApproval`、live `auto_correct` |
 | 真正 live auto-correct | 所有 correction 必须人审；不存在"agent 自动纠错并执行"的路径 |
-| 默认开启 v2 | `rulecode_context_v2` flag 默认 `quiet / enabled: false`；种子用户必须显式开启 |
+| v2 保持可选 | `rulecode_context_v2` 自 PRI-780（2026-09-13）起默认 `quiet / enabled: true`；显式 `enabled: false` 是迁移期熔断，不再是"必须显式开启" |
 | MVP-Core 范围扩展 | 本轮不扩展 MVP-Core；新增功能默认 `MVP-Quiet`（off + flag-registered） |
 
 任何超出上述边界的提案必须走 ADR 流程，并在 `docs/plans/post-mvp-conditional-roadmap.md` 评估重启条件。
@@ -69,11 +69,11 @@ pd runtime init --confirm
 # 3. 配置诊断通过
 pd config doctor
 
-# 4. feature flag 状态（确认 rulecode_context_v2 默认 off）
+# 4. feature flag 状态（确认 rulecode_context_v2 默认 on，PRI-780 起）
 pd runtime features --json
 ```
 
-`pd config doctor` 必须无 error 退出。`pd runtime features` 输出中 `rulecode_context_v2` 应为 `{ category: 'quiet', enabled: false }`。
+`pd config doctor` 必须无 error 退出。`pd runtime features` 输出中 `rulecode_context_v2` 应为 `{ category: 'quiet', enabled: true }`（默认开启；显式 `enabled: false` = 迁移期熔断）。
 
 ### 2.2 LLM Provider 配置
 
@@ -110,33 +110,30 @@ pd trace show --pain-id <id>              # 确认 pain 存在
 
 ---
 
-## 3. Step 1 — 开启 `rulecode_context_v2`
+## 3. Step 1 — 确认 `rulecode_context_v2` 默认开启（PRI-780）
 
-### 3.1 修改 `.pd/config.yaml`
+PRI-780（2026-09-13，ADR 2026-06-28 amendment）起该 flag **默认开启**，无需再显式配置。本步骤仅做验证；需要回滚时见 §9.2。
 
-在 workspace 根的 `.pd/config.yaml` 的 `features` 段下添加：
-
-```yaml
-features:
-  # ... 其他 flag ...
-  rulecode_context_v2:
-    category: quiet      # 保持 quiet；不要改为 core
-    enabled: true         # 显式开启
-    since: 2026-06-27    # flag 引入日期（与 feature-flag-contract.ts 一致）
-```
-
-### 3.2 验证 flag 已生效
+### 3.1 验证 flag 生效
 
 ```bash
 pd runtime features --json | jq '.features[] | select(.id == "rulecode_context_v2")'
 # 期望输出：{"id":"rulecode_context_v2","category":"quiet","enabled":true,...}
 ```
 
+### 3.2 迁移期熔断（仅回滚场景）
+
+```yaml
+features:
+  rulecode_context_v2:
+    enabled: false    # 迁移期熔断：context 缺失、v2 生成被拒绝（不会静默降级 v1）
+```
+
 ### 3.3 重要约束
 
-- `category` 必须保持 `quiet`。**不要**改为 `core`——这会绕过 seed-MVP 的可逆性约束（ADR-0014 §2.5）。
-- 一次只在一个种子 workspace 开启。**不要**全局默认开启。
-- 开启后 `run-rulehost` 的 `--behavior-examples` 才会被解释为 v2 BehaviorExamplePack；不开 flag 时传该参数会被拒绝。
+- `category` 保持 `quiet`。**不要**改为 `core`——这会绕过 seed-MVP 的可逆性约束（ADR-0014 §2.5）。
+- 开启后 `run-rulehost` 的 `--behavior-examples` 才会被解释为 v2 BehaviorExamplePack；显式关 flag 时传该参数会被拒绝。
+- PRI-780 起 Artificer 生成收敛为 v2-only：无 Owner-labelled BEP 的生成会**显式失败**（不会退化为 action-only 规则）。
 
 ---
 
@@ -343,7 +340,8 @@ pd activation list --channel code_tool_hook --include-deactivated
 
 ```bash
 # 1. 编辑 .pd/config.yaml
-#    将 features.rulecode_context_v2.enabled 改为 false（或删除该条目）
+#    将 features.rulecode_context_v2.enabled 改为 false
+#    （PRI-780 起默认开启——"删除该条目"= 恢复默认开启，不是关闭）
 
 # 2. 验证 flag 已关闭
 pd runtime features --json | jq '.features[] | select(.id == "rulecode_context_v2")'
@@ -378,7 +376,7 @@ pd activation list --channel code_tool_hook --json
 
 | # | 场景 | 验证命令 | 期望结果 |
 |---|---|---|---|
-| P1 | `rulecode_context_v2` flag 可开启 | `pd runtime features --json` | `enabled: true` |
+| P1 | `rulecode_context_v2` flag 默认开启 | `pd runtime features --json` | `enabled: true`（PRI-780 起默认） |
 | P2 | `run-rulehost --dry-run` capability ON | dry-run 输出 | `code_rule_capability: ON` |
 | P3 | `run-rulehost --confirm` 生成 v2 artifact | `pd trace show --pain-id <id>` | artifact `validationStatus = validated`，含 `requiresContextVersion: 2` + `evidenceRefs` |
 | P4 | approve 后写 shadow activation | `pd activation list --channel code_tool_hook --json` | `action = code_tool_hook_shadow_activate`，`mode = shadow` |
@@ -469,8 +467,8 @@ cd packages/openclaw-plugin && npx vitest run tests/core/rule-context-v2.perf.te
 
 | 项 | 默认 | seed-MVP 是否改变 |
 |---|---|---|
-| `rulecode_context_v2` flag | `quiet / enabled: false` | 否——仅在选定种子 workspace 显式开启 |
-| v1 rule 行为 | 不变 | 否——v1 zero-change（ADR-0014） |
+| `rulecode_context_v2` flag | `quiet / enabled: true`（PRI-780 起默认开启） | 否——默认即开启；显式 false = 迁移期熔断 |
+| v1 rule 行为 | 不变 | 否——存量 v1 工件评估不变（ADR-0014；生成侧已收敛 v2-only） |
 | `code_tool_hook` 通道 | 默认 shadow-first | 是——approve 后先 shadow，promote 才 live（PRI-489） |
 | v2 seed rules action 范围 | 仅 `allow` / `block` | 是——禁止 `propose_correction` 等（PRI-490） |
 | 自动价值判断 / auto-correct | 不存在 | 否——超出 PD 产品边界 |
@@ -480,8 +478,7 @@ cd packages/openclaw-plugin && npx vitest run tests/core/rule-context-v2.perf.te
 ## 附录 A — 命令速查
 
 ```bash
-# 开启 v2
-# 编辑 .pd/config.yaml，features.rulecode_context_v2.enabled = true
+# 确认 v2 默认开启（PRI-780 起默认 on，无需配置）
 pd runtime features --json | jq '.features[] | select(.id == "rulecode_context_v2")'
 
 # 准备 behavior examples（JSON 文件）
@@ -524,6 +521,6 @@ pd runtime features --json | jq '.features[] | select(.id == "rulecode_context_v
 - 自动任务执行（agent 不代 owner 决策）
 - 自动价值判断（v2 仅 allow / block）
 - 真正 live auto-correct（必须人审）
-- 默认开启 v2（必须显式开启）
+- v2 不可关闭（默认开启；显式 `enabled: false` 是迁移期熔断，PRI-780）
 
 任何超出上述边界的提案必须走 ADR 流程，并在 `docs/plans/post-mvp-conditional-roadmap.md` 评估重启条件。本 playbook 随 ADR-0014 MVP-First 阶段同步——MVP 阶段结束后由 maintainer 决定是否归档或演进。

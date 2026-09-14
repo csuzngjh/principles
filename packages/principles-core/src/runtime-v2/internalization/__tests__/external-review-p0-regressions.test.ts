@@ -21,6 +21,31 @@ import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } 
 import { storeEmitter } from '../../store/event-emitter.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-protocol.js';
 import type { TaskRecord } from '../../task-status.js';
+import type { BehaviorExamplePack } from '../behavior-example-pack.js';
+
+// PRI-780: v2-only generation — the artificer prompt only builds with a pack.
+// Case-level ruleContext is included so the fixture could also represent an
+// output that passes the v2 contract (M8: not a latent v1-shaped fixture).
+const P0_RULE_CONTEXT = {
+  version: 2 as const,
+  history: { status: 'available' as const, truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
+const P0_TEST_PACK: BehaviorExamplePack = {
+  sourceNegativeCase: {
+    caseId: 'neg-1', kind: 'negative', toolName: 'write_file',
+    params: { path: '/etc/passwd' }, expectedDecision: 'block',
+    ruleContext: P0_RULE_CONTEXT,
+  },
+  ownerDesiredOutcome: 'read before write',
+  positiveCounterexamples: [{
+    caseId: 'pos-1', kind: 'positive', toolName: 'write_file',
+    params: { path: '/workspace/src/a.ts' }, expectedDecision: 'allow',
+    ruleContext: P0_RULE_CONTEXT,
+  }],
+  evidenceRefs: ['pain://p0-1'],
+  redactionNotes: [],
+};
 
 let workspaceDir: string;
 let stateManager: RuntimeStateManager;
@@ -190,6 +215,7 @@ describe('P1-1 — artificer 真实消费 rollout requiredChanges', () => {
     const runner = new ArtificerRunner({
       stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter,
       artifactStore, validator: new DefaultArtificerValidator(), contentHashFn: undefined,
+      behaviorExamplePack: P0_TEST_PACK,
     }, { owner: 'p11', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000 });
 
     // fetchOutput 返回 null → runner 走失败路径;但 prompt 已捕获 — 断言 prompt 内容

@@ -134,16 +134,33 @@ function scribeOut(taskId: string, priorId?: string): unknown {
   };
 }
 
+// PRI-780: v2-only generation — the pipeline requires an Owner-labelled pack
+// and the artificer output must satisfy the v2 contract (case parity incl.
+// ruleContext + verbatim evidenceRefs).
+const PIPE_RULE_CONTEXT = {
+  version: 2 as const,
+  history: { status: 'available' as const, truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
+const PIPE_POS_CASE = { caseId: 'pos-1', kind: 'positive' as const, toolName: 'write_file', params: { path: '/project/f.txt' }, expectedDecision: 'allow' as const, ruleContext: PIPE_RULE_CONTEXT };
+const PIPE_NEG_CASE = { caseId: 'neg-1', kind: 'negative' as const, toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' as const, ruleContext: PIPE_RULE_CONTEXT };
+const PIPE_PACK = {
+  sourceNegativeCase: PIPE_NEG_CASE,
+  ownerDesiredOutcome: 'block system path writes',
+  positiveCounterexamples: [PIPE_POS_CASE],
+  evidenceRefs: ['pain://pipe-1'],
+  redactionNotes: [],
+};
+
 function artificerV2(taskId: string, priorId?: string): unknown {
   return {
     taskId, sourceScribeArtifactId: requireLineage(priorId, 'sourceScribeArtifactId'),
+    requiresContextVersion: 2,
+    evidenceRefs: ['pain://pipe-1'],
     implementationPlan: { summary: 'Block /etc writes', targetSurface: 'rule-host', changes: ['matcher'], tests: ['unit'], rolloutNotes: ['shadow'], confidence: 0.85 },
     implementationCode: 'function evaluate(input, helpers) { const p = String(input?.action?.paramsSummary?.path ?? input?.action?.normalizedPath ?? ""); if (p.startsWith("/etc")) return { decision: "block", matched: true, reason: "system path" }; const ctx = input?.context; if (ctx && ctx.facts && ctx.facts.priorReadOfTarget === "no") { return { decision: "block", matched: true, reason: "no prior read" }; } return { decision: "allow", matched: false, reason: "ok" }; }',
     implementationSummary: 'Block system path writes',
-    goldenTraceCases: [
-      { caseId: 'pos-1', kind: 'positive', toolName: 'write_file', params: { path: '/project/f.txt' }, expectedDecision: 'allow' },
-      { caseId: 'neg-1', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
-    ],
+    goldenTraceCases: [PIPE_POS_CASE, PIPE_NEG_CASE],
     affectedTools: ['write_file'],
     sourceTrace: { scribeArtifactId: requireLineage(priorId, 'sourceTrace.scribeArtifactId') },
     risks: [], generatedAt: new Date().toISOString(),
@@ -266,6 +283,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       workspaceDir: tmpDir, painId: 'pain-test-001', runtimeAdapter: adapter,
       channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
       codeRuleCapability: capability,
+      behaviorExamplePack: PIPE_PACK,
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
@@ -320,6 +338,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       painId: 'pain-feedback-001',
       runtimeAdapter: adapter,
       codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      behaviorExamplePack: PIPE_PACK,
       channel: 'code_tool_hook',
       pollIntervalMs: 5,
       timeoutMs: 1000,
@@ -349,6 +368,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       workspaceDir: tmpDir, painId: 'pain-test-001', runtimeAdapter: adapter,
       channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
       codeRuleCapability: capability,
+      behaviorExamplePack: PIPE_PACK,
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
@@ -376,6 +396,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       workspaceDir: tmpDir, painId: 'pain-test-001', runtimeAdapter: adapter,
       channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
       codeRuleCapability: capability,
+      behaviorExamplePack: PIPE_PACK,
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
@@ -595,6 +616,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
       maxStageRetries: 2,
       codeRuleCapability: capability,
+      behaviorExamplePack: PIPE_PACK,
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
@@ -725,6 +747,7 @@ describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messag
       workspaceDir: tmpDir, painId: 'pain-lang-en', runtimeAdapter: adapter,
       channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
       codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      behaviorExamplePack: PIPE_PACK,
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
@@ -771,6 +794,7 @@ describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messag
       workspaceDir: tmpDir, painId: 'pain-lang-zh', runtimeAdapter: adapter,
       channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000,
       codeRuleCapability: { enabled: true, artificerAdapter: adapter },
+      behaviorExamplePack: PIPE_PACK,
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');

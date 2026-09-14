@@ -22,6 +22,11 @@
  * - rc-6-lineage-consistency: source/sessionId/turnId must come from the same raw payload.
  */
 
+import type {
+  RuntimeV2PromptActivationsInjectedEventData,
+  ToolCallEventData,
+} from '../runtime-v2/types/event-types.js';
+
 // ─── Unified event kinds ───────────────────────────────────────────────────
 /**
  * The normalized set of hook event kinds PD subscribes to across all hosts.
@@ -70,6 +75,12 @@ export interface HostEventContext {
   readonly turnId?: string;
   /** Tool name for tool-call events (before_tool_call / after_tool_call). */
   readonly toolName?: string;
+  /**
+   * PRI-750: host tool-call id for tool events (Codex `tool_use_id`;
+   * OpenClaw shared path supplies `toolCallId`). Undefined when the host
+   * does not provide one. Lineage-consistent with `sessionId`/`turnId` (rc-6).
+   */
+  readonly toolCallId?: string;
   /** Raw tool input for before_tool_call (untrusted — rc-1). */
   readonly toolInput?: unknown;
   /** Raw tool output for after_tool_call (untrusted — rc-1). */
@@ -157,6 +168,21 @@ export interface HostEventResult {
  * The adapter does NOT own business logic (pain detection, principle injection,
  * gate enforcement). That logic consumes HostEvent and produces HostEventResult.
  */
+// ─── Unified event emission port (PRI-750) ──────────────────────────────────
+/**
+ * Host-agnostic event emission port for the shared host-runtime path.
+ *
+ * PRI-750: the Codex host adapter wires this with the single EventLog writer
+ * so shared-path host events carry the natural turn/tool ids
+ * (`HostEventContext.turnId` / `toolCallId`) and join DIRECTly to
+ * `assistant_turns.run_id`. Optional: when absent the shared path stays
+ * silent (the OpenClaw plugin path owns its own EventLog emission).
+ */
+export interface HostEventEmitter {
+  recordRuntimeV2ActivationsInjected(data: RuntimeV2PromptActivationsInjectedEventData): void;
+  recordToolCall(sessionId: string | undefined, data: ToolCallEventData): void;
+}
+
 export interface HostAdapter {
   /** Stable host identifier, e.g. 'codex', 'openclaw'. */
   readonly hostId: string;

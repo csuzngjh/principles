@@ -306,10 +306,12 @@ interface DryRunFormatInput {
   readonly capabilityStatus: string;
   readonly workspaceDir: string;
   readonly readiness: RuleHostReadinessResult;
+  /** PRI-780 review: the EFFECTIVE code-rule capability — conditions the ready "Next" line. */
+  readonly capabilityEnabled: boolean;
 }
 
 function formatDryRunOutput(input: DryRunFormatInput): string {
-  const { opts, capabilityStatus, workspaceDir, readiness } = input;
+  const { opts, capabilityStatus, workspaceDir, readiness, capabilityEnabled } = input;
   const lines: string[] = [];
   lines.push('RuleHost Pipeline (PRI-429) — DRY RUN');
   lines.push(`pain: ${opts.painId}`);
@@ -324,7 +326,12 @@ function formatDryRunOutput(input: DryRunFormatInput): string {
   lines.push('');
   lines.push('No tasks created, no LLM calls made, no artifacts written.');
   if (readiness.status === 'ready') {
-    lines.push('Next: pass --confirm to actually run the pipeline.');
+    // PRI-780 review: derive the next action from the EFFECTIVE capability —
+    // a kill-switched / BEP-missing workspace cannot run the code-rule
+    // pipeline on --confirm, only text-principle-only internalization.
+    lines.push(capabilityEnabled
+      ? 'Next: pass --confirm to actually run the pipeline.'
+      : 'Next: fix the code-rule capability issue above; --confirm runs text-principle-only internalization.');
   } else if (readiness.status === 'text_principle_only') {
     lines.push('Next: pass --confirm to run in text-principle-only mode, or fix the issues above to enable full pipeline.');
   } else {
@@ -431,7 +438,6 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
   }
 
   let effectiveCapability = resolvedRuntime.capability;
-  let contextMode: 'v1' | 'v2' = 'v1';
   let behaviorExamplePack: BehaviorExamplePack | undefined;
   let behaviorExamplesReason: string | undefined;
   const behaviorExamplesPath = opts.behaviorExamples
@@ -439,18 +445,26 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
     : undefined;
 
   if (!resolvedRuntime.contextV2Enabled && behaviorExamplesPath) {
-    const reason = 'behavior_examples_not_allowed: rulecode_context_v2 is disabled';
+    const reason = 'behavior_examples_not_allowed: rulecode_context_v2 is disabled (kill switch) and v2 is the only generation contract (PRI-780)';
     if (opts.json) {
-      process.stdout.write(JSON.stringify({ status: 'failed', reason, nextAction: 'enable rulecode_context_v2 or remove --behavior-examples' }) + '\n');
+      process.stdout.write(JSON.stringify({ status: 'failed', reason, nextAction: 're-enable rulecode_context_v2 or remove --behavior-examples' }) + '\n');
     } else {
-      console.error(`Error: ${reason}. Enable rulecode_context_v2 or remove --behavior-examples.`);
+      console.error(`Error: ${reason}. Re-enable rulecode_context_v2 or remove --behavior-examples.`);
     }
     process.exitCode = 1;
     return;
   }
 
-  if (resolvedRuntime.contextV2Enabled) {
-    contextMode = 'v2';
+  // PRI-780: the generation contract is v2-only. With the kill switch active
+  // (explicit rulecode_context_v2 disable) code-rule generation is refused
+  // with a structured reason — never a silent fallback to an action-only
+  // (v1) rule. Text-principle internalization continues (capability OFF).
+  if (!resolvedRuntime.contextV2Enabled) {
+    effectiveCapability = {
+      enabled: false,
+      disabledReason: 'rulecode_context_v2_disabled: kill switch active — v2 is the only RuleCode generation contract (PRI-780); re-enable the flag to generate code rules',
+    };
+  } else {
     if (!behaviorExamplesPath) {
       behaviorExamplesReason = 'behavior_examples_missing';
     } else {
@@ -510,15 +524,28 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         }
       }
     }
-    if (behaviorExamplesReason) {
+    if (behaviorExamplesReason && effectiveCapability.enabled) {
+      // Only override when code-rule generation would actually run — a more
+      // fundamental blocker (text_principle_only readiness, disabled agent,
+      // kill switch) keeps precedence and stays the reported reason.
       effectiveCapability = { enabled: false, disabledReason: `${behaviorExamplesReason}; nextAction: provide reliable Owner-labelled tool call IDs with --behavior-examples` };
     }
+    // behaviorExamplesReason is intentionally KEPT even when a more fundamental
+    // blocker takes precedence: the dry-run behaviorExamples field must still
+    // report 'unreliable' (M6 — clearing it here masked the evidence problem).
   }
 
   // ── Dry-run mode: report what would happen, don't run the pipeline ──
   // Default is dry-run (CLI gate rule 4: mutating commands default to dry-run).
   const isDryRun = opts.dryRun || !opts.confirm;
   if (isDryRun) {
+    // PRI-780 review M2: the status string derives from the EFFECTIVE
+    // capability (kill switch / BEP refusal included), never from the
+    // pre-flag resolvedRuntime snapshot — otherwise a kill-switched workspace
+    // would display "ON" with a misleading "pass --confirm" nextAction.
+    const effectiveCapabilityStatus = effectiveCapability.enabled
+      ? resolvedRuntime.capabilityStatus
+      : `code_rule_capability: OFF (${effectiveCapability.disabledReason ?? 'disabled'})`;
     if (opts.json) {
       process.stdout.write(JSON.stringify({
         status: 'dry_run',
@@ -527,28 +554,24 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         channel,
         readiness,
         readinessStatus: readiness.status,
-        capabilityStatus: behaviorExamplesReason
-          ? `code_rule_capability: OFF (${behaviorExamplesReason})`
-          : resolvedRuntime.capabilityStatus,
+        capabilityStatus: effectiveCapabilityStatus,
         agentRuntimeProfiles: resolvedRuntime.agentRuntimeProfiles,
         codeRuleCapability: { enabled: effectiveCapability.enabled, disabledReason: effectiveCapability.disabledReason },
-        contextMode,
+        // PRI-780: 'v2' is the only generation contract (observability field).
+        contextMode: 'v2',
         behaviorExamples: behaviorExamplesPath
           ? { path: behaviorExamplesPath, status: behaviorExamplesReason ? 'unreliable' : 'provided' }
           : { status: resolvedRuntime.contextV2Enabled ? 'missing' : 'not_required' },
         nextAction: readiness.status === 'ready'
-          ? 'pass --confirm to run the full pipeline'
+          ? (effectiveCapability.enabled
+            ? 'pass --confirm to run the full pipeline'
+            : 'fix the code-rule capability issues above; --confirm runs text-principle-only internalization')
           : readiness.status === 'text_principle_only'
             ? 'pass --confirm to run in text-principle-only mode (code-rule capability OFF), or fix the issues above to enable full pipeline'
             : 'fix the readiness issues above before running the pipeline',
       }) + '\n');
     } else {
-      // P2 fix (CodeRabbit PR2 Comment 2): text branch must use the same v2-aware
-      // capabilityStatus source as the JSON branch (behaviorExamplesReason-aware).
-      const effectiveCapabilityStatus = behaviorExamplesReason
-        ? `code_rule_capability: OFF (${behaviorExamplesReason})`
-        : resolvedRuntime.capabilityStatus;
-      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: effectiveCapabilityStatus, workspaceDir, readiness }) + '\n');
+      process.stdout.write(formatDryRunOutput({ opts, capabilityStatus: effectiveCapabilityStatus, workspaceDir, readiness, capabilityEnabled: effectiveCapability.enabled }) + '\n');
     }
     return;
   }
@@ -562,7 +585,6 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
       runtimeAdapter: resolvedRuntime.agentAdapters.dreamer,
       agentAdapters: resolvedRuntime.agentAdapters,
       codeRuleCapability: effectiveCapability,
-      contextMode,
       behaviorExamplePack,
       channel: channel as RuleHostChannel,
       maxRounds: opts.maxRounds,

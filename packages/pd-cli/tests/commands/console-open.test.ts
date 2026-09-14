@@ -328,10 +328,62 @@ describe('planConsoleLaunch — reused (healthy console on preferred port)', () 
       expect(result.reason).toBe('console_authentication_mode_mismatch');
       // PRI-695: the guidance names the actual running state and both ways
       // out — it no longer references "Companion" (meaningless to CLI users)
-      // or PD_CONSOLE_TOKEN (never set by the default install).
+      // or PD_CONSOLE_TOKEN (never set by the default install). PRI-784: the
+      // no-source form stays source-neutral; the env/flag variants have
+      // their own cases below.
       expect(result.nextAction).toContain('without authentication');
       expect(result.nextAction).toContain(`port ${addr.port}`);
       expect(result.nextAction).not.toContain('Companion');
+      expect(result.nextAction).not.toContain('PD_CONSOLE_TOKEN');
+    } finally {
+      await new Promise<void>((resolve) => server.close(resolve));
+    }
+  });
+
+  it('auth-mismatch guidance names PD_CONSOLE_TOKEN and its durable removal when the token came from the env (PRI-784)', async () => {
+    const server = http.createServer((_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const result = await planConsoleLaunch({
+        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
+        host: '127.0.0.1', token: 'configured-token', tokenSource: 'env',
+      });
+      expect(result.status).toBe('refused');
+      expect(result.reason).toBe('console_authentication_mode_mismatch');
+      // The env source is the recurring real-world trap: a persistently set
+      // variable makes "reopen without a token" impossible to follow, so the
+      // guidance must name the variable and how to remove it at its source.
+      expect(result.nextAction).toContain('PD_CONSOLE_TOKEN');
+      expect(result.nextAction).toContain("SetEnvironmentVariable('PD_CONSOLE_TOKEN', $null, 'User')");
+      expect(result.nextAction).toContain('--no-auth');
+      expect(result.nextAction).toContain('--token');
+    } finally {
+      await new Promise<void>((resolve) => server.close(resolve));
+    }
+  });
+
+  it('auth-mismatch guidance names --token, never the env var, when the token came from the flag (PRI-784)', async () => {
+    const server = http.createServer((_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true, data: { authenticationMode: 'no_auth' } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const result = await planConsoleLaunch({
+        workspaceDir: '/tmp/anywhere', preferredPort: addr.port,
+        host: '127.0.0.1', token: 'configured-token', tokenSource: 'flag',
+      });
+      expect(result.status).toBe('refused');
+      expect(result.reason).toBe('console_authentication_mode_mismatch');
+      expect(result.nextAction).toContain('--token');
+      expect(result.nextAction).toContain('--no-auth');
       expect(result.nextAction).not.toContain('PD_CONSOLE_TOKEN');
     } finally {
       await new Promise<void>((resolve) => server.close(resolve));
@@ -724,6 +776,12 @@ describe('CLI command wiring (pd console open)', () => {
       expect(run.parsed.status).toBe('refused');
       expect(run.parsed.reason).toBe('console_authentication_mode_mismatch');
       expect(run.parsed).not.toHaveProperty('serverPid');
+      // PRI-784 review fix (PR #1670): the fresh-start env guidance is part of
+      // the user contract — assert its content, not just the refusal shell.
+      expect(run.parsed.nextAction).toContain('PD_CONSOLE_TOKEN');
+      expect(run.parsed.nextAction).toContain('not forwarded');
+      expect(run.parsed.nextAction).toContain('--token "$PD_CONSOLE_TOKEN"');
+      expect(run.parsed.nextAction).toContain('--no-auth');
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(await isPortInUse('127.0.0.1', 49391)).toBe(false);
     } finally {

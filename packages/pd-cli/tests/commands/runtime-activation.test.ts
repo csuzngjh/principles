@@ -657,7 +657,9 @@ describe('handleRuntimeActivationList', () => {
       },
     ]);
     // Default mockFeatureFlags has rulecode_context_v2 enabled. Flip it off
-    // to simulate the production default (the flag is quiet/default-off).
+    // to simulate the migration-period kill switch (explicit
+    // features.rulecode_context_v2.enabled: false; the registry default is ON
+    // since PRI-780).
     mockFeatureFlags.flags.rulecode_context_v2.enabled = false;
 
     await handleRuntimeActivationList({

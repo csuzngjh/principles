@@ -12,7 +12,7 @@ describe('CodexHooksHostAdapter pinned to codex-cli 0.147.0', () => {
   it('decodes the real PreToolUse input shape and cwd', () => {
     expect(adapter.decodeEvent({ ...common, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'pwd' }, tool_use_id: 'call-1' })).toMatchObject({
       kind: 'before_tool_call', source: 'codex:pre_tool_use',
-      context: { workspaceDir: '/workspace', sessionId: 'sess-523', turnId: 'turn-523', toolName: 'Bash', toolInput: { command: 'pwd' } },
+      context: { workspaceDir: '/workspace', sessionId: 'sess-523', turnId: 'turn-523', toolName: 'Bash', toolCallId: 'call-1', toolInput: { command: 'pwd' } },
     });
   });
 
@@ -27,7 +27,7 @@ describe('CodexHooksHostAdapter pinned to codex-cli 0.147.0', () => {
   it('decodes PostToolUse input plus response and original input', () => {
     expect(adapter.decodeEvent({ ...common, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'false' }, tool_response: { exitCode: 1 }, tool_use_id: 'call-2' })).toMatchObject({
       kind: 'after_tool_call', source: 'codex:post_tool_use',
-      context: { toolName: 'Bash', toolInput: { command: 'false' }, toolOutput: { exitCode: 1 } },
+      context: { toolName: 'Bash', toolCallId: 'call-2', toolInput: { command: 'false' }, toolOutput: { exitCode: 1 } },
     });
   });
 

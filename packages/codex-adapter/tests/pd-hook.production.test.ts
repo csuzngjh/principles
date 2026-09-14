@@ -86,6 +86,43 @@ describe('pd-hook executable shared MVP paths', () => {
   });
 });
 
+describe('PRI-780 Codex runtime context capability declaration (v2 rules)', () => {
+  const V2_DECL_RULE_CODE = `function evaluate(input) { if (input.action.normalizedPath.indexOf('ctxdecl-always-780') >= 0) return { decision: 'block', matched: true, reason: 'CODEX_V2_LOADED_780' }; return { decision: 'allow', matched: false, reason: 'not target' }; } var meta = { name: 'codex-v2-decl', version: '1', ruleId: 'R_CODEX_V2_DECL_780', coversCondition: 'all' };`;
+  function workspaceWithRuleContext(v2Enabled: boolean): string {
+    const root = workspace();
+    const config = getDefaultPdConfig();
+    config.features['host.codex'].enabled = true;
+    config.features['rulecode_context_v2'].enabled = v2Enabled;
+    fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+    return root;
+  }
+  async function v2Rule(root: string): Promise<void> {
+    await artifact(root, { id: 'art-rule-780', kind: 'rule', principleId: 'P_CODEX_V2_780', ruleId: 'R_CODEX_V2_DECL_780', content: { principleId: 'P_CODEX_V2_780', ruleId: 'R_CODEX_V2_DECL_780', requiresContextVersion: 2, implementationCode: V2_DECL_RULE_CODE }, channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_CODEX_V2_DECL_780' });
+  }
+
+  it('PRI-780 (rev 2): a v2 rule stays SUSPENDED on Codex — never executed context-blind — with the structured unsupported warning', async () => {
+    // Codex review round 2 P1: the unavailable→allow contract is prompt-level
+    // discipline, not runtime-enforced; this rule blocks WITHOUT inspecting
+    // context, so if it were loaded it would deny. The allow here proves the
+    // suspension, and the stderr annotation makes the unsupported declaration
+    // explicit (never a silent skip).
+    const root = workspaceWithRuleContext(true);
+    await v2Rule(root);
+    const suspended = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'ctxdecl-always-780.txt'), content: 'x' }, tool_use_id: 'call-suspended' });
+    expect(JSON.parse(suspended.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    expect(suspended.stderr).toContain('rule_context_v2_unavailable');
+    expect(suspended.stderr).toContain('codex_runtime_context_unsupported');
+  });
+
+  it('flag OFF (kill switch): the same v2 rule is suspended with the structured warning, not silently enforced', async () => {
+    const root = workspaceWithRuleContext(false);
+    await v2Rule(root);
+    const suspended = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'ctxdecl-always-780.txt'), content: 'x' }, tool_use_id: 'call-suspended' });
+    expect(JSON.parse(suspended.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    expect(suspended.stderr).toContain('rule_context_v2_unavailable');
+  });
+});
+
 const registry = createStepRegistry();
 let bddRoot = '';
 let bddResult: ReturnType<typeof invoke>;

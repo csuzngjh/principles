@@ -53,7 +53,7 @@
 10. [`ERROR_ARCHITECTURE.md`](./ERROR_ARCHITECTURE.md) — 错误分类与降级路径
 11. [`OBSERVABILITY_ARCHITECTURE.md`](./OBSERVABILITY_ARCHITECTURE.md) — 日志/指标/追踪/审计
 12. [`SECURITY_ARCHITECTURE.md`](./SECURITY_ARCHITECTURE.md) — 工作区/沙箱/审批/PII
-13. [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) — 5 级配置层级
+13. [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) — 单文件配置（ADR-0016；含未实施的历史多层设计记录）
 14. [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) — Schema 演化
 15. [`PERFORMANCE_BUDGETS.md`](./PERFORMANCE_BUDGETS.md) — 性能预算
 
@@ -99,7 +99,7 @@
 
 | 文档 | 状态 | 处理 |
 |------|------|------|
-| `pd-task-manager.md` | Partially Implemented | 保留作迁移参考；多数概念已被 TaskRecord + Runtime V2 explicit scheduling 替代，`IdleTrigger` 已由 ADR-0012 废止 |
+| `pd-task-manager.md` | Implemented（状态见文档内状态块） | 保留作设计参考；多数概念已被 TaskRecord + Runtime V2 explicit scheduling 替代，`IdleTrigger` 已由 ADR-0012 废止 |
 
 ---
 

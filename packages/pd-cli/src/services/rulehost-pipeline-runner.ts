@@ -144,9 +144,11 @@ export interface RuleHostPipelineOptions {
    * capability is treated as OFF with reason 'code_rule_capability not provided'.
    */
   readonly codeRuleCapability?: CodeRuleCapability;
-  /** Explicit Artificer contract selected by the workspace feature flag. */
-  readonly contextMode?: 'v1' | 'v2';
-  /** Required in v2 mode; assembled from Owner-labelled production evidence. */
+  /**
+   * PRI-780: required whenever code-rule generation runs — v2 is the only
+   * Artificer contract (no v1 fallback). Assembled from Owner-labelled
+   * production evidence; a missing pack refuses the adversarial loop loud.
+   */
   readonly behaviorExamplePack?: BehaviorExamplePack;
   /** Internalization channel for created tasks (default 'code_tool_hook'). */
   readonly channel?: 'prompt' | 'code_tool_hook' | 'defer_archive';
@@ -396,6 +398,15 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
       onProgress('adversarial_loop', 'failed', 'artificerAdapter not provided');
       return rejectedResult(opts.painId, stages, 'code_rule_capability enabled but artificerAdapter not provided');
     }
+    // PRI-780: v2-only generation — an enabled code-rule capability without
+    // an Owner-labelled BehaviorExamplePack refuses BEFORE any artificer LLM
+    // stage runs. Never degrade to an action-only (v1) rule.
+    if (!opts.behaviorExamplePack) {
+      const reason = 'behavior_example_pack_missing: v2 is the only RuleCode generation contract (PRI-780); provide Owner-labelled behavior examples via --behavior-examples';
+      stages.push({ name: 'adversarial_loop', status: 'failed', reason });
+      onProgress('adversarial_loop', 'failed', reason);
+      return rejectedResult(opts.painId, stages, reason);
+    }
     onProgress('adversarial_loop', 'start');
     // PRI-661: the loop's evaluator replay must use the SAME production gate
     // context as the consumer cycle and the activation gate (workspace root +
@@ -421,7 +432,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     const artificerRunner = new ArtificerRunner(
       {
         stateManager, runtimeAdapter: capability.artificerAdapter, eventEmitter, validator: new DefaultArtificerValidator(), artifactStore,
-        contextMode: opts.contextMode ?? 'v1', behaviorExamplePack: opts.behaviorExamplePack, contentHashFn,
+        behaviorExamplePack: opts.behaviorExamplePack, contentHashFn,
       },
       {
         ...runnerOptsFor(capability.artificerAdapter),

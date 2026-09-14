@@ -70,3 +70,17 @@ describe('pd-hook production boundary', () => {
     expect(result.stderr.length).toBeLessThanOrEqual(1_200);
   });
 });
+
+describe('PRI-780 Codex runtime context capability declaration', () => {
+  it('annotateContextWarnings enriches the gate suspension warning with the explicit host-unsupported reason', async () => {
+    const { annotateContextWarnings } = await import('../src/pd-hook.js');
+    const out = annotateContextWarnings([
+      'rule_context_v2_unavailable: enable and wire the host rule context provider',
+      'unrelated_warning: stay untouched',
+    ]);
+    expect(out[0]).toContain('rule_context_v2_unavailable');
+    expect(out[0]).toContain('codex_runtime_context_unsupported');
+    expect(out[0]).toContain('v2 rules stay suspended');
+    expect(out[1]).toBe('unrelated_warning: stay untouched');
+  });
+});

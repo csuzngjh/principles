@@ -38,7 +38,7 @@ describe('ArtificerPromptBuilder', () => {
   const builder = new ArtificerPromptBuilder();
 
   const input = {
-    contextMode: 'v1' as const,
+    behaviorExamplePack: validBehaviorExamplePack,
     taskId: 'artificer-task-001',
     contextHash: 'ctx-abc123',
     sourceScribeArtifactId: 'pi-art-scribe-001',
@@ -84,8 +84,10 @@ describe('ArtificerPromptBuilder', () => {
     // the paramsSummary-is-an-object contract + repair replay-evidence block;
     // PRI-700 — bumped v3 → v4 for the case-id vocabulary note + prior
     // output-contract rejection feedback; PRI-741 — bumped v4 → v5 for the
-    // canonicalKind-first matching contract + HOST SEMANTIC CONTEXT block.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v5');
+    // canonicalKind-first matching contract + HOST SEMANTIC CONTEXT block;
+    // PRI-780 — bumped v5 → v6: the v1 context-mode branch is deleted, v2 is
+    // the only generation contract.
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v6');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -100,14 +102,14 @@ describe('ArtificerPromptBuilder', () => {
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).not.toContain('"affectedTools": ["write_file"]');
   });
 
-  it('PRI-741: v1 prompt without hostSemanticContext stays backward compatible (no host block, no field)', () => {
+  it('PRI-741: prompt without hostSemanticContext stays backward compatible (no host block, no field)', () => {
     const { message, systemPrompt } = builder.buildPrompt(input);
     expect(systemPrompt).not.toContain('HOST SEMANTIC CONTEXT (authoritative');
     const parsed = JSON.parse(message) as Record<string, unknown>;
     expect(parsed).not.toHaveProperty('hostSemanticContext');
   });
 
-  it('PRI-741: v1 prompt with hostSemanticContext renders the HOST SEMANTIC CONTEXT block from the projection', () => {
+  it('PRI-741: prompt with hostSemanticContext renders the HOST SEMANTIC CONTEXT block from the projection', () => {
     const { message, systemPrompt, promptInput } = builder.buildPrompt({
       ...input,
       hostSemanticContext: {
@@ -184,23 +186,34 @@ describe('ArtificerPromptBuilder', () => {
   });
 });
 
-describe('PRI-484 Artificer prompt context modes', () => {
-  // Red phase: assertions covering the rewrite required by the
-  // 2026-06-27 RuleCode context vision design §7.3.
+describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
+  // PRI-780: the v1 context-mode branch is deleted. These assertions cover
+  // the 2026-06-27 RuleCode context vision design §7.3 as converged by
+  // PRI-780 (v2-only generation contract).
 
-  it('allows inspecting input.context (v2 surface)', () => {
-    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({ contextMode: 'v1', taskId: 'task', contextHash: 'hash', sourceScribeArtifactId: 'scribe', scribeArtifact: {} });
-    expect(systemPrompt).toMatch(/must not.*input\.context/i);
+  it('PRI-780: the v1 prohibition ("MUST NOT read input.context") is gone — the prompt allows inspecting input.context', () => {
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({ behaviorExamplePack: validBehaviorExamplePack, taskId: 'task', contextHash: 'hash', sourceScribeArtifactId: 'scribe', scribeArtifact: {} });
+    expect(systemPrompt).not.toMatch(/MUST NOT.*input\.context/i);
+    expect(systemPrompt).toContain('You may inspect input.context');
+  });
+
+  it('PRI-780: prompt input carries no contextMode field (v2 is the only contract)', () => {
+    const { message, promptInput } = new ArtificerPromptBuilder().buildPrompt({ behaviorExamplePack: validBehaviorExamplePack, taskId: 'task', contextHash: 'hash', sourceScribeArtifactId: 'scribe', scribeArtifact: {} });
+    const parsed = JSON.parse(message) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty('contextMode');
+    expect((promptInput as unknown as Record<string, unknown>).contextMode).toBeUndefined();
+    expect(parsed.behaviorExamplePack).toBeDefined();
+  });
+
+  it('PRI-780: an invalid BehaviorExamplePack fails loud (no v1/action-only fallback)', () => {
+    const builder = new ArtificerPromptBuilder();
+    expect(() => builder.buildPrompt({ behaviorExamplePack: {} as BehaviorExamplePack, taskId: 'task', contextHash: 'hash', sourceScribeArtifactId: 'scribe', scribeArtifact: {} })).toThrow(/behaviorExamplePack is required/i);
   });
 
   it('requires allow when context is missing or unavailable', () => {
-    // P2 fix (CodeRabbit PR2 Comment 4): assert against the v2 prompt built by
-    // the prompt builder (systemPrompt, PRI-633 ex-artificerInstruction), not
-    // the bare ARTIFICER_PROTOCOL_INSTRUCTION constant. The v2 contract is
-    // appended via V2_CONTEXT_INSTRUCTION; asserting on the bare constant
-    // would not verify that the contract actually flows through the builder.
+    // Assert against the prompt built by the prompt builder (systemPrompt,
+    // PRI-633 ex-artificerInstruction), not the bare constant.
     const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
-      contextMode: 'v2',
       taskId: 'task',
       contextHash: 'hash',
       sourceScribeArtifactId: 'scribe',
@@ -213,7 +226,6 @@ describe('PRI-484 Artificer prompt context modes', () => {
 
   it('requires preferring canonicalKind / facts over raw history.calls', () => {
     const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
-      contextMode: 'v2',
       taskId: 'task',
       contextHash: 'hash',
       sourceScribeArtifactId: 'scribe',
@@ -227,7 +239,6 @@ describe('PRI-484 Artificer prompt context modes', () => {
 
   it('forbids inferring "not done" from an empty calls array', () => {
     const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
-      contextMode: 'v2',
       taskId: 'task',
       contextHash: 'hash',
       sourceScribeArtifactId: 'scribe',
@@ -238,11 +249,11 @@ describe('PRI-484 Artificer prompt context modes', () => {
     expect(systemPrompt).toContain('empty');
   });
 
-  it('declares the contract version bump history v1 → v2 → v3 → v4 → v5 (PRI-634 PR-A, PRI-700, PRI-741)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v5');
+  it('declares the contract version bump history v1 → … → v6 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780)', () => {
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v6');
   });
 
-  it('still references input.action for v1 compatibility', () => {
+  it('still references input.action', () => {
     expect(ARTIFICER_PROTOCOL_INSTRUCTION).toContain('input.action');
   });
 
@@ -257,8 +268,8 @@ describe('PRI-484 Artificer prompt context modes', () => {
   });
 
   it('mentions requiresContextVersion when declaring v2 rules', () => {
-    const builder = new ArtificerPromptBuilder();
-    expect(() => builder.buildPrompt({ contextMode: 'v2', taskId: 'task', contextHash: 'hash', sourceScribeArtifactId: 'scribe', scribeArtifact: {} })).toThrow(/behaviorExamplePack/i);
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({ behaviorExamplePack: validBehaviorExamplePack, taskId: 'task', contextHash: 'hash', sourceScribeArtifactId: 'scribe', scribeArtifact: {} });
+    expect(systemPrompt).toContain('requiresContextVersion: 2');
   });
 
   it('keeps the existing JSON-only output constraint intact', () => {
@@ -277,7 +288,7 @@ describe('PRI-508: Artificer dreamer context passthrough', () => {
   it('includes dreamerContext.badDecision/betterDecision/rationale in prompt message when provided', () => {
     const builder = new ArtificerPromptBuilder();
     const { message, promptInput } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: validBehaviorExamplePack,
       taskId: 'task-pri-508',
       contextHash: 'ctx-pri-508',
       sourceScribeArtifactId: 'scribe-pri-508',
@@ -312,7 +323,7 @@ describe('PRI-508: Artificer dreamer context passthrough', () => {
   it('does not include dreamerContext in prompt when not provided (backward compatible)', () => {
     const builder = new ArtificerPromptBuilder();
     const { message, promptInput } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: validBehaviorExamplePack,
       taskId: 'task-pri-508-no-dreamer',
       contextHash: 'ctx-pri-508',
       sourceScribeArtifactId: 'scribe-pri-508',
@@ -327,7 +338,6 @@ describe('PRI-508: Artificer dreamer context passthrough', () => {
   it('v2 mode includes dreamerContext in prompt when provided', () => {
     const builder = new ArtificerPromptBuilder();
     const { message } = builder.buildPrompt({
-      contextMode: 'v2',
       taskId: 'task-pri-508-v2',
       contextHash: 'ctx-pri-508-v2',
       sourceScribeArtifactId: 'scribe-pri-508',
@@ -356,7 +366,7 @@ describe('PRI-509: Artificer repair feedback passthrough', () => {
   // Slice 1: repairFeedback serialized into prompt message when present
   it('includes repairFeedback in prompt message when provided (with requiredChanges text)', () => {
     const { message, promptInput } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: validBehaviorExamplePack,
       taskId: 'task-pri-509',
       contextHash: 'ctx-pri-509',
       sourceScribeArtifactId: 'scribe-pri-509',
@@ -373,7 +383,7 @@ describe('PRI-509: Artificer repair feedback passthrough', () => {
   // Slice 2: backward compatibility — repairFeedback absent → not in prompt
   it('does not include repairFeedback in prompt when not provided (backward compatible)', () => {
     const { message, promptInput } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: validBehaviorExamplePack,
       taskId: 'task-pri-509-no-repair',
       contextHash: 'ctx-pri-509',
       sourceScribeArtifactId: 'scribe-pri-509',
@@ -387,7 +397,7 @@ describe('PRI-509: Artificer repair feedback passthrough', () => {
   // Slice 3: empty/whitespace repairFeedback treated as absent (backward compatible)
   it('does not include repairFeedback when empty or whitespace-only', () => {
     const { message: msgEmpty } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: validBehaviorExamplePack,
       taskId: 'task-pri-509-empty',
       contextHash: 'ctx-pri-509',
       sourceScribeArtifactId: 'scribe-pri-509',
@@ -397,7 +407,7 @@ describe('PRI-509: Artificer repair feedback passthrough', () => {
     expect(JSON.parse(msgEmpty).repairFeedback).toBeUndefined();
 
     const { message: msgWs } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: validBehaviorExamplePack,
       taskId: 'task-pri-509-ws',
       contextHash: 'ctx-pri-509',
       sourceScribeArtifactId: 'scribe-pri-509',
@@ -437,7 +447,7 @@ describe('BUG-3 (PRI-442): artificer prompt propose_correction consistency', () 
 
   it('v1 prompt forbids propose_correction (no contradiction with v2)', () => {
     const result = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: validBehaviorExamplePack,
       taskId: 'bug3-v1',
       contextHash: 'ctx-bug3',
       sourceScribeArtifactId: 'scribe-bug3',
@@ -449,7 +459,6 @@ describe('BUG-3 (PRI-442): artificer prompt propose_correction consistency', () 
 
   it('v2 prompt still forbids propose_correction (constraint preserved after move)', () => {
     const result = builder.buildPrompt({
-      contextMode: 'v2',
       taskId: 'bug3-v2',
       contextHash: 'ctx-bug3',
       sourceScribeArtifactId: 'scribe-bug3',

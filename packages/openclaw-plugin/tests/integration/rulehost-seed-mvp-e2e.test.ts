@@ -564,7 +564,6 @@ beforeAll(async () => {
       eventEmitter,
       artifactStore: stateManager.piArtifactStore,
       validator: new DefaultArtificerValidator(),
-      contextMode: 'v2',
       behaviorExamplePack: assembledPack,
     },
     runnerOpts,

@@ -45,6 +45,20 @@ const VALID_CONTRACT: IntentContractV1 = {
   validationExpectation: 'absent consumer evidence must surface as an explicit risk',
 };
 
+// PRI-780: v2-only prompt builder — minimal Owner-labelled pack for prompt tests.
+const PROMPT_TEST_RULE_CONTEXT = {
+  version: 2 as const,
+  history: { status: 'available' as const, truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
+const PROMPT_TEST_PACK = {
+  sourceNegativeCase: { caseId: 'negative-1', kind: 'negative' as const, toolName: 'write_file', params: { path: 'unread' }, expectedDecision: 'block' as const, ruleContext: PROMPT_TEST_RULE_CONTEXT },
+  ownerDesiredOutcome: 'Block unread writes.',
+  positiveCounterexamples: [{ caseId: 'positive-1', kind: 'positive' as const, toolName: 'write_file', params: { path: 'read' }, expectedDecision: 'allow' as const, ruleContext: PROMPT_TEST_RULE_CONTEXT }],
+  evidenceRefs: ['pain:1'],
+  redactionNotes: [],
+};
+
 function scribeOutputWithContract(overrides: Partial<IntentContractV1> = {}) {
   return {
     taskId: 'scribe-1',
@@ -75,7 +89,7 @@ describe('1. Intent Consistency — contract flows scribe → prompt → rule ar
   it('the artificer prompt carries the exact contract the scribe produced (byte-identical intent anchor)', () => {
     const builder = new ArtificerPromptBuilder();
     const { promptInput, systemPrompt } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: PROMPT_TEST_PACK,
       taskId: 'artificer-1',
       contextHash: 'hash-1',
       sourceScribeArtifactId: 'pi-art-scribe-1',
@@ -96,7 +110,7 @@ describe('1. Intent Consistency — contract flows scribe → prompt → rule ar
     const legacyArtifact = scribeOutputWithContract();
     delete (legacyArtifact as Record<string, unknown>).intentContract;
     const { promptInput } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: PROMPT_TEST_PACK,
       taskId: 'artificer-2',
       contextHash: 'hash-2',
       sourceScribeArtifactId: 'pi-art-scribe-2',
@@ -304,7 +318,7 @@ describe('3. Repair feedback circuit — PRI-700 factors B + C', () => {
   it('priorValidatorErrors reaches the serialized artificer prompt (the dead loop is broken)', () => {
     const builder = new ArtificerPromptBuilder();
     const { promptInput, message, systemPrompt } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: PROMPT_TEST_PACK,
       taskId: 'artificer-repair-r1',
       contextHash: 'hash-r1',
       sourceScribeArtifactId: 'pi-art-scribe-1',
@@ -332,7 +346,7 @@ describe('3. Repair feedback circuit — PRI-700 factors B + C', () => {
   it('the case-id vocabulary note is part of the prompt contract (factor C)', () => {
     const builder = new ArtificerPromptBuilder();
     const { systemPrompt } = builder.buildPrompt({
-      contextMode: 'v1',
+      behaviorExamplePack: PROMPT_TEST_PACK,
       taskId: 'artificer-repair-r1',
       contextHash: 'hash-r1',
       sourceScribeArtifactId: 'pi-art-scribe-1',

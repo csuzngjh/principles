@@ -573,6 +573,37 @@ function writeContextV2EnabledConfig(workspaceDir: string): void {
   fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
 }
 
+function writeContextV2KillSwitchConfig(workspaceDir: string): void {
+  const configDir = path.join(workspaceDir, '.pd');
+  fs.mkdirSync(configDir, { recursive: true });
+  const cfg = {
+    version: 1,
+    features: {
+      prompt: { category: 'core', enabled: true },
+      code_tool_hook: { category: 'core', enabled: true },
+      defer_archive: { category: 'core', enabled: true },
+      code_rule_capability: { category: 'core', enabled: true },
+      // PRI-780: explicit kill switch (the flag itself defaults ON).
+      rulecode_context_v2: { category: 'quiet', enabled: false },
+    },
+    workspace: { default: workspaceDir },
+    runtimeProfiles: {
+      'pi-ai.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+    },
+    internalAgents: {
+      defaultRuntime: 'pi-ai.default',
+      agents: {
+        dreamer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        philosopher: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        scribe: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        artificer: { enabled: true, runtimeProfile: 'pi-ai.default' },
+        evaluator: { enabled: true, runtimeProfile: 'pi-ai.default' },
+      },
+    },
+  };
+  fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(cfg), 'utf8');
+}
+
 describe('handleRunRuleHost — PR #1122 behavior-examples fail-fast (CodeRabbit Comment 1+2)', () => {
   let workspaceDir: string;
   let savedEnv: NodeJS.ProcessEnv;
@@ -648,8 +679,9 @@ describe('handleRunRuleHost — PR #1122 behavior-examples fail-fast (CodeRabbit
   it('text dry-run output uses v2-aware capabilityStatus when --behavior-examples is missing (CodeRabbit Comment 2)', async () => {
     // With contextV2Enabled=true and no --behavior-examples, the handler sets
     // behaviorExamplesReason='behavior_examples_missing'. The text dry-run
-    // branch must surface this reason in capabilityStatus (matching the JSON
-    // branch), not the stale resolvedRuntime.capabilityStatus.
+    // branch must derive capabilityStatus from the EFFECTIVE capability
+    // (PRI-780 review M2), surfacing the reason — not the stale
+    // resolvedRuntime.capabilityStatus ("ON").
     writeContextV2EnabledConfig(workspaceDir);
     const { stdout } = await captureStdio(() =>
       handleRunRuleHost({
@@ -658,6 +690,24 @@ describe('handleRunRuleHost — PR #1122 behavior-examples fail-fast (CodeRabbit
         workspace: workspaceDir,
       }),
     );
-    expect(stdout).toMatch(/code_rule_capability: OFF \(behavior_examples_missing\)/);
+    expect(stdout).toMatch(/code_rule_capability: OFF \(behavior_examples_missing;/);
+    expect(stdout).not.toMatch(/code_rule_capability: ON/);
+  });
+
+  it('PRI-780 M2: kill-switch dry-run reports OFF with the kill-switch reason, never ON', async () => {
+    writeContextV2KillSwitchConfig(workspaceDir);
+    const { stdout } = await captureStdio(() =>
+      handleRunRuleHost({
+        painId: 'pain-1',
+        dryRun: true,
+        workspace: workspaceDir,
+      }),
+    );
+    expect(stdout).toMatch(/code_rule_capability: OFF \(rulecode_context_v2_disabled/);
+    expect(stdout).not.toMatch(/code_rule_capability: ON/);
+    // Codex review round 2 P2: the plain-text "Next" line must derive from the
+    // EFFECTIVE capability too — confirmation cannot run the code-rule pipeline.
+    expect(stdout).not.toMatch(/Next: pass --confirm to actually run the pipeline/);
+    expect(stdout).toMatch(/Next: fix the code-rule capability issue above/);
   });
 });
