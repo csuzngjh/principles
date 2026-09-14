@@ -4,6 +4,8 @@
 > 读者：Owner / 仓库维护者
 > 设计：[`docs/audit/cnb-cloud-agent-architecture.md`](../audit/cnb-cloud-agent-architecture.md)
 > 角色章程：[`.cnb/agents/pd-auditor.md`](../../.cnb/agents/pd-auditor.md)（Auditor，只读）、[`.cnb/agents/pd-developer.md`](../../.cnb/agents/pd-developer.md)（Developer，受限写，见 §4.3）
+>
+> **注**：本文引用的 `ADR-0026` 目前为 `Proposed`，存在于 **CNB PR #21**，尚未合入 `main`（见 `docs/adr/`）。
 
 ---
 
@@ -57,6 +59,13 @@
 * 不要把令牌写进仓库文件、`.git/config` 的 remote URL、或任何会被提交的位置。
   本项目的令牌只用于 Owner 手动执行镜像（见 §2），**不进入 CI/流水线配置**
   （`.cnb.yml` 的 `CNB_TOKEN` 是平台自动注入的临时令牌，构建结束自动销毁，与个人令牌无关）。
+
+> **修订说明（2026-09-13，PRI-782 / ISSUE #19）**：上文"不进入 CI/流水线配置"针对的是
+> **CNB 个人访问令牌**——该约束成立。但它**不应**被读作"本项目整体零密钥"：
+> 自 PRI-778 起，交付桥（§4.4）使用**独立的**密钥仓库文件
+> （`pd-secrets/cnb-github-bridge.yml`，内含 `GITHUB_SYNC_TOKEN`），
+> 由 `.cnb.yml:263,368` 的 `imports` 注入。两者是**不同的凭据、不同的存储面**，
+> 不要把本节的约束错误外推。见 §4.4.2 与 §5。
 
 ---
 
@@ -377,6 +386,7 @@ Validation / PR，Validation 引用检查原文输出。
 | GitHub main | 永不直推（治理 + 平台双强制）；桥只建 `sync/cnb-delivery/*` 分支与 PR |
 | force push | 禁（插件 `force: false` + GitHub 平台禁用） |
 | 方向 | 单向 CNB → GitHub；GitHub → CNB 仍是独立镜像机制（§2），不构成本桥的一部分 |
+| **双平台令牌同行** | T6/T7 容器**同时**持有 `CNB_TOKEN`（平台注入，**配置不可移除**）与 `GITHUB_SYNC_TOKEN`（`imports` 注入）。**这是已接受的残余风险（P0-01 / RA-1~RA-4），不是配置缺陷**——`CNB_TOKEN` 的在场性由平台决定，任何 `imports` 层级调整都无法消除（ADR-0026）。详见 `docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md` §4.1 与 §4.4（接受条件：登记 + 事实对齐 + 写入口保护持续在场） |
 
 #### 4.4.3 闭环与引导顺序
 
@@ -402,6 +412,36 @@ GitHub PR 合并后重做 ③ 对齐。
 | 未执行全量 `verify:merge` | 首次 `npm install` 约 25 分钟，不纳入第一阶段流水线 |
 | `@NPC` 评论触发不可用 | 单向镜像下 CNB 侧无 PR/Issue |
 | GitHub 既有红灯会同样出现 | workflow `E2E Regression Test` / job `Nocturnal Pipeline Regression Test` 在 main 上自 ≥#1605 起连续失败，根因在 `packages/pd-cli/src/update/**`。**这是预先存在的红灯，不得归因于 CNB 接入** |
+| **P0-01：交付容器同时持有两平台写权限** | T6/T7 容器内 `CNB_TOKEN`（CNB 写）与 `GITHUB_SYNC_TOKEN`（GitHub Contents RW + PR RW）并存。属**平台注入边界**问题，配置不可消除（ADR-0026）。**已接受为残余风险**，不是待修复的配置缺陷 |
+
+### 5.1 P0-01 残余风险登记（显式接受，非沉默）
+
+> 来源：`docs/architecture/CREDENTIAL_GOVERNANCE_DECISION.md` §4.1。
+> 本节只登记**存在性**，不复制分析全文（避免第二个事实源）。
+
+| ID | 残余风险 | 为何不可消除 |
+|---|---|---|
+| **RA-1** | 容器内任意代码可读取 `GITHUB_SYNC_TOKEN`（供应链攻击面：镜像/依赖投毒） | 脚本任务必须读到该令牌才能推送 ⇒ 不存在"不可读"配置 |
+| **RA-2** | 该令牌 Contents RW + PR RW（限单仓库）⇒ 泄露可改写**非保护分支**内容并开 PR | 已是最小必要授权；再收窄会破坏桥功能 |
+| **RA-3** | `CNB_TOKEN` 同容器提供 CNB 仓库写权力 | 平台注入，配置不可消除（ADR-0026） |
+| **RA-4** | **单一突破点可同时获得两个平台写权限**（P0-01 的本质） | F2 + F1 的合成事实 |
+| **RA-5** | 无轮换自动化；PAT 长期有效，泄露窗口 = 有效期 | 轮换自动化不属本阶段范围 |
+
+**接受条件（缺一即不成立）**：
+
+1. **登记**——本节存在（已满足）；
+2. **事实对齐**——§4.4.2 与 §1.2/§8 已与本实现的现实对齐（见上文修订说明）；
+3. **写入口保护持续在场**——`main` 平台保护（Verify Merge Gate strict + `enforce_admins` + 禁 force/delete）、
+   桥只推 `sync/cnb-delivery/*` 与 `ai/cnb-dev/*`、禁 force。**削弱任一项即视为重新打开 P0-01**。
+
+**已覆盖的控制（不重复建设）**：GitHub `main` 分支保护、桥的分支前缀约束、令牌不落盘
+（credential helper / `umask 077` 临时 header + `trap` / `redact()`）、gitleaks pre-push、
+可信事件语义、结构化失败 + nextAction。
+
+**明确拒绝的缓解方向**：Vault / 外部 Secret Manager、"不含 `CNB_TOKEN` 的容器"、
+`imports` 层级调整（ADR-0026 判定命题不成立）、移除 `CNB_TOKEN` 使用、双向同步、
+受控配置库 + `include`（解决的是"谁能改配置"，不是"凭据是否同容器"）。逐条理由见
+`CREDENTIAL_GOVERNANCE_DECISION.md` §4.3。
 
 ---
 
@@ -435,5 +475,6 @@ CNB 定时任务的**执行身份 = 最后添加或修改该配置并推送的�
 | **不得**为该 NPC 开启「工作模式」 | 开启即授予代码/PR 写权限，破坏只读姿态 |
 | **不得**在 `.cnb.yml` 中加入 `git:auto-merge` | 违反「不自动合并」 |
 | **不得**引用密钥仓库文件 | 当前为「云端零密钥」姿态 |
+| ~~**不得**引用密钥仓库文件~~（**已修订 2026-09-13**） | 原表述与实现冲突：`.cnb.yml:263,368` 自 PRI-778 起已 `imports` 密钥仓库 `csuzngjh/pd-secrets`（§4.4.1 亦明确要求预置）。**保留原句以可追溯**，但以 §4.4 与 §5 为准。该行的原意是限制**新增**密钥引用面，此约束继续有效：新增任何密钥引用都必须走 §4.4.1 的 `allow_*` 最小授权，并在 `docs/runbooks/CREDENTIAL_INVENTORY.md` 登记 |
 | `.cnb/**` 是 CI 配置，**不是** PD 产品代码 | 与 `.github/workflows/` 同类；不得据此改动 `packages/**` |
 | 报告**不得**提交回 `main` | 走 commit 附件，避免第二个写入口 |
