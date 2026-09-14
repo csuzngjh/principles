@@ -9,6 +9,8 @@
 
 背景问题：PD 依赖多个内置代理和 Peer Runner 协同工作，但 LLM 输出具有随机性。最常见失败是 JSON 格式不正确、字段缺失、字段语义矛盾、lineage 错误、或 schema 版本与解析代码漂移。若只靠提示词要求“请输出 JSON”或在代码里无限增加 parser fallback，系统会变成脆弱的 prompt/parser 竞赛。
 
+> **PRI-786 真况注记**：本文是设计提案，文中"建议的 CLI 合同"与 Phase 路线图均未实施。TraceRefiner / TraceRefinerAgent 链路已随 PRI-770 从代码中删除，提及它们的段落仅作历史设计参考；GoldenTrace 的现存能力是 fixture 构建与 replay validator（`principle-compiler` 消费）。
+
 因此，PD 采用三层 Agent-Software Contract：
 
 1. **软件拥有确定性写入和校验**：Agent 负责推理，PD CLI/core 负责写入、校验、迁移和审计。
@@ -66,7 +68,6 @@ Agent reasoning
 | `pd output validate` | 验证任意 runner 输出 | schemaRef + JSON | valid/errors/repairPrompt |
 | `pd artifact write` | 写入 PIArtifact | schemaRef + payload + lineage | artifactId/resultRef |
 | `pd candidate ingest` | 摄入 candidate | candidate payload | candidateId/intake decision |
-| `pd trace refine` | 确定性 TraceRefiner | FullTracePayloadV2 | RefinedTracePayload |
 | `pd golden-trace build` | 从 refined trace 生成 candidate | RefinedTracePayload | GoldenTrace draft |
 
 要求：
@@ -154,10 +155,11 @@ interface CertifiedAgentOutput<TData> {
 
 这个模式适合：
 
-- TraceRefinerAgent shadow output。
 - GoldenTrace candidate builder。
 - RuleHost implementation proposal。
 - Long-running built-in agents 的 completion artifact。
+
+（TraceRefinerAgent shadow output 已随 PRI-770 删除，从本清单移除。）
 
 不适合：
 
@@ -184,7 +186,7 @@ Peer Runner 输出必须满足：
 
 ### 4.3 TraceRefiner / GoldenTrace
 
-TraceRefiner 已经是确定性 read model；TraceRefinerAgent 应保持 shadow。后续 GoldenTrace candidate builder 可以采用 Layer 3 的 certifying output 结构，但生成后的 GoldenTrace 仍必须由 core validator 和 replay gate 判定。
+（PRI-786 真况：TraceRefiner / TraceRefinerAgent 已随 PRI-770 删除，本节仅存历史设计参考。）GoldenTrace 的现存部分是 fixture 构建与 replay validator——生成后的 GoldenTrace 仍必须由 core validator 和 replay gate 判定。
 
 ### 4.4 RuleHost / Activation
 
@@ -237,9 +239,10 @@ RuleHost live activation 必须满足：
 
 ### Phase C: 证书式输出 shadow 试点
 
-7. 在 TraceRefinerAgent 上实现 `CertifiedAgentOutput` shadow contract。
-8. 在 GoldenTrace candidate builder 上复用。
-9. 只记录/评估，不作为生产写入权威。
+7. 在 GoldenTrace candidate builder 上应用 `CertifiedAgentOutput` 式证书结构。
+8. 只记录/评估，不作为生产写入权威。
+
+（原第 7 条"在 TraceRefinerAgent 上实现 shadow contract"已随 PRI-770 删除该链路而移除。）
 
 ---
 

@@ -163,7 +163,6 @@ runtime-v2/
 ├── internalization-integrity-remediation.ts   ← Service
 ├── remediation-contract.ts          ← Schema
 ├── golden-trace-replay-validator.ts ← Service
-├── golden-trace-replay-adapter.ts   ← Adapter
 ├── runner/                          ← Runner 框架
 │   ├── diagnostician-runner.ts
 │   ├── diagnostician-runner-options.ts
@@ -461,7 +460,6 @@ PD 系统在运行时分为以下进程：
 │  ┌────────────────────────────────────────────────────────────┐│
 │  │ {workspace}/.pd/state.db                                    ││
 │  │ {workspace}/.state/principle_training_state.json           ││
-│  │ {workspace}/.state/audit-log.jsonl                         ││
 │  │ {workspace}/.principles/skills/                            ││
 │  │ {workspace}/.principles/implementations/                   ││
 │  │ {workspace}/.pd/training-exports/                          ││
@@ -596,16 +594,14 @@ correction_audit_events           ★ ADR-0004
 ```
 {workspace}/.pd/
 ├── state.db
-├── config/
-│   ├── activation.yaml
-│   ├── internalization.yaml
-│   └── runtime-scheduling.yaml       ← PD-owned explicit scheduling (replaces legacy idle trigger)
+├── config.yaml                      ← 单文件配置（ADR-0016；含 feature flags）
 ├── training-exports/               ← model_training 通道激活后写入
 │   └── {batchId}/
 │       ├── dataset.jsonl
 │       └── metadata.json
-└── audit-log.jsonl                 ← 审计日志
 ```
+
+（per-domain `config/*.yaml` 与 `audit-log.jsonl` 为未实施的历史设计，见 CONFIGURATION_ARCHITECTURE.md 与 OBSERVABILITY_ARCHITECTURE.md 的对应标注。）
 
 ```
 {workspace}/.state/                 ← OpenClaw 兼容性目录
@@ -621,29 +617,17 @@ correction_audit_events           ★ ADR-0004
 
 ## 7. 配置层级
 
-PD 的配置遵循以下层级（从低优先级到高优先级，详见待建的 `CONFIGURATION_ARCHITECTURE.md`）：
+PD 的用户配置是**单文件** `{workspace}/.pd/config.yaml`（ADR-0016，详见 `CONFIGURATION_ARCHITECTURE.md`——其中"历史设计/未实施"章节保留了早期多层方案的记录）：
 
 ```
-1. 内置默认值（代码常量）
-       ↓ 可被覆盖
-2. ~/.openclaw/extensions/principles-disciple/default-config.yaml
-       ↓ 可被覆盖
-3. {workspace}/.pd/config/*.yaml
-       ↓ 可被覆盖
-4. 环境变量（PD_* 前缀）
-       ↓ 可被覆盖
-5. 命令行参数（pd-cli）
+1. 内置默认值（代码常量，principles-core runtime-v2/config/pd-config-defaults.ts）
+       ↓ 覆盖
+2. {workspace}/.pd/config.yaml（含 feature flags）
+       ↓ 覆盖
+3. 命令行参数（pd-cli）
 ```
 
-主要配置文件：
-
-| 文件 | 用途 |
-|------|------|
-| `activation.yaml` | 通道激活策略（详见 ADR-0006）|
-| `internalization.yaml` | 内化流水线参数 |
-| `runtime-scheduling.yaml` | PD-owned 显式调度/执行策略；不依赖 OpenClaw idle 状态 |
-| `runtime.yaml` | RuntimeAdapter 选择 |
-| `gfi.yaml` | GFI 策略 |
+环境变量覆盖（PD_* 前缀）与 per-domain yaml（activation/internalization/runtime-scheduling/gfi/runtime）为**未实施的历史设计**，现网不存在对应文件；引用它们的规划段落见 CONFIGURATION_ARCHITECTURE.md §5/§9。
 
 ---
 
