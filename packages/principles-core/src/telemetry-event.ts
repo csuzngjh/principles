@@ -171,6 +171,9 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('scribe_task_retried'),
   Type.Literal('scribe_task_failed'),
   Type.Literal('scribe_principle_draft_generated'),
+  // PRI-758/EP002-R3: scribe normalized a string-encoded intentContract carrier
+  // before validation (glm-5.3-flash structured-output path evidence).
+  Type.Literal('scribe_intent_contract_string_normalized'),
   Type.Literal('scribe_cancel_run_failed'),
   Type.Literal('scribe_mark_succeeded_failed'),
   Type.Literal('scribe_update_output_failed'),
