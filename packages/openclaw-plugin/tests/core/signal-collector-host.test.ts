@@ -20,6 +20,7 @@ vi.mock('../../src/utils/trace-id.js', () => ({
 import { SignalCollectorHost } from '../../src/core/signal-collector-host.js';
 import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
 import { trackFriction } from '../../src/core/session-tracker.js';
+import { SystemLogger } from '../../src/core/system-logger.js';
 
 // ── 测试用统一词库 (与 core 测试对齐) ────────────────────────────────────────
 
@@ -573,5 +574,119 @@ describe('SignalCollectorHost edge cases and error handling', () => {
     host.detectSync('你搞什么啊，这是错的', 'sess-mixed', 'user');
     await flushAsync();
     expect(emitPainDetectedEvent).toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRI-788 G1 — Stage2 确认回写 correction_detected
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('PRI-788 G1: Stage2 确认回写 correction_detected', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  type MockTrajectory = {
+    recordUserTurn: ReturnType<typeof vi.fn>;
+    markUserTurnCorrection: ReturnType<typeof vi.fn>;
+  };
+
+  function makeWctxWithRowid(rowid: number | undefined, markResult: boolean | undefined) {
+    const wctx = makeMockWctx();
+    const trajectory = wctx.trajectory as unknown as MockTrajectory;
+    trajectory.recordUserTurn = vi.fn().mockReturnValue(rowid);
+    trajectory.markUserTurnCorrection = vi.fn().mockReturnValue(markResult);
+    return { ...wctx, trajectory };
+  }
+
+  it('LLM confirms ambiguous correction → markUserTurnCorrection called with captured rowid + llm cue', async () => {
+    const wctx = makeWctxWithRowid(42, true);
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'correction', confidence: 0.9, reason: '明确指出改错了文件',
+      }),
+    });
+
+    host.detectSync('这个不对', 'sess-g1', 'user');
+    await flushAsync();
+
+    expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledTimes(1);
+    expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledWith(42, 'llm:明确指出改错了文件');
+    // 回写独立于 pain 事件——事件照常发出
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('rowid no longer exists (mark returns false) → SIGNAL_WRITEBACK_MISS logged, pain still emitted', async () => {
+    const wctx = makeWctxWithRowid(42, false);
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue',
+      }),
+    });
+
+    host.detectSync('这个不对', 'sess-g1-miss', 'user');
+    await flushAsync();
+
+    expect(SystemLogger.log).toHaveBeenCalledWith(
+      '/tmp/test-ws', 'SIGNAL_WRITEBACK_MISS', expect.stringContaining('42'),
+    );
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('markUserTurnCorrection throws → SIGNAL_WRITEBACK_FAIL logged, pain still emitted (rc-9 no silent swallow)', async () => {
+    const wctx = makeWctxWithRowid(42, true);
+    (wctx.trajectory.markUserTurnCorrection as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('db locked');
+    });
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue',
+      }),
+    });
+
+    host.detectSync('这个不对', 'sess-g1-fail', 'user');
+    await flushAsync();
+
+    expect(SystemLogger.log).toHaveBeenCalledWith(
+      '/tmp/test-ws', 'SIGNAL_WRITEBACK_FAIL', expect.stringContaining('db locked'),
+    );
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('recordUserTurn unavailable (no rowid) → write-back skipped entirely', async () => {
+    const wctx = makeWctxWithRowid(undefined, true);
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue',
+      }),
+    });
+
+    host.detectSync('这个不对', 'sess-g1-norow', 'user');
+    await flushAsync();
+
+    expect(wctx.trajectory.markUserTurnCorrection).not.toHaveBeenCalled();
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('LLM says none → no write-back', async () => {
+    const wctx = makeWctxWithRowid(42, true);
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: false, type: 'none', confidence: 1, reason: '普通指令',
+      }),
+    });
+
+    host.detectSync('这个不对', 'sess-g1-none', 'user');
+    await flushAsync();
+
+    expect(wctx.trajectory.markUserTurnCorrection).not.toHaveBeenCalled();
   });
 });

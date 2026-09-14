@@ -1,5 +1,6 @@
 import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData } from "./utils/validators.js";
+import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import {
   listActiveSignalKeywords,
   listPendingSignalTerms,
@@ -121,15 +122,17 @@ import type {
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 function getToken(): string | null {
-  return sessionStorage.getItem("pd_token");
+  // PRI-793: localStorage-backed (with one-time migration from the legacy
+  // sessionStorage copy) so the token survives browser restarts.
+  return loadStoredToken();
 }
 
 function setToken(token: string): void {
-  sessionStorage.setItem("pd_token", token);
+  storeToken(token);
 }
 
 function clearToken(): void {
-  sessionStorage.removeItem("pd_token");
+  clearStoredToken();
 }
 
 /**

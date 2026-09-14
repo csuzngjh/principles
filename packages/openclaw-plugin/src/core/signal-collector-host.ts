@@ -108,6 +108,12 @@ interface PendingSignal {
   traceId: string;
   /** Stage1 扫描时的词库快照(异步路径复用同一份,避免检测期间词库漂移) */
   storeSnapshot: UnifiedKeywordStore;
+  /**
+   * PRI-788 G1: Stage1 写入 user_turns 返回的 rowid。Stage2 确认为纠正后据此
+   * 回写 correction_detected 标志（recordUserTurn 当时只写了 Stage1 的 0）。
+   * recordUserTurn 不可用时为 undefined → 回写跳过（可观测降级）。
+   */
+  userTurnRowid?: number;
 }
 
 /**
@@ -191,8 +197,9 @@ export class SignalCollectorHost {
       correctionCue: output.matchedTerms.length > 0 ? output.matchedTerms.join(', ') : null,
       referencesAssistantTurnId: options?.referencesAssistantTurnId ?? null,
     };
+    let userTurnRowid: number | undefined;
     try {
-      this.wctx.trajectory?.recordUserTurn?.(turnInput);
+      userTurnRowid = this.wctx.trajectory?.recordUserTurn?.(turnInput);
     } catch (e) {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_TRAJECTORY_FAIL', `recordUserTurn threw: ${String(e)}`);
     }
@@ -212,6 +219,7 @@ export class SignalCollectorHost {
         occurrenceId: this.resolveOccurrenceId(sessionId, userMessage, options),
         traceId: createTraceId(),
         storeSnapshot: store,
+        userTurnRowid,
       };
       // fire-and-forget,失败不影响用户消息处理 (spec §4.2)
       void this.detectAsyncAndRoute(pending);
@@ -278,11 +286,36 @@ export class SignalCollectorHost {
 
     // 3. 按 strength 分流
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
+      // PRI-788 G1: LLM 确认的纠正回写标志位。Stage1 写入时歧义候选置 0，若不
+      // 回写，证据构建器与 correction_samples 闭环永远看不到这条纠正。标志位
+      // 陈述"这条消息是纠正"的事实，独立于 pain 事件的 rate limit，故先于
+      // routeStrong 执行。
+      this.writeBackConfirmedCorrection(pending, confirmed);
       this.routeStrong(confirmed, pending.sessionId, pending.text, pending.occurrenceId);
     } else if (confirmed.isSignal && confirmed.strength === 'WEAK') {
       this.routeWeak(confirmed, pending.sessionId);
     }
     // none → 仅记录,无副作用
+  }
+
+  /**
+   * PRI-788 G1: Stage2 确认为纠正后回写 user_turns.correction_detected（G1）。
+   * 以 Stage1 写入返回的 rowid 精确寻址（rc-7）；rowid 缺失/行已不存在均为
+   * 可观测降级，不阻塞路由。
+   */
+  private writeBackConfirmedCorrection(pending: PendingSignal, confirmed: SignalCollectorOutput): void {
+    if (pending.userTurnRowid === undefined) return;
+    const cue = confirmed.llmReason ? `llm:${confirmed.llmReason.slice(0, 120)}` : null;
+    try {
+      const updated = this.wctx.trajectory?.markUserTurnCorrection(pending.userTurnRowid, cue);
+      if (updated === false) {
+        SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_WRITEBACK_MISS',
+          `user_turn rowid ${pending.userTurnRowid} no longer exists; correction flag write-back skipped`);
+      }
+    } catch (e) {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_WRITEBACK_FAIL',
+        `markUserTurnCorrection threw: ${String(e)}`);
+    }
   }
 
   /**
