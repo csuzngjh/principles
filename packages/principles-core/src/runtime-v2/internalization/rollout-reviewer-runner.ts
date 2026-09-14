@@ -455,11 +455,17 @@ export class RolloutReviewerRunner {
       if (artifacts.length > 0) {
         const [firstArtifact] = artifacts;
         if (!firstArtifact) continue;
-        this.emitRolloutReviewerEvent(
-          reviewMode === 'principle_semantic' ? 'rollout_reviewer_scribe_dep_selected' : 'rollout_reviewer_evaluator_dep_selected',
-          taskId,
-          { depTaskId: depId, artifactId: firstArtifact.artifactId },
-        );
+        if (reviewMode === 'principle_semantic') {
+          this.emitRolloutReviewerEvent('rollout_reviewer_scribe_dep_selected', taskId, {
+            depTaskId: depId,
+            artifactId: firstArtifact.artifactId,
+          });
+        } else {
+          this.emitRolloutReviewerEvent('rollout_reviewer_evaluator_dep_selected', taskId, {
+            depTaskId: depId,
+            artifactId: firstArtifact.artifactId,
+          });
+        }
         return {
           contextHash: RolloutReviewerRunner.hashContextRefs([firstArtifact.artifactId]),
           sourceArtifact: firstArtifact.contentJson,
@@ -469,11 +475,11 @@ export class RolloutReviewerRunner {
       }
     }
 
-    this.emitRolloutReviewerEvent(
-      reviewMode === 'principle_semantic' ? 'rollout_reviewer_no_scribe_artifact' : 'rollout_reviewer_no_evaluator_artifact',
-      taskId,
-      { reviewMode },
-    );
+    if (reviewMode === 'principle_semantic') {
+      this.emitRolloutReviewerEvent('rollout_reviewer_no_scribe_artifact', taskId, { reviewMode });
+    } else {
+      this.emitRolloutReviewerEvent('rollout_reviewer_no_evaluator_artifact', taskId, { reviewMode });
+    }
     return { contextHash: 'empty', sourceArtifact: null, sourceArtifactId: null, reviewMode };
   }
 

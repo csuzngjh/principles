@@ -37,6 +37,12 @@ export interface RolloutReviewerOutputV1 {
 /** PRI-720: which contract the rollout review runs under. */
 export type RolloutReviewMode = 'principle_semantic' | 'code_chain';
 
+/** Reads one field off an untrusted record without `as` casts (rc-1/rc-2). */
+function readTraceField(source: unknown, field: string): unknown {
+  if (typeof source !== 'object' || source === null) return undefined;
+  return Reflect.get(source, field);
+}
+
 export const ROLLOUT_REVIEWER_DECISIONS = ['approve_rollout', 'needs_revision', 'reject'] as const;
 
 export const RolloutReviewerReviewSchema = Type.Object({
@@ -118,10 +124,7 @@ export class DefaultRolloutReviewerValidator implements RolloutReviewerValidator
     const sourceField = reviewMode === 'principle_semantic' ? 'sourceScribeArtifactId' : 'sourceEvaluatorArtifactId';
     const traceField = reviewMode === 'principle_semantic' ? 'scribeArtifactId' : 'evaluatorArtifactId';
     const sourceValue = reviewMode === 'principle_semantic' ? output.sourceScribeArtifactId : output.sourceEvaluatorArtifactId;
-    const traceRecord = typeof output.sourceTrace === 'object' && output.sourceTrace !== null
-      ? (output.sourceTrace as unknown as Record<string, unknown>)
-      : null;
-    const traceValue = traceRecord ? traceRecord[traceField] : undefined;
+    const traceValue = readTraceField(output.sourceTrace, traceField);
 
     if (typeof sourceValue !== 'string' || sourceValue.trim() === '') {
       errors.push(`${sourceField} must be non-empty string (${reviewMode} review)`);
