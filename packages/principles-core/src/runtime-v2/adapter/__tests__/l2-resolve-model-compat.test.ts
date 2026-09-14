@@ -84,3 +84,41 @@ describe('resolveL2Model — pi-ai compat regression (RUNTIME_CONTRACT @ l2-agen
     expect(() => resolveL2Model('not-a-known-provider', 'm1')).toThrow();
   });
 });
+
+// ── PRI-795 r2 — catalog-first for custom endpoints ──────────────────────────
+
+describe('resolveL2Model — catalog-first borrowing (PRI-795 r2)', () => {
+  it('borrows the catalog entry for a baseUrl-relayed catalog-known model, overriding only transport', () => {
+    // glm-5.3-flash IS in the installed catalog (zai namespace): 1M context,
+    // 131072 output, reasoning:true, zai thinking format, effort-capable.
+    const model = resolveL2Model('zai', 'glm-5.3-flash', 'https://open.bigmodel.cn/api/paas/v4/');
+    expect(model.api).toBe('openai-completions');
+    expect(model.id).toBe('glm-5.3-flash');
+    // Transport overridden to the caller's endpoint + provider name.
+    expect(model.provider).toBe('zai');
+    expect(model.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4/');
+    // Authoritative metadata kept (NOT the hand-built literal's 128000/32000).
+    expect(model.contextWindow).toBe(1_000_000);
+    expect(model.maxTokens).toBe(131_072);
+    expect(model.reasoning).toBe(true);
+    // Compat carries the zai thinking format + effort support so the profile's
+    // reasoning level actually reaches the wire (the EP002-R3 root cause).
+    const compat = model.compat as Record<string, unknown> | undefined;
+    expect(compat?.thinkingFormat).toBe('zai');
+    expect(compat?.supportsReasoningEffort).toBe(true);
+  });
+
+  it('falls back to the hand-built literal for a model absent from every catalog', () => {
+    const model = resolveL2Model('zai', 'no-such-model-anywhere', 'https://open.bigmodel.cn/api/paas/v4/', {
+      reasoning: true,
+      maxTokens: 16_000,
+    });
+    expect(model.api).toBe('openai-completions');
+    expect(model.contextWindow).toBe(128_000);
+    expect(model.maxTokens).toBe(16_000);
+    expect(model.reasoning).toBe(true);
+    const compat = model.compat as Record<string, unknown> | undefined;
+    expect(compat?.thinkingFormat).toBe('deepseek');
+    expect(compat?.supportsReasoningEffort).toBe(false);
+  });
+});
