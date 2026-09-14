@@ -280,6 +280,8 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       tools,
     };
 
+    const MAX_NO_TOOL_CALL_NUDGES = 2;
+    let nudges = 0;
     const loopConfig: AgentLoopConfig = {
       model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
       apiKey,
@@ -300,6 +302,35 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
         turnCount += 1;
         return outputCapture.output !== null || turnCount >= maxTurns;
       },
+      // EP002-R3 (live evidence, glm-5.3-flash): the model sometimes ends its
+      // turn with a plain-text draft instead of a tool call, which makes the
+      // agent loop stop without submit_rulecode. The library-native
+      // continuation path is getFollowUpMessages: when the loop would stop,
+      // feed a corrective user message (bounded) so the SAME conversation —
+      // with the spec/tool results intact — continues. Respects maxTurns and
+      // the total budget (rc-7); failure stays loud once nudges are exhausted.
+      getFollowUpMessages: async () => {
+        if (outputCapture.output !== null) return [];
+        if (budgetTimedOut || turnCount >= maxTurns) return [];
+        if (nudges >= MAX_NO_TOOL_CALL_NUDGES) return [];
+        nudges += 1;
+        this.eventEmitter.emitTelemetry({
+          eventType: 'artificer_l2_turn',
+          traceId: taskId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'l2-adapter',
+          agentId: 'artificer-l2',
+          payload: { runId, phase: 'no_tool_call_nudge', nudge: nudges, turn: turnCount },
+        });
+        return [{
+          role: 'user' as const,
+          content:
+            `Your previous message contained NO tool call — in this session that ends the run as a failure. ` +
+            `Respond NOW with a single tool call: validate_rulecode (to check your drafted code) or submit_rulecode ` +
+            `(with the complete ArtificerRuleOutput JSON as the tool arguments). Do not write plain text.`,
+          timestamp: Date.now(),
+        }];
+      },
     };
 
     this.eventEmitter.emitTelemetry({
@@ -313,50 +344,23 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     let timedOut = false;
     let loopError: string | null = null;
-    // EP002-R3 (live evidence, glm-5.3-flash): the model sometimes ends its
-    // turn with a plain-text answer instead of a tool call, which terminates
-    // the agent loop without submit_rulecode. Prompt-level fixes alone did not
-    // converge, so the adapter now nudges — appends a corrective user message
-    // and continues the SAME conversation — a bounded number of times before
-    // failing loud. Still respects maxTurns and the total budget (rc-7).
-    const MAX_NO_TOOL_CALL_NUDGES = 2;
-    let nudges = 0;
-    for (;;) {
-      try {
-        await runAgentLoop(
-          prompts,
-          agentContext,
-          loopConfig,
-          async (event: AgentEvent) => { void event; },
-          abortController.signal,
-          pdStreamSimple,
-        );
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        timedOut = budgetTimedOut;
-        loopError = reason;
-        break;
-      }
-      if (outputCapture.output !== null) break;
-      if (timedOut || turnCount >= maxTurns) break;
-      if (nudges >= MAX_NO_TOOL_CALL_NUDGES) break;
-      nudges += 1;
-      this.eventEmitter.emitTelemetry({
-        eventType: 'artificer_l2_turn',
-        traceId: taskId,
-        timestamp: new Date().toISOString(),
-        sessionId: 'l2-adapter',
-        agentId: 'artificer-l2',
-        payload: { runId, phase: 'no_tool_call_nudge', nudge: nudges, turn: turnCount },
-      });
-      prompts.push({
-        role: 'user',
-        content:
-          `Your previous message contained NO tool call — in this session that ends the run as a failure. ` +
-          `Respond NOW with a single tool call: validate_rulecode (to check your drafted code) or submit_rulecode ` +
-          `(with the complete ArtificerRuleOutput JSON as the tool arguments). Do not write plain text.`,
-        timestamp: Date.now(),
-      });
+    // EP002-R3: continuation after a no-tool-call turn is handled by the
+    // library-native getFollowUpMessages hook in loopConfig above (bounded
+    // nudges) — re-invoking runAgentLoop here would seed a fresh context and
+    // lose the in-progress conversation.
+    try {
+      await runAgentLoop(
+        prompts,
+        agentContext,
+        loopConfig,
+        async (event: AgentEvent) => { void event; },
+        abortController.signal,
+        pdStreamSimple,
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      timedOut = budgetTimedOut;
+      loopError = reason;
     }
 
     clearTimeout(budgetTimer);
