@@ -101,26 +101,33 @@ export const DIAGNOSTICIAN_EDGES: readonly (readonly [DiagnosticianStageKind, Di
 // ── Edge Validation ────────────────────────────────────────────────────────────
 
 /**
+ * PRI-720: topology scope selecting the edge set for a graph query.
+ * Absent scope = full graph (legacy callers, backward compatible).
+ */
+export interface EdgeScope {
+  channel?: InternalizationChannel;
+  pipelineMode?: PipelineTopologyMode;
+}
+
+/**
  * Validates whether a transition from one runner to another is legal.
  *
  * Channel-aware since PRI-720: the edge set is resolved from the task's
- * channel + pipeline topology mode via resolveChannelEdges. Without a channel
+ * channel + pipeline topology mode via resolveChannelEdges. Without a scope
  * the full graph is checked (backward-compatible with legacy callers); with
  * `pipelineMode: 'full_chain'` the full graph is always allowed regardless of
  * channel.
  *
  * @param from - Source peer runner kind
  * @param to - Target peer runner kind
- * @param channel - Internalization channel of the task chain
- * @param pipelineMode - Explicit topology mode override ('full_chain' forces the legacy linear graph)
+ * @param scope - Channel + topology mode of the task chain
  */
 export function validateEdge(
   from: PeerRunnerKind,
   to: PeerRunnerKind,
-  channel?: InternalizationChannel,
-  pipelineMode?: PipelineTopologyMode,
+  scope?: EdgeScope,
 ): boolean {
-  return resolveChannelEdges(channel, pipelineMode).some(([f, t]) => f === from && t === to);
+  return resolveChannelEdges(scope?.channel, scope?.pipelineMode).some(([f, t]) => f === from && t === to);
 }
 
 /**

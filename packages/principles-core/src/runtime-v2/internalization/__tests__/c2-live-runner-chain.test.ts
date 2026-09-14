@@ -445,30 +445,30 @@ describe('PRI-457 C2-P0: Live MVP runner chain pinning test', () => {
 
     // Shared upstream edges exist on every channel.
     for (const channel of ['prompt', 'code_tool_hook', 'defer_archive'] as const) {
-      expect(validateEdge('dreamer', 'philosopher', channel)).toBe(true);
-      expect(validateEdge('philosopher', 'scribe', channel)).toBe(true);
+      expect(validateEdge('dreamer', 'philosopher', { channel })).toBe(true);
+      expect(validateEdge('philosopher', 'scribe', { channel })).toBe(true);
     }
     // evaluator→rollout_reviewer exists only where the evaluator exists.
-    expect(validateEdge('evaluator', 'rollout_reviewer', 'code_tool_hook')).toBe(true);
-    expect(validateEdge('evaluator', 'rollout_reviewer', 'prompt')).toBe(false);
+    expect(validateEdge('evaluator', 'rollout_reviewer', { channel: 'code_tool_hook' })).toBe(true);
+    expect(validateEdge('evaluator', 'rollout_reviewer', { channel: 'prompt' })).toBe(false);
 
     // The channel fork (AC11): prompt forbids the RuleCode sub-chain,
     // code_tool_hook requires it.
-    expect(validateEdge('scribe', 'rollout_reviewer', 'prompt')).toBe(true);
-    expect(validateEdge('scribe', 'artificer', 'prompt')).toBe(false);
-    expect(validateEdge('scribe', 'rollout_reviewer', 'code_tool_hook')).toBe(false);
-    expect(validateEdge('scribe', 'artificer', 'code_tool_hook')).toBe(true);
-    expect(validateEdge('artificer', 'evaluator', 'prompt')).toBe(false);
-    expect(validateEdge('artificer', 'evaluator', 'code_tool_hook')).toBe(true);
+    expect(validateEdge('scribe', 'rollout_reviewer', { channel: 'prompt' })).toBe(true);
+    expect(validateEdge('scribe', 'artificer', { channel: 'prompt' })).toBe(false);
+    expect(validateEdge('scribe', 'rollout_reviewer', { channel: 'code_tool_hook' })).toBe(false);
+    expect(validateEdge('scribe', 'artificer', { channel: 'code_tool_hook' })).toBe(true);
+    expect(validateEdge('artificer', 'evaluator', { channel: 'prompt' })).toBe(false);
+    expect(validateEdge('artificer', 'evaluator', { channel: 'code_tool_hook' })).toBe(true);
 
     // defer_archive is prompt-shaped (AC9).
-    expect(validateEdge('scribe', 'rollout_reviewer', 'defer_archive')).toBe(true);
-    expect(validateEdge('scribe', 'artificer', 'defer_archive')).toBe(false);
+    expect(validateEdge('scribe', 'rollout_reviewer', { channel: 'defer_archive' })).toBe(true);
+    expect(validateEdge('scribe', 'artificer', { channel: 'defer_archive' })).toBe(false);
 
     // The full_chain override restores every legacy edge on any channel.
     for (const channel of ['prompt', 'defer_archive', 'code_tool_hook'] as const) {
-      expect(validateEdge('scribe', 'artificer', channel, 'full_chain')).toBe(true);
-      expect(validateEdge('artificer', 'evaluator', channel, 'full_chain')).toBe(true);
+      expect(validateEdge('scribe', 'artificer', { channel: channel, pipelineMode: 'full_chain' })).toBe(true);
+      expect(validateEdge('artificer', 'evaluator', { channel: channel, pipelineMode: 'full_chain' })).toBe(true);
     }
 
     // Backward compatibility: no channel → full graph (legacy callers).

@@ -436,7 +436,7 @@ export function validateInternalizationGraph(tasks: PITaskRecord[]): GraphValida
       if (isDiagnosticianStageKind(dep.taskKind) && isDiagnosticianStageKind(task.taskKind)) {
         edgeValid = validateDiagEdge(dep.taskKind, task.taskKind);
       } else if (isPeerRunnerKind(dep.taskKind) && isPeerRunnerKind(task.taskKind)) {
-        edgeValid = validateEdge(dep.taskKind, task.taskKind, task.channel, task.pipelineMode);
+        edgeValid = validateEdge(dep.taskKind, task.taskKind, { channel: task.channel, pipelineMode: task.pipelineMode });
       } else {
         // Cross-pipeline edge — not allowed
         edgeValid = false;
