@@ -53,26 +53,55 @@ function copyPackage(sourceDir: string, targetDir: string): void {
   fs.copyFileSync(path.join(sourceDir, 'package.json'), path.join(targetDir, 'package.json'));
 }
 
-/** Copy a package plus its transitive runtime dependencies from the worktree's
- * node_modules into the seeded runtime layout (what `npm install` produces). */
+/** Resolve a dependency directory the way Node resolution would from
+ * `fromDir`: the nearest `node_modules/<dep>` on the ancestor path, ending at
+ * the repo-root node_modules. npm may nest workspace deps (exact-pinned
+ * versions conflicting at the root), so a root-only lookup silently misses
+ * them and seeds a runtime that cannot load. */
+function findNodeModulesDir(fromDir: string, dep: string, rootNm: string): string | null {
+  let dir = fromDir;
+  // Workspace deps surface in node_modules as junctions/symlinks; resolve to
+  // the real package dir first or the ancestor walk never sees its nested deps.
+  try { dir = fs.realpathSync(dir); } catch { /* keep as-is */ }
+  while (true) {
+    const candidate = path.join(dir, 'node_modules', dep);
+    if (fs.existsSync(candidate)) return candidate;
+    if (dir === rootNm || dir === path.dirname(rootNm)) return null;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/** Copy a package plus its transitive runtime dependencies resolved through
+ * the real node_modules layout into the seeded runtime layout (what
+ * `npm install` produces). */
 function copyPackageWithDeps(sourceDir: string, targetDir: string, nm: string, rootNm: string): void {
   copyPackage(sourceDir, targetDir);
-  const queue: Array<{ dir: string; target: string }> = [{ dir: sourceDir, target: targetDir }];
+  const queue: Array<{ source: string; target: string }> = [{ source: sourceDir, target: targetDir }];
   const seen = new Set<string>();
   for (let depth = 0; depth < 5 && queue.length > 0; depth += 1) {
     const layer = queue.splice(0);
     for (const item of layer) {
       let deps: Record<string, string> = {};
-      try { deps = JSON.parse(fs.readFileSync(path.join(item.dir, 'package.json'), 'utf8')).dependencies ?? {}; } catch { /* copied pkg.json is authoritative */ }
+      try { deps = JSON.parse(fs.readFileSync(path.join(item.source, 'package.json'), 'utf8')).dependencies ?? {}; } catch { /* copied pkg.json is authoritative */ }
       for (const dep of Object.keys(deps)) {
-        const depSource = path.join(rootNm, dep);
         const depTarget = path.join(nm, dep);
-        if (seen.has(dep) || fs.existsSync(depTarget) || !fs.existsSync(depSource)) continue;
+        if (seen.has(dep) || fs.existsSync(depTarget)) continue;
         seen.add(dep);
-        // dereference: workspace symlinks under rootNm must become real dirs
+        const depSource = findNodeModulesDir(item.source, dep, rootNm);
+        if (depSource === null) {
+          // Build-time-only deps (e.g. better-sqlite3's node-addon-api headers)
+          // are legitimately absent from the install tree; skipping them is
+          // fine, but it must stay observable — a silently missing RUNTIME dep
+          // here is what once seeded a wrapper that could not load.
+          console.warn(`[copyPackageWithDeps] unresolvable dep "${dep}" of ${item.source} — skipped`);
+          continue;
+        }
+        // dereference: workspace symlinks under node_modules must become real dirs
         // (Codex 0.147 skips symlinks when installing plugins).
         fs.cpSync(depSource, depTarget, { recursive: true, dereference: true });
-        queue.push({ dir: depTarget, target: depTarget });
+        queue.push({ source: depSource, target: depTarget });
       }
     }
   }
