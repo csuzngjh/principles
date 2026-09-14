@@ -253,6 +253,8 @@ export function buildRuntimeInitOutput(workspaceDir: string, confirm: boolean): 
       tables: ['schema_version', 'ingest_checkpoint', 'sessions', 'assistant_turns',
         'user_turns', 'tool_calls', 'pain_events', 'gate_blocks', 'trust_changes',
         'principle_events', 'task_outcomes', 'correction_samples', 'sample_reviews',
+        // PRI-790 G2: Stage2 待确认信号的持久队列。
+        'signal_confirmations',
         'exports_audit'],
       status: 'skipped',
       warnings: [],
