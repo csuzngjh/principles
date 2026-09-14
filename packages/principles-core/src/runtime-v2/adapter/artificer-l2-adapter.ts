@@ -344,16 +344,25 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     let timedOut = false;
     let loopError: string | null = null;
-    // EP002-R3: continuation after a no-tool-call turn is handled by the
-    // library-native getFollowUpMessages hook in loopConfig above (bounded
-    // nudges) — re-invoking runAgentLoop here would seed a fresh context and
-    // lose the in-progress conversation.
+    // EP002-R3: streamAssistantResponse reports LLM-call failures as a message
+    // with stopReason 'error'/'aborted' and the agent loop then ends WITHOUT
+    // calling shouldStopAfterTurn — previously invisible (turnCount frozen,
+    // no nudge, generic failure reason). Capture it here so the underlying
+    // provider error surfaces loudly (rc-9) instead of a generic message.
+    let lastErrorMessage: string | null = null;
     try {
       await runAgentLoop(
         prompts,
         agentContext,
         loopConfig,
-        async (event: AgentEvent) => { void event; },
+        async (event: AgentEvent) => {
+          if (event.type === 'message_end') {
+            const message = (event as { message?: { stopReason?: string; errorMessage?: string } }).message;
+            if (message && (message.stopReason === 'error' || message.stopReason === 'aborted')) {
+              lastErrorMessage = `LLM stream ended with stopReason=${message.stopReason}${message.errorMessage ? `: ${message.errorMessage}` : ''}`;
+            }
+          }
+        },
         abortController.signal,
         pdStreamSimple,
       );
@@ -361,6 +370,9 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       const reason = err instanceof Error ? err.message : String(err);
       timedOut = budgetTimedOut;
       loopError = reason;
+    }
+    if (loopError === null && lastErrorMessage !== null) {
+      loopError = lastErrorMessage;
     }
 
     clearTimeout(budgetTimer);
