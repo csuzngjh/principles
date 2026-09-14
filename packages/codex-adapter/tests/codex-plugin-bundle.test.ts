@@ -476,7 +476,8 @@ describe('pd-disable.cjs kill switch', () => {
     const { getDefaultPdConfig } = await import('@principles/core/runtime-v2');
     const config = getDefaultPdConfig();
     config.features['host.codex'].enabled = true;
-    const yamlDump = (await import('js-yaml')).default.dump(config, { lineWidth: -1 });
+    // js-yaml 5 is ESM-only: no default export — use the namespace.
+    const yamlDump = (await import('js-yaml')).dump(config, { lineWidth: -1 });
     fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), yamlDump, 'utf8');
 
     const script = path.join(pluginDir, 'scripts', 'pd-disable.cjs');
