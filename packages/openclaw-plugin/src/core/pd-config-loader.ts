@@ -35,6 +35,8 @@ export interface ObserverConfigResult {
   provider: string | null;
   model: string | null;
   timeoutMs: number | null;
+  /** PRI-788 G3: profile 的 maxTokens（思考型本地模型需要显式大 token 预算） */
+  maxTokens: number | null;
   baseUrl: string | null;
   configErrors?: PluginConfigLoadResult['errors'];
 }
@@ -43,8 +45,8 @@ function base(result: PluginConfigLoadResult): Pick<ObserverConfigResult, 'sourc
   return { source: result.source };
 }
 
-function emptyRuntime(): Pick<ObserverConfigResult, 'runtimeProfileId' | 'runtimeProfileType' | 'apiKeyEnv' | 'apiKeyPresent' | 'provider' | 'model' | 'timeoutMs' | 'baseUrl'> {
-  return { runtimeProfileId: null, runtimeProfileType: null, apiKeyEnv: null, apiKeyPresent: false, provider: null, model: null, timeoutMs: null, baseUrl: null };
+function emptyRuntime(): Pick<ObserverConfigResult, 'runtimeProfileId' | 'runtimeProfileType' | 'apiKeyEnv' | 'apiKeyPresent' | 'provider' | 'model' | 'timeoutMs' | 'maxTokens' | 'baseUrl'> {
+  return { runtimeProfileId: null, runtimeProfileType: null, apiKeyEnv: null, apiKeyPresent: false, provider: null, model: null, timeoutMs: null, maxTokens: null, baseUrl: null };
 }
 
 function isInternalAgentName(value: string): value is InternalAgentName {
@@ -87,11 +89,11 @@ export function resolveObserverConfig(
   }
   const apiKeyEnv = profile.apiKeyEnv ?? null;
   if (!apiKeyEnv) {
-    return { enabled: true, readiness: 'needs_setup', ...base(result), ...emptyRuntime(), runtimeProfileId, runtimeProfileType: profile.type, provider: profile.provider ?? null, model: profile.model ?? null, timeoutMs: profile.timeoutMs ?? null, baseUrl: profile.baseUrl ?? null, reason: `pi-ai profile '${runtimeProfileId}' missing apiKeyEnv`, nextAction: `Add apiKeyEnv to runtime profile '${runtimeProfileId}' in .pd/config.yaml` };
+    return { enabled: true, readiness: 'needs_setup', ...base(result), ...emptyRuntime(), runtimeProfileId, runtimeProfileType: profile.type, provider: profile.provider ?? null, model: profile.model ?? null, timeoutMs: profile.timeoutMs ?? null, maxTokens: profile.maxTokens ?? null, baseUrl: profile.baseUrl ?? null, reason: `pi-ai profile '${runtimeProfileId}' missing apiKeyEnv`, nextAction: `Add apiKeyEnv to runtime profile '${runtimeProfileId}' in .pd/config.yaml` };
   }
   const apiKeyPresent = Object.hasOwn(process.env, apiKeyEnv) && Boolean(process.env[apiKeyEnv]);
   if (!apiKeyPresent) {
-    return { enabled: true, readiness: 'needs_setup', ...base(result), runtimeProfileId, runtimeProfileType: profile.type, apiKeyEnv, apiKeyPresent: false, provider: profile.provider ?? null, model: profile.model ?? null, timeoutMs: profile.timeoutMs ?? null, baseUrl: profile.baseUrl ?? null, reason: `Environment variable '${apiKeyEnv}' is not set or empty`, nextAction: `Set the environment variable '${apiKeyEnv}' with a valid API key` };
+    return { enabled: true, readiness: 'needs_setup', ...base(result), runtimeProfileId, runtimeProfileType: profile.type, apiKeyEnv, apiKeyPresent: false, provider: profile.provider ?? null, model: profile.model ?? null, timeoutMs: profile.timeoutMs ?? null, maxTokens: profile.maxTokens ?? null, baseUrl: profile.baseUrl ?? null, reason: `Environment variable '${apiKeyEnv}' is not set or empty`, nextAction: `Set the environment variable '${apiKeyEnv}' with a valid API key` };
   }
-  return { enabled: true, readiness: 'not_ready', ...base(result), runtimeProfileId, runtimeProfileType: profile.type, apiKeyEnv, apiKeyPresent: true, provider: profile.provider ?? null, model: profile.model ?? null, timeoutMs: profile.timeoutMs ?? null, baseUrl: profile.baseUrl ?? null, reason: `pi-ai profile configured with apiKeyEnv='${apiKeyEnv}' (key present); runtime availability unknown`, nextAction: 'Run pd runtime probe to verify end-to-end connectivity' };
+  return { enabled: true, readiness: 'not_ready', ...base(result), runtimeProfileId, runtimeProfileType: profile.type, apiKeyEnv, apiKeyPresent: true, provider: profile.provider ?? null, model: profile.model ?? null, timeoutMs: profile.timeoutMs ?? null, maxTokens: profile.maxTokens ?? null, baseUrl: profile.baseUrl ?? null, reason: `pi-ai profile configured with apiKeyEnv='${apiKeyEnv}' (key present); runtime availability unknown`, nextAction: 'Run pd runtime probe to verify end-to-end connectivity' };
 }
