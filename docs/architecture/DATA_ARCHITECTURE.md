@@ -86,8 +86,7 @@ PD Runtime V2 的权威数据存储分为**两个物理事实源**：
 | `{workspace}/.state/event-log.jsonl` | OpenClaw 事件日志 | openclaw-plugin |
 | `{workspace}/.state/daily-stats/` | 每日统计 | openclaw-plugin |
 | `{workspace}/.state/CURRENT_FOCUS` | 当前焦点 | openclaw-plugin |
-| `{workspace}/.state/evolution.jsonl` | 进化事件流 | openclaw-plugin |
-| `{workspace}/.state/evolution-scorecard.json` | 进化积分卡 | openclaw-plugin |
+| `{workspace}/memory/evolution.jsonl` | 进化事件流（pain 观测流；真实写入路径见 pain-signal-observability.ts） | openclaw-plugin |
 
 > **注**：这些辅助状态可能在未来版本被 Runtime V2 的 events 表 / Telemetry 替代。当前由 plugin 独立管理。
 

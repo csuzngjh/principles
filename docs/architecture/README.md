@@ -27,6 +27,7 @@
 | **新建内置代理 / 切换 CLI 后端** | [`COMPONENTS.md`](./COMPONENTS.md) §3.8（BALM）+ ADR-0008 |
 | **代理长程任务 / 自校验工具** | [`COMPONENTS.md`](./COMPONENTS.md) §3.9（LRAS）+ ADR-0009 |
 | **痛苦信号来源 / 目标对齐** | [`INTERNALIZATION_PIPELINE.md`](./INTERNALIZATION_PIPELINE.md) §2.1.1 + ADR-0010 |
+| **长任务执行 / Agent 交付规范（何时停、产物写哪）** | [`AGENT_DELIVERY_OPERATING_MODEL.md`](./AGENT_DELIVERY_OPERATING_MODEL.md) |
 | **OKR / Mission / 任务调度** | [`COMPONENTS.md`](./COMPONENTS.md) §3.10-3.11 + ADR-0010/0011 |
 
 ---
@@ -52,7 +53,7 @@
 10. [`ERROR_ARCHITECTURE.md`](./ERROR_ARCHITECTURE.md) — 错误分类与降级路径
 11. [`OBSERVABILITY_ARCHITECTURE.md`](./OBSERVABILITY_ARCHITECTURE.md) — 日志/指标/追踪/审计
 12. [`SECURITY_ARCHITECTURE.md`](./SECURITY_ARCHITECTURE.md) — 工作区/沙箱/审批/PII
-13. [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) — 5 级配置层级
+13. [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) — 单文件配置（ADR-0016；含未实施的历史多层设计记录）
 14. [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) — Schema 演化
 15. [`PERFORMANCE_BUDGETS.md`](./PERFORMANCE_BUDGETS.md) — 性能预算
 
@@ -98,7 +99,7 @@
 
 | 文档 | 状态 | 处理 |
 |------|------|------|
-| `pd-task-manager.md` | Partially Implemented | 保留作迁移参考；多数概念已被 TaskRecord + Runtime V2 explicit scheduling 替代，`IdleTrigger` 已由 ADR-0012 废止 |
+| `pd-task-manager.md` | Implemented（状态见文档内状态块） | 保留作设计参考；多数概念已被 TaskRecord + Runtime V2 explicit scheduling 替代，`IdleTrigger` 已由 ADR-0012 废止 |
 
 ---
 
@@ -141,6 +142,10 @@
 | ADR-0010 | Accepted | Goal-Aligned Pain Signal（GAP）|
 | ADR-0011 | Accepted | Three-Tier Task Model and MissionScheduler |
 | [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) | Accepted | Runtime V2 独立调度与 legacy execution 退役；取代 IdleTrigger 保留决策 |
+| [ADR-0026](../adr/0026-cnb-token-injection-boundary.md) | Proposed | CNB_TOKEN 注入边界不可由 imports 配置消除（P0-01 归因修正）|
+
+> 注：ADR-0013 ~ ADR-0025 未在本表登记（表格最后更新于 ADR-0012）。
+> 补齐属独立的文档治理动作，本次仅登记本决策相关的 ADR-0026。
 
 ### 架构治理（Governance）
 
