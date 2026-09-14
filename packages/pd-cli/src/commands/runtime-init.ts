@@ -118,7 +118,8 @@ function buildConfigYaml(workspaceDir: string): string {
     lineWidth: 120,
     noRefs: true,
     sortKeys: false,
-    quotingType: '"',
+    // js-yaml 5 renamed quotingType ('"' | "'") to quoteStyle.
+    quoteStyle: 'double',
     forceQuotes: false,
   });
 }

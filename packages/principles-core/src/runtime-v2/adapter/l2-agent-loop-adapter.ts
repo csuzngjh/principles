@@ -36,7 +36,7 @@ import { runAgentLoop } from '@earendil-works/pi-agent-core';
 import type { AgentMessage, AgentLoopConfig, AgentEvent } from '@earendil-works/pi-agent-core';
 import { getModel, getProviders, completeSimple, streamSimple } from '@earendil-works/pi-ai/compat';
 import type { Model, Message, KnownProvider, Context } from '@earendil-works/pi-ai/compat';
-import type { SimpleStreamOptions } from '@earendil-works/pi-ai';
+import type { Api, SimpleStreamOptions } from '@earendil-works/pi-ai';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { PDRuntimeError } from '../error-categories.js';
@@ -254,7 +254,7 @@ function extractLastAssistantText(messages: AgentMessage[]): string | null {
  * fetch at entry, so those APIs keep Node's global fetch instead of failing
  * every L2 call. Exported for ArtificerL2Adapter, which runs the same loop.
  */
-export function pdStreamSimple(model: Model<string>, context: Context, options?: SimpleStreamOptions) {
+export function pdStreamSimple(model: Model<Api>, context: Context, options?: SimpleStreamOptions) {
   return streamSimple(model, context, { ...options, fetch: getPiAiFetchForApi(model.api) });
 }
 

@@ -53,7 +53,8 @@ describe('WorkflowFunnelLoader', () => {
   });
 
   function writeConfig(config: WorkflowFunnelConfig): void {
-    const yamlStr = yamlLib.dump(config, { schema: yamlLib.DEFAULT_SCHEMA });
+    // Mirror the loader's pinned YAML 1.1 schema (js-yaml 5 renamed v4's DEFAULT_SCHEMA).
+    const yamlStr = yamlLib.dump(config, { schema: yamlLib.YAML11_SCHEMA });
     fs.writeFileSync(configPath, yamlStr, 'utf-8');
   }
 
