@@ -22,6 +22,7 @@ import type {
   PeerRunnerKind,
   RunnerKind,
   InternalizationChannel,
+  PipelineTopologyMode,
   PIArtifact,
   ArtifactRef,
 } from './peer-runner-contracts.js';
@@ -107,6 +108,8 @@ export interface NextTaskProposal {
   dependencyTaskIds: string[];
   inputArtifactRefs: ArtifactRef[];
   channel: InternalizationChannel;
+  /** PRI-720: inherited full-chain override; absent = standard channel-aware topology. */
+  pipelineMode?: PipelineTopologyMode;
   correlationId?: string;
 }
 
@@ -312,21 +315,22 @@ export function decideArtifactRejectionFeedback(
 /**
  * Proposes the next task in the pipeline after a task succeeds.
  *
- * Uses the job graph (getAllowedSuccessors) to determine valid next steps:
- *   - dreamer → philosopher
- *   - philosopher → scribe
- *   - scribe → artificer
- *   - artificer → evaluator
- *   - evaluator → rollout_reviewer
+ * Uses the channel-aware job graph (getAllowedSuccessors, PRI-720) to
+ * determine valid next steps:
+ *   - code_tool_hook/skill or full_chain mode:
+ *       dreamer → philosopher → scribe → artificer → evaluator → rollout_reviewer
+ *   - prompt/defer_archive (standard mode):
+ *       dreamer → philosopher → scribe → rollout_reviewer
  *
- * rollout_reviewer is the v1 terminal peer runner; the trainer/model_training
+ * rollout_reviewer is the terminal peer runner; the trainer/model_training
  * surface was removed in PRI-449 (MVP-Gone).
  *
  * Requires currentTask.status === 'succeeded' — non-terminal tasks
  * must not generate successor proposals (prevents pipeline乱序).
  *
- * Filters successors by channel constraint: a runner kind transition
- * is only valid when validateEdge(fromKind, toKind, channel) is true.
+ * Resolves successors through the channel-aware job graph (PRI-720): the
+ * task's channel + pipelineMode select the legal edge set (see
+ * resolveChannelEdges).
  *
  * Returns null if the task is not succeeded or no channel-valid
  * successors exist.
@@ -353,18 +357,17 @@ export function createNextTaskProposal(
   // After the guard, currentTask.taskKind is narrowed to PeerRunnerKind
   const { taskKind } = currentTask;
   const effectiveChannel = channel ?? currentTask.channel;
-  const successors = getAllowedSuccessors(taskKind);
-
-  // Filter to only channel-valid successors (M1: gate by job graph + channel policy)
-  const validSuccessors = successors.filter(s =>
-    validateEdge(taskKind, s, effectiveChannel),
-  );
+  // PRI-720: topology mode is a property of the seeded chain — inherited from
+  // the task record, never decided per-hop, so a chain cannot switch topology
+  // mid-flight when the workspace flag flips.
+  const effectivePipelineMode = currentTask.pipelineMode;
+  const validSuccessors = getAllowedSuccessors(taskKind, effectiveChannel, effectivePipelineMode);
 
   if (validSuccessors.length === 0) {
     return null;
   }
 
-  // V1: take the first valid successor (linear chain)
+  // Take the first valid successor (linear chain per resolved topology)
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const nextKind = validSuccessors[0]!;
 
@@ -375,6 +378,7 @@ export function createNextTaskProposal(
     // Defensive copy: prevent caller from mutating source task outputArtifactRefs (M2)
     inputArtifactRefs: [...currentTask.outputArtifactRefs],
     channel: effectiveChannel,
+    pipelineMode: effectivePipelineMode,
     correlationId: currentTask.correlationId,
   };
 }
@@ -426,13 +430,13 @@ export function validateInternalizationGraph(tasks: PITaskRecord[]): GraphValida
         continue;
       }
 
-      // Use the current task's channel for edge validation
+      // Use the current task's channel + topology mode for edge validation (PRI-720)
       // Peer runner edges use validateEdge; diagnostician edges use validateDiagEdge
       let edgeValid: boolean;
       if (isDiagnosticianStageKind(dep.taskKind) && isDiagnosticianStageKind(task.taskKind)) {
         edgeValid = validateDiagEdge(dep.taskKind, task.taskKind);
       } else if (isPeerRunnerKind(dep.taskKind) && isPeerRunnerKind(task.taskKind)) {
-        edgeValid = validateEdge(dep.taskKind, task.taskKind, task.channel);
+        edgeValid = validateEdge(dep.taskKind, task.taskKind, task.channel, task.pipelineMode);
       } else {
         // Cross-pipeline edge — not allowed
         edgeValid = false;

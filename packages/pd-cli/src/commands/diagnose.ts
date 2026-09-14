@@ -36,7 +36,7 @@ import {
 import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
-import { loadPdConfig } from '../services/pd-config-loader.js';
+import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime-v2';
 import { createHash } from 'node:crypto';
 /** Layer 0 content-hash (design §6.1); injected so diag writers can attach predecessorSummary hashes. */
@@ -199,6 +199,8 @@ function buildDiagnosticianTestDouble(taskId: string): PDRuntimeAdapter {
  */
 export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  // PRI-720: resolve the full-chain override once per invocation.
+  const seedPipelineMode = resolvePromptFullPipelineSeedMode(workspaceDir);
 
   // Validate mutually exclusive flags (HG-03)
   if (opts.openclawLocal && opts.openclawGateway) {
@@ -611,7 +613,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           // sourcePainId; it must be resolved from the diagnostician task's
           // diagnosticJson. ERR-004: never invent lineage.
           const sourcePainId = await resolveSourcePainIdFromDiagnostician(stateManager, candidate);
-          const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: sourcePainId ?? undefined });
+          const seed = buildDreamerSeedFromCandidate(candidate, { route, ready, sourcePainId: sourcePainId ?? undefined, pipelineMode: seedPipelineMode });
           // eslint-disable-next-line no-restricted-syntax -- 'in' required for discriminated union narrowing (BridgeTaskSeed | BridgeDecision)
           if ('decision' in seed) continue; // not_internalizable or invalid — skip
           const existingTask = await stateManager.getTask(seed.taskId);

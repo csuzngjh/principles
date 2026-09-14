@@ -1,4 +1,4 @@
-import type { InternalizationChannel } from './peer-runner-contracts.js';
+import type { InternalizationChannel, PipelineTopologyMode } from './peer-runner-contracts.js';
 import type { InternalizationRouteKind } from './internalization-route.js';
 import type { CandidateRecord } from '../store/candidate/candidate-store.js';
 import { PI_METADATA_KEY } from './pitask-metadata.js';
@@ -11,6 +11,14 @@ export interface IntakeToInternalizationBridgeInput {
   sourcePainId?: string;
   workspaceDir?: string;
   now?: string;
+  /**
+   * PRI-720: explicit full-chain topology override for the seeded chain.
+   * Hosts resolve this from the `prompt_full_pipeline` feature flag (or
+   * explicit operator/lab options) at seed time. Only 'full_chain' is
+   * serialized — absence means the standard channel-aware topology, so
+   * legacy seeds and legacy readers stay byte-compatible.
+   */
+  pipelineMode?: PipelineTopologyMode;
   /** Diagnostician task ID that produced this candidate (lineage). */
   sourceTaskId?: string;
   /** Artifact ID of the diagnostician artifact (lineage). */
@@ -88,6 +96,8 @@ export interface BridgeTaskSeed {
   taskId: string;
   taskKind: 'dreamer';
   channel: InternalizationChannel;
+  /** PRI-720: present only when the seed carries the explicit full-chain override. */
+  pipelineMode?: PipelineTopologyMode;
   diagnosticJson: string;
   status: 'pending';
   attemptCount: number;
@@ -125,6 +135,9 @@ export function buildDreamerTaskSeed(
     [PI_METADATA_KEY]: {
       dependencyTaskIds,
       channel: decision.channel,
+      // PRI-720: only the explicit override is serialized; absence = standard
+      // channel-aware topology (legacy-compatible).
+      ...(input.pipelineMode === 'full_chain' ? { pipelineMode: 'full_chain' as const } : {}),
       timeoutMs: 300_000,
       inputArtifactRefs,
       outputArtifactRefs: [],
@@ -142,6 +155,7 @@ export function buildDreamerTaskSeed(
     taskId: decision.taskId,
     taskKind: 'dreamer',
     channel: decision.channel,
+    ...(input.pipelineMode === 'full_chain' ? { pipelineMode: 'full_chain' as const } : {}),
     diagnosticJson: finalDiagnosticJson,
     status: 'pending',
     attemptCount: 0,
@@ -165,13 +179,15 @@ export interface BuildDreamerSeedFromCandidateOptions {
   route: InternalizationRouteKind;
   ready: boolean;
   sourcePainId?: string;
+  /** PRI-720: seed-time full-chain override (see IntakeToInternalizationBridgeInput.pipelineMode). */
+  pipelineMode?: PipelineTopologyMode;
 }
 
 export function buildDreamerSeedFromCandidate(
   candidate: CandidateRecord,
   options: BuildDreamerSeedFromCandidateOptions,
 ): BridgeTaskSeed | BridgeDecision {
-  const { route, ready, sourcePainId } = options;
+  const { route, ready, sourcePainId, pipelineMode } = options;
 
   // PRI-395: Fail loud when all lineage fields are empty — an empty seed
   // provides no traceability and indicates the candidate lacks diagnostician lineage.
@@ -193,6 +209,7 @@ export function buildDreamerSeedFromCandidate(
     route,
     ready,
     sourcePainId,
+    pipelineMode,
     sourceTaskId: candidate.taskId?.trim() || undefined,
     sourceArtifactId: candidate.artifactId?.trim() || undefined,
     sourceRunId: candidate.sourceRunId?.trim() || undefined,

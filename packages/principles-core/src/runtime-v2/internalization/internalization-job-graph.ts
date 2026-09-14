@@ -12,13 +12,20 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import type { InternalizationChannel, PeerRunnerKind, DiagnosticianStageKind } from './peer-runner-contracts.js';
+import type {
+  InternalizationChannel,
+  PeerRunnerKind,
+  DiagnosticianStageKind,
+  PipelineTopologyMode,
+} from './peer-runner-contracts.js';
+import { isInternalizationChannel } from './peer-runner-contracts.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /**
- * Allowed edges in the job graph (v1).
- * Each tuple is [from, to] meaning from → to is a legal transition.
+ * Full-chain edges — the legacy v1 linear graph, retained as the topology of
+ * `code_tool_hook`/`skill` chains and of any chain explicitly seeded with
+ * `pipelineMode: 'full_chain'` (PRI-720 Owner override).
  *
  * v1: rollout_reviewer is the terminal peer runner. The trainer/model_training
  * surface was removed in PRI-449 (MVP-Gone).
@@ -34,6 +41,55 @@ export const ALLOWED_EDGES: readonly (readonly [PeerRunnerKind, PeerRunnerKind])
 ] as const;
 
 /**
+ * Principle-semantic edges for the prompt/defer_archive channels (PRI-720).
+ *
+ * The RuleCode sub-chain (artificer → evaluator) is never created on these
+ * channels: they activate the validated Scribe `principle` artifact via
+ * PromptWriter, so Artificer's mandatory RuleCode contract
+ * (implementationCode + goldenTraceCases + affectedTools) is wrong-channel
+ * work. RolloutReviewer runs in its principle semantic mode instead.
+ */
+const PRINCIPLE_SEMANTIC_EDGES: readonly (readonly [PeerRunnerKind, PeerRunnerKind])[] = [
+  ['dreamer', 'philosopher'] as const,
+  ['philosopher', 'scribe'] as const,
+  ['scribe', 'rollout_reviewer'] as const,
+] as const;
+
+/**
+ * Channel-aware topology (PRI-720) — the single source of truth for which
+ * edges exist per channel. `code_tool_hook`/`skill` keep the full chain
+ * byte-compatible; `prompt`/`defer_archive` take the principle-semantic path.
+ */
+export const CHANNEL_EDGES: Readonly<
+  Record<InternalizationChannel, readonly (readonly [PeerRunnerKind, PeerRunnerKind])[]>
+> = {
+  prompt: PRINCIPLE_SEMANTIC_EDGES,
+  defer_archive: PRINCIPLE_SEMANTIC_EDGES,
+  code_tool_hook: ALLOWED_EDGES,
+  skill: ALLOWED_EDGES,
+};
+
+/**
+ * Resolves the effective edge set for a channel + topology mode (PRI-720).
+ *
+ * - `full_chain` mode always returns the full linear graph (explicit override).
+ * - A known channel returns that channel's edge set.
+ * - No channel (legacy callers) keeps the full graph for backward compatibility.
+ */
+export function resolveChannelEdges(
+  channel?: InternalizationChannel,
+  pipelineMode?: PipelineTopologyMode,
+): readonly (readonly [PeerRunnerKind, PeerRunnerKind])[] {
+  if (pipelineMode === 'full_chain') {
+    return ALLOWED_EDGES;
+  }
+  if (channel !== undefined && isInternalizationChannel(channel)) {
+    return CHANNEL_EDGES[channel];
+  }
+  return ALLOWED_EDGES;
+}
+
+/**
  * Allowed edges in the diagnostician chain.
  * diag_rootcause → diag_distiller → diag_router
  */
@@ -47,19 +103,24 @@ export const DIAGNOSTICIAN_EDGES: readonly (readonly [DiagnosticianStageKind, Di
 /**
  * Validates whether a transition from one runner to another is legal.
  *
- * Checks ALLOWED_EDGES only. The trainer/model_training surface was removed
- * in PRI-449 (MVP-Gone), so no channel-gated special cases remain.
+ * Channel-aware since PRI-720: the edge set is resolved from the task's
+ * channel + pipeline topology mode via resolveChannelEdges. Without a channel
+ * the full graph is checked (backward-compatible with legacy callers); with
+ * `pipelineMode: 'full_chain'` the full graph is always allowed regardless of
+ * channel.
  *
  * @param from - Source peer runner kind
  * @param to - Target peer runner kind
- * @param _channel - Internalization channel (kept for API compatibility; unused)
+ * @param channel - Internalization channel of the task chain
+ * @param pipelineMode - Explicit topology mode override ('full_chain' forces the legacy linear graph)
  */
 export function validateEdge(
   from: PeerRunnerKind,
   to: PeerRunnerKind,
-  _channel?: InternalizationChannel,
+  channel?: InternalizationChannel,
+  pipelineMode?: PipelineTopologyMode,
 ): boolean {
-  return ALLOWED_EDGES.some(([f, t]) => f === from && t === to);
+  return resolveChannelEdges(channel, pipelineMode).some(([f, t]) => f === from && t === to);
 }
 
 /**
@@ -159,13 +220,21 @@ export function isAcyclic(
 /**
  * Returns all allowed successor runner kinds for a given runner.
  *
- * v1: returns only ALLOWED_EDGES successors. rollout_reviewer is terminal.
+ * Channel-aware since PRI-720 (see resolveChannelEdges): prompt/defer_archive
+ * chains route scribe → rollout_reviewer; full-chain mode and unchannelled
+ * legacy reads keep the linear graph. rollout_reviewer is terminal.
  *
  * @param from - Source peer runner kind
+ * @param channel - Internalization channel of the task chain
+ * @param pipelineMode - Explicit topology mode override
  * @returns Array of allowed successor runner kinds
  */
-export function getAllowedSuccessors(from: PeerRunnerKind): PeerRunnerKind[] {
-  return ALLOWED_EDGES
+export function getAllowedSuccessors(
+  from: PeerRunnerKind,
+  channel?: InternalizationChannel,
+  pipelineMode?: PipelineTopologyMode,
+): PeerRunnerKind[] {
+  return resolveChannelEdges(channel, pipelineMode)
     .filter(([f]) => f === from)
     .map(([, t]) => t);
 }
@@ -173,11 +242,19 @@ export function getAllowedSuccessors(from: PeerRunnerKind): PeerRunnerKind[] {
 /**
  * Returns all allowed predecessor runner kinds for a given runner.
  *
+ * Channel-aware since PRI-720 (see resolveChannelEdges).
+ *
  * @param to - Target peer runner kind
+ * @param channel - Internalization channel of the task chain
+ * @param pipelineMode - Explicit topology mode override
  * @returns Array of allowed predecessor runner kinds
  */
-export function getAllowedPredecessors(to: PeerRunnerKind): PeerRunnerKind[] {
-  return ALLOWED_EDGES
+export function getAllowedPredecessors(
+  to: PeerRunnerKind,
+  channel?: InternalizationChannel,
+  pipelineMode?: PipelineTopologyMode,
+): PeerRunnerKind[] {
+  return resolveChannelEdges(channel, pipelineMode)
     .filter(([, t]) => t === to)
     .map(([f]) => f);
 }
