@@ -1126,3 +1126,107 @@ describe('TrajectoryDatabase.markUserTurnCorrection (PRI-788 G1)', () => {
     db.dispose();
   });
 });
+
+// ── PRI-788 G2: signal_confirmations 持久队列 ────────────────────────────────
+
+describe('TrajectoryDatabase.signal_confirmations (PRI-788 G2)', () => {
+  let workspaceDir: string | null = null;
+
+  afterEach(() => {
+    if (workspaceDir) {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      workspaceDir = null;
+    }
+  });
+
+  function makeDb() {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-g2-queue-'));
+    return new TrajectoryDatabase({ workspaceDir });
+  }
+
+  function enqueue(db: InstanceType<typeof TrajectoryDatabase>, sessionId: string, rowid: number, createdAt: string) {
+    db.enqueueSignalConfirmation({
+      sessionId,
+      userTurnRowid: rowid,
+      occurrenceId: `occ-${rowid}`,
+      excerpt: `msg ${rowid}`,
+      terms: ['不对', '错了'],
+      suggestedType: 'correction',
+      createdAt,
+    });
+  }
+
+  it('enqueue is idempotent per user_turn_rowid (UNIQUE), row round-trips with parsed terms', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 101, '2026-09-14T00:00:00Z');
+    enqueue(db, 's1', 101, '2026-09-14T00:00:01Z'); // same rowid → no-op
+
+    const pending = db.listPendingSignalConfirmations(10);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      sessionId: 's1',
+      userTurnRowid: 101,
+      occurrenceId: 'occ-101',
+      terms: ['不对', '错了'],
+      suggestedType: 'correction',
+      status: 'pending',
+      attempts: 0,
+      resolvedAt: null,
+    });
+    db.dispose();
+  });
+
+  it('lists pending ordered by attempts ASC then created_at ASC (oldest failure first)', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 1, '2026-09-14T00:00:00Z');
+    enqueue(db, 's1', 2, '2026-09-14T00:01:00Z');
+    enqueue(db, 's1', 3, '2026-09-14T00:02:00Z');
+
+    const byRowid = new Map(db.listPendingSignalConfirmations(10).map(r => [r.userTurnRowid, r.id]));
+    // rowid 2 失败两次、rowid 3 失败一次、rowid 1 从未失败
+    db.bumpSignalConfirmationAttempt(byRowid.get(2)!);
+    db.bumpSignalConfirmationAttempt(byRowid.get(2)!);
+    db.bumpSignalConfirmationAttempt(byRowid.get(3)!);
+
+    const ordered = db.listPendingSignalConfirmations(10);
+    expect(ordered.map(r => r.userTurnRowid)).toEqual([1, 3, 2]);
+    db.dispose();
+  });
+
+  it('terminal transition is guarded: only pending rows can be resolved, second write fails', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 7, '2026-09-14T00:00:00Z');
+    const [item] = db.listPendingSignalConfirmations(10);
+
+    expect(db.markSignalConfirmationResult(item.id, 'confirmed', 'llm cue')).toBe(true);
+    // 已是 confirmed → 守卫拦截
+    expect(db.markSignalConfirmationResult(item.id, 'abandoned', 'double write')).toBe(false);
+
+    const pending = db.listPendingSignalConfirmations(10);
+    expect(pending).toHaveLength(0);
+    db.dispose();
+  });
+
+  it('bump leaves row pending and reports accumulated attempts', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 9, '2026-09-14T00:00:00Z');
+    const [item] = db.listPendingSignalConfirmations(10);
+
+    expect(db.bumpSignalConfirmationAttempt(item.id)).toBe(1);
+    expect(db.bumpSignalConfirmationAttempt(item.id)).toBe(2);
+    expect(db.listPendingSignalConfirmations(10)[0].attempts).toBe(2);
+    db.dispose();
+  });
+
+  it('countPendingSignalConfirmations reflects pending only', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 11, '2026-09-14T00:00:00Z');
+    enqueue(db, 's1', 12, '2026-09-14T00:01:00Z');
+    const [a, b] = db.listPendingSignalConfirmations(10);
+    db.markSignalConfirmationResult(b.id, 'rejected', 'none');
+
+    expect(db.countPendingSignalConfirmations()).toBe(1);
+    expect(a.id).toBeDefined();
+    db.dispose();
+  });
+});

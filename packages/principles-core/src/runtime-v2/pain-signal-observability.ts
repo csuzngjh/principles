@@ -254,6 +254,21 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
       note TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS signal_confirmations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      user_turn_rowid INTEGER NOT NULL UNIQUE,
+      occurrence_id TEXT NOT NULL,
+      excerpt TEXT NOT NULL,
+      terms_json TEXT NOT NULL,
+      suggested_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','confirmed','rejected','abandoned')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolution TEXT
+    );
     CREATE TABLE IF NOT EXISTS exports_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       export_kind TEXT NOT NULL,
@@ -371,6 +386,7 @@ function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warn
     CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
     CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
+    CREATE INDEX IF NOT EXISTS idx_signal_confirmations_status ON signal_confirmations(status, attempts);
   `);
 
   return { tables, warnings };

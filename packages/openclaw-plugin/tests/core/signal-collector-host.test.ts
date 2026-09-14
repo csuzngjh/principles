@@ -690,3 +690,141 @@ describe('PRI-788 G1: Stage2 确认回写 correction_detected', () => {
     expect(wctx.trajectory.markUserTurnCorrection).not.toHaveBeenCalled();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRI-788 G2 — LLM 不可用 → 候选持久化入队（不再丢弃）
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('PRI-788 G2: LLM 不可用时候选持久化入队', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function makeWctxForQueue(withRowid = true) {
+    const wctx = makeMockWctx();
+    const trajectory = wctx.trajectory as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    trajectory.recordUserTurn = vi.fn().mockReturnValue(withRowid ? 77 : undefined);
+    trajectory.enqueueSignalConfirmation = vi.fn();
+    trajectory.markUserTurnCorrection = vi.fn();
+    return { ...wctx, trajectory };
+  }
+
+  it('LLM unavailable + correction-ambiguous → enqueueSignalConfirmation called with correction suggestedType', async () => {
+    const wctx = makeWctxForQueue();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: null, // 通道死 → 走降级分支
+    });
+
+    host.detectSync('这个不对', 'sess-g2', 'user');
+    await flushAsync();
+
+    expect(wctx.trajectory.enqueueSignalConfirmation).toHaveBeenCalledTimes(1);
+    const arg = wctx.trajectory.enqueueSignalConfirmation.mock.calls[0][0];
+    expect(arg).toMatchObject({ sessionId: 'sess-g2', userTurnRowid: 77, suggestedType: 'correction' });
+    expect(arg.terms).toContain('不对');
+    expect(SystemLogger.log).toHaveBeenCalledWith(
+      '/tmp/test-ws', 'SIGNAL_CONFIRMATION_QUEUED', expect.stringContaining('llm_unavailable'),
+    );
+  });
+
+  it('LLM unavailable + empathy-only match → routed WEAK (GFI), NOT enqueued', async () => {
+    const wctx = makeWctxForQueue();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: null,
+    });
+
+    host.detectSync('真是搞什么啊', 'sess-g2-empathy', 'user');
+    await flushAsync();
+
+    expect(trackFriction).toHaveBeenCalled();
+    expect(wctx.trajectory.enqueueSignalConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('zero keyword match → no enqueue (体量与噪声不可控)', async () => {
+    const wctx = makeWctxForQueue();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: null,
+    });
+
+    host.detectSync('帮我看看这个函数的命名', 'sess-g2-nomatch', 'user');
+    await flushAsync();
+
+    expect(wctx.trajectory.enqueueSignalConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('recordUserTurn returned no rowid → no enqueue (无行可回写)', async () => {
+    const wctx = makeWctxForQueue(false);
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: null,
+    });
+
+    host.detectSync('这个不对', 'sess-g2-norow', 'user');
+    await flushAsync();
+
+    expect(wctx.trajectory.enqueueSignalConfirmation).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRI-788 G2 — confirmPendingSignal 批量确认分流
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('PRI-788 G2: confirmPendingSignal', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const item = { sessionId: 'sess-c', userTurnRowid: 55, occurrenceId: 'occ-55', excerpt: '这个不对' };
+
+  function makeWctx() {
+    const wctx = makeMockWctx();
+    const trajectory = wctx.trajectory as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    trajectory.recordUserTurn = vi.fn();
+    trajectory.markUserTurnCorrection = vi.fn().mockReturnValue(true);
+    return { ...wctx, trajectory };
+  }
+
+  it('classified correction → write-back + pain emit, disposition confirmed', async () => {
+    const wctx = makeWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+
+    const result = await host.confirmPendingSignal(item, async () => ({
+      is_feedback: true, type: 'correction', confidence: 0.9, reason: '确认是纠正',
+    }));
+
+    expect(result.disposition).toBe('confirmed');
+    expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledWith(55, 'llm:确认是纠正');
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('classified none → rejected, no write-back no emit', async () => {
+    const wctx = makeWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+
+    const result = await host.confirmPendingSignal(item, async () => ({
+      is_feedback: false, type: 'none', confidence: 1, reason: '普通聊天',
+    }));
+
+    expect(result.disposition).toBe('rejected');
+    expect(wctx.trajectory.markUserTurnCorrection).not.toHaveBeenCalled();
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+
+  it('classifier returns null / throws → disposition failed (调用方 attempts++)', async () => {
+    const wctx = makeWctx();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+
+    const unavailable = await host.confirmPendingSignal(item, async () => null);
+    const threw = await host.confirmPendingSignal(item, async () => {
+      throw new Error('timeout');
+    });
+
+    expect(unavailable.disposition).toBe('failed');
+    expect(threw.disposition).toBe('failed');
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+});

@@ -206,7 +206,7 @@ export function resetPromptStateForTest(workspaceDir?: string): void {
  */
 const _signalCollectorHosts = new Map<string, SignalCollectorHost>();
 
-function getSignalCollectorHost(wctx: WorkspaceContext, logger?: PluginLogger): SignalCollectorHost {
+export function getSignalCollectorHost(wctx: WorkspaceContext, logger?: PluginLogger): SignalCollectorHost {
   let host = _signalCollectorHosts.get(wctx.workspaceDir);
   if (!host) {
     // 从 .pd/config.yaml 的 signalCollector runtimeProfile 构造 LLM classifier(配置单轨化)。

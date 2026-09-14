@@ -518,4 +518,38 @@ describe('PRI-640 host attribution (host_kind on canonical pain_events)', () => 
     expect(again.warnings).toContain('host_kind_conflict:kept=openclaw,rejected=codex');
     expect(readPainHostKind(stateDir, 'pain_640_conflict')).toBe('openclaw');
   });
+
+  it('ensureTrajectorySchema creates signal_confirmations (PRI-788 G2, DDL kept in sync with plugin)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: 'manual_g2_schema',
+        taskId: 'diagnosis_manual_g2_schema',
+        painType: 'user_frustration',
+        source: 'manual',
+        reason: 'schema bootstrap',
+        score: 80,
+        sessionId: 'cli',
+        agentId: 'pd-cli',
+      },
+    });
+
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const table = db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'signal_confirmations'",
+      ).get() as { sql: string } | undefined;
+      expect(table).toBeDefined();
+      expect(table?.sql).toContain("status TEXT NOT NULL DEFAULT 'pending'");
+      expect(table?.sql).toContain('user_turn_rowid INTEGER NOT NULL UNIQUE');
+      const index = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_signal_confirmations_status'",
+      ).get();
+      expect(index).toBeDefined();
+    } finally {
+      db.close();
+    }
+  });
 });

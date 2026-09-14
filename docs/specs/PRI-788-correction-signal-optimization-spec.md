@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS signal_confirmations (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
   user_turn_rowid INTEGER NOT NULL UNIQUE,
+  occurrence_id TEXT NOT NULL,
   excerpt TEXT NOT NULL,
   terms_json TEXT NOT NULL,
   suggested_type TEXT NOT NULL,
@@ -68,6 +69,8 @@ CREATE TABLE IF NOT EXISTS signal_confirmations (
 CREATE INDEX IF NOT EXISTS idx_signal_confirmations_status
   ON signal_confirmations(status, attempts);
 ```
+
+（实施注：`occurrence_id` 为实施时新增列——批量确认补发 pain 必须复现 realtime 路径的同一 occurrence 身份，否则 canonical pain 去重失效，违反 ADR-0020 §11.4/rc-6。）
 
 - DDL SHALL 双份同步：plugin `applyTrajectorySchema`（trajectory.ts）与 core `ensureTrajectorySchema`（pain-signal-observability.ts），照 correction_samples 双份纪律。
 - **写入**：`detectAsyncAndRoute` 的四个丢弃分支（DEGRADED/TIMEOUT/PARSE_FAIL/FAILED）SHALL 改为入队（`INSERT OR IGNORE`，`UNIQUE(user_turn_rowid)` 幂等）；原 SystemLogger 事件保留，另加 `SIGNAL_CONFIRMATION_QUEUED`。
