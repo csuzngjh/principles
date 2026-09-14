@@ -218,13 +218,26 @@ describe('PRI-629 §34 architecture regression guards', () => {
     expect(src).toContain('goGovernanceFocus');
   });
 
+  it('PRI-787: decision card renders a visible lock reason and no longer triple-renders the rollout brief summary', () => {
+    const cardSrc = fs.readFileSync(
+      path.resolve(__dirname, '../../src/ui/pages/focus/OwnerDecisionCard.tsx'), 'utf-8');
+    // rc-9: 动作被治理门禁用时卡片必须给出可见原因（无声禁用=bug）
+    expect(cardSrc).toContain('owner-actions-locked-');
+    // rollout 的 brief.summary 只由 item.summary 渲染一次；正文不再重复
+    expect(cardSrc).not.toContain('item.review.brief.summary &&');
+    // 锁定原因由 FocusPage 派生并传入（experience readiness 门）
+    const focusSrc = fs.readFileSync(
+      path.resolve(__dirname, '../../src/ui/pages/focus/FocusPage.tsx'), 'utf-8');
+    expect(focusSrc).toContain('actionsLockedReason');
+  });
+
   it('i18n: ownerDecision keys exist in BOTH locales (parity)', () => {
     for (const locale of ['zh-CN', 'en']) {
       const raw = fs.readFileSync(path.resolve(__dirname, `../../src/ui/i18n/${locale}.json`), 'utf-8');
       const data = JSON.parse(raw) as { pages: { focus: Record<string, unknown>; failedTasks: Record<string, unknown> } };
       const od = data.pages.focus.ownerDecision as Record<string, unknown> | undefined;
       expect(od, `${locale} pages.focus.ownerDecision missing`).toBeDefined();
-      for (const key of ['sectionTitle', 'empty', 'acceptCurrent', 'reviseOnce', 'rejectCurrent', 'staleError', 'qualityChecklistLabel']) {
+      for (const key of ['sectionTitle', 'empty', 'acceptCurrent', 'reviseOnce', 'rejectCurrent', 'staleError', 'qualityChecklistLabel', 'actionsLockedAuth', 'actionsLockedIdentity', 'goSettingsCta']) {
         expect(typeof od?.[key], `${locale} ownerDecision.${key}`).toBe('string');
       }
       // PRI-704: quality checklist 状态文案 + 五项检查名（OwnerDecisionCard

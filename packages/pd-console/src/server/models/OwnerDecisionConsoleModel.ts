@@ -200,12 +200,14 @@ async function deriveTaskDecisionItem(
   const sourceRunId = facts.task.humanReviewContext?.sourceRunId
     ?? facts.task.completionIntent?.sourceRunId ?? '';
   const artifact = facts.decisionArtifact;
+  // rollout 卡 title 用固定文案：brief.summary 已作为 summary 渲染，复用会让
+  // 同一段评审原文在同一张卡出现两次（PRI-787）。
   const title = review.brief.kind === 'evaluator'
     ? review.brief.principle.title
       ?? review.brief.principle.statement
       ?? review.brief.implementation.summary
       ?? '自动改进需要你的判断'
-    : review.brief.summary ?? 'Rollout 评审需要你的判断';
+    : 'Rollout 评审需要你的判断';
   const summary = review.brief.kind === 'evaluator'
     ? review.brief.implementation.summary
       ?? (review.brief.concerns.length > 0
