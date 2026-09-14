@@ -476,6 +476,10 @@ export async function runInternalizationConsumerCycle(
           // PRI-758 CodeRabbit P2: forward maxTokens + systemPrompt from profile.
           ...(taskRuntimeConfig.maxTokens !== undefined ? { maxTokens: taskRuntimeConfig.maxTokens } : {}),
           ...(taskRuntimeConfig.systemPrompt ? { systemPrompt: taskRuntimeConfig.systemPrompt } : {}),
+          // PRI-795: forward the profile reasoning level — the PiAiRuntimeAdapter
+          // branch below already receives it; the L2 loop was silently dropping
+          // it, leaving always-thinking models at their most expensive default.
+          ...(taskRuntimeConfig.reasoning !== undefined ? { reasoning: taskRuntimeConfig.reasoning } : {}),
         });
       } else if (l2Flag.enabled && wakeResult.taskKind === 'dreamer') {
         const stateDir = `${workspaceDir}/.state`;

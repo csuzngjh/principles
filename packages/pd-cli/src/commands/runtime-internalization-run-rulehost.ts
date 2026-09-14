@@ -261,10 +261,18 @@ function resolveRunRuleHostRuntime(
     baseUrl: artificerProfile.baseUrl,
     gateDeps: createSandboxGateDeps(),
     validator: new DefaultArtificerValidator(),
-    totalBudgetMs: timeoutMs,
+    // PRI-795: fall back to the profile's timeoutMs when --timeout-ms is not
+    // given — parity with resolvePiAiAgentAdapter above. Previously the raw
+    // CLI option (possibly undefined) was passed, silently dropping the L2
+    // loop onto the adapter's 300s default regardless of the profile.
+    totalBudgetMs: timeoutMs ?? artificerProfile.timeoutMs,
     // Forward profile maxTokens — parity with the consumer-cycle adapter;
     // omitting it truncates long artificer JSON at the provider's default cap.
     ...(artificerProfile.maxTokens !== undefined ? { maxTokens: artificerProfile.maxTokens } : {}),
+    // PRI-795: forward profile reasoning so always-thinking models get a
+    // bounded thinking level on the L2 loop too — parity with the
+    // PiAiRuntimeAdapter wiring (it was previously L2-dropped).
+    ...(artificerProfile.reasoning !== undefined ? { reasoning: artificerProfile.reasoning } : {}),
   });
 
   return {

@@ -112,8 +112,21 @@ export interface L2AgentLoopAdapterConfig {
  * its streaming loop semantics are untested against borrowed catalog entries.
  * Built-in providers use getModel(); custom OpenAI-compatible endpoints
  * construct a Model object directly.
+ *
+ * PRI-795: the custom-Model literal previously hardcoded `reasoning:false`
+ * and `maxTokens:32000`, silently discarding the profile's reasoning level
+ * and diverging from the request-level maxTokens (adapter 8192 / literal
+ * 32000 / profile 16000 — three values, no single source of truth). Callers
+ * now pass the profile-resolved values; the defaults preserve the previous
+ * dreamer-L2 behavior for existing callers.
  */
-export function resolveL2Model(provider: string, modelId: string, baseUrl?: string): Model<string> {
+// eslint-disable-next-line @typescript-eslint/max-params -- 4th param is an optional opts bag; keeping (provider, modelId, baseUrl?) positional preserves the existing exported signature and all call sites
+export function resolveL2Model(
+  provider: string,
+  modelId: string,
+  baseUrl?: string,
+  opts?: { reasoning?: boolean; maxTokens?: number },
+): Model<string> {
   const knownProviders = getProviders();
   if ((knownProviders as string[]).includes(provider) && !baseUrl) {
     // @ts-expect-error — getModel requires literal model ID types; runtime strings from config are acceptable
@@ -133,11 +146,11 @@ export function resolveL2Model(provider: string, modelId: string, baseUrl?: stri
     api: 'openai-completions' as const,
     provider,
     baseUrl,
-    reasoning: false,
+    reasoning: opts?.reasoning ?? false,
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
-    maxTokens: 32000,
+    maxTokens: opts?.maxTokens ?? 32000,
     compat: {
       supportsStore: false,
       supportsDeveloperRole: false,
