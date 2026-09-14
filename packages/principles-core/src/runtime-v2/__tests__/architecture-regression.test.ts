@@ -3528,8 +3528,9 @@ describe('PRI-416: barrel cap guards', () => {
 // The extractor strips comments from captured tokens and validates that every
 // frozen entry is a real identifier — the snapshot must be a name SET, never
 // source-text fragments (review finding: 12/1719 comment-polluted entries).
-// Wildcard re-exports and non-identifier captures fail loud: the guard refuses
-// to freeze a surface it cannot prove.
+// Whitespace variants of the block form are captured, not missed. Wildcard
+// re-exports, default exports and non-identifier captures fail loud: the
+// guard refuses to freeze a surface it cannot prove.
 
 describe('PRI-775: barrel export surface freeze', () => {
   interface BarrelSurfaceFixture {
@@ -3548,8 +3549,15 @@ describe('PRI-775: barrel export surface freeze', () => {
         + 'exports explicitly or extend this guard deliberately.',
       );
     }
+    if (/^export\s+default/m.test(src)) {
+      throw new Error(
+        'PRI-775: default export detected. A barrel default export is invisible to the '
+        + 'name-set snapshot, so the freeze refuses to guess: use a named export or '
+        + 'extend this guard deliberately.',
+      );
+    }
     const names = new Set<string>();
-    for (const block of src.match(/export (?:type )?\{[^}]*\}/g) ?? []) {
+    for (const block of src.match(/\bexport\s*(?:type\s*)?\{[^}]*\}/g) ?? []) {
       // Strip comments BEFORE splitting on commas: a comment that itself
       // contains a comma would otherwise be cut in half and glue comment
       // text onto the following real symbol (hit on real barrel source).
@@ -3669,6 +3677,14 @@ describe('PRI-775: barrel export surface freeze', () => {
 
     // Text fragments that never reduce to an identifier fail loud, never freeze.
     expect(() => extractExportNames('export { 123bad } from "./x.js";')).toThrow(/non-identifier/);
+
+    // Whitespace variants of the block form are captured, not missed
+    // (`export{Foo}` slipped past the old strict-space regex).
+    expect(extractExportNames("export{NoSpace} from './x.js';")).toEqual(['NoSpace']);
+    expect(extractExportNames("export type{NoSpaceType} from './x.js';")).toEqual(['NoSpaceType']);
+
+    // A barrel default export is invisible to the name set: refuse.
+    expect(() => extractExportNames("import Foo from './x.js';\nexport default Foo;\n")).toThrow(/default/);
   });
 });
 
